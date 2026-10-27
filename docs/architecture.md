@@ -1,6 +1,6 @@
 # Architecture
 
-One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only, keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and the MCP server (`desk mcp`) are all clients of that API. If the app finds a desk already running on the port, it attaches to it instead of starting another.
+One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only, keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
 GitHub GraphQL ──(read only)──> src/github/*  ──> src/store.ts (node:sqlite)
@@ -10,7 +10,7 @@ settings.json ──> src/settings.ts ──┘
                                                      │
                                   src/desk.ts (views, actions, sync loop, notify)
                                                      │
-                                  src/server.ts (Hono: /api/*, web/dist, SSE)
+                                  src/server.ts (Hono: /api/*, /mcp, web/dist, SSE)
                                    │           │            │
                      web/ (in electron/ or a browser)  src/cli.ts   src/mcp.ts
 ```
@@ -93,7 +93,7 @@ Done and snooze record `acked_at`, the latest activity you had seen; the item co
 
 ## HTTP API (`src/server.ts`)
 
-Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` and whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`). JSON everywhere; types in `src/types.ts`.
+Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` and whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`). JSON everywhere; types in `src/types.ts`.
 
 | Method | Path                  | Body / query                                           | Returns                                                                                                                                                                      |
 | ------ | --------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -115,6 +115,7 @@ Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` a
 | GET    | `/api/status`         |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                                     |
 | GET    | `/api/events`         |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                                |
 | GET    | `/health`             |                                                        | `{ ok: true, version }`                                                                                                                                                      |
+| POST   | `/mcp`                | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                                |
 
 Errors: `{ error: string }` with 4xx/5xx. Unknown item → 404. Ambiguous short id → 409 with `candidates`.
 
@@ -140,12 +141,13 @@ desk fields                        the fields rules can use
 desk config [path|check|edit]      works with the server down too
 desk settings [set <key> <value> | reset <key>]
 desk mcp                           MCP server on stdio
+desk connect claude [--apply]      print (or run) `claude mcp add --transport http --scope user review-desk http://localhost:<port>/mcp`, plus Codex config
 desk install | uninstall           launchd LaunchAgent for the headless server (macOS); the app has "Open at login"
 ```
 
-## MCP (`desk mcp`)
+## MCP (`src/mcp.ts`)
 
-Stdio server (`@modelcontextprotocol/sdk`), proxies to the HTTP API. Tools:
+One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP at the server's `/mcp` (a fresh stateless server per request, calling the API in-process through `app.request`), and stdio via `desk mcp` (proxies to the HTTP API through `src/client.ts`). Connecting clients: [api.md](api.md#connect-an-agent). Tools:
 
 - `desk_overview()` — counts per space/board, sync status.
 - `desk_list({ board?, buckets?, limit? })` — cards; `board` defaults to focus.

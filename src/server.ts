@@ -6,8 +6,11 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { Desk, DeskError } from "./desk.ts";
+import { createMcpServer } from "./mcp.ts";
 import { openUrl } from "./notify.ts";
 import { FIELDS } from "./signals.ts";
 import type { Action } from "./types.ts";
@@ -138,6 +141,18 @@ export function createApp(desk: Desk, port: number): Hono {
       }
       off();
     }),
+  );
+
+  // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
+  const inProcess = createClient((p, init) => app.request(p, init));
+  app.post("/mcp", async (c) => {
+    const transport = new WebStandardStreamableHTTPServerTransport();
+    await createMcpServer(inProcess).connect(transport);
+    return transport.handleRequest(c.req.raw);
+  });
+  // Stateless: no server-initiated stream and no session to end, which the spec answers with 405.
+  app.on(["GET", "DELETE"], "/mcp", (c) =>
+    c.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }, 405, { allow: "POST" }),
   );
 
   app.all("/api/*", (c) => c.json({ error: "not found" }, 404));

@@ -1,11 +1,11 @@
-// `desk mcp`: stdio MCP server that proxies the local desk API. Local triage only; nothing writes to GitHub.
+// The desk's MCP tools, served over stdio by `desk mcp` and over HTTP at the server's /mcp. Local triage only; nothing writes to GitHub.
 
 import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import * as api from "./client.ts";
+import { createClient, type DeskClient } from "./client.ts";
 import type { Card, Placement } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
@@ -62,7 +62,7 @@ function traceLines(p: Placement): string[] {
   ];
 }
 
-async function overviewText(): Promise<string> {
+async function overviewText(api: DeskClient): Promise<string> {
   const o = await api.overview();
   const lines = [
     `me: ${o.me} · synced: ${o.synced_at ?? "never"}${o.syncing ? " (syncing)" : ""}${o.sync_error ? ` · sync error: ${o.sync_error}` : ""}`,
@@ -83,7 +83,7 @@ async function overviewText(): Promise<string> {
 
 type ListBucket = (typeof LIST_BUCKETS)[number];
 
-async function listText(board: string | undefined, buckets: ListBucket[], limit: number): Promise<string> {
+async function listText(api: DeskClient, board: string | undefined, buckets: ListBucket[], limit: number): Promise<string> {
   let pools: [ListBucket, Card[]][];
   if (!board || board === "focus") {
     if (!buckets.some((b) => b === "now" || b === "today"))
@@ -111,7 +111,7 @@ async function listText(board: string | undefined, buckets: ListBucket[], limit:
   return head + "\n" + untrusted([...cards.map(cardLine), json(cards.map(compact))]);
 }
 
-async function itemText(ref: string): Promise<string> {
+async function itemText(api: DeskClient, ref: string): Promise<string> {
   const d = await api.item(ref);
   const c = d.card;
   const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}\n${c.url}`;
@@ -136,7 +136,7 @@ async function itemText(ref: string): Promise<string> {
   );
 }
 
-async function actText(ref: string, action: (typeof ACTIONS)[number], until?: string): Promise<string> {
+async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[number], until?: string): Promise<string> {
   const u = action === "snooze" ? (until ?? "tomorrow") : undefined;
   const r = await api.act(ref, action, u);
   const s = r.state;
@@ -150,7 +150,7 @@ async function actText(ref: string, action: (typeof ACTIONS)[number], until?: st
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
 }
 
-export function createMcpServer(): McpServer {
+export function createMcpServer(api: DeskClient = createClient()): McpServer {
   const server = new McpServer({ name: "review-desk", version: "0.1.0" });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
 
@@ -160,7 +160,7 @@ export function createMcpServer(): McpServer {
       description: "Review Desk counts per space and board, focus totals, and sync status.",
       annotations: readOnly,
     },
-    () => run(overviewText),
+    () => run(() => overviewText(api)),
   );
 
   server.registerTool(
@@ -174,7 +174,7 @@ export function createMcpServer(): McpServer {
       },
       annotations: readOnly,
     },
-    ({ board, buckets, limit }) => run(() => listText(board, buckets ?? ["now", "today"], limit ?? 25)),
+    ({ board, buckets, limit }) => run(() => listText(api, board, buckets ?? ["now", "today"], limit ?? 25)),
   );
 
   server.registerTool(
@@ -184,7 +184,7 @@ export function createMcpServer(): McpServer {
       inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
       annotations: readOnly,
     },
-    ({ ref }) => run(() => itemText(ref)),
+    ({ ref }) => run(() => itemText(api, ref)),
   );
 
   server.registerTool(
@@ -199,7 +199,7 @@ export function createMcpServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ ref, action, until }) => run(() => actText(ref, action, until)),
+    ({ ref, action, until }) => run(() => actText(api, ref, action, until)),
   );
 
   server.registerTool(

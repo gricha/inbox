@@ -94,19 +94,20 @@ desk status --short     # "desk ●2 ◐8", for a status line
 
 `bin/desk` is the CLI (`bin/desk.cmd` on Windows). To use `desk` from anywhere, link it onto your PATH: `ln -sf ~/code/review-desk/bin/desk ~/.local/bin/desk`.
 
-MCP for Claude Code (tools `desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`):
+Agents get MCP tools (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`) from the desk itself at `http://localhost:47823/mcp`, whenever the app or `desk serve` runs. To add it to Claude Code for all projects:
 
 ```bash
-claude mcp add --scope user review-desk -- ~/code/review-desk/bin/desk mcp
+desk connect claude --apply   # runs: claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp
 ```
 
-For Codex, add this to `~/.codex/config.toml`, with the absolute path to your checkout:
+For Codex, add this to `~/.codex/config.toml` (`desk connect claude` prints it too):
 
 ```toml
 [mcp_servers.review-desk]
-command = "/Users/you/code/review-desk/bin/desk"
-args = ["mcp"]
+url = "http://localhost:47823/mcp"
 ```
+
+Clients that only speak stdio can run `desk mcp` instead. Routes, tools, connecting and the security model: [docs/api.md](docs/api.md).
 
 There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-desktop/review-desk](integrations/claude-desktop/review-desk). Install it with `claude plugin marketplace add ~/code/review-desk`, then `claude plugin install review-desk@review-desk`.
 

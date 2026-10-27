@@ -39,7 +39,8 @@ const USAGE = `usage: desk <command>
   settings set <key> <value>          change one; lists: a,b or a JSON array; booleans: true/false, yes/no, on/off
   settings reset <key>                back to the default
   fields                              the fields rules can use
-  mcp                                 MCP server on stdio
+  mcp                                 MCP server on stdio (the desk also serves MCP over HTTP at /mcp)
+  connect claude [--apply]            print the command that adds the desk's MCP to Claude Code; --apply runs it
   install | uninstall                 run the server at login (macOS launchd)
 
 <ref> is owner/repo#123, or repo#123 when unique.
@@ -65,6 +66,7 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   brief: { force: { type: "boolean" } },
   show: { json: { type: "boolean" } },
   settings: { json: { type: "boolean" } },
+  connect: { apply: { type: "boolean" } },
 };
 
 // [min, max] positionals per command.
@@ -83,6 +85,7 @@ const ARITY: Record<string, [number, number]> = {
   config: [0, 1],
   settings: [0, 3],
   mcp: [0, 0],
+  connect: [1, 1],
   install: [0, 0],
   uninstall: [0, 0],
   done: [1, 1],
@@ -390,6 +393,21 @@ async function settings(x: Ctx): Promise<number> {
   return 0;
 }
 
+function connect(x: Ctx): Promise<number> {
+  if (x.args[0] !== "claude") throw new UsageError(`unknown connect target: ${x.args[0]} (try: desk connect claude)`);
+  const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
+  const args = ["mcp", "add", "--transport", "http", "--scope", "user", "review-desk", url];
+  x.out(`# Claude Code, all projects${x.opts.apply ? "" : " (desk connect claude --apply runs this)"}:`);
+  x.out(`claude ${args.join(" ")}`);
+  x.out(`\n# Codex: add to ~/.codex/config.toml\n[mcp_servers.review-desk]\nurl = "${url}"`);
+  x.out(`\n# Works while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
+  if (!x.opts.apply) return Promise.resolve(0);
+  x.out();
+  const r = spawnSync("claude", args, { stdio: "inherit" });
+  if (r.error) throw new Error(`can't run claude (${r.error.message}); run the command above yourself`);
+  return Promise.resolve(r.status ?? 1);
+}
+
 // launchd is macOS-only; elsewhere the desktop app's login item does the job.
 function macOnly(cmd: string): void {
   if (process.platform !== "darwin")
@@ -420,6 +438,7 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
   show,
   config,
   settings,
+  connect,
   done: act("done"),
   mute: act("mute"),
   unmute: act("unmute"),

@@ -63,45 +63,72 @@ function refused(e: unknown): boolean {
   return cause?.code === "ECONNREFUSED" || !!cause?.errors?.some((x) => x.code === "ECONNREFUSED");
 }
 
-async function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
-  let res: Response;
+async function overNetwork(path: string, init: RequestInit): Promise<Response> {
   try {
-    res = await fetch(baseUrl() + path, {
+    return await fetch(baseUrl() + path, init);
+  } catch (e) {
+    if (refused(e)) throw new DeskDownError();
+    throw e;
+  }
+}
+
+const q = encodeURIComponent;
+
+// `send` is fetch over loopback by default; the server's /mcp passes its own app to call the same routes in-process.
+export function createClient(send: (path: string, init: RequestInit) => Response | Promise<Response> = overNetwork) {
+  async function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+    const res = await send(path, {
       method,
       headers: body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     });
-  } catch (e) {
-    if (refused(e)) throw new DeskDownError();
-    throw e;
+    const data: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const e = (data ?? {}) as { error?: string; candidates?: string[] };
+      throw new DeskApiError(res.status, e.error, e.candidates);
+    }
+    return data as T;
   }
-  const data: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const e = (data ?? {}) as { error?: string; candidates?: string[] };
-    throw new DeskApiError(res.status, e.error, e.candidates);
-  }
-  return data as T;
+
+  return {
+    overview: () => call<Overview>("GET", "/api/overview"),
+    focus: () => call<FocusView>("GET", "/api/focus"),
+    queue: () => call<QueueView>("GET", "/api/queue"),
+    board: (id: string) => call<BoardView>("GET", `/api/boards/${q(id)}`),
+    item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
+    act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
+    undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
+    sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
+    getConfig: () => call<ConfigDoc>("GET", "/api/config"),
+    previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
+    putConfig: (text: string) => call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text }),
+    fields: () => call<FieldDoc[]>("GET", "/api/fields"),
+    settings: () => call<SettingsView>("GET", "/api/settings"),
+    putSettings: (patch: SettingsPatch) =>
+      call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
+    status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
+    analyze: (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }, 240_000),
+    health: () => call<{ ok: true; version: string }>("GET", "/health"),
+  };
 }
+export type DeskClient = ReturnType<typeof createClient>;
 
-const q = encodeURIComponent;
-
-export const overview = () => call<Overview>("GET", "/api/overview");
-export const focus = () => call<FocusView>("GET", "/api/focus");
-export const queue = () => call<QueueView>("GET", "/api/queue");
-export const board = (id: string) => call<BoardView>("GET", `/api/boards/${q(id)}`);
-export const item = (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`);
-export const act = (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until });
-export const undo = (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq });
-export const sync = () => call<{ ok: true }>("POST", "/api/sync", {});
-export const getConfig = () => call<ConfigDoc>("GET", "/api/config");
-export const previewConfig = (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text });
-export const putConfig = (text: string) =>
-  call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text });
-export const fields = () => call<FieldDoc[]>("GET", "/api/fields");
-export const settings = () => call<SettingsView>("GET", "/api/settings");
-export const putSettings = (patch: SettingsPatch) =>
-  call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch);
-export const status = (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs);
-export const analyze = (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }, 240_000);
-export const health = () => call<{ ok: true; version: string }>("GET", "/health");
+export const {
+  overview,
+  queue,
+  board,
+  item,
+  act,
+  undo,
+  sync,
+  getConfig,
+  previewConfig,
+  putConfig,
+  fields,
+  settings,
+  putSettings,
+  status,
+  analyze,
+  health,
+} = createClient();

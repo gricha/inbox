@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -269,6 +269,7 @@ test("usage errors exit 2", async () => {
     ["config", "nope"],
     ["serve", "--port", "x"],
     ["serve", "--port", "0"],
+    ["connect", "codex"],
     ...settings,
   ]) {
     const r = await run(argv);
@@ -370,6 +371,37 @@ test("settings reset puts one back to its default", async () => {
   assert.equal(r.out, "✓ github.poll_seconds = 90  (default)\n");
   assert.deepEqual(lastCall(), { method: "PUT", path: "/api/settings", body: { reset: ["github.poll_seconds"] } });
   assert.deepEqual(fake.settings, {});
+});
+
+test("connect claude prints the Claude Code command and the Codex config", async () => {
+  const r = await withPort(47960, () => run(["connect", "claude"]));
+  assert.equal(r.code, 0);
+  assert.match(r.out, /^claude mcp add --transport http --scope user review-desk http:\/\/localhost:47960\/mcp$/m);
+  assert.match(r.out, /^\[mcp_servers\.review-desk\]\nurl = "http:\/\/localhost:47960\/mcp"$/m);
+});
+
+// A fake claude, alone on PATH, so the real one (and the user's config) is never reached.
+test("connect claude --apply runs claude with those arguments", { skip: process.platform === "win32" }, async () => {
+  const bin = join(tmp, "fake-claude");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(tmp, "claude-args")}"\n`);
+  chmodSync(join(bin, "claude"), 0o755);
+  const prev = process.env.PATH;
+  try {
+    process.env.PATH = bin;
+    const r = await withPort(47960, () => run(["connect", "claude", "--apply"]));
+    assert.equal(r.code, 0, r.err);
+    assert.equal(
+      readFileSync(join(tmp, "claude-args"), "utf8"),
+      "mcp\nadd\n--transport\nhttp\n--scope\nuser\nreview-desk\nhttp://localhost:47960/mcp\n",
+    );
+    process.env.PATH = tmp;
+    const missing = await run(["connect", "claude", "--apply"]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.err, /^desk: can't run claude \(.*ENOENT\); run the command above yourself\n$/);
+  } finally {
+    process.env.PATH = prev;
+  }
 });
 
 test("install and uninstall are macOS-only", async () => {

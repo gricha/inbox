@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { serve } from "@hono/node-server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Desk } from "../src/desk.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp } from "../src/server.ts";
@@ -55,7 +59,53 @@ test("rejects foreign Host and Origin", async () => {
     403,
   );
   assert.equal((await t.req("/api/overview", { headers: { origin: "http://localhost:47823" } })).status, 200);
+  assert.equal((await t.req("/mcp", { method: "POST", headers: { origin: "https://evil.example" }, body: "{}" })).status, 403);
+  assert.equal((await t.app.request("http://evil.example/mcp", { method: "POST", body: "{}" })).status, 403);
   t.cleanup();
+});
+
+test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", async () => {
+  const t = await setup();
+  const srv = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const s = serve({ fetch: t.app.fetch, port: 0, hostname: "127.0.0.1" }, () => {
+      resolve(s);
+    });
+  });
+  const { port } = srv.address() as AddressInfo;
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await client.callTool({ name, arguments: args });
+    return { text: (r.content as { text: string }[]).map((c) => c.text).join("\n"), isError: !!r.isError };
+  };
+  try {
+    assert.deepEqual((await client.listTools()).tools.map((x) => x.name).sort(), [
+      "desk_act",
+      "desk_brief",
+      "desk_item",
+      "desk_list",
+      "desk_overview",
+      "desk_sync",
+      "desk_undo",
+    ]);
+    assert.match((await call("desk_overview")).text, /focus: 1 now, 0 today/);
+
+    const act = await call("desk_act", { ref: "api#7", action: "done" });
+    const seq = Number(/Undo with desk_undo seq=(\d+)/.exec(act.text)?.[1]);
+    assert.ok(seq > 0, act.text);
+    assert.equal(t.desk.status().text, "");
+    assert.deepEqual(await call("desk_undo", { seq }), { text: "undid done on acme/api#7", isError: false });
+    assert.equal(t.desk.status().text, "desk ●1");
+
+    const missing = await call("desk_item", { ref: "api#99" });
+    assert.equal(missing.isError, true);
+    assert.match(missing.text, /no item "api#99"/);
+    assert.equal((await t.req("/mcp")).status, 405);
+  } finally {
+    await client.close();
+    srv.close();
+    t.cleanup();
+  }
 });
 
 test("API round trip: overview, board, item, act, undo, status", async () => {
