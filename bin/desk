@@ -1,0 +1,12 @@
+#!/bin/sh
+# Follow symlinks (e.g. ~/bin/desk -> repo/bin/desk) so src/cli.ts is found next to the real file.
+self="$0"
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+root=$(cd "$(dirname "$self")/.." && pwd -P)
+exec node --disable-warning=ExperimentalWarning "$root/src/cli.ts" "$@"

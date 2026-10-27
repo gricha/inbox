@@ -1,0 +1,5 @@
+{
+  "name": "review-desk",
+  "owner": { "name": "Greg Pstrucha" },
+  "plugins": [{ "name": "review-desk", "source": "./integrations/claude-desktop/review-desk" }]
+}

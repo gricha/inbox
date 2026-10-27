@@ -1,0 +1,21 @@
+{
+  "__typename": "Issue",
+  "id": "I_synthetic_500",
+  "number": 500,
+  "title": "Widget list flickers on resize",
+  "url": "https://github.com/acme/widgets/issues/500",
+  "state": "OPEN",
+  "createdAt": "2026-02-10T08:00:00Z",
+  "updatedAt": "2026-03-01T08:00:00Z",
+  "author": { "__typename": "User", "login": "birch" },
+  "repository": { "nameWithOwner": "acme/widgets" },
+  "labels": { "nodes": [{ "name": "bug" }] },
+  "assignees": { "nodes": [{ "login": "octo-dev" }, { "login": "maple" }] },
+  "comments": {
+    "totalCount": 12,
+    "nodes": [
+      { "author": { "__typename": "Bot", "login": "stale-keeper" }, "createdAt": "2026-03-01T08:00:00Z" },
+      { "author": { "__typename": "User", "login": "maple" }, "createdAt": "2026-02-28T08:00:00Z" }
+    ]
+  }
+}

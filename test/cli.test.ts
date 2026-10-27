@@ -1,0 +1,364 @@
+import assert from "node:assert/strict";
+import { execFile, spawnSync } from "node:child_process";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { main } from "../src/cli.ts";
+import * as api from "../src/client.ts";
+import { plistFor } from "../src/launchd.ts";
+import { startFakeApi, unusedPort, type FakeApi } from "./helpers/fake-api.ts";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const BIN = join(ROOT, "bin", "desk");
+const tmp = mkdtempSync(join(tmpdir(), "desk-cli-"));
+
+let fake: FakeApi;
+before(async () => { fake = await startFakeApi(); });
+after(() => fake.close());
+
+async function run(argv: string[], stdout: { isTTY?: boolean; columns?: number } = {}) {
+  let out = "", err = "";
+  const code = await main(argv, { stdout: { ...stdout, write: (s: string) => (out += s) }, stderr: { write: (s: string) => (err += s) } });
+  return { code, out, err };
+}
+
+async function withPort<T>(port: number, fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.DESK_PORT;
+  process.env.DESK_PORT = String(port);
+  try { return await fn(); } finally { process.env.DESK_PORT = prev; }
+}
+
+const lastCall = () => fake.calls[fake.calls.length - 1];
+
+test("client throws DeskDownError when nothing is listening", async () => {
+  await withPort(await unusedPort(), async () => {
+    await assert.rejects(api.overview(), (e: Error) => e instanceof api.DeskDownError && e.message === "desk is not running — start it with: desk serve");
+    const r = await run(["ls"]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, "desk is not running — start it with: desk serve\n");
+  });
+});
+
+test("client maps 404 and 409 to readable errors", async () => {
+  await assert.rejects(api.item("nope#9"), (e: Error) => e instanceof api.DeskApiError && e.status === 404 && e.message === "unknown item nope#9");
+  await assert.rejects(api.item("sentry#1"), (e: api.DeskApiError) => e.status === 409 && e.candidates.length === 2 && /candidates: getsentry\/sentry#1, other\/sentry#1/.test(e.message));
+});
+
+test("ls defaults to focus, grouped by bucket, with counts of the rest", async () => {
+  const r = await run(["ls"]);
+  assert.equal(r.code, 0);
+  assert.equal(r.out, [
+    "NOW 1",
+    "● seer#8949   Flag provider client calls in unchecked paths  octo asked you · 6d",
+    "",
+    "TODAY 1",
+    "◐ sentry#101  Fix the flaky snuba test that only fails on Tuesdays  your team was asked · 1d",
+    "",
+    "1 later · 1 fyi · 1 cleared · 1 hidden  (desk ls --all)",
+    "",
+  ].join("\n"));
+  assert.equal(lastCall().path, "/api/queue");
+});
+
+test("ls --all on focus prints the whole queue", async () => {
+  const r = await run(["ls", "--all"]);
+  assert.equal(r.code, 0);
+  assert.equal(lastCall().path, "/api/queue");
+  assert.match(r.out, /^NOW 1\n● seer#8949 .*\n\nTODAY 1\n◐ sentry#101 .*\n\nLATER 1\n○ sentry#202 +Bump some dependency.*\n\nFYI 1\n· widgets#7 +Widget docs.*\n\nHIDDEN BY RULES 1\n× sentry#303 .*\n\nCLEARED \(done, snoozed, muted\) 1\n× sentry#404 .*\[done\]\n$/);
+});
+
+test("ls <board> hides later/fyi unless --all, and counts cleared/hidden", async () => {
+  const r = await run(["ls", "reviews"]);
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.out, /LATER|sentry#202/);
+  assert.match(r.out, /1 later · 1 fyi · 1 cleared · 1 hidden {2}\(desk ls reviews --all\)\n$/);
+
+  const all = await run(["ls", "reviews", "--all"]);
+  assert.match(all.out, /LATER 1\n○ sentry#202 +Bump some dependency/);
+  assert.match(all.out, /FYI 1\n· widgets#7 +Widget docs/);
+  assert.match(all.out, /HIDDEN BY RULES 1\n/);
+  assert.match(all.out, /CLEARED \(done, snoozed, muted\) 1\n.*\[/);
+});
+
+test("ls unknown board lists the boards", async () => {
+  const r = await run(["ls", "nope"]);
+  assert.equal(r.code, 1);
+  assert.equal(r.err, "desk: unknown board nope — boards: focus, reviews\n");
+});
+
+test("ls --json prints the raw view", async () => {
+  const r = await run(["ls", "--json"]);
+  assert.equal(JSON.parse(r.out).sections.now[0].id, "getsentry/seer#8949");
+});
+
+test("ls truncates to the terminal width", async () => {
+  const r = await run(["ls"], { columns: 40 });
+  for (const line of r.out.split("\n")) assert.ok(line.length <= 40, line);
+  assert.match(r.out, /…/);
+});
+
+test("color only on a TTY without NO_COLOR", async () => {
+  const prev = process.env.NO_COLOR;
+  delete process.env.NO_COLOR;
+  try {
+    assert.match((await run(["ls"], { isTTY: true, columns: 200 })).out, /\x1b\[/);
+    assert.doesNotMatch((await run(["ls"])).out, /\x1b\[/);
+    process.env.NO_COLOR = "1";
+    assert.doesNotMatch((await run(["ls"], { isTTY: true, columns: 200 })).out, /\x1b\[/);
+  } finally {
+    if (prev === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = prev;
+  }
+});
+
+test("show prints facts and the rule trace", async () => {
+  const r = await run(["show", "seer#8949"]);
+  assert.equal(r.code, 0);
+  const lines = r.out.split("\n");
+  assert.equal(lines[0], "getsentry/seer#8949  Flag provider client calls in unchecked paths");
+  assert.equal(lines[1], "https://github.com/getsentry/seer/pull/8949");
+  assert.match(lines[2], /^pr by octo · CI red · \+120 −30 · updated 2h ago · active$/);
+  assert.match(r.out, /reviews {2}● now {2}octo asked you · 6d/);
+  assert.match(r.out, / {2}✓ filter !author\.bot\n {2}✗ #0 {5}pr\.ci == 'red' && me\.author\n {2}✓ #1 {5}me\.requested_direct\n/);
+  assert.equal(JSON.parse((await run(["show", "seer#8949", "--json"])).out).card.id, "getsentry/seer#8949");
+});
+
+test("show reports ambiguous and unknown refs", async () => {
+  const amb = await run(["show", "sentry#1"]);
+  assert.equal(amb.code, 1);
+  assert.match(amb.err, /candidates: getsentry\/sentry#1, other\/sentry#1/);
+  const unk = await run(["show", "nope#9"]);
+  assert.equal(unk.code, 1);
+  assert.equal(unk.err, "desk: unknown item nope#9\n");
+});
+
+test("done/mute/pin post the action", async () => {
+  for (const [cmd, past] of [["done", "done"], ["mute", "muted"], ["pin", "pinned"], ["restore", "restored"]]) {
+    const r = await run([cmd, "seer#8949"]);
+    assert.equal(r.code, 0);
+    assert.deepEqual(lastCall(), { method: "POST", path: "/api/act", body: { id: "seer#8949", action: cmd } });
+    assert.match(r.out, new RegExp(`^✓ ${past} getsentry/seer#8949  \\(desk undo \\d+ to revert\\)\\n$`));
+  }
+});
+
+test("snooze defaults to tomorrow and passes an explicit until", async () => {
+  const r = await run(["snooze", "seer#8949"]);
+  assert.equal(r.code, 0);
+  assert.deepEqual(lastCall().body, { id: "seer#8949", action: "snooze", until: "tomorrow" });
+  assert.match(r.out, /^✓ snoozed getsentry\/seer#8949 until .+ or activity {2}\(desk undo \d+ to revert\)\n$/);
+
+  await run(["snooze", "seer#8949", "3h"]);
+  assert.equal(lastCall().body.until, "3h");
+  const act = await run(["snooze", "seer#8949", "activity"]);
+  assert.match(act.out, /^✓ snoozed getsentry\/seer#8949 until someone else acts {2}\(desk undo \d+ to revert\)\n$/);
+});
+
+test("undo, sync, prompt", async () => {
+  assert.equal((await run(["undo"])).out, "✓ Undid done on seer#8949\n");
+  assert.equal(lastCall().path, "/api/undo");
+  assert.equal((await run(["sync"])).out, "sync started\n");
+  assert.equal((await run(["prompt", "seer#8949"])).out, "Review https://github.com/getsentry/seer/pull/8949\nTitle: Flag provider client calls in unchecked paths\n");
+});
+
+test("prompt drops terminal control chars from a hostile title", async () => {
+  assert.equal((await run(["prompt", "widgets#66"])).out, "Review https://github.com/acme/widgets/pull/66\nTitle: Hi]52;c;cm0gLXJmIH4=there\n");
+});
+
+test("status prints focus totals and boards", async () => {
+  const r = await run(["status"]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /^● 1 now {2}◐ 1 today {2}\+1 new {3}synced (just now|\dm ago)\n/);
+  assert.match(r.out, /\nWork\n {2}reviews {2}PRs to review {2}●1 ◐1 ○1 ·1 {2}\+1 new\n/);
+});
+
+test("status --short prints the status text, or 'desk offline' fast", async () => {
+  assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk ●1 ◐1 +1\n", err: "" });
+  await withPort(await unusedPort(), async () => {
+    assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk offline\n", err: "" });
+  });
+  // 503 means up but not serving yet, or the config never loaded.
+  for (const [error, out] of [["desk is starting; the first sync can take a minute", "desk starting\n"], ["config has errors: boards[0].id: missing", "desk config error\n"]]) {
+    const busy = createServer((_, res) => { res.writeHead(503, { "content-type": "application/json" }); res.end(JSON.stringify({ error })); });
+    await new Promise<void>((r) => busy.listen(0, "127.0.0.1", r));
+    try {
+      assert.equal((await withPort((busy.address() as AddressInfo).port, () => run(["status", "--short"]))).out, out);
+    } finally {
+      busy.closeAllConnections();
+      busy.close();
+    }
+  }
+  // A server that accepts but never answers must not hang the status line.
+  const hung = createServer(() => {});
+  await new Promise<void>((r) => hung.listen(0, "127.0.0.1", r));
+  try {
+    const t0 = Date.now();
+    const r = await withPort((hung.address() as AddressInfo).port, () => run(["status", "--short"]));
+    assert.equal(r.out, "desk offline\n");
+    assert.ok(Date.now() - t0 < 1800, `took ${Date.now() - t0}ms`);
+  } finally {
+    hung.closeAllConnections();
+    hung.close();
+  }
+});
+
+test("usage errors exit 2", async () => {
+  const settings = [["settings", "nope"], ["settings", "set", "github.bots"], ["settings", "reset"], ["settings", "reset", "a", "b"], ["settings", "set", "a", "b", "c"]];
+  for (const argv of [["frobnicate"], ["done"], ["show", "a", "b"], ["ls", "--bogus"], ["config", "nope"], ["serve", "--port", "x"], ["serve", "--port", "0"], ...settings]) {
+    const r = await run(argv);
+    assert.equal(r.code, 2, argv.join(" "));
+    assert.match(r.err, /^desk: .+\nrun 'desk help' for usage\n$/);
+  }
+  const help = await run([]);
+  assert.equal(help.code, 0);
+  assert.match(help.out, /^usage: desk <command>/);
+  assert.equal((await run(["ls", "--help"])).code, 0);
+});
+
+test("config path, check, edit", async () => {
+  const file = join(tmp, "config.toml");
+  fake.configPath = file;
+  writeFileSync(file, "poll_seconds = 60\n");
+  assert.equal((await run(["config"])).out, `${file}\n`);
+  assert.equal((await run(["config", "path"])).out, `${file}\n`);
+
+  const ok = await run(["config", "check"]);
+  assert.equal(ok.code, 0);
+  assert.equal(ok.out, `✓ ${file} is valid\n`);
+  assert.deepEqual(lastCall().body, { text: "poll_seconds = 60\n" });
+
+  writeFileSync(file, "INVALID\n");
+  const bad = await run(["config", "check"]);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.out, "✗ boards[0].rules[0].when: unknown field me.nope\n");
+
+  const prev = process.env.EDITOR;
+  process.env.EDITOR = "true";
+  try {
+    writeFileSync(file, "poll_seconds = 30\n");
+    const ed = await run(["config", "edit"]);
+    assert.equal(ed.code, 0);
+    assert.deepEqual(lastCall(), { method: "PUT", path: "/api/config", body: { text: "poll_seconds = 30\n" } });
+  } finally {
+    process.env.EDITOR = prev;
+  }
+});
+
+test("settings lists effective values by section and stars overrides", async () => {
+  fake.settings = { "github.poll_seconds": 120 };
+  const r = await run(["settings"]);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /^GitHub\n\* github\.poll_seconds +120\n {2}github\.close_collaborator_min +3\n {2}github\.bots +\(none\)\n/);
+  assert.match(r.out, /\n\nNotifications\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/);
+  assert.match(r.out, /\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
+  assert.match(r.out, /\n\n\* set in \/home\/you\/\.review-desk\/settings\.json\n$/);
+  assert.equal(lastCall().path, "/api/settings");
+  assert.equal(JSON.parse((await run(["settings", "--json"])).out).values["github.poll_seconds"], 120);
+});
+
+test("settings set parses the value by the setting's type", async () => {
+  const cases: [string, string, unknown][] = [
+    ["github.poll_seconds", "300", 300],
+    ["notify.enabled", "off", false],
+    ["notify.enabled", "YES", true],
+    ["github.bots", "renovate, dependabot ,", ["renovate", "dependabot"]],
+    ["github.bots", '["a-bot[bot]", "b"]', ["a-bot[bot]", "b"]],
+    ["github.bots", "", []],
+    ["notify.quiet", "", ""],
+    ["app.hotkey", "Control+Shift+K", "Control+Shift+K"],
+    ["handoff.issue", "Look at {item.url}\nThen reply.", "Look at {item.url}\nThen reply."],
+  ];
+  for (const [key, raw, value] of cases) {
+    const r = await run(["settings", "set", key, raw]);
+    assert.equal(r.code, 0, `${key} ${raw}: ${r.err}`);
+    assert.deepEqual(lastCall(), { method: "PUT", path: "/api/settings", body: { set: { [key]: value } } });
+  }
+  assert.equal((await run(["settings", "set", "github.poll_seconds", "300"])).out, "✓ github.poll_seconds = 300\n");
+  assert.equal((await run(["settings", "set", "notify.enabled", "on"])).out, "✓ notify.enabled = true  (default)\n");
+  assert.equal((await run(["settings", "set", "github.bots", "a,b"])).out, "✓ github.bots = a, b\n");
+  assert.equal(fake.settings["github.poll_seconds"], 300);
+});
+
+test("settings set rejects bad values without writing", async () => {
+  fake.settings = { "github.poll_seconds": 120 };
+  const bad: [string[], string][] = [
+    [["github.poll_seconds", "5"], "desk: github.poll_seconds must be at least 30\n"],
+    [["github.poll_seconds", "soon"], "desk: github.poll_seconds must be a number\n"],
+    [["notify.enabled", "maybe"], "desk: notify.enabled must be true or false (yes/no, on/off)\n"],
+    [["github.my_repos", "nope"], `desk: github.my_repos "nope" isn't owner/name\n`],
+    [["nope.key", "1"], `desk: unknown setting "nope.key"; desk settings lists them\n`],
+  ];
+  for (const [args, err] of bad) {
+    const r = await run(["settings", "set", ...args]);
+    assert.equal(r.code, 1, args.join(" "));
+    assert.equal(r.err, err);
+  }
+  assert.match((await run(["settings", "set", "github.bots", "[oops"])).err, /^desk: github\.bots: bad JSON list/);
+  assert.deepEqual(fake.settings, { "github.poll_seconds": 120 });
+});
+
+test("settings reset puts one back to its default", async () => {
+  fake.settings = { "github.poll_seconds": 120 };
+  const r = await run(["settings", "reset", "github.poll_seconds"]);
+  assert.equal(r.code, 0);
+  assert.equal(r.out, "✓ github.poll_seconds = 90  (default)\n");
+  assert.deepEqual(lastCall(), { method: "PUT", path: "/api/settings", body: { reset: ["github.poll_seconds"] } });
+  assert.deepEqual(fake.settings, {});
+});
+
+test("install and uninstall are macOS-only", async () => {
+  const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+  for (const platform of ["linux", "win32"]) {
+    Object.defineProperty(process, "platform", { value: platform });
+    try {
+      // Never reach launchctl from a test.
+      assert.equal(process.platform, platform);
+      for (const cmd of ["install", "uninstall"]) {
+        const r = await run([cmd]);
+        assert.equal(r.code, 1);
+        assert.equal(r.err, `desk: ${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app\n`);
+      }
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
+  }
+});
+
+const execBin = promisify(execFile);
+
+test("bin/desk resolves through a symlink", async () => {
+  const link = join(tmp, "desk");
+  symlinkSync(BIN, link);
+  const env = { ...process.env, DESK_PORT: String(fake.port) };
+  const { stdout } = await execBin(link, ["status", "--short"], { env });
+  assert.equal(stdout, "desk ●1 ◐1 +1\n");
+
+  const down = { ...process.env, DESK_PORT: String(await unusedPort()) };
+  const t0 = Date.now();
+  const r = await execBin(link, ["status", "--short"], { env: down });
+  assert.equal(r.stdout, "desk offline\n");
+  assert.ok(Date.now() - t0 < 1500, `took ${Date.now() - t0}ms`);
+
+  await assert.rejects(execBin(link, ["ls"], { env: down }), (e: { code: number; stderr: string }) =>
+    e.code === 1 && e.stderr === "desk is not running — start it with: desk serve\n");
+});
+
+test("plistFor builds a LaunchAgent plist", () => {
+  const xml = plistFor({ nodePath: "/opt/node/bin/node", cliPath: "/Users/a&b/review-desk/src/cli.ts", home: "/Users/a&b", port: 47823 });
+  assert.match(xml, /<key>Label<\/key>\s*<string>dev\.review-desk\.desk<\/string>/);
+  assert.match(xml, /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/opt\/node\/bin\/node<\/string>\s*<string>--disable-warning=ExperimentalWarning<\/string>\s*<string>\/Users\/a&amp;b\/review-desk\/src\/cli\.ts<\/string>\s*<string>serve<\/string>\s*<\/array>/);
+  assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
+  assert.match(xml, /<key>KeepAlive<\/key>\s*<true\/>/);
+  assert.match(xml, /<key>StandardOutPath<\/key>\s*<string>\/Users\/a&amp;b\/\.review-desk\/desk\.log<\/string>/);
+  assert.match(xml, /<key>StandardErrorPath<\/key>\s*<string>\/Users\/a&amp;b\/\.review-desk\/desk\.log<\/string>/);
+  assert.match(xml, /<key>PATH<\/key>\s*<string>\/opt\/node\/bin:\/Users\/a&amp;b\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/);
+  assert.match(xml, /<key>DESK_PORT<\/key>\s*<string>47823<\/string>/);
+
+  const file = join(tmp, "test.plist");
+  writeFileSync(file, xml);
+  const lint = spawnSync("plutil", ["-lint", file], { encoding: "utf8" });
+  if (!lint.error) assert.equal(lint.status, 0, lint.stdout + lint.stderr);
+});

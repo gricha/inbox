@@ -1,0 +1,14 @@
+{
+  "name": "Review Desk",
+  "short_name": "Review Desk",
+  "description": "Your GitHub review load, sorted into what needs you now.",
+  "start_url": "/#/focus",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FCFBF8",
+  "theme_color": "#FCFBF8",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

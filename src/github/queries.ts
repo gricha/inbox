@@ -1,0 +1,61 @@
+// GraphQL documents. Queries only; every one reports rateLimit so the client can track budget.
+
+const RATE = "rateLimit { remaining resetAt cost }";
+
+export const VIEWER = `query { ${RATE} viewer { login } }`;
+
+export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
+  ${RATE}
+  search(query: $q, type: ISSUE, first: $first, after: $after) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      __typename
+      ... on PullRequest { id number updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on Issue { id number updatedAt repository { nameWithOwner } author { __typename login } }
+    }
+  }
+}`;
+
+const COMMON = `
+  id number title url state createdAt updatedAt
+  author { __typename login }
+  repository { nameWithOwner }
+  labels(first: 15) { nodes { name } }
+  assignees(first: 10) { nodes { login } }
+  comments(last: 10) { totalCount nodes { author { __typename login } createdAt } }`;
+
+const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
+
+const PR = `${COMMON}
+  isDraft additions deletions changedFiles baseRefName reviewDecision
+  reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
+  timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
+    nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }
+  }
+  latestReviews(first: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
+  latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
+  reviews(last: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
+  commits(last: 1) { nodes { commit { oid committedDate author { user { login } } statusCheckRollup { state } } } }`;
+
+const details = (pr: string) => `query($ids: [ID!]!) {
+  ${RATE}
+  nodes(ids: $ids) {
+    __typename
+    ... on PullRequest { ${pr} }
+    ... on Issue { ${COMMON} }
+  }
+}`;
+
+// mergeable and per-thread comments are the slow parts, so only your own PRs get them.
+export const DETAILS_REVIEW = details(`${PR}
+  reviewThreads(first: 60) { totalCount nodes { isResolved } }`);
+
+export const DETAILS_MINE = details(`${PR}
+  mergeable
+  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } createdAt } } } }`);
+
+export const TEAMS = `query($me: String!) {
+  ${RATE}
+  viewer { organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }
+}`;
