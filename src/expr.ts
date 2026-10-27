@@ -2,8 +2,11 @@
 import type { Signals } from "./types.ts";
 import { FIELDS } from "./signals.ts";
 
+// A field's value (FIELDS leaves are strings, numbers, booleans or string lists) or a computed one.
+type Value = string | number | boolean | null | undefined | Value[];
+
 type Node =
-  | { t: "lit"; v: unknown }
+  | { t: "lit"; v: Value }
   | { t: "name"; path: string }
   | { t: "list"; items: Node[] }
   | { t: "not"; x: Node }
@@ -21,8 +24,11 @@ function tokenize(src: string): Token[] {
   const out: Token[] = [];
   let i = 0;
   while (i < src.length) {
-    const c = src[i];
-    if (/\s/.test(c)) { i++; continue; }
+    const c = src.charAt(i);
+    if (/\s/.test(c)) {
+      i++;
+      continue;
+    }
     if (/[0-9]/.test(c)) {
       const m = /^[0-9]+(\.[0-9]+)?/.exec(src.slice(i))!;
       out.push({ k: "num", v: m[0], pos: i });
@@ -30,9 +36,14 @@ function tokenize(src: string): Token[] {
       continue;
     }
     if (c === '"' || c === "'") {
-      let j = i + 1, s = "";
+      let j = i + 1,
+        s = "";
       while (j < src.length && src[j] !== c) {
-        if (src[j] === "\\" && j + 1 < src.length) { s += src[j + 1]; j += 2; continue; }
+        if (src[j] === "\\" && j + 1 < src.length) {
+          s += src[j + 1];
+          j += 2;
+          continue;
+        }
         s += src[j++];
       }
       if (j >= src.length) throw new SyntaxError(`unterminated string at ${i + 1}`);
@@ -48,8 +59,16 @@ function tokenize(src: string): Token[] {
       continue;
     }
     const two = src.slice(i, i + 2);
-    if (["&&", "||", "==", "!=", "<=", ">="].includes(two)) { out.push({ k: "op", v: two, pos: i }); i += 2; continue; }
-    if ("!<>+-*/()[],".includes(c)) { out.push({ k: "op", v: c, pos: i }); i++; continue; }
+    if (["&&", "||", "==", "!=", "<=", ">="].includes(two)) {
+      out.push({ k: "op", v: two, pos: i });
+      i += 2;
+      continue;
+    }
+    if ("!<>+-*/()[],".includes(c)) {
+      out.push({ k: "op", v: c, pos: i });
+      i++;
+      continue;
+    }
     if (c === "=") throw new SyntaxError(`use == to compare (at ${i + 1})`);
     throw new SyntaxError(`unexpected "${c}" at ${i + 1}`);
   }
@@ -60,7 +79,7 @@ function tokenize(src: string): Token[] {
 function parse(src: string): Node {
   const toks = tokenize(src);
   let p = 0;
-  const peek = () => toks[p];
+  const peek = (): Token => toks[p] ?? { k: "end", v: "", pos: src.length };
   const isOp = (v: string) => peek().k === "op" && peek().v === v;
   const expect = (v: string) => {
     if (!isOp(v)) throw new SyntaxError(`expected "${v}" at ${peek().pos + 1}`);
@@ -69,45 +88,82 @@ function parse(src: string): Node {
 
   const or = (): Node => {
     let a = and();
-    while (isOp("||")) { p++; a = { t: "bin", op: "||", a, b: and() }; }
+    while (isOp("||")) {
+      p++;
+      a = { t: "bin", op: "||", a, b: and() };
+    }
     return a;
   };
   const and = (): Node => {
     let a = not();
-    while (isOp("&&")) { p++; a = { t: "bin", op: "&&", a, b: not() }; }
+    while (isOp("&&")) {
+      p++;
+      a = { t: "bin", op: "&&", a, b: not() };
+    }
     return a;
   };
   const not = (): Node => {
-    if (isOp("!")) { p++; return { t: "not", x: not() }; }
+    if (isOp("!")) {
+      p++;
+      return { t: "not", x: not() };
+    }
     return cmp();
   };
   const cmp = (): Node => {
     const a = add();
     for (const op of ["==", "!=", "<=", ">=", "<", ">", "in", "matches"]) {
-      if (isOp(op)) { p++; return { t: "bin", op, a, b: add() }; }
+      if (isOp(op)) {
+        p++;
+        return { t: "bin", op, a, b: add() };
+      }
     }
     return a;
   };
   const add = (): Node => {
     let a = mul();
-    while (isOp("+") || isOp("-")) { const op = toks[p++].v; a = { t: "bin", op, a, b: mul() }; }
+    while (isOp("+") || isOp("-")) {
+      const op = peek().v;
+      p++;
+      a = { t: "bin", op, a, b: mul() };
+    }
     return a;
   };
   const mul = (): Node => {
     let a = unary();
-    while (isOp("*") || isOp("/")) { const op = toks[p++].v; a = { t: "bin", op, a, b: unary() }; }
+    while (isOp("*") || isOp("/")) {
+      const op = peek().v;
+      p++;
+      a = { t: "bin", op, a, b: unary() };
+    }
     return a;
   };
   const unary = (): Node => {
-    if (isOp("-")) { p++; return { t: "neg", x: unary() }; }
-    if (isOp("!")) { p++; return { t: "not", x: unary() }; }
+    if (isOp("-")) {
+      p++;
+      return { t: "neg", x: unary() };
+    }
+    if (isOp("!")) {
+      p++;
+      return { t: "not", x: unary() };
+    }
     return atom();
   };
   const atom = (): Node => {
     const tok = peek();
-    if (tok.k === "num") { p++; return { t: "lit", v: Number(tok.v) }; }
-    if (tok.k === "str") { p++; return { t: "lit", v: tok.v }; }
-    if (isOp("(")) { p++; const x = or(); expect(")"); return x; }
+    if (tok.k === "num") {
+      p++;
+      return { t: "lit", v: Number(tok.v) };
+    }
+    if (tok.k === "str") {
+      p++;
+      return { t: "lit", v: tok.v };
+    }
+    if (isOp("(")) {
+      p++;
+      const x = or();
+      expect(")");
+      return x;
+    }
     if (isOp("[")) {
       p++;
       const items: Node[] = [];
@@ -144,34 +200,48 @@ function parse(src: string): Node {
 
 function check(node: Node): void {
   switch (node.t) {
+    case "lit":
+      return;
     case "name":
       if (!FIELD_PATHS.has(node.path)) {
         const hint = suggest(node.path);
         throw new SyntaxError(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`);
       }
       return;
-    case "list": node.items.forEach(check); return;
-    case "not": case "neg": check(node.x); return;
+    case "list":
+      node.items.forEach(check);
+      return;
+    case "not":
+    case "neg":
+      check(node.x);
+      return;
     case "bin":
       check(node.a);
       check(node.b);
       if (node.op === "matches" && node.b.t === "lit") {
-        try { node.re = new RegExp(String(node.b.v), "i"); } catch (e) { throw new SyntaxError(`bad regex: ${(e as Error).message}`); }
+        try {
+          node.re = new RegExp(String(node.b.v), "i");
+        } catch (e) {
+          throw new SyntaxError(`bad regex: ${(e as Error).message}`);
+        }
       }
       return;
     case "call":
       if (!(node.fn in FUNCS)) throw new SyntaxError(`unknown function "${node.fn}"; have ${Object.keys(FUNCS).join(", ")}`);
       if (node.args.length !== FUNCS[node.fn]) throw new SyntaxError(`${node.fn}() takes ${FUNCS[node.fn]} argument(s)`);
       node.args.forEach(check);
-      return;
   }
 }
 
 function suggest(path: string): string | null {
-  let best: string | null = null, bestD = Infinity;
+  let best: string | null = null,
+    bestD = Infinity;
   for (const f of FIELD_PATHS) {
     const d = distance(path, f);
-    if (d < bestD) { bestD = d; best = f; }
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
   }
   return bestD <= Math.max(2, Math.floor(path.length / 4)) ? best : null;
 }
@@ -179,21 +249,22 @@ function suggest(path: string): string | null {
 function distance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
-    let prev = row[0];
+    let prev = row[0]!;
     row[0] = i;
     for (let j = 1; j <= b.length; j++) {
-      const tmp = row[j];
-      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      const tmp = row[j]!;
+      row[j] = Math.min(tmp + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
       prev = tmp;
     }
   }
-  return row[b.length];
+  return row[b.length]!;
 }
 
-export function lookup(s: Signals, path: string): unknown {
+// Callers only pass FIELD_PATHS, whose leaves are Values.
+function lookup(s: Signals, path: string): Value {
   let v: unknown = s;
   for (const k of path.split(".")) v = (v as Record<string, unknown> | undefined)?.[k];
-  return v;
+  return v as Value;
 }
 
 function num(v: unknown, op: string): number {
@@ -202,23 +273,44 @@ function num(v: unknown, op: string): number {
 }
 
 function glob(pattern: string): RegExp {
-  return new RegExp("^" + pattern.split("*").map((p) => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "i");
+  return new RegExp(
+    "^" +
+      pattern
+        .split("*")
+        .map((p) => p.replaceAll(/[.+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*") +
+      "$",
+    "i",
+  );
 }
 
-function evaluate(node: Node, s: Signals): unknown {
+function evaluate(node: Node, s: Signals): Value {
   switch (node.t) {
-    case "lit": return node.v;
-    case "name": return lookup(s, node.path);
-    case "list": return node.items.map((x) => evaluate(x, s));
-    case "not": return !evaluate(node.x, s);
-    case "neg": return -num(evaluate(node.x, s), "-");
+    case "lit":
+      return node.v;
+    case "name":
+      return lookup(s, node.path);
+    case "list":
+      return node.items.map((x) => evaluate(x, s));
+    case "not":
+      return !evaluate(node.x, s);
+    case "neg":
+      return -num(evaluate(node.x, s), "-");
     case "call": {
       const args = node.args.map((x) => evaluate(x, s));
       switch (node.fn) {
-        case "len": return Array.isArray(args[0]) || typeof args[0] === "string" ? args[0].length : 0;
-        case "lower": return String(args[0] ?? "").toLowerCase();
-        case "contains": return String(args[0] ?? "").toLowerCase().includes(String(args[1]).toLowerCase());
-        case "startswith": return String(args[0] ?? "").toLowerCase().startsWith(String(args[1]).toLowerCase());
+        case "len":
+          return Array.isArray(args[0]) || typeof args[0] === "string" ? args[0].length : 0;
+        case "lower":
+          return String(args[0] ?? "").toLowerCase();
+        case "contains":
+          return String(args[0] ?? "")
+            .toLowerCase()
+            .includes(String(args[1]).toLowerCase());
+        case "startswith":
+          return String(args[0] ?? "")
+            .toLowerCase()
+            .startsWith(String(args[1]).toLowerCase());
         case "any": {
           const re = glob(String(args[1]));
           return (Array.isArray(args[0]) ? args[0] : [args[0]]).some((x) => re.test(String(x)));
@@ -229,32 +321,44 @@ function evaluate(node: Node, s: Signals): unknown {
     case "bin": {
       if (node.op === "&&") return Boolean(evaluate(node.a, s)) && Boolean(evaluate(node.b, s));
       if (node.op === "||") return Boolean(evaluate(node.a, s)) || Boolean(evaluate(node.b, s));
-      const a = evaluate(node.a, s), b = evaluate(node.b, s);
+      const a = evaluate(node.a, s),
+        b = evaluate(node.b, s);
       switch (node.op) {
-        case "==": return a === b;
-        case "!=": return a !== b;
-        case "<": case "<=": case ">": case ">=": {
+        case "==":
+          return a === b;
+        case "!=":
+          return a !== b;
+        case "<":
+        case "<=":
+        case ">":
+        case ">=": {
           if (typeof a === "string" && typeof b === "string") {
             return node.op === "<" ? a < b : node.op === "<=" ? a <= b : node.op === ">" ? a > b : a >= b;
           }
-          const x = num(a, node.op), y = num(b, node.op);
+          const x = num(a, node.op),
+            y = num(b, node.op);
           return node.op === "<" ? x < y : node.op === "<=" ? x <= y : node.op === ">" ? x > y : x >= y;
         }
         case "in":
           if (Array.isArray(b)) return b.includes(a);
           if (typeof b === "string") return b.includes(String(a));
           throw new TypeError(`"in" needs a list or string on the right, got ${JSON.stringify(b)}`);
-        case "matches": return (node.re ?? new RegExp(String(b), "i")).test(String(a ?? ""));
+        case "matches":
+          return (node.re ?? new RegExp(String(b), "i")).test(String(a ?? ""));
         case "+":
           if (typeof a === "string" || typeof b === "string") return String(a) + String(b);
           return num(a, "+") + num(b, "+");
-        case "-": return num(a, "-") - num(b, "-");
-        case "*": return num(a, "*") * num(b, "*");
-        case "/": return num(a, "/") / num(b, "/");
+        case "-":
+          return num(a, "-") - num(b, "-");
+        case "*":
+          return num(a, "*") * num(b, "*");
+        case "/":
+          return num(a, "/") / num(b, "/");
       }
       throw new Error(`unknown operator ${node.op}`);
     }
   }
+  throw new Error("unknown node");
 }
 
 export type Compiled = { ok: true; eval(s: Signals): unknown } | { ok: false; error: string };
@@ -270,7 +374,7 @@ export function compile(src: string): Compiled {
 }
 
 export function renderTemplate(tpl: string, s: Signals): string {
-  return tpl.replace(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, path: string) => {
+  return tpl.replaceAll(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, path: string) => {
     if (!FIELD_PATHS.has(path)) return whole;
     const v = lookup(s, path);
     if (typeof v === "number") return String(Math.round(v));

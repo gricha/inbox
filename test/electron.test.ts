@@ -3,8 +3,24 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import {
-  backoff, cardLabel, desktopEntry, desktopSettings, isAppUrl, isGitHubUrl, isHttpsUrl, isHttpUrl, menuLabel, mergePath,
-  parseShellPath, parseSSE, probeHealth, restoreBounds, SHELL_PATH_COMMAND, trayTitle, trayTooltip,
+  backoff,
+  cardLabel,
+  desktopEntry,
+  desktopSettings,
+  envVar,
+  isAppUrl,
+  isGitHubUrl,
+  isHttpsUrl,
+  isHttpUrl,
+  menuLabel,
+  mergePath,
+  parseShellPath,
+  parseSSE,
+  probeHealth,
+  restoreBounds,
+  SHELL_PATH_COMMAND,
+  trayTitle,
+  trayTooltip,
 } from "../electron/lib.ts";
 
 test("parseShellPath ignores rc-file noise around the markers", () => {
@@ -19,19 +35,40 @@ test("mergePath keeps order and drops repeats and empties", () => {
   assert.equal(mergePath(":", "/a:/b", "/usr/bin:/a::", "/c", ""), "/a:/b:/usr/bin:/c");
 });
 
+test("envVar treats an empty variable as unset", () => {
+  process.env.DESK_TEST_VAR = "";
+  try {
+    assert.equal(envVar("DESK_TEST_VAR"), undefined);
+    process.env.DESK_TEST_VAR = "x";
+    assert.equal(envVar("DESK_TEST_VAR"), "x");
+    assert.equal(envVar("DESK_TEST_UNSET_VAR"), undefined);
+  } finally {
+    delete process.env.DESK_TEST_VAR;
+  }
+});
+
 test("probeHealth: a desk, nothing, or something else", async () => {
   const serve = (handler: http.RequestListener) =>
     new Promise<{ base: string; close: () => void }>((resolve) => {
       const s = http.createServer(handler).listen(0, "127.0.0.1", () => {
-        resolve({ base: `http://127.0.0.1:${(s.address() as AddressInfo).port}`, close: () => s.close() });
+        resolve({
+          base: `http://127.0.0.1:${(s.address() as AddressInfo).port}`,
+          close: () => {
+            s.close();
+          },
+        });
       });
     });
 
-  const desk = await serve((_q, r) => r.writeHead(200, { "content-type": "application/json" }).end(`{"ok":true,"version":"0.1.0"}`));
+  const desk = await serve((_q, r) => {
+    r.writeHead(200, { "content-type": "application/json" }).end(`{"ok":true,"version":"0.1.0"}`);
+  });
   assert.deepEqual(await probeHealth(desk.base), { kind: "desk" });
   desk.close();
 
-  const other = await serve((_q, r) => r.writeHead(404).end("nope"));
+  const other = await serve((_q, r) => {
+    r.writeHead(404).end("nope");
+  });
   assert.equal((await probeHealth(other.base)).kind, "other");
   other.close();
 
@@ -59,8 +96,12 @@ test("parseSSE returns complete events and keeps the tail", () => {
 });
 
 test("desktopSettings falls back to the defaults", () => {
-  assert.deepEqual(desktopSettings(undefined), { hotkey: "Control+Alt+D", open_at_login: false, menu_bar_count: true });
-  assert.deepEqual(desktopSettings({ "app.hotkey": "", "app.open_at_login": true, "app.menu_bar_count": false }), { hotkey: "", open_at_login: true, menu_bar_count: false });
+  assert.deepEqual(desktopSettings(), { hotkey: "Control+Alt+D", open_at_login: false, menu_bar_count: true });
+  assert.deepEqual(desktopSettings({ "app.hotkey": "", "app.open_at_login": true, "app.menu_bar_count": false }), {
+    hotkey: "",
+    open_at_login: true,
+    menu_bar_count: false,
+  });
 });
 
 test("tray title and tooltip", () => {
@@ -88,7 +129,9 @@ test("URL checks", () => {
   assert.ok(!isHttpUrl("file:///etc/passwd") && !isHttpUrl("javascript:alert(1)"));
   assert.ok(isHttpsUrl("https://github.com") && !isHttpsUrl("http://github.com"));
   assert.ok(isGitHubUrl("https://github.com/getsentry/seer/pull/12"));
-  assert.ok(!isGitHubUrl("http://github.com/x") && !isGitHubUrl("https://github.com.evil.example/x") && !isGitHubUrl("https://gist.github.com/x"));
+  assert.ok(
+    !isGitHubUrl("http://github.com/x") && !isGitHubUrl("https://github.com.evil.example/x") && !isGitHubUrl("https://gist.github.com/x"),
+  );
 });
 
 test("restoreBounds keeps saved bounds only when they're on a screen", () => {

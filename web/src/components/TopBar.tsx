@@ -11,7 +11,18 @@ function syncText(o: Overview | null, now: number, offline: boolean): string {
   return o.synced_at ? `Synced ${ago(o.synced_at, now)}` : "Not synced yet";
 }
 
-export function TopBar({ overview: o, offline, now, route, filter, setFilter, filterRef, onSync, onHelp, inert }: {
+export function TopBar({
+  overview: o,
+  offline,
+  now,
+  route,
+  filter,
+  setFilter,
+  filterRef,
+  onSync,
+  onHelp,
+  inert,
+}: {
   overview: Overview | null;
   offline: boolean;
   now: number;
@@ -39,14 +50,19 @@ export function TopBar({ overview: o, offline, now, route, filter, setFilter, fi
         <span className="crumb">Settings</span>
       ) : (
         <label className="search">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="m10.5 10.5 3 3" />
+          </svg>
           <input
             ref={filterRef}
             type="search"
             placeholder="Filter"
             aria-label="Filter by title, repo or author"
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => {
+              setFilter(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 setFilter("");
@@ -58,7 +74,12 @@ export function TopBar({ overview: o, offline, now, route, filter, setFilter, fi
         </label>
       )}
       <div className="tb-right">
-        <button type="button" className={cls("sync", ((o?.sync_error && !o.syncing) || offline) && "err")} onClick={onSync} title={o?.sync_error ?? rate ?? "Sync now (r)"}>
+        <button
+          type="button"
+          className={cls("sync", ((!!o?.sync_error && !o.syncing) || offline) && "err")}
+          onClick={onSync}
+          title={o?.sync_error ?? rate ?? "Sync now (r)"}
+        >
           <svg className={cls("i", o?.syncing && "spin")} viewBox="0 0 16 16" aria-hidden="true">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
           </svg>
@@ -70,7 +91,12 @@ export function TopBar({ overview: o, offline, now, route, filter, setFilter, fi
             <path d="M4 7h.01M6.5 7h.01M9 7h.01M11.5 7h.01M5 10h6" />
           </svg>
         </button>
-        <a className={cls("icon", inSettings && "on")} href={inSettings ? "#/" : "#/settings/github"} title={inSettings ? "Back to the queue (Esc)" : "Settings (,)"} aria-label="Settings">
+        <a
+          className={cls("icon", "to-settings", inSettings && "on")}
+          href={inSettings ? "#/" : "#/settings/github"}
+          title={inSettings ? "Back to the queue (Esc)" : "Settings (,)"}
+          aria-label="Settings"
+        >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
             <circle cx="10" cy="4.5" r="1.5" />

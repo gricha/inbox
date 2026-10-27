@@ -17,7 +17,7 @@ test("default configs parse cleanly", () => {
 test("TOML syntax errors report a line", () => {
   const { loaded, errors } = parseConfig("poll_seconds = \n[[boards]]");
   assert.equal(loaded, null);
-  assert.match(errors[0].path, /^line \d+/);
+  assert.match(errors[0]?.path ?? "", /^line \d+/);
 });
 
 test("validation finds typos, bad buckets and bad expressions", () => {
@@ -59,10 +59,15 @@ query = "x"
 });
 
 test("settings left in config.toml are ignored with a warning pointing to Settings", () => {
-  const { loaded, errors, warnings } = parseConfig(`poll_seconds = 5\n[signals]\nbots = ["x"]\n[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nquery = "x"\n`);
+  const { loaded, errors, warnings } = parseConfig(
+    `poll_seconds = 5\n[signals]\nbots = ["x"]\n[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nquery = "x"\n`,
+  );
   assert.deepEqual(errors, []);
-  assert.deepEqual(warnings.map((e) => e.path), ["poll_seconds", "signals"]);
-  assert.equal(warnings[0].message, '"poll_seconds" moved to Settings (settings.json); delete it here');
+  assert.deepEqual(
+    warnings.map((e) => e.path),
+    ["poll_seconds", "signals"],
+  );
+  assert.equal(warnings[0]?.message, '"poll_seconds" moved to Settings (settings.json); delete it here');
   assert.equal(loaded!.config.poll_seconds, 90);
   assert.deepEqual(loaded!.config.signals.bots, []);
 });

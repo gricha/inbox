@@ -14,13 +14,20 @@ type Raw = Record<string, unknown>;
 const SORTS = ["waiting", "updated", "newest"] as const;
 
 // Settings (sync interval, bots, prompts, ...) come from settings.json; config.toml holds spaces and boards.
-export function parseConfig(text: string, settings: Settings = DEFAULTS): { loaded: LoadedConfig | null; errors: ConfigError[]; warnings: ConfigError[] } {
+export function parseConfig(
+  text: string,
+  settings: Settings = DEFAULTS,
+): { loaded: LoadedConfig | null; errors: ConfigError[]; warnings: ConfigError[] } {
   let raw: Raw;
   try {
-    raw = parse(text) as Raw;
+    raw = parse(text);
   } catch (e) {
     const err = e as TomlError;
-    return { loaded: null, errors: [{ path: err.line ? `line ${err.line}` : "toml", message: err.message.split("\n")[0] }], warnings: [] };
+    return {
+      loaded: null,
+      errors: [{ path: err.line ? `line ${err.line}` : "toml", message: err.message.split("\n")[0] ?? "" }],
+      warnings: [],
+    };
   }
   const errors: ConfigError[] = [];
   const err = (path: string, message: string) => errors.push({ path, message });
@@ -30,33 +37,50 @@ export function parseConfig(text: string, settings: Settings = DEFAULTS): { load
   };
   const table = (v: unknown, path: string): Raw => {
     if (v === undefined) return {};
-    if (typeof v !== "object" || v === null || Array.isArray(v)) { err(path, "must be a table"); return {}; }
+    if (typeof v !== "object" || v === null || Array.isArray(v)) {
+      err(path, "must be a table");
+      return {};
+    }
     return v as Raw;
   };
   const str = (v: unknown, path: string, dflt: string): string => {
     if (v === undefined) return dflt;
-    if (typeof v !== "string") { err(path, "must be a string"); return dflt; }
+    if (typeof v !== "string") {
+      err(path, "must be a string");
+      return dflt;
+    }
     return v;
   };
   const num = (v: unknown, path: string, dflt: number): number => {
     if (v === undefined) return dflt;
-    if (typeof v !== "number" || Number.isNaN(v)) { err(path, "must be a number"); return dflt; }
+    if (typeof v !== "number" || Number.isNaN(v)) {
+      err(path, "must be a number");
+      return dflt;
+    }
     return v;
   };
   const strs = (v: unknown, path: string): string[] => {
     if (v === undefined) return [];
     if (typeof v === "string") return [v];
-    if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) { err(path, "must be a list of strings"); return []; }
+    if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+      err(path, "must be a list of strings");
+      return [];
+    }
     return v as string[];
   };
   const bucket = (v: unknown, path: string, dflt: Bucket): Bucket => {
     if (v === undefined) return dflt;
-    if (!BUCKETS.includes(v as Bucket)) { err(path, `must be one of ${BUCKETS.join(", ")}`); return dflt; }
+    if (!BUCKETS.includes(v as Bucket)) {
+      err(path, `must be one of ${BUCKETS.join(", ")}`);
+      return dflt;
+    }
     return v as Bucket;
   };
 
   // Leftovers from before settings.json: their values are ignored, so they don't block the desk.
-  const warnings: ConfigError[] = ["poll_seconds", ...LEGACY_TABLES].filter((k) => k in raw).map((k) => ({ path: k, message: `"${k}" moved to Settings (settings.json); delete it here` }));
+  const warnings: ConfigError[] = ["poll_seconds", ...LEGACY_TABLES]
+    .filter((k) => k in raw)
+    .map((k) => ({ path: k, message: `"${k}" moved to Settings (settings.json); delete it here` }));
   known(raw, "", ["spaces", "boards", "poll_seconds", ...LEGACY_TABLES]);
 
   const spaces: SpaceConfig[] = [];
@@ -94,7 +118,12 @@ export function parseConfig(text: string, settings: Settings = DEFAULTS): { load
       const when = str(rt.when, `${rp}.when`, "");
       if (!when) err(`${rp}.when`, "is required");
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
-      return { when: when || "false", bucket: bucket(rt.bucket, `${rp}.bucket`, "later"), why: str(rt.why, `${rp}.why`, ""), nocap: rt.nocap === true };
+      return {
+        when: when || "false",
+        bucket: bucket(rt.bucket, `${rp}.bucket`, "later"),
+        why: str(rt.why, `${rp}.why`, ""),
+        nocap: rt.nocap === true,
+      };
     });
     const sort = str(t.sort, `${path}.sort`, "waiting");
     if (!(SORTS as readonly string[]).includes(sort)) err(`${path}.sort`, `must be one of ${SORTS.join(", ")}`);
@@ -107,13 +136,19 @@ export function parseConfig(text: string, settings: Settings = DEFAULTS): { load
       space,
       name: str(t.name, `${path}.name`, id),
       queries,
-      filter: filter || undefined,
-      priority: priority || undefined,
+      filter: filter === "" ? undefined : filter,
+      priority: priority === "" ? undefined : priority,
       rules,
       default: bucket(t.default, `${path}.default`, "later"),
       default_why: str(t.default_why, `${path}.default_why`, ""),
       sort: (SORTS as readonly string[]).includes(sort) ? (sort as BoardConfig["sort"]) : "waiting",
-      caps: t.caps === undefined ? undefined : { now: caps.now === undefined ? undefined : num(caps.now, `${path}.caps.now`, 3), today: caps.today === undefined ? undefined : num(caps.today, `${path}.caps.today`, 6) },
+      caps:
+        t.caps === undefined
+          ? undefined
+          : {
+              now: caps.now === undefined ? undefined : num(caps.now, `${path}.caps.now`, 3),
+              today: caps.today === undefined ? undefined : num(caps.today, `${path}.caps.today`, 6),
+            },
     };
     const c = compileBoard(board, path);
     errors.push(...c.errors);

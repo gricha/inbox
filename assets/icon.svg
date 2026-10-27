@@ -1,10 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1F5FAD"/>
-  <rect x="332" y="292" width="360" height="110" rx="30" fill="#7FA6D6"/>
-  <rect x="282" y="352" width="460" height="130" rx="34" fill="#BCD0EA"/>
-  <rect x="232" y="422" width="560" height="330" rx="44" fill="#FFFFFF"/>
-  <circle cx="330" cy="530" r="30" fill="#1F5FAD"/>
-  <rect x="390" y="510" width="300" height="40" rx="20" fill="#1C1B19"/>
-  <circle cx="330" cy="644" r="24" fill="none" stroke="#1F5FAD" stroke-width="12"/>
-  <rect x="390" y="624" width="220" height="40" rx="20" fill="#8F8A80"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B2E34"/>
+      <stop offset="1" stop-color="#15171A"/>
+    </linearGradient>
+    <linearGradient id="hl" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFE15C"/>
+      <stop offset="1" stop-color="#F6C933"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#FFFFFF" stroke-opacity=".08" stroke-width="3"/>
+  <!-- the highlighted row: a marker swipe with chisel-cut ends (round joins soften the corners), ink on top -->
+  <polygon points="244,412 264,300 786,290 766,402" fill="url(#hl)" stroke="url(#hl)" stroke-width="18" stroke-linejoin="round"/>
+  <rect x="290" y="330" width="330" height="42" rx="21" fill="#16171A"/>
+  <!-- the rest of the queue, quiet -->
+  <rect x="282" y="520" width="440" height="40" rx="20" fill="#E8E9EB"/>
+  <rect x="282" y="620" width="360" height="40" rx="20" fill="#E8E9EB" fill-opacity=".55"/>
+  <rect x="282" y="720" width="260" height="40" rx="20" fill="#E8E9EB" fill-opacity=".3"/>
 </svg>

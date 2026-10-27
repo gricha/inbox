@@ -4,8 +4,8 @@ One surface. The window is the queue; Settings is the only other place, and it's
 
 ## Principles
 
-- **Minimize surfaces, maximize automation.** No tabs. Boards and rules feed one queue; they're edited in Settings → Rules.
-- **Only urgency gets colour.** A yellow highlighter marks Now: the heading and each item's ref. Everything else is ink and pencil grey. Problems ("CI failing", "merge conflict") are coloured words in Now and Today, and turn grey once sorted away.
+- **Minimize surfaces, maximize automation.** One queue; boards and rules feed it and are edited in Settings → Rules. The sidebar navigates the queue and Settings; it never categorizes by repo or board.
+- **Only urgency gets colour.** A yellow highlighter marks Now: the heading, each item's ref and the sidebar's Now count. It's a marker stroke (`::before`, chisel-cut caps sized in em, a wavy middle, a slight tilt), never a box; `npm run shots` checks it covers its text and is never clipped. Everything else is ink and pencil grey. Problems ("CI failing", "merge conflict") are coloured words in Now and Today, and turn grey once sorted away.
 - **No boxes around words.** No chips, tags or outlined badges. The only frame is the keyboard cursor: a neutral fill with a pencil ring.
 - **Sentence case.** No all-caps labels, no monospace outside code.
 - **Both themes.** Tokens live on `:root` in `web/src/styles.css`, with a dark block under `prefers-color-scheme`. Check every change in light and dark. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only.
@@ -28,11 +28,12 @@ One surface. The window is the queue; Settings is the only other place, and it's
 └───────────────────────────────────────────────────────────────┘
 ```
 
-- One centred column, 920px wide. The ref column (`--ref-w`) lines up group heads, refs and the Settings section list. Titles, run headers and the open detail share the second column.
+- A 232px sidebar: Queue (Now, Today), Sorted away (Later, FYI, Hidden, Cleared: a click opens the group and scrolls to it) and Settings (its sections). The active item is a neutral filled pill. At 820px and below it hides; Settings then uses a dropdown.
+- One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
 - Sorted away: later, FYI, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
 - Opening an item (Enter) shows facts, one line of why, a collapsed rule trace, and one line of actions with their keys.
-- Settings: the section list sits in the ref column (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
+- Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
 
 ## Keys
 
@@ -42,13 +43,13 @@ Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 
 ## Files
 
-| | |
-|---|---|
-| `web/src/App.tsx` | state, data loading, SSE, keyboard |
-| `web/src/view.ts` | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
-| `web/src/components/TopBar.tsx` | wordmark, filter, sync, help, settings |
-| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx` | the queue |
-| `web/src/components/Settings.tsx`, `Rules.tsx` | configuration |
-| `web/src/styles.css` | tokens for both themes, then layout by area |
-| `web/src/fonts/` | Instrument Sans (UI), JetBrains Mono (code), bundled so nothing loads from the network |
-| `web/mock/server.ts` | an in-memory API for UI work without GitHub: `node web/mock/server.ts` |
+|                                                             |                                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `web/src/App.tsx`                                           | state, data loading, SSE, keyboard                                                              |
+| `web/src/view.ts`                                           | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
+| `web/src/components/TopBar.tsx`                             | wordmark, filter, sync, help, settings                                                          |
+| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx` | the queue                                                                                       |
+| `web/src/components/Settings.tsx`, `Rules.tsx`              | configuration                                                                                   |
+| `web/src/styles.css`                                        | tokens for both themes, then layout by area                                                     |
+| `web/src/fonts/`                                            | Instrument Sans (UI), JetBrains Mono (code), bundled so nothing loads from the network          |
+| `web/mock/server.ts`                                        | an in-memory API for UI work without GitHub: `node web/mock/server.ts`                          |

@@ -3,3 +3,4 @@ web/dist/
 release/
 *.tsbuildinfo
 .DS_Store
+.shots/

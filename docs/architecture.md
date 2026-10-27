@@ -43,6 +43,7 @@ Used by `when`, `filter`. Safe: no JS eval, no property access outside the known
 - Results are truthy-tested for `when`/`filter`.
 
 API:
+
 ```ts
 compile(src: string): { ok: true; eval(s: Signals): unknown } | { ok: false; error: string }
 renderTemplate(tpl: string, s: Signals): string     // "{path}" → value; numbers rounded
@@ -57,17 +58,23 @@ Measured on the real queue (2026-10-27): a search with full PR details is too sl
 
 1. **Light search** per query: `search(type: ISSUE, first: 100)` returning `id number updatedAt repository{nameWithOwner} author{login}` + typename. ~1 s, cost 1. Paginate up to 300 per query.
 2. **Details** via `nodes(ids:)`, batches of 20, 3 concurrent, only for items that are new, whose `updatedAt` changed, or whose details are stale (your PRs: 3 min for CI; others: 30 min). Two fragments:
-   - *review* fragment (everyone's items): no `mergeable`, `reviewThreads(first: 60){ nodes { isResolved } }`. 20 PRs ≈ 2.7 s, cost 2.
-   - *mine* fragment (PRs you authored): adds `mergeable` and each thread's last comment author. Slow, but you have few PRs.
+   - _review_ fragment (everyone's items): no `mergeable`, `reviewThreads(first: 60){ nodes { isResolved } }`. 20 PRs ≈ 2.7 s, cost 2.
+   - _mine_ fragment (PRs you authored): adds `mergeable` and each thread's last comment author. Slow, but you have few PRs.
 
 `ReviewRequestedEvent.actor.__typename == "Bot"` identifies bot-added asks (e.g. sentry-junior is a Bot).
 
 ```ts
-export interface SearchHit { node_id: string; id: string; kind: "pr" | "issue"; updated_at: string; author: string }
+export interface SearchHit {
+  node_id: string;
+  id: string;
+  kind: "pr" | "issue";
+  updated_at: string;
+  author: string;
+}
 export interface GitHub {
   viewer(): Promise<string>;
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
-  details(hits: SearchHit[], me: string): Promise<Item[]>;   // missing/deleted nodes are skipped
+  details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
@@ -88,26 +95,26 @@ Done and snooze record `acked_at`, the latest activity you had seen; the item co
 
 Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` and whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`). JSON everywhere; types in `src/types.ts`.
 
-| Method | Path | Body / query | Returns |
-|---|---|---|---|
-| GET | `/api/overview` | | `Overview` |
-| GET | `/api/queue` | | `QueueView` (the UI's main surface) |
-| GET | `/api/focus` | | `FocusView` (now + today) |
-| GET | `/api/boards/:id` | | `BoardView` |
-| GET | `/api/item` | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail` |
-| POST | `/api/act` | `{ id, action: Action, until? }` | `{ ok: true, state: ItemState, undo_seq: number }` |
-| POST | `/api/undo` | `{ seq? }` (default: latest) | `{ ok: true, id }` |
-| POST | `/api/analyze` | `{ id, force? }` | `{ ok: true, brief: Brief }` — reuses the brief for the same commit unless `force`; otherwise runs the `claude` CLI on the PR diff (30–90 s); 502 with the reason on failure |
-| POST | `/api/sync` | | `{ ok: true }` (starts a sync now) |
-| GET | `/api/config` | | `{ path, text, errors: ConfigError[] }` |
-| POST | `/api/config/preview` | `{ text }` | `PreviewResult` |
-| PUT | `/api/config` | `{ text, base? }` | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`) |
-| GET | `/api/fields` | | `FieldDoc[]` |
-| GET | `/api/settings` | | `SettingsView`: schema, values, what's overridden, GitHub status |
-| PUT | `/api/settings` | `{ set?: {key: value}, reset?: [key] }` | `{ ok, errors, settings }` (writes nothing if any value is invalid) |
-| GET | `/api/status` | | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0) |
-| GET | `/api/events` | | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s |
-| GET | `/health` | | `{ ok: true, version }` |
+| Method | Path                  | Body / query                                           | Returns                                                                                                                                                                      |
+| ------ | --------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/overview`       |                                                        | `Overview`                                                                                                                                                                   |
+| GET    | `/api/queue`          |                                                        | `QueueView` (the UI's main surface)                                                                                                                                          |
+| GET    | `/api/focus`          |                                                        | `FocusView` (now + today)                                                                                                                                                    |
+| GET    | `/api/boards/:id`     |                                                        | `BoardView`                                                                                                                                                                  |
+| GET    | `/api/item`           | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                                 |
+| POST   | `/api/act`            | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                           |
+| POST   | `/api/undo`           | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                           |
+| POST   | `/api/analyze`        | `{ id, force? }`                                       | `{ ok: true, brief: Brief }` — reuses the brief for the same commit unless `force`; otherwise runs the `claude` CLI on the PR diff (30–90 s); 502 with the reason on failure |
+| POST   | `/api/sync`           |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                           |
+| GET    | `/api/config`         |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                                      |
+| POST   | `/api/config/preview` | `{ text }`                                             | `PreviewResult`                                                                                                                                                              |
+| PUT    | `/api/config`         | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                                     |
+| GET    | `/api/fields`         |                                                        | `FieldDoc[]`                                                                                                                                                                 |
+| GET    | `/api/settings`       |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                             |
+| PUT    | `/api/settings`       | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                          |
+| GET    | `/api/status`         |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                                     |
+| GET    | `/api/events`         |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                                |
+| GET    | `/health`             |                                                        | `{ ok: true, version }`                                                                                                                                                      |
 
 Errors: `{ error: string }` with 4xx/5xx. Unknown item → 404. Ambiguous short id → 409 with `candidates`.
 

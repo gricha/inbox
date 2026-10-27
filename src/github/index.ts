@@ -5,9 +5,14 @@ import { createClient, RateLimitedError } from "./client.ts";
 import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
 import { DETAILS_MINE, DETAILS_REVIEW, LIGHT_SEARCH, TEAMS, VIEWER } from "./queries.ts";
 
-export { RateLimitedError } from "./client.ts";
-
-export interface SearchHit { node_id: string; id: string; kind: "pr" | "issue"; updated_at: string; author: string; author_bot?: boolean }
+export interface SearchHit {
+  node_id: string;
+  id: string;
+  kind: "pr" | "issue";
+  updated_at: string;
+  author: string;
+  author_bot?: boolean;
+}
 export interface GitHub {
   viewer(): Promise<string>;
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
@@ -16,8 +21,12 @@ export interface GitHub {
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
-interface SearchData { search: { issueCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawHit | null)[] } }
-interface TeamsData { viewer: { organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } } }
+interface SearchData {
+  search: { issueCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawHit | null)[] };
+}
+interface TeamsData {
+  viewer: { organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
+}
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
@@ -35,7 +44,7 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
     while (!failed && next < items.length) {
       const i = next++;
       try {
-        out[i] = await fn(items[i]);
+        out[i] = await fn(items[i]!); // in range: no await between the while check and next++
       } catch (e) {
         failed = true;
         throw e;
@@ -55,7 +64,11 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     let total = 0;
     let after: string | null = null;
     while (hits.size < max) {
-      const { search: page }: SearchData = await client.query<SearchData>(LIGHT_SEARCH, { q, first: Math.min(100, max - hits.size), after });
+      const { search: page }: SearchData = await client.query<SearchData>(LIGHT_SEARCH, {
+        q,
+        first: Math.min(100, max - hits.size),
+        after,
+      });
       total = page.issueCount;
       for (const n of page.nodes) if (n?.id) hits.set(n.id, toHit(n));
       if (!page.pageInfo.hasNextPage || !page.pageInfo.endCursor) break;
@@ -69,7 +82,10 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     const isMine = (h: SearchHit) => h.kind === "pr" && h.author.toLowerCase() === me.toLowerCase();
     const batches = [
       ...chunk(unique.filter(isMine), 5).map((b) => ({ query: DETAILS_MINE, ids: b.map((h) => h.node_id) })),
-      ...chunk(unique.filter((h) => !isMine(h)), 20).map((b) => ({ query: DETAILS_REVIEW, ids: b.map((h) => h.node_id) })),
+      ...chunk(
+        unique.filter((h) => !isMine(h)),
+        20,
+      ).map((b) => ({ query: DETAILS_REVIEW, ids: b.map((h) => h.node_id) })),
     ];
     const now = new Date().toISOString();
     // A failed batch is skipped, not fatal: its items stay stale and are retried next sync.
@@ -96,13 +112,17 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       search(`is:pr author:@me created:>=${since}`, 1000),
       search("is:open involves:@me", 300),
     ]);
-    const failed = settled.filter((r) => r.status === "rejected").map((r) => (r as PromiseRejectedResult).reason as Error);
-    if (failed.length === settled.length) throw failed[0];
+    const failed = settled.filter((r) => r.status === "rejected").map((r) => r.reason as Error);
+    const [first] = failed;
+    if (first && failed.length === settled.length) throw first;
     for (const e of failed) opts.log?.(`context: ${e.message}`);
-    const ok = <T,>(r: PromiseSettledResult<T>, empty: T) => (r.status === "fulfilled" ? r.value : empty);
+    const ok = <T>(r: PromiseSettledResult<T>, empty: T) => (r.status === "fulfilled" ? r.value : empty);
     const none = { hits: [] as SearchHit[], total: 0 };
-    const teams = ok(settled[0] as PromiseSettledResult<TeamsData>, { viewer: { organizations: { nodes: [] } } });
-    const [reviewed, commented, authored, involved] = settled.slice(1).map((r) => ok(r as PromiseSettledResult<typeof none>, none));
+    const teams = ok(settled[0], { viewer: { organizations: { nodes: [] } } });
+    const reviewed = ok(settled[1], none);
+    const commented = ok(settled[2], none);
+    const authored = ok(settled[3], none);
+    const involved = ok(settled[4], none);
     const engaged = new Map<string, Set<string>>();
     for (const h of [...reviewed.hits, ...commented.hits]) {
       if (h.author_bot) continue;
@@ -113,8 +133,8 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       me,
       teams: [...new Set(teams.viewer.organizations.nodes.flatMap((o) => o?.teams.nodes.map((t) => t.slug) ?? []))],
       affinity: Object.fromEntries([...engaged].map(([author, prs]) => [author, prs.size])),
-      repo_prs: tally(authored.hits.map((h) => h.id.split("#")[0])),
-      orgs: tally(involved.hits.map((h) => h.id.split("/")[0])),
+      repo_prs: tally(authored.hits.map((h) => h.id.split("#")[0] ?? "")),
+      orgs: tally(involved.hits.map((h) => h.id.split("/")[0] ?? "")),
     };
   }
 
@@ -123,6 +143,6 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     search,
     details,
     context,
-    rateLimit: client.rateLimit,
+    rateLimit: () => client.rateLimit(),
   };
 }

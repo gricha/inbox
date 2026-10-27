@@ -16,28 +16,55 @@ const reviewAsk = (n: number, o: Partial<Item> = {}) =>
     request_events: [{ at: hoursAgo(n), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
     ...o,
   });
-const teamPing = (n: number) => makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
-const myPr = (n: number, o: Partial<Item> = {}) => makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
+const teamPing = (n: number) =>
+  makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+const myPr = (n: number, o: Partial<Item> = {}) =>
+  makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
 
 async function setup(items: Item[]) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()];
-    if (q.includes("review-requested:@me") && !q.includes("-review-requested")) return all.filter((i) => i.review_requests.length).map((i) => i.id);
+    if (q.includes("review-requested:@me") && !q.includes("-review-requested"))
+      return all.filter((i) => i.review_requests.length).map((i) => i.id);
     if (q.includes("author:@me") && !q.includes("-author:@me")) return all.filter((i) => i.author === "me").map((i) => i.id);
     return [];
   });
   let now = NOW;
   gh.clock = () => now;
   const notes: string[] = [];
-  const desk = new Desk({ home, github: gh, now: () => now, notify: (_t, b) => notes.push(b), log: () => {} });
+  const desk = new Desk({
+    home,
+    github: gh,
+    now: () => now,
+    notify: (_t, b) => {
+      notes.push(b);
+    },
+    log: () => {},
+  });
   await desk.init();
-  return { desk, gh, notes, home, setNow: (d: Date) => { now = d; }, cleanup: () => { desk.stop(); fs.rmSync(home, { recursive: true }); } };
+  return {
+    desk,
+    gh,
+    notes,
+    home,
+    setNow: (d: Date) => {
+      now = d;
+    },
+    cleanup: () => {
+      desk.stop();
+      fs.rmSync(home, { recursive: true });
+    },
+  };
 }
 
 // Lets a sync started in the background (by a save or a timer) finish.
 async function idle(desk: Desk) {
-  while (desk.syncing) await new Promise((r) => setImmediate(r));
+  while (desk.syncing) {
+    await new Promise((r) => {
+      setImmediate(r);
+    });
+  }
 }
 
 test("first run writes a config with a space for the busiest org", async () => {
@@ -53,13 +80,22 @@ test("sync fills boards, focus and status", async () => {
   const t = await setup([reviewAsk(1), teamPing(2), myPr(3)]);
   await t.desk.sync();
   const review = t.desk.board("acme-review");
-  assert.deepEqual(review.sections.now.map((c) => c.id), ["acme/api#1"]);
-  assert.deepEqual(review.sections.fyi.map((c) => c.id), ["acme/api#2"]);
-  assert.equal(review.sections.now[0].why, "carol asked you directly");
+  assert.deepEqual(
+    review.sections.now.map((c) => c.id),
+    ["acme/api#1"],
+  );
+  assert.deepEqual(
+    review.sections.fyi.map((c) => c.id),
+    ["acme/api#2"],
+  );
+  assert.equal(review.sections.now[0]?.why, "carol asked you directly");
   assert.ok(review.board.queries.every((q) => q.endsWith("org:acme")));
   const mine = t.desk.board("acme-mine");
-  assert.deepEqual(mine.sections.now.map((c) => c.id), ["acme/web#3"]);
-  assert.ok(mine.sections.now[0].chips.includes("CI red"));
+  assert.deepEqual(
+    mine.sections.now.map((c) => c.id),
+    ["acme/web#3"],
+  );
+  assert.ok(mine.sections.now[0]?.chips.includes("CI red"));
 
   const focus = t.desk.focus();
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1", "acme/web#3"]);
@@ -67,17 +103,17 @@ test("sync fills boards, focus and status", async () => {
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 2);
-  assert.equal(ov.spaces[0].boards[0].counts.now, 1);
+  assert.equal(ov.spaces[0]?.boards[0]?.counts.now, 1);
   t.cleanup();
 });
 
 test("details are only refetched when an item changed or went stale", async () => {
-  const items = [reviewAsk(1)];
-  const t = await setup(items);
+  const item = reviewAsk(1);
+  const t = await setup([item]);
   await t.desk.sync();
   await t.desk.sync();
   assert.equal(t.gh.detailCalls.filter((c) => c.length).length, 1);
-  t.gh.items.set("acme/api#1", { ...items[0], updated_at: hoursAgo(0) });
+  t.gh.items.set("acme/api#1", { ...item, updated_at: hoursAgo(0) });
   await t.desk.sync();
   assert.equal(t.gh.detailCalls.filter((c) => c.length).length, 2);
   t.cleanup();
@@ -90,14 +126,23 @@ test("done hides until someone else acts; undo restores", async () => {
   assert.ok(r.undo_seq > 0);
   let board = t.desk.board("acme-review");
   assert.equal(board.sections.now.length, 0);
-  assert.deepEqual(board.cleared.map((c) => [c.id, c.status]), [["acme/api#1", "done"]]);
+  assert.deepEqual(
+    board.cleared.map((c) => [c.id, c.status]),
+    [["acme/api#1", "done"]],
+  );
 
   assert.deepEqual(t.desk.undo().action, "done");
   assert.equal(t.desk.board("acme-review").sections.now.length, 1);
 
   t.desk.act("acme/api#1", "done");
   t.setNow(new Date(NOW.getTime() + 3_600_000));
-  t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: new Date(NOW.getTime() + 1800_000).toISOString(), comments: [{ author: "carol", author_bot: false, at: new Date(NOW.getTime() + 1800_000).toISOString() }] }));
+  t.gh.items.set(
+    "acme/api#1",
+    reviewAsk(1, {
+      updated_at: new Date(NOW.getTime() + 1800_000).toISOString(),
+      comments: [{ author: "carol", author_bot: false, at: new Date(NOW.getTime() + 1800_000).toISOString() }],
+    }),
+  );
   await t.desk.sync();
   board = t.desk.board("acme-review");
   assert.equal(board.sections.now[0]?.id, "acme/api#1");
@@ -109,16 +154,16 @@ test("snooze until a time, wakes on time or on activity; mute and pin", async ()
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
   await t.desk.sync();
   t.desk.act("api#1", "snooze", "3h");
-  assert.equal(t.desk.board("acme-review").cleared[0].status, "snoozed");
+  assert.equal(t.desk.board("acme-review").cleared[0]?.status, "snoozed");
   t.setNow(new Date(NOW.getTime() + 4 * 3_600_000));
   t.desk.changed();
   assert.equal(t.desk.board("acme-review").cleared.length, 0);
 
   t.desk.act("api#2", "mute");
-  assert.equal(t.desk.board("acme-review").cleared[0].status, "muted");
+  assert.equal(t.desk.board("acme-review").cleared[0]?.status, "muted");
   t.desk.act("api#2", "unmute");
   t.desk.act("api#2", "pin");
-  assert.equal(t.desk.board("acme-review").sections.now[0].id, "acme/api#2");
+  assert.equal(t.desk.board("acme-review").sections.now[0]?.id, "acme/api#2");
   t.cleanup();
 });
 
@@ -127,8 +172,14 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
   await t.desk.sync();
   assert.equal(t.desk.resolve("api#1"), "acme/api#1");
   assert.equal(t.desk.resolve("https://github.com/acme/web/pull/1/files"), "acme/web#1");
-  assert.throws(() => t.desk.resolve("#1"), (e: { status: number }) => e.status === 409);
-  assert.throws(() => t.desk.resolve("api#99"), (e: { status: number }) => e.status === 404);
+  assert.throws(
+    () => t.desk.resolve("#1"),
+    (e: { status: number }) => e.status === 409,
+  );
+  assert.throws(
+    () => t.desk.resolve("api#99"),
+    (e: { status: number }) => e.status === 404,
+  );
   const detail = t.desk.item("acme/api#1");
   assert.equal(detail.signals.me.requested_direct, true);
   assert.ok(detail.handoff_prompt.includes("gh pr diff 1 --repo acme/api"));
@@ -139,7 +190,12 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
 test("preview shows moves without saving; putConfig saves valid text only", async () => {
   const t = await setup([reviewAsk(1), teamPing(2)]);
   await t.desk.sync();
-  const text = t.desk.getConfig().text.replace(`{ when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi"`, `{ when = "me.requested_codeowner && !me.requested_direct", bucket = "today"`);
+  const text = t.desk
+    .getConfig()
+    .text.replace(
+      `{ when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi"`,
+      `{ when = "me.requested_codeowner && !me.requested_direct", bucket = "today"`,
+    );
   const p = t.desk.preview(text);
   assert.deepEqual(p.errors, []);
   const review = p.boards.find((b) => b.id === "acme-review")!;
@@ -148,7 +204,7 @@ test("preview shows moves without saving; putConfig saves valid text only", asyn
 
   assert.equal(t.desk.putConfig("[[boards]]\nid = 1").ok, false);
   assert.equal(t.desk.putConfig(text).ok, true);
-  assert.equal(t.desk.board("acme-review").sections.today[0].id, "acme/api#2");
+  assert.equal(t.desk.board("acme-review").sections.today[0]?.id, "acme/api#2");
   t.cleanup();
 });
 
@@ -161,7 +217,7 @@ test("notifies only for new NOW entries after the first sync", async () => {
   t.setNow(new Date("2026-10-27T15:00:00")); // local time, outside quiet hours
   await t.desk.sync();
   assert.equal(t.notes.length, 1);
-  assert.match(t.notes[0], /api#5/);
+  assert.match(t.notes[0] ?? "", /api#5/);
   await t.desk.sync();
   assert.equal(t.notes.length, 1);
   t.cleanup();
@@ -213,7 +269,10 @@ test("undo by seq refuses to overwrite a later action on the same item", async (
   await t.desk.sync();
   const first = t.desk.act("api#1", "pin").undo_seq;
   t.desk.act("api#1", "done");
-  assert.throws(() => t.desk.undo(first), (e: { status: number }) => e.status === 409);
+  assert.throws(
+    () => t.desk.undo(first),
+    (e: { status: number }) => e.status === 409,
+  );
   t.desk.undo();
   t.desk.undo(first);
   assert.equal(t.desk.item("api#1").state.pinned, false);
@@ -255,7 +314,10 @@ test("saving config refuses when the file changed since it was loaded", async ()
   const t = await setup([]);
   const base = t.desk.getConfig().text;
   assert.equal(t.desk.putConfig(base, base).ok, true);
-  assert.throws(() => t.desk.putConfig(base, base + "\n# stale"), (e: { status: number }) => e.status === 409);
+  assert.throws(
+    () => t.desk.putConfig(base, base + "\n# stale"),
+    (e: { status: number }) => e.status === 409,
+  );
   t.cleanup();
 });
 
@@ -263,7 +325,7 @@ test("when every search fails, the last sync time stays and the error is shown",
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
   const before = t.desk.syncedAt;
-  t.gh.search = async () => { throw new Error("GitHub rejected the token (HTTP 401): run `gh auth login`"); };
+  t.gh.search = () => Promise.reject(new Error("GitHub rejected the token (HTTP 401): run `gh auth login`"));
   t.setNow(new Date(NOW.getTime() + 3_600_000));
   await t.desk.sync();
   assert.equal(t.desk.syncedAt, before);
@@ -281,7 +343,7 @@ test("settings: saving changes the live config; bad values write nothing", async
   assert.equal(t.desk.item("api#1").handoff_prompt, "Look at https://github.com/acme/api/pull/1 please");
   const bad = t.desk.putSettings({ set: { "github.poll_seconds": 5, "notify.enabled": false } });
   assert.equal(bad.ok, false);
-  assert.equal(bad.errors[0].path, "github.poll_seconds");
+  assert.equal(bad.errors[0]?.path, "github.poll_seconds");
   assert.equal(t.desk.settings["notify.enabled"], true);
   // Setting a default value or resetting drops the key from settings.json.
   t.desk.putSettings({ set: { "github.poll_seconds": 90 }, reset: ["handoff.prompt"] });
@@ -312,8 +374,14 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   t.desk.act("web#4", "done");
   const q = t.desk.queue();
   assert.deepEqual(q.sections.now.map((c) => c.id).sort(), ["acme/api#1", "acme/web#3"]);
-  assert.deepEqual(q.sections.fyi.map((c) => c.id), ["acme/api#2"]);
-  assert.deepEqual(q.cleared.map((c) => c.id), ["acme/web#4"]);
+  assert.deepEqual(
+    q.sections.fyi.map((c) => c.id),
+    ["acme/api#2"],
+  );
+  assert.deepEqual(
+    q.cleared.map((c) => c.id),
+    ["acme/web#4"],
+  );
   const all = [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared].map((c) => c.id);
   assert.equal(new Set(all).size, all.length);
   t.cleanup();
@@ -323,7 +391,10 @@ test("synced_at is when the sync finished; hits keep its start time", async () =
   const t = await setup([reviewAsk(1)]);
   const done = new Date(NOW.getTime() + 60_000);
   const search = t.gh.search.bind(t.gh);
-  t.gh.search = async (q: string) => { t.setNow(done); return search(q); };
+  t.gh.search = (q: string) => {
+    t.setNow(done);
+    return search(q);
+  };
   await t.desk.sync();
   assert.equal(t.desk.syncedAt, done.toISOString());
   assert.equal(t.desk.store.get("synced_at"), done.toISOString());
@@ -338,7 +409,10 @@ test("saving settings keeps entries in settings.json it can't use", async () => 
   t.desk.reloadSettings();
   const r = t.desk.putSettings({ set: { "notify.enabled": false } });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.settings.errors.map((e) => e.path), ["github.poll_seconds", "x.typo"]);
+  assert.deepEqual(
+    r.settings.errors.map((e) => e.path),
+    ["github.poll_seconds", "x.typo"],
+  );
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "github.poll_seconds": 5, "notify.enabled": false, "x.typo": true });
   await idle(t.desk);
   t.cleanup();
@@ -355,10 +429,15 @@ test("an unreadable settings.json is never overwritten: saving and moving settin
   assert.match(fs.readFileSync(config, "utf8"), /^poll_seconds = 300/);
   assert.equal(desk.store.get("settings_migrated"), null);
   assert.ok(desk.loaded);
-  assert.deepEqual(desk.configWarnings.map((w) => w.path), ["poll_seconds"]);
+  assert.deepEqual(
+    desk.configWarnings.map((w) => w.path),
+    ["poll_seconds"],
+  );
   const r = desk.putSettings({ set: { "notify.enabled": false } });
   assert.equal(r.ok, false);
-  assert.deepEqual(r.errors, [{ path: "settings.json", message: "settings.json can't be read, so saving now would overwrite it. Fix or delete the file first." }]);
+  assert.deepEqual(r.errors, [
+    { path: "settings.json", message: "settings.json can't be read, so saving now would overwrite it. Fix or delete the file first." },
+  ]);
   assert.equal(fs.readFileSync(file, "utf8"), "{ oops");
   desk.stop();
   fs.rmSync(home, { recursive: true });
@@ -384,7 +463,9 @@ test("settings move once: leftovers in config.toml only warn, and a later reset 
   assert.equal(desk.settings["github.poll_seconds"], 90);
   assert.deepEqual(desk.configErrors, []);
   assert.ok(desk.loaded);
-  assert.deepEqual(desk.getConfig().warnings, [{ path: "poll_seconds", message: '"poll_seconds" moved to Settings (settings.json); delete it here' }]);
+  assert.deepEqual(desk.getConfig().warnings, [
+    { path: "poll_seconds", message: '"poll_seconds" moved to Settings (settings.json); delete it here' },
+  ]);
   desk.stop();
   fs.rmSync(home, { recursive: true });
 });

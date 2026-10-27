@@ -1,12 +1,39 @@
 // Typed HTTP client for the desk API. Used by the CLI and the MCP server.
 
-import type { Action, BoardView, Brief, ConfigDoc, ConfigError, FieldDoc, FocusView, ItemDetail, ItemState, Overview, PreviewResult, QueueView, SettingsView, SettingValue } from "./types.ts";
+import type {
+  Action,
+  BoardView,
+  Brief,
+  ConfigDoc,
+  ConfigError,
+  FieldDoc,
+  FocusView,
+  ItemDetail,
+  ItemState,
+  Overview,
+  PreviewResult,
+  QueueView,
+  SettingsView,
+  SettingValue,
+} from "./types.ts";
 
 export type { ConfigDoc };
 
-export interface ActResult { ok: true; state: ItemState; undo_seq: number }
-export interface StatusInfo { now: number; today: number; new: number; text: string }
-export interface SettingsPatch { set?: Record<string, SettingValue>; reset?: string[] }
+export interface ActResult {
+  ok: true;
+  state: ItemState;
+  undo_seq: number;
+}
+export interface StatusInfo {
+  now: number;
+  today: number;
+  new: number;
+  text: string;
+}
+export interface SettingsPatch {
+  set?: Record<string, SettingValue>;
+  reset?: string[];
+}
 
 export class DeskDownError extends Error {
   constructor() {
@@ -19,7 +46,7 @@ export class DeskApiError extends Error {
   status: number;
   candidates: string[];
   constructor(status: number, error: string | undefined, candidates: string[] = []) {
-    const msg = error || `HTTP ${status}`;
+    const msg = (error ?? "") || `HTTP ${status}`;
     super(candidates.length ? `${msg} — candidates: ${candidates.join(", ")}` : msg);
     this.name = "DeskApiError";
     this.status = status;
@@ -28,7 +55,7 @@ export class DeskApiError extends Error {
 }
 
 export function baseUrl(): string {
-  return `http://127.0.0.1:${process.env.DESK_PORT || 47823}`;
+  return `http://127.0.0.1:${(process.env.DESK_PORT ?? "") || 47823}`;
 }
 
 function refused(e: unknown): boolean {
@@ -69,10 +96,12 @@ export const undo = (seq?: number) => call<{ ok: true; id: string; action: Actio
 export const sync = () => call<{ ok: true }>("POST", "/api/sync", {});
 export const getConfig = () => call<ConfigDoc>("GET", "/api/config");
 export const previewConfig = (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text });
-export const putConfig = (text: string) => call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text });
+export const putConfig = (text: string) =>
+  call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text });
 export const fields = () => call<FieldDoc[]>("GET", "/api/fields");
 export const settings = () => call<SettingsView>("GET", "/api/settings");
-export const putSettings = (patch: SettingsPatch) => call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch);
+export const putSettings = (patch: SettingsPatch) =>
+  call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch);
 export const status = (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs);
 export const analyze = (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }, 240_000);
 export const health = () => call<{ ok: true; version: string }>("GET", "/health");

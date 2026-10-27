@@ -17,7 +17,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/cli.ts serve",
     "dev": "concurrently -k \"DESK_DEV=1 node --watch --disable-warning=ExperimentalWarning src/cli.ts serve\" \"vite --config web/vite.config.ts\"",
     "build": "vite build --config web/vite.config.ts",
-    "test": "node --disable-warning=ExperimentalWarning --test 'test/**/*.test.ts' 'web/test/*.test.ts'",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\" \"web/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "app": "npm run build && electron .",
     "app:dev": "node --disable-warning=ExperimentalWarning scripts/dev-app.ts",
@@ -26,7 +26,15 @@
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:win": "npm run build && electron-builder --win",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives .",
+    "lint:css": "stylelint \"web/src/**/*.css\"",
+    "knip": "knip",
+    "check": "npm run format:check && npm run lint && npm run lint:css && npm run typecheck && npm run knip && npm test",
+    "prepare": "simple-git-hooks",
+    "shots": "node --disable-warning=ExperimentalWarning scripts/shots.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
@@ -43,9 +51,17 @@
     "concurrently": "^10.0.6",
     "electron": "^45.0.0",
     "electron-builder": "^26.17.0",
+    "knip": "^6.43.0",
+    "lint-staged": "^16.4.0",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "playwright-core": "^1.64.0",
+    "prettier": "^3.9.10",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "simple-git-hooks": "^2.14.0",
+    "stylelint": "^17.16.0",
+    "stylelint-config-standard": "^40.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
   },
@@ -107,5 +123,14 @@
         }
       ]
     }
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged",
+    "pre-push": "npm run check"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,cjs,js,json,md,css,html,yml}": "prettier --write",
+    "*.{ts,tsx}": "oxlint --type-aware --deny-warnings",
+    "*.css": "stylelint --fix"
   }
 }

@@ -1,0 +1,8 @@
+node_modules
+web/dist
+release
+research
+package-lock.json
+assets
+integrations/claude-desktop/review-desk/.claude-plugin/types
+.shots

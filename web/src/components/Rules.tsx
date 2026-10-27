@@ -7,7 +7,13 @@ import { lineOf } from "../view.ts";
 const BUCKETS: Bucket[] = ["now", "today", "later", "fyi", "hide"];
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
-export function Rules({ active, refresh, flash, onSaved, onDirty }: {
+export function Rules({
+  active,
+  refresh,
+  flash,
+  onSaved,
+  onDirty,
+}: {
   active: boolean;
   refresh: number; // bumps on every app refresh: a clean editor re-reads the file in case it changed on disk
   flash: (text: string, error?: boolean) => void;
@@ -53,11 +59,14 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
 
   // Re-read the file each time the page opens: it may have been edited outside (desk config edit, an editor).
   useEffect(() => {
-    if (active && !dirty) load();
+    // Read through the ref: finishing an edit (dirty to clean) must not trigger a re-read.
+    const { doc: d, text: t } = latest.current;
+    if (active && (d === null || t === d.text)) void load();
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
   }, [active, load, refresh]);
   useEffect(() => {
     onDirty(dirty);
-  }, [dirty]);
+  }, [dirty, onDirty]);
 
   async function runPreview() {
     setBusy("preview");
@@ -101,24 +110,30 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
     if (!(e.metaKey || e.ctrlKey)) return;
     if (e.key.toLowerCase() === "s") {
       e.preventDefault();
-      if (!busy && dirty) save();
+      if (!busy && dirty) void save();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (!busy) runPreview();
+      if (!busy) void runPreview();
     }
   };
   useEffect(() => {
-    if (!active) return;
-    const h = (e: KeyboardEvent) => keys.current(e);
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    const h = (e: KeyboardEvent) => {
+      keys.current(e);
+    };
+    if (active) window.addEventListener("keydown", h);
+    return () => {
+      window.removeEventListener("keydown", h);
+    };
   }, [active]);
 
   useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", h);
-    return () => window.removeEventListener("beforeunload", h);
+    const h = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    if (dirty) window.addEventListener("beforeunload", h);
+    return () => {
+      window.removeEventListener("beforeunload", h);
+    };
   }, [dirty]);
 
   function track() {
@@ -133,6 +148,7 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
     const el = ta.current;
     if (!el) return;
     el.focus();
+    // oxlint-disable-next-line typescript/no-deprecated -- the only way to insert text that the textarea's undo stack keeps
     if (!document.execCommand("insertText", false, s)) {
       el.setRangeText(s, el.selectionStart, el.selectionEnd, "end");
       setText(el.value);
@@ -147,7 +163,8 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
     const lines = text.split("\n");
     const start = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0);
     el.focus();
-    el.setSelectionRange(start, start + lines[line].length);
+    el.setSelectionRange(start, start + (lines[line] ?? "").length);
+    // oxlint-disable-next-line unicorn/prefer-number-coercion -- lineHeight is "19.5px"; Number() would give NaN
     el.scrollTop = Math.max(0, (line - 4) * (parseFloat(getComputedStyle(el).lineHeight) || 20));
     track();
   }
@@ -156,13 +173,27 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
   const shown = q ? fields.filter((f) => f.path.includes(q) || f.doc.toLowerCase().includes(q)) : fields;
   const stale = preview !== null && preview.text !== text;
   const pvBoards = preview?.result.boards ?? [];
-  const same = (b: PreviewResult["boards"][number]) => b.before !== null && !b.moved.length && !b.unfetched.length && BUCKETS.every((k) => b.before![k] === b.counts[k]);
+  const same = (b: PreviewResult["boards"][number]) =>
+    b.before !== null && !b.moved.length && !b.unfetched.length && BUCKETS.every((k) => b.before![k] === b.counts[k]);
   const changed = pvBoards.filter((b) => !same(b));
   const unchanged = pvBoards.filter(same);
 
   return (
     <div className="rules-wrap" hidden={!active}>
-      {loadError && <div className="notice err"><span>Couldn't load the rules: {loadError}</span><button type="button" className="btn" onClick={() => load()}>Retry</button></div>}
+      {loadError && (
+        <div className="notice err">
+          <span>Couldn't load the rules: {loadError}</span>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              void load();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <div className="rules">
         <div className="editor-col">
           <textarea
@@ -174,7 +205,9 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
             autoCorrect="off"
             wrap="off"
             aria-label="Config TOML"
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+            }}
             onSelect={track}
             onKeyDown={(e) => {
               if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -184,14 +217,47 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
             }}
           />
           <div className="editor-foot">
-            <button type="button" className="btn primary" disabled={!!busy || !dirty} onClick={save}>{busy === "save" ? "Saving…" : "Save"}<kbd>{MOD}S</kbd></button>
-            <button type="button" className="btn" disabled={!!busy} onClick={runPreview}>{busy === "preview" ? "Previewing…" : "Preview changes"}<kbd>{MOD}↵</kbd></button>
-            <button type="button" className="btn ghost" disabled={!dirty} onClick={() => { if (doc) setText(doc.text); setErrors([]); setPreview(null); }}>Revert</button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!!busy || !dirty}
+              onClick={() => {
+                void save();
+              }}
+            >
+              {busy === "save" ? "Saving…" : "Save"}
+              <kbd>{MOD}S</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!!busy}
+              onClick={() => {
+                void runPreview();
+              }}
+            >
+              {busy === "preview" ? "Previewing…" : "Preview changes"}
+              <kbd>{MOD}↵</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={!dirty}
+              onClick={() => {
+                if (doc) setText(doc.text);
+                setErrors([]);
+                setPreview(null);
+              }}
+            >
+              Revert
+            </button>
             <span className="grow" />
             {dirty && <span className="unsaved">Unsaved changes</span>}
             <span className="pos">Line {pos.replace(":", ", column ")}</span>
           </div>
-          <p className="s-path quiet"><code>{doc?.path ?? "…"}</code>. Tab indents, Esc leaves the editor.</p>
+          <p className="s-path quiet">
+            <code>{doc?.path ?? "…"}</code>. Tab indents, Esc leaves the editor.
+          </p>
         </div>
 
         <div className="side-col">
@@ -199,17 +265,31 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
             <section className="side-block">
               <h3 className="s-sub t-warn">Moved to Settings</h3>
               <ul className="plain">
-                {warnings.map((w) => <li key={w.path}><code>{w.path}</code> is ignored here now; it lives in Settings. Delete it from this file.</li>)}
+                {warnings.map((w) => (
+                  <li key={w.path}>
+                    <code>{w.path}</code> is ignored here now; it lives in Settings. Delete it from this file.
+                  </li>
+                ))}
               </ul>
             </section>
           )}
           {errors.length > 0 && (
             <section className="side-block errors">
-              <h3 className="s-sub t-bad">{errors.length} {errors.length === 1 ? "error" : "errors"}</h3>
+              <h3 className="s-sub t-bad">
+                {errors.length} {errors.length === 1 ? "error" : "errors"}
+              </h3>
               <ul>
                 {errors.map((e, i) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- errors have no id and can repeat a path
                   <li key={i}>
-                    <button type="button" className="err-row" onClick={() => jump(e.path)} title="Jump to this line">
+                    <button
+                      type="button"
+                      className="err-row"
+                      onClick={() => {
+                        jump(e.path);
+                      }}
+                      title="Jump to this line"
+                    >
                       <code>{e.path}</code>
                       <span>{e.message}</span>
                     </button>
@@ -247,15 +327,22 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
                       {b.moved.map((m) => (
                         <li key={m.id}>
                           <span className="ref">{shortId(m.id)}</span>
-                          <span className="mono">{m.from ?? "new"} → {m.to}</span>
-                          <span className="title" title={m.title}>{m.title}</span>
+                          <span className="mono">
+                            {m.from ?? "new"} → {m.to}
+                          </span>
+                          <span className="title" title={m.title}>
+                            {m.title}
+                          </span>
                         </li>
                       ))}
                     </ul>
                   )}
                   {b.unfetched.length > 0 && (
                     <p className="note small">
-                      Not fetched yet, so not counted; saving fetches: {b.unfetched.map((u) => <code key={u}>{u}</code>)}
+                      Not fetched yet, so not counted; saving fetches:{" "}
+                      {b.unfetched.map((u) => (
+                        <code key={u}>{u}</code>
+                      ))}
                     </p>
                   )}
                 </div>
@@ -270,10 +357,27 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
 
           <section className="side-block">
             <h3 className="s-sub">Fields</h3>
-            <input className="input" type="search" placeholder="Search fields" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search fields" />
+            <input
+              className="input"
+              type="search"
+              placeholder="Search fields"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+              }}
+              aria-label="Search fields"
+            />
             <div className="fields-list">
               {shown.map((f) => (
-                <button key={f.path} type="button" className="field" onClick={() => insert(f.path)} title="Insert at the cursor">
+                <button
+                  key={f.path}
+                  type="button"
+                  className="field"
+                  onClick={() => {
+                    insert(f.path);
+                  }}
+                  title="Insert at the cursor"
+                >
                   <code>{f.path}</code>
                   <span className="type">{f.type}</span>
                   <span className="doc">{f.doc}</span>
@@ -286,14 +390,54 @@ export function Rules({ active, refresh, flash, onSaved, onDirty }: {
           <section className="side-block">
             <h3 className="s-sub">Syntax</h3>
             <dl className="cheat">
-              <div className="fact"><dt>rules</dt><dd>first matching <code>when</code> places the card; else <code>default</code></dd></div>
-              <div className="fact"><dt>buckets</dt><dd><code>now today later fyi hide</code></dd></div>
-              <div className="fact"><dt>logic</dt><dd><code>&amp;&amp; || !</code> (or <code>and or not</code>)</dd></div>
-              <div className="fact"><dt>compare</dt><dd><code>== != &lt; &lt;= &gt; &gt;= in matches</code></dd></div>
-              <div className="fact"><dt>functions</dt><dd><code>len(x) lower(s) contains(s, sub) startswith(s, p) any(list, "glob*")</code></dd></div>
-              <div className="fact"><dt>examples</dt><dd><code>"ml-team" in item.labels</code>, <code>item.title matches "^fix"</code></dd></div>
-              <div className="fact"><dt>why</dt><dd><code>why = "close collaborator: {"{author.engaged_90d}"} PRs"</code></dd></div>
-              <div className="fact"><dt>caps</dt><dd><code>caps = {"{ now = 3, today = 6 }"}</code>; <code>nocap = true</code> on a rule exempts it</dd></div>
+              <div className="fact">
+                <dt>rules</dt>
+                <dd>
+                  first matching <code>when</code> places the card; else <code>default</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>buckets</dt>
+                <dd>
+                  <code>now today later fyi hide</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>logic</dt>
+                <dd>
+                  <code>&amp;&amp; || !</code> (or <code>and or not</code>)
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>compare</dt>
+                <dd>
+                  <code>== != &lt; &lt;= &gt; &gt;= in matches</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>functions</dt>
+                <dd>
+                  <code>len(x) lower(s) contains(s, sub) startswith(s, p) any(list, "glob*")</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>examples</dt>
+                <dd>
+                  <code>"ml-team" in item.labels</code>, <code>item.title matches "^fix"</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>why</dt>
+                <dd>
+                  <code>why = "close collaborator: {"{author.engaged_90d}"} PRs"</code>
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>caps</dt>
+                <dd>
+                  <code>caps = {"{ now = 3, today = 6 }"}</code>; <code>nocap = true</code> on a rule exempts it
+                </dd>
+              </div>
             </dl>
           </section>
         </div>

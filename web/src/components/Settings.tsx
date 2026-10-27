@@ -9,7 +9,14 @@ import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // Resolves to the value the server saved, or null when it was rejected (the row shows why).
 type Commit = (v: SettingValue) => Promise<SettingValue | null>;
-interface FieldProps { def: SettingDef; value: SettingValue; commit: Commit; clear: () => void; id: string; invalid: boolean }
+interface FieldProps {
+  def: SettingDef;
+  value: SettingValue;
+  commit: Commit;
+  clear: () => void;
+  id: string;
+  invalid: boolean;
+}
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -24,12 +31,16 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
   }, [shown]);
 
   async function save(text: string) {
-    if (!typed.current) return setDraft(shown);
+    if (!typed.current) {
+      setDraft(shown);
+      return;
+    }
     const v = valueOf(def, text);
     if (JSON.stringify(v) === JSON.stringify(value)) {
       typed.current = false;
       clear();
-      return setDraft(shown);
+      setDraft(shown);
+      return;
     }
     const saved = await commit(v);
     if (saved === null || focused.current) return;
@@ -54,7 +65,9 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
         typed.current = true;
         setDraft(e.target.value);
       },
-      onFocus: () => { focused.current = true; },
+      onFocus: () => {
+        focused.current = true;
+      },
       onBlur: () => {
         focused.current = false;
         void save(draft);
@@ -97,13 +110,31 @@ function ListField(p: FieldProps) {
 
 function BooleanField({ value, commit, id }: FieldProps) {
   const [on, setOn] = useState(value === true);
-  useEffect(() => setOn(value === true), [value]);
+  const [synced, setSynced] = useState(value);
+  if (value !== synced) {
+    setSynced(value);
+    setOn(value === true);
+  }
+
+  async function flip(v: boolean) {
+    setOn(v);
+    if ((await commit(v)) === null) setOn(!v);
+  }
+
   return (
-    <input id={id} className="switch" type="checkbox" role="switch" checked={on} aria-labelledby={`${id}-label`} aria-describedby={`${id}-msg`} onChange={async (e) => {
-      const v = e.target.checked;
-      setOn(v);
-      if ((await commit(v)) === null) setOn(!v);
-    }} />
+    <input
+      id={id}
+      className="switch"
+      type="checkbox"
+      // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked; ARIA in HTML forbids aria-checked here
+      role="switch"
+      checked={on}
+      aria-labelledby={`${id}-label`}
+      aria-describedby={`${id}-msg`}
+      onChange={(e) => {
+        void flip(e.target.checked);
+      }}
+    />
   );
 }
 
@@ -113,11 +144,17 @@ function HotkeyField(p: FieldProps) {
   const input = useRef<HTMLInputElement>(null);
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (!recording) return d.bind.onKeyDown(e);
+    if (!recording) {
+      d.bind.onKeyDown(e);
+      return;
+    }
     const bare = !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey);
     if (bare && e.key === "Tab") return;
     e.preventDefault();
-    if (bare && e.key === "Escape") return setRecording(false);
+    if (bare && e.key === "Escape") {
+      setRecording(false);
+      return;
+    }
     const acc = bare && e.key === "Backspace" ? "" : acceleratorOf(e, MAC);
     if (acc === null) return;
     setRecording(false);
@@ -142,13 +179,26 @@ function HotkeyField(p: FieldProps) {
         }}
       />
       {/* mousedown would blur the input and end the recording before the click lands */}
-      <button type="button" className="btn" aria-pressed={recording} aria-label={recording ? "Cancel recording" : "Record a shortcut"} onMouseDown={(e) => e.preventDefault()} onClick={() => {
-        setRecording(!recording);
-        input.current?.focus();
-      }}>
+      <button
+        type="button"
+        className="btn"
+        aria-pressed={recording}
+        aria-label={recording ? "Cancel recording" : "Record a shortcut"}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
+        onClick={() => {
+          setRecording(!recording);
+          input.current?.focus();
+        }}
+      >
         {recording ? "Cancel" : "Record"}
       </button>
-      {recording && <span className="quiet small" aria-live="polite">Press {MAC ? "⌃, ⌥ or ⌘" : "Ctrl or Alt"} with a key. Esc cancels, Backspace clears.</span>}
+      {recording && (
+        <span className="quiet small" aria-live="polite">
+          Press {MAC ? "⌃, ⌥ or ⌘" : "Ctrl or Alt"} with a key. Esc cancels, Backspace clears.
+        </span>
+      )}
     </div>
   );
 }
@@ -166,7 +216,12 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   const [status, setStatus] = useState<"saved" | { error: string } | null>(null);
   const [epoch, setEpoch] = useState(0); // remounts the control after a reset so it drops a rejected draft
   const timer = useRef(0);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+    },
+    [],
+  );
 
   async function put(patch: { set?: Record<string, SettingValue>; reset?: string[] }): Promise<SettingsView | null> {
     clearTimeout(timer.current);
@@ -178,12 +233,18 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
         return null;
       }
       setStatus("saved");
-      timer.current = window.setTimeout(() => setStatus(null), 1600);
+      timer.current = window.setTimeout(() => {
+        setStatus(null);
+      }, 1600);
       return r.settings;
     } catch (e) {
       setStatus({ error: message(e) });
       return null;
     }
+  }
+
+  async function resetToDefault() {
+    if (await put({ reset: [def.key] })) setEpoch((n) => n + 1);
   }
 
   const id = `setting-${def.key}`;
@@ -195,14 +256,21 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
       def={def}
       value={view.values[def.key] ?? (def.default as SettingValue)}
       invalid={typeof status === "object" && status !== null}
-      clear={() => setStatus(null)}
+      clear={() => {
+        setStatus(null);
+      }}
       commit={async (v) => (await put({ set: { [def.key]: v } }))?.values[def.key] ?? null}
     />
   );
   const reset = view.overridden.includes(def.key) && (
-    <button type="button" className="link-btn" title={`Default: ${draftOf(def.default) || "(empty)"}`} onClick={async () => {
-      if (await put({ reset: [def.key] })) setEpoch((n) => n + 1);
-    }}>
+    <button
+      type="button"
+      className="link-btn"
+      title={`Default: ${draftOf(def.default) || "(empty)"}`}
+      onClick={() => {
+        void resetToDefault();
+      }}
+    >
       Reset to default
     </button>
   );
@@ -210,7 +278,15 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   return (
     <div className={cls("setting", `st-${def.type}`)}>
       <div className="s-label-col">
-        {def.type === "boolean" ? <span className="s-label" id={`${id}-label`}>{def.label}</span> : <label className="s-label" htmlFor={id}>{def.label}</label>}
+        {def.type === "boolean" ? (
+          <span className="s-label" id={`${id}-label`}>
+            {def.label}
+          </span>
+        ) : (
+          <label className="s-label" htmlFor={id}>
+            {def.label}
+          </label>
+        )}
         {def.help && <p className="s-help">{def.help}</p>}
         {reset}
       </div>
@@ -228,15 +304,30 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
 
 function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   if (!s.accelerator) return <p className="s-live quiet">Off</p>;
-  if (s.ok) return <p className="s-live"><span className="t-good">Active.</span> Press <kbd>{s.accelerator}</kbd> from any app.</p>;
-  return <p className="s-live t-bad">Couldn't use {s.accelerator}: {s.error ?? "another app may have it"}</p>;
+  if (s.ok)
+    return (
+      <p className="s-live">
+        <span className="t-good">Active.</span> Press <kbd>{s.accelerator}</kbd> from any app.
+      </p>
+    );
+  return (
+    <p className="s-live t-bad">
+      Couldn't use {s.accelerator}: {s.error ?? "another app may have it"}
+    </p>
+  );
 }
 
 function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
   return (
     <div className="gh">
       <div className="gh-account">
-        {gh.login ? <p className="gh-who">Signed in as <b>@{gh.login}</b></p> : <p className="gh-who">Not signed in yet</p>}
+        {gh.login ? (
+          <p className="gh-who">
+            Signed in as <b>@{gh.login}</b>
+          </p>
+        ) : (
+          <p className="gh-who">Not signed in yet</p>
+        )}
         <p className="quiet">
           Through {gh.auth}. {gh.synced_at ? `Last synced ${ago(gh.synced_at, now)}.` : "Not synced yet."}
           {gh.rate_limit && ` ${gh.rate_limit.remaining.toLocaleString()} API requests left until ${when(gh.rate_limit.reset_at)}.`}
@@ -246,14 +337,23 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
         <div className="notice err" role="alert">
           <span>
             {gh.error}
-            {authProblem(gh.error) && <> Run <code>gh auth login</code> in a terminal, then sync.</>}
+            {authProblem(gh.error) && (
+              <>
+                {" "}
+                Run <code>gh auth login</code> in a terminal, then sync.
+              </>
+            )}
           </span>
         </div>
       )}
       {gh.teams.length > 0 && (
         <div className="gh-block">
           <h3 className="s-sub">Your teams</h3>
-          <p className="gh-teams">{gh.teams.map((t) => <span key={t}>@{t}</span>)}</p>
+          <p className="gh-teams">
+            {gh.teams.map((t) => (
+              <span key={t}>@{t}</span>
+            ))}
+          </p>
         </div>
       )}
       {gh.orgs.length > 0 && (
@@ -270,7 +370,9 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
               ))}
             </tbody>
           </table>
-          <p className="quiet small">Spaces decide which searches run for which orgs. Change them in <a href="#/settings/rules">Rules</a>.</p>
+          <p className="quiet small">
+            Spaces decide which searches run for which orgs. Change them in <a href="#/settings/rules">Rules</a>.
+          </p>
         </div>
       )}
     </div>
@@ -280,9 +382,23 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
 // "/Users/me/.review-desk/settings.json" → "~/.review-desk/settings.json"
 const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]:\\Users\\[^\\]+(?=\\)/, "~");
 
-const RULES = { id: "rules", title: "Rules", help: "Which GitHub searches feed the queue, and the rules that decide where each item lands. Everything a rule sends to later, FYI or hide is sorted away for you." };
+const RULES = {
+  id: "rules",
+  title: "Rules",
+  help: "Which GitHub searches feed the queue, and the rules that decide where each item lands. Everything a rule sends to later, FYI or hide is sorted away for you.",
+};
 
-export function Settings({ active, section: asked, view, now, loads, onView, flash, onRulesSaved, onRulesDirty }: {
+export function Settings({
+  active,
+  section: asked,
+  view,
+  now,
+  loads,
+  onView,
+  flash,
+  onRulesSaved,
+  onRulesDirty,
+}: {
   active: boolean;
   section: string;
   view: SettingsView | null;
@@ -295,9 +411,9 @@ export function Settings({ active, section: asked, view, now, loads, onView, fla
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
-  const sections = view ? [view.sections[0], RULES, ...view.sections.slice(1)] : [RULES];
+  const sections = view ? [...view.sections.slice(0, 1), RULES, ...view.sections.slice(1)] : [RULES];
   // An unknown section (an old link, a typo) shows the first one rather than an empty pane.
-  const section = !view || sections.some((x) => x.id === asked) ? asked : sections[0].id;
+  const section = !view || sections.some((x) => x.id === asked) ? asked : (sections[0] ?? RULES).id;
   const [rulesSeen, setRulesSeen] = useState(section === "rules");
   useEffect(() => {
     if (section === "rules") setRulesSeen(true);
@@ -305,9 +421,15 @@ export function Settings({ active, section: asked, view, now, loads, onView, fla
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
-    if (!desktop || !view) return;
-    const t = setTimeout(() => desktop.status().then(setLive, () => {}), 300);
-    return () => clearTimeout(t);
+    const t =
+      desktop && view
+        ? setTimeout(() => {
+            desktop.status().then(setLive, () => {});
+          }, 300)
+        : undefined;
+    return () => {
+      clearTimeout(t);
+    };
   }, [view, desktop]);
 
   const s = sections.find((x) => x.id === section) ?? null;
@@ -316,43 +438,70 @@ export function Settings({ active, section: asked, view, now, loads, onView, fla
 
   return (
     <div className="settings" hidden={!active}>
-      <select className="input s-pick" aria-label="Settings section" value={section} onChange={(e) => { location.hash = `#/settings/${e.target.value}`; }}>
-        {sections.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
-      </select>
-      <nav className="s-nav" aria-label="Settings">
+      <select
+        className="input s-pick"
+        aria-label="Settings section"
+        value={section}
+        onChange={(e) => {
+          location.hash = `#/settings/${e.target.value}`;
+        }}
+      >
         {sections.map((x) => (
-          <a key={x.id} href={`#/settings/${x.id}`} className={cls("s-nav-item", x.id === section && "on")} aria-current={x.id === section ? "page" : undefined}>
+          <option key={x.id} value={x.id}>
             {x.title}
-          </a>
+          </option>
         ))}
-        <a href="#/" className="s-back">Back <kbd>esc</kbd></a>
-      </nav>
+      </select>
       <div className="s-pane">
         {!view && section !== "rules" && <p className="quiet">Loading…</p>}
         {view && view.errors.length > 0 && (
           <div className="notice warn" role="alert">
             <span>
-              settings.json has {view.errors.length === 1 ? "a problem, so that setting uses its default" : `${view.errors.length} problems, so those settings use their defaults`}:
-              {view.errors.map((e) => <span key={e.path} className="s-file-err"><code>{e.path}</code> {e.message}</span>)}
+              settings.json has{" "}
+              {view.errors.length === 1
+                ? "a problem, so that setting uses its default"
+                : `${view.errors.length} problems, so those settings use their defaults`}
+              :
+              {view.errors.map((e) => (
+                <span key={e.path} className="s-file-err">
+                  <code>{e.path}</code> {e.message}
+                </span>
+              ))}
             </span>
           </div>
         )}
         {s && (
           <header className="s-head-block">
             <h1>{s.title}</h1>
-            {desktopOnly && !desktop ? <p className="s-intro">Only the desktop app uses these. Open it to change how it behaves.</p> : s.help && <p className="s-intro">{s.help}</p>}
+            {desktopOnly && !desktop ? (
+              <p className="s-intro">Only the desktop app uses these. Open it to change how it behaves.</p>
+            ) : (
+              s.help && <p className="s-intro">{s.help}</p>
+            )}
           </header>
         )}
         {view && section === "github" && <GitHubStatusView gh={view.github} now={now} />}
         {view && section !== "rules" && defs.length > 0 && (
           <div className="s-fields">
             {defs.map((d) => (
-              <Row key={d.key} def={d} view={view} onView={onView} extra={d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />} />
+              <Row
+                key={d.key}
+                def={d}
+                view={view}
+                onView={onView}
+                extra={d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />}
+              />
             ))}
           </div>
         )}
-        {rulesSeen && <Rules active={active && section === "rules"} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
-        {view && section !== "rules" && <p className="s-path quiet" title={view.path}>Saved as you go to <code>{tilde(view.path)}</code></p>}
+        {rulesSeen && (
+          <Rules active={active && section === "rules"} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />
+        )}
+        {view && section !== "rules" && (
+          <p className="s-path quiet" title={view.path}>
+            Saved as you go to <code>{tilde(view.path)}</code>
+          </p>
+        )}
       </div>
     </div>
   );

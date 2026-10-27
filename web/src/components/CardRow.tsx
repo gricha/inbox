@@ -24,8 +24,9 @@ export interface RowCtx {
   restore: (c: Card) => void;
 }
 
-export function PinGlyph() {
+function PinGlyph() {
   return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- inline SVG needs role="img" to be announced; <img> can't hold it
     <svg className="pin" viewBox="0 0 16 16" role="img" aria-label="pinned">
       <path d="M10.3 1.2a.7.7 0 0 1 1 0l3.5 3.5a.7.7 0 0 1 0 1l-.9.9a.7.7 0 0 1-.8.1l-2.3 2.3.2 2.6a.7.7 0 0 1-.2.5l-.8.8a.7.7 0 0 1-1 0L6.5 10.4 2.6 14.3a.5.5 0 0 1-.7-.7L5.8 9.7 3.4 7.2a.7.7 0 0 1 0-1l.8-.8a.7.7 0 0 1 .5-.2l2.6.2 2.3-2.3a.7.7 0 0 1 .1-.8Z" />
     </svg>
@@ -47,27 +48,59 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
   const facts = card.chips.map(word).filter((f) => !card.why.toLowerCase().includes(f.text.toLowerCase()));
   const words = (
     <>
-      {facts.map((f) => <span key={f.text} className={cls("fact-word", f.tone && `t-${f.tone}`)}>{f.text}</span>)}
-      {card.verdict && <span className={`fact-word verdict v-${card.verdict}`} title="Claude's brief">brief says {card.verdict}</span>}
+      {facts.map((f) => (
+        <span key={f.text} className={cls("fact-word", f.tone && `t-${f.tone}`)}>
+          {f.text}
+        </span>
+      ))}
+      {card.verdict && (
+        <span className={`fact-word verdict v-${card.verdict}`} title="Claude's brief">
+          brief says {card.verdict}
+        </span>
+      )}
       {card.demoted && <span className="fact-word demoted">{card.demoted}</span>}
     </>
   );
   const compact = !!inRun && variant === "active";
   return (
     <div
-      className={cls("row", `b-${card.bucket}`, ctx.selected === card.id && "sel", open && "open", ctx.leaving.has(card.id) && "leaving", variant !== "active" && "dim")}
+      className={cls(
+        "row",
+        `b-${card.bucket}`,
+        ctx.selected === card.id && "sel",
+        open && "open",
+        ctx.leaving.has(card.id) && "leaving",
+        variant !== "active" && "dim",
+      )}
       data-id={card.id}
     >
       <div className="row-line">
         {/* Tab focus and the j/k cursor are the same thing. */}
-        <button type="button" className="row-main" aria-expanded={open} onClick={() => ctx.click(card)} onFocus={() => ctx.select(card)}>
+        <button
+          type="button"
+          className="row-main"
+          aria-expanded={open}
+          onClick={() => {
+            ctx.click(card);
+          }}
+          onFocus={() => {
+            ctx.select(card);
+          }}
+        >
           <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
-            <span className="ref-ink"><span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}</span>
+            <span className="ref-ink">
+              <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+            </span>
           </span>
           <span className="row-body">
             <span className="title-line">
-              <span className="title" title={card.title}>{card.title}</span>
-              {card.new && <span className="new-dot" role="img" aria-label="new activity" title="New activity since you looked" />}
+              <span className="title" title={card.title}>
+                {card.title}
+              </span>
+              {card.new && (
+                // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a CSS-drawn dot with no image file behind it
+                <span className="new-dot" role="img" aria-label="new activity" title="New activity since you looked" />
+              )}
               {card.pinned && <PinGlyph />}
               {/* In a run the header already says who and why, so the facts fit on the title line. */}
               {compact && <span className="meta inline">{words}</span>}
@@ -88,12 +121,29 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
               </span>
             )}
           </span>
-          <span className="age" title={`waiting since ${new Date(card.waiting_since).toLocaleString()}`}>{age(card.waiting_since, ctx.now)}</span>
+          <span className="age" title={`waiting since ${new Date(card.waiting_since).toLocaleString()}`}>
+            {age(card.waiting_since, ctx.now)}
+          </span>
         </button>
         {variant === "cleared" && (
-          <button type="button" className="btn ghost restore" onClick={() => ctx.restore(card)}>Restore</button>
+          <button
+            type="button"
+            className="btn ghost restore"
+            onClick={() => {
+              ctx.restore(card);
+            }}
+          >
+            Restore
+          </button>
         )}
-        {ctx.snoozeFor === card.id && <SnoozeMenu onPick={(until) => ctx.snooze(card, until)} onClose={ctx.closeSnooze} />}
+        {ctx.snoozeFor === card.id && (
+          <SnoozeMenu
+            onPick={(until) => {
+              ctx.snooze(card, until);
+            }}
+            onClose={ctx.closeSnooze}
+          />
+        )}
       </div>
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
     </div>
@@ -107,11 +157,19 @@ function SnoozeMenu({ onPick, onClose }: { onPick: (until: string) => void; onCl
   }, []);
   return (
     <>
-      <div className="scrim-clear" onClick={onClose} />
+      <div className="scrim-clear" role="presentation" onClick={onClose} />
       <div ref={menu} className="popover" role="menu" aria-label="Snooze">
         <div className="pop-title">Snooze</div>
         {SNOOZE.map((o) => (
-          <button key={o.key} type="button" role="menuitem" className="pop-item" onClick={() => onPick(o.until)}>
+          <button
+            key={o.key}
+            type="button"
+            role="menuitem"
+            className="pop-item"
+            onClick={() => {
+              onPick(o.until);
+            }}
+          >
             <span>{o.label}</span>
             <kbd>{o.key}</kbd>
           </button>

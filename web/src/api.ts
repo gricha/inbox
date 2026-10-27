@@ -1,8 +1,18 @@
 import type {
-  Action, Brief, ConfigError, FieldDoc, ItemDetail, ItemState, Overview, PreviewResult, QueueView, SettingsView, SettingValue,
+  Action,
+  Brief,
+  ConfigError,
+  FieldDoc,
+  ItemDetail,
+  ItemState,
+  Overview,
+  PreviewResult,
+  QueueView,
+  SettingsView,
+  SettingValue,
 } from "../../src/types.ts";
 
-export class ApiError extends Error {
+class ApiError extends Error {
   status: number; // 0 = the desk server isn't reachable
   constructor(message: string, status: number) {
     super(message);
@@ -23,8 +33,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   // A non-JSON reply is the dev proxy's error page: the desk server itself is down.
   if (!(res.headers.get("content-type") ?? "").includes("json")) throw new ApiError("desk server not reachable", 0);
-  const data = await res.json();
-  if (!res.ok) throw new ApiError(data.error ?? res.statusText, res.status);
+  const data: unknown = await res.json();
+  if (!res.ok) throw new ApiError((data as { error?: string }).error ?? res.statusText, res.status);
   return data as T;
 }
 

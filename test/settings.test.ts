@@ -32,7 +32,10 @@ test("settings.json: bad entries fall back to defaults", () => {
   fs.writeFileSync(file, JSON.stringify({ "github.poll_seconds": 5, "github.bots": ["ci-helper"], "x.y": 1 }));
   const { overrides, errors, raw } = readSettings(file);
   assert.deepEqual(overrides, { "github.bots": ["ci-helper"] });
-  assert.deepEqual(errors.map((e) => e.path), ["github.poll_seconds", "x.y"]);
+  assert.deepEqual(
+    errors.map((e) => e.path),
+    ["github.poll_seconds", "x.y"],
+  );
   assert.deepEqual(raw, { "github.poll_seconds": 5, "github.bots": ["ci-helper"], "x.y": 1 });
   const s = effective(overrides);
   assert.equal(s["github.poll_seconds"], 90);
@@ -40,7 +43,7 @@ test("settings.json: bad entries fall back to defaults", () => {
   writeSettings(file, { "notify.enabled": false });
   assert.deepEqual(readSettings(file).overrides, { "notify.enabled": false });
   fs.writeFileSync(file, "{ not json");
-  assert.equal(readSettings(file).errors[0].path, "settings.json");
+  assert.equal(readSettings(file).errors[0]?.path, "settings.json");
   assert.equal(readSettings(file).raw, null);
 });
 
@@ -133,7 +136,9 @@ id = "b"
 space = "w"
 query = "y"
 `)!;
-  assert.equal(m.text, `[[spaces]]
+  assert.equal(
+    m.text,
+    `[[spaces]]
 id = "w"
 
 # ── Work ──
@@ -148,7 +153,8 @@ query = "x"
 id = "b"
 space = "w"
 query = "y"
-`);
+`,
+  );
   assert.equal(m.moved["handoff.mine"], "# inside a string\nx");
 });
 

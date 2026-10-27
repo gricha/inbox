@@ -3,11 +3,30 @@
 import type { Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
-interface Actor { __typename?: string; login: string }
-interface Reviewer { __typename: string; login?: string; slug?: string }
-interface Conn<T> { totalCount?: number; nodes: T[] }
-interface RawReview { author: Actor | null; state: string; submittedAt: string | null; createdAt: string; commit?: { oid: string } | null }
-interface RawComment { author: Actor | null; createdAt: string }
+interface Actor {
+  __typename?: string;
+  login: string;
+}
+interface Reviewer {
+  __typename: string;
+  login?: string;
+  slug?: string;
+}
+interface Conn<T> {
+  totalCount?: number;
+  nodes: T[];
+}
+interface RawReview {
+  author: Actor | null;
+  state: string;
+  submittedAt: string | null;
+  createdAt: string;
+  commit?: { oid: string } | null;
+}
+interface RawComment {
+  author: Actor | null;
+  createdAt: string;
+}
 
 export interface RawHit {
   __typename: "PullRequest" | "Issue";
@@ -41,12 +60,21 @@ export interface RawNode extends RawHit {
   reviews?: Conn<RawReview>;
   reviewThreads?: Conn<{ isResolved: boolean; comments?: Conn<RawComment> }>;
   commits?: Conn<{
-    commit: { oid: string; committedDate: string; author: { user: { login: string } | null } | null; statusCheckRollup: { state: string } | null };
+    commit: {
+      oid: string;
+      committedDate: string;
+      author: { user: { login: string } | null } | null;
+      statusCheckRollup: { state: string } | null;
+    };
   }>;
 }
 
 const CI: Record<string, Ci> = { SUCCESS: "green", FAILURE: "red", ERROR: "red", PENDING: "pending", EXPECTED: "pending" };
-const DECISION: Record<string, ReviewDecision> = { APPROVED: "approved", CHANGES_REQUESTED: "changes_requested", REVIEW_REQUIRED: "required" };
+const DECISION: Record<string, ReviewDecision> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes_requested",
+  REVIEW_REQUIRED: "required",
+};
 const MERGEABLE: Record<string, Mergeable> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
 
 const login = (a: Actor | null) => a?.login ?? "ghost";
@@ -107,7 +135,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_author: head?.author?.user?.login ?? "",
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
-      .map((r) => ({ ...reviewer(r.requestedReviewer!), codeowner: r.asCodeOwner })),
+      .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),
     request_events: byAt(
       (n.timelineItems?.nodes ?? [])
         .filter((e) => e.requestedReviewer)
@@ -121,7 +149,11 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     comments_total: n.comments.totalCount ?? 0,
     threads_total: n.reviewThreads?.totalCount ?? 0,
     threads_unresolved: threads.filter((t) => !t.isResolved).length,
-    thread_last: byAt(threads.flatMap((t) => (t.comments?.nodes ?? []).map((c) => ({ author: login(c.author), author_bot: isBot(c.author), at: c.createdAt })))),
+    thread_last: byAt(
+      threads.flatMap((t) =>
+        (t.comments?.nodes ?? []).map((c) => ({ author: login(c.author), author_bot: isBot(c.author), at: c.createdAt })),
+      ),
+    ),
     detail_at: now,
   };
 }

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["electron/preload.cjs", "web/mock/server.ts", "scripts/*.ts", "test/**/*.test.ts", "web/test/*.test.ts"],
+  "project": ["src/**/*.ts", "electron/**/*.{ts,cjs}", "web/**/*.{ts,tsx}", "scripts/**/*.ts", "test/**/*.ts"],
+  "ignoreBinaries": ["plutil"]
+}

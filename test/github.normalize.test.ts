@@ -67,7 +67,9 @@ test("your PR with red CI, a conflict and unresolved threads (mine fragment)", (
   ]);
   assert.equal(it.head_oid, "bbbb111122223333444455556666777788889999");
   assert.equal(it.head_author, "octo-dev");
-  assert.deepEqual(it.reviews, [{ author: "birch", author_bot: false, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" }]);
+  assert.deepEqual(it.reviews, [
+    { author: "birch", author_bot: false, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" },
+  ]);
 });
 
 test("issue gets zero values for PR-only fields", () => {
@@ -79,14 +81,24 @@ test("issue gets zero values for PR-only fields", () => {
   assert.equal(it.comments_total, 12);
   assert.deepEqual(
     it.comments.map((c) => [c.author, c.author_bot]),
-    [["maple", false], ["stale-keeper", true]],
+    [
+      ["maple", false],
+      ["stale-keeper", true],
+    ],
   );
   assert.deepEqual(
     { draft: it.draft, additions: it.additions, deletions: it.deletions, changed_files: it.changed_files, base: it.base },
     { draft: false, additions: 0, deletions: 0, changed_files: 0, base: "" },
   );
   assert.deepEqual(
-    { ci: it.ci, review: it.review_decision, mergeable: it.mergeable, head_oid: it.head_oid, head_at: it.head_committed_at, head_author: it.head_author },
+    {
+      ci: it.ci,
+      review: it.review_decision,
+      mergeable: it.mergeable,
+      head_oid: it.head_oid,
+      head_at: it.head_committed_at,
+      head_author: it.head_author,
+    },
     { ci: "none", review: "none", mergeable: "unknown", head_oid: "", head_at: null, head_author: "" },
   );
   assert.deepEqual([it.review_requests, it.request_events, it.reviews, it.thread_last], [[], [], [], []]);
@@ -102,7 +114,9 @@ test("deleted accounts become ghost; null reviewers are dropped", () => {
   assert.equal(it.ci, "none");
   assert.equal(it.head_author, "");
   assert.deepEqual(it.review_requests, []);
-  assert.deepEqual(it.request_events, [{ at: "2025-12-01T09:00:00Z", actor: "ghost", actor_bot: false, reviewer: "maple", reviewer_type: "user" }]);
+  assert.deepEqual(it.request_events, [
+    { at: "2025-12-01T09:00:00Z", actor: "ghost", actor_bot: false, reviewer: "maple", reviewer_type: "user" },
+  ]);
   assert.deepEqual(it.comments, [{ author: "ghost", author_bot: false, at: "2025-12-02T08:00:00Z" }]);
   // A pending review has no submittedAt; it falls back to createdAt.
   assert.deepEqual(it.reviews, [
@@ -114,10 +128,15 @@ test("deleted accounts become ghost; null reviewers are dropped", () => {
 test("CI rollup states map to green/red/pending/none", () => {
   const ci = (state: string | null) => {
     const n = fixture("pr-review");
-    n.commits!.nodes[0].commit.statusCheckRollup = state ? { state } : null;
+    const head = n.commits?.nodes[0];
+    assert.ok(head, "the fixture has a head commit");
+    head.commit.statusCheckRollup = state ? { state } : null;
     return normalize(n, NOW).ci;
   };
-  assert.deepEqual([ci("SUCCESS"), ci("FAILURE"), ci("ERROR"), ci("PENDING"), ci("EXPECTED"), ci(null)], ["green", "red", "red", "pending", "pending", "none"]);
+  assert.deepEqual(
+    [ci("SUCCESS"), ci("FAILURE"), ci("ERROR"), ci("PENDING"), ci("EXPECTED"), ci(null)],
+    ["green", "red", "red", "pending", "pending", "none"],
+  );
   const noCommits = fixture("pr-review");
   noCommits.commits = { nodes: [] };
   assert.equal(normalize(noCommits, NOW).ci, "none");
@@ -135,6 +154,20 @@ test("review decision and mergeable mappings", () => {
 });
 
 test("toHit builds the light search hit", () => {
-  const hit = toHit({ __typename: "Issue", id: "I_x", number: 3, updatedAt: "2026-01-01T00:00:00Z", repository: { nameWithOwner: "acme/widgets" }, author: null });
-  assert.deepEqual(hit, { node_id: "I_x", id: "acme/widgets#3", kind: "issue", updated_at: "2026-01-01T00:00:00Z", author: "ghost", author_bot: false });
+  const hit = toHit({
+    __typename: "Issue",
+    id: "I_x",
+    number: 3,
+    updatedAt: "2026-01-01T00:00:00Z",
+    repository: { nameWithOwner: "acme/widgets" },
+    author: null,
+  });
+  assert.deepEqual(hit, {
+    node_id: "I_x",
+    id: "acme/widgets#3",
+    kind: "issue",
+    updated_at: "2026-01-01T00:00:00Z",
+    author: "ghost",
+    author_bot: false,
+  });
 });

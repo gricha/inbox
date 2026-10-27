@@ -40,7 +40,11 @@ export const FIELDS: FieldDoc[] = [
   { path: "me.requested_by_bot", type: "boolean", doc: "a bot added the request" },
   { path: "me.requested_hours", type: "number", doc: "hours since the request (-1 if none)" },
   { path: "me.reviewed", type: "boolean", doc: "you submitted a review" },
-  { path: "me.review_state", type: "string", doc: 'your latest review: "approved", "changes_requested", "commented", "dismissed" or "none"' },
+  {
+    path: "me.review_state",
+    type: "string",
+    doc: 'your latest review: "approved", "changes_requested", "commented", "dismissed" or "none"',
+  },
   { path: "me.reviewed_hours", type: "number", doc: "hours since your latest review (-1 if none)" },
   { path: "me.pushed_since_review", type: "boolean", doc: "someone pushed after your latest review" },
   { path: "me.commented", type: "boolean", doc: "you commented or reviewed" },
@@ -76,24 +80,25 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const hours = (iso: string | null) => (iso ? Math.max(0, (now.getTime() - Date.parse(iso)) / 3_600_000) : -1);
   // Git commit dates are author-controlled: never later than GitHub's own updatedAt, or now.
   const nowIso = now.toISOString();
-  const headAt = item.head_committed_at ? [item.head_committed_at, item.updated_at, nowIso].sort()[0] : null;
+  const headAt = item.head_committed_at ? ([item.head_committed_at, item.updated_at, nowIso].sort()[0] ?? null) : null;
 
-  const mine = (r: { reviewer: string; type: "user" | "team" }) =>
-    r.type === "user" ? isMe(r.reviewer) : teams.has(lc(r.reviewer));
+  const mine = (r: { reviewer: string; type: "user" | "team" }) => (r.type === "user" ? isMe(r.reviewer) : teams.has(lc(r.reviewer)));
   const myRequests = item.review_requests.filter(mine);
   const direct = myRequests.some((r) => r.type === "user");
   const team = myRequests.find((r) => r.type === "team")?.reviewer ?? "";
   const requestEvents = item.request_events.filter((e) => mine({ reviewer: e.reviewer, type: e.reviewer_type }));
-  const requestEvent =
-    [...requestEvents].reverse().find((e) => (direct ? e.reviewer_type === "user" : true)) ?? null;
+  const requestEvent = requestEvents.findLast((e) => (direct ? e.reviewer_type === "user" : true)) ?? null;
   const requested = myRequests.length > 0;
 
   const myReviews = item.reviews.filter((r) => isMe(r.author) && r.state !== "pending");
   // Thread replies create COMMENTED reviews; they shouldn't hide an approval or a changes request.
-  const myReview = myReviews.filter((r) => r.state !== "commented").at(-1) ?? myReviews.at(-1) ?? null;
+  const myReview = myReviews.findLast((r) => r.state !== "commented") ?? myReviews.at(-1) ?? null;
   const othersCommit = headAt && item.head_author && !isMe(item.head_author) ? headAt : null;
   const pushedSinceReview = Boolean(
-    myReview && (myReview.commit && item.head_oid ? myReview.commit !== item.head_oid && !isMe(item.head_author) : othersCommit && othersCommit > myReview.at),
+    myReview &&
+    (myReview.commit && item.head_oid
+      ? myReview.commit !== item.head_oid && !isMe(item.head_author)
+      : othersCommit && othersCommit > myReview.at),
   );
   const author = item.author;
 
@@ -104,20 +109,22 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
     item.head_author && isMe(item.head_author) ? headAt : null,
     isMe(author) ? item.created_at : null,
   ]);
-  const others = latest([
-    ...item.comments.filter((c) => !isMe(c.author) && !isBot(c.author, c.author_bot)).map((c) => c.at),
-    ...item.reviews.filter((r) => !isMe(r.author) && !isBot(r.author, r.author_bot) && r.state !== "pending").map((r) => r.at),
-    ...item.thread_last.filter((t) => !isMe(t.author) && !isBot(t.author, t.author_bot)).map((t) => t.at),
-    othersCommit,
-    ...requestEvents.filter((e) => !isMe(e.actor)).map((e) => e.at),
-  ].filter((t) => t && t <= nowIso));
+  const others = latest(
+    [
+      ...item.comments.filter((c) => !isMe(c.author) && !isBot(c.author, c.author_bot)).map((c) => c.at),
+      ...item.reviews.filter((r) => !isMe(r.author) && !isBot(r.author, r.author_bot) && r.state !== "pending").map((r) => r.at),
+      ...item.thread_last.filter((t) => !isMe(t.author) && !isBot(t.author, t.author_bot)).map((t) => t.at),
+      othersCommit,
+      ...requestEvents.filter((e) => !isMe(e.actor)).map((e) => e.at),
+    ].filter((t) => t && t <= nowIso),
+  );
   const activity = others ?? item.created_at;
 
   const latestByReviewer = new Map<string, ReviewState>();
   for (const r of item.reviews) if (r.state !== "commented" && r.state !== "pending") latestByReviewer.set(lc(r.author), r.state);
   const approvals = [...latestByReviewer.values()].filter((s) => s === "approved").length;
 
-  const [owner, name] = item.repo.split("/");
+  const [owner = "", name = ""] = item.repo.split("/");
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;

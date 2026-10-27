@@ -6,7 +6,14 @@ import { CardRow, type RowCtx } from "./CardRow.tsx";
 const EMPTY: Partial<Record<GroupKey, string>> = { now: "Nothing needs you right now.", today: "Nothing else for today." };
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", hidden: "g h", cleared: "g x" };
 
-export function Queue({ view, overview, groups, ctx, filter, toggle }: {
+export function Queue({
+  view,
+  overview,
+  groups,
+  ctx,
+  filter,
+  toggle,
+}: {
   view: QueueView | null;
   overview: Overview | null;
   groups: Group[];
@@ -16,7 +23,11 @@ export function Queue({ view, overview, groups, ctx, filter, toggle }: {
 }) {
   if (!view) {
     const first = !!overview && !overview.synced_at;
-    return <div className="queue"><p className="quiet-note">{first ? "Reading your GitHub queue for the first time. This takes about 30 seconds." : "Loading…"}</p></div>;
+    return (
+      <div className="queue">
+        <p className="quiet-note">{first ? "Reading your GitHub queue for the first time. This takes about 30 seconds." : "Loading…"}</p>
+      </div>
+    );
   }
   const filtering = !!filter.trim();
   // While filtering, empty groups take no space.
@@ -51,7 +62,9 @@ export function Queue({ view, overview, groups, ctx, filter, toggle }: {
                   aria-expanded={g.open}
                   disabled={g.forced}
                   title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"} (${KEY[g.key]})`}
-                  onClick={() => toggle(g.key)}
+                  onClick={() => {
+                    toggle(g.key);
+                  }}
                 >
                   <span className="n">{filtering ? g.cards.length : g.total}</span> {g.label.toLowerCase()}
                   {fresh > 0 && <span className="fresh">({fresh} new)</span>}
@@ -62,7 +75,7 @@ export function Queue({ view, overview, groups, ctx, filter, toggle }: {
           </div>
           {opened.map((g) => (
             <div key={g.key} className={`group g-${g.key}`}>
-              <h3 className="group-head sub">
+              <h3 id={`h-${g.key}`} className="group-head sub">
                 <span>{g.label}</span>
                 <span className="count">{g.cards.length}</span>
               </h3>
@@ -82,12 +95,17 @@ function Rows({ cards, g, ctx }: { cards: Card[]; g: Group; ctx: RowCtx }) {
         r.cards.length < 3 ? (
           r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} />)
         ) : (
-          <div key={`run:${r.cards[0].id}`} className="run" role="group" aria-labelledby={`run-${r.cards[0].id}`}>
-            <div className="run-head" id={`run-${r.cards[0].id}`}>
-              <span className="run-title">{r.cards.length} {r.cards.every((c) => c.kind === "pr") ? "PRs" : "items"} from {r.author}</span>
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- <fieldset> is for form controls; this groups a run of rows
+          <div key={`run:${r.id}`} className="run" role="group" aria-labelledby={`run-${r.id}`}>
+            <div className="run-head" id={`run-${r.id}`}>
+              <span className="run-title">
+                {r.cards.length} {r.cards.every((c) => c.kind === "pr") ? "PRs" : "items"} from {r.author}
+              </span>
               {r.why && <span className="run-why">{r.why}</span>}
             </div>
-            {r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} inRun />)}
+            {r.cards.map((c) => (
+              <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} inRun />
+            ))}
           </div>
         ),
       )}
@@ -96,12 +114,12 @@ function Rows({ cards, g, ctx }: { cards: Card[]; g: Group; ctx: RowCtx }) {
 }
 
 // Consecutive cards with the same author and reason (a stack of PRs) read as one block.
-function runs(cards: Card[]): { author: string; why: string; cards: Card[] }[] {
-  const out: { author: string; why: string; cards: Card[] }[] = [];
+function runs(cards: Card[]): { id: string; author: string; why: string; cards: Card[] }[] {
+  const out: { id: string; author: string; why: string; cards: Card[] }[] = [];
   for (const c of cards) {
     const last = out.at(-1);
     if (last && last.author === c.author && last.why === c.why) last.cards.push(c);
-    else out.push({ author: c.author, why: c.why, cards: [c] });
+    else out.push({ id: c.id, author: c.author, why: c.why, cards: [c] });
   }
   return out;
 }

@@ -6,30 +6,45 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { BoardView, ConfigError, FieldDoc, FocusView, ItemDetail, Overview, PreviewResult, SettingsView } from "../../src/types.ts";
 
-const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", fileURLToPath(new URL("../mock/server.ts", import.meta.url))], {
-  env: { ...process.env, MOCK_PORT: "0" },
-  stdio: ["ignore", "pipe", "inherit"],
-});
+const child = spawn(
+  process.execPath,
+  ["--disable-warning=ExperimentalWarning", fileURLToPath(new URL("../mock/server.ts", import.meta.url))],
+  {
+    env: { ...process.env, MOCK_PORT: "0" },
+    stdio: ["ignore", "pipe", "inherit"],
+  },
+);
 let base = "";
 
 before(async () => {
-  const [line] = (await once(child.stdout!, "data")) as [Buffer];
+  const [line] = (await once(child.stdout, "data")) as [Buffer];
   base = line.toString().match(/http:\/\/[\d.:]+/)![0];
 });
 after(() => {
   child.kill();
 });
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- T is the caller's claim about the reply shape, like call<T> in web/src/api.ts
 async function call<T>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T }> {
-  const res = await fetch(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body), headers: { "content-type": "application/json" } });
+  const res = await fetch(base + path, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+  });
   return { status: res.status, data: (await res.json()) as T };
 }
 
 test("overview, focus and every board", async () => {
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.spaces.map((s) => s.name), ["Work", "Personal"]);
+  assert.deepEqual(
+    o.spaces.map((s) => s.name),
+    ["Work", "Personal"],
+  );
   const boards = o.spaces.flatMap((s) => s.boards);
-  assert.deepEqual(boards.map((b) => b.id), ["work-review", "work-mine", "work-mentions", "personal-review", "personal-mine"]);
+  assert.deepEqual(
+    boards.map((b) => b.id),
+    ["work-review", "work-mine", "work-mentions", "personal-review", "personal-mine"],
+  );
   const { data: f } = await call<FocusView>("GET", "/api/focus");
   assert.equal(f.sections.now.length, o.focus.now);
   assert.ok(f.sections.now.every((c) => c.bucket === "now" && c.status === "active"));
@@ -57,7 +72,13 @@ test("item detail resolves short refs and explains placement", async () => {
   assert.equal(review.rule_bucket, "now");
   assert.equal(review.bucket, "today");
   assert.match(review.demoted ?? "", /Now was full/);
-  assert.deepEqual(review.trace.map((t) => [t.index, t.matched]), [[-1, true], [0, true]]);
+  assert.deepEqual(
+    review.trace.map((t) => [t.index, t.matched]),
+    [
+      [-1, true],
+      [0, true],
+    ],
+  );
   assert.match(d.handoff_prompt, /acme\/api#4127/);
   assert.equal((await call("GET", "/api/item?id=nope%231")).status, 404);
 });
@@ -66,7 +87,10 @@ test("act, undo and the cap reflow", async () => {
   const { data: r } = await call<{ ok: true; undo_seq: number }>("POST", "/api/act", { id: "acme/api#4099", action: "done" });
   let { data: v } = await call<BoardView>("GET", "/api/boards/work-review");
   assert.ok(v.cleared.some((c) => c.id === "acme/api#4099" && c.status === "done"));
-  assert.ok(v.sections.now.some((c) => c.id === "acme/api#4127"), "a freed NOW slot promotes the demoted card");
+  assert.ok(
+    v.sections.now.some((c) => c.id === "acme/api#4127"),
+    "a freed NOW slot promotes the demoted card",
+  );
 
   const { data: u } = await call<{ ok: true; id: string }>("POST", "/api/undo", { seq: r.undo_seq });
   assert.equal(u.id, "acme/api#4099");
@@ -90,11 +114,14 @@ test("config preview reports moves and errors; save applies", async () => {
   const { data: p } = await call<PreviewResult>("POST", "/api/config/preview", { text: edited });
   assert.deepEqual(p.errors, []);
   const wr = p.boards.find((b) => b.id === "work-review")!;
-  assert.deepEqual(wr.moved.map((m) => [m.id, m.from, m.to]), [["acme/web#2290", "later", "today"]]);
+  assert.deepEqual(
+    wr.moved.map((m) => [m.id, m.from, m.to]),
+    [["acme/web#2290", "later", "today"]],
+  );
 
   const { data: bad } = await call<PreviewResult>("POST", "/api/config/preview", { text: edited.replace("pr.approvals", "pr.aprovals") });
-  assert.equal(bad.errors[0].path, "boards[0].rules[6].when");
-  assert.match(bad.errors[0].message, /did you mean pr\.approvals/);
+  assert.equal(bad.errors[0]?.path, "boards[0].rules[6].when");
+  assert.match(bad.errors[0]?.message ?? "", /did you mean pr\.approvals/);
 
   const { data: saved } = await call<{ ok: boolean }>("PUT", "/api/config", { text: edited });
   assert.equal(saved.ok, true);
@@ -126,8 +153,8 @@ test("settings: schema, save, reject and reset", async () => {
   const { data: s } = await call<SettingsView>("GET", "/api/settings");
   assert.ok(s.defs.length > 0 && s.defs.every((d) => d.key in s.values && s.sections.some((x) => x.id === d.section)));
   assert.equal(s.github.login, "me");
-  assert.equal(s.github.orgs[0].org, "acme");
-  assert.equal(s.github.orgs[0].space, "Work");
+  assert.equal(s.github.orgs[0]?.org, "acme");
+  assert.equal(s.github.orgs[0]?.space, "Work");
   assert.ok(s.github.orgs.some((o) => o.space === null));
   assert.ok(s.overridden.includes("github.poll_seconds"));
 
@@ -151,5 +178,5 @@ test("settings: schema, save, reject and reset", async () => {
   const { data: cfg } = await call<{ text: string }>("GET", "/api/config");
   assert.ok(!/^\s*(poll_seconds|\[signals\])/m.test(cfg.text));
   const { data: p } = await call<PreviewResult>("POST", "/api/config/preview", { text: `poll_seconds = 60\n${cfg.text}` });
-  assert.match(p.errors[0].message, /moved to Settings/);
+  assert.match(p.errors[0]?.message ?? "", /moved to Settings/);
 });

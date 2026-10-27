@@ -11,8 +11,8 @@ export const SHELL_PATH_COMMAND = `printf '${MARK}'; printenv PATH; printf '${MA
 // The PATH between the markers, ignoring whatever the shell's rc files print around it.
 export function parseShellPath(out: string): string | null {
   const m = out.match(new RegExp(`${MARK}([^]*?)${MARK}`));
-  const p = m?.[1].trim();
-  return p ? p : null;
+  const p = m?.[1]?.trim() ?? "";
+  return p === "" ? null : p;
 }
 
 export const fallbackDirs = (home: string): string[] => ["/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/bin`];
@@ -23,6 +23,9 @@ export function mergePath(sep: string, ...parts: string[]): string {
   for (const part of parts) for (const dir of part.split(sep)) if (dir) seen.add(dir);
   return [...seen].join(sep);
 }
+
+// An empty variable (DESK_HOME=) counts as unset.
+export const envVar = (name: string): string | undefined => (process.env[name] === "" ? undefined : process.env[name]);
 
 // ---------------------------------------------------------------- attach or start
 
@@ -45,11 +48,14 @@ export const backoff = (attempt: number): number => Math.min(30_000, 1000 * 2 **
 
 // ---------------------------------------------------------------- SSE
 
-export interface SSEvent { event: string; data: string }
+export interface SSEvent {
+  event: string;
+  data: string;
+}
 
 // Complete events in `buf`, plus the unfinished tail to prepend to the next chunk.
 export function parseSSE(buf: string): { events: SSEvent[]; rest: string } {
-  const blocks = buf.replace(/\r\n?/g, "\n").split("\n\n");
+  const blocks = buf.replaceAll(/\r\n?/g, "\n").split("\n\n");
   const rest = blocks.pop() ?? "";
   const events: SSEvent[] = [];
   for (const block of blocks) {
@@ -73,10 +79,14 @@ export function parseSSE(buf: string): { events: SSEvent[]; rest: string } {
 
 // ---------------------------------------------------------------- settings
 
-export interface DesktopSettings { hotkey: string; open_at_login: boolean; menu_bar_count: boolean }
+export interface DesktopSettings {
+  hotkey: string;
+  open_at_login: boolean;
+  menu_bar_count: boolean;
+}
 
 // An older desk may not know the app.* settings; fall back to the defaults.
-export function desktopSettings(values: Record<string, unknown> | undefined): DesktopSettings {
+export function desktopSettings(values?: Record<string, unknown>): DesktopSettings {
   const v = { ...DEFAULTS, ...values } as Record<string, unknown>;
   return {
     hotkey: typeof v["app.hotkey"] === "string" ? v["app.hotkey"] : DEFAULTS["app.hotkey"],
@@ -90,16 +100,25 @@ export function desktopSettings(values: Record<string, unknown> | undefined): De
 // "desk ●2 ◐5 +3" -> "●2 ◐5 +3"
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
-export const trayTooltip = (s: { now: number; today: number } | null): string => (s ? `Review Desk: ${s.now} now, ${s.today} today` : "Review Desk");
+export const trayTooltip = (s: { now: number; today: number } | null): string =>
+  s ? `Review Desk: ${s.now} now, ${s.today} today` : "Review Desk";
 
 // Menus read a single & as a mnemonic marker; cut first so && is never split.
 export function menuLabel(text: string, max = 60): string {
-  const chars = [...text.replace(/\s+/g, " ").trim()];
-  const cut = chars.length > max ? chars.slice(0, max - 1).join("").trimEnd() + "…" : chars.join("");
-  return cut.replace(/&/g, "&&");
+  // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: the cut must not split a surrogate pair
+  const chars = [...text.replaceAll(/\s+/g, " ").trim()];
+  const cut =
+    chars.length > max
+      ? chars
+          .slice(0, max - 1)
+          .join("")
+          .trimEnd() + "…"
+      : chars.join("");
+  return cut.replaceAll("&", "&&");
 }
 
-export const cardLabel = (c: { repo: string; number: number; title: string }): string => menuLabel(`${c.repo.split("/").pop()}#${c.number} ${c.title}`);
+export const cardLabel = (c: { repo: string; number: number; title: string }): string =>
+  menuLabel(`${c.repo.split("/").pop()}#${c.number} ${c.title}`);
 
 // ---------------------------------------------------------------- URLs
 
@@ -121,7 +140,12 @@ export const isGitHubUrl = (url: string): boolean => {
 
 // ---------------------------------------------------------------- window bounds
 
-export interface Bounds { x: number; y: number; width: number; height: number }
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 // Saved bounds, or just the saved size when its spot is off every screen (a display was unplugged).
 export function restoreBounds(saved: Partial<Bounds> | null, screens: Bounds[], def: { width: number; height: number }): Partial<Bounds> {
@@ -138,8 +162,8 @@ export function restoreBounds(saved: Partial<Bounds> | null, screens: Bounds[], 
 
 // Desktop Entry Exec quoting, then the file's own escaping of backslashes; % is a field code.
 export function desktopEntry(exec: string, args: string[]): string {
-  const quote = (s: string) => (/[\s"'\\`$<>|;&*?#()]/.test(s) ? `"${s.replace(/(["`$\\])/g, "\\$1")}"` : s);
-  const cmd = [exec, ...args].map(quote).join(" ").replace(/\\/g, "\\\\").replace(/%/g, "%%");
+  const quote = (s: string) => (/[\s"'\\`$<>|;&*?#()]/.test(s) ? `"${s.replaceAll(/(["`$\\])/g, "\\$1")}"` : s);
+  const cmd = [exec, ...args].map(quote).join(" ").replaceAll("\\", "\\\\").replaceAll("%", "%%");
   return [
     "[Desktop Entry]",
     "Type=Application",

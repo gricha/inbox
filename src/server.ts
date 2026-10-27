@@ -12,7 +12,7 @@ import { openUrl } from "./notify.ts";
 import { FIELDS } from "./signals.ts";
 import type { Action } from "./types.ts";
 
-export const VERSION = "0.1.0";
+const VERSION = "0.1.0";
 export const DEFAULT_PORT = 47823;
 const DIST = fileURLToPath(new URL("../web/dist/", import.meta.url));
 const TYPES: Record<string, string> = {
@@ -30,14 +30,18 @@ const TYPES: Record<string, string> = {
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
   const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
-  if (process.env.DESK_DEV) for (const p of [5173, 5174]) { origins.add(`http://localhost:${p}`); origins.add(`http://127.0.0.1:${p}`); }
+  if (process.env.DESK_DEV)
+    for (const p of [5173, 5174]) {
+      origins.add(`http://localhost:${p}`);
+      origins.add(`http://127.0.0.1:${p}`);
+    }
 
   // Only this machine's browser and tools: blocks DNS rebinding (Host) and cross-site requests (Origin).
   app.use("*", async (c, next) => {
     const host = new URL(c.req.url).hostname;
-    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) return c.json({ error: "forbidden host" }, 403);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new DeskError(403, "forbidden host");
     const origin = c.req.header("origin");
-    if (origin && !origins.has(origin)) return c.json({ error: "forbidden origin" }, 403);
+    if (origin && !origins.has(origin)) throw new DeskError(403, "forbidden origin");
     await next();
     c.header("X-Frame-Options", "DENY");
     c.header("Content-Security-Policy", "frame-ancestors 'none'");
@@ -54,10 +58,22 @@ export function createApp(desk: Desk, port: number): Hono {
   };
 
   app.get("/health", (c) => c.json({ ok: true, version: VERSION }));
-  app.get("/api/overview", (c) => { ready(); return c.json(desk.overview()); });
-  app.get("/api/focus", (c) => { ready(); return c.json(desk.focus()); });
-  app.get("/api/queue", (c) => { ready(); return c.json(desk.queue()); });
-  app.get("/api/boards/:id", (c) => { ready(); return c.json(desk.board(c.req.param("id"))); });
+  app.get("/api/overview", (c) => {
+    ready();
+    return c.json(desk.overview());
+  });
+  app.get("/api/focus", (c) => {
+    ready();
+    return c.json(desk.focus());
+  });
+  app.get("/api/queue", (c) => {
+    ready();
+    return c.json(desk.queue());
+  });
+  app.get("/api/boards/:id", (c) => {
+    ready();
+    return c.json(desk.board(c.req.param("id")));
+  });
   app.get("/api/item", (c) => {
     ready();
     const id = c.req.query("id");
@@ -78,7 +94,7 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/undo", async (c) => {
     ready();
-    const body = await c.req.json<{ seq?: number }>().catch(() => ({}) as { seq?: number });
+    const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));
     const { id, action } = desk.undo(body.seq);
     return c.json({ ok: true, id, action });
   });
@@ -86,7 +102,10 @@ export function createApp(desk: Desk, port: number): Hono {
     void desk.sync();
     return c.json({ ok: true });
   });
-  app.get("/api/config", (c) => { ready(); return c.json(desk.getConfig()); });
+  app.get("/api/config", (c) => {
+    ready();
+    return c.json(desk.getConfig());
+  });
   app.post("/api/config/preview", async (c) => {
     ready();
     const { text } = await c.req.json<{ text: string }>();
@@ -103,7 +122,10 @@ export function createApp(desk: Desk, port: number): Hono {
     const body = await c.req.json<{ set?: Record<string, unknown>; reset?: string[] }>();
     return c.json(desk.putSettings({ set: body.set, reset: body.reset }));
   });
-  app.get("/api/status", (c) => { ready(); return c.json(desk.status()); });
+  app.get("/api/status", (c) => {
+    ready();
+    return c.json(desk.status());
+  });
 
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -133,25 +155,33 @@ export function createApp(desk: Desk, port: number): Hono {
   return app;
 }
 
-export async function startServer(opts: {
-  port?: number;
-  open?: boolean;
-  home?: string;
-  notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
-  log?: (msg: string) => void;
-} = {}): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
-  const port = opts.port ?? Number(process.env.DESK_PORT || DEFAULT_PORT);
-  const home = opts.home ?? process.env.DESK_HOME ?? path.join(os.homedir(), ".review-desk");
-  const log = opts.log ?? ((m: string) => console.error(`${new Date().toISOString()} ${m}`));
+export async function startServer(
+  opts: {
+    port?: number;
+    open?: boolean;
+    home?: string;
+    notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
+    log?: (msg: string) => void;
+  } = {},
+): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
+  const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);
+  const home = opts.home ?? ((process.env.DESK_HOME ?? "") || path.join(os.homedir(), ".review-desk")); // empty means unset, as in the CLI
+  const log =
+    opts.log ??
+    ((m: string) => {
+      console.error(`${new Date().toISOString()} ${m}`);
+    });
   const desk = new Desk({ home, github: createGitHub({ log }), log, notify: opts.notify });
   const app = createApp(desk, port);
   const url = `http://localhost:${port}`;
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve, reject) => {
-    const s = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => resolve(s));
-    s.once("error", (e: NodeJS.ErrnoException) =>
-      reject(e.code === "EADDRINUSE" ? new Error(`port ${port} is in use; is desk already running? (${url})`) : e),
-    );
+    const s = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
+      resolve(s);
+    });
+    s.once("error", (e: NodeJS.ErrnoException) => {
+      reject(e.code === "EADDRINUSE" ? new Error(`port ${port} is in use; is desk already running? (${url})`) : e);
+    });
   });
   log(`Review Desk on ${url} (home ${home})`);
 
@@ -171,7 +201,9 @@ export async function startServer(opts: {
     close: async () => {
       desk.stop();
       await new Promise<void>((r) => {
-        server.close(() => r());
+        server.close(() => {
+          r();
+        });
         (server as { closeAllConnections?: () => void }).closeAllConnections?.();
       });
     },

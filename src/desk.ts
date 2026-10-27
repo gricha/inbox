@@ -3,8 +3,26 @@ import fs from "node:fs";
 import path from "node:path";
 import type { GitHub, SearchHit } from "./github/index.ts";
 import type {
-  Action, BoardSummary, BoardView, Brief, Bucket, Card, ConfigDoc, ConfigError, Context, FocusView, Item, ItemDetail, ItemState,
-  Overview, Placement, PreviewResult, QueueView, SettingsView, SettingValue, Status,
+  Action,
+  BoardSummary,
+  BoardView,
+  Brief,
+  Bucket,
+  Card,
+  ConfigDoc,
+  ConfigError,
+  Context,
+  FocusView,
+  Item,
+  ItemDetail,
+  ItemState,
+  Overview,
+  Placement,
+  PreviewResult,
+  QueueView,
+  SettingsView,
+  SettingValue,
+  Status,
 } from "./types.ts";
 import { defaultConfigText, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, type Analysis } from "./signals.ts";
@@ -13,7 +31,18 @@ import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import { analyzePr } from "./analyze.ts";
-import { checkSetting, effective, migrateLegacy, readSettings, SECTIONS, SETTINGS, settingDef, settingsPath, writeSettings, type Settings } from "./settings.ts";
+import {
+  checkSetting,
+  effective,
+  migrateLegacy,
+  readSettings,
+  SECTIONS,
+  SETTINGS,
+  settingDef,
+  settingsPath,
+  writeSettings,
+  type Settings,
+} from "./settings.ts";
 
 const HOUR = 3_600_000;
 const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
@@ -95,15 +124,19 @@ export class Desk {
     this.github = opts.github;
     this.now = opts.now ?? (() => new Date());
     this.notifyFn = opts.notify ?? notify;
-    this.log = opts.log ?? ((m) => console.error(`[desk] ${m}`));
+    this.log =
+      opts.log ??
+      ((m) => {
+        console.error(`[desk] ${m}`);
+      });
     this.analyzer = opts.analyzer ?? analyzePr;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
     this.settingsPath = settingsPath(this.home);
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
-    this.ctx = this.store.get<Context>("context");
-    this.syncedAt = this.store.get<string>("synced_at");
+    this.ctx = this.store.get("context") as Context | null;
+    this.syncedAt = this.store.get("synced_at") as string | null;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -112,7 +145,8 @@ export class Desk {
     if (!this.ctx) await this.refreshContext();
     if (!fs.existsSync(this.configPath)) {
       // The default spaces come from where your work is; don't guess them from a failed fetch.
-      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < Date.now() - 24 * HOUR) throw new Error(`couldn't read your GitHub context to write a first config: ${this.contextError ?? "unknown error"}`);
+      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < Date.now() - 24 * HOUR)
+        throw new Error(`couldn't read your GitHub context to write a first config: ${this.contextError ?? "unknown error"}`);
       const orgs = Object.entries(this.ctx?.orgs ?? {})
         .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
         .sort((a, b) => b[1] - a[1])
@@ -144,7 +178,7 @@ export class Desk {
   arm(): void {
     if (this.timer) clearTimeout(this.timer);
     const wait = Math.max(this.settings["github.poll_seconds"] * 1000, this.pausedUntil - Date.now());
-    this.timer = setTimeout(this.tick!, wait);
+    this.timer = setTimeout(() => void this.tick!(), wait);
   }
 
   stop(): void {
@@ -157,7 +191,9 @@ export class Desk {
 
   onChange(fn: (rev: number) => void): () => void {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
   }
 
   changed(): void {
@@ -235,7 +271,7 @@ export class Desk {
       path: this.settingsPath,
       sections: SECTIONS,
       defs: [...SETTINGS],
-      values: this.settings as unknown as Record<string, SettingValue>,
+      values: this.settings,
       overridden: Object.keys(this.settingsOverrides),
       errors: this.settingsErrors,
       github: {
@@ -290,16 +326,18 @@ export class Desk {
       this.log(`context refresh failed: ${this.contextError}`);
       // Retry in about an hour rather than on every poll.
       const retry = new Date(this.now().getTime() - 23 * HOUR).toISOString();
-      this.ctx = this.ctx ? { ...this.ctx, refreshed_at: retry } : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
+      this.ctx = this.ctx
+        ? { ...this.ctx, refreshed_at: retry }
+        : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
     }
     this.store.set("context", this.ctx);
   }
 
   // Board query → expanded GitHub search strings (null when it can't run, e.g. no collaborators yet).
   expandQuery(q: string, scope: string, loaded = this.loaded): string | null {
-    let base = `${q} ${scope}`.replaceAll("{me}", this.me()).replace(/\s+/g, " ").trim();
+    let base = `${q} ${scope}`.replaceAll("{me}", this.me()).replaceAll(/\s+/g, " ").trim();
     if (!base.includes("{close_authors}")) return base;
-    base = base.replace("{close_authors}", "").replace(/\s+/g, " ").trim();
+    base = base.replace("{close_authors}", "").replaceAll(/\s+/g, " ").trim();
     const min = loaded?.config.signals.close_collaborator_min ?? 3;
     const bots = new Set((loaded?.config.signals.bots ?? []).map((b) => b.toLowerCase()));
     const authors = Object.entries(this.ctx?.affinity ?? {})
@@ -315,7 +353,10 @@ export class Desk {
 
   async sync(): Promise<void> {
     if (!this.loaded || this.stopped) return;
-    if (this.syncing) { this.syncAgain = true; return; }
+    if (this.syncing) {
+      this.syncAgain = true;
+      return;
+    }
     if (Date.now() < this.pausedUntil) return;
     this.syncing = true;
     this.changed();
@@ -330,7 +371,12 @@ export class Desk {
       for (const q of queries) {
         try {
           const r = await this.github.search(q, 300);
-          this.store.setHits(q, r.hits.map((h) => h.id), r.total, now.toISOString());
+          this.store.setHits(
+            q,
+            r.hits.map((h) => h.id),
+            r.total,
+            now.toISOString(),
+          );
           for (const h of r.hits) hits.set(h.id, h);
         } catch (e) {
           if (isRateLimited(e)) throw e;
@@ -350,7 +396,8 @@ export class Desk {
       this.store.touchItems([...hits.keys()], now.toISOString());
       this.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString());
       if (!this.store.get("baseline_at")) this.store.set("baseline_at", now.toISOString());
-      if (errors.length === queries.length && queries.length) throw new Error(errors[0].replace(/^.*?: (?=GitHub)/, ""));
+      const [firstError] = errors;
+      if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
       this.syncedAt = this.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
       this.store.set("synced_at", this.syncedAt);
       this.syncError = errors.length ? `${errors.length} search(es) failed: ${errors[0]}` : null;
@@ -369,19 +416,27 @@ export class Desk {
   afterSync(): void {
     this.changed();
     this.notifyNewNow();
-    if (this.syncAgain) { this.syncAgain = false; void this.sync(); }
+    if (this.syncAgain) {
+      this.syncAgain = false;
+      void this.sync();
+    }
   }
 
   notifyNewNow(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
     const now = this.focus().sections.now;
-    const prev = this.store.get<string[]>("notified_now");
-    this.store.set("notified_now", now.map((c) => c.id));
+    const prev = this.store.get("notified_now") as string[] | null;
+    this.store.set(
+      "notified_now",
+      now.map((c) => c.id),
+    );
     if (prev === null || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
     const fresh = now.filter((c) => !prev.includes(c.id));
     if (!fresh.length) return;
-    const body = fresh.length === 1 ? `${shortRef(fresh[0])} · ${fresh[0].why}` : `${fresh.length} new in Now: ${fresh.map(shortRef).join(", ")}`;
+    const [only] = fresh;
+    const body =
+      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new in Now: ${fresh.map(shortRef).join(", ")}`;
     this.notifyFn("Review Desk", body);
   }
 
@@ -398,7 +453,7 @@ export class Desk {
     const now = this.now();
     const ctx = this.ctx ?? { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
     const states = this.store.states();
-    const baseline = this.store.get<string>("baseline_at") ?? now.toISOString();
+    const baseline = (this.store.get("baseline_at") as string | null) ?? now.toISOString();
     const entries = new Map<string, Entry>();
     for (const item of this.store.items()) {
       const analysis = analyze(item, ctx, loaded.config, now);
@@ -416,16 +471,19 @@ export class Desk {
       const ids = new Set<string>();
       for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
       const list = [...ids].map((id) => entries.get(id)).filter((e): e is Entry => e !== undefined);
-      const result = classify(board, list.map((e) => ({
-        id: e.item.id,
-        signals: e.analysis.signals,
-        waiting_since: e.analysis.waiting_since,
-        updated_at: e.item.updated_at,
-        created_at: e.item.created_at,
-        activity_at: e.analysis.activity_at,
-        pinned: e.state.pinned,
-        active: e.status === "active",
-      })));
+      const result = classify(
+        board,
+        list.map((e) => ({
+          id: e.item.id,
+          signals: e.analysis.signals,
+          waiting_since: e.analysis.waiting_since,
+          updated_at: e.item.updated_at,
+          created_at: e.item.created_at,
+          activity_at: e.analysis.activity_at,
+          pinned: e.state.pinned,
+          active: e.status === "active",
+        })),
+      );
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
       for (const [id, p] of result.placements) {
@@ -583,7 +641,12 @@ export class Desk {
     const cards = (ids: string[]) => ids.map((x) => this.card(snap.entries.get(x)!, b.result.placements.get(x)!, snap));
     return {
       board: { ...this.summary(id, snap), queries: b.queries },
-      sections: { now: cards(b.result.order.now), today: cards(b.result.order.today), later: cards(b.result.order.later), fyi: cards(b.result.order.fyi) },
+      sections: {
+        now: cards(b.result.order.now),
+        today: cards(b.result.order.today),
+        later: cards(b.result.order.later),
+        fyi: cards(b.result.order.fyi),
+      },
       hidden: cards(b.result.order.hide),
       cleared: cards(b.result.inactive),
     };
@@ -598,11 +661,12 @@ export class Desk {
     if (!m) throw new DeskError(404, `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL`);
     const [, owner, name, num] = m;
     const found = ids.filter((id) => {
-      const [repo, n] = id.split("#");
-      const [o, r] = repo.split("/");
-      return n === num && (!name || r.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
+      const [repo = "", n] = id.split("#");
+      const [o = "", repoName = ""] = repo.split("/");
+      return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
     });
-    if (found.length === 1) return found[0];
+    const [first] = found;
+    if (found.length === 1 && first !== undefined) return first;
     if (found.length === 0) throw new DeskError(404, `no item "${ref}" on the desk`);
     throw new DeskError(409, `"${ref}" matches ${found.length} items`, found);
   }
@@ -622,9 +686,13 @@ export class Desk {
       item: e.item,
       signals: e.analysis.signals,
       placements,
-      state: state as ItemState,
+      state,
       handoff_prompt: renderTemplate(
-        e.item.kind === "issue" ? loaded.config.handoff.issue : e.analysis.signals.me.author ? loaded.config.handoff.mine : loaded.config.handoff.prompt,
+        e.item.kind === "issue"
+          ? loaded.config.handoff.issue
+          : e.analysis.signals.me.author
+            ? loaded.config.handoff.mine
+            : loaded.config.handoff.prompt,
         e.analysis.signals,
       ),
       brief: snap.briefs.get(id) ?? null,
@@ -671,10 +739,20 @@ export class Desk {
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = this.snapshot().entries.get(id)!.analysis.activity_at;
     switch (action) {
-      case "done": s.done_at = now.toISOString(); s.acked_at = seen; s.snooze_until = null; s.snoozed_at = null; break;
+      case "done":
+        s.done_at = now.toISOString();
+        s.acked_at = seen;
+        s.snooze_until = null;
+        s.snoozed_at = null;
+        break;
       case "snooze": {
         const u = until ?? "tomorrow";
-        if (u === "activity") { s.done_at = now.toISOString(); s.acked_at = seen; s.snooze_until = null; break; }
+        if (u === "activity") {
+          s.done_at = now.toISOString();
+          s.acked_at = seen;
+          s.snooze_until = null;
+          break;
+        }
         s.snooze_until = parseUntil(u, now).toISOString();
         s.snoozed_at = now.toISOString();
         s.acked_at = seen;
@@ -682,13 +760,29 @@ export class Desk {
         s.done_at = null;
         break;
       }
-      case "mute": s.muted = true; break;
-      case "unmute": s.muted = false; break;
-      case "pin": s.pinned = true; break;
-      case "unpin": s.pinned = false; break;
-      case "seen": s.seen_at = now.toISOString(); break;
-      case "restore": s.done_at = null; s.snooze_until = null; s.snoozed_at = null; s.muted = false; break;
-      default: throw new DeskError(400, `unknown action "${action}"`);
+      case "mute":
+        s.muted = true;
+        break;
+      case "unmute":
+        s.muted = false;
+        break;
+      case "pin":
+        s.pinned = true;
+        break;
+      case "unpin":
+        s.pinned = false;
+        break;
+      case "seen":
+        s.seen_at = now.toISOString();
+        break;
+      case "restore":
+        s.done_at = null;
+        s.snooze_until = null;
+        s.snoozed_at = null;
+        s.muted = false;
+        break;
+      default:
+        throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
@@ -749,7 +843,8 @@ export class Desk {
   }
 
   putConfig(text: string, base?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
-    if (base !== undefined && base !== this.configText) throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
+    if (base !== undefined && base !== this.configText)
+      throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
     if (!loaded) return { ok: false, errors, warnings };
     const real = fs.realpathSync(this.configPath); // keep a symlinked config a symlink
@@ -767,13 +862,20 @@ export class Desk {
 }
 
 function countsOf(r: BoardResult): Record<Bucket, number> {
-  return { now: r.order.now.length, today: r.order.today.length, later: r.order.later.length, fyi: r.order.fyi.length, hide: r.order.hide.length };
+  return {
+    now: r.order.now.length,
+    today: r.order.today.length,
+    later: r.order.later.length,
+    fyi: r.order.fyi.length,
+    hide: r.order.hide.length,
+  };
 }
 
 function statusOf(s: StateRow, activityAt: string, now: Date): Status {
   if (s.muted) return "muted";
   if (s.done_at && activityAt <= (s.acked_at ?? s.done_at)) return "done";
-  if (s.snooze_until && now.toISOString() < s.snooze_until && !(s.snooze_on_activity && activityAt > (s.acked_at ?? s.snoozed_at ?? ""))) return "snoozed";
+  if (s.snooze_until && now.toISOString() < s.snooze_until && !(s.snooze_on_activity && activityAt > (s.acked_at ?? s.snoozed_at ?? "")))
+    return "snoozed";
   return "active";
 }
 
@@ -793,11 +895,16 @@ export function parseUntil(until: string, now: Date): Date {
     d.setHours(9, 0, 0, 0);
     // After midnight, "tomorrow" still means the coming morning; on a Monday before 09:00, "monday" means today.
     if (until === "tomorrow" && now.getHours() >= 5) d.setDate(d.getDate() + 1);
-    if (until === "monday" && !(now.getDay() === 1 && now.getHours() < 9)) d.setDate(d.getDate() + (((8 - d.getDay()) % 7) || 7));
+    if (until === "monday" && !(now.getDay() === 1 && now.getHours() < 9)) d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
     return d;
   }
   const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(until);
-  const t = day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 9).getTime() : /^\d{4}-\d{2}-\d{2}T/.test(until) ? Date.parse(until) : NaN;
-  if (Number.isNaN(t) || t <= now.getTime()) throw new DeskError(400, `can't read snooze time "${until}"; use 1h, 3h, 2d, tomorrow, monday, activity or a future ISO time`);
+  const t = day
+    ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 9).getTime()
+    : /^\d{4}-\d{2}-\d{2}T/.test(until)
+      ? Date.parse(until)
+      : NaN;
+  if (Number.isNaN(t) || t <= now.getTime())
+    throw new DeskError(400, `can't read snooze time "${until}"; use 1h, 3h, 2d, tomorrow, monday, activity or a future ISO time`);
   return new Date(t);
 }

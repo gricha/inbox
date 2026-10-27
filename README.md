@@ -30,18 +30,18 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Notifications, Desktop app, Briefs, Hand-off prompts. Changes save as you go.
 - In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
 
-| Key | Does |
-|---|---|
-| `j` / `k` | move |
-| `Enter` | open an item: facts, why, rule trace |
-| `o` | open on GitHub |
-| `e` | done: hidden until someone else comments, reviews or pushes |
-| `s` | snooze: 1h, 3h, tomorrow, Monday, or until activity |
-| `m` / `p` | mute / pin |
-| `u` | undo |
-| `c` | copy a review prompt to paste into a Claude session |
-| `i` | brief: ask Claude whether the PR needs you (look / skim / skip) |
-| `/` | filter · `r` sync · `,` settings · `g r` rules · `?` all keys |
+| Key       | Does                                                            |
+| --------- | --------------------------------------------------------------- |
+| `j` / `k` | move                                                            |
+| `Enter`   | open an item: facts, why, rule trace                            |
+| `o`       | open on GitHub                                                  |
+| `e`       | done: hidden until someone else comments, reviews or pushes     |
+| `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity             |
+| `m` / `p` | mute / pin                                                      |
+| `u`       | undo                                                            |
+| `c`       | copy a review prompt to paste into a Claude session             |
+| `i`       | brief: ask Claude whether the PR needs you (look / skim / skip) |
+| `/`       | filter · `r` sync · `,` settings · `g r` rules · `?` all keys   |
 
 Done, snooze, mute and pin are local. Nothing is sent to GitHub.
 
@@ -118,14 +118,14 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 
 ## Files
 
-| | |
-|---|---|
-| `~/.review-desk/config.toml` | spaces, boards, rules |
-| `~/.review-desk/settings.json` | settings you changed from the default |
-| `~/.review-desk/desk.db` | cache and your local state (SQLite) |
-| [CLAUDE.md](CLAUDE.md) | where each kind of change goes |
-| [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app |
-| [docs/ui.md](docs/ui.md) | the UI |
+|                                              |                                       |
+| -------------------------------------------- | ------------------------------------- |
+| `~/.review-desk/config.toml`                 | spaces, boards, rules                 |
+| `~/.review-desk/settings.json`               | settings you changed from the default |
+| `~/.review-desk/desk.db`                     | cache and your local state (SQLite)   |
+| [CLAUDE.md](CLAUDE.md)                       | where each kind of change goes        |
+| [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app   |
+| [docs/ui.md](docs/ui.md)                     | the UI                                |
 
 ## Develop
 
@@ -133,8 +133,11 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 npm run app:dev     # the app with hot reload; restarts on src/ or electron/ changes
 npm run dev         # server + Vite in a browser at :5173
 npm test            # node:test, no network
-npm run typecheck
+npm run check       # format, lint (type-aware), CSS lint, types, dead code, tests: what CI runs
 npm run smoke:app   # launches the app on a scratch home and checks it end to end
+npm run shots       # visual QA: screenshots of every key state, light and dark, plus highlight checks (.shots/index.html)
 ```
+
+Verification: Prettier formats; oxlint with type-aware rules (`.oxlintrc.json`) and stylelint lint; `tsc` runs with `noUncheckedIndexedAccess` and friends; knip catches dead code. A pre-commit hook formats and lints staged files, a pre-push hook runs `npm run check`, and CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs it on macOS, Linux and Windows.
 
 Set `DESK_HOME` and `DESK_PORT` to work on a scratch copy instead of your real desk.

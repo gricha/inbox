@@ -6,7 +6,10 @@ type Command = [file: string, args: string[]];
 // Windows gets none: the desktop app shows its own notifications.
 export function notifyCommand(title: string, body: string, platform: NodeJS.Platform = process.platform): Command | null {
   if (platform === "darwin") {
-    return ["osascript", ["-e", "on run argv", "-e", "display notification (item 1 of argv) with title (item 2 of argv)", "-e", "end run", "--", body, title]];
+    return [
+      "osascript",
+      ["-e", "on run argv", "-e", "display notification (item 1 of argv) with title (item 2 of argv)", "-e", "end run", "--", body, title],
+    ];
   }
   if (platform === "win32") return null;
   return ["notify-send", ["--app-name=Review Desk", "--", title, body]];
@@ -21,12 +24,12 @@ export function openCommand(url: string, platform: NodeJS.Platform = process.pla
 // The callback swallows errors, so a missing notify-send or xdg-open does nothing.
 const run = (c: Command | null) => void (c && execFile(c[0], c[1], () => {}));
 
-export const notify = (title: string, body: string): void => run(notifyCommand(title, body));
-export const openUrl = (url: string): void => run(openCommand(url));
-
-export function macNotify(title: string, body: string): void {
-  if (process.platform === "darwin") notify(title, body);
-}
+export const notify = (title: string, body: string): void => {
+  run(notifyCommand(title, body));
+};
+export const openUrl = (url: string): void => {
+  run(openCommand(url));
+};
 
 // quiet = "19:00-09:00"; wraps past midnight when start > end.
 export function inQuietHours(quiet: string, now: Date): boolean {

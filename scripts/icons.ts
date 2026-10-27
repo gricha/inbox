@@ -6,20 +6,21 @@ import path from "node:path";
 const dir = path.join(import.meta.dirname, "..", "assets");
 const icon = fs.readFileSync(path.join(dir, "icon.svg"), "utf8");
 
-// The tray glyph: two cards behind a front card, drawn in one colour (macOS template images are alpha only).
+// The tray glyph: the highlighted row over two quiet ones, in one colour (macOS template images are alpha only).
 const template = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="#000">
-  <rect x="4.5" y="1.5" width="7" height="2" rx="1"/>
-  <rect x="3" y="4.5" width="10" height="2" rx="1"/>
-  <path fill-rule="evenodd" d="M2.5 7.5h11a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 13V9a1.5 1.5 0 0 1 1.5-1.5zM4 10.25h8v1.5H4z"/>
+  <path fill-rule="evenodd" d="M1.6 3.1 2.2 2.2 14.6 1.9 14.1 6.1 1.4 6.4zM4 3.6h5.5v1.3H4z"/>
+  <rect x="3.5" y="8.6" width="9" height="1.7" rx=".85"/>
+  <rect x="3.5" y="11.9" width="6" height="1.7" rx=".85" fill-opacity=".6"/>
 </svg>`;
 
 // Windows and Linux: the app icon in small, readable on light and dark taskbars.
 const color = (alert: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <rect width="16" height="16" rx="3.5" fill="#1F5FAD"/>
-  <rect x="5" y="2.75" width="6" height="1.5" rx=".75" fill="#7FA6D6"/>
-  <rect x="3.75" y="5" width="8.5" height="1.75" rx=".75" fill="#BCD0EA"/>
-  <rect x="2.5" y="7.5" width="11" height="6" rx="1.25" fill="#FFFFFF"/>
-  ${alert ? `<circle cx="12.75" cy="3.25" r="3" fill="#E5484D" stroke="#FFFFFF" stroke-width="1"/>` : ""}
+  <rect width="16" height="16" rx="3.5" fill="#1E2024"/>
+  <path d="M2.4 3.4 3 2.6 13.8 2.4 13.4 6.2 2.3 6.4z" fill="#FFD84A"/>
+  <rect x="4" y="3.8" width="5.5" height="1.2" rx=".6" fill="#16171A"/>
+  <rect x="4" y="8.6" width="8" height="1.5" rx=".75" fill="#E8E9EB"/>
+  <rect x="4" y="11.6" width="5.5" height="1.5" rx=".75" fill="#E8E9EB" fill-opacity=".55"/>
+  ${alert ? `<circle cx="12.75" cy="12.75" r="3" fill="#E5484D" stroke="#1E2024" stroke-width="1"/>` : ""}
 </svg>`;
 
 const dot = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#E5484D" stroke="#FFFFFF" stroke-width="1.5"/></svg>`;
@@ -47,14 +48,24 @@ const render = `async (svg, size) => {
 }`;
 
 app.dock?.hide();
-// Not a top-level await: Electron holds "ready" until the entry module finishes evaluating.
-void app.whenReady().then(async () => {
+// Not a top-level await (Electron holds "ready" until this module finishes); Electron only logs a rejection, so exit or it hangs.
+app
+  .whenReady()
+  .then(renderIcons)
+  .catch((e: unknown) => {
+    console.error(e);
+    app.exit(1);
+  });
+
+async function renderIcons(): Promise<void> {
   const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   await w.loadURL("data:text/html,<!doctype html><title>icons</title>");
   for (const [file, svg, size] of out) {
-    const url: string = await w.webContents.executeJavaScript(`(${render})(${JSON.stringify(svg)}, ${size})`);
-    fs.writeFileSync(path.join(dir, file), Buffer.from(url.split(",")[1], "base64"));
+    const url: unknown = await w.webContents.executeJavaScript(`(${render})(${JSON.stringify(svg)}, ${size})`);
+    const png = typeof url === "string" ? url.split(",")[1] : undefined;
+    if (png === undefined) throw new Error(`rendering ${file} returned ${String(url)}`);
+    fs.writeFileSync(path.join(dir, file), Buffer.from(png, "base64"));
     console.log(`assets/${file} (${size}px)`);
   }
   app.quit();
-});
+}

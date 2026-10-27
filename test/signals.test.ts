@@ -8,10 +8,15 @@ const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.confi
 const ctx = makeContext();
 
 test("direct ask by a human", () => {
-  const s = analyze(makeItem({
-    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
-    request_events: [{ at: hoursAgo(5), actor: "alice", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
-  }), ctx, cfg, NOW).signals;
+  const s = analyze(
+    makeItem({
+      review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+      request_events: [{ at: hoursAgo(5), actor: "alice", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
+    }),
+    ctx,
+    cfg,
+    NOW,
+  ).signals;
   assert.equal(s.me.requested, true);
   assert.equal(s.me.requested_direct, true);
   assert.equal(s.me.requested_by, "alice");
@@ -20,11 +25,19 @@ test("direct ask by a human", () => {
 });
 
 test("team CODEOWNERS ping added by a bot", () => {
-  const a = analyze(makeItem({
-    author: "carol",
-    review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }, { reviewer: "other-team", type: "team", codeowner: true }],
-    request_events: [{ at: hoursAgo(3), actor: "helper-bot", actor_bot: true, reviewer: "ml-team", reviewer_type: "team" }],
-  }), ctx, cfg, NOW);
+  const a = analyze(
+    makeItem({
+      author: "carol",
+      review_requests: [
+        { reviewer: "ml-team", type: "team", codeowner: true },
+        { reviewer: "other-team", type: "team", codeowner: true },
+      ],
+      request_events: [{ at: hoursAgo(3), actor: "helper-bot", actor_bot: true, reviewer: "ml-team", reviewer_type: "team" }],
+    }),
+    ctx,
+    cfg,
+    NOW,
+  );
   assert.equal(a.signals.me.requested, true);
   assert.equal(a.signals.me.requested_direct, false);
   assert.equal(a.signals.me.requested_team, "ml-team");
@@ -41,11 +54,16 @@ test("requests to other teams don't count", () => {
 });
 
 test("your review, then new commits from the author", () => {
-  const s = analyze(makeItem({
-    reviews: [{ author: "me", author_bot: false, state: "changes_requested", at: hoursAgo(20), commit: "" }],
-    head_committed_at: hoursAgo(2),
-    head_author: "alice",
-  }), ctx, cfg, NOW).signals;
+  const s = analyze(
+    makeItem({
+      reviews: [{ author: "me", author_bot: false, state: "changes_requested", at: hoursAgo(20), commit: "" }],
+      head_committed_at: hoursAgo(2),
+      head_author: "alice",
+    }),
+    ctx,
+    cfg,
+    NOW,
+  ).signals;
   assert.equal(s.me.reviewed, true);
   assert.equal(s.me.review_state, "changes_requested");
   assert.equal(s.me.pushed_since_review, true);
@@ -63,14 +81,19 @@ test("your PR: others' comments are new activity, bots are not", () => {
 });
 
 test("approvals, affinity and repo facts", () => {
-  const s = analyze(makeItem({
-    reviews: [
-      { author: "bob", author_bot: false, state: "changes_requested", at: hoursAgo(10), commit: "" },
-      { author: "bob", author_bot: false, state: "approved", at: hoursAgo(5), commit: "" },
-      { author: "dan", author_bot: false, state: "commented", at: hoursAgo(4), commit: "" },
-      { author: "eve", author_bot: false, state: "approved", at: hoursAgo(3), commit: "" },
-    ],
-  }), ctx, cfg, NOW).signals;
+  const s = analyze(
+    makeItem({
+      reviews: [
+        { author: "bob", author_bot: false, state: "changes_requested", at: hoursAgo(10), commit: "" },
+        { author: "bob", author_bot: false, state: "approved", at: hoursAgo(5), commit: "" },
+        { author: "dan", author_bot: false, state: "commented", at: hoursAgo(4), commit: "" },
+        { author: "eve", author_bot: false, state: "approved", at: hoursAgo(3), commit: "" },
+      ],
+    }),
+    ctx,
+    cfg,
+    NOW,
+  ).signals;
   assert.equal(s.pr.approvals, 2);
   assert.equal(s.author.engaged_90d, 12);
   assert.equal(s.author.close, true);
@@ -118,11 +141,19 @@ test("future-dated commits are clamped to GitHub's updatedAt", () => {
 });
 
 test("requests you made yourself are not someone else's activity", () => {
-  const a = analyze(makeItem({
-    author: "me", head_author: "me", head_committed_at: hoursAgo(30), created_at: hoursAgo(50),
-    request_events: [{ at: hoursAgo(1), actor: "me", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
-    review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }],
-  }), ctx, cfg, NOW);
+  const a = analyze(
+    makeItem({
+      author: "me",
+      head_author: "me",
+      head_committed_at: hoursAgo(30),
+      created_at: hoursAgo(50),
+      request_events: [{ at: hoursAgo(1), actor: "me", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
+      review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }],
+    }),
+    ctx,
+    cfg,
+    NOW,
+  );
   assert.equal(a.others_at, null);
   assert.equal(a.signals.me.new_activity, false);
 });

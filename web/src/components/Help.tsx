@@ -32,16 +32,29 @@ export function Help({ onClose }: { onClose: () => void }) {
     };
   }, []);
   return (
-    <div className="overlay" onClick={onClose}>
-      <div ref={dialog} tabIndex={-1} className="dialog" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="overlay"
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a native <dialog> needs showModal() and top-layer styling; this sheet manages focus itself */}
+      <div ref={dialog} tabIndex={-1} className="dialog" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
         <div className="dialog-head">
           <h2>Keyboard shortcuts</h2>
-          <button type="button" className="btn ghost" onClick={onClose}>Close<kbd>esc</kbd></button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Close<kbd>esc</kbd>
+          </button>
         </div>
         <dl className="keys">
           {KEYS.map(([ks, v]) => (
             <div key={v} className="fact">
-              <dt>{ks.map((k) => <kbd key={k}>{k}</kbd>)}</dt>
+              <dt>
+                {ks.map((k) => (
+                  <kbd key={k}>{k}</kbd>
+                ))}
+              </dt>
               <dd>{v}</dd>
             </div>
           ))}

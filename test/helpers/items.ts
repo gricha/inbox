@@ -47,7 +47,15 @@ export function makeItem(o: Partial<Item> & { repo?: string; number?: number } =
 }
 
 export function makeContext(o: Partial<Context> = {}): Context {
-  return { me: "me", teams: ["ml-team"], affinity: { alice: 12, bob: 1 }, repo_prs: { "acme/api": 4 }, orgs: { acme: 40, me: 3 }, refreshed_at: NOW.toISOString(), ...o };
+  return {
+    me: "me",
+    teams: ["ml-team"],
+    affinity: { alice: 12, bob: 1 },
+    repo_prs: { "acme/api": 4 },
+    orgs: { acme: 40, me: 3 },
+    refreshed_at: NOW.toISOString(),
+    ...o,
+  };
 }
 
 // In-memory GitHub: each search returns the items whose ids `route(query)` lists.
@@ -65,26 +73,30 @@ export class FakeGitHub implements GitHub {
     this.ctx = ctx;
   }
 
-  async viewer() { return this.ctx.me; }
+  viewer() {
+    return Promise.resolve(this.ctx.me);
+  }
 
-  async search(query: string) {
+  search(query: string) {
     this.searches.push(query);
     const hits: SearchHit[] = this.route(query)
       .map((id) => this.items.get(id))
       .filter((it): it is Item => it !== undefined)
       .map((it) => ({ node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author }));
-    return { hits, total: hits.length };
+    return Promise.resolve({ hits, total: hits.length });
   }
 
-  async details(hits: SearchHit[]) {
+  details(hits: SearchHit[]) {
     this.detailCalls.push(hits.map((h) => h.id));
-    return hits.map((h) => ({ ...this.items.get(h.id)!, detail_at: this.clock().toISOString() }));
+    return Promise.resolve(hits.map((h) => ({ ...this.items.get(h.id)!, detail_at: this.clock().toISOString() })));
   }
 
-  async context() {
+  context() {
     const { refreshed_at: _, ...rest } = this.ctx;
-    return rest;
+    return Promise.resolve(rest);
   }
 
-  rateLimit() { return null; }
+  rateLimit() {
+    return null;
+  }
 }

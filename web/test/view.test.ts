@@ -4,16 +4,51 @@ import { settingDef } from "../../src/settings.ts";
 import type { Card, QueueView } from "../../src/types.ts";
 import { age, ago, clearedText, shortId, shortRef } from "../src/format.ts";
 import {
-  acceleratorOf, authProblem, DEFAULT_OPEN, draftOf, groupsOf, lineOf, navigable, parseList, parseRoute, removeCard, routeHash, routeKey,
-  valueOf, type KeyLike,
+  acceleratorOf,
+  authProblem,
+  DEFAULT_OPEN,
+  draftOf,
+  groupsOf,
+  lineOf,
+  navigable,
+  parseList,
+  parseRoute,
+  removeCard,
+  routeHash,
+  valueOf,
+  type KeyLike,
 } from "../src/view.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {
-  const [repo, n] = id.split("#");
+  const [repo = "", n] = id.split("#");
   return {
-    id, kind: "pr", repo, number: Number(n), title: `title ${id}`, url: "", author: "dana", author_bot: false, bucket: "now", why: "",
-    board: "b", boards: ["b"], chips: [], ci: "green", review: "required", draft: false, size: 1, created_at: "", updated_at: "",
-    activity_at: "", waiting_since: "", new: false, pinned: false, status: "active", snooze_until: null, verdict: null, ...extra,
+    id,
+    kind: "pr",
+    repo,
+    number: Number(n),
+    title: `title ${id}`,
+    url: "",
+    author: "dana",
+    author_bot: false,
+    bucket: "now",
+    why: "",
+    board: "b",
+    boards: ["b"],
+    chips: [],
+    ci: "green",
+    review: "required",
+    draft: false,
+    size: 1,
+    created_at: "",
+    updated_at: "",
+    activity_at: "",
+    waiting_since: "",
+    new: false,
+    pinned: false,
+    status: "active",
+    snooze_until: null,
+    verdict: null,
+    ...extra,
   };
 };
 
@@ -32,7 +67,6 @@ test("routes round-trip through the hash", () => {
   assert.equal(routeHash({ name: "settings", section: "rules" }), "#/settings/rules");
   assert.deepEqual(parseRoute(routeHash({ name: "settings", section: "app" })), { name: "settings", section: "app" });
   assert.equal(routeHash({ name: "queue" }), "#/");
-  assert.equal(routeKey({ name: "settings", section: "app" }), "settings:app");
   assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "github" });
 });
 
@@ -52,7 +86,14 @@ test("settings fields: text to value and back", () => {
 });
 
 test("a key combo becomes an Electron accelerator", () => {
-  const k = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({ code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  const k = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({
+    code,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods,
+  });
   assert.equal(acceleratorOf(k("KeyD", { ctrlKey: true, altKey: true }), true), "Control+Alt+D");
   assert.equal(acceleratorOf(k("KeyK", { metaKey: true, shiftKey: true }), true), "CommandOrControl+Shift+K");
   assert.equal(acceleratorOf(k("KeyK", { metaKey: true }), false), "Super+K");
@@ -69,7 +110,8 @@ test("a key combo becomes an Electron accelerator", () => {
   assert.equal(acceleratorOf(k("Numpad1", { ctrlKey: true }), true), null);
   // Whatever it builds, the server's pattern accepts.
   const re = new RegExp(settingDef("app.hotkey")!.pattern!);
-  for (const a of ["Control+Alt+D", "CommandOrControl+Shift+K", "Control+Shift+Space", "Alt+Up", "CommandOrControl+/", "Control+F12"]) assert.ok(re.test(a), a);
+  for (const a of ["Control+Alt+D", "CommandOrControl+Shift+K", "Control+Shift+Space", "Alt+Up", "CommandOrControl+/", "Control+F12"])
+    assert.ok(re.test(a), a);
 });
 
 test("auth problems are told apart from other GitHub errors", () => {
@@ -81,20 +123,43 @@ test("auth problems are told apart from other GitHub errors", () => {
 
 test("sorted-away groups are skipped by j/k until opened; filtering opens groups with matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
-  assert.deepEqual(groups.map((g) => [g.key, g.open, g.total]), [
-    ["now", true, 1], ["today", true, 1], ["later", false, 1], ["fyi", false, 0], ["hidden", false, 1], ["cleared", false, 1],
-  ]);
-  assert.deepEqual(navigable(groups, new Set()).map((c) => c.id), ["acme/api#1", "acme/web#2"]);
-  assert.deepEqual(navigable(groups, new Set(["acme/api#1"])).map((c) => c.id), ["acme/web#2"]);
-  assert.deepEqual(navigable(groupsOf(queue(), { ...DEFAULT_OPEN, later: true }, ""), new Set()).map((c) => c.id), ["acme/api#1", "acme/web#2", "acme/api#3"]);
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.open, g.total]),
+    [
+      ["now", true, 1],
+      ["today", true, 1],
+      ["later", false, 1],
+      ["fyi", false, 0],
+      ["hidden", false, 1],
+      ["cleared", false, 1],
+    ],
+  );
+  assert.deepEqual(
+    navigable(groups, new Set()).map((c) => c.id),
+    ["acme/api#1", "acme/web#2"],
+  );
+  assert.deepEqual(
+    navigable(groups, new Set(["acme/api#1"])).map((c) => c.id),
+    ["acme/web#2"],
+  );
+  assert.deepEqual(
+    navigable(groupsOf(queue(), { ...DEFAULT_OPEN, later: true }, ""), new Set()).map((c) => c.id),
+    ["acme/api#1", "acme/web#2", "acme/api#3"],
+  );
 
   const filtered = groupsOf(queue(), DEFAULT_OPEN, "api#3");
-  assert.deepEqual(navigable(filtered, new Set()).map((c) => c.id), ["acme/api#3"]);
+  assert.deepEqual(
+    navigable(filtered, new Set()).map((c) => c.id),
+    ["acme/api#3"],
+  );
   assert.equal(filtered.find((g) => g.key === "later")?.open, true);
   // Opened by the filter, not by you: the toggle is off-limits until the filter clears.
   assert.equal(filtered.find((g) => g.key === "later")?.forced, true);
   assert.equal(groupsOf(queue(), { ...DEFAULT_OPEN, later: true }, "api#3").find((g) => g.key === "later")?.forced, false);
-  assert.deepEqual(navigable(groupsOf(queue(), DEFAULT_OPEN, "PRIYA"), new Set()).map((c) => c.id), ["acme/web#2"]);
+  assert.deepEqual(
+    navigable(groupsOf(queue(), DEFAULT_OPEN, "PRIYA"), new Set()).map((c) => c.id),
+    ["acme/web#2"],
+  );
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
 });
 

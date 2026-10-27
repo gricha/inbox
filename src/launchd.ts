@@ -6,11 +6,16 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-export const LABEL = "dev.review-desk.desk";
+const LABEL = "dev.review-desk.desk";
 
-export interface PlistOptions { nodePath: string; cliPath: string; home: string; port: number }
+export interface PlistOptions {
+  nodePath: string;
+  cliPath: string;
+  home: string;
+  port: number;
+}
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const esc = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const str = (s: string) => `<string>${esc(s)}</string>`;
 
 export function plistFor(o: PlistOptions): string {
@@ -50,10 +55,10 @@ export function plistFor(o: PlistOptions): string {
 `;
 }
 
-export const plistPath = (home = homedir()) => join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
+const plistPath = (home = homedir()) => join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
 const domain = () => `gui/${process.getuid!()}`;
 
-export async function install(cliPath: string, port = Number(process.env.DESK_PORT || 47823)): Promise<string> {
+export async function install(cliPath: string, port = Number((process.env.DESK_PORT ?? "") || 47823)): Promise<string> {
   const home = homedir();
   const file = plistPath(home);
   mkdirSync(join(home, ".review-desk"), { recursive: true });
@@ -64,7 +69,7 @@ export async function install(cliPath: string, port = Number(process.env.DESK_PO
   for (let i = 0; ; i++) {
     const r = spawnSync("launchctl", ["bootstrap", domain(), file], { encoding: "utf8" });
     if (r.status === 0) return file;
-    if (i === 4) throw new Error(`launchctl bootstrap failed: ${(r.stderr || "").trim()}`);
+    if (i === 4) throw new Error(`launchctl bootstrap failed: ${(r.stderr ?? "").trim()}`);
     await sleep(500);
   }
 }

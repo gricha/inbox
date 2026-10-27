@@ -58,8 +58,9 @@ export async function copyText(text: string): Promise<void> {
     ta.value = text;
     ta.style.position = "fixed";
     ta.style.opacity = "0";
-    document.body.appendChild(ta);
+    document.body.append(ta);
     ta.select();
+    // oxlint-disable-next-line typescript/no-deprecated -- the fallback for when the Clipboard API is refused; nothing replaces it
     const ok = document.execCommand("copy");
     ta.remove();
     if (!ok) throw new Error("clipboard unavailable");

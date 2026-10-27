@@ -35,7 +35,14 @@
   "reviewThreads": { "totalCount": 0, "nodes": [] },
   "commits": {
     "nodes": [
-      { "commit": { "oid": "cccc111122223333444455556666777788889999", "committedDate": "2025-12-01T07:00:00Z", "author": { "user": null }, "statusCheckRollup": null } }
+      {
+        "commit": {
+          "oid": "cccc111122223333444455556666777788889999",
+          "committedDate": "2025-12-01T07:00:00Z",
+          "author": { "user": null },
+          "statusCheckRollup": null
+        }
+      }
     ]
   }
 }

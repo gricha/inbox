@@ -4,7 +4,6 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import * as api from "./client.ts";
 import { DeskApiError, DeskDownError } from "./client.ts";
@@ -12,8 +11,15 @@ import { install, uninstall } from "./launchd.ts";
 import { openCommand } from "./notify.ts";
 import type { Action, Bucket, Card, SettingDef, SettingValue } from "./types.ts";
 
-export interface Out { write(s: string): unknown; isTTY?: boolean; columns?: number }
-export interface IO { stdout: Out; stderr: Out }
+export interface Out {
+  write(s: string): unknown;
+  isTTY?: boolean;
+  columns?: number;
+}
+export interface IO {
+  stdout: Out;
+  stderr: Out;
+}
 
 const USAGE = `usage: desk <command>
 
@@ -42,7 +48,15 @@ const USAGE = `usage: desk <command>
 class UsageError extends Error {}
 
 const GLYPH: Record<Bucket, string> = { now: "●", today: "◐", later: "○", fyi: "·", hide: "×" };
-const PAST: Record<string, string> = { done: "done", mute: "muted", unmute: "unmuted", pin: "pinned", unpin: "unpinned", restore: "restored", snooze: "snoozed" };
+const PAST: Record<string, string> = {
+  done: "done",
+  mute: "muted",
+  unmute: "unmuted",
+  pin: "pinned",
+  unpin: "unpinned",
+  restore: "restored",
+  snooze: "snoozed",
+};
 
 const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   serve: { port: { type: "string" }, open: { type: "boolean" } },
@@ -55,9 +69,28 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
 
 // [min, max] positionals per command.
 const ARITY: Record<string, [number, number]> = {
-  serve: [0, 0], open: [0, 0], status: [0, 0], ls: [0, 1], show: [1, 1], snooze: [1, 2], undo: [0, 1], sync: [0, 0],
-  prompt: [1, 1], brief: [1, 1], fields: [0, 0], config: [0, 1], settings: [0, 3], mcp: [0, 0], install: [0, 0], uninstall: [0, 0],
-  done: [1, 1], mute: [1, 1], unmute: [1, 1], pin: [1, 1], unpin: [1, 1], restore: [1, 1],
+  serve: [0, 0],
+  open: [0, 0],
+  status: [0, 0],
+  ls: [0, 1],
+  show: [1, 1],
+  snooze: [1, 2],
+  undo: [0, 1],
+  sync: [0, 0],
+  prompt: [1, 1],
+  brief: [1, 1],
+  fields: [0, 0],
+  config: [0, 1],
+  settings: [0, 3],
+  mcp: [0, 0],
+  install: [0, 0],
+  uninstall: [0, 0],
+  done: [1, 1],
+  mute: [1, 1],
+  unmute: [1, 1],
+  pin: [1, 1],
+  unpin: [1, 1],
+  restore: [1, 1],
 };
 
 function palette(on: boolean) {
@@ -69,7 +102,10 @@ function ctxFor(io: IO, args: string[], opts: Record<string, unknown>) {
   const c = palette(!!io.stdout.isTTY && !process.env.NO_COLOR);
   const glyph = (b: Bucket) => (b === "now" ? c.red : b === "today" ? c.yellow : b === "fyi" ? c.dim : (s: string) => s)(GLYPH[b]);
   return {
-    args, opts, c, glyph,
+    args,
+    opts,
+    c,
+    glyph,
     width: io.stdout.columns ?? (io.stdout.isTTY ? 80 : Infinity),
     out: (s = "") => void io.stdout.write(s + "\n"),
   };
@@ -78,7 +114,7 @@ type Ctx = ReturnType<typeof ctxFor>;
 
 const shortRef = (card: Card) => `${card.repo.split("/")[1]}#${card.number}`;
 // GitHub titles are untrusted: strip control chars so they can't emit terminal escapes.
-const plain = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ");
+const plain = (s: string) => s.replaceAll(/\p{Cc}+/gu, " ");
 const clip = (s: string, n: number) => (s.length <= n ? s : n <= 1 ? "" : s.slice(0, n - 1) + "…");
 
 // The title wins: the why is clipped first, down to 20 columns, before the title gives way.
@@ -106,8 +142,15 @@ function printCards(x: Ctx, groups: [Bucket, Card[], string?][]): void {
     x.out(x.c.bold(`${label ?? b.toUpperCase()} ${cs.length}`));
     for (const k of cs) {
       const [t, w] = fit(plain(k.title), plain(k.why), x.width - refW - 4);
-      const note = k.status !== "active" ? `  [${k.status}${k.snooze_until ? ` until ${localTime(k.snooze_until)}` : ""}]` : k.demoted ? `  (${k.demoted})` : "";
-      x.out(`${x.glyph(b)} ${shortRef(k).padEnd(refW)}  ${k.new ? x.c.bold(t) : t}${w ? "  " + x.c.dim(w) : ""}${note ? x.c.dim(note) : ""}`);
+      const note =
+        k.status !== "active"
+          ? `  [${k.status}${k.snooze_until ? ` until ${localTime(k.snooze_until)}` : ""}]`
+          : k.demoted
+            ? `  (${k.demoted})`
+            : "";
+      x.out(
+        `${x.glyph(b)} ${shortRef(k).padEnd(refW)}  ${k.new ? x.c.bold(t) : t}${w ? "  " + x.c.dim(w) : ""}${note ? x.c.dim(note) : ""}`,
+      );
     }
   });
 }
@@ -115,19 +158,32 @@ function printCards(x: Ctx, groups: [Bucket, Card[], string?][]): void {
 async function ls(x: Ctx): Promise<number> {
   const which = x.args[0] ?? "focus";
   // Focus is the queue's Now and Today; the queue has the rest for --all and the counts.
-  const v = which === "focus" ? await api.queue() : await api.board(which).catch(async (e) => {
-    if (!(e instanceof DeskApiError) || e.status !== 404) throw e;
-    const ids = (await api.overview()).spaces.flatMap((s) => s.boards.map((b) => b.id));
-    throw new Error(`${e.message} — boards: focus, ${ids.join(", ")}`);
-  });
-  if (x.opts.json) return x.out(JSON.stringify(v, null, 2)), 0;
+  const v =
+    which === "focus"
+      ? await api.queue()
+      : await api.board(which).catch(async (e) => {
+          if (!(e instanceof DeskApiError) || e.status !== 404) throw e;
+          const ids = (await api.overview()).spaces.flatMap((s) => s.boards.map((b) => b.id));
+          throw new Error(`${e.message} — boards: focus, ${ids.join(", ")}`);
+        });
+  if (x.opts.json) return (x.out(JSON.stringify(v, null, 2)), 0);
   const s = v.sections;
-  const groups: [Bucket, Card[], string?][] = [["now", s.now], ["today", s.today]];
+  const groups: [Bucket, Card[], string?][] = [
+    ["now", s.now],
+    ["today", s.today],
+  ];
   if (x.opts.all) groups.push(["later", s.later], ["fyi", s.fyi]);
   if (groups.every(([, cs]) => !cs.length)) x.out(`Nothing in ${groups.map(([b]) => b.toUpperCase()).join(" or ")}.`);
   if (x.opts.all) groups.push(["hide", v.hidden, "HIDDEN BY RULES"], ["hide", v.cleared, "CLEARED (done, snoozed, muted)"]);
   printCards(x, groups);
-  const counts: [number, string][] = x.opts.all ? [] : [[s.later.length, "later"], [s.fyi.length, "fyi"], [v.cleared.length, "cleared"], [v.hidden.length, "hidden"]];
+  const counts: [number, string][] = x.opts.all
+    ? []
+    : [
+        [s.later.length, "later"],
+        [s.fyi.length, "fyi"],
+        [v.cleared.length, "cleared"],
+        [v.hidden.length, "hidden"],
+      ];
   const more = counts.filter(([n]) => n).map(([n, l]) => `${n} ${l}`);
   const hint = !x.opts.all && (s.later.length || s.fyi.length) ? `  (desk ls ${which === "focus" ? "" : `${which} `}--all)` : "";
   if (more.length) x.out("\n" + x.c.dim(clip(more.join(" · ") + hint, x.width)));
@@ -135,16 +191,25 @@ async function ls(x: Ctx): Promise<number> {
 }
 
 async function show(x: Ctx): Promise<number> {
-  const d = await api.item(x.args[0]);
-  if (x.opts.json) return x.out(JSON.stringify(d, null, 2)), 0;
+  const d = await api.item(x.args[0]!);
+  if (x.opts.json) return (x.out(JSON.stringify(d, null, 2)), 0);
   const k = d.card;
   const st = d.state;
-  const status = k.status === "snoozed"
-    ? `snoozed${st.snooze_until ? ` until ${localTime(st.snooze_until)}` : ""}${st.snooze_on_activity ? `${st.snooze_until ? " or" : " until"} activity` : ""}`
-    : k.status;
+  const statusText =
+    k.status === "snoozed"
+      ? `snoozed${st.snooze_until ? ` until ${localTime(st.snooze_until)}` : ""}${st.snooze_on_activity ? `${st.snooze_until ? " or" : " until"} activity` : ""}`
+      : k.status;
   x.out(`${x.c.bold(k.id)}  ${plain(k.title)}`);
   x.out(x.c.dim(k.url));
-  x.out([`${k.kind} by ${k.author}${k.author_bot ? " (bot)" : ""}`, ...k.chips, `updated ${ago(k.updated_at)}`, status, ...(k.pinned ? ["pinned"] : [])].join(" · "));
+  x.out(
+    [
+      `${k.kind} by ${k.author}${k.author_bot ? " (bot)" : ""}`,
+      ...k.chips,
+      `updated ${ago(k.updated_at)}`,
+      statusText,
+      ...(k.pinned ? ["pinned"] : []),
+    ].join(" · "),
+  );
   if (!d.placements.length) x.out(x.c.dim("Not on any board now: a board filter drops it, or no board's search returns it anymore."));
   for (const p of d.placements) {
     x.out();
@@ -159,16 +224,22 @@ async function show(x: Ctx): Promise<number> {
   return 0;
 }
 
-const act = (action: Action) => async (x: Ctx): Promise<number> => {
-  const until = action === "snooze" ? x.args[1] ?? "tomorrow" : undefined;
-  const r = await api.act(x.args[0], action, until);
-  const s = r.state;
-  // The server stores "activity" as done-until-activity, so the state alone doesn't say it.
-  const when = until === "activity" ? " until someone else acts"
-    : until && s.snooze_until ? ` until ${localTime(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}` : "";
-  x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
-  return 0;
-};
+const act =
+  (action: Action) =>
+  async (x: Ctx): Promise<number> => {
+    const until = action === "snooze" ? (x.args[1] ?? "tomorrow") : undefined;
+    const r = await api.act(x.args[0]!, action, until);
+    const s = r.state;
+    // The server stores "activity" as done-until-activity, so the state alone doesn't say it.
+    const when =
+      until === "activity"
+        ? " until someone else acts"
+        : until && s.snooze_until
+          ? ` until ${localTime(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`
+          : "";
+    x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
+    return 0;
+  };
 
 async function status(x: Ctx): Promise<number> {
   if (x.opts.short) {
@@ -178,7 +249,13 @@ async function status(x: Ctx): Promise<number> {
       if (s.text) x.out(s.text);
     } catch (e) {
       // 503 = up but not serving: still starting, or the config never loaded.
-      x.out(!(e instanceof DeskApiError && e.status === 503) ? "desk offline" : /config/.test(e.message) ? "desk config error" : "desk starting");
+      x.out(
+        !(e instanceof DeskApiError && e.status === 503)
+          ? "desk offline"
+          : e.message.includes("config")
+            ? "desk config error"
+            : "desk starting",
+      );
     }
     return 0;
   }
@@ -187,7 +264,8 @@ async function status(x: Ctx): Promise<number> {
   x.out(`${x.glyph("now")} ${o.focus.now} now  ${x.glyph("today")} ${o.focus.today} today  +${o.focus.new} new   ${x.c.dim(sync)}`);
   if (o.sync_error) x.out(x.c.red(`sync error: ${o.sync_error}`));
   if (o.config_errors.length) x.out(x.c.red(`${o.config_errors.length} config error(s) — desk config check`));
-  if (o.rate_limit && o.rate_limit.remaining < 500) x.out(x.c.yellow(`GitHub rate limit low: ${o.rate_limit.remaining} left, resets ${localTime(o.rate_limit.reset_at)}`));
+  if (o.rate_limit && o.rate_limit.remaining < 500)
+    x.out(x.c.yellow(`GitHub rate limit low: ${o.rate_limit.remaining} left, resets ${localTime(o.rate_limit.reset_at)}`));
   const boards = o.spaces.flatMap((s) => s.boards);
   const idW = Math.max(0, ...boards.map((b) => b.id.length));
   const nameW = Math.max(0, ...boards.map((b) => b.name.length));
@@ -197,7 +275,9 @@ async function status(x: Ctx): Promise<number> {
     for (const b of s.boards) {
       const n = b.counts;
       const counts = (["now", "today", "later", "fyi"] as const).map((k) => `${x.glyph(k)}${n[k]}`).join(" ");
-      x.out(`  ${b.id.padEnd(idW)}  ${b.name.padEnd(nameW)}  ${counts}${b.new ? `  +${b.new} new` : ""}${b.error ? x.c.red(`  ${b.error}`) : ""}`);
+      x.out(
+        `  ${b.id.padEnd(idW)}  ${b.name.padEnd(nameW)}  ${counts}${b.new ? `  +${b.new} new` : ""}${b.error ? x.c.red(`  ${b.error}`) : ""}`,
+      );
     }
   }
   return 0;
@@ -211,14 +291,15 @@ async function config(x: Ctx): Promise<number> {
     if (e instanceof DeskDownError) return null;
     throw e;
   });
-  const path = up?.path ?? join(process.env.DESK_HOME || join(homedir(), ".review-desk"), "config.toml");
-  if (sub === "path") return x.out(path), 0;
+  const path = up?.path ?? join((process.env.DESK_HOME ?? "") || join(homedir(), ".review-desk"), "config.toml");
+  if (sub === "path") return (x.out(path), 0);
   if (sub === "edit") {
-    const editor = process.env.EDITOR || (process.platform === "win32" ? "notepad" : "vi");
+    const editor = (process.env.EDITOR ?? "") || (process.platform === "win32" ? "notepad" : "vi");
     // A shell splits EDITOR's flags ("code -w"). Windows paths can't contain quotes.
-    const r = process.platform === "win32"
-      ? spawnSync(`${editor} "${path}"`, { shell: true, stdio: "inherit" })
-      : spawnSync("/bin/sh", ["-c", `${editor} "$1"`, "sh", path], { stdio: "inherit" });
+    const r =
+      process.platform === "win32"
+        ? spawnSync(`${editor} "${path}"`, { shell: true, stdio: "inherit" })
+        : spawnSync("/bin/sh", ["-c", `${editor} "$1"`, "sh", path], { stdio: "inherit" });
     if (r.status !== 0) throw new Error(`editor exited with ${r.status ?? r.signal}`);
   }
   if (!up) {
@@ -226,7 +307,11 @@ async function config(x: Ctx): Promise<number> {
     const { errors, warnings } = parseConfig(readFileSync(path, "utf8"));
     for (const e of errors) x.out(`${x.c.red("✗")} ${e.path}: ${e.message}`);
     for (const w of warnings) x.out(`${x.c.yellow("!")} ${w.path}: ${w.message}`);
-    x.out(errors.length ? x.c.dim("desk isn't running; start it with: desk serve") : `${x.c.green("✓")} ${path} is valid (desk isn't running; start it with: desk serve)`);
+    x.out(
+      errors.length
+        ? x.c.dim("desk isn't running; start it with: desk serve")
+        : `${x.c.green("✓")} ${path} is valid (desk isn't running; start it with: desk serve)`,
+    );
     return errors.length ? 1 : 0;
   }
   // Validate what's on disk, which may differ from what the server loaded.
@@ -242,11 +327,11 @@ async function config(x: Ctx): Promise<number> {
   return 0;
 }
 
-function showSetting(v: SettingValue): string {
+function showSetting(v: SettingValue | undefined): string {
   if (Array.isArray(v)) return v.length ? v.join(", ") : "(none)";
   if (v === "") return "(empty)";
   const lines = String(v).split("\n");
-  return plain(lines[0]) + (lines.length > 1 ? ` … (+${lines.length - 1} lines)` : "");
+  return plain(lines[0] ?? "") + (lines.length > 1 ? ` … (+${lines.length - 1} lines)` : "");
 }
 
 // The server checks ranges and patterns; this only turns the argument into the setting's type.
@@ -262,11 +347,15 @@ function parseSetting(d: SettingDef, raw: string): SettingValue {
     throw new Error(`${d.key} must be true or false (yes/no, on/off)`);
   }
   if (d.type === "list") {
-    if (!raw.trim().startsWith("[")) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!raw.trim().startsWith("["))
+      return raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     try {
       return JSON.parse(raw) as string[];
     } catch (e) {
-      throw new Error(`${d.key}: bad JSON list (${(e as Error).message})`);
+      throw new Error(`${d.key}: bad JSON list (${(e as Error).message})`, { cause: e });
     }
   }
   return raw;
@@ -279,34 +368,36 @@ async function settings(x: Ctx): Promise<number> {
   if (sub !== undefined && sub !== "set" && sub !== "reset") throw new UsageError(`unknown settings command: ${sub}`);
   const v = await api.settings();
   if (sub === undefined) {
-    if (x.opts.json) return x.out(JSON.stringify(v, null, 2)), 0;
+    if (x.opts.json) return (x.out(JSON.stringify(v, null, 2)), 0);
     const w = Math.max(...v.defs.map((d) => d.key.length));
     const groups = v.sections.map((s) => [s, v.defs.filter((d) => d.section === s.id)] as const).filter(([, ds]) => ds.length);
     groups.forEach(([s, ds], i) => {
       if (i) x.out();
       x.out(x.c.bold(s.title));
-      for (const d of ds) x.out(`${v.overridden.includes(d.key) ? "*" : " "} ${d.key.padEnd(w)}  ${clip(showSetting(v.values[d.key]), x.width - w - 4)}`);
+      for (const d of ds)
+        x.out(`${v.overridden.includes(d.key) ? "*" : " "} ${d.key.padEnd(w)}  ${clip(showSetting(v.values[d.key]), x.width - w - 4)}`);
     });
     for (const e of v.errors) x.out(x.c.red(`✗ ${e.path}: ${e.message}`));
     x.out("\n" + x.c.dim(`* set in ${v.path}`));
     return 0;
   }
-  const d = v.defs.find((d) => d.key === key);
+  const d = v.defs.find((def) => def.key === key);
   if (!d) throw new Error(`unknown setting "${key}"; desk settings lists them`);
-  const r = await api.putSettings(sub === "set" ? { set: { [key]: parseSetting(d, raw) } } : { reset: [key] });
+  const r = await api.putSettings(sub === "set" ? { set: { [d.key]: parseSetting(d, raw!) } } : { reset: [d.key] });
   if (!r.ok) throw new Error(r.errors.map((e) => `${e.path} ${e.message}`).join("; "));
-  const isDefault = !r.settings.overridden.includes(key);
-  x.out(`${x.c.green("✓")} ${key} = ${showSetting(r.settings.values[key])}${isDefault ? x.c.dim("  (default)") : ""}`);
+  const isDefault = !r.settings.overridden.includes(d.key);
+  x.out(`${x.c.green("✓")} ${d.key} = ${showSetting(r.settings.values[d.key])}${isDefault ? x.c.dim("  (default)") : ""}`);
   return 0;
 }
 
 // launchd is macOS-only; elsewhere the desktop app's login item does the job.
 function macOnly(cmd: string): void {
-  if (process.platform !== "darwin") throw new Error(`${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app`);
+  if (process.platform !== "darwin")
+    throw new Error(`${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app`);
 }
 
 async function serve(x: Ctx): Promise<number> {
-  const raw = x.opts.port ?? (process.env.DESK_PORT || 47823);
+  const raw = typeof x.opts.port === "string" ? x.opts.port : (process.env.DESK_PORT ?? "") || 47823;
   const port = Number(raw);
   // Port 0 would pick a random port no client can find.
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`bad port: ${raw}`);
@@ -320,11 +411,22 @@ async function serve(x: Ctx): Promise<number> {
   return 0;
 }
 
-const cliPath = () => realpathSync(fileURLToPath(import.meta.url));
+const cliPath = () => realpathSync(import.meta.filename);
 
 const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
-  serve, status, ls, show, config, settings,
-  done: act("done"), mute: act("mute"), unmute: act("unmute"), pin: act("pin"), unpin: act("unpin"), restore: act("restore"), snooze: act("snooze"),
+  serve,
+  status,
+  ls,
+  show,
+  config,
+  settings,
+  done: act("done"),
+  mute: act("mute"),
+  unmute: act("unmute"),
+  pin: act("pin"),
+  unpin: act("unpin"),
+  restore: act("restore"),
+  snooze: act("snooze"),
   open: async () => {
     await api.health();
     spawnSync(...openCommand(api.baseUrl() + "/"));
@@ -337,9 +439,16 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
     x.out(`${x.c.green("✓")} Undid ${r.action} on ${r.id.split("/")[1]}`);
     return 0;
   },
-  sync: async (x) => (await api.sync(), x.out("sync started"), 0),
+  sync: async (x) => {
+    await api.sync();
+    x.out("sync started");
+    return 0;
+  },
   // The prompt template can interpolate the title; keep newlines and tabs, drop other control chars.
-  prompt: async (x) => (x.out((await api.item(x.args[0])).handoff_prompt.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")), 0),
+  prompt: async (x) => {
+    x.out((await api.item(x.args[0]!)).handoff_prompt.replaceAll(/(?![\t\n])\p{Cc}/gu, ""));
+    return 0;
+  },
   fields: async (x) => {
     const fs = await api.fields();
     const w = Math.max(...fs.map((f) => f.path.length));
@@ -347,8 +456,8 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
     return 0;
   },
   brief: async (x) => {
-    const b = (await api.analyze(x.args[0], !!x.opts.force)).brief;
-    const clean = (t: string) => t.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+    const b = (await api.analyze(x.args[0]!, !!x.opts.force)).brief;
+    const clean = (t: string) => t.replaceAll(/\p{Cc}/gu, " ");
     const color = b.verdict === "look" ? x.c.red : b.verdict === "skim" ? x.c.yellow : x.c.dim;
     x.out(`${color(b.verdict.toUpperCase())} · risk ${b.risk} · ${b.model}`);
     x.out(clean(b.summary));
@@ -358,7 +467,9 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
   mcp: async () => {
     const { runMcp } = await import("./mcp.ts");
     await runMcp();
-    await new Promise((r) => process.stdin.once("end", r));
+    await new Promise((r) => {
+      process.stdin.once("end", r);
+    });
     return 0;
   },
   install: async (x) => {
@@ -367,25 +478,30 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
     x.out(`${x.c.green("✓")} installed ${file}\n  desk serve now runs at login; log: ~/.review-desk/desk.log`);
     return 0;
   },
-  uninstall: async (x) => {
+  uninstall: (x) => {
     macOnly("uninstall");
     x.out(`${x.c.green("✓")} removed ${uninstall()}`);
-    return 0;
+    return Promise.resolve(0);
   },
 };
 
-export async function main(argv: string[], io: IO = { stdout: process.stdout, stderr: process.stderr }): Promise<number> {
+const STDIO: IO = { stdout: process.stdout, stderr: process.stderr };
+
+export async function main(argv: string[], io: IO = STDIO): Promise<number> {
   const [cmd = "help", ...rest] = argv;
-  if (cmd === "help" || cmd === "--help" || cmd === "-h") return io.stdout.write(USAGE), 0;
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") return (io.stdout.write(USAGE), 0);
   try {
     const run = COMMANDS[cmd];
-    if (!run) throw new UsageError(`unknown command: ${cmd}`);
+    const arity = ARITY[cmd];
+    if (!run || !arity) throw new UsageError(`unknown command: ${cmd}`);
     const { values, positionals } = parseArgs({
-      args: rest, allowPositionals: true, strict: true,
+      args: rest,
+      allowPositionals: true,
+      strict: true,
       options: { help: { type: "boolean", short: "h" }, ...OPTIONS[cmd] },
     });
-    if (values.help) return io.stdout.write(USAGE), 0;
-    const [min, max] = ARITY[cmd];
+    if (values.help) return (io.stdout.write(USAGE), 0);
+    const [min, max] = arity;
     if (positionals.length < min) throw new UsageError(`${cmd}: missing argument`);
     if (positionals.length > max) throw new UsageError(`${cmd}: unexpected argument ${positionals[max]}`);
     return await run(ctxFor(io, positionals, values));

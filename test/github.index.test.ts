@@ -57,9 +57,23 @@ test("search paginates 100 per page until no next page", async () => {
   const { hits, total } = await gh.search("is:pr is:open");
   assert.equal(total, 250);
   assert.equal(hits.length, 250);
-  assert.deepEqual(calls.map((c) => [c.variables.first, c.variables.after]), [[100, null], [100, "100"], [100, "200"]]);
-  assert.deepEqual(hits[0], { node_id: "PR_acme/widgets_maple_0", id: "acme/widgets#1", kind: "pr", updated_at: "2026-03-01T00:00:00Z", author: "maple", author_bot: false });
-  assert.equal(calls[0].variables.q, "is:pr is:open");
+  assert.deepEqual(
+    calls.map((c) => [c.variables.first, c.variables.after]),
+    [
+      [100, null],
+      [100, "100"],
+      [100, "200"],
+    ],
+  );
+  assert.deepEqual(hits[0], {
+    node_id: "PR_acme/widgets_maple_0",
+    id: "acme/widgets#1",
+    kind: "pr",
+    updated_at: "2026-03-01T00:00:00Z",
+    author: "maple",
+    author_bot: false,
+  });
+  assert.equal(calls[0]?.variables.q, "is:pr is:open");
 });
 
 test("search stops at max", async () => {
@@ -68,7 +82,10 @@ test("search stops at max", async () => {
   const { hits, total } = await gh.search("is:pr", 150);
   assert.equal(total, 900);
   assert.equal(hits.length, 150);
-  assert.deepEqual(calls.map((c) => c.variables.first), [100, 50]);
+  assert.deepEqual(
+    calls.map((c) => c.variables.first),
+    [100, 50],
+  );
 
   const def = fakeGitHub((b) => searchPage(all, b));
   assert.equal((await def.gh.search("is:pr")).hits.length, 300);
@@ -79,7 +96,11 @@ test("search drops a node repeated across pages", async () => {
   const all = prs(150);
   const { gh } = fakeGitHub((b) => {
     const page = searchPage(all, b);
-    if (b.variables.after) page.data.search.nodes[0] = searchPage(all, { ...b, variables: { ...b.variables, after: null } }).data.search.nodes[99];
+    if (b.variables.after) {
+      const dup = searchPage(all, { ...b, variables: { ...b.variables, after: null } }).data.search.nodes[99];
+      assert.ok(dup);
+      page.data.search.nodes[0] = dup;
+    }
     return page;
   });
   const { hits } = await gh.search("is:pr");
@@ -87,8 +108,14 @@ test("search drops a node repeated across pages", async () => {
   assert.equal(new Set(hits.map((h) => h.node_id)).size, 149);
 });
 
-const base: RawNode =JSON.parse(readFileSync(new URL("./fixtures/github/pr-review.json", import.meta.url), "utf8"));
-const hit = (node_id: string, author: string, kind: "pr" | "issue" = "pr"): SearchHit => ({ node_id, id: `acme/widgets#${node_id}`, kind, updated_at: "", author });
+const base: RawNode = JSON.parse(readFileSync(new URL("./fixtures/github/pr-review.json", import.meta.url), "utf8"));
+const hit = (node_id: string, author: string, kind: "pr" | "issue" = "pr"): SearchHit => ({
+  node_id,
+  id: `acme/widgets#${node_id}`,
+  kind,
+  updated_at: "",
+  author,
+});
 
 test("details: your PRs get the mine fragment in 5s, the rest the review fragment in 20s, 3 at a time", async () => {
   const hits = [
@@ -102,19 +129,28 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
     const ids: string[] = b.variables.ids;
     // "gone" simulates a node deleted between search and details.
     const nodes = ids.map((id, i) => (id === "other3" ? null : { ...base, id, number: i + 1 }));
-    return { data: { rateLimit: RL, nodes }, errors: ids.includes("other3") ? [{ type: "NOT_FOUND", path: ["nodes", ids.indexOf("other3")], message: "gone" }] : undefined };
+    return {
+      data: { rateLimit: RL, nodes },
+      errors: ids.includes("other3") ? [{ type: "NOT_FOUND", path: ["nodes", ids.indexOf("other3")], message: "gone" }] : undefined,
+    };
   });
   const items = await gh.details(hits, "octo-dev");
 
   const mine = calls.filter((c) => c.query.includes("mergeable"));
   const review = calls.filter((c) => !c.query.includes("mergeable"));
-  assert.deepEqual(mine.map((c) => c.variables.ids.length), [5, 2]);
-  assert.deepEqual(review.map((c) => c.variables.ids.length), [20, 6]);
+  assert.deepEqual(
+    mine.map((c) => c.variables.ids.length),
+    [5, 2],
+  );
+  assert.deepEqual(
+    review.map((c) => c.variables.ids.length),
+    [20, 6],
+  );
   assert.ok(review.flatMap((c) => c.variables.ids).includes("myissue"));
   assert.ok(maxInFlight() <= 3, `max in flight ${maxInFlight()}`);
   assert.equal(items.length, 7 + 1 + 25 - 1);
   assert.ok(!items.some((i) => i.node_id === "other3"));
-  assert.ok(items.every((i) => i.detail_at === items[0].detail_at));
+  assert.ok(items.every((i) => i.detail_at === items[0]?.detail_at));
 });
 
 test("details with no hits makes no calls", async () => {
@@ -137,13 +173,28 @@ test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async
         data: {
           rateLimit: RL,
           // null = an org the token can't read (SAML), reported as FORBIDDEN with partial data.
-          viewer: { organizations: { nodes: [{ login: "acme", teams: { nodes: [{ slug: "platform-core" }, { slug: "infra" }] } }, null, { login: "other", teams: { nodes: [{ slug: "infra" }] } }] } },
+          viewer: {
+            organizations: {
+              nodes: [
+                { login: "acme", teams: { nodes: [{ slug: "platform-core" }, { slug: "infra" }] } },
+                null,
+                { login: "other", teams: { nodes: [{ slug: "infra" }] } },
+              ],
+            },
+          },
         },
-        errors: [{ type: "FORBIDDEN", path: ["viewer", "organizations", "nodes", 1], message: "Resource protected by organization SAML enforcement" }],
+        errors: [
+          {
+            type: "FORBIDDEN",
+            path: ["viewer", "organizations", "nodes", 1],
+            message: "Resource protected by organization SAML enforcement",
+          },
+        ],
       };
     }
-    const key = Object.keys(searches).find((k) => b.variables.q.includes(k))!;
-    return searchPage(searches[key], b);
+    const all = Object.entries(searches).find(([k]) => b.variables.q.includes(k))?.[1];
+    assert.ok(all, b.variables.q);
+    return searchPage(all, b);
   });
   const ctx = await gh.context("octo-dev");
   assert.equal(ctx.me, "octo-dev");
@@ -152,12 +203,12 @@ test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async
   assert.deepEqual(ctx.repo_prs, { "acme/infra": 4, "solo/dotfiles": 1 });
   assert.deepEqual(ctx.orgs, { acme: 3, solo: 2 });
 
-  const qs = calls.map((c) => c.variables.q).filter(Boolean);
+  const qs = new Set(calls.map((c) => c.variables.q).filter(Boolean));
   const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-  assert.ok(qs.includes(`is:pr reviewed-by:@me -author:@me updated:>=${since}`));
-  assert.ok(qs.includes(`is:pr commenter:@me -author:@me updated:>=${since}`));
-  assert.ok(qs.includes(`is:pr author:@me created:>=${since}`));
-  assert.ok(qs.includes("is:open involves:@me"));
+  assert.ok(qs.has(`is:pr reviewed-by:@me -author:@me updated:>=${since}`));
+  assert.ok(qs.has(`is:pr commenter:@me -author:@me updated:>=${since}`));
+  assert.ok(qs.has(`is:pr author:@me created:>=${since}`));
+  assert.ok(qs.has("is:open involves:@me"));
   assert.deepEqual(calls.find((c) => c.query.includes("organizations"))!.variables, { me: "octo-dev" });
 });
 

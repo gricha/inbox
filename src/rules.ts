@@ -49,7 +49,7 @@ function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
   }
 }
 
-export function place(board: CompiledBoard, s: Signals): Placement | null {
+function place(board: CompiledBoard, s: Signals): Placement | null {
   const trace: TraceStep[] = [];
   const cfg = board.config;
   if (board.filter && cfg.filter) {
@@ -57,11 +57,11 @@ export function place(board: CompiledBoard, s: Signals): Placement | null {
     trace.push({ index: -1, when: cfg.filter, ...r });
     if (!r.matched) return null;
   }
-  for (let i = 0; i < board.rules.length; i++) {
-    const r = truthy(board.rules[i], s);
-    trace.push({ index: i, when: cfg.rules[i].when, ...r });
+  for (const [i, c] of board.rules.entries()) {
+    const rule = cfg.rules[i]!; // board.rules is compiled 1:1 from cfg.rules
+    const r = truthy(c, s);
+    trace.push({ index: i, when: rule.when, ...r });
     if (r.matched) {
-      const rule = cfg.rules[i];
       return { board: cfg.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: renderTemplate(rule.why ?? "", s), trace };
     }
   }
@@ -101,23 +101,32 @@ export function classify(board: CompiledBoard, entries: Entry[]): BoardResult {
   // An earlier rule is a stronger reason, so it also wins the capped slots.
   const ruleOf = (e: Entry) => placements.get(e.id)!.rule ?? Infinity;
   for (const b of Object.keys(byBucket) as Bucket[]) {
-    byBucket[b].sort((x, y) => Number(y.pinned) - Number(x.pinned) || ruleOf(x) - ruleOf(y) || rank(y) - rank(x) || sort(x, y) || x.id.localeCompare(y.id));
+    byBucket[b].sort(
+      (x, y) => Number(y.pinned) - Number(x.pinned) || ruleOf(x) - ruleOf(y) || rank(y) - rank(x) || sort(x, y) || x.id.localeCompare(y.id),
+    );
   }
 
-  const exempt = (e: Entry) => e.pinned || (placements.get(e.id)!.rule !== null && cfg.rules[placements.get(e.id)!.rule!].nocap === true);
+  const exempt = (e: Entry) => {
+    if (e.pinned) return true;
+    const rule = placements.get(e.id)!.rule;
+    return rule !== null && cfg.rules[rule]?.nocap === true;
+  };
   const demote = (from: "now" | "today", to: Bucket, cap: number | undefined) => {
     if (cap === undefined) return;
     let counted = 0;
-    const keep: Entry[] = [], over: Entry[] = [];
+    const keep: Entry[] = [],
+      over: Entry[] = [];
     for (const e of byBucket[from]) {
       if (exempt(e)) keep.push(e);
-      else if (counted < cap) { keep.push(e); counted++; }
-      else over.push(e);
+      else if (counted < cap) {
+        keep.push(e);
+        counted++;
+      } else over.push(e);
     }
     for (const e of over) {
       const p = placements.get(e.id)!;
       p.bucket = to;
-      p.demoted = `${from[0].toUpperCase()}${from.slice(1)} was full (${cap})`;
+      p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full (${cap})`;
     }
     byBucket[from] = keep;
     byBucket[to] = [...over, ...byBucket[to]];
