@@ -17,6 +17,7 @@ Product principle: minimize surfaces (ideally one) and maximize automation. New 
 | The desktop app (window, tray, hotkey, login item) | `electron/main.ts`; pure helpers in `electron/lib.ts`                                                                                                              |
 | CLI / MCP                                          | `src/cli.ts` / `src/mcp.ts` (both talk HTTP to the running desk via `src/client.ts`)                                                                               |
 | Shared types                                       | `src/types.ts` (the web UI imports these too)                                                                                                                      |
+| The skill                                          | `skills/review-desk/SKILL.md`; connecting agents to the desk in `src/agents.ts`                                                                                    |
 
 ## Run
 

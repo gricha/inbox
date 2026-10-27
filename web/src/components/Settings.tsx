@@ -1,6 +1,6 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
 import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
-import type { DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
+import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { ago, cls, when } from "../format.ts";
 import { Rules } from "./Rules.tsx";
@@ -138,6 +138,40 @@ function BooleanField({ value, commit, id }: FieldProps) {
   );
 }
 
+function SelectField({ def, value, commit, id, invalid }: FieldProps) {
+  const [picked, setPicked] = useState(String(value));
+  const [synced, setSynced] = useState(value);
+  if (value !== synced) {
+    setSynced(value);
+    setPicked(String(value));
+  }
+
+  async function pick(v: string) {
+    const was = picked;
+    setPicked(v);
+    if ((await commit(v)) === null) setPicked(was);
+  }
+
+  return (
+    <select
+      id={id}
+      className="input choice"
+      value={picked}
+      aria-invalid={invalid}
+      aria-describedby={`${id}-msg`}
+      onChange={(e) => {
+        void pick(e.target.value);
+      }}
+    >
+      {def.options?.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function HotkeyField(p: FieldProps) {
   const d = useDraft(p);
   const [recording, setRecording] = useState(false);
@@ -210,6 +244,7 @@ const CONTROLS: Record<SettingType, ComponentType<FieldProps>> = {
   text: TextField,
   list: ListField,
   hotkey: HotkeyField,
+  select: SelectField,
 };
 
 function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView; onView: (v: SettingsView) => void; extra?: ReactNode }) {
@@ -317,6 +352,59 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   );
 }
 
+const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
+
+// Keyed by the driver picked above it, so picking another agent starts fresh.
+function AgentLink({ active, loads }: { active: boolean; loads: number }) {
+  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Re-read on every app refresh: the agent's own config can change outside the desk.
+  useEffect(() => {
+    if (active) api.agents().then(setStatus, () => {});
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
+  }, [active, loads]);
+
+  async function connect() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.connectAgent());
+    } catch (e) {
+      setError(message(e));
+      setStatus(await api.agents().catch(() => status));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!status?.mcp || !status.skill) return null;
+  const missing = !status.mcp.connected || status.skill.state !== "installed";
+  return (
+    <div className="agent">
+      <p className="s-live quiet" title={status.mcp.command}>
+        MCP tools: {status.mcp.connected ? "connected" : "not connected"}
+      </p>
+      <p className="s-live quiet" title={status.skill.path}>
+        Skill: {SKILL_STATE[status.skill.state]}
+      </p>
+      {missing && (
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={() => {
+            void connect();
+          }}
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      )}
+      {error && <p className="s-live t-bad">Couldn't connect: {error}</p>}
+    </div>
+  );
+}
+
 function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
   return (
     <div className="gh">
@@ -411,7 +499,9 @@ export function Settings({
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
-  const sections = view ? [...view.sections.slice(0, 1), RULES, ...view.sections.slice(1)] : [RULES];
+  // Rules go after the sources and the agent they feed (GitHub, Agents), before the smaller settings.
+  const at = view ? Math.max(1, view.sections.findIndex((x) => x.id === "agent") + 1) : 0;
+  const sections = view ? [...view.sections.slice(0, at), RULES, ...view.sections.slice(at)] : [RULES];
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
@@ -482,7 +572,13 @@ export function Settings({
                     def={d}
                     view={view}
                     onView={onView}
-                    extra={d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />}
+                    extra={
+                      d.key === "agent.driver" ? (
+                        <AgentLink key={String(view.values[d.key])} active={active} loads={loads} />
+                      ) : (
+                        d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
+                      )
+                    }
                   />
                 ))}
               </div>

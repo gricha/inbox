@@ -23,6 +23,9 @@ test("checkSetting", () => {
   assert.equal(checkSetting("app.hotkey", "CommandOrControl+Shift+K"), null);
   assert.match(checkSetting("app.hotkey", "K")!, /modifiers/);
   assert.match(checkSetting("handoff.prompt", "  ")!, /empty/);
+  assert.equal(checkSetting("agent.driver", "codex"), null);
+  assert.equal(checkSetting("agent.driver", "vim"), "must be one of claude-code, codex, none");
+  assert.match(checkSetting("agent.driver", 1)!, /one of/);
   assert.match(checkSetting("nope.nope", 1)!, /unknown/);
 });
 

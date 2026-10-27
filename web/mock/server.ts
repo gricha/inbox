@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import type {
   Action,
+  AgentStatus,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -1615,6 +1616,28 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 }
 
 // ---------------------------------------------------------------------------
+// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agents shows Connect.
+
+const linked = new Set(["claude-code mcp"]);
+function agentStatus(): AgentStatus {
+  const driver = String(overrides["agent.driver"] ?? DEFAULTS["agent.driver"]);
+  if (driver === "none") return { driver, mcp: null, skill: null };
+  const [command, skills] =
+    driver === "codex"
+      ? ["codex mcp add review-desk --url http://localhost:47823/mcp", `${homedir()}/.agents/skills`]
+      : ["claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp", `${homedir()}/.claude/skills`];
+  return {
+    driver,
+    mcp: { connected: linked.has(`${driver} mcp`), command },
+    skill: {
+      state: linked.has(`${driver} skill`) ? "installed" : "missing",
+      path: `${skills}/review-desk/SKILL.md`,
+      command: `mkdir -p ${skills} && cp -R skills/review-desk ${skills}/`,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 
 class HttpError extends Error {
@@ -1696,6 +1719,12 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "PUT /api/settings") {
     const body = await readBody(req);
     return putSettings((body.set ?? {}) as Record<string, unknown>, (body.reset ?? []) as string[]);
+  }
+  if (route === "GET /api/agents") return agentStatus();
+  if (route === "POST /api/agents/connect") {
+    const { driver } = agentStatus();
+    linked.add(`${driver} mcp`).add(`${driver} skill`);
+    return agentStatus();
   }
   if (route === "GET /api/status") {
     const o = overview();

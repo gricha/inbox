@@ -26,6 +26,7 @@ const ACCELERATOR =
 
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub", help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk never writes to GitHub." },
+  { id: "agent", title: "Agents" },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
   {
@@ -71,6 +72,19 @@ export const SETTINGS = [
     pattern: "^[\\w.-]+/[\\w.-]+$",
     pattern_hint: "owner/name",
     help: "repo.mine is true for these. Repos you own count automatically.",
+  },
+  {
+    key: "agent.driver",
+    section: "agent",
+    label: "Main agent",
+    type: "select",
+    default: "claude-code",
+    options: [
+      { value: "claude-code", label: "Claude Code" },
+      { value: "codex", label: "Codex" },
+      { value: "none", label: "None" },
+    ],
+    help: "The agent you work in. Review Desk connects to it: its MCP tools and the Review Desk skill.",
   },
   { key: "notify.enabled", section: "notify", label: "Notify me when something new lands in Now", type: "boolean", default: true },
   {
@@ -147,6 +161,8 @@ export function checkSetting(key: string, value: unknown): string | null {
       const bad = re && value.find((v) => !re.test(v));
       return bad === undefined || bad === null ? null : `"${bad}" isn't ${d.pattern_hint ?? "valid"}`;
     }
+    case "select":
+      return d.options?.some((o) => o.value === value) ? null : `must be one of ${d.options?.map((o) => o.value).join(", ")}`;
     case "string":
     case "text":
     case "hotkey":

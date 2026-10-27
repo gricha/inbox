@@ -27,7 +27,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 - **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared. Click a count to look inside.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
-- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Notifications, Desktop app, Briefs, Hand-off prompts. Changes save as you go.
+- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, Briefs, Hand-off prompts. Changes save as you go.
 - In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
 
 | Key       | Does                                                            |
@@ -82,30 +82,35 @@ The first run writes a starting config: one space for the org with most of your 
 
 ## Agents
 
-The CLI and the MCP server talk to the running desk.
+Pick the agent you work in under Settings → Agents: Claude Code (the default), Codex, or none. Review Desk connects to it in two parts, and **Connect** there does whatever is missing:
+
+- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
+- **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK).
+
+| Agent       | MCP tools                                                                             | Skill                                     |
+| ----------- | ------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Claude Code | `claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp` | copied to `~/.claude/skills/review-desk/` |
+| Codex       | `codex mcp add review-desk --url http://localhost:47823/mcp`                          | copied to `~/.agents/skills/review-desk/` |
+
+The same from a terminal:
+
+```bash
+desk connect            # what the agent in Settings is missing, and the commands that fix it
+desk connect --apply    # do it
+desk connect codex      # or name the agent: claude, codex
+```
+
+The CLI and the MCP tools talk to the running desk.
 
 ```bash
 desk ls                 # Now and Today in the terminal; `--all` for the rest
 desk show seer#8463     # why it's there, with the rule trace
 desk done seer#8463     # also: snooze, mute, pin, restore, undo, sync, prompt, brief
-desk settings           # list settings; `desk settings set github.poll_seconds 120`
+desk settings           # list settings; `desk settings set agent.driver codex`
 desk status --short     # "desk ●2 ◐8", for a status line
 ```
 
 `bin/desk` is the CLI (`bin/desk.cmd` on Windows). To use `desk` from anywhere, link it onto your PATH: `ln -sf ~/code/review-desk/bin/desk ~/.local/bin/desk`.
-
-Agents get MCP tools (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`) from the desk itself at `http://localhost:47823/mcp`, whenever the app or `desk serve` runs. To add it to Claude Code for all projects:
-
-```bash
-desk connect claude --apply   # runs: claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp
-```
-
-For Codex, add this to `~/.codex/config.toml` (`desk connect claude` prints it too):
-
-```toml
-[mcp_servers.review-desk]
-url = "http://localhost:47823/mcp"
-```
 
 Clients that only speak stdio can run `desk mcp` instead. Routes, tools, connecting and the security model: [docs/api.md](docs/api.md).
 

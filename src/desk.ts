@@ -4,6 +4,7 @@ import path from "node:path";
 import type { GitHub, SearchHit } from "./github/index.ts";
 import type {
   Action,
+  AgentStatus,
   BoardSummary,
   BoardView,
   Brief,
@@ -31,6 +32,7 @@ import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import { analyzePr } from "./analyze.ts";
+import * as agents from "./agents.ts";
 import {
   checkSetting,
   effective,
@@ -311,6 +313,20 @@ export class Desk {
     writeSettings(this.settingsPath, next);
     this.reloadSettings();
     return { ok: true, errors: [], settings: this.getSettings() };
+  }
+
+  // ---------------------------------------------------------------- agents
+
+  agentStatus(mcpUrl: string): AgentStatus {
+    return agents.status(this.settings["agent.driver"], mcpUrl);
+  }
+
+  async connectAgent(mcpUrl: string): Promise<AgentStatus> {
+    try {
+      return await agents.connect(this.settings["agent.driver"], mcpUrl);
+    } catch (e) {
+      throw new DeskError(502, (e as Error).message);
+    }
   }
 
   // ---------------------------------------------------------------- sync

@@ -4,7 +4,17 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { BoardView, ConfigError, FieldDoc, FocusView, ItemDetail, Overview, PreviewResult, SettingsView } from "../../src/types.ts";
+import type {
+  AgentStatus,
+  BoardView,
+  ConfigError,
+  FieldDoc,
+  FocusView,
+  ItemDetail,
+  Overview,
+  PreviewResult,
+  SettingsView,
+} from "../../src/types.ts";
 
 const child = spawn(
   process.execPath,
@@ -179,4 +189,16 @@ test("settings: schema, save, reject and reset", async () => {
   assert.ok(!/^\s*(poll_seconds|\[signals\])/m.test(cfg.text));
   const { data: p } = await call<PreviewResult>("POST", "/api/config/preview", { text: `poll_seconds = 60\n${cfg.text}` });
   assert.match(p.errors[0]?.message ?? "", /moved to Settings/);
+});
+
+test("agents: status for the selected driver, and connect", async () => {
+  const { data: a } = await call<AgentStatus>("GET", "/api/agents");
+  assert.equal(a.driver, "claude-code");
+  assert.equal(a.mcp?.connected, true);
+  assert.equal(a.skill?.state, "missing");
+  const { data: c } = await call<AgentStatus>("POST", "/api/agents/connect", {});
+  assert.equal(c.skill?.state, "installed");
+  await call("PUT", "/api/settings", { set: { "agent.driver": "none" } });
+  assert.deepEqual((await call<AgentStatus>("GET", "/api/agents")).data, { driver: "none", mcp: null, skill: null });
+  await call("PUT", "/api/settings", { reset: ["agent.driver"] });
 });

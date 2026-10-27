@@ -187,3 +187,42 @@ test("opening a URL and notifying per platform, all as argv", () => {
   assert.deepEqual(notifyCommand("Review Desk", "body", "darwin")?.[1].slice(-2), ["body", "Review Desk"]);
   assert.equal(notifyCommand("Review Desk", "body", "win32"), null);
 });
+
+// A scratch HOME (USERPROFILE on Windows) and an empty PATH: the real ~/.claude, ~/.claude.json and ~/.codex are never touched.
+test("agents: status for agent.driver, and connect", async () => {
+  const t = await setup();
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH };
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  Object.assign(process.env, { HOME: home, USERPROFILE: home, PATH: path.join(home, "empty") });
+  try {
+    fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { "review-desk": { type: "http" } } }));
+    const before = await t.json("/api/agents");
+    assert.equal(before.driver, "claude-code");
+    assert.deepEqual(before.mcp, {
+      connected: true,
+      command: "claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp",
+    });
+    assert.equal(before.skill.state, "missing");
+    const after = await t.json("/api/agents/connect", { method: "POST" });
+    assert.equal(after.skill.state, "installed");
+    assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "review-desk", "SKILL.md")));
+
+    const put = { method: "PUT", headers: { "content-type": "application/json" } };
+    await t.json("/api/settings", { ...put, body: JSON.stringify({ set: { "agent.driver": "none" } }) });
+    assert.deepEqual(await t.json("/api/agents"), { driver: "none", mcp: null, skill: null });
+    if (process.platform !== "win32") {
+      await t.json("/api/settings", { ...put, body: JSON.stringify({ set: { "agent.driver": "codex" } }) });
+      const r = await t.req("/api/agents/connect", { method: "POST" });
+      assert.equal(r.status, 502);
+      assert.deepEqual(await r.json(), {
+        error: "codex isn't on PATH. Run it yourself: codex mcp add review-desk --url http://localhost:47823/mcp",
+      });
+    }
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    t.cleanup();
+  }
+});

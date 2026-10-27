@@ -112,6 +112,8 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | GET    | `/api/fields`         |                                                        | `FieldDoc[]`                                                                                                                                                                 |
 | GET    | `/api/settings`       |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                             |
 | PUT    | `/api/settings`       | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                          |
+| GET    | `/api/agents`         |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                                      |
+| POST   | `/api/agents/connect` |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                                        |
 | GET    | `/api/status`         |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                                     |
 | GET    | `/api/events`         |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                                |
 | GET    | `/health`             |                                                        | `{ ok: true, version }`                                                                                                                                                      |
@@ -141,7 +143,7 @@ desk fields                        the fields rules can use
 desk config [path|check|edit]      works with the server down too
 desk settings [set <key> <value> | reset <key>]
 desk mcp                           MCP server on stdio
-desk connect claude [--apply]      print (or run) `claude mcp add --transport http --scope user review-desk http://localhost:<port>/mcp`, plus Codex config
+desk connect [claude|codex] [--apply]   your agent (Settings → Agents): its MCP tools and the skill; --apply connects what's missing
 desk install | uninstall           launchd LaunchAgent for the headless server (macOS); the app has "Open at login"
 ```
 

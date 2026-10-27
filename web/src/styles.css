@@ -1609,6 +1609,16 @@ kbd {
   font-size: 13px;
 }
 
+.input.choice {
+  width: auto;
+  min-width: 200px;
+  cursor: pointer;
+}
+
+.agent .btn {
+  margin-top: 12px;
+}
+
 .hotkey {
   display: flex;
   flex-wrap: wrap;

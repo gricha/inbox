@@ -125,6 +125,9 @@ export function createApp(desk: Desk, port: number): Hono {
     const body = await c.req.json<{ set?: Record<string, unknown>; reset?: string[] }>();
     return c.json(desk.putSettings({ set: body.set, reset: body.reset }));
   });
+  const mcpUrl = `http://localhost:${port}/mcp`;
+  app.get("/api/agents", (c) => c.json(desk.agentStatus(mcpUrl)));
+  app.post("/api/agents/connect", async (c) => c.json(await desk.connectAgent(mcpUrl)));
   app.get("/api/status", (c) => {
     ready();
     return c.json(desk.status());

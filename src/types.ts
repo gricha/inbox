@@ -171,7 +171,7 @@ export interface Config {
 // ---------------------------------------------------------------------------
 // Settings (settings.json): how the desk behaves. Boards and rules stay in config.toml.
 
-export type SettingType = "number" | "boolean" | "string" | "text" | "list" | "hotkey";
+export type SettingType = "number" | "boolean" | "string" | "text" | "list" | "hotkey" | "select";
 export type SettingValue = number | boolean | string | string[];
 
 export interface SettingDef {
@@ -179,8 +179,9 @@ export interface SettingDef {
   section: string;
   label: string;
   help?: string;
-  type: SettingType; // text = multi-line string, list = strings, hotkey = Electron accelerator ("" = off)
+  type: SettingType; // text = multi-line string, list = strings, hotkey = Electron accelerator ("" = off), select = one of options
   default: number | boolean | string | readonly string[];
+  options?: readonly { value: string; label: string }[]; // select only
   min?: number;
   max?: number;
   pattern?: string; // strings and list items must match (an empty "string" is always allowed unless required)
@@ -214,6 +215,13 @@ export interface SettingsView {
   overridden: string[]; // keys set in settings.json
   errors: ConfigError[]; // settings.json problems; bad entries fall back to defaults
   github: GitHubStatus;
+}
+
+// GET /api/agents: whether the agent in agent.driver has the desk's MCP tools and the Review Desk skill. null for driver "none".
+export interface AgentStatus {
+  driver: string;
+  mcp: { connected: boolean; command: string } | null; // command: what Connect runs to register the desk
+  skill: { state: "installed" | "outdated" | "missing"; path: string; command: string } | null; // path: the installed SKILL.md
 }
 
 // window.desktop: set by the desktop app's preload; undefined in a browser.

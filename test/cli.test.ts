@@ -39,6 +39,26 @@ async function withPort<T>(port: number, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, vars);
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+// A scratch HOME (USERPROFILE on Windows) and desk home, so connect never reads or writes the real ~/.claude, ~/.codex or ~/.review-desk.
+function scratchHome(settings: Record<string, unknown> = {}) {
+  const home = mkdtempSync(join(tmp, "home-"));
+  writeFileSync(join(home, "settings.json"), JSON.stringify(settings));
+  return { HOME: home, USERPROFILE: home, DESK_HOME: home, DESK_PORT: "47960" };
+}
+
 const lastCall = () => {
   const last = fake.calls.at(-1);
   assert.ok(last, "no call reached the fake API");
@@ -269,7 +289,8 @@ test("usage errors exit 2", async () => {
     ["config", "nope"],
     ["serve", "--port", "x"],
     ["serve", "--port", "0"],
-    ["connect", "codex"],
+    ["connect", "vim"],
+    ["connect", "claude", "codex"],
     ...settings,
   ]) {
     const r = await run(argv);
@@ -334,6 +355,7 @@ test("settings set parses the value by the setting's type", async () => {
     ["notify.quiet", "", ""],
     ["app.hotkey", "Control+Shift+K", "Control+Shift+K"],
     ["handoff.issue", "Look at {item.url}\nThen reply.", "Look at {item.url}\nThen reply."],
+    ["agent.driver", "codex", "codex"],
   ];
   for (const [key, raw, value] of cases) {
     const r = await run(["settings", "set", key, raw]);
@@ -353,6 +375,7 @@ test("settings set rejects bad values without writing", async () => {
     [["github.poll_seconds", "soon"], "desk: github.poll_seconds must be a number\n"],
     [["notify.enabled", "maybe"], "desk: notify.enabled must be true or false (yes/no, on/off)\n"],
     [["github.my_repos", "nope"], `desk: github.my_repos "nope" isn't owner/name\n`],
+    [["agent.driver", "vim"], "desk: agent.driver must be one of claude-code, codex, none\n"],
     [["nope.key", "1"], `desk: unknown setting "nope.key"; desk settings lists them\n`],
   ];
   for (const [args, err] of bad) {
@@ -373,35 +396,54 @@ test("settings reset puts one back to its default", async () => {
   assert.deepEqual(fake.settings, {});
 });
 
-test("connect claude prints the Claude Code command and the Codex config", async () => {
-  const r = await withPort(47960, () => run(["connect", "claude"]));
-  assert.equal(r.code, 0);
-  assert.match(r.out, /^claude mcp add --transport http --scope user review-desk http:\/\/localhost:47960\/mcp$/m);
-  assert.match(r.out, /^\[mcp_servers\.review-desk\]\nurl = "http:\/\/localhost:47960\/mcp"$/m);
+test("connect claude prints what's missing and the commands that fix it", async () => {
+  const env = scratchHome();
+  const r = await withEnv(env, () => run(["connect", "claude"]));
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.split("\n");
+  assert.deepEqual(lines.slice(0, 3), [
+    "# Claude Code (desk connect claude --apply does this)",
+    "# MCP tools: not connected",
+    "claude mcp add --transport http --scope user review-desk http://localhost:47960/mcp",
+  ]);
+  assert.equal(lines[3], "# Skill: not installed");
+  assert.match(lines[4]!, /^mkdir -p .*\.claude.skills'? && cp -R .*review-desk'? .*\.claude.skills'?\/$/);
+});
+
+test("connect without an argument uses the agent in settings", async () => {
+  const codex = await withEnv(scratchHome({ "agent.driver": "codex" }), () => run(["connect"]));
+  assert.equal(codex.code, 0, codex.err);
+  assert.match(codex.out, /^# Codex \(desk connect --apply does this\)\n/);
+  assert.match(codex.out, /^codex mcp add review-desk --url http:\/\/localhost:47960\/mcp$/m);
+  const none = await withEnv(scratchHome({ "agent.driver": "none" }), () => run(["connect"]));
+  assert.equal(none.out, "No agent selected in Settings → Agents. Pick one there, or: desk connect claude (or codex)\n");
 });
 
 // A fake claude, alone on PATH, so the real one (and the user's config) is never reached.
-test("connect claude --apply runs claude with those arguments", { skip: process.platform === "win32" }, async () => {
-  const bin = join(tmp, "fake-claude");
+test("connect --apply registers the desk and installs the skill", { skip: process.platform === "win32" }, async () => {
+  const env = scratchHome();
+  const bin = join(env.HOME, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "claude"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(tmp, "claude-args")}"\n`);
+  writeFileSync(
+    join(bin, "claude"),
+    `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/claude-args"\nprintf '{"mcpServers":{"review-desk":{}}}' > "$HOME/.claude.json"\n`,
+  );
   chmodSync(join(bin, "claude"), 0o755);
-  const prev = process.env.PATH;
-  try {
-    process.env.PATH = bin;
-    const r = await withPort(47960, () => run(["connect", "claude", "--apply"]));
-    assert.equal(r.code, 0, r.err);
-    assert.equal(
-      readFileSync(join(tmp, "claude-args"), "utf8"),
-      "mcp\nadd\n--transport\nhttp\n--scope\nuser\nreview-desk\nhttp://localhost:47960/mcp\n",
-    );
-    process.env.PATH = tmp;
-    const missing = await run(["connect", "claude", "--apply"]);
-    assert.equal(missing.code, 1);
-    assert.match(missing.err, /^desk: can't run claude \(.*ENOENT\); run the command above yourself\n$/);
-  } finally {
-    process.env.PATH = prev;
-  }
+  const missing = await withEnv({ ...env, PATH: tmp }, () => run(["connect", "--apply"]));
+  assert.equal(missing.code, 1);
+  assert.equal(
+    missing.err,
+    "desk: claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk http://localhost:47960/mcp\n",
+  );
+  const r = await withEnv({ ...env, PATH: bin }, () => run(["connect", "--apply"]));
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    readFileSync(join(env.HOME, "claude-args"), "utf8"),
+    "mcp\nadd\n--transport\nhttp\n--scope\nuser\nreview-desk\nhttp://localhost:47960/mcp\n",
+  );
+  const skill = join(env.HOME, ".claude", "skills", "review-desk", "SKILL.md");
+  assert.equal(r.out, `✓ Claude Code: MCP tools connected, skill installed (${skill})\n`);
+  assert.equal(readFileSync(skill, "utf8"), readFileSync(join(ROOT, "skills", "review-desk", "SKILL.md"), "utf8"));
 });
 
 test("install and uninstall are macOS-only", async () => {

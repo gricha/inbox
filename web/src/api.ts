@@ -1,5 +1,6 @@
 import type {
   Action,
+  AgentStatus,
   Brief,
   ConfigError,
   FieldDoc,
@@ -60,4 +61,6 @@ export const api = {
   // Invalid values write nothing; `errors` says which keys and why.
   saveSettings: (patch: { set?: Record<string, SettingValue>; reset?: string[] }) =>
     call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
+  agents: () => call<AgentStatus>("GET", "/api/agents"),
+  connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
 };

@@ -8,20 +8,24 @@ Types named here are in [src/types.ts](../src/types.ts), which is the source of 
 
 Agents reach the queue over MCP. The desk serves it at `/mcp` whenever it runs, so there is nothing else to start.
 
-### Claude Code (recommended: HTTP)
+### Your agent (Settings → Agents)
+
+`agent.driver` picks the agent you work in: `claude-code` (the default), `codex` or `none`. Settings → Agents shows whether it has the desk's MCP tools and the Review Desk skill ([skills/review-desk/SKILL.md](../skills/review-desk/SKILL.md)), and its **Connect** button does what's missing (`POST /api/agents/connect`). From a terminal:
 
 ```bash
-desk connect claude            # prints the command below (with DESK_PORT if set), plus the Codex config
-desk connect claude --apply    # runs it
+desk connect                   # what's missing for the agent in settings, and the commands that fix it
+desk connect --apply           # does it
+desk connect claude|codex      # a specific agent instead
 ```
 
-which is:
+Connecting copies the skill (and refreshes a copy that differs from the repo's), then registers the MCP server if it isn't registered yet:
 
-```bash
-claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp
-```
+| Agent       | Registered when                                        | Registers with                                                                        | Skill                                   |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------- | --------------------------------------- |
+| Claude Code | `~/.claude.json` has `mcpServers["review-desk"]`       | `claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp` | `~/.claude/skills/review-desk/SKILL.md` |
+| Codex       | `~/.codex/config.toml` has `[mcp_servers.review-desk]` | `codex mcp add review-desk --url http://localhost:47823/mcp`                          | `~/.agents/skills/review-desk/SKILL.md` |
 
-`--scope user` makes it available in every project. `claude mcp list` then shows `review-desk: http://localhost:47823/mcp (HTTP) - ✔ Connected` while the desk runs, and a failed connection while it doesn't. If you added the older stdio `review-desk` before, `claude mcp add` says it already exists: run `claude mcp remove review-desk -s user` first.
+`--scope user` makes Claude Code's entry available in every project. `claude mcp list` then shows `review-desk: http://localhost:47823/mcp (HTTP) - ✔ Connected` while the desk runs, and a failed connection while it doesn't. If you added the older stdio `review-desk` before, it already counts as registered; to switch it to HTTP, run `claude mcp remove review-desk -s user`, then Connect again. Codex reads user skills from `~/.agents/skills` ([Codex skills](https://developers.openai.com/codex/skills)).
 
 ### Claude Code over stdio (fallback)
 
@@ -29,19 +33,6 @@ For a client that only speaks stdio, `desk mcp` serves the same tools on stdin/s
 
 ```bash
 claude mcp add --scope user review-desk -- ~/code/review-desk/bin/desk mcp
-```
-
-### Codex
-
-```bash
-codex mcp add review-desk --url http://localhost:47823/mcp
-```
-
-or in `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.review-desk]
-url = "http://localhost:47823/mcp"
 ```
 
 ### Any MCP client
@@ -72,29 +63,31 @@ The same seven tools over HTTP and stdio. Results are text; most end with a JSON
 
 JSON in and out. Errors are `{ error: string, candidates?: string[] }` with a 4xx or 5xx status: 400 for a bad request, 404 for an unknown board, item or route, 409 for an ambiguous short ref (with `candidates`). Routes marked ✓ answer 503 until the first load finishes; if config.toml has errors from the start, those that read the queue (overview, queue, focus, boards, item, act, analyze, status) keep answering 503 and `/api/config` works so you can fix it. Errors in a later edit keep the last good config running.
 
-| Method      | Path                  | Request                                                    | Response                                                                                                                     | 503 while starting |
-| ----------- | --------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| GET         | `/health`             |                                                            | `{ ok: true, version: string }`                                                                                              |                    |
-| GET         | `/api/overview`       |                                                            | `Overview`                                                                                                                   | ✓                  |
-| GET         | `/api/queue`          |                                                            | `QueueView`: every item once, at its best placement (the UI's main surface)                                                  | ✓                  |
-| GET         | `/api/focus`          |                                                            | `FocusView`: the queue's now and today                                                                                       | ✓                  |
-| GET         | `/api/boards/:id`     |                                                            | `BoardView`                                                                                                                  | ✓                  |
-| GET         | `/api/item`           | `?id=<ref>` (encode `#` as `%23`)                          | `ItemDetail`                                                                                                                 | ✓                  |
-| POST        | `/api/act`            | `{ id: string, action: Action, until?: string }`           | `{ ok: true, state: ItemState, undo_seq: number }` (`seen` and `undo` return `undo_seq: 0`)                                  | ✓                  |
-| POST        | `/api/undo`           | `{ seq?: number }` (default: the latest action)            | `{ ok: true, id: string, action: Action }`; 409 if a later action on the same item must be undone first                      | ✓                  |
-| POST        | `/api/analyze`        | `{ id: string, force?: boolean }`                          | `{ ok: true, brief: Brief }`; 400 for an issue, 409 while one runs, 502 with the reason if the `claude` CLI fails            | ✓                  |
-| POST        | `/api/sync`           |                                                            | `{ ok: true }` (starts a sync now)                                                                                           |                    |
-| GET         | `/api/config`         |                                                            | `ConfigDoc`: `{ path, text, errors: ConfigError[], warnings?: ConfigError[] }`                                               | ✓                  |
-| POST        | `/api/config/preview` | `{ text: string }`                                         | `PreviewResult`: errors, and per board the new counts and which items would move                                             | ✓                  |
-| PUT         | `/api/config`         | `{ text: string, base?: string }`                          | `{ ok: boolean, errors: ConfigError[], warnings: ConfigError[] }`; saves only if valid; 409 if the file changed since `base` | ✓                  |
-| GET         | `/api/fields`         |                                                            | `FieldDoc[]`: every field rules can use                                                                                      |                    |
-| GET         | `/api/settings`       |                                                            | `SettingsView`: schema, effective values, what's overridden, GitHub status                                                   |                    |
-| PUT         | `/api/settings`       | `{ set?: Record<string, SettingValue>, reset?: string[] }` | `{ ok: boolean, errors: ConfigError[], settings: SettingsView }`; writes nothing if any value is invalid                     |                    |
-| GET         | `/api/status`         |                                                            | `{ now: number, today: number, new: number, text: string }`; `text` is e.g. `desk ●2 ◐5 +3`, `""` when 0/0                   | ✓                  |
-| GET         | `/api/events`         |                                                            | Server-sent events, below                                                                                                    |                    |
-| POST        | `/mcp`                | MCP JSON-RPC (Streamable HTTP)                             | JSON-RPC responses as an SSE stream; 202 for notifications                                                                   |                    |
-| GET, DELETE | `/mcp`                |                                                            | 405, `Allow: POST`                                                                                                           |                    |
-| GET         | anything else         |                                                            | The web UI from `web/dist` (unknown paths get `index.html`)                                                                  |                    |
+| Method      | Path                  | Request                                                    | Response                                                                                                                                                                               | 503 while starting |
+| ----------- | --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| GET         | `/health`             |                                                            | `{ ok: true, version: string }`                                                                                                                                                        |                    |
+| GET         | `/api/overview`       |                                                            | `Overview`                                                                                                                                                                             | ✓                  |
+| GET         | `/api/queue`          |                                                            | `QueueView`: every item once, at its best placement (the UI's main surface)                                                                                                            | ✓                  |
+| GET         | `/api/focus`          |                                                            | `FocusView`: the queue's now and today                                                                                                                                                 | ✓                  |
+| GET         | `/api/boards/:id`     |                                                            | `BoardView`                                                                                                                                                                            | ✓                  |
+| GET         | `/api/item`           | `?id=<ref>` (encode `#` as `%23`)                          | `ItemDetail`                                                                                                                                                                           | ✓                  |
+| POST        | `/api/act`            | `{ id: string, action: Action, until?: string }`           | `{ ok: true, state: ItemState, undo_seq: number }` (`seen` and `undo` return `undo_seq: 0`)                                                                                            | ✓                  |
+| POST        | `/api/undo`           | `{ seq?: number }` (default: the latest action)            | `{ ok: true, id: string, action: Action }`; 409 if a later action on the same item must be undone first                                                                                | ✓                  |
+| POST        | `/api/analyze`        | `{ id: string, force?: boolean }`                          | `{ ok: true, brief: Brief }`; 400 for an issue, 409 while one runs, 502 with the reason if the `claude` CLI fails                                                                      | ✓                  |
+| POST        | `/api/sync`           |                                                            | `{ ok: true }` (starts a sync now)                                                                                                                                                     |                    |
+| GET         | `/api/config`         |                                                            | `ConfigDoc`: `{ path, text, errors: ConfigError[], warnings?: ConfigError[] }`                                                                                                         | ✓                  |
+| POST        | `/api/config/preview` | `{ text: string }`                                         | `PreviewResult`: errors, and per board the new counts and which items would move                                                                                                       | ✓                  |
+| PUT         | `/api/config`         | `{ text: string, base?: string }`                          | `{ ok: boolean, errors: ConfigError[], warnings: ConfigError[] }`; saves only if valid; 409 if the file changed since `base`                                                           | ✓                  |
+| GET         | `/api/fields`         |                                                            | `FieldDoc[]`: every field rules can use                                                                                                                                                |                    |
+| GET         | `/api/settings`       |                                                            | `SettingsView`: schema, effective values, what's overridden, GitHub status                                                                                                             |                    |
+| PUT         | `/api/settings`       | `{ set?: Record<string, SettingValue>, reset?: string[] }` | `{ ok: boolean, errors: ConfigError[], settings: SettingsView }`; writes nothing if any value is invalid                                                                               |                    |
+| GET         | `/api/agents`         |                                                            | `AgentStatus` for `agent.driver`: `{ driver, mcp: { connected, command } \| null, skill: { state: "installed" \| "outdated" \| "missing", path, command } \| null }` (null for `none`) |                    |
+| POST        | `/api/agents/connect` |                                                            | `AgentStatus` after installing the skill and registering the MCP server; 502 with the command to run yourself if the agent's CLI fails or isn't on PATH                                |                    |
+| GET         | `/api/status`         |                                                            | `{ now: number, today: number, new: number, text: string }`; `text` is e.g. `desk ●2 ◐5 +3`, `""` when 0/0                                                                             | ✓                  |
+| GET         | `/api/events`         |                                                            | Server-sent events, below                                                                                                                                                              |                    |
+| POST        | `/mcp`                | MCP JSON-RPC (Streamable HTTP)                             | JSON-RPC responses as an SSE stream; 202 for notifications                                                                                                                             |                    |
+| GET, DELETE | `/mcp`                |                                                            | 405, `Allow: POST`                                                                                                                                                                     |                    |
+| GET         | anything else         |                                                            | The web UI from `web/dist` (unknown paths get `index.html`)                                                                                                                            |                    |
 
 `Action` is `done`, `snooze`, `mute`, `unmute`, `pin`, `unpin`, `restore`, `seen` (marks it looked at; not undoable) or `undo` (undoes the latest action on that item). `until` is as for `desk_act`.
 

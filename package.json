@@ -76,6 +76,7 @@
       "electron/**",
       "src/**",
       "web/dist/**",
+      "skills/**",
       "assets/**",
       "package.json"
     ],

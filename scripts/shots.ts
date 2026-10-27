@@ -123,6 +123,7 @@ const SHOTS: Shot[] = [
   },
   { name: "settings-github", go: at("#/settings/github") },
   { name: "settings-rules", go: at("#/settings/rules") },
+  { name: "settings-agent", go: at("#/settings/agent") },
   { name: "settings-app", go: at("#/settings/app") },
   {
     // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.

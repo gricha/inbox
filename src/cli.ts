@@ -5,10 +5,12 @@ import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
+import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { DeskApiError, DeskDownError } from "./client.ts";
 import { install, uninstall } from "./launchd.ts";
 import { openCommand } from "./notify.ts";
+import { effective, readSettings, settingDef, settingsPath } from "./settings.ts";
 import type { Action, Bucket, Card, SettingDef, SettingValue } from "./types.ts";
 
 export interface Out {
@@ -40,7 +42,7 @@ const USAGE = `usage: desk <command>
   settings reset <key>                back to the default
   fields                              the fields rules can use
   mcp                                 MCP server on stdio (the desk also serves MCP over HTTP at /mcp)
-  connect claude [--apply]            print the command that adds the desk's MCP to Claude Code; --apply runs it
+  connect [claude|codex] [--apply]    connect your agent (Settings → Agents) to the desk: MCP tools and skill; --apply does it
   install | uninstall                 run the server at login (macOS launchd)
 
 <ref> is owner/repo#123, or repo#123 when unique.
@@ -85,7 +87,7 @@ const ARITY: Record<string, [number, number]> = {
   config: [0, 1],
   settings: [0, 3],
   mcp: [0, 0],
-  connect: [1, 1],
+  connect: [0, 1],
   install: [0, 0],
   uninstall: [0, 0],
   done: [1, 1],
@@ -115,6 +117,7 @@ function ctxFor(io: IO, args: string[], opts: Record<string, unknown>) {
 }
 type Ctx = ReturnType<typeof ctxFor>;
 
+const deskHome = () => (process.env.DESK_HOME ?? "") || join(homedir(), ".review-desk");
 const shortRef = (card: Card) => `${card.repo.split("/")[1]}#${card.number}`;
 // GitHub titles are untrusted: strip control chars so they can't emit terminal escapes.
 const plain = (s: string) => s.replaceAll(/\p{Cc}+/gu, " ");
@@ -294,7 +297,7 @@ async function config(x: Ctx): Promise<number> {
     if (e instanceof DeskDownError) return null;
     throw e;
   });
-  const path = up?.path ?? join((process.env.DESK_HOME ?? "") || join(homedir(), ".review-desk"), "config.toml");
+  const path = up?.path ?? join(deskHome(), "config.toml");
   if (sub === "path") return (x.out(path), 0);
   if (sub === "edit") {
     const editor = (process.env.EDITOR ?? "") || (process.platform === "win32" ? "notepad" : "vi");
@@ -393,19 +396,31 @@ async function settings(x: Ctx): Promise<number> {
   return 0;
 }
 
-function connect(x: Ctx): Promise<number> {
-  if (x.args[0] !== "claude") throw new UsageError(`unknown connect target: ${x.args[0]} (try: desk connect claude)`);
+const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
+
+// Works with the desk down too: it reads the driver from settings.json and the agent's own config files.
+async function connect(x: Ctx): Promise<number> {
+  const name =
+    x.args[0] === "claude" ? "claude-code" : (x.args[0] ?? effective(readSettings(settingsPath(deskHome())).overrides)["agent.driver"]);
+  const driver = settingDef("agent.driver")?.options?.find((o) => o.value === name);
+  if (!driver) throw new UsageError(`unknown agent: ${name} (try: desk connect claude, or codex)`);
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
-  const args = ["mcp", "add", "--transport", "http", "--scope", "user", "review-desk", url];
-  x.out(`# Claude Code, all projects${x.opts.apply ? "" : " (desk connect claude --apply runs this)"}:`);
-  x.out(`claude ${args.join(" ")}`);
-  x.out(`\n# Codex: add to ~/.codex/config.toml\n[mcp_servers.review-desk]\nurl = "${url}"`);
-  x.out(`\n# Works while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
-  if (!x.opts.apply) return Promise.resolve(0);
-  x.out();
-  const r = spawnSync("claude", args, { stdio: "inherit" });
-  if (r.error) throw new Error(`can't run claude (${r.error.message}); run the command above yourself`);
-  return Promise.resolve(r.status ?? 1);
+  const s = x.opts.apply ? await agents.connect(driver.value, url) : agents.status(driver.value, url);
+  if (!s.mcp || !s.skill) {
+    x.out("No agent selected in Settings → Agents. Pick one there, or: desk connect claude (or codex)");
+    return 0;
+  }
+  if (s.mcp.connected && s.skill.state === "installed") {
+    x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
+    return 0;
+  }
+  x.out(`# ${driver.label}${x.opts.apply ? "" : ` (desk connect ${x.args[0] ? `${x.args[0]} ` : ""}--apply does this)`}`);
+  x.out(`# MCP tools: ${s.mcp.connected ? "connected" : "not connected"}`);
+  if (!s.mcp.connected) x.out(s.mcp.command);
+  x.out(`# Skill: ${SKILL_STATE[s.skill.state]}`);
+  if (s.skill.state !== "installed") x.out(s.skill.command);
+  x.out(`# The tools work while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
+  return 0;
 }
 
 // launchd is macOS-only; elsewhere the desktop app's login item does the job.
