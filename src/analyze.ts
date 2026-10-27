@@ -48,8 +48,9 @@ function run(s: Spawn, opts: { input?: string; cwd?: string; timeout: number; st
           resolve(stdout);
           return;
         }
-        // cmd.exe exits 9009 when it can't find the command.
-        const missing = err.code === "ENOENT" || (s.shell && err.code === 9009);
+        // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
+        const missing =
+          err.code === "ENOENT" || (s.shell && (err.code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
         reject(new Error(missing ? opts.missing : (stderr || err.message).trim().split("\n").slice(-3).join(" ")));
       },
     );

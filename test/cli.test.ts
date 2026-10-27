@@ -470,7 +470,8 @@ test("install and uninstall are macOS-only", async () => {
 // oxlint-disable-next-line typescript/strict-void-return -- promisify picks execFile's util.promisify.custom form, so no return value is discarded
 const execBin = promisify(execFile);
 
-test("bin/desk resolves through a symlink", async () => {
+// bin/desk is a POSIX sh launcher; Windows uses bin/desk.cmd.
+test("bin/desk resolves through a symlink", { skip: process.platform === "win32" }, async () => {
   const link = join(tmp, "desk");
   symlinkSync(BIN, link);
   const env = { ...process.env, DESK_PORT: String(fake.port) };
@@ -489,7 +490,8 @@ test("bin/desk resolves through a symlink", async () => {
   );
 });
 
-test("plistFor builds a LaunchAgent plist", () => {
+// launchd is macOS-only, and Windows would join these paths with backslashes.
+test("plistFor builds a LaunchAgent plist", { skip: process.platform === "win32" }, () => {
   const xml = plistFor({ nodePath: "/opt/node/bin/node", cliPath: "/Users/a&b/review-desk/src/cli.ts", home: "/Users/a&b", port: 47823 });
   assert.match(xml, /<key>Label<\/key>\s*<string>dev\.review-desk\.desk<\/string>/);
   assert.match(
