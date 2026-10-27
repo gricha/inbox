@@ -33,23 +33,24 @@ function PinGlyph() {
   );
 }
 
-// Chips from the server become plain words; only problems get a colour.
-function word(chip: string): { text: string; tone?: "bad" | "warn" | "good" } {
+// Rows show only problems; everything else (size, approvals, threads) is in the open item.
+function problem(chip: string): { text: string; tone: "bad" | "warn" } | null {
   if (chip === "CI red") return { text: "CI failing", tone: "bad" };
   if (chip === "conflict") return { text: "merge conflict", tone: "warn" };
   if (chip === "changes requested") return { text: chip, tone: "warn" };
-  if (chip === "approved") return { text: chip, tone: "good" };
-  return { text: chip };
+  return null;
 }
 
 export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Variant; ctx: RowCtx; inRun?: boolean }) {
   const open = ctx.expanded === card.id;
   // Skip facts the reason already says ("merge conflict" twice reads as noise).
-  const facts = card.chips.map(word).filter((f) => !card.why.toLowerCase().includes(f.text.toLowerCase()));
+  const facts = card.chips
+    .map(problem)
+    .filter((f): f is NonNullable<typeof f> => f !== null && !card.why.toLowerCase().includes(f.text.toLowerCase()));
   const words = (
     <>
       {facts.map((f) => (
-        <span key={f.text} className={cls("fact-word", f.tone && `t-${f.tone}`)}>
+        <span key={f.text} className={`fact-word t-${f.tone}`}>
           {f.text}
         </span>
       ))}
@@ -112,10 +113,7 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
                 ) : variant === "hidden" ? (
                   <span>Hidden by a rule. Open it to see which.</span>
                 ) : (
-                  <>
-                    {!inRun && !card.why.startsWith(card.author) && <span className="who">{card.author}</span>}
-                    {!inRun && card.why && <span className="why">{card.why}</span>}
-                  </>
+                  !inRun && card.why && <span className="why">{card.why}</span>
                 )}
                 {words}
               </span>

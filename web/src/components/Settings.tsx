@@ -390,7 +390,7 @@ const RULES = {
 
 export function Settings({
   active,
-  section: asked,
+  section,
   view,
   now,
   loads,
@@ -412,12 +412,6 @@ export function Settings({
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
   const sections = view ? [...view.sections.slice(0, 1), RULES, ...view.sections.slice(1)] : [RULES];
-  // An unknown section (an old link, a typo) shows the first one rather than an empty pane.
-  const section = !view || sections.some((x) => x.id === asked) ? asked : (sections[0] ?? RULES).id;
-  const [rulesSeen, setRulesSeen] = useState(section === "rules");
-  useEffect(() => {
-    if (section === "rules") setRulesSeen(true);
-  }, [section]);
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
@@ -432,77 +426,70 @@ export function Settings({
     };
   }, [view, desktop]);
 
-  const s = sections.find((x) => x.id === section) ?? null;
-  const defs = view && s ? view.defs.filter((d) => d.section === s.id) : [];
-  const desktopOnly = defs.length > 0 && defs.every((d) => d.desktop);
+  // One page with every section; a link to a section (#/settings/rules) scrolls to it.
+  const ready = view !== null;
+  useEffect(() => {
+    if (!active || !ready) return;
+    if (section === "github") window.scrollTo({ top: 0 });
+    else document.querySelector(`#s-${section}`)?.scrollIntoView({ block: "start" });
+  }, [active, section, ready]);
 
   return (
     <div className="settings" hidden={!active}>
-      <select
-        className="input s-pick"
-        aria-label="Settings section"
-        value={section}
-        onChange={(e) => {
-          location.hash = `#/settings/${e.target.value}`;
-        }}
-      >
-        {sections.map((x) => (
-          <option key={x.id} value={x.id}>
-            {x.title}
-          </option>
-        ))}
-      </select>
-      <div className="s-pane">
-        {!view && section !== "rules" && <p className="quiet">Loading…</p>}
-        {view && view.errors.length > 0 && (
-          <div className="notice warn" role="alert">
-            <span>
-              settings.json has{" "}
-              {view.errors.length === 1
-                ? "a problem, so that setting uses its default"
-                : `${view.errors.length} problems, so those settings use their defaults`}
-              :
-              {view.errors.map((e) => (
-                <span key={e.path} className="s-file-err">
-                  <code>{e.path}</code> {e.message}
-                </span>
-              ))}
-            </span>
-          </div>
-        )}
-        {s && (
-          <header className="s-head-block">
-            <h1>{s.title}</h1>
-            {desktopOnly && !desktop ? (
-              <p className="s-intro">Only the desktop app uses these. Open it to change how it behaves.</p>
-            ) : (
-              s.help && <p className="s-intro">{s.help}</p>
-            )}
-          </header>
-        )}
-        {view && section === "github" && <GitHubStatusView gh={view.github} now={now} />}
-        {view && section !== "rules" && defs.length > 0 && (
-          <div className="s-fields">
-            {defs.map((d) => (
-              <Row
-                key={d.key}
-                def={d}
-                view={view}
-                onView={onView}
-                extra={d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />}
-              />
-            ))}
-          </div>
-        )}
-        {rulesSeen && (
-          <Rules active={active && section === "rules"} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />
-        )}
-        {view && section !== "rules" && (
-          <p className="s-path quiet" title={view.path}>
+      <header className="s-page-head">
+        <h1>Settings</h1>
+        {view && (
+          <p className="quiet" title={view.path}>
             Saved as you go to <code>{tilde(view.path)}</code>
           </p>
         )}
-      </div>
+      </header>
+      {!view && <p className="quiet">Loading…</p>}
+      {view && view.errors.length > 0 && (
+        <div className="notice warn" role="alert">
+          <span>
+            settings.json has{" "}
+            {view.errors.length === 1
+              ? "a problem, so that setting uses its default"
+              : `${view.errors.length} problems, so those settings use their defaults`}
+            :
+            {view.errors.map((e) => (
+              <span key={e.path} className="s-file-err">
+                <code>{e.path}</code> {e.message}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+      {sections.map((x) => {
+        const defs = view ? view.defs.filter((d) => d.section === x.id) : [];
+        const desktopOnly = defs.length > 0 && defs.every((d) => d.desktop);
+        return (
+          <section key={x.id} id={`s-${x.id}`} className="s-section" aria-labelledby={`s-${x.id}-title`}>
+            <h2 id={`s-${x.id}-title`}>{x.title}</h2>
+            {desktopOnly && !desktop ? (
+              <p className="s-intro">Only the desktop app uses these.</p>
+            ) : (
+              x.help && <p className="s-intro">{x.help}</p>
+            )}
+            {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
+            {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
+            {view && defs.length > 0 && (
+              <div className="s-fields">
+                {defs.map((d) => (
+                  <Row
+                    key={d.key}
+                    def={d}
+                    view={view}
+                    onView={onView}
+                    extra={d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

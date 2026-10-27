@@ -2,23 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Action, Card, DesktopBridge, ItemDetail, Overview, QueueView, SettingsView } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
-import {
-  DEFAULT_OPEN,
-  groupsOf,
-  matches,
-  navigable,
-  parseRoute,
-  removeCard,
-  routeHash,
-  SORTED_AWAY,
-  type GroupKey,
-  type Route,
-} from "./view.ts";
+import { DEFAULT_OPEN, groupsOf, navigable, parseRoute, removeCard, routeHash, type GroupKey, type Route } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { Help } from "./components/Help.tsx";
 import { Queue } from "./components/Queue.tsx";
 import { Settings } from "./components/Settings.tsx";
-import { cardsOf, Sidebar } from "./components/Sidebar.tsx";
+import { Sidebar } from "./components/Sidebar.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 
 interface Toast {
@@ -109,8 +98,6 @@ export function App() {
   const undoSeq = useRef<number | null>(null);
   const lastIndex = useRef(0);
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
-  const settingsLoaded = useRef(false);
-  const pendingJump = useRef<GroupKey | null>(null); // a sidebar click waiting for the queue to render
   const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
   const pending = useRef<{ id: string; until: number } | null>(null);
@@ -132,7 +119,6 @@ export function App() {
     const sn = ++settingsSeq.current;
     try {
       const s = await api.settings();
-      settingsLoaded.current = true;
       if (sn === settingsSeq.current) setSettings(s);
     } catch {}
   }, []);
@@ -141,8 +127,7 @@ export function App() {
     const r = routeRef.current;
     const exp = expandedRef.current;
     const n = ++loadSeq.current;
-    // The sidebar lists the settings sections, so they load once at start as well.
-    if (r.name === "settings" || !settingsLoaded.current) void loadSettings();
+    if (r.name === "settings") void loadSettings();
     try {
       const [ov, v, d] = await Promise.all([
         api.overview(),
@@ -189,8 +174,7 @@ export function App() {
 
   const settingsSection = route.name === "settings" ? route.section : null;
   useEffect(() => {
-    // Keep the narrow-window section dropdown focused, so arrow keys keep working in it.
-    if (document.activeElement instanceof HTMLElement && !document.activeElement.matches(".s-pick")) document.activeElement.blur();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setExpanded(null);
     setSnoozeFor(null);
     if (settingsSection !== null) {
@@ -459,32 +443,6 @@ export function App() {
     if (next) setSelected(next.id);
   }
 
-  // Sidebar: go to a group in the queue, opening it if it's sorted away and closed.
-  // A second click on an open sorted-away group closes it, like the bar below the queue.
-  function jump(k: GroupKey) {
-    const away = SORTED_AWAY.includes(k);
-    if (away && open[k] && route.name === "queue") {
-      toggleGroup(k);
-      return;
-    }
-    if (away && !open[k]) toggleGroup(k);
-    // Move the j/k cursor there too, and take focus off the sidebar so Enter opens the row.
-    const first = view ? cardsOf(view, k).find((c) => matches(c, filter)) : undefined;
-    if (first) setSelected(first.id);
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    pendingJump.current = k;
-    if (route.name !== "queue") go({ name: "queue" });
-    else setTick((t) => t + 1);
-  }
-
-  // One try, on the first queue render after the click: an empty group has no heading, and a late jump would surprise.
-  useEffect(() => {
-    const k = pendingJump.current;
-    if (!k || route.name !== "queue") return;
-    pendingJump.current = null;
-    document.querySelector(`#h-${k}`)?.scrollIntoView({ block: "start" });
-  });
-
   function toggleGroup(k: GroupKey) {
     setOpen((o) => {
       const next = { ...o, [k]: !o[k] };
@@ -598,7 +556,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} view={view} settings={settings} open={open} jump={jump} inert={help} />
+      <Sidebar route={route} view={view} inert={help} />
       <div className="col">
         <TopBar
           overview={overview}

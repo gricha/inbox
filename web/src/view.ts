@@ -27,7 +27,7 @@ export function parseRoute(hash: string): Route {
 
 export const routeHash = (r: Route) => (r.name === "settings" ? `#/settings/${r.section}` : "#/");
 
-export const matches = (c: Card, q: string) =>
+const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = { now: true, today: true, later: false, fyi: false, hidden: false, cleared: false };

@@ -1,60 +1,13 @@
-import type { QueueView, SettingsView } from "../../../src/types.ts";
+import type { QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { SORTED_AWAY, type GroupKey, type Route } from "../view.ts";
+import type { Route } from "../view.ts";
 
-const LABEL: Record<GroupKey, string> = { now: "Now", today: "Today", later: "Later", fyi: "FYI", hidden: "Hidden", cleared: "Cleared" };
-const RULES = { id: "rules", title: "Rules" };
-
-export const cardsOf = (view: QueueView, k: GroupKey) => (k === "hidden" ? view.hidden : k === "cleared" ? view.cleared : view.sections[k]);
-
-// Navigation for the one queue and its settings. No categories here: those are rules.
-export function Sidebar({
-  route,
-  view,
-  settings,
-  open,
-  jump,
-  inert,
-}: {
-  route: Route;
-  view: QueueView | null;
-  settings: SettingsView | null;
-  open: Record<GroupKey, boolean>;
-  jump: (k: GroupKey) => void;
-  inert?: boolean;
-}) {
-  const sections = settings ? [...settings.sections.slice(0, 1), RULES, ...settings.sections.slice(1)] : [];
-  // An unknown section shows the first one (see Settings), so mark that one.
-  const shown = route.name === "settings" && sections.some((x) => x.id === route.section) ? route.section : sections[0]?.id;
+// Sources of work, one entry each (just GitHub for now), and Settings in the footer.
+export function Sidebar({ route, view, inert }: { route: Route; view: QueueView | null; inert?: boolean }) {
   const onQueue = route.name === "queue";
-
-  const item = (k: GroupKey) => {
-    const cards = view ? cardsOf(view, k) : [];
-    const away = SORTED_AWAY.includes(k);
-    const fresh = away ? cards.filter((c) => c.new).length : 0;
-    return (
-      <button
-        key={k}
-        type="button"
-        className={cls("side-item", k === "now" && cards.length > 0 && "side-now", onQueue && away && open[k] && "open")}
-        aria-expanded={away ? open[k] : undefined}
-        disabled={away && view !== null && cards.length === 0}
-        onClick={() => {
-          jump(k);
-        }}
-      >
-        <span className="side-name">{LABEL[k]}</span>
-        {fresh > 0 && (
-          <>
-            <span className="side-new" aria-hidden="true" title={`${fresh} with new activity`} />
-            <span className="sr-only">, {fresh} new</span>
-          </>
-        )}
-        <span className="side-count">{view ? cards.length : ""}</span>
-      </button>
-    );
-  };
-
+  const onSettings = route.name === "settings";
+  const now = view?.sections.now.length ?? 0;
+  const today = view?.sections.today.length ?? 0;
   return (
     <aside className="side" inert={inert}>
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
@@ -66,11 +19,12 @@ export function Sidebar({
         </svg>
         <span>Review Desk</span>
       </div>
-      <nav className="side-nav" aria-label="Queue and settings">
+      <nav className="side-nav" aria-label="Sources">
         <a
           href="#/"
-          className="side-label first"
+          className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
+          title={view ? `${now} now, ${today} today` : undefined}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (onQueue) {
@@ -79,27 +33,19 @@ export function Sidebar({
             }
           }}
         >
-          Queue
+          <span className="side-name">GitHub</span>
+          <span className="side-count">{view ? now + today : ""}</span>
         </a>
-        {item("now")}
-        {item("today")}
-        <p className="side-label">Sorted away</p>
-        {SORTED_AWAY.map(item)}
-        <p className="side-label">Settings</p>
-        {sections.map((s) => {
-          const on = route.name === "settings" && shown === s.id;
-          return (
-            <a
-              key={s.id}
-              href={`#/settings/${s.id}`}
-              className={cls("side-item", "side-set", on && "on")}
-              aria-current={on ? "page" : undefined}
-            >
-              {s.title}
-            </a>
-          );
-        })}
       </nav>
+      <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>
+        <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+          <circle cx="10" cy="4.5" r="1.5" />
+          <circle cx="6" cy="11.5" r="1.5" />
+        </svg>
+        <span className="side-name">Settings</span>
+        <kbd>,</kbd>
+      </a>
     </aside>
   );
 }

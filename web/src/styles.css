@@ -177,15 +177,6 @@ kbd {
   color: var(--green);
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 /* Title bar ---------------------------------------------------------------- */
 
 .app {
@@ -205,6 +196,8 @@ kbd {
 .side {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow-y: auto;
   border-right: 1px solid var(--rule);
@@ -224,8 +217,25 @@ kbd {
 
 .side-nav {
   display: grid;
+  flex: 1;
+  align-content: start;
   gap: 1px;
   padding: 6px 10px 24px;
+}
+
+/* Settings lives in the footer: always there, never in the way. */
+.side-foot {
+  justify-content: flex-start;
+  margin: 0 10px 12px;
+  color: var(--pencil);
+}
+
+.side-foot .i {
+  flex: none;
+}
+
+.side-foot kbd {
+  margin-left: auto;
 }
 
 .side-item {
@@ -267,44 +277,11 @@ kbd {
   font-weight: 600;
 }
 
-.side-set:not(.on) {
-  color: var(--pencil);
-}
-
-.side-new {
-  width: 5px;
-  height: 5px;
-  margin-left: auto;
-  border-radius: 50%;
-  background: var(--blue);
-}
-
 .side-count {
   color: var(--pencil);
   font-size: 12.5px;
   font-weight: 450;
   font-variant-numeric: tabular-nums;
-}
-
-.side-now .side-name {
-  color: var(--hl-ink);
-  font-weight: 600;
-}
-
-.side-label {
-  margin: 16px 10px 4px;
-  color: var(--pencil);
-  font-size: 12px;
-  font-weight: 550;
-}
-
-a.side-label:hover {
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.side-label.first {
-  margin-top: 6px;
 }
 
 .topbar {
@@ -703,15 +680,13 @@ a.side-label:hover {
 
 /* The highlighter: a marker stroke (ragged chisel ends, slight tilt) drawn behind the ink. */
 .b-now .ref-ink,
-.g-now > .group-head > span:first-child,
-.side-now .side-name {
+.g-now > .group-head > span:first-child {
   position: relative;
   isolation: isolate;
 }
 
 .b-now .ref-ink::before,
-.g-now > .group-head > span:first-child::before,
-.side-now .side-name::before {
+.g-now > .group-head > span:first-child::before {
   position: absolute;
   z-index: -1;
   inset: -0.06em -0.55em -0.08em -0.5em;
@@ -890,11 +865,6 @@ a.side-label:hover {
   font-weight: 600;
 }
 
-.run-why {
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
 .run .row-main {
   padding-top: 6px;
   padding-bottom: 7px;
@@ -947,11 +917,6 @@ a.side-label:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.away-btn .fresh {
-  color: var(--pencil);
-  font-size: 12px;
-}
-
 .away-btn:hover {
   color: var(--ink);
 }
@@ -963,13 +928,6 @@ a.side-label:hover {
 
 .away-btn.on .n {
   color: var(--ink);
-}
-
-.away-note {
-  width: 100%;
-  margin-top: 2px;
-  color: var(--pencil);
-  font-size: 12.5px;
 }
 
 .group-head.sub {
@@ -1528,20 +1486,37 @@ a.side-label:hover {
   padding: 0 12px;
 }
 
-.s-pick {
-  display: none;
+.s-page-head {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
-.s-pane {
-  min-width: 0;
-}
-
-.s-head-block h1 {
+.s-page-head h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 650;
   letter-spacing: -0.02em;
-  line-height: 1.2;
+}
+
+.s-page-head .quiet {
+  font-size: 12.5px;
+}
+
+.s-section {
+  padding: 36px 0 12px;
+  scroll-margin-top: 60px;
+}
+
+.s-section + .s-section {
+  border-top: 1px solid var(--rule);
+}
+
+.s-section h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .s-intro {
@@ -1981,12 +1956,6 @@ a.side-label:hover {
 
   .settings {
     padding: 0;
-  }
-
-  .s-pick {
-    display: block;
-    max-width: 260px;
-    margin-bottom: 16px;
   }
 }
 

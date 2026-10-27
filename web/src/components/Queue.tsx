@@ -52,26 +52,21 @@ export function Queue({
         <section className="away" aria-label="Sorted away">
           <div className="away-bar">
             <span className="away-label">Sorted away</span>
-            {away.map((g) => {
-              const fresh = g.cards.filter((c) => c.new).length;
-              return (
-                <button
-                  key={g.key}
-                  type="button"
-                  className={cls("away-btn", g.open && "on")}
-                  aria-expanded={g.open}
-                  disabled={g.forced}
-                  title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"} (${KEY[g.key]})`}
-                  onClick={() => {
-                    toggle(g.key);
-                  }}
-                >
-                  <span className="n">{filtering ? g.cards.length : g.total}</span> {g.label.toLowerCase()}
-                  {fresh > 0 && <span className="fresh">({fresh} new)</span>}
-                </button>
-              );
-            })}
-            {!opened.length && <p className="away-note">Your rules moved these out of the way. Nothing here needs you today.</p>}
+            {away.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                className={cls("away-btn", g.open && "on")}
+                aria-expanded={g.open}
+                disabled={g.forced}
+                title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"} (${KEY[g.key]})`}
+                onClick={() => {
+                  toggle(g.key);
+                }}
+              >
+                <span className="n">{filtering ? g.cards.length : g.total}</span> {g.label.toLowerCase()}
+              </button>
+            ))}
           </div>
           {opened.map((g) => (
             <div key={g.key} className={`group g-${g.key}`}>
@@ -98,10 +93,9 @@ function Rows({ cards, g, ctx }: { cards: Card[]; g: Group; ctx: RowCtx }) {
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- <fieldset> is for form controls; this groups a run of rows
           <div key={`run:${r.id}`} className="run" role="group" aria-labelledby={`run-${r.id}`}>
             <div className="run-head" id={`run-${r.id}`}>
-              <span className="run-title">
+              <span className="run-title" title={r.why}>
                 {r.cards.length} {r.cards.every((c) => c.kind === "pr") ? "PRs" : "items"} from {r.author}
               </span>
-              {r.why && <span className="run-why">{r.why}</span>}
             </div>
             {r.cards.map((c) => (
               <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} inRun />
