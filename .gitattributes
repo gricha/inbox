@@ -1,0 +1,5 @@
+# LF everywhere, so Prettier's check agrees on every OS; Windows batch files keep CRLF.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.woff2 binary
