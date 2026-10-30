@@ -257,11 +257,12 @@ export class GitHubConnector implements Connector {
       const tracked = new Map([...desk.store.itemMeta()].map(([id, m]) => [id.toLowerCase(), { id, m }]));
       const refresh = new Map<string, SearchHit>();
       const mentions: NewEvent[] = [];
+      const seen = { ...this.feed.seen };
       let unknown = 0;
       for (const t of page.threads) {
-        const before = this.feed.seen[t.thread];
+        const before = seen[t.thread];
         if (before?.at === t.updated_at) continue;
-        this.feed.seen[t.thread] = { at: t.updated_at, reason: t.reason };
+        seen[t.thread] = { at: t.updated_at, reason: t.reason };
         if (!t.item) continue;
         const known = tracked.get(t.item.toLowerCase());
         if (!known) {
@@ -275,13 +276,14 @@ export class GitHubConnector implements Connector {
           mentions.push({ at, item_id: known.id, kind: "mentioned", actor: "", data: { reason: t.reason } });
         }
       }
+      // Before the cursor moves: if this fails, the next poll sees these threads again.
+      const items = refresh.size ? await this.api.details([...refresh.values()], desk.me()) : [];
       // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
       const now = Date.parse(page.date ?? "") || started;
       this.feed.since = new Date(now - 60_000).toISOString();
       this.feed.last_modified = page.last_modified;
       const horizon = new Date(now - 2 * 24 * HOUR).toISOString();
-      this.feed.seen = Object.fromEntries(Object.entries(this.feed.seen).filter(([, s]) => s.at >= horizon));
-      const items = refresh.size ? await this.api.details([...refresh.values()], desk.me()) : [];
+      this.feed.seen = Object.fromEntries(Object.entries(seen).filter(([, s]) => s.at >= horizon));
       desk.ingest(this, items);
       desk.record(this.id, mentions);
       if (items.length || mentions.length) desk.synced();

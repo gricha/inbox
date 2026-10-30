@@ -227,6 +227,31 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
   t.cleanup();
 });
 
+test("notifications: a failed refresh leaves the cursor, so the next poll handles the same threads", async () => {
+  const t = await setup([reviewAsk(1)]);
+  await t.desk.sync();
+  await t.desk.gh.poll();
+  const since = t.desk.gh.feed.since;
+  t.setNow(later(1));
+  t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.9), comments: [{ author: "dana", author_bot: false, at: iso(0.9) }] }));
+  const threads = [{ thread: "t1", item: "acme/api#1", reason: "mention", updated_at: iso(0.9) }];
+  const details = t.gh.details.bind(t.gh);
+  t.gh.details = () => Promise.reject(new Error("GitHub HTTP 500"));
+  t.gh.threads = threads;
+  await t.desk.gh.poll();
+  assert.equal(t.desk.gh.feedError, "GitHub HTTP 500");
+  assert.equal(t.desk.gh.feed.since, since);
+  assert.deepEqual(t.desk.gh.feed.seen, {});
+
+  t.gh.details = details;
+  t.gh.threads = threads; // GitHub sends them again: the cursor didn't move
+  await t.desk.gh.poll();
+  assert.equal(t.gh.feedCalls.at(-1)?.since, since);
+  assert.deepEqual(kinds(t.desk).slice(1), ["commented acme/api#1", "mentioned acme/api#1"]);
+  assert.notEqual(t.desk.gh.feed.since, since);
+  t.cleanup();
+});
+
 test("notifications: a rate-limit pause skips polls", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
