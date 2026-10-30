@@ -164,6 +164,23 @@ test("you approved: still in the reviewed-by search, it passes the board's filte
   t.cleanup();
 });
 
+test("a resolution with no time (no longer requested) doesn't pass a board's filter, however recently a bot touched the PR", async () => {
+  const quiet = reviewAsk(1, {
+    created_at: hoursAgo(30 * 24),
+    head_committed_at: hoursAgo(30 * 24),
+    review_requests: [],
+    request_events: [{ at: hoursAgo(20 * 24), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
+    updated_at: hoursAgo(1),
+  });
+  const t = await setup([quiet]);
+  const route = t.gh.route;
+  t.gh.route = (q) => (q.includes("mentions:@me") ? ["acme/api#1"] : route(q));
+  await t.desk.sync();
+  assert.equal(t.desk.item("api#1").card.resolved, "no longer requested");
+  assert.deepEqual(t.desk.queue().resolved, [], "quiet for 20 days: the Mentions filter drops it, as before it resolved");
+  t.cleanup();
+});
+
 test("unrequested without a review: request removed, resolved as no longer requested", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();

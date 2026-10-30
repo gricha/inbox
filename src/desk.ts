@@ -506,8 +506,9 @@ export class Desk {
     const kept = this.store.kept();
     const fetched = this.store.queries();
     // A recently resolved item still in a search (you approved: reviewed-by:@me) passes its board's filter, to show under Resolved.
+    // Only one that says when: updated_at moves with every bot or CI touch, so it would never age out.
     const keepSince = new Date(now.getTime() - KEEP_RESOLVED).toISOString();
-    const recent = (e: Entry) => e.resolved !== null && (e.resolved.at ?? e.item.updated_at) > keepSince;
+    const recent = (e: Entry) => !!e.resolved?.at && e.resolved.at > keepSince;
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
     for (const board of loaded.boards) {
