@@ -278,13 +278,15 @@ export function askClaude(prompt: string, opts: { command: string; model: string
   );
 }
 
+export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `cause`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): Error {
   const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");
   if (status !== 401 && !/401|authenticate|log ?in/i.test(msg)) return new Error(msg);
   // "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." → "401 OAuth access token has expired"
   const why = msg.replace(/^Failed to authenticate\.\s*(API Error:\s*)?/i, "").replace(/\.?\s*Re-authenticate to continue\.?$/i, "");
-  return new Error("Claude Code isn't logged in. Run `claude auth login` in a terminal.", { cause: why });
+  return new Error(NOT_LOGGED_IN, { cause: why });
 }
 
 export function claudeEnvelope(out: string): unknown {

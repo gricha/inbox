@@ -629,10 +629,10 @@ export class Babysitter {
     });
   }
 
+  // A login pause lifts with an agent setting (Desk.retryAgents), not with any save.
   settingsChanged(): void {
     this.clones = null;
     this.notes.clear();
-    this.paused = null;
     // Off is off: agents already running stop too.
     const st = this.desk.settings;
     if (!st["inflight.babysit"] || st["agent.driver"] !== "claude-code")
@@ -1032,6 +1032,13 @@ export class Babysitter {
     if (it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft)
       return "approved and green: merge it";
     return null;
+  }
+
+  unpause(): void {
+    clearTimeout(this.timers.get("*paused"));
+    this.timers.delete("*paused");
+    this.paused = null;
+    this.considerAll();
   }
 
   // No new runs for a while (the agent can't log in); then everything in flight is looked at again.

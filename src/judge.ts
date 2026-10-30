@@ -2,7 +2,7 @@
 // by the owner's prose policy. Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
 import type { Desk } from "./desk.ts";
-import { askClaude, askCodex } from "./review.ts";
+import { askClaude, askCodex, NOT_LOGGED_IN } from "./review.ts";
 import {
   BUCKETS,
   type Bucket,
@@ -252,6 +252,7 @@ export class Judge {
       this.failures = 0;
       this.lastAt = at;
       desk.log(`judge placed ${answers.size} of ${batch.length} gray-zone items by the policy`);
+      desk.retryAgents(NOT_LOGGED_IN);
     } catch (err) {
       if (desk.stopped) return;
       this.failures++;

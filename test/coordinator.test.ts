@@ -242,6 +242,38 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
   assert.deepEqual([t.co.status().state, t.co.status().started], ["idle", true]);
 });
 
+test(
+  "fixing the agent's settings retries the judge and the coordinator now; so does a call that shows the login works",
+  posix,
+  async (c) => {
+    const t = await setup(c, {
+      policy: "Team asks are today.",
+      settings: { "policy.judge": true, "analyze.command": "/nonexistent/claude" },
+    });
+    const team = (n: number) => ask(n, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }], request_events: [] });
+    t.gh.items.set("acme/api#2", team(2));
+    await t.sync();
+    await until(() => !!t.desk.judge.error && !t.desk.judge.running && !!t.co.load().error && !t.co.current);
+    assert.match(t.desk.judge.error!, /not found/);
+    // Set the right path, as the error says: both try now instead of in five minutes.
+    t.desk.putSettings({ set: { "analyze.command": t.fake.bin } });
+    await until(() => t.desk.judge.lastAt !== null && t.co.status().started);
+    assert.deepEqual([t.desk.judge.error, t.co.load().error], [null, null]);
+
+    // Logged out: the next wake fails and waits. A judge call that works again (after claude auth login) lifts that wait.
+    t.fake.set("fail");
+    t.gh.items.set("acme/api#3", ask(3));
+    await t.sync();
+    await until(() => t.co.load().error !== null && !t.co.current);
+    assert.ok(t.co.load().retry_at > Date.now());
+    t.fake.clear("fail");
+    t.gh.items.set("acme/api#4", team(4));
+    await t.sync();
+    await until(() => !t.desk.judge.running && t.co.load().error === null && !t.co.current);
+    assert.equal(t.co.load().retry_at, 0);
+  },
+);
+
 test("while you have the session open in a terminal, runs wait", posix, async (c) => {
   const t = await setup(c, { policy: "Bot PRs are FYI." });
   await t.sync();

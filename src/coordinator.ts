@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Desk } from "./desk.ts";
-import { claudeError, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
+import { claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, runCommand } from "./review.ts";
 import type {
   ActivityEvent,
   ActivityKind,
@@ -347,6 +347,7 @@ export class Coordinator {
       this.save({ started_at: st.started_at ?? startedAt, cursor: upTo, last_run: run, failures: 0, retry_at: 0, error: null });
       this.log(n, "run", `Done in ${Math.round(run.ms / 1000)}s${actions ? `, ${actions} action${actions === 1 ? "" : "s"}` : ""}`);
       desk.log(`coordinator run ${n} done in ${run.ms} ms, ${actions} actions`);
+      desk.retryAgents(NOT_LOGGED_IN);
     } else {
       const failures = st.failures + 1;
       const patch: Partial<State> = {

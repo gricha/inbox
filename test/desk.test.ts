@@ -444,6 +444,11 @@ test("settings that change the searches sync right away", async () => {
   t.desk.putSettings({ set: { "github.close_collaborator_min": 1 } });
   await idle(t.desk);
   assert.ok(t.gh.searches.some((q) => q.endsWith("author:alice author:bob")));
+  // Anything else applies to what the desk has: no new pass over GitHub.
+  const before = t.gh.searches.length;
+  t.desk.putSettings({ set: { "policy.judge": false, "notify.quiet": "", "github.my_repos": ["acme/web"] } });
+  await idle(t.desk);
+  assert.equal(t.gh.searches.length, before);
   t.cleanup();
 });
 

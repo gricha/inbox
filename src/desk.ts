@@ -48,7 +48,7 @@ import { classify, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import type { AgentOpts, PrText } from "./review.ts";
+import { NOT_LOGGED_IN, type AgentOpts, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { Judge, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
@@ -73,6 +73,7 @@ const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["analyze.model"], s["review.auto_ai"]]);
+const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
 const MAX_DRAFT = 5_000;
 const MAX_QUESTION = 300;
@@ -366,21 +367,55 @@ export class Desk {
   reloadSettings(): void {
     const poll = this.settings["github.poll_seconds"];
     const agent = agentKey(this.settings);
+    const searches = searchKey(this.settings);
     this.settings = this.readSettings();
-    // A changed agent starts afresh: AI reviews aren't paused, and PRs that failed are tried again.
-    if (agentKey(this.settings) !== agent) {
-      this.aiFailures = 0;
-      this.aiPaused = null;
-      this.aiErrors.clear();
-    }
-    // Sync now: bots and close_collaborator_min change the {close_authors} searches.
-    if (this.configText) this.reloadConfig(true);
+    // Sync now only when the searches change; other settings apply to what the desk already has.
+    if (this.configText) this.reloadConfig(searchKey(this.settings) !== searches);
     else this.changed();
     if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
+    this.sitter.settingsChanged();
+    // A changed agent starts afresh: whatever failed on the old one tries again now.
+    if (agentKey(this.settings) !== agent) this.retryAgents();
     this.pumpAi();
     this.judge.pump();
     this.coordinator.wake();
-    this.sitter.settingsChanged();
+  }
+
+  // What failed on the agent (AI reviews, the judge, the coordinator, babysitters) tries again now instead of after its
+  // backoff. `only`: just what failed with this error, e.g. NOT_LOGGED_IN once another call shows the login works again.
+  retryAgents(only?: string): void {
+    const hit = (m: string | null | undefined) => !only || !!m?.endsWith(only);
+    let any = false;
+    for (const [id, e] of this.aiErrors)
+      if (hit(e.message)) {
+        this.aiErrors.delete(id);
+        any = true;
+      }
+    if (this.aiPaused && hit(this.aiPaused.message)) {
+      this.aiPaused = null;
+      this.aiFailures = 0;
+      any = true;
+    }
+    if (!only) this.aiFailures = 0;
+    if ((this.judge.error || this.judge.retryAt) && hit(this.judge.error)) {
+      this.judge.retry();
+      any = true;
+    }
+    const co = this.coordinator.load();
+    if (co.retry_at && hit(co.error)) {
+      this.coordinator.save({ failures: 0, retry_at: 0 });
+      any = true;
+    }
+    if (this.sitter.paused && hit(this.sitter.paused.why)) {
+      this.sitter.unpause();
+      any = true;
+    }
+    if (!any || !only) return; // a settings change pumps everything itself
+    this.log("the agent works again: retrying what failed on its login");
+    this.changed();
+    this.pumpAi();
+    this.judge.pump();
+    this.coordinator.wake();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -1027,6 +1062,7 @@ export class Desk {
       if (this.aiPaused) this.log("AI reviews resume");
       this.aiPaused = null;
       this.log(`AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes`);
+      this.retryAgents(NOT_LOGGED_IN);
       return ai;
     } catch (err) {
       const message = (err as Error).message;

@@ -553,8 +553,13 @@ test("an expired claude login fails one run with a clear status, then nothing re
     assert.equal(rows.get(id)?.needs_you, "CI failing: claude isn't logged in (run claude auth login)");
   }
   assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 2);
-  // A settings save (say, a new claude command) lifts the pause.
+  // Any other save keeps the pause; a new agent setting (say, the claude command or model) lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
+  await new Promise((r) => {
+    setTimeout(r, 200);
+  });
+  assert.equal(s.w.count(), 1);
+  s.desk.putSettings({ set: { "analyze.model": "opus" } });
   await until("another attempt", () => s.w.count() >= 2);
 });
 
