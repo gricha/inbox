@@ -94,41 +94,45 @@ test("an in-flight row's status in plain words", () => {
     mergeable: "conflict" as const,
     draft: false,
   };
-  assert.deepEqual(laneFacts(row, "main"), [
-    { text: "CI failing: test (3.12), lint", problem: true },
-    { text: "approved by marco", problem: false },
-    { text: "changes requested by dana", problem: true },
-    { text: "waiting on sam, @backend", problem: false },
-    { text: "2 unresolved threads", problem: false },
-    { text: "conflicts with main", problem: true },
+  // The same words and colours as the queue and the review: red for CI, amber for changes requested and a conflict.
+  assert.deepEqual(laneFacts(row), [
+    { text: "CI failing: test (3.12), lint", tone: "bad" },
+    { text: "approved by marco", tone: "" },
+    { text: "changes requested by dana", tone: "warn" },
+    { text: "waiting on sam, @backend", tone: "" },
+    { text: "2 unresolved threads", tone: "" },
+    { text: "merge conflict", tone: "warn" },
   ]);
   assert.deepEqual(
-    laneFacts(
-      { ...row, ci: "green", failing: [], approved_by: [], changes_by: [], waiting_on: [], threads_unresolved: 1, mergeable: "clean" },
-      "main",
-    ).map((f) => f.text),
+    laneFacts({
+      ...row,
+      ci: "green",
+      failing: [],
+      approved_by: [],
+      changes_by: [],
+      waiting_on: [],
+      threads_unresolved: 1,
+      mergeable: "clean",
+    }).map((f) => f.text),
     ["CI passing", "1 unresolved thread"],
   );
   assert.deepEqual(
-    laneFacts(
-      {
-        ...row,
-        ci: "pending",
-        failing: [],
-        approved_by: [],
-        changes_by: [],
-        waiting_on: [],
-        threads_unresolved: 0,
-        mergeable: "unknown",
-        draft: true,
-      },
-      "main",
-    ).map((f) => f.text),
+    laneFacts({
+      ...row,
+      ci: "pending",
+      failing: [],
+      approved_by: [],
+      changes_by: [],
+      waiting_on: [],
+      threads_unresolved: 0,
+      mergeable: "unknown",
+      draft: true,
+    }).map((f) => f.text),
     ["draft", "CI running"],
   );
-  assert.equal(laneFacts({ ...row, failing: ["a", "b", "c"] }, "main")[0]?.text, "CI failing: a and 2 more");
+  assert.equal(laneFacts({ ...row, failing: ["a", "b", "c"] })[0]?.text, "CI failing: a and 2 more");
   assert.equal(
-    laneFacts({ ...row, failing: ["tacos-gha / TACOS Unlock (terraform/eng-tools/workflow-engine)"] }, "main")[0]?.text,
+    laneFacts({ ...row, failing: ["tacos-gha / TACOS Unlock (terraform/eng-tools/workflow-engine)"] })[0]?.text,
     "CI failing: tacos-gha / TACOS Unlock (terraform/eng…",
   );
 });
@@ -420,7 +424,7 @@ test("the coordinator in plain words: the top bar's line, its log, its status", 
   });
   assert.equal(logText(entry({ kind: "act", action: "snooze", item_id: "acme/api#12", text: "bot bump" })), "Snoozed api#12: bot bump");
   assert.equal(logText(entry({ kind: "act", action: "done", item_id: "acme/api#12" })), "Cleared api#12");
-  assert.equal(logText(entry({ kind: "run", text: "Woke on 6 events" })), "Run 3: woke on 6 events");
+  assert.equal(logText(entry({ kind: "run", text: "6 events, 3 actions · 41s" })), "Run 3 · 6 events, 3 actions · 41s");
   assert.equal(logText(entry({ kind: "note", text: "Nothing needed you." })), "Nothing needed you.");
 
   const now = Date.parse("2026-10-27T12:00:00Z");

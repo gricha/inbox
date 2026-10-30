@@ -13,6 +13,9 @@ export function age(at: string, now: number): string {
   return `${Math.round(m / 1440)}d`;
 }
 
+// "just now" in the first minute, then as age(): for a single time on its own, where "0m" reads like a glitch.
+export const sinceText = (at: string, now: number) => (Date.parse(at) > now - 60_000 ? "just now" : age(at, now));
+
 // "40s ago", "5m ago"
 export function ago(at: string, now: number): string {
   const s = Math.max(0, Math.round((now - Date.parse(at)) / 1000));

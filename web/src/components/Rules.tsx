@@ -3,6 +3,7 @@ import type { Bucket, ConfigError, FieldDoc, PreviewResult } from "../../../src/
 import { api, message } from "../api.ts";
 import { BUCKET_LABEL, cls, shortId } from "../format.ts";
 import { lineOf } from "../view.ts";
+import { KeyButton } from "./Detail.tsx";
 
 const BUCKETS: Bucket[] = ["now", "today", "later", "fyi", "hide"];
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -218,40 +219,33 @@ export function Rules({
             }}
           />
           <div className="editor-foot">
-            <button
-              type="button"
-              className="btn primary"
+            {/* The key before the label, as on every action line. */}
+            <KeyButton
+              k={`${MOD}S`}
+              label={busy === "save" ? "Saving…" : "Save"}
               disabled={!!busy || !dirty}
-              onClick={() => {
+              run={() => {
                 void save();
               }}
-            >
-              {busy === "save" ? "Saving…" : "Save"}
-              <kbd>{MOD}S</kbd>
-            </button>
-            <button
-              type="button"
-              className="btn"
+            />
+            <KeyButton
+              k={`${MOD}↵`}
+              label={busy === "preview" ? "Previewing…" : "Preview changes"}
               disabled={!!busy}
-              onClick={() => {
+              run={() => {
                 void runPreview();
               }}
-            >
-              {busy === "preview" ? "Previewing…" : "Preview changes"}
-              <kbd>{MOD}↵</kbd>
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
+            />
+            <KeyButton
+              k=""
+              label="Revert"
               disabled={!dirty}
-              onClick={() => {
+              run={() => {
                 if (doc) setText(doc.text);
                 setErrors([]);
                 setPreview(null);
               }}
-            >
-              Revert
-            </button>
+            />
             <span className="grow" />
             {dirty && <span className="unsaved">Unsaved changes</span>}
             <span className="pos">Line {pos.replace(":", ", column ")}</span>

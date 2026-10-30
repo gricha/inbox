@@ -1,6 +1,6 @@
 import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { laneFacts } from "../view.ts";
+import { laneFacts, sitterLine } from "../view.ts";
 import { KeyButton } from "./Detail.tsx";
 
 // The In-flight lane: your PRs marked done, what each babysitter is doing, and what's back with you.
@@ -79,9 +79,10 @@ function Row({
   const live = r.state === "open";
   const needs = live ? r.needs_you : null;
   const s = r.sitter;
-  // The babysitter's own news, unless it only repeats why the PR needs you ("needs you: …", "no local clone of …").
+  // The babysitter's own news, unless it only repeats why the PR needs you ("babysitter asks: …", "no local clone of …").
   const sitter = live && (!needs || s.state === "done" || s.state === "running");
-  const sitterLine = [s.text, s.since && age(s.since, now), s.state === "running" && r.run?.step].filter(Boolean).join(" · ");
+  // A missing clone is fixed in Settings: say where.
+  const noClone = !!needs && needs.startsWith("no local clone");
   const open = on || (live && r.drafts.length > 0);
   const keys = (k: string) => {
     run(r, k);
@@ -113,16 +114,23 @@ function Row({
                 {c.title}
               </span>
             </span>
+            {/* The highlighter on the ref already says it needs you: the reason, in ink, as the queue's why. */}
             {needs && (
               <span className="lane-status needs">
-                <b>needs you</b>: {needs}
+                {needs}
+                {noClone && (
+                  <>
+                    {" · "}
+                    <a href="#/settings/inflight">Local clones</a>
+                  </>
+                )}
               </span>
             )}
-            {sitter && <span className="lane-status">{sitterLine}</span>}
+            {sitter && <span className="lane-status">{sitterLine(r, now)}</span>}
             {live ? (
               <span className="meta">
-                {laneFacts(r, r.base).map((f) => (
-                  <span key={f.text} className={cls("fact-word", f.problem && needs && "t-bad")}>
+                {laneFacts(r).map((f) => (
+                  <span key={f.text} className={cls("fact-word", needs && f.tone && `t-${f.tone}`)}>
                     {f.text}
                   </span>
                 ))}
@@ -131,8 +139,12 @@ function Row({
               <span className="lane-status">{r.state}</span>
             )}
           </span>
-          <span className="age" title={`updated ${new Date(c.updated_at).toLocaleString()}`}>
-            {age(c.resolved_at ?? c.updated_at, now)}
+          {/* The queue's measure: how long it's been waiting, or when it landed. */}
+          <span
+            className="age"
+            title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(c.resolved_at ?? c.waiting_since).toLocaleString()}`}
+          >
+            {age(c.resolved_at ?? c.waiting_since, now)}
           </span>
         </button>
       </div>
@@ -157,7 +169,7 @@ function Row({
                     }}
                   />
                   <KeyButton
-                    k={on && i === 0 && !r.escalation ? "x" : ""}
+                    k={on && i === 0 && !r.escalation && !r.outside_at ? "x" : ""}
                     label="Discard"
                     run={() => {
                       run(r, "x", d);
@@ -172,7 +184,17 @@ function Row({
               <KeyButton k="o" label="Open on GitHub" run={keys} />
               {live && <KeyButton k="d" label="Take back" run={keys} />}
               {live && r.escalation && <KeyButton k="x" label="Dismiss the question" run={keys} />}
-              {r.resume && <KeyButton k="c" label="Copy resume command" title={r.resume} run={keys} />}
+              {live && !r.escalation && r.outside_at && (
+                <KeyButton k="x" label="Mark read" title="You've read the outside contributors' comments on GitHub" run={keys} />
+              )}
+              {r.resume && (
+                <KeyButton
+                  k="c"
+                  label={live && r.escalation ? "Answer in a terminal" : "Copy resume command"}
+                  title={`Copies ${r.resume}`}
+                  run={keys}
+                />
+              )}
             </div>
           )}
         </div>

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, copyText, eventText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, orderNotes, resolvedHead, splitPath } from "../view.ts";
+import { age, cls, copyText, eventText, sinceText, shortRef, when } from "../format.ts";
+import { currentFile, filePatch, orderNotes, resolvedHead, sitterLine, splitPath } from "../view.ts";
 import { CI, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
@@ -40,6 +40,7 @@ export function Review({
   inert,
   flash,
   onInflight,
+  row,
   onBack,
 }: {
   id: string;
@@ -49,6 +50,7 @@ export function Review({
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onInflight: (c: Card) => void; // d: in flight, or take it back
+  row: InflightRow | null; // your PR in flight: its lane line goes under the facts, as in the lane
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
@@ -306,7 +308,13 @@ export function Review({
           {resolved && (
             <p className="rv-meta rv-resolved">
               <span>{resolved.line}</span>
-              {card.resolved_at && <span>{Date.parse(card.resolved_at) > now - 60_000 ? "just now" : age(card.resolved_at, now)}</span>}
+              {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
+            </p>
+          )}
+          {/* In flight: the why above says why it needs you ("in flight: …"); this is the lane's babysitter line under it. */}
+          {row?.state === "open" && row.sitter.text && (
+            <p className="rv-meta rv-lane">
+              <span>{sitterLine(row, now)}</span>
             </p>
           )}
         </header>
@@ -341,7 +349,6 @@ export function Review({
           run={run}
           disabled={view.generating || busy === "ai"}
         />
-        <KeyButton k="esc" label="Back" run={run} />
       </div>
 
       {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}

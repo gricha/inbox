@@ -2,8 +2,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CoordinatorView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, shortId } from "../format.ts";
+import { cls, shortId, sinceText } from "../format.ts";
 import { coordinatorText, logText } from "../view.ts";
+import { KeyButton } from "./Detail.tsx";
+import { withCode } from "./Review.tsx";
 
 const SHOWN = 30;
 
@@ -52,21 +54,19 @@ export function CoordinatorLog({
     <section className="coord-log" aria-labelledby="coord-log-h">
       <div className="cl-head">
         <h2 id="coord-log-h">Coordinator</h2>
-        <span className="cl-status">{view ? coordinatorText(view.status, now) : error || "Loading…"}</span>
-        <button type="button" className="link-btn" onClick={onClose}>
-          Close <kbd>esc</kbd>
-        </button>
+        <span className="cl-status">{view ? withCode(coordinatorText(view.status, now)) : error || "Loading…"}</span>
+        <KeyButton k="esc" label="Close" run={onClose} />
       </div>
       {view && !view.log.length && <p className="group-empty">Nothing yet.</p>}
       <ul className="cl-list">
         {view?.log.slice(0, SHOWN).map((e) => (
           <li key={e.seq} className={cls(`cl-${e.kind}`, e.undone && "undone")}>
-            <span className="cl-when">{age(e.at, now)}</span>
-            <span className="cl-text">{logText(e)}</span>
+            <span className="cl-when">{sinceText(e.at, now)}</span>
+            <span className="cl-text">{withCode(logText(e))}</span>
             {e.kind === "act" && e.undo_seq !== null && !e.undone && (
               <button
                 type="button"
-                className="link-btn"
+                className="cl-undo"
                 onClick={() => {
                   void undo(e.undo_seq!);
                 }}

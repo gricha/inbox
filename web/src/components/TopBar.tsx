@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { age, ago, cls } from "../format.ts";
+import { ago, cls, sinceText } from "../format.ts";
 import { actedText, type Route } from "../view.ts";
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
@@ -16,6 +16,7 @@ export function TopBar({
   offline,
   now,
   route,
+  from,
   filter,
   setFilter,
   filterRef,
@@ -29,6 +30,7 @@ export function TopBar({
   offline: boolean;
   now: number;
   route: Route;
+  from: "queue" | "inflight"; // where a review goes back to
   filter: string;
   setFilter: (s: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
@@ -54,11 +56,15 @@ export function TopBar({
       {inSettings || route.name === "inflight" ? (
         <span className="crumb">{inSettings ? "Settings" : "In flight"}</span>
       ) : route.name === "review" ? (
-        <a className="back" href="#/" title="Back to the queue (esc)">
+        <a
+          className="back"
+          href={from === "inflight" ? "#/inflight" : "#/"}
+          title={`Back to ${from === "inflight" ? "In flight" : "the queue"} (esc)`}
+        >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>Queue</span>
+          <span>{from === "inflight" ? "In flight" : "Queue"}</span>
           <kbd>esc</kbd>
         </a>
       ) : (
@@ -95,7 +101,7 @@ export function TopBar({
             title={coordOpen ? "Hide the coordinator's log" : "What the coordinator did"}
             onClick={onCoordinator}
           >
-            Coordinator<span className="cl-what"> {actedText(acted)}</span> · {age(acted.at, now)}
+            Coordinator<span className="cl-what"> {actedText(acted)}</span> · {sinceText(acted.at, now)}
           </button>
         )}
         <button
@@ -109,6 +115,12 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
+        {/* Below 820px the sidebar is gone: In flight is reachable from here. */}
+        {!!o?.inflight.total && route.name !== "inflight" && (
+          <a className="tb-flight" href="#/inflight" title={`${o.inflight.needs_you} need you (g i)`}>
+            In flight {o.inflight.total}
+          </a>
+        )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="1.5" y="4" width="13" height="8.5" rx="1.5" />

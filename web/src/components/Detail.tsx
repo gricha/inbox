@@ -105,8 +105,8 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           </p>
           {main.demoted && (
             <p className="demote-note">
-              The rule said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to {BUCKET_LABEL[main.bucket].toLowerCase()} because{" "}
-              {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
+              {main.judge?.bucket ? "Your policy" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
+              {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
             </p>
           )}
           <details className="trace-toggle">

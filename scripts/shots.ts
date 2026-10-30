@@ -46,7 +46,7 @@ async function start(): Promise<string> {
 
 // Every highlighter mark: the ::before band must cover the text and nothing may clip it.
 // Page code is a string: this project's tsconfig has no DOM types, on purpose (the server mustn't touch them).
-const HIGHLIGHTS = ".b-now .ref-ink, .g-now > .group-head > span:first-child, .side-now .side-count";
+const HIGHLIGHTS = ".b-now .ref-ink, .g-now > .group-head > span:first-child";
 const CHECK_HIGHLIGHTS = `(() => {
   const problems = [];
   const px = (v) => Number.parseFloat(v) || 0;
@@ -197,6 +197,26 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("j");
       await page.keyboard.press("j");
       await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Merged and closed ones under Landed, below the fold at every size.
+    name: "inflight-landed",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      await page.locator(".lane h3").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Enter on a lane row: its review says what the lane says, and Esc goes back to the lane.
+    name: "review-inflight",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      await page.locator('.lane [data-id="acme/api#4122"] .row-main').click();
+      await page.keyboard.press("Enter");
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(600);
     },
   },
   {

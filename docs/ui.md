@@ -5,7 +5,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 ## Principles
 
 - **Minimize surfaces, maximize automation.** One queue; boards and rules feed it and are edited in Settings → Rules. The sidebar navigates the queue, In flight and Settings; it never categorizes by repo or board.
-- **Only urgency gets colour.** A yellow highlighter marks Now: the heading, each item's ref and the sidebar's Now count. It's a marker stroke (`::before`, chisel-cut caps sized in em, a wavy middle, a slight tilt), never a box; `npm run shots` checks it covers its text and is never clipped. Everything else is ink and pencil grey. Problems ("CI failing", "merge conflict") are coloured words in Now and Today, and turn grey once sorted away.
+- **Only urgency gets colour.** A yellow highlighter marks Now: the heading and each item's ref. It's a marker stroke (`::before`, chisel-cut caps sized in em, a wavy middle, a slight tilt), never a box; `npm run shots` checks it covers its text and is never clipped. Everything else is ink and pencil grey. Problems are coloured words in Now and Today, the same words and colours everywhere (the queue, a review, the lane): "CI failing" red, "changes requested" and "merge conflict" amber; they turn grey once sorted away. Passing CI, a verdict, an agent's failure: ink and pencil.
 - **No boxes around words.** No chips, tags or outlined badges. The only frame is the keyboard cursor: a neutral fill with a pencil ring.
 - **Sentence case.** No all-caps labels, no monospace outside code.
 - **Both themes.** Tokens live on `:root` in `web/src/styles.css`, with a dark block under `prefers-color-scheme`. Check every change in light and dark. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only.
@@ -28,7 +28,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 └───────────────────────────────────────────────────────────────┘
 ```
 
-- A 232px sidebar: GitHub (the queue, with its Now and Today count), In flight (with how many of your in-flight PRs need you) and Settings. The active item is a neutral filled pill. At 820px and below it hides; Settings then uses a dropdown and the top bar names the page.
+- A 232px sidebar: GitHub (the queue, with its Now and Today count), In flight (with how many PRs are in flight, as its heading says; the ones that need you are in Now) and Settings, counts in pencil. The active item is a neutral filled pill; a review is under the page it was opened from. At 820px and below it hides; the top bar then names the page and carries a quiet "In flight 3" link.
 - One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
 - Sorted away: later, FYI, resolved, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
@@ -36,10 +36,11 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 - Enter (or a click) on a PR opens its review (below); on your PR in flight, which is only in Now because it needs you, it opens In flight at that PR. On an issue it opens the item in place: facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys. `w` opens a PR in place too, with its rule trace and raw signals.
 - A row whose PR has an AI review of its current commit says so after its facts: "AI says look".
 - An item the policy judge placed shows the judge's why as its why; its detail says "by your policy", and the rule trace ends with a `policy` step (`today, the tokenizer you maintain`, or `not judged yet, so the board default`).
-- The coordinator: when it acted in the last day, the top bar carries one quiet pencil line, "Coordinator snoozed 3 FYI items · 4m" (below 1000px just "Coordinator · 4m"). A click (Esc closes it) opens its log above the queue: each run, each action with its reason and an Undo, its notes. No colour, no badge.
-- Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
-- Settings → Policy, right after Rules: one sentence ("Prose guidance the judge and the coordinator follow."), a plain text editor in the UI font (an example as its placeholder), Save (⌘S, which saves the editor you're in) and Revert, then one quiet line of the judge's status ("23 items placed by the policy. 7 of 60 this hour.", or why it's off, or its last failure and the next try) and the file's path. If the file changed since you opened it, Save keeps your text and says so.
-- Settings → Agents → Coordinator: the switch, one line of status ("Idle. Last run 5m ago: 6 events, 3 actions.", "Running, started 20s ago.", its last error and next try, or why it's off), then its session id and the command that opens it in a terminal, with Copy.
+- The coordinator: when it acted in the last day, the top bar carries one quiet pencil line, "Coordinator snoozed 3 FYI items · 4m" (below 1000px just "Coordinator · 4m"; "just now" in the first minute). A click (`esc Close`) opens its log above the queue: one pencil line per run ("Run 14 · 6 events, 3 actions · 41s") above its actions, each with its reason and a pencil Undo, and its notes. No colour, no badge.
+- Settings: one scrolling page, wider than the queue so the rules editor fits. Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview); `#/settings/<section>` scrolls to one. Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
+- Settings → Policy, right after Rules: one sentence ("Prose guidance the judge and the coordinator follow."), a plain text editor in the UI font (an example as its placeholder), "⌘S Save" (saves the editor you're in) and Revert as an action line, like Rules', then one quiet line of the judge's status (a failure in ink, not red) ("23 items placed by the policy. 7 of 60 this hour.", or why it's off, or its last failure and the next try) and the file's path. If the file changed since you opened it, Save keeps your text and says so.
+- Settings → Agents → Coordinator: the switch, one line of status ("Idle. Last run 5m ago: 6 events, 3 actions.", "Running, started 20s ago.", its last error and next try in ink, or why it's off), then its short session id and the command that opens it in a terminal on one line (an ellipsis if it doesn't fit), with Copy.
+- Settings → AI review and → In flight: when AI reviews or babysitters are paused after failures in a row (an expired login), one line says why and when they try again, once, instead of on every PR.
 
 ## The review view
 
@@ -59,7 +60,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
   • src/routes/query.ts passes ?budget= through Number() unchecked ...
   5 notes on the changes below. ] and [ step through them.
 
-  a Approve   o Open on GitHub   c Copy prompt   i Redo AI review   esc Back
+  a Approve   o Open on GitHub   c Copy prompt   i Redo AI review
 
   5 files          n p  │ src/planner/stream.ts                        new +24 −0
   src/planner/stream.ts │ ┌───────────────────────────────────────────────────┐
@@ -68,7 +69,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
                         │ │    ┃ The core of the change: rows come out in ... │  an AI note, at its line
 ```
 
-- Header: the ref (highlighted when it's in Now), author, title, then one line: why it's on the desk (left out when a fact says the same), CI, the review state, a merge conflict, size. Problems are coloured words, as in the queue, and grey once the PR is sorted away or resolved. A wrapped line starts with a fact, never a "·", and a fact that wraps carries on after its "·", not under it.
+- Header: the ref (highlighted when it's in Now), author, title, then one line: why it's on the desk (left out when a fact says the same), CI, the review state, a merge conflict, size. Your PR in flight says so in its why ("in flight: reply ready to send", or just "in flight" while its babysitter has it, as calm as its lane row) and adds the babysitter's line from the lane under it, in pencil. Esc and the top bar's back link ("‹ In flight" or "‹ Queue") go back to the page it was opened from. Problems are coloured words, as in the queue, and grey once the PR is sorted away or resolved. A wrapped line starts with a fact, never a "·", and a fact that wraps carries on after its "·", not under it.
 - A resolved PR (Enter on a row under Resolved, or one you just approved) says so in one pencil line under the facts, "Resolved: merged by li-wei · 2h" (the reason, who merged or closed it, and how long ago, "just now" in the first minute), in place of the why; its ref loses Now's highlighter.
 - Recent activity: the PR's latest events in the queue's words, newest first, three of them and the rest behind a quiet "n more", each with its time after the facts' "·". Above 1100px it's a column of its own beside the facts and the AI review, one event a line; narrower, it's one wrapped pencil line under the facts ("sam commented 37m · you were mentioned 1h · 2 more"), so the AI review and the diff stay near the top. A resolved PR leaves out its "resolved" event and the one that caused it (the merge, the approval, the removed request); the Resolved line says it.
 - The AI review: verdict, risk (only high is coloured), summary, concerns, and how many notes sit in the code. While it's being written, a quiet line says so; a failure shows its reason in ink, not red (it's about the agent, not the PR), with a command in it set as code (`claude auth login`), and `i` tries again. When AI reviews are paused after failures in a row, a PR that wasn't tried says that. A merged or closed PR with none says "No AI review." (`i` still asks). A review of an older commit stays, marked "before the latest commits", and its notes aren't placed in the new code.
@@ -84,8 +85,8 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 ```
   In flight 5
   Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in Now only when it needs you.
-  api#4122   Paginate the audit log export                                       5h
-             needs you: reply ready to send
+  api#4122   Paginate the audit log export                                       3d
+             reply ready to send
              pushed a fix for 3 comments · 4be71c2 · 24m
              CI passing   changes requested by dana   3 unresolved threads
              ┃ Reply to dana on src/export/audit.ts:88: "Should the cursor be opaque? …"
@@ -96,18 +97,19 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
              CI failing: test (20.x)   waiting on marco
 ```
 
-- Each row: the title, then "needs you: …" when it's back with you (the babysitter's question, "reply ready to send", "CI failing: no local clone of oss/tinyhttp", "approved and green: merge it"), then the babysitter's own line ("fixing CI · 4m · npm test", "pushed a fix for 2 comments · abc1234", "watching") unless it only repeats that, then the PR's state in plain words: CI passing, failing (with up to two check names) or running; approved by, changes requested by, waiting on; unresolved threads; conflicts with the base.
+- Each row: the title, then why it's back with you, in ink with no label (the highlighter on its ref already says so): "babysitter asks: …", "reply ready to send", "comments from outside contributors", "no local clone of oss/tinyhttp, so no babysitter" (with a link to Local clones), "approved and green: merge it". Then the babysitter's own line ("fixing CI · 4m · npm test", "pushed a fix for 2 comments · abc1234", "watching") unless it only repeats that, then the PR's state in plain words: CI passing, failing (with up to two check names) or running; approved by, changes requested by, waiting on; unresolved threads; merge conflict. The right-hand time is the queue's: how long it's been waiting, or when it landed.
 - Calm: a row is ink and pencil grey while a babysitter has it, problems included. A row that needs you gets the highlighter on its ref and its problems their colour, as in Now.
-- A drafted reply sits under its row like an AI note in a review: what it answers, the reply, Send and Discard. Send posts it on GitHub as you; it's one of the desk's three writes.
-- The selected row opens like an item in the queue, with its keys: Review, Open on GitHub, Take back, Dismiss the question, Copy resume command (`cd <worktree> && claude --resume <session>`, to open the babysitter's session yourself).
+- A drafted reply sits under its row like an AI note in a review, a margin rule and no card: what it answers, the reply, Send and Discard. Send posts it on GitHub as you; it's one of the desk's three writes.
+- The selected row opens like an item in the queue, with its keys: Review, Open on GitHub, Take back, Dismiss the question (or Mark read, for outside contributors' comments), Copy resume command (`cd <worktree> && claude --resume <session>`, to open the babysitter's session yourself; "Answer in a terminal" when it asked a question).
+- In Now, a PR in flight says so: "in flight: reply ready to send", or "babysitter asks: …", so it doesn't read like a reviewer's ask; Enter on it opens the lane at that PR.
 
 ## Keys
 
-`j/k` move · `Enter` review a PR, open an issue · `o` GitHub · `d` your PR in flight, or take it back · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` AI review · `w` rule trace and signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g i` in flight · `g l/f/d/h/x` sorted-away groups · `?` help.
+`j/k` move · `Enter` review a PR, open an issue · `o` GitHub · `d` your PR in flight, or take it back · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` AI review · `w` rule trace and signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g i` in flight · `g l/f/d/h/x` sorted-away groups (the key after `g` is always the chord's, never the key's own action) · `?` help.
 
-In a review: `n/p` next and previous file · `]/[` next and previous AI note · `a` then `a` approve · `d` your PR in flight, or take it back · `i` AI review again · `o` GitHub · `c` copy prompt · `Esc` back to the queue.
+In a review: `n/p` next and previous file · `]/[` next and previous AI note · `a` then `a` approve · `d` your PR in flight, or take it back · `i` AI review again · `o` GitHub · `c` copy prompt · `Esc` back to where you opened it (the queue or In flight).
 
-In flight: `j/k` move · `Enter` review · `o` GitHub · `d` take back · `y` send the drafted reply · `x` dismiss the question, or discard the reply · `c` copy the resume command · `Esc` the queue.
+In flight: `j/k` move · `Enter` review · `o` GitHub · `d` take back · `y` send the drafted reply · `x` dismiss the question (or outside comments), or discard the reply · `c` copy the resume command · `Esc` the queue. `e`, `s` and `m` don't apply to a PR in flight: its babysitter has it, so `d` takes it back first.
 
 Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 
@@ -117,7 +119,7 @@ Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `web/src/App.tsx`                                            | state, data loading, SSE, keyboard                                                              |
 | `web/src/view.ts`                                            | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
-| `web/src/components/TopBar.tsx`                              | wordmark, filter, the coordinator's line, sync, help, settings                                  |
+| `web/src/components/TopBar.tsx`                              | wordmark, filter or back link, the coordinator's line, In flight (narrow), sync, help, settings |
 | `web/src/components/CoordinatorLog.tsx`                      | the coordinator's log, opened from the top bar                                                  |
 | `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`  | the queue                                                                                       |
 | `web/src/components/Review.tsx`                              | a PR's review: header, AI review, files, Pierre diffs with notes, approve                       |

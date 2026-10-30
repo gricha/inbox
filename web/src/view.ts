@@ -13,7 +13,7 @@ import type {
   SettingDef,
   SettingValue,
 } from "../../src/types.ts";
-import { ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
+import { age as ageOf, ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
 
 // One surface (the queue), a PR's review in its place, your in-flight PRs, and Settings, whose sections include the rules editor.
 export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "inflight" } | { name: "settings"; section: string };
@@ -57,26 +57,32 @@ export function routeHash(r: Route): string {
 // ---------------------------------------------------------------- in flight
 
 // An in-flight PR's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
+// Tones as in the queue and the review: CI failing is bad, changes requested and a merge conflict are warnings.
 export function laneFacts(
   r: Pick<InflightRow, "ci" | "failing" | "approved_by" | "changes_by" | "waiting_on" | "threads_unresolved" | "mergeable" | "draft">,
-  base: string,
-): { text: string; problem: boolean }[] {
-  const out: { text: string; problem: boolean }[] = [];
-  const add = (text: string, problem = false) => out.push({ text, problem });
+): { text: string; tone: "" | "bad" | "warn" }[] {
+  const out: { text: string; tone: "" | "bad" | "warn" }[] = [];
+  const add = (text: string, tone: "" | "bad" | "warn" = "") => out.push({ text, tone });
   if (r.draft) add("draft");
   // Check names can be long ("tacos-gha / TACOS Unlock (terragrunt/regions/…)"): two at most, each clipped.
   const clip = (n: string) => (n.length > 40 ? `${n.slice(0, 39)}…` : n);
   const f = r.failing;
   const failing = f.length > 2 ? `${clip(f[0]!)} and ${f.length - 1} more` : f.map(clip).join(", ");
-  if (r.ci === "red") add(failing ? `CI failing: ${failing}` : "CI failing", true);
+  if (r.ci === "red") add(failing ? `CI failing: ${failing}` : "CI failing", "bad");
   else if (r.ci === "green") add("CI passing");
   else if (r.ci === "pending") add("CI running");
   if (r.approved_by.length) add(`approved by ${r.approved_by.join(", ")}`);
-  if (r.changes_by.length) add(`changes requested by ${r.changes_by.join(", ")}`, true);
+  if (r.changes_by.length) add(`changes requested by ${r.changes_by.join(", ")}`, "warn");
   if (r.waiting_on.length) add(`waiting on ${r.waiting_on.join(", ")}`);
   if (r.threads_unresolved) add(`${r.threads_unresolved} unresolved ${r.threads_unresolved === 1 ? "thread" : "threads"}`);
-  if (r.mergeable === "conflict") add(`conflicts with ${base}`, true);
+  if (r.mergeable === "conflict") add("merge conflict", "warn");
   return out;
+}
+
+// What a PR's babysitter is doing, in the lane's words: "fixing CI · 4m · npm test", "pushed a fix for 2 comments · abc1234".
+export function sitterLine(r: Pick<InflightRow, "sitter" | "run">, now: number): string {
+  const s = r.sitter;
+  return [s.text, s.since && ageOf(s.since, now), s.state === "running" && r.run?.step].filter(Boolean).join(" · ");
 }
 
 // ---------------------------------------------------------------- review
@@ -359,7 +365,7 @@ export function logText(e: CoordinatorLogEntry): string {
     const what = `${sentence(past(e.action)).slice(0, -1)} ${e.item_id ? shortId(e.item_id) : "an item"}`;
     return e.text ? `${what}: ${e.text}` : what;
   }
-  return e.kind === "run" && e.run ? `Run ${e.run}: ${e.text.charAt(0).toLowerCase()}${e.text.slice(1)}` : e.text;
+  return e.kind === "run" && e.run ? `Run ${e.run} · ${e.text.charAt(0).toLowerCase()}${e.text.slice(1)}` : e.text;
 }
 
 export function judgeStatusText(j: JudgeStatus, now: number): string {

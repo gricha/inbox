@@ -350,6 +350,16 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   );
 }
 
+function PausedLine({ p, now }: { p: SettingsView["paused"]["ai"]; now: number }) {
+  if (!p) return null;
+  const left = Math.max(1, Math.round((Date.parse(p.until) - now) / 60_000));
+  return (
+    <p className="s-live">
+      {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m, or now if you change the agent settings.
+    </p>
+  );
+}
+
 function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   if (!s.accelerator) return <p className="s-live quiet">Off</p>;
   if (s.ok)
@@ -387,12 +397,16 @@ function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads
   }
   return (
     <div className="coord">
-      <p className={cls("s-live", s.state === "error" ? "t-bad" : "quiet")}>{withCode(coordinatorText(s, now))}</p>
+      {/* An agent's failure is about the agent: ink, not red. */}
+      <p className={cls("s-live", s.state !== "error" && "quiet")}>{withCode(coordinatorText(s, now))}</p>
       {command && (
         <>
-          <p className="s-live quiet">Session {s.session_id}. Talk to it in a terminal to shape the policy or the rules:</p>
+          <p className="s-live quiet" title={s.session_id}>
+            Session {s.session_id.slice(0, 8)}. Talk to it in a terminal to shape the policy or the rules:
+          </p>
           <div className="coord-cmd">
-            <code>{command}</code>
+            {/* One line, so a wrap can't split the id or an argument from its flag; Copy copies all of it. */}
+            <code title={command}>{command}</code>
             <button
               type="button"
               className="btn"
@@ -618,6 +632,10 @@ export function Settings({
               x.help && <p className="s-intro">{x.help}</p>
             )}
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
+            {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
+            {view && (x.id === "review" || x.id === "inflight") && (
+              <PausedLine p={view.paused[x.id === "review" ? "ai" : "babysitters"]} now={now} />
+            )}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
             {view && defs.length > 0 && (

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { cls } from "../format.ts";
+import { KeyButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
 
@@ -116,31 +117,27 @@ export function Policy({
         }}
       />
       <div className="editor-foot">
-        <button
-          type="button"
-          className="btn primary"
+        <KeyButton
+          k={`${MOD}S`}
+          label={busy ? "Saving…" : "Save"}
           disabled={busy || !dirty}
-          onClick={() => {
+          run={() => {
             void save();
           }}
-        >
-          {busy ? "Saving…" : "Save"}
-          <kbd>{MOD}S</kbd>
-        </button>
-        <button
-          type="button"
-          className="btn ghost"
+        />
+        <KeyButton
+          k=""
+          label="Revert"
           disabled={!dirty}
-          onClick={() => {
+          run={() => {
             if (doc) setText(doc.text);
           }}
-        >
-          Revert
-        </button>
+        />
         <span className="grow" />
         {dirty && <span className="unsaved">Unsaved changes</span>}
       </div>
-      {doc && <p className={cls("s-live", doc.judge.state === "error" ? "t-bad" : "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
+      {/* An agent's failure is about the agent, not your work: ink, not red. */}
+      {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       <p className="s-path quiet" title={doc?.path}>
         <code>{doc ? doc.path.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, "~") : "…"}</code>. The coordinator edits it too when you ask it to.
       </p>

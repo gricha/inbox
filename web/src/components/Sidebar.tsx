@@ -5,17 +5,19 @@ import type { Route } from "../view.ts";
 // Sources of work, one entry each (just GitHub for now), your PRs in flight, and Settings in the footer.
 export function Sidebar({
   route,
+  from,
   view,
   overview,
   inert,
 }: {
   route: Route;
+  from: "queue" | "inflight"; // where a review was opened from: it stays that page's
   view: QueueView | null;
   overview: Overview | null;
   inert?: boolean;
 }) {
-  const onQueue = route.name === "queue" || route.name === "review";
-  const onLane = route.name === "inflight";
+  const onQueue = route.name === "queue" || (route.name === "review" && from === "queue");
+  const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
   const onSettings = route.name === "settings";
   const now = view?.sections.now.length ?? 0;
   const today = view?.sections.today.length ?? 0;
@@ -48,7 +50,7 @@ export function Sidebar({
           <span className="side-name">GitHub</span>
           <span className="side-count">{view ? now + today : ""}</span>
         </a>
-        {/* The count is what needs you; the rest is the babysitters'. */}
+        {/* All of them, as the lane's heading says; the ones that need you are in Now already. */}
         <a
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
@@ -56,7 +58,7 @@ export function Sidebar({
           title={flight ? `${flight.total} in flight, ${flight.needs_you} need you (g i)` : "Your PRs in flight (g i)"}
         >
           <span className="side-name">In flight</span>
-          <span className="side-count">{flight && flight.needs_you > 0 ? flight.needs_you : ""}</span>
+          <span className="side-count">{flight && flight.total > 0 ? flight.total : ""}</span>
         </a>
       </nav>
       <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>

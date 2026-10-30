@@ -319,7 +319,8 @@ kbd {
 
   .topbar .wordmark,
   .topbar .crumb,
-  .topbar .icon.to-settings {
+  .topbar .icon.to-settings,
+  .topbar .tb-flight {
     display: none;
   }
 }
@@ -831,8 +832,9 @@ kbd {
   font-weight: 600;
 }
 
+/* Only urgency gets colour: the verdict is ink, its weight says "look". */
 .v-look {
-  color: var(--blue);
+  color: var(--ink);
 }
 
 .v-skip {
@@ -964,8 +966,15 @@ kbd {
   color: var(--ink);
 }
 
-.lane-status.needs b {
-  font-weight: 650;
+.lane-status a {
+  color: var(--pencil);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+}
+
+/* Landed sits one group gap below the open rows, as Today does below Now. */
+.lane .group-head.sub {
+  margin-top: 0;
 }
 
 .lane-row .meta {
@@ -977,14 +986,12 @@ kbd {
   padding-bottom: 12px;
 }
 
-/* A reply waiting for Send: what it answers, then the reply, like an AI note in a review. */
+/* A reply waiting for Send: what it answers, then the reply, like an AI note in a review: a margin rule, no card. */
 .draft {
   display: grid;
   gap: 4px;
   padding: 8px 12px 4px;
   border-left: 2px solid var(--rule-strong);
-  border-radius: 0 6px 6px 0;
-  background: var(--sheet);
 }
 
 .draft-to {
@@ -1056,8 +1063,9 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+/* Passing isn't urgent: no colour, as in the review header and the lane. */
 .t-ci-green {
-  color: var(--green);
+  color: inherit;
 }
 
 .t-ci-red {
@@ -1107,8 +1115,9 @@ kbd {
   font-weight: 600;
 }
 
+/* The matched step reads by weight (.trace li.hit), not colour. */
 .tick.ok {
-  color: var(--green);
+  color: var(--ink);
 }
 
 .tick.no {
@@ -1631,6 +1640,11 @@ kbd {
   border-bottom: 1px solid var(--rule);
 }
 
+/* The next section's top rule closes the last one; two hairlines 13px apart read as a double rule. */
+.s-fields .setting:last-child {
+  border-bottom: 0;
+}
+
 .setting.st-text {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1802,7 +1816,7 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 8px 18px;
   margin-top: 10px;
   color: var(--pencil);
   font-size: 12.5px;
@@ -1845,11 +1859,12 @@ kbd {
 /* The coordinator, under its switch in Settings → Agents. */
 .coord {
   flex-basis: 100%;
+  min-width: 0; /* the one-line command shrinks to an ellipsis instead of widening the page */
 }
 
 .coord-cmd {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   margin-top: 6px;
 }
@@ -1857,10 +1872,29 @@ kbd {
 .coord-cmd code {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   color: var(--ink-2);
   font-size: 12px;
   line-height: 1.6;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Below 820px, where the sidebar's In flight entry is hidden: the same, in pencil. */
+.tb-flight {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.tb-flight:hover {
+  background: var(--wash);
+  color: var(--ink);
 }
 
 /* The queue's top bar: one quiet line when the coordinator acted recently. */
@@ -1955,6 +1989,20 @@ kbd {
 .cl-undone {
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+/* The least important action on the log: pencil, ink on hover. */
+.cl-undo {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pencil);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cl-undo:hover {
+  color: var(--ink);
 }
 
 .side-col {
@@ -2253,6 +2301,11 @@ kbd {
 }
 
 .rv-resolved {
+  color: var(--pencil);
+}
+
+/* A PR in flight: its babysitter's line, in pencil as in the lane. */
+.rv-lane {
   color: var(--pencil);
 }
 

@@ -102,6 +102,7 @@ export function App() {
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
+  const [reviewFrom, setReviewFrom] = useState<"queue" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -159,7 +160,8 @@ export function App() {
         // Always: the sidebar shows the queue's counts on every page.
         api.queue(),
         exp ? api.item(exp).catch((e: unknown) => message(e)) : null,
-        r.name === "inflight" ? api.inflight() : null,
+        // A review of your PR in flight shows its lane line too.
+        r.name === "inflight" || r.name === "review" ? api.inflight() : null,
       ]);
       if (n !== loadSeq.current) return;
       setOverview(ov);
@@ -213,6 +215,10 @@ export function App() {
   }, [settingsSection, flash, load]);
 
   const onLane = route.name === "inflight";
+  // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
+  useEffect(() => {
+    if (route.name !== "review") setReviewFrom(route.name === "inflight" ? "inflight" : "queue");
+  }, [route.name]);
   useEffect(() => {
     if (!onLane) return;
     window.scrollTo(0, 0);
@@ -480,7 +486,13 @@ export function App() {
   async function dismiss(r: InflightRow, d?: Draft) {
     try {
       await api.dismiss(r.card.id, d?.id);
-      flash(d ? `Discarded the reply to ${d.to}` : `Dismissed the question on ${shortRef(r.card)}`);
+      flash(
+        d
+          ? `Discarded the reply to ${d.to}`
+          : r.escalation
+            ? `Dismissed the question on ${shortRef(r.card)}`
+            : `Marked the outside comments on ${shortRef(r.card)} read`,
+      );
     } catch (e) {
       flash(message(e), true);
     }
@@ -500,7 +512,7 @@ export function App() {
       else flash(`No reply to send on ${shortRef(c)}`);
     } else if (k === "x") {
       if (d) void dismiss(r, d);
-      else if (r.escalation) void dismiss(r);
+      else if (r.escalation || r.outside_at) void dismiss(r);
       else if (r.drafts[0]) void dismiss(r, r.drafts[0]);
       else flash(`Nothing to dismiss on ${shortRef(c)}`);
     } else if (k === "c") void copyResume(r);
@@ -595,17 +607,6 @@ export function App() {
         return;
       }
     }
-    if (Date.now() - gAt.current < 1200) {
-      gAt.current = 0;
-      if (CHORDS[k]) {
-        go(CHORDS[k]);
-        return;
-      }
-      if (AWAY_KEYS[k] && route.name === "queue") {
-        toggleGroup(AWAY_KEYS[k]);
-        return;
-      }
-    }
     if (k === "g") gAt.current = Date.now();
     else if (k === "?") setHelp(true);
     else if (k === ",") go({ name: "settings", section: "github" });
@@ -642,14 +643,36 @@ export function App() {
       run(current, k);
     }
   };
+  // The key after g is the chord's, whatever it means on its own (i in a review, x and d in the lane), so it never falls
+  // through to them. Capture phase: this runs before any other keydown listener, the review's included.
+  const onChord = (e: KeyboardEvent) => {
+    if (!gAt.current || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
+    const t = e.target instanceof HTMLElement ? e.target : document.body;
+    if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    const fresh = Date.now() - gAt.current < 1200;
+    gAt.current = 0;
+    if (!fresh) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const k = e.key;
+    if (CHORDS[k]) go(CHORDS[k]);
+    else if (AWAY_KEYS[k] && route.name === "queue") toggleGroup(AWAY_KEYS[k]);
+  };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
+  const chordRef = useRef(onChord);
+  chordRef.current = onChord;
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       keyRef.current(e);
     };
+    const chord = (e: KeyboardEvent) => {
+      chordRef.current(e);
+    };
+    window.addEventListener("keydown", chord, { capture: true });
     window.addEventListener("keydown", h);
     return () => {
+      window.removeEventListener("keydown", chord, { capture: true });
       window.removeEventListener("keydown", h);
     };
   }, []);
@@ -684,13 +707,14 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} view={view} overview={overview} inert={help} />
+      <Sidebar route={route} from={reviewFrom} view={view} overview={overview} inert={help} />
       <div className="col">
         <TopBar
           overview={overview}
           offline={down === UNREACHABLE}
           now={now}
           route={route}
+          from={reviewFrom}
           filter={filter}
           setFilter={setFilter}
           filterRef={filterRef}
@@ -768,8 +792,9 @@ export function App() {
               inert={help}
               flash={reviewFlash}
               onInflight={inflight}
+              row={laneRows.find((r) => r.card.id === route.id) ?? null}
               onBack={() => {
-                go({ name: "queue" });
+                go({ name: reviewFrom });
               }}
             />
           )}
