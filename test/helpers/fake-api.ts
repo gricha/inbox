@@ -53,6 +53,7 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     verdict: null,
     resolved: null,
     resolved_at: null,
+    inflight: false,
     ...extra,
   };
 }
@@ -102,6 +103,7 @@ const overview: Overview = {
   connectors: [{ id: "github", name: "GitHub", status: "ok", synced_at: ago(0.05), error: null }],
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
   focus: { now: 1, today: 1, new: 1 },
+  inflight: { total: 0, needs_you: 0 },
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 
@@ -122,7 +124,17 @@ const boardView: BoardView = {
 };
 
 function state(id: string, patch: Partial<ItemState> = {}): ItemState {
-  return { id, done_at: null, snooze_until: null, snooze_on_activity: false, muted: false, pinned: false, seen_at: null, ...patch };
+  return {
+    id,
+    done_at: null,
+    snooze_until: null,
+    snooze_on_activity: false,
+    muted: false,
+    pinned: false,
+    seen_at: null,
+    inflight_at: null,
+    ...patch,
+  };
 }
 
 function detail(c: Card): ItemDetail {

@@ -57,6 +57,8 @@ test("lists the tools", async () => {
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     "desk_act",
     "desk_brief",
+    "desk_draft_reply",
+    "desk_escalate",
     "desk_events",
     "desk_item",
     "desk_list",
@@ -194,7 +196,7 @@ test("`desk mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 8);
+    assert.equal((await c.listTools()).tools.length, 10);
     const r = await c.callTool({ name: "desk_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

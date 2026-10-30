@@ -50,6 +50,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     verdict: null,
     resolved: null,
     resolved_at: null,
+    inflight: false,
     ...extra,
   };
 };

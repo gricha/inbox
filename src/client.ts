@@ -7,6 +7,7 @@ import type {
   BoardView,
   ConfigDoc,
   ConfigError,
+  Draft,
   FieldDoc,
   FocusView,
   ItemDetail,
@@ -110,6 +111,11 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
     status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
     aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${q(id)}/ai`, { force }, 360_000),
+    // Local only: a draft waits for you to send it from the In-flight lane, and no client can send it.
+    draftReply: (id: string, body: string, thread_id?: string) =>
+      call<{ ok: true; draft: Draft }>("POST", `/api/inflight/${q(id)}/draft`, { body, thread_id }),
+    escalate: (id: string, question: string) =>
+      call<{ ok: true; question: string }>("POST", `/api/inflight/${q(id)}/escalate`, { question }),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));

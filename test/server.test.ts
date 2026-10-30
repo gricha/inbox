@@ -82,6 +82,8 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     assert.deepEqual((await client.listTools()).tools.map((x) => x.name).sort(), [
       "desk_act",
       "desk_brief",
+      "desk_draft_reply",
+      "desk_escalate",
       "desk_events",
       "desk_item",
       "desk_list",
