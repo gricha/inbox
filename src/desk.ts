@@ -61,6 +61,7 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
+const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["analyze.model"], s["review.auto_ai"]]);
 
 export class DeskError extends Error {
   status: number;
@@ -264,7 +265,14 @@ export class Desk {
 
   reloadSettings(): void {
     const poll = this.settings["github.poll_seconds"];
+    const agent = agentKey(this.settings);
     this.settings = this.readSettings();
+    // A changed agent starts afresh: AI reviews aren't paused, and PRs that failed are tried again.
+    if (agentKey(this.settings) !== agent) {
+      this.aiFailures = 0;
+      this.aiPaused = null;
+      this.aiErrors.clear();
+    }
     // Sync now: bots and close_collaborator_min change the {close_authors} searches.
     if (this.configText) this.reloadConfig(true);
     else this.changed();
@@ -778,7 +786,7 @@ export class Desk {
     const err = this.aiErrors.get(id);
     const own = err?.head_oid === e.item.head_oid ? err.message : null;
     // A PR the desk would have reviewed on its own says why it didn't.
-    const paused = this.aiPausedNow() && this.wantsAi(e, snap) ? this.aiPaused!.message : null;
+    const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? this.aiPaused!.message : null;
     return {
       card: d.card,
       item: d.item,
@@ -874,11 +882,12 @@ export class Desk {
     } catch (err) {
       const message = (err as Error).message;
       this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
-      this.log(`AI review of ${id} failed: ${message}`);
+      const cause = (err as Error).cause;
+      this.log(`AI review of ${id} failed: ${message}${typeof cause === "string" ? ` (${cause})` : ""}`);
       if (++this.aiFailures >= AI_PAUSE_AFTER) {
         if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
         this.aiPaused = {
-          message: `AI reviews paused after ${this.aiFailures} failures in a row: ${message}`,
+          message: `AI reviews are paused: ${message}`,
           until: Date.now() + AI_RETRY,
         };
       }
@@ -900,9 +909,14 @@ export class Desk {
   }
 
   // Background AI reviews for what's in Now and Today, a couple at a time. After a failure it waits for the next sync.
-  // AI reviews nobody asked for: on unless review.auto_ai is off, there's no agent to write them, or they keep failing.
+  // AI reviews nobody asked for: on unless review.auto_ai is off or there's no agent to write them...
+  autoAiOn(): boolean {
+    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none";
+  }
+
+  // ...and not paused because they keep failing.
   autoAi(): boolean {
-    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none" && !this.aiPausedNow();
+    return this.autoAiOn() && !this.aiPausedNow();
   }
 
   pumpAi(): void {

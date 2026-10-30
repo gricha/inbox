@@ -250,7 +250,7 @@ export function claudeEnvelope(out: string): unknown {
     if (env.api_error_status === 401 || /401|authenticate|log ?in/i.test(msg)) {
       // "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." → "401 OAuth access token has expired"
       const why = msg.replace(/^Failed to authenticate\.\s*(API Error:\s*)?/i, "").replace(/\.?\s*Re-authenticate to continue\.?$/i, "");
-      throw new Error(`Claude Code isn't logged in (${why}). Run claude auth login in a terminal.`);
+      throw new Error("Claude Code isn't logged in. Run `claude auth login` in a terminal.", { cause: why });
     }
     throw new Error(msg);
   }

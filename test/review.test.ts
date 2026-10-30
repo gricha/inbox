@@ -129,7 +129,9 @@ test("claude's envelope: structured output, JSON in the result, and login errors
   };
   assert.throws(
     () => claudeEnvelope(JSON.stringify(expired)),
-    (e: Error) => e.message === "Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.",
+    (e: Error) =>
+      e.message === "Claude Code isn't logged in. Run `claude auth login` in a terminal." &&
+      e.cause === "401 OAuth access token has expired",
   );
   assert.throws(() => claudeEnvelope(JSON.stringify({ is_error: true, result: "Overloaded" })), /^Error: Overloaded$/);
 });
@@ -404,9 +406,11 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   t.cleanup();
 });
 
+const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+
 test("failures in a row (an expired login) pause AI reviews nobody asked for; asking still runs, and a success resumes them", async () => {
   const t = await setup([ask(1), ask(2), ask(3), ask(4, { state: "merged" })]);
-  t.f.setFail("Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.");
+  t.f.setFail(LOGGED_OUT);
   await t.sync();
   const [first, second] = t.f.started;
   const untried = ["acme/api#1", "acme/api#2", "acme/api#3"].find((id) => !t.f.started.includes(id))!;
@@ -419,10 +423,7 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
   const v = await t.desk.reviewView(untried);
   assert.equal(t.f.started.length, 2, "no sync and no opened PR starts another run");
   assert.equal(v.generating, false);
-  assert.equal(
-    v.ai_error,
-    "AI reviews paused after 2 failures in a row: Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.",
-  );
+  assert.equal(v.ai_error, `AI reviews are paused: ${LOGGED_OUT}`);
   assert.match((await t.desk.reviewView(first!)).ai_error ?? "", /^Claude Code isn't logged in/, "a PR that was tried shows its own error");
   assert.equal((await t.desk.reviewView("api#4")).ai_error, null, "not on one it wouldn't review on its own (merged)");
 
@@ -434,6 +435,40 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
   assert.equal((await asked).verdict, "skim");
   assert.equal(t.desk.aiPaused, null, "a success resumes them");
   assert.equal((await t.desk.reviewView(untried)).ai_error, null);
+  t.cleanup();
+});
+
+test("changing the agent settings lifts the pause and tries the failed PRs again; with no agent, nothing reads as paused", async () => {
+  const t = await setup([ask(1), ask(2), ask(3), ask(4)]);
+  t.f.setFail(LOGGED_OUT);
+  await t.sync();
+  for (const id of t.f.started.slice()) await t.f.release(id);
+  assert.ok(t.desk.aiPausedNow());
+  const untried = ["acme/api#1", "acme/api#2", "acme/api#3", "acme/api#4"].filter((id) => !t.f.started.includes(id));
+
+  t.desk.putSettings({ set: { "github.poll_seconds": 120 } });
+  await flush();
+  assert.ok(t.desk.aiPausedNow(), "another setting leaves it paused");
+  assert.equal(t.f.started.length, 2);
+
+  t.desk.putSettings({ set: { "analyze.model": "opus" } });
+  await flush();
+  assert.equal(t.desk.aiPausedNow(), false);
+  assert.equal(t.f.started.length, 4, "two more start at once");
+  assert.deepEqual(t.f.started.slice(2), t.f.started.slice(0, 2), "the failed ones first: their errors were for the old agent");
+  for (const id of t.f.started.slice(2)) await t.f.release(id);
+  assert.ok(t.desk.aiPausedNow(), "failing again pauses again");
+
+  // Asking (i) with the agent off fails too, but no PR should say AI reviews are paused.
+  t.desk.putSettings({ set: { "agent.driver": "none" } });
+  for (const id of untried) {
+    const failed = assert.rejects(t.desk.aiReview(id));
+    await flush();
+    await t.f.release(id);
+    await failed;
+  }
+  assert.ok(t.desk.aiPausedNow());
+  assert.equal((await t.desk.reviewView(t.f.started[0]!)).ai_error, null, "its error was for the old agent");
   t.cleanup();
 });
 
