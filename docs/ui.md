@@ -5,8 +5,8 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 ## Principles
 
 - **Minimize surfaces, maximize automation.** One queue; boards and rules feed it and are edited in Settings → Rules. The sidebar navigates the queue, In flight and Settings; it never categorizes by repo or board.
-- **Only urgency gets colour.** A yellow highlighter marks Now: the heading and each item's ref (an empty Now has none). It's a marker stroke (`::before`, chisel-cut caps sized in em, a wavy middle, a slight tilt), never a box; `npm run shots` checks it covers its text and is never clipped. Everything else is ink and pencil grey. Problems are coloured words in Now and Today (on a card, in its open facts), the same words and colours everywhere (the queue, a review, the lane): "CI failing" red, "changes requested" and "merge conflict" amber; they turn grey once sorted away. Passing CI, a verdict, an agent's failure: ink and pencil.
-- **No boxes around words.** No chips, tags or outlined badges. Cards are sheets on the paper, never outlined. The only frame is the keyboard cursor: a pencil ring (on a card, around its own sheet; elsewhere with a neutral fill).
+- **Only urgency gets colour.** A yellow highlighter marks Now: the heading and each item's ref (an empty Now has none). It's a marker stroke (`::before`, chisel-cut caps sized in em, a wavy middle, a slight tilt), never a box; `npm run shots` checks it covers its text and is never clipped. Everything else is ink and pencil grey. Problems are coloured words on every Now and Today card, the same words and colours everywhere (the queue, a review, the lane): "CI failing" red, "changes requested" and "merge conflict" amber; they turn grey once sorted away. Passing CI, a verdict, an agent's failure: ink and pencil; "high risk" is the AI's one red word.
+- **No boxes around words.** No chips, tags or outlined badges. Cards are sheets on the paper, never outlined. The only frame is the keyboard cursor: a neutral fill with a pencil ring, on a card as on a row.
 - **Sentence case.** No all-caps labels, no monospace outside code.
 - **Both themes.** Tokens live on `:root` in `web/src/styles.css`, with a dark block under `prefers-color-scheme`. Check every change in light and dark. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only.
 
@@ -16,34 +16,45 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 ┌───────────────────────────────────────────────────────────────┐
 │ ● ● ●  Review Desk  [ Filter / ]  Coordinator · 4m  Synced 1m │  title bar (drag region in the app)
 ├───────────────────────────────────────────────────────────────┤
-│      Now 1                                                    │
+│      AI reviews are paused: Claude Code isn't logged in. …    │  only while they are
+│      Now 2                                                    │
 │    ╭───────────────────────────────────────────────────────╮  │
-│    │ Read eval API keys from macOS Keychain            32d │  │  a card: title, age
-│    │ seer#8463  asked you directly            look closely │  │  ref, why; the verdict on the right
-│    │ Reads the eval keys from the Keychain instead of …    │  │  the AI summary's first sentence
+│    │ Read eval API keys from macOS Keychain            32d │  │  the title, whole; its age
+│    │ seer#8463  asked you directly   +62 −7 · Look closely │  │  ref, why, problems; size and the AI's call
+│    │ Reads the eval keys from the Keychain instead of the  │  │  the AI's gist, in whole sentences
+│    │ env file. A missing key now fails at startup.         │  │
+│    │ ┃ The fallback logs the key's name and its value.     │  │  its top concern (look closely, high risk)
+│    ╰───────────────────────────────────────────────────────╯  │
+│    ╭───────────────────────────────────────────────────────╮  │
+│    │ Rewrite the retention cleanup job                  5d │  │  your PR
+│    │ api#4110  Babysitter asks: hourly?  merge conflict    │  │  what you owe, its label in ink
+│    │ Enter opens In flight to answer it                    │  │  what's next, its keys in ink
 │    ╰───────────────────────────────────────────────────────╯  │
 │      Today 8                                                  │
 │    ╭───────────────────────────────────────────────────────╮  │
 │    │ Remove the sentry.get_dsn helper                  22h │  │
-│    │ seer#9073  close collaborator                 skip it │  │
+│    │ seer#9073  close collaborator       +4 −120 · Skip it │  │
 │    │ Deletes an unused helper and its tests.               │  │
 │    ╰───────────────────────────────────────────────────────╯  │
 │      …                                                        │
+│    ╰───────────────────────────────────────────────────────╯  │  the folded cards' edges
 │      3 more for today                                         │
 │      Sorted away   later   FYI   resolved                     │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 - A 232px sidebar: GitHub (the queue, with its Now and Today count), In flight (with how many PRs are in flight, as its heading says; the ones that need you are in Now) and Settings, counts in pencil. The active item is a neutral filled pill; a review is under the page it was opened from. At 820px and below it hides; the top bar then names the page and carries a quiet "In flight 3" link.
-- One centred column, 920px wide, beside it. In the queue, headings and every card's text start on one edge. In flight and Settings keep a ref column (`--ref-w`).
-- Cards: Now and Today are a sheet each, three lines and no more: the title (whole, wrapping) with its age; the ref, why it's here and, on the right edge, the AI's verdict ("look closely", "skim it", "skip it", with "high risk" in red before it), so verdicts read down the right as refs read down the left; then the AI summary's first sentence. Your own PR carries what's next instead of a summary ("**d** hands it to a babysitter", its keys in ink), less what its why already says. An issue is two lines. Everything else waits for the selected card.
-- The selected card opens in place: the whole summary, up to two concerns as margin notes (a thin rule, no box), one pencil line of facts ("by priya", size, CI, review, merge conflict, threads, draft, risk below high, "5 notes on the changes", a demotion like "Now was full (3)"; problems in their colour, less what the why says), and its keys as an action line ("enter Review o Open on GitHub e Done s Snooze m Mute"; your PR adds `d`; one in flight only Show in flight, Open on GitHub and Take back). A click opens a card without selecting it first, since the selected card grows.
-- The AI's word while there's no current review, in pencil on the right: "AI review being written", "AI review queued", "AI review paused"; an older commit's review keeps its verdict with "· updating" (or "· paused", "· earlier commit" when auto reviews are off) and its summary turns pencil.
-- Runs: three or more consecutive items with the same author and reason stack under one line ("3 PRs from vaind asked you directly") on one sheet, ruled apart; their cards leave the why out.
-- The queue is Now and Today. Today shows its first `queue.today_cards` cards (5) and one pencil line, "3 more for today", that opens the rest in place; j/k stop on it (the cards' cursor) and Enter (or a click) opens it. Now never folds. An empty Now is its heading and "Nothing needs you right now.", no highlighter, no 0.
-- Each Now and Today card carries its pre-flight (`Card.preflight`), as above. While AI reviews are paused (an expired login), one line above Now says so, once.
-- An item nobody has touched for `queue.quiet_days` (14) leaves Now and Today for Later, with "quiet for 3 weeks" as its note.
-- Sorted away: later, FYI, resolved, hidden by rules, cleared, on one quiet line with no counts. Opened, their items are flat rows on the paper, not cards: title, then ref and why (and a note like "quiet for 3 weeks"). Each name opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`); they're closed again on every load. While filtering, empty groups disappear, groups with matches open on their own, and Today doesn't fold.
+- One centred column beside it: 800px for the queue, so the AI's call on a card's right edge sits near its title, and 920px for In flight. The top bar's filter starts on the column's edge. In the queue, headings and every card's text start on one edge. In flight and Settings keep a ref column (`--ref-w`).
+- The queue is prefiltered, not a list of GitHub: only Now and Today show, every card carries its pre-flight, and everything else is one quiet line below.
+- A card (Now and Today): the title, whole and wrapping, with the new dot and pin after its last word and its age on the right. Then the ref, why it's here and its problems in their colours (left out when the why says them), and on the right edge the size in pencil and the AI's call: "Look closely" (semibold ink), "Skim it" (ink-2), "Skip it" (pencil), the review's own words, with "high risk" in red before it. Refs read down the left and calls down the right. Then the AI's gist: whole sentences up to about 200 characters at a 72ch measure (three lines at most, for one very long sentence). A card the AI says to look at closely, or calls high risk, adds its top concern as a margin note (a thin rule, no box), cut at its first clause. Skim and skip cards stay at three lines; an issue is two.
+- Your own PR's why is what you owe, its label in ink ("**Babysitter asks:** keep it nightly, or switch to hourly?", "**In flight:** reply ready to send", "**Approved and green:** merge it"), and its third line is what's next instead of a gist ("**d** hands it to a babysitter", "**Enter** opens In flight, **y** sends it"), less what its why already says.
+- No current review: the call's place says "AI review being written", "AI review queued" or "AI review paused", in pencil. A review of an older commit keeps its call with "· updating" (or "· paused", "· earlier commit" when auto reviews are off), and its gist and concern turn pencil. While AI reviews are paused (an expired login), one line above Now says so once: "**AI reviews are paused:** Claude Code isn't logged in. Run `claude auth login` in a terminal."
+- The selected card has a neutral fill and the pencil ring, and opens in place: the whole summary, up to two concerns, one pencil line of facts ("by priya", CI passing or running, approved, threads, draft, risk below high, "5 notes on the changes", a demotion like "Now was full (3)"; less what the card already says), then its keys under a hairline ("enter Review o Open on GitHub e Done s Snooze m Mute"; your PR adds `d`; one in flight has only Show in flight, Open on GitHub and Take back). j/k keep the card they land on where it was while the one they left closes above it. A click opens a card without selecting it first, since the selected card grows. The snooze menu opens under the card, never over its keys.
+- Stacks: three or more consecutive items with the same author and reason sit under one line ("3 PRs from vaind asked you directly") on one sheet, ruled apart; their cards leave the why out.
+- The fold: Today shows its first `queue.today_cards` cards (5); the rest sit behind one pencil line, "3 more for today", with the next cards' edges showing under the last one. j/k stop on it (the cards' cursor, the column's full width) and Enter (or a click) opens the rest in place. Now never folds.
+- An empty group is one line: "**Now** Nothing needs you right now." with no highlighter and no 0, "**Today** Nothing else for today."
+- The quiet rule: an item nobody has touched for `queue.quiet_days` (14) leaves Now and Today for Later, before caps, with "quiet for 3 weeks" as its note. A pinned item and a review you were asked for in that time stay.
+- Sorted away: later, FYI, resolved, hidden by rules, cleared, on one quiet line with no counts. Opened, their items are flat rows on the paper, not cards: title, then ref, why, problems in grey (and a note like "quiet for 3 weeks"). Each name opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`); they're closed again on every load. While filtering, empty groups disappear, groups with matches open on their own, and Today doesn't fold.
 - Resolved rows are dimmed like cleared ones, carry no "new" dot, and show the reason ("merged", "you approved", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
 - Enter (or a click) on a PR opens its review (below); on your PR in flight, which is only in Now because it needs you, it opens In flight at that PR. On an issue it opens the item in place: facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys. `w` opens a PR in place too, with its rule trace and raw signals.
 - An item the policy judge placed shows the judge's why as its why; its detail says "by your policy", and the rule trace ends with a `policy` step (`today, the tokenizer you maintain`, or `not judged yet, so the board default`).
@@ -112,7 +123,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 - Calm: a row is ink and pencil grey while a babysitter has it, problems included. A row that needs you gets the highlighter on its ref and its problems their colour, as in Now.
 - A drafted reply sits under its row like an AI note in a review, a margin rule and no card: what it answers ("Your agent's reply to …" when an agent other than its babysitter drafted it), the reply, Send and Discard. Send posts it on GitHub as you; it's one of the desk's three writes.
 - The selected row opens like an item in the queue, with its keys: Review, Open on GitHub, Take back, Dismiss the question (or Mark read, for outside contributors' comments), Copy resume command (`cd <worktree> && claude --resume <session>`, to open the babysitter's session yourself; "Answer in a terminal" when it asked a question).
-- In Now, a PR in flight says so: "in flight: reply ready to send", or "babysitter asks: …", so it doesn't read like a reviewer's ask; Enter on it opens the lane at that PR.
+- In Now, a PR in flight says so, its label in ink: "**In flight:** reply ready to send", or "**Babysitter asks:** …", so it doesn't read like a reviewer's ask; Enter on it opens the lane at that PR.
 
 ## Keys
 

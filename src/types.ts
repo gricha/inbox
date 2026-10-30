@@ -393,7 +393,7 @@ export interface Card {
   demoted?: string;
   board: string;
   boards: string[]; // every board the item is on (for Focus)
-  chips: string[]; // short facts: "CI red", "+120 −30", "draft", "conflict", "3 unresolved"
+  chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"
   ci: Ci;
   review: ReviewDecision;
   draft: boolean;

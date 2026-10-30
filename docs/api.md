@@ -154,7 +154,7 @@ interface Card {
   demoted?: string; // e.g. "Now was full (3)"
   board: string;
   boards: string[]; // every board it's on
-  chips: string[]; // short facts: "CI red", "+120 −30", "draft", "conflict", "3 unresolved"
+  chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"
   ci: "green" | "red" | "pending" | "none";
   review: "approved" | "changes_requested" | "required" | "none";
   draft: boolean;

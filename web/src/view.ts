@@ -206,8 +206,28 @@ export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
 // "Enter opens In flight, y sends it" split so its keys can be set apart: odd indexes are keys.
 export const keyParts = (text: string): string[] => text.split(/(?<=^|, )(Enter|[a-z])(?= (?:opens|sends|hands|puts) )/);
 
-// The first sentence of an AI summary: all a card says until it's selected.
-export const lead = (summary: string): string => /^.+?[.!?](?=\s+[A-Z(`'"])/s.exec(summary)?.[0] ?? summary;
+// Whole sentences (or clauses after a ";") up to about max characters, and always the first: a card's gist and concern
+// end where a thought ends, never in an ellipsis.
+export function opening(text: string, max = 200): string {
+  const [first = "", ...rest] = text.trim().split(/(?<=[.!?])\s+(?=[A-Z0-9`"'(])|(?<=;)\s+/);
+  let out = first;
+  for (const u of rest) {
+    if (out.length + 1 + u.length > max) break;
+    out += ` ${u}`;
+  }
+  return out.replace(/;$/, ".");
+}
+
+// A card's problems, in the review's and the lane's words and tones.
+export function problems(c: Pick<Card, "chips">): { text: string; tone: "bad" | "warn" }[] {
+  const out: { text: string; tone: "bad" | "warn" }[] = [];
+  if (c.chips.includes("CI red")) out.push({ text: "CI failing", tone: "bad" });
+  if (c.chips.includes("changes requested")) out.push({ text: "changes requested", tone: "warn" });
+  if (c.chips.includes("conflict")) out.push({ text: "merge conflict", tone: "warn" });
+  return out;
+}
+
+export const sizeOf = (c: Pick<Card, "chips">): string | undefined => c.chips.find((x) => /^\+\d+ −\d+$/.test(x));
 
 const OLDER: Partial<Record<Preflight["state"], string>> = { stale: "updating", paused: "paused", off: "earlier commit" };
 const WAITING: Partial<Record<Preflight["state"], string>> = {
@@ -225,32 +245,24 @@ export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"
   return note ? { verdict: null, note } : null;
 }
 
-const CI_WORD = { green: "passing", red: "failing", pending: "running" };
-
-// The selected card's facts, in the review header's words, less what its why already says; problems carry their tone.
-export function cardFacts(
-  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted">,
-  me: string,
-): { text: string; tone: "" | "bad" | "warn" }[] {
-  const out: { text: string; tone: "" | "bad" | "warn" }[] = [];
-  const add = (text: string, tone: "" | "bad" | "warn" = "") => out.push({ text, tone });
-  if (c.author.toLowerCase() !== me.toLowerCase()) add(`by ${c.author}`);
-  const size = c.chips.find((x) => /^\+\d+ −\d+$/.test(x));
-  if (size) add(size);
-  if (c.kind === "pr" && c.ci !== "none") add(`CI ${CI_WORD[c.ci]}`, c.ci === "red" ? "bad" : "");
-  if (c.chips.includes("changes requested")) add("changes requested", "warn");
-  if (c.chips.includes("approved")) add("approved");
-  if (c.chips.includes("conflict")) add("merge conflict", "warn");
+// The selected card's facts, in the review header's words, less what the card already says: its why, and its problems and
+// size, which every card shows.
+export function cardFacts(c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted">, me: string): string[] {
+  const out: string[] = [];
+  if (c.author.toLowerCase() !== me.toLowerCase()) out.push(`by ${c.author}`);
+  if (c.kind === "pr" && c.ci === "green") out.push("CI passing");
+  if (c.kind === "pr" && c.ci === "pending") out.push("CI running");
+  if (c.chips.includes("approved")) out.push("approved");
   const threads = /^(\d+) unresolved$/.exec(c.chips.find((x) => x.endsWith(" unresolved")) ?? "")?.[1];
-  if (threads) add(`${threads} unresolved ${threads === "1" ? "thread" : "threads"}`);
-  if (c.chips.includes("draft")) add("draft");
+  if (threads) out.push(`${threads} unresolved ${threads === "1" ? "thread" : "threads"}`);
+  if (c.chips.includes("draft")) out.push("draft");
   const risk = c.preflight?.risk;
-  if (risk && risk !== "high") add(`${risk} risk`);
+  if (risk && risk !== "high") out.push(`${risk} risk`);
   const notes = c.preflight?.state === "ready" ? (c.preflight.notes ?? 0) : 0;
-  if (notes) add(`${notes} ${notes === 1 ? "note" : "notes"} on the changes`);
-  if (c.demoted) add(c.demoted);
+  if (notes) out.push(`${notes} ${notes === 1 ? "note" : "notes"} on the changes`);
+  if (c.demoted) out.push(c.demoted);
   const why = c.why.toLowerCase();
-  return out.filter((f) => !why.includes(f.text.toLowerCase()));
+  return out.filter((f) => !why.includes(f.toLowerCase()));
 }
 
 // The cards on screen, in screen order.

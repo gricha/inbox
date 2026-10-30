@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   Action,
   Card,
@@ -109,6 +109,7 @@ export function App() {
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
   const lastIndex = useRef(0);
+  const landing = useRef<{ id: string; top: number } | null>(null); // where the card j/k moves to sat on screen
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
@@ -294,6 +295,15 @@ export function App() {
     if (next) setSelected(next.id);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- tick re-checks once the undo hold has run out
   }, [flat, cursor, selected, tick]);
+
+  // The card j/k lands on stays put while the one it left closes above it; then it's scrolled into view if it grew past it.
+  useLayoutEffect(() => {
+    const at = landing.current;
+    landing.current = null;
+    if (!at || at.id !== selected) return;
+    const top = document.querySelector(`[data-id="${CSS.escape(at.id)}"]`)?.getBoundingClientRect().top;
+    if (top !== undefined) window.scrollBy(0, top - at.top);
+  }, [selected]);
 
   useEffect(() => {
     if (selected && route.name === "queue")
@@ -562,7 +572,10 @@ export function App() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const i = cursor.indexOf(selected ?? "");
     const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
-    if (next) setSelected(next);
+    if (!next) return;
+    const top = document.querySelector(`[data-id="${CSS.escape(next)}"]`)?.getBoundingClientRect().top;
+    landing.current = top === undefined ? null : { id: next, top };
+    setSelected(next);
   }
 
   // Today's "n more" line opens in place; the cursor goes on to the first card it showed.

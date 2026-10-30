@@ -29,7 +29,7 @@ export function Queue({
   if (!view) {
     const first = !!overview && !overview.synced_at;
     return (
-      <div className="queue">
+      <div className="queue deck">
         <p className="quiet-note">{first ? "Reading your GitHub queue for the first time. This takes about 30 seconds." : "Loading…"}</p>
       </div>
     );
@@ -42,16 +42,24 @@ export function Queue({
 
   return (
     <div className="queue deck">
-      {view.ai_paused && <p className="ai-paused">AI reviews are paused: {withCode(view.ai_paused)}</p>}
+      {view.ai_paused && (
+        <p className="ai-paused">
+          <b>AI reviews are paused:</b> {withCode(view.ai_paused)}
+        </p>
+      )}
       {filtering && !top.length && <p className="group-empty">No matches in Now or Today.</p>}
       {top.map((g) => (
-        // An empty Now has nothing urgent, so it carries no highlighter and no 0.
-        <section key={g.key} className={cls("group", `g-${g.key}`, !g.total && "none")} aria-labelledby={`h-${g.key}`}>
+        // An empty group is one line: an empty Now has nothing urgent, so it carries no highlighter and no 0.
+        <section key={g.key} className={cls("group", `g-${g.key}`, !g.cards.length && "none")} aria-labelledby={`h-${g.key}`}>
           <h2 id={`h-${g.key}`} className="group-head">
             <span>{g.label}</span>
-            {g.total > 0 && <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>}
+            {g.cards.length ? (
+              <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>
+            ) : (
+              <span className="group-none">{EMPTY[g.key]}</span>
+            )}
           </h2>
-          {g.cards.length ? <Rows cards={g.cards} g={g} ctx={ctx} /> : <p className="group-empty">{EMPTY[g.key]}</p>}
+          {g.cards.length > 0 && <Rows cards={g.cards} g={g} ctx={ctx} folded={g.fold > 0} />}
           {g.fold > 0 && (
             <button
               type="button"
@@ -101,10 +109,10 @@ export function Queue({
   );
 }
 
-function Rows({ cards, g, ctx }: { cards: Card[]; g: Group; ctx: RowCtx }) {
+function Rows({ cards, g, ctx, folded }: { cards: Card[]; g: Group; ctx: RowCtx; folded?: boolean }) {
   const away = SORTED_AWAY.includes(g.key);
   return (
-    <div className="rows cards">
+    <div className={cls("rows", "cards", folded && "folded")}>
       {runs(cards).map((r) =>
         r.cards.length < 3 ? (
           r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} />)

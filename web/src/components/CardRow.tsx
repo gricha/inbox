@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, shortRef, SNOOZE } from "../format.ts";
-import { aiWord, cardFacts, keyParts, lead, nextText, type Variant } from "../view.ts";
+import { aiWord, cardFacts, keyParts, nextText, opening, problems, sizeOf, type Variant } from "../view.ts";
 import { Detail, KeyButton } from "./Detail.tsx";
 import { VERDICT } from "./Review.tsx";
 
@@ -33,8 +33,7 @@ function PinGlyph() {
   );
 }
 
-// A card says three things: what it is, why it's here with the AI's verdict, and the AI's first sentence (for your own
-// PR, what's next). The selected card opens in place with the rest: the whole summary, concerns, facts and keys.
+// A card: its title; ref, why, problems, size and the AI's call; the AI's gist (or your PR's next step); a close look's concern.
 export function CardRow({
   card,
   variant,
@@ -52,8 +51,20 @@ export function CardRow({
   const sel = ctx.selected === card.id;
   const p = card.preflight;
   const ai = variant === "resolved" ? null : p ? aiWord(p) : card.verdict && { verdict: card.verdict, note: "" };
+  const mine = card.kind === "pr" && !card.resolved && card.author.toLowerCase() === ctx.me.toLowerCase();
   const next = nextText(card);
-  const summary = p?.summary && (sel ? p.summary : lead(p.summary));
+  const older = !!p && p.state !== "ready";
+  const summary = p?.summary && (sel ? p.summary : opening(p.summary));
+  const concerns = p?.concerns ?? [];
+  const shown = sel ? concerns : p?.verdict === "look" || p?.risk === "high" ? concerns.slice(0, 1).map((c) => opening(c, 0)) : [];
+  // A problem the why already says colours the why instead of showing twice.
+  const why = card.why.toLowerCase();
+  const said = (f: { text: string }) => why.includes(f.text.toLowerCase());
+  const extra = problems(card).filter((f) => !said(f));
+  const tone = p && variant === "active" ? problems(card).find(said)?.tone : undefined;
+  // Your own PR's why is what you owe ("babysitter asks: …"), so its label leads in ink.
+  const [head = "", tail] = card.why.split(/: (.*)/s);
+  const size = p && card.kind === "pr" ? sizeOf(card) : undefined;
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -96,7 +107,7 @@ export function CardRow({
           <span className="age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
             {age(since, ctx.now)}
           </span>
-          {/* The verdict sits on the right edge, under the age, so verdicts read down the cards as refs do. */}
+          {/* Refs read down the left edge and the AI's calls down the right. */}
           <span className="card-line">
             <span className="meta">
               <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
@@ -109,23 +120,47 @@ export function CardRow({
               ) : variant === "hidden" ? (
                 <span>Hidden by a rule. Open it to see which.</span>
               ) : (
-                (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
+                (!inRun || variant === "resolved") &&
+                card.why &&
+                (mine && p ? (
+                  <span className="why owed">
+                    <b className={tone && `t-${tone}`}>
+                      {head.charAt(0).toUpperCase() + head.slice(1)}
+                      {tail !== undefined && ":"}
+                    </b>
+                    {tail && ` ${tail}`}
+                  </span>
+                ) : (
+                  <span className={cls("why", tone && `t-${tone}`)}>{card.why}</span>
+                ))
               )}
+              {variant !== "resolved" &&
+                extra.map((f) => (
+                  <span key={f.text} className={`fact-word t-${f.tone}`}>
+                    {f.text}
+                  </span>
+                ))}
               {away && card.demoted && <span>{card.demoted}</span>}
             </span>
-            {ai && (
+            {(size !== undefined || ai) && (
               <span className="ai-word">
-                {p?.risk === "high" && <span className="t-bad">high risk</span>}
-                {ai.verdict && <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict].toLowerCase()}</span>}
-                {ai.note && <span>{ai.note}</span>}
+                {size && <span className="size">{size}</span>}
+                {ai?.verdict && p?.risk === "high" && <span className="t-bad">high risk</span>}
+                {ai?.verdict && <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict]}</span>}
+                {ai?.note && <span>{ai.note}</span>}
               </span>
             )}
           </span>
           {summary ? (
-            <span className={cls("context", p?.state !== "ready" && "older")}>{summary}</span>
+            <span className={cls("gist", older && "older", !sel && "clip")}>{summary}</span>
           ) : (
-            next && <span className="context">{keyParts(next).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part))}</span>
+            next && <span className="gist">{keyParts(next).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part))}</span>
           )}
+          {shown.map((c) => (
+            <span key={c} className={cls("concern", older && "older", !sel && "clip")}>
+              {c}
+            </span>
+          ))}
         </button>
         {variant === "cleared" && (
           <button
@@ -138,48 +173,38 @@ export function CardRow({
             Restore
           </button>
         )}
-        {ctx.snoozeFor === card.id && (
-          <SnoozeMenu
-            onPick={(until) => {
-              ctx.snooze(card, until);
-            }}
-            onClose={ctx.closeSnooze}
-          />
-        )}
       </div>
-      {sel && !open && <More card={card} ctx={ctx} />}
+      {sel && !open && <More card={card} ctx={ctx} mine={mine} />}
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
+      {/* Under the card, so it never covers the card's own keys. */}
+      {ctx.snoozeFor === card.id && (
+        <SnoozeMenu
+          onPick={(until) => {
+            ctx.snooze(card, until);
+          }}
+          onClose={ctx.closeSnooze}
+        />
+      )}
     </div>
   );
 }
 
-// The selected card's rest: concerns as margin notes, its facts, and its keys.
-function More({ card, ctx }: { card: Card; ctx: RowCtx }) {
+// The selected card's rest: its facts and its keys.
+function More({ card, ctx, mine }: { card: Card; ctx: RowCtx; mine: boolean }) {
   const run = (k: string) => {
     ctx.run(card, k);
   };
-  const concerns = card.preflight?.concerns ?? [];
   const facts = cardFacts(card, ctx.me);
-  const mine = card.kind === "pr" && !card.resolved && card.author.toLowerCase() === ctx.me.toLowerCase();
   return (
     <div className="more">
-      {concerns.length > 0 && (
-        <ul className="concerns" aria-label="Concerns">
-          {concerns.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
-      )}
       {facts.length > 0 && (
         <p className="card-facts">
           {facts.map((f) => (
-            <span key={f.text} className={cls("fact-word", f.tone && `t-${f.tone}`)}>
-              {f.text}
-            </span>
+            <span key={f}>{f}</span>
           ))}
         </p>
       )}
-      <div className="actions">
+      <div className="actions card-keys">
         <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : card.inflight ? "Show in flight" : "Review"} run={run} />
         <KeyButton k="o" label="Open on GitHub" run={run} />
         {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}

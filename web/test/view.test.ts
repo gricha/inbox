@@ -18,16 +18,18 @@ import {
   judgeStepText,
   keyParts,
   laneFacts,
-  lead,
   lineOf,
   logText,
   navigable,
   nextText,
+  opening,
   parseList,
   parseRoute,
+  problems,
   removeCard,
   resolvedHead,
   routeHash,
+  sizeOf,
   stops,
   valueOf,
   type KeyLike,
@@ -295,13 +297,37 @@ test("a card's next step sets its keys apart", () => {
   assert.deepEqual(keyParts("a draft: mark it ready for review when it is"), ["a draft: mark it ready for review when it is"]);
 });
 
-test("a card shows the AI summary's first sentence", () => {
-  assert.equal(lead("Splits the scheduler in two. Lease owns the jobs table."), "Splits the scheduler in two.");
+test("a card's gist and concern end at a whole sentence or clause, never in an ellipsis", () => {
+  const scheduler =
+    "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work.";
   assert.equal(
-    lead("Caches it per process, so the first request no longer pays the 1.5 s load."),
-    "Caches it per process, so the first request no longer pays the 1.5 s load.",
+    opening(scheduler),
+    "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s.",
   );
-  assert.equal(lead("Adds an http2: 'prior-knowledge' option. HTTP/1.1 keeps working."), "Adds an http2: 'prior-knowledge' option.");
+  assert.equal(
+    opening("Splits the scheduler in two. Lease owns the jobs table."),
+    "Splits the scheduler in two. Lease owns the jobs table.",
+  );
+  // A first sentence longer than the limit stays whole: the card's line clamp is the fallback.
+  const long = `Moves the retry budget ${"and more ".repeat(40)}into the coordinator. Then this.`;
+  assert.equal(opening(long), long.replace(" Then this.", ""));
+  // A concern is cut at its first clause.
+  assert.equal(
+    opening("The budget is per process; with 12 replicas one hot shard trips it on some and not others. Tests miss it.", 0),
+    "The budget is per process.",
+  );
+  assert.equal(opening("Adds an http2: 'prior-knowledge' option. HTTP/1.1 keeps working.", 0), "Adds an http2: 'prior-knowledge' option.");
+});
+
+test("a card's problems and size, in the review's and the lane's words", () => {
+  assert.deepEqual(problems({ chips: ["CI red", "conflict", "changes requested", "approved", "+62 −7"] }), [
+    { text: "CI failing", tone: "bad" },
+    { text: "changes requested", tone: "warn" },
+    { text: "merge conflict", tone: "warn" },
+  ]);
+  assert.deepEqual(problems({ chips: ["draft", "3 unresolved"] }), []);
+  assert.equal(sizeOf({ chips: ["CI red", "+341 −802"] }), "+341 −802");
+  assert.equal(sizeOf({ chips: ["issue"] }), undefined);
 });
 
 test("a card's AI word: the verdict, marked when it's for an older commit, or why there's none yet", () => {
@@ -316,36 +342,38 @@ test("a card's AI word: the verdict, marked when it's for an older commit, or wh
   assert.equal(aiWord({ state: "none" }), null);
 });
 
-test("the selected card's facts leave out what its why says", () => {
+test("the selected card's facts leave out what the card already says", () => {
   const pr = card("acme/api#1", {
     chips: ["CI red", "conflict", "3 unresolved", "+62 −7"],
     ci: "red",
     preflight: { state: "ready", risk: "medium", notes: 5 },
     demoted: "Now was full (3)",
   });
-  const text = (c: Card, me = "me") => cardFacts(c, me).map((f) => (f.tone ? `${f.text} (${f.tone})` : f.text));
-  assert.deepEqual(text(pr), [
-    "by dana",
-    "+62 −7",
-    "CI failing (bad)",
-    "merge conflict (warn)",
-    "3 unresolved threads",
-    "medium risk",
-    "5 notes on the changes",
-    "Now was full (3)",
-  ]);
-  assert.deepEqual(text({ ...pr, why: "merge conflict", author: "me", demoted: undefined }), [
-    "+62 −7",
-    "CI failing (bad)",
-    "3 unresolved threads",
+  // Problems and size are on every card, so the facts skip them.
+  assert.deepEqual(cardFacts(pr, "me"), ["by dana", "3 unresolved threads", "medium risk", "5 notes on the changes", "Now was full (3)"]);
+  assert.deepEqual(cardFacts({ ...pr, why: "3 unresolved threads", author: "me", demoted: undefined }, "me"), [
     "medium risk",
     "5 notes on the changes",
   ]);
   assert.deepEqual(
-    text({ ...pr, chips: ["1 unresolved"], ci: "green", preflight: { state: "stale", risk: "high", notes: 2 }, demoted: undefined }),
-    ["by dana", "CI passing", "1 unresolved thread"],
+    cardFacts(
+      {
+        ...pr,
+        chips: ["1 unresolved", "approved"],
+        ci: "green",
+        preflight: { state: "stale", risk: "high", notes: 2 },
+        demoted: undefined,
+      },
+      "me",
+    ),
+    ["by dana", "CI passing", "approved", "1 unresolved thread"],
   );
-  assert.deepEqual(text(card("acme/api#2", { kind: "issue", ci: "none", author: "nina" })), ["by nina"]);
+  assert.deepEqual(cardFacts({ ...pr, chips: ["draft"], ci: "pending", preflight: undefined, demoted: undefined }, "me"), [
+    "by dana",
+    "CI running",
+    "draft",
+  ]);
+  assert.deepEqual(cardFacts(card("acme/api#2", { kind: "issue", ci: "none", author: "nina" }), "me"), ["by nina"]);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

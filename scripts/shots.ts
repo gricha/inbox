@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page } from "playwright-core";
+import type { QueueView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -104,8 +105,40 @@ const pauseAi = (paused: boolean) => async (page: Page) => {
   await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
   await page.locator(".ai-paused").waitFor({ state: paused ? "visible" : "detached", timeout: 5000 });
 };
+// The queue as the mock serves it, changed in the browser: for states the mock's data doesn't reach.
+const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
+  await page.route("**/api/queue", async (route) => {
+    const res = await route.fetch();
+    const q = (await res.json()) as QueueView;
+    change(q);
+    await route.fulfill({ response: res, json: q });
+  });
+  await page.reload();
+  await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+};
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
+  {
+    // A selected card the AI says to look at closely: its whole review, its facts and its keys.
+    name: "queue-selected",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Nothing in Now: one line, with no highlighter.
+    name: "queue-empty",
+    go: queueAs((q) => {
+      q.sections.now = [];
+    }),
+    after: async (page) => {
+      await page.unroute("**/api/queue");
+      await page.reload();
+      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+    },
+  },
   {
     // The cursor on Today's "n more for today" line, then Enter opens the rest in place.
     name: "queue-fold",
@@ -174,10 +207,11 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The menu opens under the card, so its keys stay in view.
     name: "snooze",
     go: async (page) => {
       await at("#/")(page);
-      await page.keyboard.press("j");
+      await page.locator(".row", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
       await page.keyboard.press("s");
       await page.waitForTimeout(200);
     },

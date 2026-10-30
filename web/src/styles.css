@@ -28,6 +28,7 @@
   --rule-strong: #d3d3ce;
   --control: #929590;
   --sel: #e9e9e4;
+  --card-sel: #f3f3f0;
   --side: #efefec;
   --side-on: #e3e3de;
   --side-hover: #e9e9e5;
@@ -70,6 +71,7 @@
     --rule-strong: #35373c;
     --control: #6a6e76;
     --sel: #232427;
+    --card-sel: #26272b;
     --side: #111214;
     --side-on: #232427;
     --side-hover: #1b1c1f;
@@ -190,9 +192,16 @@ kbd {
 }
 
 .col {
+  --col-w: 920px;
+
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* The queue's cards keep a shorter measure, so the AI's call on the right sits near the title it's about. */
+.col:has(.main > .deck) {
+  --col-w: 800px;
 }
 
 /* Sidebar ------------------------------------------------------------------ */
@@ -314,7 +323,7 @@ kbd {
 /* With the sidebar showing, the filter starts on the queue column's edge. */
 @media (width > 820px) {
   .topbar {
-    padding-left: max(20px, calc((100% - 920px) / 2 + 24px));
+    padding-left: max(20px, calc((100% - var(--col-w)) / 2 + 24px));
   }
 
   .search {
@@ -499,7 +508,7 @@ kbd {
 .main {
   flex: 1;
   width: 100%;
-  max-width: 920px;
+  max-width: var(--col-w);
   margin: 0 auto;
   padding: 28px 24px 120px;
 }
@@ -586,6 +595,11 @@ kbd {
   padding: 0 18px;
   color: var(--ink-2);
   font-size: 13.5px;
+}
+
+.ai-paused b {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* Today's "n more for today": the cursor stops on it, Enter opens it in place. */
@@ -986,11 +1000,10 @@ kbd {
   box-shadow: var(--card-lift);
 }
 
-/* The cursor: the card's own sheet, with the pencil ring. */
+/* The cursor: a neutral fill with the pencil ring. */
 .card.sel {
-  box-shadow:
-    inset 0 0 0 1.5px var(--pencil),
-    var(--card-shadow);
+  background: var(--card-sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
 .card .row-main {
@@ -1029,11 +1042,7 @@ kbd {
   grid-area: 1 / 2;
 }
 
-.card .context {
-  grid-column: 1 / -1;
-}
-
-/* The ref and why on the left, the AI's word on the right; the title keeps the card's full width. */
+/* The ref, why and problems on the left, the size and the AI's call on the right; the title keeps the card's full width. */
 .card-line {
   display: flex;
   grid-column: 1 / -1;
@@ -1054,6 +1063,10 @@ kbd {
   margin-right: 12px;
 }
 
+.card .meta > .fact-word {
+  white-space: nowrap;
+}
+
 /* Inline, the ref has the line's room: nothing truncates and nothing clips the highlighter. */
 .card .ref {
   margin: 0 12px 0 0;
@@ -1070,6 +1083,24 @@ kbd {
   overflow: visible;
 }
 
+/* Your own PR's why is what you owe: its label in ink, the rest darker than a reason. */
+.why.owed {
+  color: var(--ink-2);
+}
+
+.why.owed b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.why.owed b.t-bad {
+  color: var(--red);
+}
+
+.why.owed b.t-warn {
+  color: var(--amber);
+}
+
 .ai-word {
   display: flex;
   gap: 8px;
@@ -1084,63 +1115,95 @@ kbd {
   content: "·";
 }
 
+.ai-word .size {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The call ranks by weight, as in the review: look is semibold ink, skim is ink-2, skip is pencil. */
 .card .verdict {
   color: var(--ink);
 }
 
+.card .v-skim {
+  color: var(--ink-2);
+  font-weight: 450;
+}
+
 .card .v-skip {
   color: var(--pencil);
+  font-weight: 450;
 }
 
 .ai-word .t-bad {
   font-weight: 600;
 }
 
-.context {
+.gist {
+  grid-column: 1 / -1;
+  max-width: 72ch;
   margin-top: 3px;
   color: var(--ink-2);
   font-size: 13.5px;
+  text-wrap: pretty;
 }
 
-/* An AI review of an older commit, kept until the new one lands. */
-.context.older {
-  color: var(--pencil);
-}
-
-.context b {
+.gist b {
   color: var(--ink);
   font-weight: 600;
 }
 
-.more {
-  display: grid;
-  gap: 12px;
-  padding: 0 18px 14px;
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
-/* Concerns sit like the review's margin notes: a thin rule, no box. */
-.concerns {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.concerns li {
+/* The top concern sits like the review's margin notes: a thin rule, no box. */
+.concern {
+  grid-column: 1 / -1;
+  max-width: 72ch;
+  margin-top: 6px;
   padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule-strong);
+  color: var(--ink-2);
+  font-size: 13px;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* An AI review of an older commit, kept until the new one lands. */
+.gist.older,
+.concern.older {
+  color: var(--pencil);
+}
+
+/* Whole sentences already keep these short; the clamp is for one very long sentence. */
+.gist.clip,
+.concern.clip {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.gist.clip {
+  -webkit-line-clamp: 3;
+}
+
+.concern.clip {
+  -webkit-line-clamp: 2;
+}
+
+/* The selected card's facts, then its keys under a hairline, as far below it as the facts sit above. */
+.more {
+  padding: 0 18px;
 }
 
 .card-facts {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 14px;
+  margin: -8px 0 10px;
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+.card-keys {
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--rule-strong);
 }
 
 .card .detail {
@@ -1153,12 +1216,41 @@ kbd {
   border-radius: 12px;
 }
 
-/* The cursor on the fold is the cards' cursor: a sheet with the pencil ring. */
+/* The cursor on the fold is the cards' cursor. */
 .deck .fold.sel {
+  background: var(--card-sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+  color: var(--ink-2);
+}
+
+/* Folded, the next two cards' edges show under the last one, so the line below reads as more of the same. */
+.cards.folded {
+  position: relative;
+  padding-bottom: 10px;
+  isolation: isolate;
+}
+
+.cards.folded::before,
+.cards.folded::after {
+  position: absolute;
+  z-index: -1;
+  height: 24px;
+  border-radius: 0 0 12px 12px;
   background: var(--sheet);
-  box-shadow:
-    inset 0 0 0 1.5px var(--pencil),
-    var(--card-shadow);
+  box-shadow: var(--card-lift);
+  content: "";
+}
+
+.cards.folded::before {
+  right: 8px;
+  bottom: 5px;
+  left: 8px;
+}
+
+.cards.folded::after {
+  right: 16px;
+  bottom: 0;
+  left: 16px;
 }
 
 .deck .fold:focus-visible {
@@ -1269,6 +1361,14 @@ kbd {
 
 .g-now.none > .group-head > span:first-child::before {
   content: none;
+}
+
+/* An empty group says so on its heading's line. */
+.group-none {
+  color: var(--pencil);
+  font-size: 13.5px;
+  font-weight: 450;
+  letter-spacing: 0;
 }
 
 /* In flight ------------------------------------------------------------------

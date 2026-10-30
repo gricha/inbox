@@ -1117,14 +1117,18 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
   return rows;
 }
 
+// As Desk's chips.
 function chips(r: Rec): string[] {
   const sig = signals(r);
   const out: string[] = [];
+  if (sig.item.kind === "issue") out.push("issue");
+  if (sig.item.draft) out.push("draft");
   if (sig.pr.ci === "red") out.push("CI red");
   if (sig.pr.mergeable === "conflict") out.push("conflict");
-  if (sig.item.draft) out.push("draft");
-  if (sig.item.kind === "pr") out.push(`+${sig.pr.additions} −${sig.pr.deletions}`);
+  if (sig.pr.review === "changes_requested") out.push("changes requested");
+  if (sig.pr.review === "approved") out.push("approved");
   if (sig.pr.unresolved_threads) out.push(`${sig.pr.unresolved_threads} unresolved`);
+  if (sig.item.kind === "pr") out.push(`+${sig.pr.additions} −${sig.pr.deletions}`);
   return out;
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 const KEYS: [string[], string][] = [
-  [["j", "k"], "Move down and up (or the arrow keys)"],
+  [["j", "k"], "Move down and up (or the arrow keys). The selected card shows its whole AI review, its facts and its keys"],
   [
     ["enter"],
     "Review the selected PR; an issue opens in place, your PR in flight opens in In flight, and “n more for today” shows the rest",
