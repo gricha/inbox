@@ -13,12 +13,42 @@ export interface SearchHit {
   author: string;
   author_bot?: boolean;
 }
+export interface NotificationThread {
+  thread: string; // thread id
+  item: string | null; // "owner/repo#123" for a PR or issue, else null
+  reason: string; // review_requested, mention, team_mention, assign, author, comment, ...
+  updated_at: string;
+}
+export interface NotificationPage {
+  modified: boolean; // false when If-Modified-Since says nothing changed (a 304 costs no rate limit)
+  threads: NotificationThread[];
+  last_modified: string | null; // send back as If-Modified-Since
+  poll_interval: number; // seconds GitHub asks clients to wait (X-Poll-Interval)
+  date: string | null; // GitHub's clock
+}
 export interface GitHub {
   viewer(): Promise<string>;
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
   details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
+  // Threads updated since `since`, read or not. Read only: nothing is marked read.
+  notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
+}
+
+interface RawThread {
+  id: string;
+  reason: string;
+  updated_at: string;
+  subject: { type: string; url: string | null };
+}
+
+const NOTIFICATION_PAGES = 5;
+
+function threadItem(t: RawThread): string | null {
+  if (t.subject.type !== "PullRequest" && t.subject.type !== "Issue") return null;
+  const m = /\/repos\/([^/]+)\/([^/]+)\/(?:pulls|issues)\/(\d+)$/.exec(t.subject.url ?? "");
+  return m ? `${m[1]}/${m[2]}#${m[3]}` : null;
 }
 
 interface SearchData {
@@ -138,11 +168,36 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     };
   }
 
+  async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
+    const threads: NotificationThread[] = [];
+    const head = (h: Headers, modified: boolean): NotificationPage => ({
+      modified,
+      threads,
+      last_modified: h.get("last-modified"),
+      poll_interval: Number(h.get("x-poll-interval")) || 60,
+      date: h.get("date"),
+    });
+    let first: NotificationPage | null = null;
+    for (let page = 1; page <= NOTIFICATION_PAGES; page++) {
+      const q = new URLSearchParams({ all: "true", per_page: "50", page: String(page) });
+      if (feed.since) q.set("since", feed.since);
+      const conditional = page === 1 && feed.last_modified ? { "if-modified-since": feed.last_modified } : undefined;
+      const r = await client.get(`/notifications?${q.toString()}`, { headers: conditional });
+      first ??= head(r.headers, r.status !== 304);
+      if (r.status === 304) break;
+      const list = r.data as RawThread[];
+      for (const t of list) threads.push({ thread: t.id, item: threadItem(t), reason: t.reason, updated_at: t.updated_at });
+      if (list.length < 50) break;
+    }
+    return first ?? head(new Headers(), false);
+  }
+
   return {
     viewer: async () => (await client.query<{ viewer: { login: string } }>(VIEWER)).viewer.login,
     search,
     details,
     context,
+    notifications,
     rateLimit: () => client.rateLimit(),
   };
 }

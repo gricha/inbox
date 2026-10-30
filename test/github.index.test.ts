@@ -218,3 +218,56 @@ test("viewer and rateLimit", async () => {
   assert.equal(await gh.viewer(), "octo-dev");
   assert.deepEqual(gh.rateLimit(), { remaining: 4321, reset_at: RL.resetAt });
 });
+
+test("notifications: every thread since a time, PRs and issues mapped to ids, paged, with the poll interval", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const thread = (id: string, type: string, url: string | null, reason = "mention") => ({
+    id,
+    reason,
+    updated_at: "2026-10-27T11:00:00Z",
+    subject: { type, url },
+  });
+  const pages = [
+    [
+      thread("1", "PullRequest", "https://api.github.com/repos/acme/widgets/pulls/412", "review_requested"),
+      thread("2", "Issue", "https://api.github.com/repos/Acme/Docs/issues/7"),
+      thread("3", "Release", "https://api.github.com/repos/acme/widgets/releases/1"),
+      thread("4", "CheckSuite", null, "ci_activity"),
+      ...Array.from({ length: 46 }, (_, i) => thread(`x${i}`, "Discussion", null)),
+    ],
+    [thread("5", "PullRequest", "https://api.github.com/repos/acme/widgets/pulls/9")],
+  ];
+  const fake = ((url: string, init: RequestInit) => {
+    calls.push({ url, headers: init.headers as Record<string, string> });
+    const page = Number(new URL(url).searchParams.get("page"));
+    const headers = { "last-modified": "LM", "x-poll-interval": "90", date: "Tue, 27 Oct 2026 12:00:00 GMT" };
+    return Promise.resolve(new Response(JSON.stringify(pages[page - 1] ?? []), { headers }));
+  }) as unknown as typeof fetch;
+  const gh = createGitHub({ token: "t", fetch: fake });
+  const r = await gh.notifications({ since: "2026-10-27T10:00:00Z", last_modified: "OLD" });
+  assert.equal(calls.length, 2);
+  const q = new URL(calls[0]!.url).searchParams;
+  assert.deepEqual([q.get("all"), q.get("since"), q.get("per_page")], ["true", "2026-10-27T10:00:00Z", "50"]);
+  assert.equal(calls[0]?.headers["if-modified-since"], "OLD");
+  assert.equal(calls[1]?.headers["if-modified-since"], undefined);
+  assert.deepEqual(
+    r.threads.filter((t) => t.item).map((t) => [t.thread, t.item, t.reason]),
+    [
+      ["1", "acme/widgets#412", "review_requested"],
+      ["2", "Acme/Docs#7", "mention"],
+      ["5", "acme/widgets#9", "mention"],
+    ],
+  );
+  assert.equal(r.threads.length, 51);
+  assert.deepEqual([r.modified, r.last_modified, r.poll_interval, r.date], [true, "LM", 90, "Tue, 27 Oct 2026 12:00:00 GMT"]);
+});
+
+test("notifications: a 304 means nothing changed and costs one call", async () => {
+  let n = 0;
+  const fake = (() => {
+    n++;
+    return Promise.resolve(new Response(null, { status: 304, headers: { "x-poll-interval": "60" } }));
+  }) as unknown as typeof fetch;
+  const r = await createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: "LM" });
+  assert.deepEqual([r.modified, r.threads, r.poll_interval, n], [false, [], 60, 1]);
+});

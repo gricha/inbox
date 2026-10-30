@@ -18,7 +18,7 @@ export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
 }`;
 
 const COMMON = `
-  id number title url state createdAt updatedAt
+  id number title url state createdAt updatedAt closedAt
   author { __typename login }
   repository { nameWithOwner }
   labels(first: 15) { nodes { name } }
@@ -28,7 +28,7 @@ const COMMON = `
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
 const PR = `${COMMON}
-  isDraft additions deletions changedFiles baseRefName reviewDecision
+  isDraft additions deletions changedFiles baseRefName reviewDecision mergedBy { login }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
     nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }

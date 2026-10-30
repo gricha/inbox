@@ -189,3 +189,50 @@ test("a missing gh says how to install it", async () => {
     if (env.GITHUB_TOKEN !== undefined) process.env.GITHUB_TOKEN = env.GITHUB_TOKEN;
   }
 });
+
+// REST: a fake that records the URL, method and headers.
+function restFetch(...responses: (() => Response)[]) {
+  const calls: { url: string; method: string; headers: Record<string, string> }[] = [];
+  const f = ((url: string, init: RequestInit) => {
+    calls.push({ url, method: init.method ?? "GET", headers: init.headers as Record<string, string> });
+    const r = responses[Math.min(calls.length, responses.length) - 1];
+    return Promise.resolve(r ? r() : new Response("[]"));
+  }) as unknown as typeof fetch;
+  return { fetch: f, calls };
+}
+
+test("REST: refuses anything but GET without calling GitHub, so it can never mark a thread read", async () => {
+  const fake = restFetch();
+  const c = client(fake.fetch);
+  await assert.rejects(c.get("/notifications/threads/1", { method: "PATCH" }), /read-only: refusing to send PATCH/);
+  await assert.rejects(c.get("/notifications", { method: "put" }), /read-only/);
+  await assert.rejects(c.get("https://evil.example/x"), /not a GitHub API path/);
+  await assert.rejects(c.get("//evil.example/x"), /not a GitHub API path/);
+  assert.equal(fake.calls.length, 0);
+});
+
+test("REST: GETs api.github.com with the token and headers; a 304 has no body", async () => {
+  const fake = restFetch(
+    () => new Response(JSON.stringify([{ id: "1" }]), { headers: { "last-modified": "Tue, 27 Oct 2026 12:00:00 GMT" } }),
+    () => new Response(null, { status: 304, headers: { "x-poll-interval": "120" } }),
+  );
+  const c = client(fake.fetch);
+  const r = await c.get("/notifications?all=true");
+  assert.deepEqual([r.status, r.data, r.headers.get("last-modified")], [200, [{ id: "1" }], "Tue, 27 Oct 2026 12:00:00 GMT"]);
+  assert.equal(fake.calls[0]?.url, "https://api.github.com/notifications?all=true");
+  assert.equal(fake.calls[0]?.method, "GET");
+  assert.equal(fake.calls[0]?.headers.authorization, "bearer t0ken");
+  const again = await c.get("/notifications", { headers: { "if-modified-since": "Tue, 27 Oct 2026 12:00:00 GMT" } });
+  assert.deepEqual([again.status, again.data], [304, null]);
+  assert.equal(fake.calls[1]?.headers["if-modified-since"], "Tue, 27 Oct 2026 12:00:00 GMT");
+});
+
+test("REST: rate limits throw RateLimitedError; 502s are retried", async () => {
+  await assert.rejects(client(restFetch(() => new Response("", { status: 429 })).fetch).get("/notifications"), RateLimitedError);
+  const flaky = restFetch(
+    () => new Response("", { status: 502 }),
+    () => new Response("[]"),
+  );
+  assert.deepEqual((await client(flaky.fetch).get("/notifications")).data, []);
+  assert.equal(flaky.calls.length, 2);
+});

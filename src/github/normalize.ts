@@ -42,6 +42,7 @@ export interface RawNode extends RawHit {
   url: string;
   state: string;
   createdAt: string;
+  closedAt?: string | null;
   labels: Conn<{ name: string }>;
   assignees: Conn<{ login: string }>;
   comments: Conn<RawComment>;
@@ -52,6 +53,7 @@ export interface RawNode extends RawHit {
   changedFiles?: number;
   baseRefName?: string;
   reviewDecision?: string | null;
+  mergedBy?: { login: string } | null;
   mergeable?: string;
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
   timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
@@ -123,6 +125,8 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     labels: n.labels.nodes.map((l) => l.name),
     assignees: n.assignees.nodes.map((a) => a.login),
     created_at: n.createdAt,
+    closed_at: n.closedAt ?? null,
+    merged_by: n.mergedBy?.login ?? "",
     additions: n.additions ?? 0,
     deletions: n.deletions ?? 0,
     changed_files: n.changedFiles ?? 0,
