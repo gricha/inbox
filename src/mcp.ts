@@ -115,6 +115,7 @@ async function overviewText(api: DeskClient): Promise<string> {
     `me: ${o.me} · synced: ${o.synced_at ?? "never"}${o.syncing ? " (syncing)" : ""}${o.sync_error ? ` · sync error: ${o.sync_error}` : ""}`,
     `sources: ${o.connectors.map((c) => `${c.name} ${c.status}`).join(", ")}`,
     `focus: ${o.focus.now} now, ${o.focus.today} today, ${o.focus.new} new`,
+    `in flight: ${o.inflight.total} of your PRs, ${o.inflight.needs_you} need you`,
   ];
   for (const s of o.spaces) {
     lines.push(`${s.name} (${s.id})`);
@@ -377,6 +378,45 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
       annotations: readOnly,
     },
     (q) => run(() => eventsText(api, q)),
+  );
+
+  const local = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+
+  server.registerTool(
+    "desk_draft_reply",
+    {
+      description:
+        "Draft a reply on one of the user's own PRs that's in flight (marked done in the desk): to a review thread (thread_id, the thread's node id) or, without it, a comment on the PR. Nothing is posted: the draft waits in the desk's In-flight lane until the user sends it. A new draft for the same thread replaces the old one.",
+      inputSchema: {
+        ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
+        thread_id: z.string().optional().describe("The review thread's node id (PRRT_…); omit for a comment on the PR"),
+        body: z.string().min(1).max(5000).describe("The reply, in Markdown. Short and specific: what changed, in which commit, or why not"),
+      },
+      annotations: local,
+    },
+    ({ ref, thread_id, body }) =>
+      run(async () => {
+        const d = (await api.draftReply(ref, body, thread_id)).draft;
+        return `Drafted a reply to ${oneLine(d.to)} on ${ref}. Not posted: the user sends it from the desk.\n${json({ id: d.id, thread_id: d.thread_id })}`;
+      }),
+  );
+
+  server.registerTool(
+    "desk_escalate",
+    {
+      description:
+        "Hand a decision on one of the user's in-flight PRs back to them: the PR shows 'needs you: <question>' and goes to Now with the question as its why. Use it for anything that's theirs to decide (scope or API changes, disagreeing with a reviewer, a failure you can't explain), then stop working on the PR.",
+      inputSchema: {
+        ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
+        question: z.string().min(1).max(300).describe("One short question, one line"),
+      },
+      annotations: local,
+    },
+    ({ ref, question }) =>
+      run(async () => {
+        const r = await api.escalate(ref, question);
+        return `${ref} is back with the user, in Now: "${oneLine(r.question)}"`;
+      }),
   );
 
   server.registerTool(

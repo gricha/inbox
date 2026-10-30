@@ -943,6 +943,68 @@ kbd {
   font-size: 15px;
 }
 
+/* In flight ------------------------------------------------------------------
+   Your PRs the babysitters have. Grey unless one needs you: then its ref gets the highlighter and its problems their colour. */
+
+.lane-intro {
+  margin: -2px 0 10px;
+  padding: 0 12px;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.lane-status {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.lane-status.needs {
+  color: var(--ink);
+}
+
+.lane-status.needs b {
+  font-weight: 650;
+}
+
+.lane-row .meta {
+  margin-top: 1px;
+}
+
+.lane-detail {
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+/* A reply waiting for Send: what it answers, then the reply, like an AI note in a review. */
+.draft {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px 4px;
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--sheet);
+}
+
+.draft-to {
+  color: var(--pencil);
+}
+
+.draft-quote {
+  overflow-wrap: anywhere;
+}
+
+.draft-body {
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.keys-head.lane-keys {
+  margin-top: 22px;
+}
+
 /* Expanded item ------------------------------------------------------------ */
 
 .detail {

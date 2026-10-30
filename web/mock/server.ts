@@ -23,9 +23,12 @@ import type {
   CoordinatorLogEntry,
   CoordinatorStatus,
   CoordinatorView,
+  Draft,
   FieldDoc,
   FocusView,
   GitHubStatus,
+  InflightRow,
+  InflightView,
   Item,
   QueueView,
   ItemDetail,
@@ -41,6 +44,7 @@ import type {
   SettingsView,
   SettingValue,
   Signals,
+  SitterStatus,
   Status,
   TraceStep,
 } from "../../src/types.ts";
@@ -226,6 +230,19 @@ interface Seed {
   resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
   judge?: [Bucket, string]; // the policy judge's answer, where no rule matched
+  fly?: Flight; // your PR, in flight (with st.inflight_at): what its babysitter is up to
+}
+
+// A canned babysitter state for the In-flight lane; the mock never runs one.
+interface Flight {
+  sitter?: SitterStatus; // default: watching
+  needs?: string; // why it's back with you, besides a question or a draft
+  question?: [string, number]; // from desk_escalate, hours ago
+  draft?: Pick<Draft, "to" | "quote" | "body">;
+  failing?: string[];
+  waiting?: string[];
+  step?: string; // what a running babysitter is doing
+  session?: string; // the latest run's Claude Code session
 }
 
 const SEEDS: Seed[] = [
@@ -575,6 +592,16 @@ const SEEDS: Seed[] = [
     threads: [3, 5],
     fresh: true,
     on: { "work-mine": ["cr"] },
+    st: { inflight_at: iso(26) },
+    fly: {
+      sitter: { state: "done", text: "pushed a fix for 3 comments · 4be71c2", since: iso(0.4) },
+      draft: {
+        to: "dana on src/export/audit.ts:88",
+        quote: "Should the cursor be opaque? Clients will start parsing row ids if we hand them out.",
+        body: "Kept it as the row id: the API docs promise a stable, sortable cursor, and the CLI's --resume flag reads it. 4be71c2 adds a test that pins the format, so changing it later is a deliberate break.",
+      },
+      session: "6f1d2c9a-41e7-4b8e-9c55-0a3f7d2e8b14",
+    },
   },
   {
     repo: "acme/worker",
@@ -608,6 +635,14 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [8, 3, 1],
     on: { "work-mine": ["red"] },
+    st: { inflight_at: iso(3) },
+    fly: {
+      sitter: { state: "running", text: "fixing CI", since: iso(4 / 60) },
+      failing: ["test (20.x)"],
+      waiting: ["marco"],
+      step: "npm test -- timezone",
+      session: "0b8e4f3a-9d21-4c6e-8a77-5e1c2b9d4f60",
+    },
   },
   {
     repo: "acme/api",
@@ -620,6 +655,12 @@ const SEEDS: Seed[] = [
     mergeable: "conflict",
     size: [380, 290, 11],
     on: { "work-mine": ["conflict"] },
+    st: { inflight_at: iso(40) },
+    fly: {
+      question: ["main now runs cleanup hourly. Keep this PR's nightly schedule, or switch to hourly?", 1.2],
+      waiting: ["@backend"],
+      session: "a2c94e7b-3f15-4d08-b6e1-7c9d0f4a2e35",
+    },
   },
   {
     repo: "acme/ml-pipeline",
@@ -645,6 +686,8 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [45, 120, 9],
     on: { "work-mine": [] },
+    st: { inflight_at: iso(28) },
+    fly: { sitter: { state: "idle", text: "watching", since: null }, waiting: ["sam", "@backend"] },
   },
   {
     repo: "acme/worker",
@@ -768,6 +811,33 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [70, 8, 3],
     on: { "personal-mine": ["red"] },
+    st: { inflight_at: iso(19) },
+    fly: {
+      sitter: { state: "blocked", text: "no local clone of oss/tinyhttp", since: null },
+      needs: "CI failing: no local clone of oss/tinyhttp",
+      failing: ["node 22", "lint"],
+      waiting: ["ana-k"],
+    },
+  },
+  {
+    repo: "acme/worker",
+    n: 871,
+    title: "Log why a job was dead-lettered",
+    author: ME,
+    age: 60,
+    upd: 20,
+    review: "approved",
+    reviews: [["kofi", "approved", 22]],
+    mergeable: "clean",
+    size: [34, 6, 2],
+    on: { "work-mine": [] },
+    resolved: "merged",
+    st: { inflight_at: iso(48) },
+    fly: {
+      sitter: { state: "done", text: "pushed a fix for CI · 1f3c9a0", since: iso(30) },
+      session: "c71e0d4b-8a26-4f93-b1d5-3e6a9c8f0b27",
+    },
+    log: [["merged", ME, 20, {}]],
   },
   {
     repo: "me/dotfiles",
@@ -801,7 +871,17 @@ const recs: Rec[] = SEEDS.map((s) => {
     activity_at: iso(s.upd ?? s.age),
     snoozed_at: iso(0),
     pushes: 0,
-    state: { id, done_at: null, snooze_until: null, snooze_on_activity: false, muted: false, pinned: false, seen_at: null, ...s.st },
+    state: {
+      id,
+      done_at: null,
+      snooze_until: null,
+      snooze_on_activity: false,
+      muted: false,
+      pinned: false,
+      seen_at: null,
+      inflight_at: null,
+      ...s.st,
+    },
   };
 });
 
@@ -1000,7 +1080,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     if (cap === undefined) continue;
     let used = 0;
     for (const { r, p } of rows) {
-      if (p.bucket !== from || status(r) !== "active" || r.seed.resolved) continue;
+      if (p.bucket !== from || status(r) !== "active" || r.seed.resolved || laneOwned(r)) continue;
       if (r.state.pinned || (p.rule !== null && b.rules[p.rule]?.nocap)) continue;
       if (++used > cap) {
         p.bucket = to;
@@ -1055,6 +1135,7 @@ function cardOf(r: Rec, p: Placement): Card {
     verdict: reviews.get(r.id)?.head_oid === itemOf(r).head_oid ? reviews.get(r.id)!.verdict : null,
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
+    inflight: inFlight(r),
   };
 }
 
@@ -1067,7 +1148,7 @@ function boardView(b: BoardConfig): BoardView {
     cleared: [],
   };
   for (const { r, p } of boardPlacements(b)) {
-    if (r.seed.resolved) continue;
+    if (r.seed.resolved || laneOwned(r)) continue;
     const card = cardOf(r, p);
     if (card.status !== "active") view.cleared.push(card);
     else if (p.bucket === "hide") view.hidden.push(card);
@@ -1080,7 +1161,7 @@ function summary(b: BoardConfig): BoardSummary {
   const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared: 0 };
   let fresh = 0;
   for (const { r, p } of boardPlacements(b)) {
-    if (r.seed.resolved) continue;
+    if (r.seed.resolved || laneOwned(r)) continue;
     if (status(r) !== "active") counts.cleared++;
     else {
       counts[p.bucket]++;
@@ -1094,13 +1175,15 @@ function focus(): FocusView {
   const best = new Map<string, Card>();
   for (const b of config.boards) {
     for (const { r, p } of boardPlacements(b)) {
-      if (status(r) !== "active" || r.seed.resolved || (p.bucket !== "now" && p.bucket !== "today")) continue;
+      if (status(r) !== "active" || r.seed.resolved || laneOwned(r) || (p.bucket !== "now" && p.bucket !== "today")) continue;
       const cur = best.get(r.id);
       if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(r.id, cardOf(r, p));
     }
   }
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
-  return { sections: { now: cards.filter((c) => c.bucket === "now"), today: cards.filter((c) => c.bucket === "today") } };
+  return {
+    sections: { now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")], today: cards.filter((c) => c.bucket === "today") },
+  };
 }
 
 function queue(): QueueView {
@@ -1113,6 +1196,7 @@ function queue(): QueueView {
         if (!resolved.has(r.id)) resolved.set(r.id, cardOf(r, p));
         continue;
       }
+      if (laneOwned(r)) continue; // the In-flight lane has it
       if (status(r) !== "active") {
         if (!cleared.has(r.id)) cleared.set(r.id, cardOf(r, p));
         continue;
@@ -1124,11 +1208,128 @@ function queue(): QueueView {
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
   return {
-    sections: { now: of("now"), today: of("today"), later: of("later"), fyi: of("fyi") },
+    sections: { now: [...needsCards(), ...of("now")], today: of("today"), later: of("later"), fyi: of("fyi") },
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
   };
+}
+
+// ---------------------------------------------------------------------------
+// In flight, like src/desk.ts: your open PRs marked done leave the buckets for the lane, and come back to Now when they need you.
+
+const flights = new Map<string, { question: { question: string; at: string } | null; drafts: Draft[] }>();
+for (const r of recs) {
+  const f = r.seed.fly;
+  if (!f) continue;
+  flights.set(r.id, {
+    question: f.question ? { question: f.question[0], at: iso(f.question[1]) } : null,
+    drafts: f.draft ? [{ id: `d${r.seed.n}`, thread_id: `PRRT_mock${r.seed.n}`, ...f.draft, at: iso(0.4), sent_at: null, url: null }] : [],
+  });
+}
+
+function flightOf(r: Rec) {
+  let f = flights.get(r.id);
+  if (!f) flights.set(r.id, (f = { question: null, drafts: [] }));
+  return f;
+}
+
+const inFlight = (r: Rec) => !!r.state.inflight_at && r.seed.author === ME && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
+const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
+
+function needsYou(r: Rec): string | null {
+  if (!laneOwned(r)) return null;
+  const f = flightOf(r);
+  const unsent = f.drafts.filter((d) => !d.sent_at).length;
+  if (f.question) return f.question.question;
+  if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
+  return r.seed.fly?.needs ?? null;
+}
+
+function bestPlacement(r: Rec): Placement {
+  let best: Placement | null = null;
+  for (const b of config.boards) {
+    const p = place(r, b);
+    if (p && (!best || RANK[p.bucket] < RANK[best.bucket])) best = p;
+  }
+  return best ?? { board: "", bucket: "later", rule_bucket: "later", rule: null, why: "", trace: [] };
+}
+
+const needsCards = () =>
+  recs.flatMap((r) => {
+    const why = needsYou(r);
+    return why ? [cardOf(r, { ...bestPlacement(r), bucket: "now", why })] : [];
+  });
+
+function laneRow(r: Rec): InflightRow {
+  const s = r.seed;
+  const f = flightOf(r);
+  const sig = signals(r);
+  const by = (st: ReviewState) => (s.reviews ?? []).filter(([a, x]) => x === st && a !== ME).map(([a]) => a);
+  const sitter: SitterStatus = f.question
+    ? { state: "waiting", text: `needs you: ${f.question.question}`, since: f.question.at }
+    : (s.fly?.sitter ?? { state: "idle", text: "watching", since: null });
+  const session = s.fly?.session;
+  const running = sitter.state === "running";
+  const [owner = "", name = ""] = s.repo.split("/");
+  return {
+    card: cardOf(r, bestPlacement(r)),
+    state: s.resolved === "merged" ? "merged" : s.resolved === "closed" ? "closed" : "open",
+    base: sig.pr.base,
+    ci: sig.pr.ci,
+    failing: s.fly?.failing ?? [],
+    approved_by: by("approved"),
+    changes_by: by("changes_requested"),
+    waiting_on: s.fly?.waiting ?? [],
+    threads_unresolved: sig.pr.unresolved_threads,
+    mergeable: sig.pr.mergeable,
+    draft: !!s.draft,
+    needs_you: needsYou(r),
+    escalation: f.question,
+    sitter,
+    drafts: f.drafts.filter((d) => !d.sent_at),
+    run: session
+      ? {
+          id: session,
+          started_at: sitter.since ?? iso(1),
+          ended_at: running ? null : (sitter.since ?? iso(1)),
+          head_oid: itemOf(r).head_oid,
+          why: [],
+          outcome: running ? "running" : "pushed",
+          pushed_oid: null,
+          summary: "",
+          step: s.fly?.step ?? "",
+          log: "",
+        }
+      : null,
+    resume: session && !s.resolved ? `cd ~/.review-desk/worktrees/${owner}/${name}-${s.n} && claude --resume ${session}` : null,
+  };
+}
+
+function inflight(): InflightView {
+  const rows = recs.filter((r) => r.state.inflight_at && r.seed.author === ME).map(laneRow);
+  const rank = (x: InflightRow) => (x.state !== "open" ? 3 : x.needs_you ? 0 : x.sitter.state === "running" ? 1 : 2);
+  return { rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)) };
+}
+
+// Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves the lane.
+function laneAction(r: Rec, what: string, draftId: string | undefined): unknown {
+  const f = flightOf(r);
+  if (what === "send") {
+    const d = f.drafts.find((x) => x.id === draftId && !x.sent_at);
+    if (!d) throw new HttpError(404, `no draft ${String(draftId)} on ${r.id}`);
+    d.sent_at = new Date().toISOString();
+    d.url = `${urlOf(r.seed)}#discussion_mock`;
+    bump();
+    return { ok: true, url: d.url };
+  }
+  if (draftId !== undefined) {
+    if (!f.drafts.some((x) => x.id === draftId)) throw new HttpError(404, `no draft ${draftId} on ${r.id}`);
+    f.drafts = f.drafts.filter((x) => x.id !== draftId);
+  } else if (f.question) f.question = null;
+  else throw new HttpError(404, `nothing to dismiss on ${r.id}`);
+  bump();
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,6 +1385,7 @@ function overview(): Overview {
     ],
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
     focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
+    inflight: { total: recs.filter(inFlight).length, needs_you: needsCards().length },
     rate_limit: rateLimit(),
     coordinator: { state: coordinatorStatus().state, acted: acted() },
   };
@@ -1235,7 +1437,15 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
   else if (action === "pin" || action === "unpin") st.pinned = action === "pin";
   else if (action === "restore") Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, muted: false });
   else if (action === "seen") st.seen_at = now;
-  else throw new HttpError(400, `unknown action: ${String(action)}`);
+  else if (action === "inflight") {
+    if (r.seed.author !== ME || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
+      throw new HttpError(409, `only your own open PRs go in flight; ${r.id} isn't one`);
+    if (st.inflight_at) throw new HttpError(409, `${r.id} is already in flight`);
+    st.inflight_at = now;
+  } else if (action === "takeback") {
+    if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in flight`);
+    st.inflight_at = null;
+  } else throw new HttpError(400, `unknown action: ${action as string}`);
   const fresh = r.fresh;
   if (action === "seen") r.fresh = false;
   else events.push({ seq: ++seq, id: r.id, before, fresh });
@@ -2024,6 +2234,12 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       bump();
       return { ok: true, url: `${urlOf(r.seed)}#pullrequestreview-mock` };
     }
+  }
+  if (route === "GET /api/inflight") return inflight();
+  const lane = /^\/api\/inflight\/(.+)\/(send|dismiss)$/.exec(url.pathname);
+  if (lane && req.method === "POST") {
+    const { draft_id } = await readBody(req);
+    return laneAction(resolve(decodeURIComponent(lane[1]!)), lane[2]!, typeof draft_id === "string" ? draft_id : undefined);
   }
   if (route === "POST /api/undo") {
     const body = await readBody(req);

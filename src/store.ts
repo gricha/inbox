@@ -35,6 +35,7 @@ export const emptyState = (id: string): StateRow => ({
   muted: false,
   pinned: false,
   seen_at: null,
+  inflight_at: null,
 });
 
 export class Store {
@@ -55,11 +56,14 @@ export class Store {
       CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
       CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
-    const cols = this.db
-      .prepare("PRAGMA table_info(state)")
-      .all()
-      .map((c) => c.name);
-    if (!cols.includes("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
+    const cols = new Set(
+      this.db
+        .prepare("PRAGMA table_info(state)")
+        .all()
+        .map((c) => c.name),
+    );
+    if (!cols.has("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
+    if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
     const hitCols = this.db
       .prepare("PRAGMA table_info(hits)")
       .all()
@@ -218,9 +222,10 @@ export class Store {
   putState(s: StateRow): void {
     this.db
       .prepare(
-        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET done_at = excluded.done_at, snooze_until = excluded.snooze_until, snooze_on_activity = excluded.snooze_on_activity,
-           snoozed_at = excluded.snoozed_at, acked_at = excluded.acked_at, muted = excluded.muted, pinned = excluded.pinned, seen_at = excluded.seen_at`,
+           snoozed_at = excluded.snoozed_at, acked_at = excluded.acked_at, muted = excluded.muted, pinned = excluded.pinned, seen_at = excluded.seen_at,
+           inflight_at = excluded.inflight_at`,
       )
       .run(
         s.id,
@@ -232,6 +237,7 @@ export class Store {
         s.muted ? 1 : 0,
         s.pinned ? 1 : 0,
         s.seen_at,
+        s.inflight_at ?? null, // undo entries logged before in-flight existed don't carry it
       );
   }
 
@@ -384,5 +390,6 @@ function rowToState(r: Record<string, unknown>): StateRow {
     muted: r.muted === 1,
     pinned: r.pinned === 1,
     seen_at: (r.seen_at as string) ?? null,
+    inflight_at: (r.inflight_at as string) ?? null,
   };
 }

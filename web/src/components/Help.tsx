@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 
 const KEYS: [string[], string][] = [
   [["j", "k"], "Move down and up (or the arrow keys)"],
-  [["enter"], "Review the selected PR; an issue opens in place"],
+  [["enter"], "Review the selected PR; an issue opens in place, and your PR in flight opens in In flight"],
   [["o"], "Open on GitHub"],
+  [["d"], "Your own PR: you're done, babysitters take it from here (In flight). d again takes it back"],
   [["e"], "Done: it comes back when someone else acts. On a cleared item, restore it"],
   [["s"], "Snooze, then 1 to 5 to pick how long"],
   [["m"], "Mute or unmute"],
@@ -18,13 +19,24 @@ const KEYS: [string[], string][] = [
   [["r"], "Sync now"],
   [[","], "Settings (esc goes back)"],
   [["g", "r"], "Rules"],
+  [["g", "i"], "Your PRs in flight"],
   [["?"], "This list"],
+];
+
+const LANE_KEYS: [string[], string][] = [
+  [["enter"], "Review the PR"],
+  [["y"], "Send the drafted reply on GitHub, as you"],
+  [["x"], "Dismiss the question, or discard the reply"],
+  [["c"], "Copy a command that opens the babysitter's session"],
+  [["d"], "Take it back"],
+  [["o"], "Open on GitHub"],
 ];
 
 const REVIEW_KEYS: [string[], string][] = [
   [["n", "p"], "Next and previous file"],
   [["]", "["], "Next and previous AI note"],
   [["a"], "Approve on GitHub: press a, then a again within 3 seconds"],
+  [["d"], "Your own PR: in flight, or take it back"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
   [["c"], "Copy a review prompt for Claude"],
@@ -65,6 +77,8 @@ export function Help({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="keys-head">In a PR's review</h3>
             <Keys keys={REVIEW_KEYS} />
+            <h3 className="keys-head lane-keys">In flight</h3>
+            <Keys keys={LANE_KEYS} />
           </section>
         </div>
       </div>

@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Action, Card, DesktopBridge, ItemDetail, Overview, QueueView, SettingsView } from "../../src/types.ts";
+import type {
+  Action,
+  Card,
+  DesktopBridge,
+  Draft,
+  InflightRow,
+  InflightView,
+  ItemDetail,
+  Overview,
+  QueueView,
+  SettingsView,
+} from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
 import { DEFAULT_OPEN, groupsOf, navigable, parseRoute, removeCard, routeHash, type GroupKey, type Route } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
+import { Inflight } from "./components/Inflight.tsx";
 import { Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
@@ -20,7 +32,7 @@ interface Toast {
 }
 
 const OPEN_KEY = "desk.groups";
-const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
+const LEAVES = new Set<Action>(["done", "snooze", "mute", "inflight"]);
 const VERB: Partial<Record<Action, string>> = {
   done: "Done",
   mute: "Muted",
@@ -28,6 +40,8 @@ const VERB: Partial<Record<Action, string>> = {
   pin: "Pinned",
   unpin: "Unpinned",
   restore: "Restored",
+  inflight: "In flight",
+  takeback: "Took back",
 };
 const sleep = (ms: number) =>
   new Promise((r) => {
@@ -41,6 +55,7 @@ const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
+  i: { name: "inflight" },
 };
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
@@ -84,6 +99,9 @@ export function App() {
   const [loads, setLoads] = useState(0); // bumped on every refresh, so Rules can re-read a file changed on disk
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
   const [coordOpen, setCoordOpen] = useState(false); // the coordinator's log, above the queue
+  const [lane, setLane] = useState<InflightView | null>(null);
+  const [laneSel, setLaneSel] = useState<string | null>(null);
+  const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -136,14 +154,16 @@ export function App() {
     const n = ++loadSeq.current;
     if (r.name === "settings") void loadSettings();
     try {
-      const [ov, v, d] = await Promise.all([
+      const [ov, v, d, l] = await Promise.all([
         api.overview(),
         // Always: the sidebar shows the queue's counts on every page.
         api.queue(),
         exp ? api.item(exp).catch((e: unknown) => message(e)) : null,
+        r.name === "inflight" ? api.inflight() : null,
       ]);
       if (n !== loadSeq.current) return;
       setOverview(ov);
+      if (l) setLane(l);
       setNow(Date.now());
       setLoads((x) => x + 1);
       // The dev proxy keeps a dead upstream's event stream open, so reopen it once the API answers again.
@@ -191,6 +211,13 @@ export function App() {
     } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → Rules.");
     void load();
   }, [settingsSection, flash, load]);
+
+  const onLane = route.name === "inflight";
+  useEffect(() => {
+    if (!onLane) return;
+    window.scrollTo(0, 0);
+    void load();
+  }, [onLane, load]);
 
   // Live updates; EventSource gives up after a non-200 (e.g. the dev proxy while the server is down), so reconnect by hand.
   useEffect(() => {
@@ -248,6 +275,12 @@ export function App() {
   const groups = useMemo(() => groupsOf(view, open, filter), [view, open, filter]);
   const flat = useMemo(() => navigable(groups, leaving), [groups, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
+  const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
+  const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
+
+  useEffect(() => {
+    if (onLane && laneCur) document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [onLane, laneCur]);
 
   // Keep the selection by id across refreshes; if its card is gone, take whatever now sits at its old position.
   useEffect(() => {
@@ -330,7 +363,7 @@ export function App() {
         setView((v) => v && removeCard(v, c.id));
       }
       const verb = action === "snooze" ? `Snoozed ${SNOOZE.find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
-      flash(`${verb}: ${shortRef(c)}`, false, true);
+      flash(`${verb}: ${shortRef(c)}${action === "inflight" ? ". Babysitters take it from here." : ""}`, false, true);
     } catch (e) {
       flash(message(e), true);
     } finally {
@@ -399,7 +432,9 @@ export function App() {
     }
     setSelected(c.id);
     setSnoozeFor(null);
-    go({ name: "review", id: c.id });
+    // An in-flight PR is in Now for what its babysitter left you (a reply to send, a question): that's in the lane.
+    if (c.inflight) setLaneSel(c.id);
+    go(c.inflight ? { name: "inflight" } : { name: "review", id: c.id });
     void seen(c);
   }
 
@@ -418,8 +453,83 @@ export function App() {
     }
   }
 
+  // d: your own open PR goes in flight (you're done; agents get it merged), or comes back.
+  function inflight(c: Card) {
+    const mine = c.kind === "pr" && !c.resolved && c.author.toLowerCase() === (overview?.me ?? "").toLowerCase();
+    if (!mine) {
+      flash("Only your own open PRs go in flight", true);
+      return;
+    }
+    void act(c, c.inflight ? "takeback" : "inflight");
+  }
+
+  async function send(r: InflightRow, d: Draft) {
+    if (sending) return;
+    setSending(d.id);
+    try {
+      await api.sendDraft(r.card.id, d.id);
+      flash(`Sent your reply to ${d.to}`);
+    } catch (e) {
+      flash(message(e), true);
+    } finally {
+      setSending(null);
+      refresh(0);
+    }
+  }
+
+  async function dismiss(r: InflightRow, d?: Draft) {
+    try {
+      await api.dismiss(r.card.id, d?.id);
+      flash(d ? `Discarded the reply to ${d.to}` : `Dismissed the question on ${shortRef(r.card)}`);
+    } catch (e) {
+      flash(message(e), true);
+    }
+    refresh(0);
+  }
+
+  // The lane's keys: enter review, o GitHub, d take back, y send a reply, x discard it (or the question), c copy the resume command.
+  function laneRun(r: InflightRow, k: string, d?: Draft) {
+    const c = r.card;
+    setLaneSel(c.id);
+    if (k === "enter") go({ name: "review", id: c.id });
+    else if (k === "o") window.open(c.url, "_blank", "noopener,noreferrer");
+    else if (k === "d" && r.state === "open") void act(c, "takeback");
+    else if (k === "y") {
+      const draft = d ?? r.drafts[0];
+      if (draft) void send(r, draft);
+      else flash(`No reply to send on ${shortRef(c)}`);
+    } else if (k === "x") {
+      if (d) void dismiss(r, d);
+      else if (r.escalation) void dismiss(r);
+      else if (r.drafts[0]) void dismiss(r, r.drafts[0]);
+      else flash(`Nothing to dismiss on ${shortRef(c)}`);
+    } else if (k === "c") void copyResume(r);
+  }
+
+  async function copyResume(r: InflightRow) {
+    if (!r.resume) {
+      flash("No babysitter session to open yet");
+      return;
+    }
+    try {
+      await copyText(r.resume);
+      flash("Copied: paste it in a terminal to open the babysitter's session");
+    } catch (e) {
+      flash(`Couldn't copy: ${message(e)}`, true);
+    }
+  }
+
+  function moveLane(d: number) {
+    if (!laneRows.length) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const i = laneRows.findIndex((r) => r.card.id === laneCur?.card.id);
+    const next = laneRows[Math.max(0, Math.min(laneRows.length - 1, i + d))];
+    if (next) setLaneSel(next.card.id);
+  }
+
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
+    else if (k === "d") inflight(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);
@@ -504,6 +614,15 @@ export function App() {
       if (k === "Escape") go({ name: "queue" });
     } else if (route.name === "review") {
       // The review view reads its own keys.
+    } else if (route.name === "inflight") {
+      if (k === "Escape") go({ name: "queue" });
+      else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
+        e.preventDefault();
+        moveLane(k === "j" || k === "ArrowDown" ? 1 : -1);
+      } else if (laneCur && (k === "Enter" || (k.length === 1 && "odyxc".includes(k)))) {
+        e.preventDefault();
+        laneRun(laneCur, k === "Enter" ? "enter" : k);
+      }
     } else if (k === "/") {
       e.preventDefault();
       filterRef.current?.focus();
@@ -517,7 +636,7 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oesmpcwi".includes(k)) {
+    } else if (current && k.length === 1 && "oesmpcwid".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
@@ -564,7 +683,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} view={view} inert={help} />
+      <Sidebar route={route} view={view} overview={overview} inert={help} />
       <div className="col">
         <TopBar
           overview={overview}
@@ -647,10 +766,14 @@ export function App() {
               now={now}
               inert={help}
               flash={reviewFlash}
+              onInflight={inflight}
               onBack={() => {
                 go({ name: "queue" });
               }}
             />
+          )}
+          {route.name === "inflight" && !broken && (
+            <Inflight view={lane} now={now} selected={laneCur?.card.id ?? null} sending={sending} select={setLaneSel} run={laneRun} />
           )}
           {/* Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue. */}
           {settingsSeen && (

@@ -271,3 +271,82 @@ test("notifications: a 304 means nothing changed and costs one call", async () =
   const r = await createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: "LM" });
   assert.deepEqual([r.modified, r.threads, r.poll_interval, n], [false, [], 60, 1]);
 });
+
+test("prContext: a PR's threads with ids, reviews, comments and only its failing checks, in one query", async () => {
+  const who = (login: string, bot = false) => ({ __typename: bot ? "Bot" : "User", login });
+  const { gh, calls } = fakeGitHub(() => ({
+    data: {
+      rateLimit: RL,
+      node: {
+        reviewThreads: {
+          nodes: [
+            {
+              id: "PRRT_1",
+              isResolved: false,
+              isOutdated: true,
+              path: "src/a.ts",
+              line: null,
+              comments: { nodes: [{ author: who("dana"), body: "Retry?", createdAt: "2026-03-01T10:00:00Z" }] },
+            },
+          ],
+        },
+        reviews: {
+          nodes: [
+            { author: who("dana"), state: "CHANGES_REQUESTED", body: "See inline", submittedAt: null, createdAt: "2026-03-01T10:00:00Z" },
+          ],
+        },
+        comments: { nodes: [{ author: null, body: "+1", createdAt: "2026-03-01T11:00:00Z" }] },
+        commits: {
+          nodes: [
+            {
+              commit: {
+                statusCheckRollup: {
+                  contexts: {
+                    nodes: [
+                      {
+                        __typename: "CheckRun",
+                        name: "test",
+                        conclusion: "FAILURE",
+                        databaseId: 7,
+                        detailsUrl: "https://x/7",
+                        title: "1 failed",
+                        summary: null,
+                        checkSuite: { app: { slug: "github-actions" } },
+                      },
+                      { __typename: "CheckRun", name: "lint", conclusion: "SUCCESS", databaseId: 8 },
+                      { __typename: "CheckRun", name: "deploy", conclusion: "CANCELLED", databaseId: 9 },
+                      { __typename: "StatusContext", context: "ci/legacy", state: "ERROR", description: "boom", targetUrl: "https://y" },
+                      null,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+  }));
+  const ctx = await gh.prContext("PR_1");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.query, /^query\(\$id: ID!\)/);
+  assert.deepEqual(calls[0]!.variables, { id: "PR_1" });
+  assert.deepEqual(ctx.threads, [
+    {
+      id: "PRRT_1",
+      resolved: false,
+      outdated: true,
+      path: "src/a.ts",
+      line: null,
+      comments: [{ author: "dana", bot: false, body: "Retry?", at: "2026-03-01T10:00:00Z" }],
+    },
+  ]);
+  assert.deepEqual(ctx.reviews, [
+    { author: "dana", bot: false, state: "changes_requested", body: "See inline", at: "2026-03-01T10:00:00Z" },
+  ]);
+  assert.deepEqual(ctx.comments, [{ author: "ghost", bot: false, body: "+1", at: "2026-03-01T11:00:00Z" }]);
+  assert.deepEqual(ctx.checks, [
+    { name: "test", job_id: 7, app: "github-actions", url: "https://x/7", summary: "1 failed" },
+    { name: "ci/legacy", job_id: null, app: "", url: "https://y", summary: "boom" },
+  ]);
+});

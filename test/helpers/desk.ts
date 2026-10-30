@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Desk } from "../../src/desk.ts";
+import { Desk, type DeskOptions } from "../../src/desk.ts";
 import type { Item } from "../../src/types.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./items.ts";
 
@@ -20,8 +20,10 @@ export const myPr = (n: number, o: Partial<Item> = {}) =>
   makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
 
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
-export async function setup(items: Item[]) {
+// `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer, babysitter hooks).
+export async function setup(items: Item[], extra: { settings?: Record<string, unknown>; desk?: Partial<DeskOptions> } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  if (extra.settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(extra.settings));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()].filter((i) => i.state === "open");
     if (q.includes("review-requested:@me") && !q.includes("-review-requested"))
@@ -40,6 +42,7 @@ export async function setup(items: Item[]) {
       notes.push(b);
     },
     log: () => {},
+    ...extra.desk,
   });
   await desk.init();
   return {
@@ -52,7 +55,7 @@ export async function setup(items: Item[]) {
     },
     cleanup: () => {
       desk.stop();
-      fs.rmSync(home, { recursive: true });
+      fs.rmSync(home, { recursive: true, force: true });
     },
   };
 }

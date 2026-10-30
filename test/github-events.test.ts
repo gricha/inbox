@@ -154,6 +154,14 @@ test("CI transitions: red, green, pending; not to none", () => {
   );
 });
 
+test("your PR starting to conflict with its base; not while it stays conflicting, nor while GitHub works it out", () => {
+  const at = (from: Item["mergeable"], to: Item["mergeable"]) => kinds(base({ mergeable: from }), base({ mergeable: to }));
+  assert.deepEqual(at("clean", "conflict"), [["conflict", "", { base: "main" }]]);
+  assert.deepEqual(at("unknown", "conflict"), [["conflict", "", { base: "main" }]]);
+  assert.deepEqual(at("conflict", "conflict"), []);
+  assert.deepEqual(at("clean", "unknown"), []);
+});
+
 test("comments by others; not you, not bots, and not old ones shifting into the last-10 window", () => {
   const c = (author: string, at: string, author_bot = false) => ({ author, author_bot, at });
   const prev = base({ comments: [c("bob", hoursAgo(5))] });

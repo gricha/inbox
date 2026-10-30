@@ -40,6 +40,9 @@ export interface Item {
   head_oid: string;
   head_committed_at: string | null;
   head_author: string; // login of the head commit's author, "" if unknown
+  head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
+  head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
+  checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
   reviews: { author: string; author_bot: boolean; state: ReviewState; at: string; commit: string }[]; // most recent last; commit = oid reviewed
@@ -325,9 +328,10 @@ export interface ItemState {
   muted: boolean;
   pinned: boolean;
   seen_at: string | null;
+  inflight_at: string | null; // your own PR, marked done with d: babysitters take it from here
 }
 
-export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "undo";
+export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
 // snooze `until`: "1h" | "3h" | "tomorrow" (09:00) | "monday" (09:00) | "activity" | ISO time
 
 // ---------------------------------------------------------------------------
@@ -402,6 +406,7 @@ export interface Card {
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
+  inflight: boolean; // your PR, marked in flight
 }
 
 export interface BoardSummary {
@@ -422,6 +427,7 @@ export interface Overview {
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number };
+  inflight: { total: number; needs_you: number }; // your open in-flight PRs, and how many need you
   rate_limit: { remaining: number; reset_at: string } | null;
   coordinator: { state: CoordinatorStatus["state"]; acted: CoordinatorActed | null };
 }
@@ -528,6 +534,7 @@ export type ActivityKind =
   | "reopened"
   | "mentioned" // data: reason (mention, team_mention)
   | "assigned" // to you
+  | "conflict" // your PR started conflicting with its base; data: base
   | "resolved" // data: reason
   | "unresolved"; // data: was (the reason that stopped holding)
 
@@ -544,6 +551,65 @@ export interface ActivityEvent {
 export interface ActivityPage {
   events: ActivityEvent[]; // oldest first
   last_seq: number; // the next call's `after`: the last event's seq, or the log's latest when there are none
+}
+
+// ---------------------------------------------------------------------------
+// In flight: your own PRs you marked done (d). Babysitter agents keep them moving (GET /api/inflight).
+
+// A reply an agent drafted (desk_draft_reply). You send it from the In-flight lane; nothing else posts it.
+export interface Draft {
+  id: string;
+  thread_id: string | null; // the review thread it answers (a GraphQL node id); null: a comment on the PR
+  to: string; // what it answers: "dana on src/api.ts:12", "the PR"
+  quote: string; // the start of the comment it answers; untrusted GitHub text
+  body: string; // untrusted: an agent wrote it from GitHub text
+  at: string;
+  sent_at: string | null;
+  url: string | null; // the posted comment, once sent
+}
+
+// One babysitter run: a Claude Code session in the PR's worktree.
+export interface SitterRun {
+  id: string; // also the Claude Code session id
+  started_at: string;
+  ended_at: string | null;
+  head_oid: string; // the commit it started from
+  why: string[]; // what it was asked to deal with: "CI", "a merge conflict", "2 comments"
+  outcome: "running" | "pushed" | "committed" | "nothing" | "failed" | "timeout" | "stopped";
+  pushed_oid: string | null;
+  summary: string; // the agent's last line, or why it failed
+  step: string; // what it was doing last: "npm test", "edit src/api.ts"
+  log: string; // the transcript (stream-json), under the desk's home
+}
+
+export interface SitterStatus {
+  state: "running" | "queued" | "done" | "waiting" | "blocked" | "idle";
+  text: string; // plain words: "fixing CI", "pushed a fix for 2 comments · abc1234", "no local clone of acme/api"
+  since: string | null; // when that started or happened
+}
+
+export interface InflightRow {
+  card: Card;
+  state: Item["state"];
+  base: string;
+  ci: Ci;
+  failing: string[]; // failing check names
+  approved_by: string[];
+  changes_by: string[]; // changes requested by
+  waiting_on: string[]; // reviewers asked and not heard from yet; teams as @slug
+  threads_unresolved: number;
+  mergeable: Mergeable;
+  draft: boolean; // a draft PR
+  needs_you: string | null; // why it's back with you: the question, "reply ready to send", "approved and green: merge it", ...
+  escalation: { question: string; at: string } | null; // from desk_escalate
+  sitter: SitterStatus;
+  drafts: Draft[]; // unsent replies
+  run: SitterRun | null; // the latest run
+  resume: string | null; // a shell command that opens the latest run's session in Claude Code
+}
+
+export interface InflightView {
+  rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days
 }
 
 // GET /api/config

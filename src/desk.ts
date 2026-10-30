@@ -1,6 +1,8 @@
 // The desk: runs the connectors, keeps the event log, and serves the classified views and local actions.
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Babysitter, threadRef, worktreePath, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -19,7 +21,10 @@ import type {
   ConfigError,
   Context,
   CoordinatorView,
+  Draft,
   FocusView,
+  InflightRow,
+  InflightView,
   Item,
   ItemDetail,
   ItemState,
@@ -68,6 +73,9 @@ const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["analyze.model"], s["review.auto_ai"]]);
+const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
+const MAX_DRAFT = 5_000;
+const MAX_QUESTION = 300;
 
 export class DeskError extends Error {
   status: number;
@@ -86,6 +94,7 @@ interface Entry {
   status: Status;
   isNew: boolean;
   resolved: Resolution | null;
+  inflight: boolean; // your open PR, marked in flight: the lane has it, not the queue's buckets
 }
 
 interface Snapshot {
@@ -95,7 +104,11 @@ interface Snapshot {
   reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
+  needs: Map<string, string>; // in-flight PRs back in Now: why they need you
 }
+
+// In the lane rather than anywhere in the queue: in flight, and not snoozed, muted or done.
+const laneOwned = (e: Entry) => e.inflight && e.status === "active";
 
 export interface DeskOptions {
   home: string;
@@ -104,8 +117,9 @@ export interface DeskOptions {
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
-  writer?: GitHubWriter; // approve; without it approving is off
+  writer?: GitHubWriter; // approve and send; without it both are off
   mcpUrl?: string; // the desk's own MCP endpoint, for the coordinator; without it the coordinator is off
+  babysit?: SitterOptions;
 }
 
 const MAX_POLICY = 20_000; // it goes with every judge call
@@ -154,6 +168,8 @@ export class Desk {
   aiPaused: { message: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
   approving = new Set<string>();
+  sending = new Set<string>(); // draft ids on their way to GitHub
+  sitter: Babysitter;
 
   constructor(opts: DeskOptions) {
     this.home = opts.home;
@@ -178,6 +194,7 @@ export class Desk {
     this.connectors = [this.gh];
     this.judge = new Judge(this);
     this.coordinator = new Coordinator(this);
+    this.sitter = new Babysitter(this, opts.babysit);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -235,12 +252,14 @@ export class Desk {
   start(): void {
     for (const c of this.connectors) c.start();
     this.coordinator.wake();
+    this.sitter.start();
   }
 
   // Kills a judge call or coordinator run in progress.
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.sitter.stop();
     for (const c of this.connectors) c.stop();
     this.judge.stop();
     this.coordinator.stop();
@@ -361,6 +380,7 @@ export class Desk {
     this.pumpAi();
     this.judge.pump();
     this.coordinator.wake();
+    this.sitter.settingsChanged();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -471,6 +491,7 @@ export class Desk {
     this.store.pruneKv("review:", kept);
     this.store.pruneKv("pr:", kept);
     this.store.pruneKv("judge:", kept);
+    this.store.pruneKv("sitter:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     this.judge.pump();
     this.coordinator.wake();
@@ -504,6 +525,7 @@ export class Desk {
     this.store.addActivity(events.map((e) => ({ ...e, source })));
     for (const wake of this.waiters) wake();
     this.coordinator.wake();
+    this.sitter.onEvents(events);
   }
 
   resolutionOf(item: Item): Resolution | null {
@@ -590,7 +612,8 @@ export class Desk {
       const state = states.get(item.id) ?? emptyState(item.id);
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
       const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
-      entries.set(item.id, { item, analysis, state, status: statusOf(state, analysis.activity_at, now), isNew, resolved });
+      const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
+      entries.set(item.id, { item, analysis, state, status: statusOf(state, analysis.activity_at, now), isNew, resolved, inflight });
     }
 
     const hits = this.store.hits();
@@ -629,8 +652,8 @@ export class Desk {
           created_at: e.item.created_at,
           activity_at: e.analysis.activity_at,
           pinned: e.state.pinned,
-          // Resolved items leave the buckets (and the caps) like cleared ones.
-          active: e.status === "active" && !e.resolved,
+          // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
+          active: e.status === "active" && !e.resolved && !e.inflight,
           kept: kept.has(e.item.id) || recent(e),
         })),
         judge,
@@ -639,12 +662,22 @@ export class Desk {
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
       for (const [id, p] of result.placements) {
         const e = entries.get(id)!;
-        if (e.status !== "active" || e.resolved) continue;
+        if (e.status !== "active" || e.resolved || e.inflight) continue;
         const cur = best.get(id);
         if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(id, p);
       }
     }
-    return { rev, at: now.getTime(), entries, reviews: this.store.prefixed<AiReview>("review:"), boards, best };
+    // An in-flight PR comes back to Now only when it needs you, with the reason as its why.
+    const needs = new Map<string, string>();
+    for (const e of entries.values()) {
+      if (!laneOwned(e)) continue;
+      const why = this.sitterView(e.item).needs_you;
+      if (!why) continue;
+      needs.set(e.item.id, why);
+      const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
+      best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
+    }
+    return { rev, at: now.getTime(), entries, reviews: this.store.prefixed<AiReview>("review:"), boards, best, needs };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -689,6 +722,7 @@ export class Desk {
       verdict: snap.reviews.get(it.id)?.head_oid === it.head_oid ? snap.reviews.get(it.id)!.verdict : null,
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
+      inflight: e.inflight,
     };
   }
 
@@ -702,7 +736,7 @@ export class Desk {
   summary(id: string, snap: Snapshot): BoardSummary {
     const cfg = this.requireConfig().config.boards.find((b) => b.id === id)!;
     const b = snap.boards.get(id)!;
-    const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved).length;
+    const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!)).length;
     const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared };
     let fresh = 0;
     for (const bucket of Object.keys(b.result.order) as Bucket[]) {
@@ -733,16 +767,27 @@ export class Desk {
         today: focus.sections.today.length,
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
       },
+      inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length, needs_you: snap.needs.size },
       rate_limit: this.gh.api.rateLimit(),
       coordinator: { state: this.coordinator.state(), acted: this.coordinator.acted() },
     };
+  }
+
+  // Your in-flight PRs that need you, at the top of Now.
+  needsCards(snap: Snapshot, seen: Set<string>): Card[] {
+    const out: Card[] = [];
+    for (const id of snap.needs.keys()) {
+      seen.add(id);
+      out.push(this.card(snap.entries.get(id)!, snap.best.get(id)!, snap));
+    }
+    return out;
   }
 
   focus(): FocusView {
     const loaded = this.requireConfig();
     const snap = this.snapshot();
     const seen = new Set<string>();
-    const sections: FocusView["sections"] = { now: [], today: [] };
+    const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
     for (const bucket of ["now", "today"] as const) {
       for (const board of loaded.boards) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
@@ -761,7 +806,7 @@ export class Desk {
     const loaded = this.requireConfig();
     const snap = this.snapshot();
     const seen = new Set<string>();
-    const sections: QueueView["sections"] = { now: [], today: [], later: [], fyi: [] };
+    const sections: QueueView["sections"] = { now: this.needsCards(snap, seen), today: [], later: [], fyi: [] };
     const hidden: Card[] = [];
     for (const bucket of ["now", "today", "later", "fyi", "hide"] as const) {
       for (const board of loaded.boards) {
@@ -781,6 +826,7 @@ export class Desk {
         if (seen.has(id)) continue;
         seen.add(id);
         const e = snap.entries.get(id)!;
+        if (laneOwned(e)) continue; // the In-flight lane shows it
         if (e.resolved) resolved.push(this.card(e, this.placementOf(id, snap), snap));
         else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
@@ -809,7 +855,7 @@ export class Desk {
         fyi: cards(b.result.order.fyi),
       },
       hidden: cards(b.result.order.hide),
-      cleared: cards(b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved)),
+      cleared: cards(b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!))),
     };
   }
 
@@ -1129,6 +1175,20 @@ export class Desk {
         s.snoozed_at = null;
         s.muted = false;
         break;
+      case "inflight": {
+        // "I'm done": only your own open PR, and babysitters take it from here.
+        const it = this.snapshot().entries.get(id)!;
+        if (it.item.kind !== "pr" || !it.analysis.signals.me.author || it.item.state !== "open")
+          throw new DeskError(409, `only your own open PRs go in flight; ${id} isn't one`);
+        if (s.inflight_at) throw new DeskError(409, `${id} is already in flight`);
+        s.inflight_at = now.toISOString();
+        this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was in flight
+        break;
+      }
+      case "takeback":
+        if (!s.inflight_at) throw new DeskError(409, `${id} isn't in flight`);
+        s.inflight_at = null;
+        break;
       default:
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
@@ -1137,6 +1197,8 @@ export class Desk {
     if (by?.agent === "coordinator" && seq)
       this.coordinator.logAct({ item_id: id, action, bucket, undo_seq: seq }, (by.reason ?? "").trim().slice(0, 300));
     this.changed();
+    // Taking a PR back stops its babysitter at once; marking one waits a moment, so an undo right after costs nothing.
+    if (action === "inflight" || action === "takeback") this.sitter.consider(id, action === "takeback" ? 0 : undefined);
     const { snoozed_at: _, acked_at: __, ...state } = s;
     return { state, undo_seq: seq };
   }
@@ -1146,11 +1208,189 @@ export class Desk {
     if (!ev) throw new DeskError(404, "nothing to undo");
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
     const cur = this.store.state(ev.item_id);
-    this.store.putState({ ...ev.before, seen_at: cur.seen_at });
+    const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
+    this.store.putState(restored);
     this.store.markUndone(ev.seq);
     this.changed();
-    const { snoozed_at: _, acked_at: __, ...state } = ev.before;
+    if (restored.inflight_at !== cur.inflight_at) this.sitter.consider(ev.item_id, restored.inflight_at ? undefined : 0);
+    const { snoozed_at: _, acked_at: __, ...state } = restored;
     return { id: ev.item_id, state, action: ev.action as Action };
+  }
+
+  // ---------------------------------------------------------------- in flight
+
+  // The babysitter's side of one PR: its status, drafts, question, and why it's back with you.
+  sitterView(it: Item): Pick<InflightRow, "needs_you" | "escalation" | "sitter" | "drafts" | "run" | "resume"> {
+    const s = this.sitter.record(it.id);
+    const st = this.sitter.status(it.id, it, s);
+    const run = s.runs.at(-1) ?? null;
+    const wt = s.worktree ?? worktreePath(this.home, it.id);
+    return {
+      needs_you: this.sitter.needsYou(it.id, it, s, st),
+      escalation: s.escalation,
+      sitter: st,
+      drafts: s.drafts.filter((d) => !d.sent_at),
+      run,
+      resume: run && fs.existsSync(wt) ? `cd ${shellQuote(wt)} && claude --resume ${run.id}` : null,
+    };
+  }
+
+  // GET /api/inflight: your in-flight PRs, open ones first (those that need you on top), then any that landed in the last 3 days.
+  inflight(): InflightView {
+    this.requireConfig();
+    const snap = this.snapshot();
+    const me = this.me().toLowerCase();
+    const cutoff = new Date(this.now().getTime() - LANDED).toISOString();
+    const rows: InflightRow[] = [];
+    for (const e of snap.entries.values()) {
+      const it = e.item;
+      if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
+      if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
+      const verdicts = new Map<string, Item["reviews"][number]>();
+      for (const r of it.reviews)
+        if (
+          !r.author_bot &&
+          r.author.toLowerCase() !== me &&
+          (r.state === "approved" || r.state === "changes_requested" || r.state === "dismissed")
+        )
+          verdicts.set(r.author.toLowerCase(), r);
+      const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
+      const p = snap.best.get(it.id) ?? this.placementOf(it.id, snap);
+      rows.push({
+        card: this.card(e, p, snap),
+        state: it.state,
+        base: it.base,
+        ci: it.ci,
+        failing: it.checks_failed ?? [],
+        approved_by: by("approved"),
+        changes_by: by("changes_requested"),
+        waiting_on: it.review_requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer)),
+        threads_unresolved: it.threads_unresolved,
+        mergeable: it.mergeable,
+        draft: it.draft,
+        ...this.sitterView(it),
+      });
+    }
+    const rank = (r: InflightRow) => (r.state !== "open" ? 3 : r.needs_you ? 0 : r.sitter.state === "running" ? 1 : 2);
+    rows.sort(
+      (a, b) =>
+        rank(a) - rank(b) ||
+        (a.state === "open"
+          ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
+          : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
+    );
+    return { rows };
+  }
+
+  // Your own open PR in flight, for what agents and the lane may do to it.
+  inflightEntry(ref: string): Entry {
+    const e = this.pr(ref);
+    if (!e.inflight) throw new DeskError(409, `${e.item.id} isn't one of your open PRs in flight`);
+    return e;
+  }
+
+  // desk_draft_reply: an agent's reply for you to send. A thread must be one of this PR's; a new draft for a thread replaces the old one.
+  async draftReply(ref: string, threadId: string | null, body: string): Promise<Draft> {
+    const e = this.inflightEntry(ref);
+    const id = e.item.id;
+    const text = body.trim();
+    if (!text) throw new DeskError(400, "the reply is empty");
+    if (text.length > MAX_DRAFT) throw new DeskError(400, `keep a reply under ${MAX_DRAFT} characters`);
+    let to = "the PR";
+    let quote = "";
+    if (threadId) {
+      let t = this.sitter.record(id).threads.find((x) => x.id === threadId);
+      if (!t) {
+        const ctx = await this.gh.api.prContext(e.item.node_id).catch((err: unknown) => {
+          throw new DeskError(502, `couldn't read the PR's threads: ${(err as Error).message}`);
+        });
+        const found = ctx.threads.find((x) => x.id === threadId);
+        t = (found && threadRef(found)) ?? undefined;
+      }
+      if (!t) throw new DeskError(400, `no review thread "${threadId}" on ${id}`);
+      ({ to, quote } = t);
+    }
+    const draft: Draft = {
+      id: randomBytes(6).toString("hex"),
+      thread_id: threadId,
+      to,
+      quote,
+      body: text,
+      at: this.now().toISOString(),
+      sent_at: null,
+      url: null,
+    };
+    const replaces = (d: Draft) => !d.sent_at && threadId !== null && d.thread_id === threadId;
+    this.sitter.update(id, (s) => {
+      s.drafts = [...s.drafts.filter((d) => !replaces(d)), draft].slice(-20);
+    });
+    this.log(`babysitter: drafted a reply on ${id} to ${to}`);
+    this.changed();
+    this.notifyNewNow();
+    return draft;
+  }
+
+  // desk_escalate: a decision that's yours. The PR goes to Now with the question as its why; its babysitter waits.
+  escalate(ref: string, question: string): { question: string } {
+    const e = this.inflightEntry(ref);
+    // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
+    const q = question.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+    if (!q) throw new DeskError(400, "the question is empty");
+    const clipped = q.length > MAX_QUESTION ? `${q.slice(0, MAX_QUESTION - 1)}…` : q;
+    this.sitter.update(e.item.id, (s) => {
+      s.escalation = { question: clipped, at: this.now().toISOString() };
+    });
+    this.log(`babysitter: ${e.item.id} needs you: ${clipped}`);
+    this.changed();
+    this.notifyNewNow();
+    return { question: clipped };
+  }
+
+  // The lane's x: drop a draft, or the question (and the babysitter looks at the PR again).
+  dismiss(ref: string, draftId?: string): void {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const s = this.sitter.record(id);
+    if (draftId !== undefined && !s.drafts.some((d) => d.id === draftId && !d.sent_at))
+      throw new DeskError(404, `no draft ${draftId} on ${id}`);
+    if (draftId === undefined && !s.escalation) throw new DeskError(404, `nothing to dismiss on ${id}`);
+    this.sitter.update(id, (x) => {
+      if (draftId === undefined) x.escalation = null;
+      else x.drafts = x.drafts.filter((d) => d.id !== draftId);
+    });
+    this.changed();
+    this.sitter.consider(id, 0);
+  }
+
+  // POST /api/inflight/:id/send: a drafted reply, posted to GitHub on your keypress. One of the desk's three writes.
+  async sendDraft(ref: string, draftId: string): Promise<{ url: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    if (!e.analysis.signals.me.author) throw new DeskError(409, `can't send on ${id}: it isn't your PR`);
+    if (e.item.state !== "open") throw new DeskError(409, `can't send on ${id}: it's ${e.item.state}`);
+    const d = this.sitter.record(id).drafts.find((x) => x.id === draftId);
+    if (!d) throw new DeskError(404, `no draft ${draftId} on ${id}`);
+    if (d.sent_at) throw new DeskError(409, `that reply was sent already: ${d.url ?? ""}`);
+    if (!this.writer) throw new DeskError(409, "sending isn't available in this desk");
+    if (this.sending.has(draftId)) throw new DeskError(409, "already sending that reply");
+    this.sending.add(draftId);
+    let url: string;
+    try {
+      ({ url } = d.thread_id ? await this.writer.reply(d.thread_id, d.body) : await this.writer.comment(e.item.node_id, d.body));
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't take the reply: ${(err as Error).message}`);
+    } finally {
+      this.sending.delete(draftId);
+    }
+    const at = this.now().toISOString();
+    this.sitter.update(id, (s) => {
+      s.drafts = s.drafts.map((x) => (x.id === draftId ? { ...x, sent_at: at, url } : x));
+    });
+    this.store.logWrite(id, d.thread_id ? "reply" : "comment", at);
+    this.log(`sent a ${d.thread_id ? "reply" : "comment"} on ${id} to ${d.to}${url ? ` (${url})` : ""}`);
+    this.changed();
+    void this.sync();
+    return { url };
   }
 
   // ---------------------------------------------------------------- config
@@ -1236,6 +1476,8 @@ function statusOf(s: StateRow, activityAt: string, now: Date): Status {
 function shortRef(c: { repo: string; number: number }): string {
   return `${c.repo.split("/")[1]}#${c.number}`;
 }
+
+const shellQuote = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 
 export function parseUntil(until: string, now: Date): Date {
   const rel = /^(\d+)([hd])$/.exec(until);

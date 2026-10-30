@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type { ActivityEvent, Card, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, shortRef, when } from "../format.ts";
 import { currentFile, filePatch, orderNotes, resolvedHead, splitPath } from "../view.ts";
@@ -39,14 +39,16 @@ export function Review({
   now,
   inert,
   flash,
+  onInflight,
   onBack,
 }: {
   id: string;
   loads: number; // bumped on every refresh, so the review follows the server's updates
-  me: string;
+  me: string; // your login: d is for your own PRs
   now: number;
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
+  onInflight: (c: Card) => void; // d: in flight, or take it back
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
@@ -210,6 +212,7 @@ export function Review({
     else if (k === "c") void copyPrompt();
     else if (k === "i") void askAi();
     else if (k === "a") void approve();
+    else if (k === "d" && v) onInflight(v.card);
     else if (k === "esc") onBack();
   }
 
@@ -222,7 +225,7 @@ export function Review({
     if (e.key === "Escape") {
       if (armed) setArmed(0);
       else onBack();
-    } else if ("npoci[]a".includes(e.key) && e.key.length === 1) {
+    } else if ("npoci[]ad".includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
     }
@@ -251,6 +254,7 @@ export function Review({
     );
 
   const { card, item, files } = view;
+  const mine = item.state === "open" && !!me && card.author.toLowerCase() === me.toLowerCase();
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const approvals = item.reviews.filter((r) => r.state === "approved").length;
@@ -311,6 +315,16 @@ export function Review({
       </div>
 
       <div className="actions rv-actions">
+        {mine && (
+          <KeyButton
+            k="d"
+            label={card.inflight ? "Take back" : "In flight"}
+            title={
+              card.inflight ? "Back to you: babysitters stop" : "You're done: babysitters keep CI green and draft replies until it merges"
+            }
+            run={run}
+          />
+        )}
         <KeyButton
           k="a"
           label={busy === "approve" ? "Approving…" : armed ? "Press a again to approve" : "Approve"}

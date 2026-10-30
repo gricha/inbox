@@ -5,6 +5,7 @@ import type {
   ConfigError,
   CoordinatorView,
   FieldDoc,
+  InflightView,
   ItemDetail,
   ItemState,
   Overview,
@@ -55,9 +56,14 @@ export const api = {
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
   review: (id: string) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
-  // The one call that writes to GitHub: only the review view's approve key reaches it.
+  // The calls that write to GitHub: the review view's approve key, and Send on a drafted reply in the In-flight lane.
   approve: (id: string, head_oid: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
+  sendDraft: (id: string, draft_id: string) =>
+    call<{ ok: true; url: string }>("POST", `/api/inflight/${encodeURIComponent(id)}/send`, { draft_id }),
+  inflight: () => call<InflightView>("GET", "/api/inflight"),
+  // Drops a draft, or with no draft_id the question the babysitter asked.
+  dismiss: (id: string, draft_id?: string) => call<{ ok: true }>("POST", `/api/inflight/${encodeURIComponent(id)}/dismiss`, { draft_id }),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   config: () => call<{ path: string; text: string; errors: ConfigError[]; warnings?: ConfigError[] }>("GET", "/api/config"),

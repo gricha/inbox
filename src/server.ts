@@ -120,6 +120,41 @@ export function createApp(desk: Desk, port: number): Hono {
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
   });
+  // In flight: your own PRs that babysitters keep moving.
+  app.get("/api/inflight", (c) => {
+    ready();
+    return c.json(desk.inflight());
+  });
+  const fields = (c: { req: { json<T>(): Promise<T> } }) =>
+    c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const str = (v: unknown, name: string, optional = false): string | undefined => {
+    if (v === undefined && optional) return undefined;
+    if (typeof v !== "string" || (!optional && !v)) throw new DeskError(400, `${name} must be a string`);
+    return v;
+  };
+  // desk_draft_reply and desk_escalate: local only, so agents may call them.
+  app.post("/api/inflight/:id{.+}/draft", async (c) => {
+    ready();
+    const b = await fields(c);
+    const draft = await desk.draftReply(c.req.param("id"), str(b.thread_id, "thread_id", true) ?? null, str(b.body, "body")!);
+    return c.json({ ok: true, draft });
+  });
+  app.post("/api/inflight/:id{.+}/escalate", async (c) => {
+    ready();
+    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str((await fields(c)).question, "question")!) });
+  });
+  app.post("/api/inflight/:id{.+}/dismiss", async (c) => {
+    ready();
+    desk.dismiss(c.req.param("id"), str((await fields(c)).draft_id, "draft_id", true));
+    return c.json({ ok: true });
+  });
+  // Posts a drafted reply to GitHub. Only the desk's own window sends it: a browser always sets Origin on a POST, and the
+  // check above only lets ours through; MCP and the CLI send none.
+  app.post("/api/inflight/:id{.+}/send", async (c) => {
+    ready();
+    if (!c.req.header("origin")) throw new DeskError(403, "replies are sent from the desk's window, by you");
+    return c.json({ ok: true, ...(await desk.sendDraft(c.req.param("id"), str((await fields(c)).draft_id, "draft_id")!)) });
+  });
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));
@@ -235,7 +270,7 @@ export async function startServer(
     home?: string;
     notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
     log?: (msg: string) => void;
-    writer?: GitHubWriter; // a stand-in for live checks that must not approve anything
+    writer?: GitHubWriter; // a stand-in for live checks that must not approve or send anything
   } = {},
 ): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);

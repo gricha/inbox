@@ -1,5 +1,5 @@
 import type { Context, Item } from "../../src/types.ts";
-import type { GitHub, NotificationPage, NotificationThread, SearchHit } from "../../src/github/index.ts";
+import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
 export const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();
@@ -114,6 +114,15 @@ export class FakeGitHub implements GitHub {
       poll_interval: this.pollInterval,
       date,
     });
+  }
+
+  // A PR's threads, reviews, comments and failing checks, by node id; empty unless a test sets one.
+  contexts = new Map<string, PrContext>();
+  contextCalls: string[] = [];
+
+  prContext(nodeId: string): Promise<PrContext> {
+    this.contextCalls.push(nodeId);
+    return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], checks: [] });
   }
 
   rateLimit() {

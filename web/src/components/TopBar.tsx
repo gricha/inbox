@@ -51,8 +51,8 @@ export function TopBar({
         </svg>
         <span>Review Desk</span>
       </a>
-      {inSettings ? (
-        <span className="crumb">Settings</span>
+      {inSettings || route.name === "inflight" ? (
+        <span className="crumb">{inSettings ? "Settings" : "In flight"}</span>
       ) : route.name === "review" ? (
         <a className="back" href="#/" title="Back to the queue (esc)">
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

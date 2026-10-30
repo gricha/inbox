@@ -12,6 +12,7 @@ import type {
   CoordinatorView,
   FieldDoc,
   FocusView,
+  InflightView,
   ItemDetail,
   Overview,
   PolicyDoc,
@@ -74,7 +75,7 @@ test("overview, focus and every board", async () => {
     assert.equal(v.cleared.length, b.counts.cleared);
     assert.ok(cards.every((c) => c.board === b.id && c.boards.includes(b.id)));
   }
-  assert.ok(total >= 30, `~30 cards, got ${total}`);
+  assert.ok(total >= 25, `~30 cards (less your PRs in flight), got ${total}`);
   // Filtered items aren't on the board (src/rules.ts), not under "hidden".
   const { data: wr } = await call<BoardView>("GET", "/api/boards/work-review");
   assert.ok(![...Object.values(wr.sections).flat(), ...wr.hidden].some((c) => c.id === "acme/web#2279"));
@@ -218,6 +219,7 @@ test("resolved items sit apart from the queue's groups and boards; items carry t
       ["acme/web#2284", "merged", "merged"],
       ["acme/web#2292", "you approved", "you approved"],
       ["acme/worker#868", "no longer requested", "no longer requested"],
+      ["acme/worker#871", "merged", "merged"],
     ],
   );
   const elsewhere = new Set([...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared].map((c) => c.id));
@@ -305,4 +307,49 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 2 });
   await call("POST", "/api/coordinator/note", { text: "from the test" });
   assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log[0]?.text, "from the test");
+});
+
+test("in flight: the lane's states, needs-you cards at the top of Now, send and take back", async () => {
+  const { data: lane } = await call<InflightView>("GET", "/api/inflight");
+  const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
+  assert.deepEqual(
+    lane.rows.map((r) => [r.card.id, r.needs_you !== null, r.sitter.state]),
+    [
+      ["acme/api#4122", true, "done"],
+      ["oss/tinyhttp#205", true, "blocked"],
+      ["acme/api#4110", true, "waiting"],
+      ["acme/web#2295", false, "running"],
+      ["acme/api#4105", false, "idle"],
+      ["acme/worker#871", false, "done"],
+    ],
+  );
+  assert.equal(row("oss/tinyhttp#205").sitter.text, "no local clone of oss/tinyhttp");
+  assert.equal(row("acme/worker#871").state, "merged");
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const now = q.sections.now.filter((c) => c.inflight).map((c) => [c.id, c.why]);
+  assert.deepEqual(now.slice(0, 3), [
+    ["acme/api#4122", "reply ready to send"],
+    ["acme/api#4110", row("acme/api#4110").escalation!.question],
+    ["oss/tinyhttp#205", "CI failing: no local clone of oss/tinyhttp"],
+  ]);
+  assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "the babysitter has it");
+  const { data: o } = await call<Overview>("GET", "/api/overview");
+  assert.deepEqual(o.inflight, { total: 5, needs_you: 3 });
+
+  const id = encodeURIComponent("acme/api#4122");
+  const draft = row("acme/api#4122").drafts[0]!;
+  assert.equal((await call("POST", `/api/inflight/${id}/send`, { draft_id: draft.id })).status, 200);
+  assert.equal((await call("POST", `/api/inflight/${id}/send`, { draft_id: draft.id })).status, 404);
+  const { data: sent } = await call<InflightView>("GET", "/api/inflight");
+  assert.equal(sent.rows.find((r) => r.card.id === "acme/api#4122")?.needs_you, null);
+
+  assert.equal((await call("POST", "/api/act", { id: "acme/api#4127", action: "inflight" })).status, 409, "not your PR");
+  const { data: back } = await call<{ undo_seq: number }>("POST", "/api/act", { id: "acme/web#2295", action: "takeback" });
+  const { data: q2 } = await call<QueueView>("GET", "/api/queue");
+  assert.ok(
+    Object.values(q2.sections)
+      .flat()
+      .some((c) => c.id === "acme/web#2295" && !c.inflight),
+  );
+  await call("POST", "/api/undo", { seq: back.undo_seq });
 });

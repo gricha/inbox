@@ -74,6 +74,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   const placements = [...detail.placements].sort((a, b) => Number(b.board === card.board) - Number(a.board === card.board));
   const [main, ...others] = placements;
   const muted = card.status === "muted";
+  const mine = pr && item.state === "open" && card.author.toLowerCase() === ctx.me.toLowerCase();
   const run = (k: string) => {
     ctx.run(card, k);
   };
@@ -149,8 +150,9 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         </div>
       )}
       <div className="actions">
-        {pr && <KeyButton k="enter" label="Review" run={run} />}
+        {pr && <KeyButton k="enter" label={card.inflight ? "Show in flight" : "Review"} run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
+        {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
         <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
@@ -223,7 +225,7 @@ export function KeyButton({
       }}
       disabled={disabled}
     >
-      <kbd>{k}</kbd>
+      {k && <kbd>{k}</kbd>}
       {label}
     </button>
   );
