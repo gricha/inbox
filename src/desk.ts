@@ -1039,6 +1039,7 @@ export class Desk {
           throw new DeskError(409, `only your own open PRs go in flight; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is already in flight`);
         s.inflight_at = now.toISOString();
+        this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was in flight
         break;
       }
       case "takeback":

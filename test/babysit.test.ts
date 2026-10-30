@@ -448,7 +448,7 @@ test("a run fixes red CI in a worktree of your clone and pushes to the PR's own 
   assert.equal(gitIn(wt, "rev-parse", "HEAD"), remoteHead);
 });
 
-test("taking a PR back stops its run and removes the worktree and its record", posix, async (c) => {
+test("taking a PR back stops its run and removes the worktree; undo brings back its draft, and d again starts afresh", posix, async (c) => {
   const s = await sitterDesk(c, []);
   const item = pr(6, s.w.head);
   s.gh.items.set(item.id, item);
@@ -459,10 +459,26 @@ test("taking a PR back stops its run and removes the worktree and its record", p
   const wt = worktreePath(s.home, item.id);
   assert.ok(fs.existsSync(wt));
   assert.match(s.desk.inflight().rows[0]!.sitter.text, /^fixing CI/);
-  s.desk.act("web#6", "takeback");
-  await until("the worktree and the record to go", () => !fs.existsSync(wt) && s.desk.store.get(`sitter:${item.id}`) === null);
+  await s.desk.draftReply(item.id, null, "Fixed the retry test.");
+  const back = s.desk.act("web#6", "takeback");
+  await until("the run to stop and the worktree to go", () => !fs.existsSync(wt) && s.record(item.id).runs.at(-1)?.outcome === "stopped");
   assert.ok(!gitIn(s.w.clone, "worktree", "list").includes(wt));
   assert.equal(s.desk.inflight().rows.length, 0);
+  assert.deepEqual(s.record(item.id).tried, [], "a stopped run didn't finish trying");
+  // A stray d, then u: the draft is still there, and the babysitter picks up where it was.
+  s.desk.undo(back.undo_seq);
+  assert.deepEqual(
+    s.desk.inflight().rows[0]?.drafts.map((d) => d.body),
+    ["Fixed the retry test."],
+  );
+  await until("another run", () => s.w.count() === 2);
+  // Taken back and marked again with d: nothing from last time.
+  s.desk.act("web#6", "takeback");
+  await until("the second run to stop", () => s.desk.sitter.live.size === 0 && !fs.existsSync(wt));
+  s.w.mode("ok");
+  s.desk.act("web#6", "inflight");
+  assert.deepEqual(s.desk.inflight().rows[0]?.drafts, []);
+  assert.equal(s.record(item.id).runs.length, 0);
 });
 
 test("a merged PR's worktree goes; its record stays for the lane", posix, async (c) => {

@@ -250,7 +250,7 @@ Your own PRs and issues only resolve by merging or closing. An item that drops o
 
 ## In flight
 
-Your own open PR, once you're done with it: `d` in the queue, on the open item or in its review marks it in flight (`inflight_at` in `ItemState`, local and undoable); `d` again takes it back. It leaves Now, Today and the sorted-away groups for the In-flight lane (`GET /api/inflight`), and comes back to the top of Now only when it needs you, with the reason as its why: a question from its babysitter, a reply ready to send, a problem nobody is fixing (babysitting off, no local clone, a fork, CI still red after 3 runs, a run that failed), or approved and green, so merge it. Merged and closed ones stay in the lane for 3 days.
+Your own open PR, once you're done with it: `d` in the queue, on the open item or in its review marks it in flight (`inflight_at` in `ItemState`, local and undoable); `d` again takes it back, which stops its babysitter and removes its worktree; undoing that brings back its drafts and question, and marking it again later starts afresh. It leaves Now, Today and the sorted-away groups for the In-flight lane (`GET /api/inflight`), and comes back to the top of Now only when it needs you, with the reason as its why: a question from its babysitter, a reply ready to send, a problem nobody is fixing (babysitting off, no local clone, a fork, CI still red after 3 runs, a run that failed), or approved and green, so merge it. Merged and closed ones stay in the lane for 3 days.
 
 ### Babysitters
 

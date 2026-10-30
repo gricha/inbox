@@ -691,15 +691,16 @@ export class Babysitter {
     }
   }
 
-  // Stops a run and removes the worktree: taken back (forget: its drafts and question go too), merged or closed.
-  async release(id: string, forget: boolean, dir?: string): Promise<void> {
+  // Stops a run and removes the worktree: taken back, merged or closed. The record stays, so undoing a take-back
+  // brings back its drafts and question; marking the PR again with d starts it afresh.
+  async release(id: string, takenBack: boolean, dir?: string): Promise<void> {
     clearTimeout(this.timers.get(id));
     this.timers.delete(id);
     this.queue = this.queue.filter((x) => x !== id);
     this.notes.delete(id);
     const l = this.live.get(id);
     if (l) {
-      l.aborted = forget ? "taken back" : "merged or closed";
+      l.aborted = takenBack ? "taken back" : "merged or closed";
       this.kill(l.child);
       await l.closed;
     }
@@ -712,8 +713,7 @@ export class Babysitter {
       this.desk.log(`babysitter: removed the worktree for ${id}`);
     }
     if (this.stopped) return;
-    if (forget) this.desk.store.set(`sitter:${id}`, null);
-    else if (s.worktree)
+    if (s.worktree)
       this.update(id, (x) => {
         x.worktree = null;
       });
@@ -956,8 +956,8 @@ export class Babysitter {
       const s = this.update(id, (x) => {
         const rec = x.runs.find((y) => y.id === run.id);
         if (rec) Object.assign(rec, { outcome, pushed_oid: pushed, summary, ended_at: new Date().toISOString() });
-        // A run that never got going (no login) didn't try anything: once you log in, it goes again.
-        if (auth) {
+        // A run that never got going (no login) or was stopped didn't finish trying: it goes again when it can.
+        if (auth || r.aborted) {
           x.tried = x.tried.filter((k) => !keys.includes(k));
           if (keys.some((k) => k.startsWith("ci:"))) x.ci_tries = Math.max(0, x.ci_tries - 1);
         }
