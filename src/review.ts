@@ -258,10 +258,16 @@ export function claudeEnvelope(out: string): unknown {
 }
 
 // Codex has no --tools "" like Claude's, so its built-in tools go off one by one (-c, unlike --disable, skips names a version lacks).
-const CODEX_NO_TOOLS = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use"].flatMap((f) => [
-  "-c",
-  `features.${f}=false`,
-]);
+const CODEX_NO_TOOLS = [
+  "shell_tool",
+  "unified_exec",
+  "apps",
+  "plugins",
+  "browser_use",
+  "computer_use",
+  "view_image",
+  "multi_agent",
+].flatMap((f) => ["-c", `features.${f}=false`]);
 
 // No user config: that's where MCP servers (the desk's own among them) and tools live. Sandboxed read-only in an empty dir.
 export function askCodex(prompt: string, command = "codex"): Promise<unknown> {
