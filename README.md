@@ -1,12 +1,12 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: what needs you **now**, what's for **today**, and everything else sorted away by rules you control. It never writes to GitHub.
+A desktop app that turns your GitHub review load into one queue: what needs you **now**, what's for **today**, and everything else sorted away by rules you control. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. Approving is the only thing it ever writes to GitHub.
 
 Runs on macOS, Linux and Windows.
 
 ## Start
 
-You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI is only needed for briefs.
+You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI (or `codex`) is only needed for AI reviews.
 
 ```bash
 cd ~/code/review-desk && npm install
@@ -27,21 +27,21 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 - **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared. Click a count to look inside.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
-- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, Briefs, Hand-off prompts. Changes save as you go.
+- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, AI review, Hand-off prompts. Changes save as you go.
 - In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
 
-| Key       | Does                                                            |
-| --------- | --------------------------------------------------------------- |
-| `j` / `k` | move                                                            |
-| `Enter`   | open an item: facts, why, rule trace                            |
-| `o`       | open on GitHub                                                  |
-| `e`       | done: hidden until someone else comments, reviews or pushes     |
-| `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity             |
-| `m` / `p` | mute / pin                                                      |
-| `u`       | undo                                                            |
-| `c`       | copy a review prompt to paste into a Claude session             |
-| `i`       | brief: ask Claude whether the PR needs you (look / skim / skip) |
-| `/`       | filter · `r` sync · `,` settings · `g r` rules · `?` all keys   |
+| Key       | Does                                                           |
+| --------- | -------------------------------------------------------------- |
+| `j` / `k` | move                                                           |
+| `Enter`   | review a PR (diff, AI notes, approve); an issue opens in place |
+| `o`       | open on GitHub                                                 |
+| `e`       | done: hidden until someone else comments, reviews or pushes    |
+| `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
+| `m` / `p` | mute / pin                                                     |
+| `u`       | undo                                                           |
+| `c`       | copy a review prompt to paste into a Claude session            |
+| `i`       | AI review: look / skim / skip, summary, concerns, notes        |
+| `/`       | filter · `r` sync · `,` settings · `g r` rules · `?` all keys  |
 
 Done, snooze, mute and pin are local. Nothing is sent to GitHub.
 
@@ -118,9 +118,9 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 
 ## Never
 
-- It never writes to GitHub. It only runs GraphQL queries (the client refuses any document containing `mutation`), plus one read-only `gh api` GET for a brief's diff.
+- Its one write to GitHub is approving a PR, when you press `a` twice in its review. That goes through `src/github/write.ts`, whose allowlist holds only that mutation; agents can't reach it. Everything else is read only: GraphQL queries (the read client refuses any document containing `mutation`) and `gh api` GETs for a PR's files and description.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
-- It never puts PR text into the hand-off prompt, only the URL and number. The brief prompt fences PR text as untrusted.
+- It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools.
 
 ## Files
 

@@ -1,9 +1,11 @@
 # Architecture
 
-One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only, keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
+One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only (its one write is approving a PR when you press `a a` in its review), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
 GitHub GraphQL ──(read only)──> src/github/*  ──> src/store.ts (node:sqlite)
+gh api (a PR's files) ──────────> src/review.ts ──> claude -p / codex exec (the AI review)
+your approve key ──> src/github/write.ts ──(addPullRequestReview: APPROVE, the only write)──> GitHub
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
 settings.json ──> src/settings.ts ──┘
@@ -52,7 +54,9 @@ FIELDS: FieldDoc[]                                     // every signal path, typ
 
 ## GitHub module (`src/github/`)
 
-Read only: only `query` operations, never `mutation`. Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` directly.
+Read only: only `query` operations, never `mutation` (the client refuses any document containing it). Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` directly.
+
+The one exception is `src/github/write.ts`: an allowlist with exactly one mutation, `addPullRequestReview(event: APPROVE)`, sent only by `POST /api/review/:id/approve` (the review view's `a a`). It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
 
 Measured on the real queue (2026-10-27): a search with full PR details is too slow (25 PRs = 9 s, 50 = timeout). So sync is two-stage:
 
@@ -87,7 +91,7 @@ Errors: retries 502/503/timeouts twice with backoff; on secondary rate limit or 
 
 ## Store (`src/store.ts`)
 
-`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)`, `kv(key PK, value JSON)` (context, sync status, notified set, briefs).
+`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)`, `kv(key PK, value JSON)` (context, sync status, notified set; `review:<id>`, the AI review, and `pr:<id>`, the PR's files and description, each kept for one head commit and dropped with the item).
 
 Done and snooze record `acked_at`, the latest activity you had seen; the item comes back when someone else acts after that. Timed snoozes also wake early on activity.
 
@@ -95,29 +99,31 @@ Done and snooze record `acked_at`, the latest activity you had seen; the item co
 
 Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` and whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`). JSON everywhere; types in `src/types.ts`.
 
-| Method | Path                  | Body / query                                           | Returns                                                                                                                                                                      |
-| ------ | --------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/overview`       |                                                        | `Overview`                                                                                                                                                                   |
-| GET    | `/api/queue`          |                                                        | `QueueView` (the UI's main surface)                                                                                                                                          |
-| GET    | `/api/focus`          |                                                        | `FocusView` (now + today)                                                                                                                                                    |
-| GET    | `/api/boards/:id`     |                                                        | `BoardView`                                                                                                                                                                  |
-| GET    | `/api/item`           | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                                 |
-| POST   | `/api/act`            | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                           |
-| POST   | `/api/undo`           | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                           |
-| POST   | `/api/analyze`        | `{ id, force? }`                                       | `{ ok: true, brief: Brief }` — reuses the brief for the same commit unless `force`; otherwise runs the `claude` CLI on the PR diff (30–90 s); 502 with the reason on failure |
-| POST   | `/api/sync`           |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                           |
-| GET    | `/api/config`         |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                                      |
-| POST   | `/api/config/preview` | `{ text }`                                             | `PreviewResult`                                                                                                                                                              |
-| PUT    | `/api/config`         | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                                     |
-| GET    | `/api/fields`         |                                                        | `FieldDoc[]`                                                                                                                                                                 |
-| GET    | `/api/settings`       |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                             |
-| PUT    | `/api/settings`       | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                          |
-| GET    | `/api/agents`         |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                                      |
-| POST   | `/api/agents/connect` |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                                        |
-| GET    | `/api/status`         |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                                     |
-| GET    | `/api/events`         |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                                |
-| GET    | `/health`             |                                                        | `{ ok: true, version }`                                                                                                                                                      |
-| POST   | `/mcp`                | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                                |
+| Method | Path                      | Body / query                                           | Returns                                                                                                                                                             |
+| ------ | ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/overview`           |                                                        | `Overview`                                                                                                                                                          |
+| GET    | `/api/queue`              |                                                        | `QueueView` (the UI's main surface)                                                                                                                                 |
+| GET    | `/api/focus`              |                                                        | `FocusView` (now + today)                                                                                                                                           |
+| GET    | `/api/boards/:id`         |                                                        | `BoardView`                                                                                                                                                         |
+| GET    | `/api/item`               | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                        |
+| POST   | `/api/act`                | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                  |
+| POST   | `/api/undo`               | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                  |
+| GET    | `/api/review/:id`         | `:id` = `owner%2Frepo%23123`                           | `ReviewView`: facts, changed files (kept per commit), the AI review, whether you can approve                                                                        |
+| POST   | `/api/review/:id/ai`      | `{ force? }`                                           | `{ ok: true, ai: AiReview }` — the one for this commit unless `force`; otherwise runs the agent in `agent.driver` (a minute or two); 502 with the reason on failure |
+| POST   | `/api/review/:id/approve` | `{ body? }`                                            | `{ ok: true, url }` — approves on GitHub through `src/github/write.ts`; 409 for your own or a closed PR                                                             |
+| POST   | `/api/sync`               |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                  |
+| GET    | `/api/config`             |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                             |
+| POST   | `/api/config/preview`     | `{ text }`                                             | `PreviewResult`                                                                                                                                                     |
+| PUT    | `/api/config`             | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                            |
+| GET    | `/api/fields`             |                                                        | `FieldDoc[]`                                                                                                                                                        |
+| GET    | `/api/settings`           |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                    |
+| PUT    | `/api/settings`           | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                 |
+| GET    | `/api/agents`             |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                             |
+| POST   | `/api/agents/connect`     |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                               |
+| GET    | `/api/status`             |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                            |
+| GET    | `/api/events`             |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                       |
+| GET    | `/health`                 |                                                        | `{ ok: true, version }`                                                                                                                                             |
+| POST   | `/mcp`                    | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                       |
 
 Errors: `{ error: string }` with 4xx/5xx. Unknown item → 404. Ambiguous short id → 409 with `candidates`.
 
@@ -138,7 +144,7 @@ desk snooze <ref> [1h|3h|2d|tomorrow|monday|activity|YYYY-MM-DD|ISO]
 desk undo [seq]
 desk sync
 desk prompt <ref>                  print the hand-off prompt (review, your PR, or issue)
-desk brief <ref> [--force]         look / skim / skip from the claude CLI, kept per commit
+desk brief <ref> [--force]         the PR's AI review: look / skim / skip, summary, concerns; kept per commit
 desk fields                        the fields rules can use
 desk config [path|check|edit]      works with the server down too
 desk settings [set <key> <value> | reset <key>]
@@ -156,14 +162,14 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_item({ ref })` — item facts, why, rule trace, hand-off prompt.
 - `desk_act({ ref, action, until? })` — local triage: done, snooze, mute, unmute, pin, unpin, restore. Returns an undo `seq`.
 - `desk_undo({ seq? })` — undo that action (default: the latest from anyone).
-- `desk_brief({ ref })` — look / skim / skip from the claude CLI (a model call; kept per commit).
+- `desk_brief({ ref })` — the PR's AI review: verdict, risk, summary, concerns, notes (a model call unless it's written already; kept per commit).
 - `desk_sync()`.
 
-Every tool result marks PR titles and bodies as untrusted data. Nothing writes to GitHub.
+Every tool result marks PR titles and bodies as untrusted data. No tool writes to GitHub: agents never approve.
 
 ## Web UI (`web/`)
 
-Vite + React, built to `web/dist`, served at `/`. Fonts are bundled (`web/src/fonts`), nothing loads from the network. See `docs/ui.md`.
+Vite + React, built to `web/dist`, served at `/`. Fonts are bundled (`web/src/fonts`), nothing loads from the network. The review view draws diffs with `@pierre/diffs` (Shiki highlighting; each language grammar is its own lazily loaded chunk, which is why `web/dist` is about 12 MB). See `docs/ui.md`.
 
 ## Desktop app (`electron/`)
 
