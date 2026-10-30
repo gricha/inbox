@@ -13,12 +13,41 @@ function fakeFetch(reply: { status?: number; body: unknown }) {
   return { fetch: fn, calls };
 }
 
-test("the allowlist is exactly one mutation: approve", () => {
-  assert.deepEqual(Object.keys(ALLOWED), ["approve"]);
+test("the allowlist is exactly three mutations: approve, and a reply or comment you send from the In-flight lane", () => {
+  assert.deepEqual(Object.keys(ALLOWED), ["approve", "reply", "comment"]);
   assert.match(
     ALLOWED.approve,
     /addPullRequestReview\(input: \{ pullRequestId: \$pr, commitOID: \$commit, event: APPROVE, body: \$body \}\)/,
   );
+  assert.match(
+    ALLOWED.reply,
+    /^mutation DeskReply[^{]*\{\s*addPullRequestReviewThreadReply\(input: \{ pullRequestReviewThreadId: \$thread/,
+  );
+  assert.match(ALLOWED.comment, /^mutation DeskComment[^{]*\{\s*addComment\(input: \{ subjectId: \$subject, body: \$body \}\)/);
+  // One mutation per document: nothing else rides along.
+  for (const doc of Object.values(ALLOWED)) assert.equal(doc.match(/\(input:/g)?.length, 1);
+});
+
+test("a reply and a comment send their mutation once and log it", async () => {
+  const f = fakeFetch({ body: { data: { addPullRequestReviewThreadReply: { comment: { url: "https://github.com/a/b/pull/1#c1" } } } } });
+  const logs: string[] = [];
+  const w = createWriter({
+    token: "t",
+    fetch: f.fetch,
+    log: (m) => {
+      logs.push(m);
+    },
+  });
+  assert.deepEqual(await w.reply("PRRT_1", "Fixed in abc"), { url: "https://github.com/a/b/pull/1#c1" });
+  const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
+  assert.equal(sent.query, ALLOWED.reply);
+  assert.deepEqual(sent.variables, { thread: "PRRT_1", body: "Fixed in abc" });
+  const g = fakeFetch({ body: { data: { addComment: { commentEdge: { node: { url: "https://github.com/a/b/pull/1#c2" } } } } } });
+  assert.deepEqual(await createWriter({ token: "t", fetch: g.fetch }).comment("PR_1", "Thanks"), {
+    url: "https://github.com/a/b/pull/1#c2",
+  });
+  assert.equal((JSON.parse(g.calls[0]!.body) as { query: string }).query, ALLOWED.comment);
+  assert.deepEqual(logs, ["github write: reply PRRT_1"]);
 });
 
 test("approve sends the allowlisted mutation once, pinned to the commit, with its own token, and logs it", async () => {
@@ -48,10 +77,10 @@ test("GitHub's errors come back as errors, and nothing is retried", async () => 
   assert.equal(down.calls.length, 1);
 });
 
-test("the read client still refuses mutations, and neither the CLI's nor MCP's client can approve", async () => {
+test("the read client still refuses mutations, and neither the CLI's nor MCP's client can approve or send", async () => {
   const f = fakeFetch({ body: { data: {} } });
-  await assert.rejects(createClient({ token: "t", fetch: f.fetch }).query(ALLOWED.approve), /read-only/);
+  for (const doc of Object.values(ALLOWED)) await assert.rejects(createClient({ token: "t", fetch: f.fetch }).query(doc), /read-only/);
   assert.equal(f.calls.length, 0);
   const api = createDeskClient(() => new Response("{}"));
-  assert.ok(!Object.keys(api).some((k) => /approve/i.test(k)));
+  assert.ok(!Object.keys(api).some((k) => /approve|send/i.test(k)));
 });
