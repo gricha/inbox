@@ -99,6 +99,7 @@ test("problems: red CI and a conflict per head commit, and trusted feedback from
 
 test("claude runs unattended in the worktree only: restricted, dontAsk, the desk's MCP alone, one exact push", () => {
   const args = claudeArgs({
+    pr: "acme/web#3",
     session: "s-1",
     name: "desk: acme/web#3",
     model: "sonnet",
@@ -115,7 +116,16 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
   assert.equal(at("--tools"), "Bash,Read,Edit,Write,Glob,Grep");
   assert.equal(at("--model"), "sonnet", "Settings → Claude model, like the judge and the coordinator");
   for (const f of ["--restricted", "--strict-mcp-config", "--verbose"]) assert.ok(args.includes(f), f);
-  assert.deepEqual(JSON.parse(at("--mcp-config")!), { mcpServers: { "review-desk": { type: "http", url: "http://localhost:48401/mcp" } } });
+  // Its MCP calls say which PR's babysitter it is: it may draft and escalate on that PR only.
+  assert.deepEqual(JSON.parse(at("--mcp-config")!), {
+    mcpServers: {
+      "review-desk": {
+        type: "http",
+        url: "http://localhost:48401/mcp",
+        headers: { "X-Desk-Agent": "babysitter", "X-Desk-PR": "acme/web#3" },
+      },
+    },
+  });
   const allowed = args.slice(args.indexOf("--allowedTools") + 1);
   assert.ok(allowed.includes("Bash(git push origin HEAD:refs/heads/fix/retry)"));
   assert.ok(allowed.includes("Bash(git merge origin/main)"));

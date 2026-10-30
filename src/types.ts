@@ -567,6 +567,7 @@ export interface Draft {
   at: string;
   sent_at: string | null;
   url: string | null; // the posted comment, once sent
+  by?: "babysitter" | "agent"; // who drafted it: the PR's babysitter, or another agent over MCP
 }
 
 // One babysitter run: a Claude Code session in the PR's worktree.
@@ -602,7 +603,7 @@ export interface InflightRow {
   mergeable: Mergeable;
   draft: boolean; // a draft PR
   needs_you: string | null; // why it's back with you: the question, "reply ready to send", "approved and green: merge it", ...
-  escalation: { question: string; at: string } | null; // from desk_escalate
+  escalation: { question: string; at: string; by?: "babysitter" | "agent" | "desk" } | null; // from desk_escalate, or the desk's own check
   outside_at: string | null; // feedback from someone who isn't a collaborator, not dismissed yet: yours to read, never an agent's
   sitter: SitterStatus;
   drafts: Draft[]; // unsent replies

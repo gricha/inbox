@@ -121,7 +121,11 @@ test("the first run starts the session: a fixed id, its job, the desk's MCP serv
   assert.equal(after("--append-system-prompt"), SYSTEM_PROMPT);
   assert.equal(after("--output-format"), "json");
   assert.equal(after("--tools"), "");
-  assert.equal(after("--allowedTools"), "mcp__review-desk");
+  // Its tools by name: not desk_draft_reply or desk_escalate (in-flight PRs are their babysitters'), and no new tool by default.
+  const tools = args.slice(args.indexOf("--allowedTools") + 1, args.indexOf("--permission-mode"));
+  assert.ok(tools.includes("mcp__review-desk__desk_act") && tools.includes("mcp__review-desk__desk_policy"));
+  assert.ok(tools.every((x) => x.startsWith("mcp__review-desk__desk_")));
+  assert.ok(!tools.some((x) => x.endsWith("draft_reply") || x.endsWith("escalate")));
   assert.equal(after("--permission-mode"), "dontAsk");
   for (const flag of ["--strict-mcp-config", "--restricted"]) assert.ok(args.includes(flag), flag);
   assert.ok(!args.includes("--resume"));

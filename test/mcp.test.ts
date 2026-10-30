@@ -220,7 +220,8 @@ test("desk_note posts a line to the coordinator's log", async () => {
 
 test("desk_undo says what was undone", async () => {
   assert.deepEqual(await call("desk_undo", { seq: 7 }), { text: "undid done on getsentry/seer#8949", isError: false });
-  assert.deepEqual(lastCall(), { method: "POST", path: "/api/undo", body: { seq: 7 } });
+  // From an agent: the desk keeps the user's in-flight marks, and the coordinator to its own actions.
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/undo", body: { seq: 7, agent: true } });
 });
 
 test("desk_sync", async () => {

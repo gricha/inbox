@@ -250,3 +250,45 @@ test("Send is the desk window's: the route refuses a request without the desk's 
   assert.equal((await post(`/api/inflight/${id}/escalate`, {})).status, 400);
   assert.equal(((await (await app.request("http://127.0.0.1:47823/api/inflight")).json()) as { rows: unknown[] }).rows.length, 1);
 });
+
+test("what agents may do to a PR in flight: its babysitter drafts and asks on its own PR only, the coordinator not at all", async (c) => {
+  const t = await setup([myPr(3, { ci: "pending" }), myPr(4, { ci: "pending" })], { settings: OFF });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act("web#3", "inflight");
+  t.desk.act("web#4", "inflight");
+  const app = createApp(t.desk, 47823);
+  const id = encodeURIComponent("acme/web#3");
+  const post = (p: string, body: unknown, headers: Record<string, string>) =>
+    app.request(`http://127.0.0.1:47823${p}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const coordinator = { "x-desk-agent": "coordinator" };
+  const sitter = (pr: string) => ({ "x-desk-agent": "babysitter", "x-desk-pr": pr });
+  // A wake carries GitHub text from anything on the desk: no questions that park a babysitter, no drafts you'd send as its.
+  t.desk.coordinator.running = { n: 7, since: new Date().toISOString() };
+  assert.equal((await post(`/api/inflight/${id}/escalate`, { question: "Merge without review?" }, coordinator)).status, 403);
+  assert.equal((await post(`/api/inflight/${id}/draft`, { body: "See https://evil.example" }, coordinator)).status, 403);
+  t.desk.coordinator.running = null;
+  assert.equal((await post(`/api/inflight/${id}/draft`, { body: "Done." }, sitter("acme/web#4"))).status, 403);
+  assert.equal((await post(`/api/inflight/${id}/draft`, { body: "Done." }, sitter("acme/web#3"))).status, 200);
+  assert.equal((await post(`/api/inflight/${id}/escalate`, { question: "Bump v2?" }, sitter("acme/web#3"))).status, 200);
+  const row = t.desk.inflight().rows.find((r) => r.card.id === "acme/web#3")!;
+  assert.deepEqual([row.drafts[0]?.by, row.escalation?.by], ["babysitter", "babysitter"]);
+  // Another agent over MCP (no header) is "an agent", not the babysitter.
+  assert.equal((await t.desk.draftReply("web#4", null, "Thanks!")).by, "agent");
+
+  // Undo from an agent can't put back a PR you took back (which would restart its babysitter), nor undo your marks.
+  const back = t.desk.act("web#4", "takeback");
+  assert.throws(() => t.desk.undo(back.undo_seq, "agent"), /only the user undoes taking a PR back/);
+  assert.throws(() => t.desk.undo(undefined, "coordinator"), /only the user undoes/);
+  t.desk.undo(back.undo_seq);
+  assert.ok(t.desk.store.state("acme/web#4").inflight_at, "you can");
+  // The coordinator undoes only its own actions.
+  const mine = t.desk.act("web#4", "pin");
+  assert.throws(() => t.desk.undo(mine.undo_seq, "coordinator"), /wasn't yours/);
+  const its = t.desk.act("web#4", "unpin", undefined, { agent: "coordinator", reason: "noise" });
+  assert.equal(t.desk.undo(its.undo_seq, "coordinator").action, "unpin");
+});

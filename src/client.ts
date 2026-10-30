@@ -102,7 +102,9 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string, reason?: string) =>
       call<ActResult>("POST", "/api/act", { id, action, until, reason }),
-    undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
+    // `agent`: an agent asks (desk_undo), so the desk keeps your in-flight marks out of its reach.
+    undo: (seq?: number, agent?: boolean) =>
+      call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", agent ? { seq, agent } : { seq }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
     getConfig: () => call<ConfigDoc>("GET", "/api/config"),
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),

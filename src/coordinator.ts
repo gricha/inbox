@@ -29,6 +29,10 @@ const RECENT = 24 * 3_600_000;
 // After a failed run: 5, 10, 20, then 60 minutes before the next.
 const BACKOFF = [5, 10, 20, 60].map((m) => m * 60_000);
 const SERVER = "review-desk";
+// Its tools by name, so a new tool isn't granted by default. Not desk_draft_reply or desk_escalate: in-flight PRs are their babysitters'.
+const TOOLS = ["overview", "list", "item", "act", "undo", "brief", "sync", "events", "policy", "config", "note"].map(
+  (t) => `mcp__${SERVER}__desk_${t}`,
+);
 const NAME = "Review Desk coordinator";
 
 // Kinds that can change what needs the owner. Merges, closes, resolutions and pushes sort themselves out.
@@ -284,7 +288,7 @@ export class Coordinator {
       "--tools",
       "",
       "--allowedTools",
-      `mcp__${SERVER}`,
+      ...TOOLS,
       "--permission-mode",
       "dontAsk",
     ];

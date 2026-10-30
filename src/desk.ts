@@ -1244,9 +1244,15 @@ export class Desk {
     return { state, undo_seq: seq };
   }
 
-  undo(seq?: number): { id: string; state: ItemState; action: Action } {
+  // `agent`: who asks, when it isn't you. In-flight marks are yours (undoing one restarts or stops a babysitter), and the
+  // coordinator, woken by GitHub text, undoes only what it did itself.
+  undo(seq?: number, agent?: string): { id: string; state: ItemState; action: Action } {
     const ev = this.store.lastAction(seq);
     if (!ev) throw new DeskError(404, "nothing to undo");
+    if (agent && (ev.action === "inflight" || ev.action === "takeback"))
+      throw new DeskError(409, `only the user undoes ${ev.action === "inflight" ? "marking a PR in flight" : "taking a PR back"}`);
+    if (agent === "coordinator" && !this.store.log({ limit: 1000, kind: "act" }).some((r) => r.undo_seq === ev.seq))
+      throw new DeskError(409, `that action on ${ev.item_id} wasn't yours; the coordinator undoes only its own (pass its seq)`);
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
     const cur = this.store.state(ev.item_id);
     const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
@@ -1331,9 +1337,18 @@ export class Desk {
     return e;
   }
 
+  // What an agent may say about your PR in flight: its own babysitter may (one PR each); the coordinator, woken by GitHub
+  // text about anything on the desk, may not.
+  agentMay(id: string, by: { agent?: string; pr?: string } | undefined, what: string): Draft["by"] {
+    if (by?.agent === "coordinator") throw new DeskError(403, `the coordinator doesn't ${what} on PRs in flight; their babysitters do`);
+    if (by?.agent === "babysitter" && by.pr !== id) throw new DeskError(403, `a babysitter can ${what} only on its own PR, ${by.pr}`);
+    return by?.agent === "babysitter" ? "babysitter" : "agent";
+  }
+
   // desk_draft_reply: an agent's reply for you to send. A thread must be one of this PR's; a new draft for a thread replaces the old one.
-  async draftReply(ref: string, threadId: string | null, body: string): Promise<Draft> {
+  async draftReply(ref: string, threadId: string | null, body: string, by?: { agent?: string; pr?: string }): Promise<Draft> {
     const e = this.inflightEntry(ref);
+    const author = this.agentMay(e.item.id, by, "draft replies");
     const id = e.item.id;
     const text = body.trim();
     if (!text) throw new DeskError(400, "the reply is empty");
@@ -1362,28 +1377,30 @@ export class Desk {
       at: this.now().toISOString(),
       sent_at: null,
       url: null,
+      by: author,
     };
     const replaces = (d: Draft) => !d.sent_at && threadId !== null && d.thread_id === threadId;
     this.sitter.update(id, (s) => {
       s.drafts = [...s.drafts.filter((d) => !replaces(d)), draft].slice(-20);
     });
-    this.log(`babysitter: drafted a reply on ${id} to ${to}`);
+    this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: drafted a reply on ${id} to ${to}`);
     this.changed();
     this.notifyNewNow();
     return draft;
   }
 
   // desk_escalate: a decision that's yours. The PR goes to Now with the question as its why; its babysitter waits.
-  escalate(ref: string, question: string): { question: string } {
+  escalate(ref: string, question: string, by?: { agent?: string; pr?: string }): { question: string } {
     const e = this.inflightEntry(ref);
+    const author = this.agentMay(e.item.id, by, "ask you questions");
     // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
     const q = question.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
     if (!q) throw new DeskError(400, "the question is empty");
     const clipped = q.length > MAX_QUESTION ? `${q.slice(0, MAX_QUESTION - 1)}…` : q;
     this.sitter.update(e.item.id, (s) => {
-      s.escalation = { question: clipped, at: this.now().toISOString() };
+      s.escalation = { question: clipped, at: this.now().toISOString(), by: author };
     });
-    this.log(`babysitter: ${e.item.id} needs you: ${clipped}`);
+    this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: ${e.item.id} needs you: ${clipped}`);
     this.changed();
     this.notifyNewNow();
     return { question: clipped };

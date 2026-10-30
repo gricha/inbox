@@ -49,7 +49,8 @@ const compact = (c: Card) => ({
   boards: c.boards,
 });
 
-const cardLine = (c: Card) => `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}`;
+const cardLine = (c: Card) =>
+  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
 
 function traceLines(p: Placement): string[] {
   const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
@@ -163,7 +164,9 @@ async function listText(api: DeskClient, board: string | undefined, buckets: Lis
 async function itemText(api: DeskClient, ref: string): Promise<string> {
   const d = await api.item(ref);
   const c = d.card;
-  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}\n${c.url}`;
+  // In flight: the user's own PR, which its babysitter has; desk_act's done, snooze and mute don't apply.
+  const flight = c.inflight ? " · in flight: the user's PR, its babysitter has it" : "";
+  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}\n${c.url}`;
   return (
     head +
     "\n" +
@@ -353,13 +356,13 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_undo",
     {
       description:
-        "Undo a local triage action. Pass the seq that desk_act returned; without it, undoes the most recent action from anyone (UI, CLI or agent).",
+        "Undo a local triage action. Pass the seq that desk_act returned; without it, undoes the most recent action from anyone (UI, CLI or agent). Marking a PR in flight and taking it back are the user's to undo, and the coordinator undoes only its own actions.",
       inputSchema: { seq: z.number().int().positive().optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ seq }) =>
       run(async () => {
-        const r = await api.undo(seq);
+        const r = await api.undo(seq, true);
         return `undid ${r.action} on ${r.id}`;
       }),
   );

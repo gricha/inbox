@@ -9,7 +9,7 @@ import type { Desk } from "./desk.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
 import { claudeError, claudeSpawn, NOT_LOGGED_IN } from "./review.ts";
-import type { ActivityEvent, Draft, Item, SitterRun, SitterStatus } from "./types.ts";
+import type { ActivityEvent, Draft, InflightRow, Item, SitterRun, SitterStatus } from "./types.ts";
 
 const RUN_TIMEOUT = 30 * 60_000;
 const SETTLE = 3_000; // events land in bursts (a review and its comments, a push and its CI); start once they have
@@ -45,7 +45,7 @@ export interface Sitter {
   runs: SitterRun[]; // oldest first, the last few
   tried: string[]; // problems a run has taken on ("ci:<oid>", "conflict:<oid>:<base>", "feedback:<at>"), so none is tried twice
   ci_tries: number; // runs on red CI since it was last green
-  escalation: { question: string; at: string } | null;
+  escalation: NonNullable<InflightRow["escalation"]> | null;
   drafts: Draft[];
   threads: { id: string; to: string; quote: string }[]; // the PR's open review threads as last read: what a draft may answer
   outside_seen: string | null; // you dismissed feedback from outside contributors up to here
@@ -266,6 +266,7 @@ export function repoCommands(dir: string): { run: string[]; exact: string[] } {
 }
 
 export interface ArgsInput {
+  pr: string; // owner/repo#123: the one PR its MCP calls may draft on or escalate
   session: string;
   name: string;
   model: string; // analyze.model, as for the judge and the coordinator
@@ -320,7 +321,9 @@ export function claudeArgs(o: ArgsInput): string[] {
     "--permission-mode",
     "dontAsk",
     "--mcp-config",
-    JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: o.mcpUrl } } }),
+    JSON.stringify({
+      mcpServers: { "review-desk": { type: "http", url: o.mcpUrl, headers: { "X-Desk-Agent": "babysitter", "X-Desk-PR": o.pr } } },
+    }),
     "--strict-mcp-config",
     "--disallowedTools",
     ...GIT_DENY,
@@ -898,6 +901,7 @@ export class Babysitter {
     });
     const prompt = buildPrompt({ item: { ...it, head_oid: head }, me, since, todo, ctx, logs, commands, trust });
     const args = claudeArgs({
+      pr: id,
       session,
       name: `desk: ${id}`,
       model: desk.settings["analyze.model"],
@@ -1050,6 +1054,7 @@ export class Babysitter {
           x.escalation = {
             question: `${branch} no longer contains ${short(run.head_oid)}, where the babysitter started. Check the branch.`,
             at: new Date().toISOString(),
+            by: "desk",
           };
       });
       desk.log(

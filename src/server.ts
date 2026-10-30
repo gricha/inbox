@@ -32,8 +32,13 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Which agent a call came from; only for attribution in the coordinator's log, not a permission.
-const agentOf = (header: string | undefined) => (header === "coordinator" ? header : undefined);
+// Which agent a call came from, as the MCP configs the desk writes say: the coordinator's actions go in its log, and what
+// they say about a PR in flight is attributed. It also takes some things away (see Desk.draftReply, undo); it grants nothing.
+const agentOf = (header: string | undefined) => (header === "coordinator" || header === "babysitter" ? header : undefined);
+const byOf = (c: { req: { header(name: string): string | undefined } }) => ({
+  agent: agentOf(c.req.header("x-desk-agent")),
+  pr: c.req.header("x-desk-pr"),
+});
 
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
@@ -136,12 +141,12 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/inflight/:id{.+}/draft", async (c) => {
     ready();
     const b = await fields(c);
-    const draft = await desk.draftReply(c.req.param("id"), str(b.thread_id, "thread_id", true) ?? null, str(b.body, "body")!);
+    const draft = await desk.draftReply(c.req.param("id"), str(b.thread_id, "thread_id", true) ?? null, str(b.body, "body")!, byOf(c));
     return c.json({ ok: true, draft });
   });
   app.post("/api/inflight/:id{.+}/escalate", async (c) => {
     ready();
-    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str((await fields(c)).question, "question")!) });
+    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str((await fields(c)).question, "question")!, byOf(c)) });
   });
   app.post("/api/inflight/:id{.+}/dismiss", async (c) => {
     ready();
@@ -157,8 +162,8 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/undo", async (c) => {
     ready();
-    const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));
-    const { id, action } = desk.undo(body.seq);
+    const body = await c.req.json<{ seq?: number; agent?: unknown }>().catch((): { seq?: number; agent?: unknown } => ({}));
+    const { id, action } = desk.undo(body.seq, agentOf(c.req.header("x-desk-agent")) ?? (body.agent === true ? "agent" : undefined));
     return c.json({ ok: true, id, action });
   });
   app.post("/api/sync", (c) => {
@@ -233,10 +238,11 @@ export function createApp(desk: Desk, port: number): Hono {
   // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
   // The coordinator's MCP config sends X-Desk-Agent, which goes along so its actions are logged as its own.
   app.post("/mcp", async (c) => {
-    const agent = agentOf(c.req.header("x-desk-agent"));
+    const { agent, pr } = byOf(c);
     const api = createClient((p, init) => {
       const headers = new Headers(init.headers);
       if (agent) headers.set("x-desk-agent", agent);
+      if (pr) headers.set("x-desk-pr", pr);
       return app.request(p, { ...init, headers });
     });
     const transport = new WebStandardStreamableHTTPServerTransport();
