@@ -155,6 +155,7 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
     "Bash(git * --no-index*)",
     "Bash(git * --contents*)",
     "Bash(git commit* -F*)",
+    "Bash(gh *)",
   ])
     assert.ok(denied.has(d), d);
   assert.ok(!allowed.some((a) => a.startsWith("Bash(git grep") || a === "Bash(git commit:*)"));

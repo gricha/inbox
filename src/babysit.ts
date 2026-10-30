@@ -36,6 +36,9 @@ const GIT_DENY = [
   ...["--output", "--ext-diff", "--no-index", "--contents", "--open-files-in-pager"].map((o) => `Bash(git * ${o}*)`),
   "Bash(git commit* -F*)",
   "Bash(git commit* --file*)",
+  // gh carries its own login, and the owner's settings.json (loaded with --settings) could allow it.
+  "Bash(gh)",
+  "Bash(gh *)",
 ];
 
 // The babysitter's record of one PR, kept in the desk's kv store as sitter:<id>.
