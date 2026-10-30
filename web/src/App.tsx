@@ -13,7 +13,7 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
-import { DEFAULT_OPEN, FOLD, groupsOf, navigable, parseRoute, removeCard, routeHash, stops, type GroupKey, type Route } from "./view.ts";
+import { DEFAULT_OPEN, groupsOf, isFold, navigable, parseRoute, removeCard, routeHash, stops, type GroupKey, type Route } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
@@ -81,7 +81,7 @@ export function App() {
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   // Sorted-away groups open only when asked (g l, …), and close again on reload: the queue is Now and Today.
   const [open, setOpen] = useState(DEFAULT_OPEN);
-  const [unfolded, setUnfolded] = useState(false); // Today's "n more for today"
+  const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // Now's and Today's "n more" lines
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
   const [help, setHelp] = useState(false);
@@ -248,7 +248,7 @@ export function App() {
       clearTimeout(retry);
       document.removeEventListener("visibilitychange", visible);
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- bumping epoch is how a dead stream gets reopened
+    // Bumping epoch is how a dead stream gets reopened.
   }, [refresh, epoch]);
 
   useEffect(() => {
@@ -271,7 +271,8 @@ export function App() {
     };
   }, []);
 
-  const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
+  const me = overview?.me ?? "";
+  const groups = useMemo(() => groupsOf(view, open, filter, unfolded, me), [view, open, filter, unfolded, me]);
   const flat = useMemo(() => navigable(groups, leaving), [groups, leaving]);
   const cursor = useMemo(() => stops(groups, leaving), [groups, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
@@ -284,7 +285,7 @@ export function App() {
 
   // Keep the selection by id across refreshes; if its card is gone, take whatever now sits at its old position.
   useEffect(() => {
-    if (!flat.length || (selected === FOLD && cursor.includes(FOLD))) return;
+    if (!flat.length || (isFold(selected) && cursor.includes(selected!))) return;
     const i = flat.findIndex((c) => c.id === selected);
     if (i >= 0) {
       lastIndex.current = i;
@@ -293,7 +294,7 @@ export function App() {
     if (pending.current && pending.current.id === selected && Date.now() < pending.current.until) return;
     const next = flat[Math.min(lastIndex.current, flat.length - 1)];
     if (next) setSelected(next.id);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- tick re-checks once the undo hold has run out
+    // tick re-checks once the undo hold has run out.
   }, [flat, cursor, selected, tick]);
 
   // The card j/k lands on stays put while the one it left closes above it; then it's scrolled into view if it grew past it.
@@ -305,10 +306,17 @@ export function App() {
     if (top !== undefined) window.scrollBy(0, top - at.top);
   }, [selected]);
 
+  // The first card of a group brings its heading along (the queue's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
-    if (selected && route.name === "queue")
-      document.querySelector(`[data-id="${CSS.escape(selected)}"]`)?.scrollIntoView({ block: "nearest" });
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- filtering moves rows, so scroll the selection back into view
+    if (!selected || route.name !== "queue") return;
+    const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
+    const group = el?.closest(".group");
+    if (!el) return;
+    if (document.querySelector(".queue [data-id]") === el) window.scrollTo(0, 0);
+    else if (group?.querySelector("[data-id]") === el && group.querySelector(".group-head")!.getBoundingClientRect().top < 64)
+      group.querySelector(".group-head")!.scrollIntoView({ block: "start" });
+    else el.scrollIntoView({ block: "nearest" });
+    // Filtering moves rows, so scroll the selection back into view.
   }, [selected, filter, route.name]);
 
   const boards = useMemo(() => overview?.spaces.flatMap((s) => s.boards.map((b) => ({ ...b, spaceName: s.name }))) ?? [], [overview]);
@@ -472,11 +480,11 @@ export function App() {
     void act(c, c.inflight ? "takeback" : "inflight");
   }
 
-  async function send(r: InflightRow, d: Draft) {
+  async function send(id: string, d: Draft) {
     if (sending) return;
     setSending(d.id);
     try {
-      await api.sendDraft(r.card.id, d.id);
+      await api.sendDraft(id, d.id);
       flash(`Sent your reply to ${d.to}`);
     } catch (e) {
       flash(message(e), true);
@@ -511,7 +519,7 @@ export function App() {
     else if (k === "d" && r.state === "open") void act(c, "takeback");
     else if (k === "y") {
       const draft = d ?? r.drafts[0];
-      if (draft) void send(r, draft);
+      if (draft) void send(c.id, draft);
       else flash(`No reply to send on ${shortRef(c)}`);
     } else if (k === "x") {
       if (d) void dismiss(r, d);
@@ -536,14 +544,16 @@ export function App() {
 
   function moveLane(d: number) {
     if (!laneRows.length) return;
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const i = laneRows.findIndex((r) => r.card.id === laneCur?.card.id);
     const next = laneRows[Math.max(0, Math.min(laneRows.length - 1, i + d))];
-    if (next) setLaneSel(next.card.id);
+    if (!next) return;
+    setLaneSel(next.card.id);
+    focusRow(next.card.id);
   }
 
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
+    else if (k === "esc") setExpanded(null);
     else if (k === "d") inflight(c);
     else if (c.inflight && ["e", "s", "m"].includes(k)) flash(`${shortRef(c)} is in flight, so its babysitter has it. d takes it back.`);
     else if (k === "o") {
@@ -557,7 +567,10 @@ export function App() {
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
     else if (k === "c") void copy(c);
     else if (k === "i") void aiReview(c);
-    else if (k === "w") {
+    else if (k === "y") {
+      if (c.inflight && c.reply) void send(c.id, c.reply);
+      else flash(`No reply to send on ${shortRef(c)}`);
+    } else if (k === "w") {
       if (expanded === c.id) setShowSignals((s) => !s);
       else {
         toggle(c);
@@ -566,23 +579,35 @@ export function App() {
     }
   }
 
+  // Focus follows the cursor (Tab then reaches the selected card's keys), without a scroll of its own.
+  function focusRow(id: string) {
+    const el = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    const target = el instanceof HTMLButtonElement ? el : el?.querySelector(".row-main");
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+  }
+
   function move(d: number) {
     if (!cursor.length) return;
-    // A clicked link or button keeps focus and would take the next Enter.
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const i = cursor.indexOf(selected ?? "");
     const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
     if (!next) return;
     const top = document.querySelector(`[data-id="${CSS.escape(next)}"]`)?.getBoundingClientRect().top;
     landing.current = top === undefined ? null : { id: next, top };
     setSelected(next);
+    focusRow(next);
   }
 
-  // Today's "n more" line opens in place; the cursor goes on to the first card it showed.
-  function unfold() {
-    const first = view && view.today_cards > 0 ? view.sections.today[view.today_cards] : undefined;
-    setUnfolded(true);
-    if (first) setSelected(first.id);
+  // A group's "n more" line opens in place; the cursor goes on to the first card it showed.
+  function unfold(k: GroupKey) {
+    const shown = groups.find((g) => g.key === k)?.cards.length ?? 0;
+    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true }, me).find((g) => g.key === k)?.cards[shown];
+    setUnfolded((u) => ({ ...u, [k]: true }));
+    if (first) {
+      setSelected(first.id);
+      requestAnimationFrame(() => {
+        focusRow(first.id);
+      });
+    }
   }
 
   function toggleGroup(k: GroupKey) {
@@ -642,13 +667,13 @@ export function App() {
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
-    } else if (k === "Enter" && selected === FOLD) {
+    } else if (k === "Enter" && isFold(selected)) {
       e.preventDefault();
-      unfold();
+      unfold(selected!.slice("fold:".length) as GroupKey);
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oesmpcwid".includes(k)) {
+    } else if (current && k.length === 1 && "oesmpcwidy".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
@@ -707,9 +732,6 @@ export function App() {
     },
     closeSnooze: () => {
       setSnoozeFor(null);
-    },
-    restore: (c) => {
-      void act(c, "restore");
     },
   };
   const configErrors = overview?.config_errors.length ?? 0;
@@ -798,8 +820,8 @@ export function App() {
               filter={filter}
               toggle={toggleGroup}
               unfold={unfold}
-              selectFold={() => {
-                setSelected(FOLD);
+              selectFold={(k) => {
+                setSelected(`fold:${k}`);
               }}
             />
           )}
@@ -854,7 +876,7 @@ export function App() {
                 void undo();
               }}
             >
-              Undo <kbd>u</kbd>
+              <kbd>u</kbd> Undo
             </button>
           )}
         </div>

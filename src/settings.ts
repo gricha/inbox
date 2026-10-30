@@ -33,7 +33,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "queue",
     title: "Queue",
-    help: "Now and Today are the queue. Later, FYI and resolved stay out of it (g l, g f, g d).",
+    help: "Now and Today are the queue. Later and resolved stay out of it (g l, g d).",
   },
   { id: "agent", title: "Agents" },
   { id: "policy", title: "Policy", help: "Prose guidance the judge and the coordinator follow." },
@@ -110,6 +110,16 @@ export const SETTINGS = [
     min: 0,
     max: 365,
     help: "An item nobody has touched for this long leaves Now and Today. Pinned items, a review you were asked for in that time, and your PRs in flight that need you stay. 0 keeps everything.",
+  },
+  {
+    key: "queue.now_cards",
+    section: "queue",
+    label: "Now shows",
+    type: "number",
+    default: 5,
+    min: 0,
+    max: 100,
+    help: "The most important first; the rest sit behind one line you can open. 0 shows them all.",
   },
   {
     key: "queue.today_cards",

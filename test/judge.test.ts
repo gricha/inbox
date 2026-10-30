@@ -107,8 +107,8 @@ test("caps apply after the judge", () => {
   assert.deepEqual(
     demoted.map((p) => [p.bucket, p.rule_bucket, p.demoted]),
     [
-      ["today", "now", "Now was full (1)"],
-      ["today", "now", "Now was full (1)"],
+      ["today", "now", "Now was full on B (1)"],
+      ["today", "now", "Now was full on B (1)"],
     ],
   );
 });

@@ -4,8 +4,8 @@ import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre
 import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, orderNotes, resolvedHead, sitterLine, splitPath } from "../view.ts";
-import { CI, KeyButton, REVIEW } from "./Detail.tsx";
+import { currentFile, filePatch, orderNotes, resolvedHead, sitterParts, splitPath } from "../view.ts";
+import { CI, Dots, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -314,7 +314,9 @@ export function Review({
           {/* In flight: the why above says why it needs you ("in flight: …"); this is the lane's babysitter line under it. */}
           {row?.state === "open" && row.sitter.text && (
             <p className="rv-meta rv-lane">
-              <span>{sitterLine(row, now)}</span>
+              {sitterParts(row, now).map((p) => (
+                <span key={p}>{p}</span>
+              ))}
             </p>
           )}
         </header>
@@ -360,8 +362,7 @@ export function Review({
                 {files.length} {files.length === 1 ? "file" : "files"}
               </span>
               <span className="rv-keys">
-                <kbd>n</kbd>
-                <kbd>p</kbd>
+                <kbd>n</kbd> <kbd>p</kbd>
               </span>
             </p>
             <ol>
@@ -390,14 +391,18 @@ export function Review({
               })}
             </ol>
             <p className="rv-files-foot">
-              +{adds} −{dels}
-              {notes.length > 0 && (
-                <span>
-                  {" "}
-                  · {notes.length} {notes.length === 1 ? "note" : "notes"} <kbd>[</kbd>
-                  <kbd>]</kbd>
-                </span>
-              )}
+              <Dots
+                parts={[
+                  `+${adds} −${dels}`,
+                  ...(notes.length > 0
+                    ? [
+                        <span key="notes">
+                          {notes.length} {notes.length === 1 ? "note" : "notes"}, <kbd>]</kbd> <kbd>[</kbd>
+                        </span>,
+                      ]
+                    : []),
+                ]}
+              />
             </p>
           </nav>
           <div className="rv-diffs">
@@ -448,20 +453,17 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
           </p>
           <p className="rv-summary">{ai.summary}</p>
           {ai.concerns.length > 0 ? (
-            <>
-              <h3 className="d-head">Concerns</h3>
-              <ul className="rv-concerns">
-                {ai.concerns.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
-            </>
+            <ul className="rv-concerns" aria-label="Concerns">
+              {ai.concerns.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
           ) : (
             <p className="quiet">No concerns.</p>
           )}
           {!view.ai_stale && notes > 0 && (
             <p className="quiet">
-              {notes} {notes === 1 ? "note" : "notes"} on the changes below. <kbd>]</kbd> and <kbd>[</kbd> step through them.
+              {notes} {notes === 1 ? "note" : "notes"} on the changes below: <kbd>]</kbd> next, <kbd>[</kbd> previous.
             </p>
           )}
         </>

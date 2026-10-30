@@ -165,7 +165,8 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
     for (const e of over) {
       const p = placements.get(e.id)!;
       p.bucket = to;
-      p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full (${cap})`;
+      // Caps are per board, so the note names it: Now across boards can hold more than one board's cap.
+      p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full on ${cfg.name} (${cap})`;
     }
     byBucket[from] = keep;
     byBucket[to] = [...over, ...byBucket[to]];

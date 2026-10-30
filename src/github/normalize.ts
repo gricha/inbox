@@ -95,11 +95,25 @@ export interface RawCheck {
   conclusion?: string | null;
   context?: string;
   state?: string;
+  status?: string; // a check run's: QUEUED, IN_PROGRESS, COMPLETED, …
+  isRequired?: boolean; // for this PR's base branch; only asked of your own PRs
 }
 // Cancelled and skipped runs aren't the code's fault, so they don't count.
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]);
 export const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "");
 export const checkName = (c: RawCheck) => (c.__typename === "CheckRun" ? c.name : c.context) ?? "";
+const checkRunning = (c: RawCheck) =>
+  c.__typename === "CheckRun" ? c.status !== undefined && c.status !== "COMPLETED" : c.state === "PENDING" || c.state === "EXPECTED";
+
+// CI as the merge sees it: in a repo that marks some checks required, failing checks that aren't don't make it red.
+function ciOf(rollup: string | undefined, checks: RawCheck[] | null): { ci: Ci; optional: string[] } {
+  const ci = CI[rollup ?? ""] ?? "none";
+  if (!checks?.some((c) => c.isRequired)) return { ci, optional: [] };
+  const failed = checks.filter(checkFailed);
+  const optional = failed.filter((c) => c.isRequired === false).map(checkName);
+  if (ci !== "red" || !failed.length || optional.length < failed.length) return { ci, optional };
+  return { ci: checks.some(checkRunning) ? "pending" : "green", optional };
+}
 
 const login = (a: Actor | null) => a?.login ?? "ghost";
 // GraphQL drops the [bot] suffix for apps, so __typename is the reliable signal.
@@ -122,6 +136,8 @@ export function toHit(n: RawHit): SearchHit {
 export function normalize(n: RawNode, now = new Date().toISOString()): Item {
   const head = n.commits?.nodes[0]?.commit;
   const threads = n.reviewThreads?.nodes ?? [];
+  const checks = n.checks ? (n.checks.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c !== null) : null;
+  const { ci, optional } = ciOf(head?.statusCheckRollup?.state, checks);
   // reviews(last: 20) can be flooded by bot comments; the latest* lists keep each reviewer's verdict.
   const reviews = new Map<string, Item["reviews"][number]>();
   for (const r of [...(n.reviews?.nodes ?? []), ...(n.latestReviews?.nodes ?? []), ...(n.latestOpinionatedReviews?.nodes ?? [])]) {
@@ -154,7 +170,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     deletions: n.deletions ?? 0,
     changed_files: n.changedFiles ?? 0,
     base: n.baseRefName ?? "",
-    ci: CI[head?.statusCheckRollup?.state ?? ""] ?? "none",
+    ci,
     review_decision: DECISION[n.reviewDecision ?? ""] ?? "none",
     mergeable: MERGEABLE[n.mergeable ?? ""] ?? "unknown",
     head_oid: head?.oid ?? "",
@@ -162,11 +178,8 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_author: head?.author?.user?.login ?? "",
     head_ref: n.headRefName ?? "",
     head_repo: n.headRepository?.nameWithOwner ?? "",
-    ...(n.checks && {
-      checks_failed: (n.checks.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
-        .filter((c): c is RawCheck => c !== null && checkFailed(c))
-        .map(checkName),
-    }),
+    ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
+    ...(optional.length > 0 && { checks_optional: optional }),
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
       .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),

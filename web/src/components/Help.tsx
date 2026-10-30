@@ -1,38 +1,44 @@
 import { useEffect, useRef } from "react";
+import { Dots } from "./Detail.tsx";
 
+// The keys on the cards; the rest are one line at the end.
 const KEYS: [string[], string][] = [
-  [["j", "k"], "Move down and up (or the arrow keys). The selected card shows its whole AI review, its facts and its keys"],
-  [
-    ["enter"],
-    "Review the selected PR; an issue opens in place, your PR in flight opens in In flight, and “n more for today” shows the rest",
-  ],
+  [["j", "k"], "Move down and up. The selected card shows its whole AI review, its facts and its keys"],
+  [["enter"], "Review the PR; an issue opens in place, your PR in flight opens In flight, “n more” shows the rest"],
   [["o"], "Open on GitHub"],
-  [["d"], "Your own PR: you're done, babysitters take it from here (In flight). d again takes it back"],
-  [["e"], "Done: it comes back when someone else acts. On a cleared item, restore it"],
+  [["d"], "Your own PR: you're done, babysitters take it from here. d again takes it back"],
+  [["y"], "Your PR in flight: send its drafted reply on GitHub, as you"],
+  [["e"], "Done: it comes back when someone else acts"],
   [["s"], "Snooze, then 1 to 5 to pick how long"],
   [["m"], "Mute or unmute"],
-  [["p"], "Pin or unpin"],
-  [["u"], "Undo what you just did"],
-  [["c"], "Copy a review prompt for Claude"],
-  [["i"], "AI review: summary, concerns and notes from your agent (a minute or two)"],
-  [["w"], "Show the item's rule trace and raw signals"],
-  [["g", "l"], "Open or close Later (g f FYI, g d resolved, g h hidden, g x cleared)"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter"],
-  [["r"], "Sync now"],
-  [[","], "Settings (esc goes back)"],
-  [["g", "r"], "Rules"],
-  [["g", "i"], "Your PRs in flight"],
   [["?"], "This list"],
 ];
 
+const MORE_KEYS: [string, string][] = [
+  ["p", "pin"],
+  ["u", "undo"],
+  ["c", "copy a prompt"],
+  ["i", "AI review"],
+  ["w", "rule trace"],
+  ["r", "sync"],
+  ["g l", "later"],
+  ["g d", "resolved"],
+  ["g i", "in flight"],
+  ["g r", "rules"],
+  [",", "settings"],
+];
+
 const LANE_KEYS: [string[], string][] = [
+  [["j", "k"], "Move"],
   [["enter"], "Review the PR"],
   [["y"], "Send the drafted reply on GitHub, as you"],
   [["x"], "Dismiss the question, or discard the reply"],
   [["c"], "Copy a command that opens the babysitter's session"],
   [["d"], "Take it back"],
   [["o"], "Open on GitHub"],
+  [["esc"], "Back to the queue"],
 ];
 
 const REVIEW_KEYS: [string[], string][] = [
@@ -43,7 +49,7 @@ const REVIEW_KEYS: [string[], string][] = [
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
   [["c"], "Copy a review prompt for Claude"],
-  [["esc"], "Back to the queue"],
+  [["esc"], "Back to where you opened it"],
 ];
 
 export function Help({ onClose }: { onClose: () => void }) {
@@ -69,13 +75,22 @@ export function Help({ onClose }: { onClose: () => void }) {
         <div className="dialog-head">
           <h2>Keyboard shortcuts</h2>
           <button type="button" className="btn ghost" onClick={onClose}>
-            Close<kbd>esc</kbd>
+            <kbd>esc</kbd>Close
           </button>
         </div>
         <div className="keys-cols">
           <section>
             <h3 className="keys-head">In the queue</h3>
             <Keys keys={KEYS} />
+            <p className="keys-more">
+              <Dots
+                parts={MORE_KEYS.map(([k, v]) => (
+                  <span key={k}>
+                    <kbd>{k}</kbd> {v}
+                  </span>
+                ))}
+              />
+            </p>
           </section>
           <section>
             <h3 className="keys-head">In a PR's review</h3>

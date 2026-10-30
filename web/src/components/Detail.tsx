@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
-import { age, BUCKET_LABEL, cls, eventText, modelName, when } from "../format.ts";
-import { judgeStepText } from "../view.ts";
+import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
+import { cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
@@ -42,6 +42,102 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     );
   const { item, signals: s } = detail;
   const pr = item.kind === "pr";
+  const placements = [...detail.placements].sort((a, b) => Number(b.board === card.board) - Number(a.board === card.board));
+  const [main, ...others] = placements;
+  const muted = card.status === "muted";
+  const mine = pr && item.state === "open" && card.author.toLowerCase() === ctx.me.toLowerCase();
+  const run = (k: string) => {
+    ctx.run(card, k);
+  };
+  const asked = request(s);
+  // Its activity, unless that's only "first seen".
+  const events = detail.activity.some((e) => e.kind !== "new") ? detail.activity : [];
+  // The why, the board and the trace, saying only what the card's own why doesn't.
+  const why = main && (
+    <div className="why-block">
+      {card.resolved && (
+        <p className="pl-head">
+          <b>Resolved</b>: {card.resolved}. It comes back on its own if that stops being true.
+        </p>
+      )}
+      {(!!card.resolved || main.why !== card.why || !!main.judge?.bucket) && (
+        <p className="pl-head">
+          {card.resolved && "Otherwise "}
+          <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
+          {main.judge?.bucket && main.judge.why && " by your policy"}
+          {main.why && main.why !== card.why && <>: {main.why}</>}
+        </p>
+      )}
+      {main.demoted && (
+        <p className="demote-note">
+          {main.judge?.bucket ? "Your policy" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
+          {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
+        </p>
+      )}
+      <details className="trace-toggle">
+        <summary>Rule trace{others.length > 0 && ` and ${others.length} other ${others.length === 1 ? "board" : "boards"}`}</summary>
+        <PlacementView p={main} />
+        {others.map((p) => (
+          <div key={p.board} className="also">
+            <p className="pl-head">
+              Also <b>{BUCKET_LABEL[p.bucket].toLowerCase()}</b> from the {ctx.boardLabel(p.board)} board{p.why && <>: {p.why}</>}
+            </p>
+            <PlacementView p={p} />
+          </div>
+        ))}
+      </details>
+    </div>
+  );
+  const activity = events.length > 0 && (
+    <div className="activity">
+      <h4 className="d-head">Recent activity</h4>
+      <ul className="events">
+        {events.map((e) => (
+          <li key={e.seq}>
+            <Dots
+              parts={[
+                eventText(e, ctx.me),
+                <span key="age" className="quiet">
+                  {age(e.at, ctx.now)}
+                </span>,
+              ]}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
+  // Opened in place (an issue), it's the selected card's shape: one line of facts, what's new about why, its activity, its keys.
+  if (!ctx.showSignals) {
+    const facts = [
+      ...cardFacts(card, ctx.me),
+      ...(says(card.why, asked) ? [] : [asked]),
+      ...(item.labels.length ? [item.labels.join(", ")] : []),
+      plural(item.comments_total, "comment"),
+      `active ${age(card.activity_at, ctx.now)} ago`,
+    ];
+    return (
+      <div className="more opened">
+        <p className="card-facts">
+          {facts.map((f) => (
+            <span key={f}>{f}</span>
+          ))}
+        </p>
+        {why}
+        {activity}
+        <div className="actions card-keys">
+          <KeyButton k="esc" label="Close" run={run} />
+          <KeyButton k="o" label="Open on GitHub" run={run} />
+          {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
+          <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
+          <KeyButton k="s" label="Snooze" run={run} />
+          <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
+        </div>
+      </div>
+    );
+  }
+
   const facts: [string, ReactNode][] = [];
   if (pr) {
     facts.push(
@@ -55,7 +151,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       facts.push(["Merge", item.mergeable === "conflict" ? <span className="t-warn">conflicts with {item.base}</span> : "clean"]);
   }
   if (item.labels.length) facts.push(["Labels", item.labels.join(", ")]);
-  facts.push(["Asked", request(s)]);
+  if (!says(card.why, asked)) facts.push(["Asked", asked]);
   if (s.me.reviewed)
     facts.push([
       "You",
@@ -71,14 +167,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   if (item.threads_total) facts.push(["Threads", `${item.threads_unresolved} of ${item.threads_total} unresolved`]);
   facts.push(["Activity", `${age(card.activity_at, ctx.now)} ago, ${plural(item.comments_total, "comment")}`]);
 
-  const placements = [...detail.placements].sort((a, b) => Number(b.board === card.board) - Number(a.board === card.board));
-  const [main, ...others] = placements;
-  const muted = card.status === "muted";
-  const mine = pr && item.state === "open" && card.author.toLowerCase() === ctx.me.toLowerCase();
-  const run = (k: string) => {
-    ctx.run(card, k);
-  };
-
+  // `w`: the item's signals in full, its rule trace and its raw signals.
   return (
     <div className="detail">
       <dl className="facts">
@@ -89,67 +178,9 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           </div>
         ))}
       </dl>
-      {main && (
-        <div className="why-block">
-          <h4 className="d-head">Why it's here</h4>
-          {card.resolved && (
-            <p className="pl-head">
-              <b>Resolved</b>: {card.resolved}. It comes back on its own if that stops being true.
-            </p>
-          )}
-          <p className="pl-head">
-            {card.resolved && "Otherwise "}
-            <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
-            {main.judge?.bucket && main.judge.why && " by your policy"}
-            {main.why && <>: {main.why}</>}
-          </p>
-          {main.demoted && (
-            <p className="demote-note">
-              {main.judge?.bucket ? "Your policy" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
-              {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
-            </p>
-          )}
-          <details className="trace-toggle">
-            <summary>Rule trace{others.length > 0 && ` and ${others.length} other ${others.length === 1 ? "board" : "boards"}`}</summary>
-            <PlacementView p={main} />
-            {others.map((p) => (
-              <div key={p.board} className="also">
-                <p className="pl-head">
-                  Also <b>{BUCKET_LABEL[p.bucket].toLowerCase()}</b> from the {ctx.boardLabel(p.board)} board{p.why && <>: {p.why}</>}
-                </p>
-                <PlacementView p={p} />
-              </div>
-            ))}
-          </details>
-        </div>
-      )}
-      {detail.activity.length > 0 && (
-        <div className="activity">
-          <h4 className="d-head">Recent activity</h4>
-          <ul className="events">
-            {detail.activity.map((e) => (
-              <li key={e.seq}>
-                {eventText(e, ctx.me)} <span className="quiet">· {age(e.at, ctx.now)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {pr && detail.ai && (
-        <div className="brief">
-          <h4 className="d-head">
-            AI review{" "}
-            <span className="quiet">
-              from {modelName(detail.ai.model)}, {when(detail.ai.at)}
-              {detail.ai_stale ? ", before the latest commits" : ""}
-            </span>
-          </h4>
-          <p>
-            <span className={`verdict v-${detail.ai.verdict}`}>{detail.ai.verdict}</span>. {detail.ai.summary}
-          </p>
-        </div>
-      )}
-      <div className="actions">
+      {why}
+      {activity}
+      <div className="actions card-keys">
         {pr && <KeyButton k="enter" label={card.inflight ? "Show in flight" : "Review"} run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
         {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
@@ -197,6 +228,18 @@ function PlacementView({ p }: { p: Placement }) {
         )}
       </ol>
     </div>
+  );
+}
+
+// Parts of one line, apart like a card's call: "pushed a fix", "4be71c2", "24m".
+export function Dots({ parts, className }: { parts: ReactNode[]; className?: string }) {
+  return (
+    <span className={cls("dots", className)}>
+      {parts.map((p, i) => (
+        // oxlint-disable-next-line react/no-array-index-key -- parts are positional and never reorder
+        <span key={i}>{p}</span>
+      ))}
+    </span>
   );
 }
 

@@ -109,14 +109,19 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
   assert.deepEqual([of("acme/worker#860").preflight, of("acme/worker#860").next], [{ state: "none" }, undefined], "an issue");
   assert.equal(of("me/notes-app#12").preflight?.state, "none");
   assert.equal(of("me/notes-app#12").next, "3 unresolved threads: d hands it to a babysitter");
-  assert.equal(of("acme/api#4110").next, "Enter opens In flight to answer it");
-  assert.equal(of("acme/worker#875").next, "approved and green: o opens it on GitHub to merge");
+  // Enter and o are on every card's keys, so a next step that would only name them is left out.
+  assert.equal(of("acme/api#4110").next, undefined);
+  assert.equal(of("acme/worker#875").next, undefined);
+  assert.equal(of("acme/api#4122").reply?.to, "dana on src/export/audit.ts:88", "the reply y sends from the queue");
+  assert.deepEqual([of("acme/api#3051").checks_failed?.length, of("acme/api#3051").checks_optional?.length], [2, 1]);
+  assert.equal(of("acme/worker#860").last_event?.kind, "commented", "an issue's latest event");
 
   const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
   assert.equal(quiet.demoted, "quiet for 3 weeks");
   assert.ok(q.sections.today.length >= 8 && q.today_cards === 5, "Today folds");
   assert.equal(q.ai_paused, null);
   assert.equal((await call<FocusView>("GET", "/api/focus")).data.today_cards, 5);
+  assert.equal(q.now_cards, 5);
 });
 
 test("AI reviews paused: the queue says so once, cards wait as paused, and resuming runs them again", async () => {

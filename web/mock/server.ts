@@ -234,6 +234,8 @@ interface Seed {
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
   judge?: [Bucket, string]; // the policy judge's answer, where no rule matched
   fly?: Flight; // your PR, in flight (with st.inflight_at): what its babysitter is up to
+  checks?: string[]; // your PR: its failing checks' names
+  optional?: string[]; // those of them the base branch doesn't require
 }
 
 // A canned babysitter state for the In-flight lane; the mock never runs one.
@@ -703,6 +705,10 @@ const SEEDS: Seed[] = [
     assignee: true,
     comments: 7,
     on: { "work-mentions": ["assigned"] },
+    log: [
+      ["assigned", "nina", 30, {}],
+      ["commented", "nina", 10, {}],
+    ],
   },
   {
     repo: "acme/api",
@@ -715,6 +721,7 @@ const SEEDS: Seed[] = [
     comments: 12,
     fresh: true,
     on: { "work-mentions": ["newact"] },
+    log: [["commented", "tomas", 4, {}]],
   },
   {
     repo: "acme/web",
@@ -853,6 +860,28 @@ const SEEDS: Seed[] = [
     size: [30, 52, 4],
     on: { "personal-mine": [] },
   },
+  // A stack of your own PRs, one per team, all red on the same checks.
+  ...(
+    [
+      [3051, "billing", 6, ["Acceptance", "(Optional) Shows the difference between the prod and dev schema"]],
+      [3052, "issues", 7, ["Acceptance"]],
+      [3053, "alerts", 8, ["backend (3.13)", "Acceptance"]],
+    ] as const
+  ).map(([n, team, upd, checks]): Seed => ({
+    repo: "acme/api",
+    n,
+    title: `ref(${team}): Read request.user through acting_user_id()`,
+    author: ME,
+    age: 30,
+    upd,
+    ci: "red",
+    review: "required",
+    mergeable: "clean",
+    size: [24 + n - 3050, 12, 3],
+    on: { "work-mine": ["red"] },
+    checks: [...checks],
+    optional: checks.filter((c) => c.startsWith("(Optional)")),
+  })),
   // Its rule says Today (a merge conflict), but nobody has touched it in three weeks: quiet, so it waits in Later.
   {
     repo: "acme/api",
@@ -1110,7 +1139,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
       if (r.state.pinned || (p.rule !== null && b.rules[p.rule]?.nocap)) continue;
       if (++used > cap) {
         p.bucket = to;
-        p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full (${cap})`;
+        p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full on ${b.name} (${cap})`;
       }
     }
   }
@@ -1216,6 +1245,7 @@ function focus(): FocusView {
       now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
       today: cards.filter((c) => c.bucket === "today").map(top),
     },
+    now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
     ai_paused: autoAiOn() ? aiPaused : null,
   };
@@ -1247,6 +1277,7 @@ function queue(): QueueView {
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+    now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
     ai_paused: autoAiOn() ? aiPaused : null,
   };
@@ -1255,8 +1286,25 @@ function queue(): QueueView {
 // As Desk.queueCard(): a Now or Today card, with its AI review or, for your own PR, what to do next.
 function top(c: Card): Card {
   const r = recs.find((x) => x.id === c.id)!;
-  const mine = r.seed.author === ME && (r.seed.kind ?? "pr") === "pr";
-  return mine ? { ...c, preflight: preflightOf(r), next: nextOf(r) } : { ...c, preflight: preflightOf(r) };
+  const s = r.seed;
+  const out: Card = { ...c, preflight: preflightOf(r) };
+  if (s.author === ME && (s.kind ?? "pr") === "pr") {
+    const next = nextOf(r);
+    const failing = s.fly?.failing ?? s.checks ?? [];
+    const reply = laneOwned(r) ? flightOf(r).drafts.find((d) => !d.sent_at) : undefined;
+    Object.assign(
+      out,
+      next && { next },
+      failing.length && { checks_failed: failing },
+      s.optional?.length && { checks_optional: s.optional },
+    );
+    if (reply) out.reply = reply;
+  }
+  if (s.kind === "issue") {
+    const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
+    if (last) out.last_event = last;
+  }
+  return out;
 }
 
 // As Desk.preflight().
@@ -1277,17 +1325,10 @@ function preflightOf(r: Rec): Preflight {
 }
 
 // As Desk.nextStep().
-function nextOf(r: Rec): string {
+function nextOf(r: Rec): string | undefined {
   const sig = signals(r);
   const ready = sig.pr.review === "approved" && sig.pr.ci === "green" && sig.pr.mergeable === "clean" && !sig.item.draft;
-  if (laneOwned(r)) {
-    const f = flightOf(r);
-    const unsent = f.drafts.filter((d) => !d.sent_at).length;
-    if (f.question) return "Enter opens In flight to answer it";
-    if (unsent) return `Enter opens In flight, y sends ${unsent === 1 ? "it" : "them"}`;
-    return ready ? "o opens it on GitHub to merge" : "Enter opens it in In flight";
-  }
-  if (ready) return "approved and green: o opens it on GitHub to merge";
+  if (laneOwned(r) || ready) return undefined;
   const hand =
     setting("inflight.babysit") && setting("agent.driver") === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
   if (sig.pr.mergeable === "conflict") return `merge conflict with ${sig.pr.base}: ${hand}`;

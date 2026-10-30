@@ -3,7 +3,7 @@
 import type { Context, Item, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
 import { checkFailed, checkName, collaborator, normalize, toHit, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
-import { DETAILS_MINE, DETAILS_REVIEW, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
+import { DETAILS_REVIEW, detailsMine, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
 
 export interface SearchHit {
   node_id: string;
@@ -210,17 +210,25 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     const unique = [...new Map(hits.map((h) => [h.node_id, h])).values()];
     const isMine = (h: SearchHit) => h.kind === "pr" && h.author.toLowerCase() === me.toLowerCase();
     const batches = [
-      ...chunk(unique.filter(isMine), 5).map((b) => ({ query: DETAILS_MINE, ids: b.map((h) => h.node_id) })),
+      ...chunk(unique.filter(isMine), 5).map((b) => ({ mine: true, ids: b.map((h) => h.node_id) })),
       ...chunk(
         unique.filter((h) => !isMine(h)),
         20,
-      ).map((b) => ({ query: DETAILS_REVIEW, ids: b.map((h) => h.node_id) })),
+      ).map((b) => ({ mine: false, ids: b.map((h) => h.node_id) })),
     ];
     const now = new Date().toISOString();
+    const fetchNodes = async (b: { mine: boolean; ids: string[] }): Promise<(RawNode | null)[]> => {
+      if (!b.mine) return (await client.query<{ nodes: (RawNode | null)[] }>(DETAILS_REVIEW, { ids: b.ids })).nodes;
+      const data = await client.query<Record<string, RawNode | null>>(
+        detailsMine(b.ids.length),
+        Object.fromEntries(b.ids.map((id, i) => [`id${i}`, id])),
+      );
+      return b.ids.map((_, i) => data[`n${i}`] ?? null);
+    };
     // A failed batch is skipped, not fatal: its items stay stale and are retried next sync.
     const results = await pool(batches, 3, async (b) => {
       try {
-        const { nodes } = await client.query<{ nodes: (RawNode | null)[] }>(b.query, { ids: b.ids });
+        const nodes = await fetchNodes(b);
         return nodes.filter((n) => n !== null).map((n) => normalize(n, now));
       } catch (e) {
         if (e instanceof RateLimitedError) throw e;

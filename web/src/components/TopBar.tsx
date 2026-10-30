@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls, sinceText } from "../format.ts";
 import { actedText, type Route } from "../view.ts";
+import { Dots } from "./Detail.tsx";
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
@@ -42,7 +43,9 @@ export function TopBar({
 }) {
   const inSettings = route.name === "settings";
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
+  // Only what reached Now or Today: housekeeping in Later and FYI stays in its log and Settings → Agents.
   const acted = route.name === "queue" ? o?.coordinator.acted : null;
+  const shown = acted?.buckets.some((b) => b === "now" || b === "today") ? acted : null;
   return (
     <header className="topbar" inert={inert}>
       <a className="wordmark" href="#/" title="Queue">
@@ -61,11 +64,11 @@ export function TopBar({
           href={from === "inflight" ? "#/inflight" : "#/"}
           title={`Back to ${from === "inflight" ? "In flight" : "the queue"} (esc)`}
         >
+          <kbd>esc</kbd>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
           <span>{from === "inflight" ? "In flight" : "Queue"}</span>
-          <kbd>esc</kbd>
         </a>
       ) : (
         <label className="search">
@@ -93,7 +96,7 @@ export function TopBar({
         </label>
       )}
       <div className="tb-right">
-        {acted && (
+        {(coordOpen || !!shown) && (
           <button
             type="button"
             className={cls("coord-line", coordOpen && "on")}
@@ -101,7 +104,14 @@ export function TopBar({
             title={coordOpen ? "Hide the coordinator's log" : "What the coordinator did"}
             onClick={onCoordinator}
           >
-            Coordinator<span className="cl-what"> {actedText(acted)}</span> · {sinceText(acted.at, now)}
+            <Dots
+              parts={[
+                <>
+                  Coordinator<span className="cl-what">{shown && ` ${actedText(shown)}`}</span>
+                </>,
+                ...(shown ? [sinceText(shown.at, now)] : []),
+              ]}
+            />
           </button>
         )}
         <button

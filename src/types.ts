@@ -43,6 +43,7 @@ export interface Item {
   head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
   head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
+  checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
   // trusted: the author is a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); absent on items stored before the desk asked
@@ -353,7 +354,7 @@ export interface Placement {
   rule_bucket: Bucket; // before caps (after the judge)
   rule: number | null; // matched rule index, null = default
   why: string;
-  demoted?: string; // e.g. "Now was full (3)"
+  demoted?: string; // e.g. "Now was full on PRs to review (3)"
   trace: TraceStep[];
   judge?: JudgeStep; // set in the gray zone (no rule matched, or a "judge" rule) while the policy judge is on
 }
@@ -409,6 +410,10 @@ export interface Card {
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: d hands it to a babysitter"
+  checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
+  checks_optional?: string[]; // those of them its base branch doesn't require
+  reply?: Draft; // your PR in flight: the first reply waiting for Send (y sends it from the queue too)
+  last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
@@ -467,6 +472,7 @@ export interface BoardView {
 
 export interface FocusView {
   sections: { now: Card[]; today: Card[] };
+  now_cards: number; // queue.now_cards: Now shows this many, the rest behind one line; 0 = all
   today_cards: number; // queue.today_cards: Today shows this many, the rest behind one line; 0 = all
   ai_paused: string | null; // why AI reviews nobody asked for are paused (an expired login), said once instead of on every card
 }
@@ -477,7 +483,8 @@ export interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
-  today_cards: number; // as in FocusView
+  now_cards: number; // as in FocusView
+  today_cards: number;
   ai_paused: string | null;
 }
 

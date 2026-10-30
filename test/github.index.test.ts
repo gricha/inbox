@@ -124,11 +124,15 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
     ...Array.from({ length: 25 }, (_, i) => hit(`other${i}`, "maple")),
     hit("other0", "maple"), // duplicate across queries
   ];
+  // Your PRs come as aliased nodes (n0: node(id: $id0)), each asking whether its checks are required for it.
+  const idsOf = (v: Record<string, unknown>): string[] =>
+    Array.isArray(v.ids) ? (v.ids as string[]) : Object.keys(v).map((k) => v[`id${k.slice(2)}`] as string);
   const { gh, calls, maxInFlight } = fakeGitHub(async (b) => {
     await sleep(5);
-    const ids: string[] = b.variables.ids;
+    const ids = idsOf(b.variables);
     // "gone" simulates a node deleted between search and details.
     const nodes = ids.map((id, i) => (id === "other3" ? null : { ...base, id, number: i + 1 }));
+    if (!Array.isArray(b.variables.ids)) return { data: { rateLimit: RL, ...Object.fromEntries(nodes.map((n, i) => [`n${i}`, n])) } };
     return {
       data: { rateLimit: RL, nodes },
       errors: ids.includes("other3") ? [{ type: "NOT_FOUND", path: ["nodes", ids.indexOf("other3")], message: "gone" }] : undefined,
@@ -139,9 +143,11 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
   const mine = calls.filter((c) => c.query.includes("mergeable"));
   const review = calls.filter((c) => !c.query.includes("mergeable"));
   assert.deepEqual(
-    mine.map((c) => c.variables.ids.length),
+    mine.map((c) => idsOf(c.variables).length),
     [5, 2],
   );
+  assert.match(mine[0]!.query, /n4: node\(id: \$id4\)[\s\S]*isRequired\(pullRequestId: \$id4\)/);
+  assert.deepEqual(idsOf(mine[1]!.variables), ["mine5", "mine6"]);
   assert.deepEqual(
     review.map((c) => c.variables.ids.length),
     [20, 6],

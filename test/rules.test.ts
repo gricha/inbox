@@ -95,8 +95,8 @@ test("caps demote overflow in order; pinned and nocap are exempt", () => {
   assert.deepEqual(r.order.now, ["acme/api#7", "acme/api#6", "acme/api#1", "acme/api#2"]);
   assert.deepEqual(r.order.today, ["acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#4", "acme/api#5"]);
-  assert.equal(r.placements.get("acme/api#3")!.demoted, "Now was full (2)");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today was full (1)");
+  assert.equal(r.placements.get("acme/api#3")!.demoted, "Now was full on B (2)");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today was full on B (1)");
   assert.equal(r.placements.get("acme/api#4")!.rule_bucket, "now");
 });
 
@@ -136,9 +136,10 @@ test("default review rules: bot asks fall below close collaborators", () => {
     request_events: [{ at: hoursAgo(1), actor: "helper", actor_bot: true, reviewer: "me", reviewer_type: "user" }],
   });
   const teamPing = makeItem({ number: 4, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+  const closeTeamPing = makeItem({ number: 5, author: "alice", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
   const r = classify(
     review,
-    [direct, botAskClose, botAsk, teamPing].map((it) => entry(it)),
+    [direct, botAskClose, botAsk, teamPing, closeTeamPing].map((it) => entry(it)),
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
   assert.equal(b(1).bucket, "now");
@@ -148,6 +149,8 @@ test("default review rules: bot asks fall below close collaborators", () => {
   assert.equal(b(3).why, "added by helper (bot)");
   assert.equal(b(4).bucket, "fyi");
   assert.equal(b(4).why, "CODEOWNERS ping to @ml-team");
+  // A close collaborator's CODEOWNERS ping is still nobody asking you by name.
+  assert.deepEqual([b(5).bucket, b(5).why], ["fyi", "CODEOWNERS ping to @ml-team"]);
 });
 
 test("priority sorts within a bucket before the board sort", () => {
@@ -196,7 +199,7 @@ test("quiet items leave Now and Today for Later, before caps; pinned items and a
   assert.equal(r.order.now.length, 0);
   // Quiet ones leave before the cap counts, so Today's one slot (the pinned one doesn't count) goes to the fresh ask.
   assert.deepEqual(r.order.today, ["acme/api#3", "acme/api#4"]);
-  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today was full (1)"]);
+  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today was full on B (1)"]);
   assert.deepEqual(r.order.later, ["acme/api#5", "acme/api#1", "acme/api#2"]);
 
   const off = classify(b, entries, undefined, 0);

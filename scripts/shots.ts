@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page } from "playwright-core";
-import type { QueueView } from "../src/types.ts";
+import type { Overview, QueueView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -116,6 +116,15 @@ const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
   await page.reload();
   await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
 };
+// Now folds after its first five: open it for a card that sits behind its line.
+const unfoldNow = async (page: Page) => {
+  const fold = page.locator(".g-now .fold");
+  if (await fold.isVisible()) await fold.click();
+  await page.waitForTimeout(200);
+};
+const top = async (page: Page) => {
+  await page.evaluate("scrollTo(0, 0)");
+};
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
   {
@@ -130,9 +139,12 @@ const SHOTS: Shot[] = [
   {
     // Nothing in Now: one line, with no highlighter.
     name: "queue-empty",
-    go: queueAs((q) => {
-      q.sections.now = [];
-    }),
+    go: async (page) => {
+      await queueAs((q) => {
+        q.sections.now = [];
+      })(page);
+      await top(page);
+    },
     after: async (page) => {
       await page.unroute("**/api/queue");
       await page.reload();
@@ -144,15 +156,15 @@ const SHOTS: Shot[] = [
     name: "queue-fold",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".fold").focus();
-      await page.locator(".fold").scrollIntoViewIfNeeded();
+      await page.locator(".g-today .fold").focus();
+      await page.locator(".g-today .fold").scrollIntoViewIfNeeded();
     },
   },
   {
     name: "queue-today",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".fold").focus();
+      await page.locator(".g-today .fold").focus();
       await page.keyboard.press("Enter");
       await page.waitForTimeout(200);
       await page.locator(".g-today").scrollIntoViewIfNeeded();
@@ -169,6 +181,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
+      await top(page);
     },
     after: pauseAi(false),
   },
@@ -177,6 +190,7 @@ const SHOTS: Shot[] = [
     name: "expanded",
     go: async (page) => {
       await at("#/")(page);
+      await unfoldNow(page);
       await page.locator(".row", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
     },
@@ -200,6 +214,7 @@ const SHOTS: Shot[] = [
     name: "review-writing",
     go: async (page) => {
       await at("#/")(page);
+      await unfoldNow(page);
       await page.locator(".row", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
       await page.keyboard.press("Enter");
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
@@ -301,12 +316,24 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The coordinator's line in the top bar, opened: its recent log above the queue.
+    // The coordinator's line in the top bar, shown once it touched Today, opened: its recent log above the queue.
     name: "coordinator-log",
     go: async (page) => {
+      await page.route("**/api/overview", async (route) => {
+        const res = await route.fetch();
+        const o = (await res.json()) as Overview;
+        if (o.coordinator.acted) o.coordinator.acted.buckets = ["today"];
+        await route.fulfill({ response: res, json: o });
+      });
       await at("#/")(page);
+      await page.reload();
       await page.locator(".coord-line").click();
       await page.locator(".cl-list li").first().waitFor({ timeout: 5000 });
+    },
+    after: async (page) => {
+      await page.unroute("**/api/overview");
+      await page.reload();
+      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
     },
   },
   {

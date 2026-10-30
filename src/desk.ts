@@ -834,8 +834,20 @@ export class Desk {
   // A Now or Today card carries what to skim before opening it: its AI review, or for your own PR what to do next.
   queueCard(e: Entry, p: Placement, snap: Snapshot): Card {
     const c = this.card(e, p, snap);
+    const it = e.item;
     c.preflight = this.preflight(e, snap);
-    if (e.item.kind === "pr" && e.analysis.signals.me.author) c.next = this.nextStep(e);
+    if (it.kind === "pr" && e.analysis.signals.me.author) {
+      const next = this.nextStep(e);
+      if (next) c.next = next;
+      if (it.checks_failed?.length) c.checks_failed = it.checks_failed;
+      if (it.checks_optional?.length) c.checks_optional = it.checks_optional;
+      const reply = e.inflight ? this.sitterView(it).drafts[0] : undefined;
+      if (reply) c.reply = reply;
+    }
+    if (it.kind === "issue") {
+      const last = this.store.activity({ after: 0, limit: 3, item: it.id, latest: true }).find((x) => x.kind !== "new");
+      if (last) c.last_event = last;
+    }
     return c;
   }
 
@@ -857,18 +869,12 @@ export class Desk {
     return { state: state(), ...got };
   }
 
-  // Your own open PR: what's up with it, and the key that deals with it.
-  nextStep(e: Entry): string {
+  // Your own open PR: what's up with it, and the key that deals with it. Nothing when its why and the card's keys say it all
+  // (in flight: Enter opens it in the lane; approved and green: o merges it on GitHub).
+  nextStep(e: Entry): string | undefined {
     const it = e.item;
     const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
-    if (e.inflight) {
-      const v = this.sitterView(it);
-      if (v.escalation) return "Enter opens In flight to answer it";
-      if (v.drafts.length) return `Enter opens In flight, y sends ${v.drafts.length === 1 ? "it" : "them"}`;
-      if (v.outside_at) return "Enter opens In flight to read them";
-      return ready ? "o opens it on GitHub to merge" : "Enter opens it in In flight";
-    }
-    if (ready) return "approved and green: o opens it on GitHub to merge";
+    if (e.inflight || ready) return undefined;
     const s = this.settings;
     const hand = s["inflight.babysit"] && s["agent.driver"] === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
     if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
@@ -888,6 +894,7 @@ export class Desk {
   focus(): FocusView {
     return {
       sections: this.top(this.snapshot(), new Set()),
+      now_cards: this.settings["queue.now_cards"],
       today_cards: this.settings["queue.today_cards"],
       ai_paused: this.aiPausedWhy(),
     };
@@ -945,6 +952,7 @@ export class Desk {
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+      now_cards: this.settings["queue.now_cards"],
       today_cards: this.settings["queue.today_cards"],
       ai_paused: this.aiPausedWhy(),
     };
@@ -1187,7 +1195,7 @@ export class Desk {
   }
 
   // Background AI reviews, a couple at a time, in the queue's order: Now, then Today from the top, so the cards on screen
-  // (Today's first queue.today_cards) are ready first. After a failure it waits for the next sync.
+  // are ready first. After a failure it waits for the next sync.
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi() || this.generating.size >= AI_AT_ONCE) return;
     const snap = this.snapshot();

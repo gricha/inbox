@@ -251,6 +251,23 @@ test("hand-off prompt depends on kind: review, your PR, issue", async () => {
   t.cleanup();
 });
 
+test("your PR's card says what failed, and leaves out a next step its keys already say", async () => {
+  const t = await setup([
+    myPr(3, { checks_failed: ["Acceptance", "(Optional) schema diff"], checks_optional: ["(Optional) schema diff"] }),
+    myPr(4, { ci: "green", review_decision: "approved", mergeable: "clean" }),
+  ]);
+  await t.desk.sync();
+  const q = t.desk.queue();
+  const of = (id: string) => [...q.sections.now, ...q.sections.today].find((c) => c.id === id);
+  assert.deepEqual(
+    [of("acme/web#3")?.checks_failed, of("acme/web#3")?.checks_optional],
+    [["Acceptance", "(Optional) schema diff"], ["(Optional) schema diff"]],
+  );
+  assert.ok(of("acme/web#4"), "approved and green is on the queue");
+  assert.equal(of("acme/web#4")?.next, undefined, "o on its keys opens it to merge");
+  t.cleanup();
+});
+
 test("saving config refuses when the file changed since it was loaded", async () => {
   const t = await setup([]);
   const base = t.desk.getConfig().text;
@@ -372,7 +389,7 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
     q.sections.today.map((c) => [c.id, c.next]),
     [["acme/web#7", "merge conflict with main: d puts it in flight"]],
   );
-  assert.equal(q.sections.now[0]?.next, "Enter opens it in In flight");
+  assert.equal(q.sections.now[0]?.next, undefined, "its why says it, and Enter on its keys opens the lane");
 
   t.desk.putSettings({ set: { "queue.quiet_days": 0, "inflight.babysit": true } });
   assert.deepEqual(

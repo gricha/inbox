@@ -108,13 +108,14 @@ const overview: Overview = {
   coordinator: { state: "idle", acted: null },
 };
 
-const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, today_cards: 5, ai_paused: null };
+const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, now_cards: 5, today_cards: 5, ai_paused: null };
 
 const queueView: QueueView = {
   sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
+  now_cards: 5,
   today_cards: 5,
   ai_paused: null,
 };

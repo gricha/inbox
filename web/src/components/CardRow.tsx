@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
-import { age, clearedText, cls, shortRef, SNOOZE } from "../format.ts";
-import { aiWord, cardFacts, keyParts, nextText, opening, problems, sizeOf, type Variant } from "../view.ts";
-import { Detail, KeyButton } from "./Detail.tsx";
+import { age, clearedText, cls, eventText, shortRef, SNOOZE } from "../format.ts";
+import { aiWord, cardFacts, checkNames, keyParts, nextText, opening, problems, says, sizeOf, type Variant } from "../view.ts";
+import { Detail, Dots, KeyButton } from "./Detail.tsx";
 import { VERDICT } from "./Review.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i y).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
@@ -21,7 +21,6 @@ export interface RowCtx {
   run: (c: Card, key: string) => void;
   snooze: (c: Card, until: string) => void;
   closeSnooze: () => void;
-  restore: (c: Card) => void;
 }
 
 function PinGlyph() {
@@ -33,19 +32,39 @@ function PinGlyph() {
   );
 }
 
-// A card: its title; ref, why, problems, size and the AI's call; the AI's gist (or your PR's next step); a close look's concern.
+// Your own PR's why is what you owe ("babysitter asks: …"), so its label leads in ink.
+export function Owed({ why, tone }: { why: string; tone?: string | undefined }) {
+  const [head = "", tail] = why.split(/: (.*)/s);
+  return (
+    <span className="why owed">
+      <b className={tone && `t-${tone}`}>
+        {head.charAt(0).toUpperCase() + head.slice(1)}
+        {tail !== undefined && ":"}
+      </b>
+      {tail && ` ${tail}`}
+    </span>
+  );
+}
+
+// Keys in a line of text ("d hands it to a babysitter") set apart.
+export const withKeys = (text: string) => keyParts(text).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part));
+
+// A card: its title; ref, why, problems, size and the AI's call; the AI's gist (or your PR's next step, or an issue's latest
+// event); a close look's concern. Compact (your PRs in a stack): the title and the ref line only.
 export function CardRow({
   card,
   variant,
   ctx,
   inRun,
   away,
+  compact,
 }: {
   card: Card;
   variant: Variant;
   ctx: RowCtx;
   inRun?: boolean;
   away?: boolean;
+  compact?: boolean;
 }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
@@ -54,17 +73,23 @@ export function CardRow({
   const mine = card.kind === "pr" && !card.resolved && card.author.toLowerCase() === ctx.me.toLowerCase();
   const next = nextText(card);
   const older = !!p && p.state !== "ready";
-  const summary = p?.summary && (sel ? p.summary : opening(p.summary));
+  // The gist is as long as the call is heavy: up to three lines to look closely, two to skim, one to skip.
+  const lines = p?.verdict === "skip" ? 1 : p?.verdict === "skim" ? 2 : 3;
+  const summary = p?.summary && (sel ? p.summary : opening(p.summary, lines === 1 ? 0 : lines === 2 ? 140 : 200));
   const concerns = p?.concerns ?? [];
-  const shown = sel ? concerns : p?.verdict === "look" || p?.risk === "high" ? concerns.slice(0, 1).map((c) => opening(c, 0)) : [];
+  const shown = sel ? concerns : p?.verdict === "look" || p?.risk === "high" ? concerns.slice(0, 1).map((c) => opening(c, 0, false)) : [];
   // A problem the why already says colours the why instead of showing twice.
-  const why = card.why.toLowerCase();
-  const said = (f: { text: string }) => why.includes(f.text.toLowerCase());
+  const said = (f: { text: string }) => says(card.why, f.text);
   const extra = problems(card).filter((f) => !said(f));
   const tone = p && variant === "active" ? problems(card).find(said)?.tone : undefined;
-  // Your own PR's why is what you owe ("babysitter asks: …"), so its label leads in ink.
-  const [head = "", tail] = card.why.split(/: (.*)/s);
-  const size = p && card.kind === "pr" ? sizeOf(card) : undefined;
+  // Your own PR's size tells you nothing.
+  const size = p && card.kind === "pr" && !mine ? sizeOf(card) : undefined;
+  // Your red PR says what failed; a check its base branch doesn't require is only a fact.
+  const required = (card.checks_failed ?? []).filter((n) => !card.checks_optional?.includes(n));
+  const failing = mine && card.ci === "red" && required.length ? `${checkNames(required)} failing` : "";
+  const optional = mine && card.ci !== "red" && card.checks_optional?.length ? "optional check failing" : "";
+  const reply = mine && card.inflight ? card.reply : undefined;
+  const event = card.kind === "issue" && variant === "active" ? card.last_event : undefined;
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -122,17 +147,7 @@ export function CardRow({
               ) : (
                 (!inRun || variant === "resolved") &&
                 card.why &&
-                (mine && p ? (
-                  <span className="why owed">
-                    <b className={tone && `t-${tone}`}>
-                      {head.charAt(0).toUpperCase() + head.slice(1)}
-                      {tail !== undefined && ":"}
-                    </b>
-                    {tail && ` ${tail}`}
-                  </span>
-                ) : (
-                  <span className={cls("why", tone && `t-${tone}`)}>{card.why}</span>
-                ))
+                (mine && p ? <Owed why={card.why} tone={tone} /> : <span className={cls("why", tone && `t-${tone}`)}>{card.why}</span>)
               )}
               {variant !== "resolved" &&
                 extra.map((f) => (
@@ -140,6 +155,8 @@ export function CardRow({
                     {f.text}
                   </span>
                 ))}
+              {compact && failing && <span className="fact-word">{failing}</span>}
+              {optional && <span className="fact-word">{optional}</span>}
               {away && card.demoted && <span>{card.demoted}</span>}
             </span>
             {(size !== undefined || ai) && (
@@ -151,10 +168,16 @@ export function CardRow({
               </span>
             )}
           </span>
-          {summary ? (
-            <span className={cls("gist", older && "older", !sel && "clip")}>{summary}</span>
+          {compact ? null : summary ? (
+            <span className={cls("gist", older && "older", !sel && `clip clip-${lines}`)}>{summary}</span>
+          ) : reply ? (
+            // The reply you'd send with y, as the lane shows it: a margin note.
+            <span className={cls("concern", "reply", !sel && "clip")}>{sel ? reply.body : opening(reply.body, 0, false)}</span>
+          ) : failing || next ? (
+            <Dots className="gist" parts={[failing, next && withKeys(next)].filter(Boolean)} />
           ) : (
-            next && <span className="gist">{keyParts(next).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part))}</span>
+            // Opened, its activity is listed below.
+            event && !open && <Dots className="gist event" parts={[eventText(event, ctx.me), age(event.at, ctx.now)]} />
           )}
           {shown.map((c) => (
             <span key={c} className={cls("concern", older && "older", !sel && "clip")}>
@@ -162,19 +185,8 @@ export function CardRow({
             </span>
           ))}
         </button>
-        {variant === "cleared" && (
-          <button
-            type="button"
-            className="btn ghost restore"
-            onClick={() => {
-              ctx.restore(card);
-            }}
-          >
-            Restore
-          </button>
-        )}
       </div>
-      {sel && !open && <More card={card} ctx={ctx} mine={mine} />}
+      {sel && !open && <More card={card} ctx={ctx} mine={mine} away={!!away} />}
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
       {/* Under the card, so it never covers the card's own keys. */}
       {ctx.snoozeFor === card.id && (
@@ -190,11 +202,11 @@ export function CardRow({
 }
 
 // The selected card's rest: its facts and its keys.
-function More({ card, ctx, mine }: { card: Card; ctx: RowCtx; mine: boolean }) {
+function More({ card, ctx, mine, away }: { card: Card; ctx: RowCtx; mine: boolean; away: boolean }) {
   const run = (k: string) => {
     ctx.run(card, k);
   };
-  const facts = cardFacts(card, ctx.me);
+  const facts = cardFacts(card, ctx.me, away);
   return (
     <div className="more">
       {facts.length > 0 && (
@@ -207,6 +219,7 @@ function More({ card, ctx, mine }: { card: Card; ctx: RowCtx; mine: boolean }) {
       <div className="actions card-keys">
         <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : card.inflight ? "Show in flight" : "Review"} run={run} />
         <KeyButton k="o" label="Open on GitHub" run={run} />
+        {mine && card.inflight && card.reply && <KeyButton k="y" label="Send" title="Post this reply on GitHub, as you" run={run} />}
         {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
         {/* A PR in flight is its babysitter's: d takes it back first. */}
         {!card.inflight && (
@@ -241,8 +254,8 @@ function SnoozeMenu({ onPick, onClose }: { onPick: (until: string) => void; onCl
               onPick(o.until);
             }}
           >
-            <span>{o.label}</span>
             <kbd>{o.key}</kbd>
+            <span>{o.label}</span>
           </button>
         ))}
       </div>

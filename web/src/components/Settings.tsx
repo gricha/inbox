@@ -107,7 +107,17 @@ const emptyLabel = (p: FieldProps) => (!p.def.required && p.value === "" ? (p.de
 
 function StringField(p: FieldProps) {
   const d = useDraft(p);
-  return <input className="input" type="text" placeholder={emptyLabel(p)} autoCapitalize="off" autoCorrect="off" {...d.bind} />;
+  // A value with a set shape (a time window) is short; free text gets the column.
+  return (
+    <input
+      className={cls("input", p.def.pattern && "short")}
+      type="text"
+      placeholder={emptyLabel(p)}
+      autoCapitalize="off"
+      autoCorrect="off"
+      {...d.bind}
+    />
+  );
 }
 
 function TextField(p: FieldProps) {
@@ -117,7 +127,7 @@ function TextField(p: FieldProps) {
 
 function ListField(p: FieldProps) {
   const d = useDraft(p);
-  const hint = p.def.pattern_hint ? `One ${p.def.pattern_hint} per line` : "One per line";
+  const hint = p.def.placeholder ?? (p.def.pattern_hint ? `One ${p.def.pattern_hint.replace(/^an? /, "")} per line` : "One per line");
   return <textarea className="input area" rows={Math.max(2, d.draft.split("\n").length + 1)} placeholder={hint} {...d.bind} />;
 }
 
@@ -542,7 +552,7 @@ const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]
 const RULES = {
   id: "rules",
   title: "Rules",
-  help: "Which GitHub searches feed the queue, and the rules that decide where each item lands. Everything a rule sends to later, FYI or hide is sorted away for you.",
+  help: "Which GitHub searches feed the queue, and the rules that decide where each item lands. Everything a rule doesn't send to Now or Today is sorted away for you.",
 };
 
 export function Settings({

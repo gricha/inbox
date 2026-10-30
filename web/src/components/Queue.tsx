@@ -1,10 +1,11 @@
 import type { Card, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { FOLD, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
-import { CardRow, type RowCtx } from "./CardRow.tsx";
+import { AWAY_BAR, foldOf, nextText, problems, runs, says, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
+import { CardRow, withKeys, type RowCtx } from "./CardRow.tsx";
 import { withCode } from "./Review.tsx";
 
 const EMPTY: Partial<Record<GroupKey, string>> = { now: "Nothing needs you right now.", today: "Nothing else for today." };
+const MORE: Partial<Record<GroupKey, string>> = { now: "need you", today: "for today" };
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
 
 export function Queue({
@@ -23,8 +24,8 @@ export function Queue({
   ctx: RowCtx;
   filter: string;
   toggle: (k: GroupKey) => void;
-  unfold: () => void;
-  selectFold: () => void;
+  unfold: (k: GroupKey) => void;
+  selectFold: (k: GroupKey) => void;
 }) {
   if (!view) {
     const first = !!overview && !overview.synced_at;
@@ -38,6 +39,8 @@ export function Queue({
   // While filtering, empty groups take no space.
   const top = groups.filter((g) => (g.key === "now" || g.key === "today") && (!filtering || g.cards.length));
   const away = groups.filter((g) => SORTED_AWAY.includes(g.key) && (filtering ? g.cards.length : g.total));
+  // The quiet line names later and resolved; the rest show up there only while open (g f, g h, g x, or the filter).
+  const bar = away.filter((g) => AWAY_BAR.includes(g.key) || g.open);
   const opened = away.filter((g) => g.open && g.cards.length);
 
   return (
@@ -63,22 +66,30 @@ export function Queue({
           {g.fold > 0 && (
             <button
               type="button"
-              className={cls("fold", ctx.selected === FOLD && "sel")}
-              data-id={FOLD}
-              onClick={unfold}
-              onFocus={selectFold}
+              className={cls("fold", ctx.selected === foldOf(g.key) && "sel")}
+              data-id={foldOf(g.key)}
+              // Focus on mousedown would close the selected card above and move this line out from under the click.
+              onMouseDown={(e) => {
+                e.preventDefault();
+              }}
+              onClick={() => {
+                unfold(g.key);
+              }}
+              onFocus={() => {
+                selectFold(g.key);
+              }}
             >
-              {g.fold} more for today
+              {g.fold} more {MORE[g.key]}
             </button>
           )}
         </section>
       ))}
 
-      {away.length > 0 && (
+      {bar.length > 0 && (
         <section className="away" aria-label="Sorted away">
           <div className="away-bar">
             <span className="away-label">Sorted away</span>
-            {away.map((g) => (
+            {bar.map((g) => (
               <button
                 key={g.key}
                 type="button"
@@ -111,39 +122,34 @@ export function Queue({
 
 function Rows({ cards, g, ctx, folded }: { cards: Card[]; g: Group; ctx: RowCtx; folded?: boolean }) {
   const away = SORTED_AWAY.includes(g.key);
+  const me = ctx.me.toLowerCase();
   return (
     <div className={cls("rows", "cards", folded && "folded")}>
-      {runs(cards).map((r) =>
-        r.cards.length < 3 ? (
-          r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} />)
-        ) : (
+      {runs(cards).map((r) => {
+        if (r.cards.length < 3) return r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} />);
+        const first = r.cards[0]!;
+        // Your own stack is one card's worth: what's wrong once, in its colour, and what d does once; each PR a short line.
+        const mine = !away && first.kind === "pr" && !!me && r.author.toLowerCase() === me;
+        const kind = r.cards.every((c) => c.kind === "pr") ? "PRs" : "items";
+        const why = r.why.startsWith(`${r.author} `) ? r.why.slice(r.author.length + 1) : r.why;
+        const tone = g.variant === "active" && !away ? problems(first).find((f) => says(r.why, f.text))?.tone : undefined;
+        const next = mine ? nextText(first)?.replace(/ it /, " each ") : undefined;
+        return (
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- <fieldset> is for form controls; this groups a run of rows
-          <div key={`run:${r.id}`} className="run" role="group" aria-labelledby={`run-${r.id}`}>
+          <div key={`run:${r.id}`} className={cls("run", mine && "mine")} role="group" aria-labelledby={`run-${r.id}`}>
             <p className="run-head" id={`run-${r.id}`}>
-              <span className="run-title">
-                {r.cards.length} {r.cards.every((c) => c.kind === "pr") ? "PRs" : "items"} from {r.author}
-              </span>
-              {r.why && <span className="run-why">{r.why}</span>}
+              <span className="run-title">{mine ? `Your ${r.cards.length} ${kind}` : `${r.cards.length} ${kind} from ${r.author}`}</span>
+              {why && <span className={cls("run-why", tone && `t-${tone}`)}>{why}</span>}
+              {next && <span className="run-next">{withKeys(next)}</span>}
             </p>
             <div className="run-cards">
               {r.cards.map((c) => (
-                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} inRun />
+                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} inRun compact={mine} />
               ))}
             </div>
           </div>
-        ),
-      )}
+        );
+      })}
     </div>
   );
-}
-
-// Consecutive cards with the same author and reason (a stack of PRs) read as one block.
-function runs(cards: Card[]): { id: string; author: string; why: string; cards: Card[] }[] {
-  const out: { id: string; author: string; why: string; cards: Card[] }[] = [];
-  for (const c of cards) {
-    const last = out.at(-1);
-    if (last && last.author === c.author && last.why === c.why) last.cards.push(c);
-    else out.push({ id: c.id, author: c.author, why: c.why, cards: [c] });
-  }
-  return out;
 }

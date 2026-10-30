@@ -50,6 +50,7 @@
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
   --card-shadow: 0 0 0 1px rgb(27 29 33 / 5%), 0 1px 2px rgb(27 29 33 / 6%);
   --card-lift: 0 0 0 1px rgb(27 29 33 / 9%), 0 2px 6px rgb(27 29 33 / 8%);
+  --peek: var(--sheet);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
   --ref-w: 124px;
@@ -88,6 +89,7 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
     --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
     --card-lift: 0 0 0 1px rgb(255 255 255 / 9%);
+    --peek: #2a2b2f;
 
     color-scheme: dark;
   }
@@ -144,19 +146,10 @@ p {
   margin: 0;
 }
 
+/* One key style everywhere: the key in pencil, before what it does, with no box. */
 kbd {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  background: var(--sheet);
   color: var(--pencil);
-  font: 600 10.5px/1 var(--sans);
-  letter-spacing: 0.01em;
+  font: 600 12px var(--sans);
 }
 
 .quiet {
@@ -666,28 +659,6 @@ kbd {
   outline-offset: -2px;
 }
 
-.lane-row:hover:not(.sel) .row-main {
-  background: color-mix(in srgb, var(--wash) 60%, transparent);
-}
-
-/* The keyboard cursor: neutral, with a pencil ring so it never looks like hover. */
-.lane-row.sel .row-main {
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-}
-
-.lane-row.sel.open .row-main {
-  box-shadow:
-    inset 0 1.5px 0 var(--pencil),
-    inset 1.5px 0 0 var(--pencil),
-    inset -1.5px 0 0 var(--pencil);
-}
-
-.lane-row.open .row-main {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
 .row.leaving {
   pointer-events: none;
   animation: leave 200ms ease forwards;
@@ -892,10 +863,6 @@ kbd {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   text-align: right;
-}
-
-.btn.restore {
-  margin-right: 8px;
 }
 
 .run-title {
@@ -1115,6 +1082,14 @@ kbd {
   content: "·";
 }
 
+/* Parts of one line ("pushed a fix · 4be71c2 · 24m"), apart like the card's call. */
+.dots > :not(:first-child)::before {
+  margin: 0 8px;
+  color: var(--faint);
+  font-weight: 400;
+  content: "·";
+}
+
 .ai-word .size {
   font-variant-numeric: tabular-nums;
 }
@@ -1179,8 +1154,22 @@ kbd {
   -webkit-box-orient: vertical;
 }
 
-.gist.clip {
+.gist.clip-3 {
   -webkit-line-clamp: 3;
+}
+
+.gist.clip-2 {
+  -webkit-line-clamp: 2;
+}
+
+.gist.clip-1 {
+  -webkit-line-clamp: 1;
+}
+
+/* An issue's latest event: context, not a call. */
+.gist.event {
+  color: var(--pencil);
+  font-size: 13px;
 }
 
 .concern.clip {
@@ -1210,6 +1199,21 @@ kbd {
   padding: 2px 18px 16px;
 }
 
+.more.opened {
+  display: grid;
+  gap: 12px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.more.opened .card-facts {
+  margin-bottom: 0;
+}
+
+.more.opened .trace-toggle {
+  margin-top: 4px;
+}
+
 .deck .fold {
   margin-top: 4px;
   padding: 10px 18px;
@@ -1223,7 +1227,8 @@ kbd {
   color: var(--ink-2);
 }
 
-/* Folded, the next two cards' edges show under the last one, so the line below reads as more of the same. */
+/* Folded, the next two cards' edges show under the last one, so the line below reads as more of the same. In dark, where
+   shadows don't show, the edges (--peek) are a step lighter than a sheet. */
 .cards.folded {
   position: relative;
   padding-bottom: 10px;
@@ -1236,7 +1241,7 @@ kbd {
   z-index: -1;
   height: 24px;
   border-radius: 0 0 12px 12px;
-  background: var(--sheet);
+  background: var(--peek);
   box-shadow: var(--card-lift);
   content: "";
 }
@@ -1314,6 +1319,32 @@ kbd {
   font-size: 13px;
 }
 
+.run-why.t-bad {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.run-why.t-warn {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.run-next {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.run-next b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Your own stack: each PR is its title and its ref line. */
+.run.mine .card .row-main {
+  padding-top: 10px;
+  padding-bottom: 11px;
+}
+
 .deck .popover {
   left: 10px;
 }
@@ -1349,6 +1380,11 @@ kbd {
 
 .away .card .title {
   font-size: 14.5px;
+  font-weight: 400;
+}
+
+.away .dim .title {
+  color: var(--pencil);
 }
 
 .deck .away-bar {
@@ -1376,26 +1412,9 @@ kbd {
 
 .lane-intro {
   margin: -2px 0 10px;
-  padding: 0 12px;
+  padding: 0 18px;
   color: var(--pencil);
   font-size: 13px;
-}
-
-.lane-status {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
-.lane-status.needs {
-  color: var(--ink);
-}
-
-.lane-status a {
-  color: var(--pencil);
-  text-decoration: underline;
-  text-decoration-color: var(--rule-strong);
 }
 
 /* Landed sits one group gap below the open rows, as Today does below Now. */
@@ -1403,21 +1422,35 @@ kbd {
   margin-top: 0;
 }
 
-.lane-row .meta {
-  margin-top: 1px;
+/* A calm row's state is pencil, problems included; one that needs you has its why in ink and its problems coloured. */
+.lane-row:not(.b-now) .meta .fact-word {
+  color: var(--pencil);
 }
 
-.lane-detail {
-  gap: 10px;
-  padding-bottom: 12px;
+.lane-link {
+  margin: -6px 18px 12px;
+  font-size: 13px;
+}
+
+.lane-link a {
+  color: var(--pencil);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+}
+
+.gist.sitter {
+  color: var(--pencil);
+  font-size: 13px;
 }
 
 /* A reply waiting for Send: what it answers, then the reply, like an AI note in a review: a margin rule, no card. */
 .draft {
   display: grid;
   gap: 4px;
-  padding: 8px 12px 4px;
+  margin: -4px 18px 12px;
+  padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule-strong);
+  font-size: 13px;
 }
 
 .draft-to {
@@ -1438,6 +1471,12 @@ kbd {
   margin-top: 22px;
 }
 
+.keys-more {
+  margin-top: 12px;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
 /* Expanded item ------------------------------------------------------------ */
 
 .detail {
@@ -1449,19 +1488,11 @@ kbd {
   font-size: 13px;
 }
 
-.lane-row.sel .detail {
-  background: color-mix(in srgb, var(--sel) 50%, transparent);
-  box-shadow:
-    inset 1.5px 0 0 var(--pencil),
-    inset -1.5px 0 0 var(--pencil),
-    inset 0 -1.5px 0 var(--pencil);
-}
-
 .d-head {
   margin: 0 0 6px;
-  color: var(--ink);
+  color: var(--pencil);
   font-size: 12.5px;
-  font-weight: 650;
+  font-weight: 550;
 }
 
 .d-head .quiet {
@@ -1641,16 +1672,6 @@ kbd {
   color: var(--pencil);
 }
 
-.act kbd {
-  min-width: 0;
-  height: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--pencil);
-  font: 600 12px var(--sans);
-}
-
 .trace-toggle {
   margin-top: 8px;
 }
@@ -1710,8 +1731,6 @@ kbd {
 }
 
 .btn.primary kbd {
-  border-color: color-mix(in srgb, var(--paper) 35%, transparent);
-  background: transparent;
   color: inherit;
 }
 
@@ -1723,7 +1742,6 @@ kbd {
 }
 
 .btn.primary:disabled kbd {
-  border-color: var(--rule);
   color: var(--pencil);
 }
 
@@ -1752,7 +1770,6 @@ kbd {
 
 .input {
   width: 100%;
-  max-width: 380px;
   height: 34px;
   padding: 0 11px;
   border: 1px solid var(--control);
@@ -1776,8 +1793,10 @@ kbd {
   border-color: var(--red);
 }
 
-.input.num {
-  width: 112px;
+/* Two widths: short values (numbers, time windows, a hotkey) and free text across the control column. */
+.input.num,
+.input.short {
+  max-width: 240px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1857,7 +1876,7 @@ kbd {
 .pop-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   width: 100%;
   height: 32px;
   padding: 0 8px;
@@ -1918,9 +1937,8 @@ kbd {
 }
 
 .toast-btn kbd {
-  border-color: color-mix(in srgb, var(--paper) 30%, transparent);
-  background: transparent;
   color: inherit;
+  opacity: 0.7;
 }
 
 @keyframes rise {
@@ -2261,10 +2279,16 @@ kbd {
   margin-top: 8px;
 }
 
-/* Policy: prose, so the UI font and wrapped lines. */
+/* Policy: prose, so the UI font and wrapped lines, in the Rules editor's column. */
 .policy {
-  max-width: 760px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  column-gap: 28px;
   margin-top: 24px;
+}
+
+.policy > * {
+  grid-column: 1;
 }
 
 .editor.prose {
@@ -2357,17 +2381,12 @@ kbd {
   border-bottom: 1px solid var(--rule);
 }
 
-.cl-head,
-.cl-list li {
-  display: grid;
-  grid-template-columns: var(--ref-w) minmax(0, 1fr) auto;
-  align-items: baseline;
-  column-gap: var(--gap);
-  padding: 0 12px;
-}
-
 .cl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
   margin-bottom: 8px;
+  padding: 0 18px;
 }
 
 .cl-head h2 {
@@ -2379,6 +2398,7 @@ kbd {
 }
 
 .cl-status {
+  flex: 1;
   color: var(--pencil);
   font-size: 13px;
 }
@@ -2393,12 +2413,17 @@ kbd {
 }
 
 .cl-list li {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  column-gap: 14px;
+  padding: 4px 18px;
 }
 
 .cl-when {
+  grid-column: 3;
   color: var(--pencil);
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -2721,7 +2746,8 @@ kbd {
   position: absolute;
   left: 0;
   width: 18px;
-  color: var(--pencil);
+  color: var(--faint);
+  font-weight: 400;
   text-align: center;
   content: "·";
 }
@@ -2797,12 +2823,21 @@ kbd {
   line-height: 1.5;
 }
 
+/* Concerns are margin notes, as on the card and in the diff. */
 .rv-concerns {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
-  padding-left: 18px;
-  color: var(--ink);
+  padding: 0;
+  list-style: none;
+}
+
+.rv-concerns li {
+  max-width: 80ch;
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-2);
+  font-size: 13.5px;
 }
 
 .act.armed {
@@ -2899,6 +2934,29 @@ kbd {
   overflow: hidden;
   font-weight: 550;
   text-overflow: ellipsis;
+}
+
+/* In the file list a long name wraps instead of losing its end, and a folder that gives way still shows "…/". */
+.rv-file .rv-fname {
+  align-items: baseline;
+}
+
+.rv-file .rv-dir {
+  flex: 0 1 auto;
+  min-width: 1.8em;
+}
+
+.rv-file .rv-base {
+  flex: none;
+  max-width: calc(100% - 1.8em);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (width >= 1280px) {
+  .rv-body {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
 }
 
 .rv-nn {
@@ -3102,7 +3160,8 @@ kbd {
 /* Narrow windows ----------------------------------------------------------- */
 
 @media (width <= 1000px) {
-  .rules {
+  .rules,
+  .policy {
     grid-template-columns: minmax(0, 1fr);
   }
 

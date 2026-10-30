@@ -51,13 +51,26 @@ const details = (pr: string) => `query($ids: [ID!]!) {
 export const DETAILS_REVIEW = details(`${PR}
   reviewThreads(first: 60) { totalCount nodes { isResolved } }`);
 
-const CHECK = "__typename ... on CheckRun { name conclusion } ... on StatusContext { context state }";
+// isRequired needs the PR's own id, so each of your PRs is its own aliased node (n0, n1, …) with its id as $id0, $id1, ….
+const check = (id: string) =>
+  `__typename ... on CheckRun { name status conclusion isRequired(pullRequestId: ${id}) } ... on StatusContext { context state isRequired(pullRequestId: ${id}) }`;
 
-// Failing check names are for the In-flight lane, so they're only asked of your own PRs too.
-export const DETAILS_MINE = details(`${PR}
-  mergeable
-  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
-  checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${CHECK} } } } } } }`);
+// Failing check names are for the In-flight lane and your cards, so they're only asked of your own PRs too.
+export function detailsMine(n: number): string {
+  const one = (i: number) => `n${i}: node(id: $id${i}) {
+    __typename
+    ... on PullRequest { ${PR}
+      mergeable
+      reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
+      checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${check(`$id${i}`)} } } } } } }
+    }
+  }`;
+  const ids = Array.from({ length: n }, (_, i) => i);
+  return `query(${ids.map((i) => `$id${i}: ID!`).join(", ")}) {
+  ${RATE}
+  ${ids.map(one).join("\n  ")}
+}`;
+}
 
 // authorAssociation (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, ...) says whose feedback a babysitter may act on.
 // What a babysitter needs to work on your PR: its review threads (with ids to reply to), reviews, comments and failing checks.

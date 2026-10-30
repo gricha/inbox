@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { normalize, toHit, type RawNode } from "../src/github/normalize.ts";
+import { normalize, toHit, type RawCheck, type RawNode } from "../src/github/normalize.ts";
 
 const fixture = (name: string): RawNode => JSON.parse(readFileSync(new URL(`./fixtures/github/${name}.json`, import.meta.url), "utf8"));
 const NOW = "2026-03-03T00:00:00.000Z";
@@ -203,4 +203,37 @@ test("your PR's head branch, where it lives, and the names of its failing checks
   // Someone else's PR isn't asked for checks, so it has no list rather than an empty one.
   assert.equal(normalize(fixture("pr-mine"), NOW).checks_failed, undefined);
   assert.equal(normalize({ ...fixture("pr-mine"), headRepository: null }, NOW).head_repo, "");
+});
+
+test("a failing check the base branch doesn't require doesn't make CI red", () => {
+  const withChecks = (state: string, nodes: RawCheck[]): RawNode => {
+    const raw = fixture("pr-mine");
+    const head = raw.commits!.nodes[0]!.commit;
+    return {
+      ...raw,
+      commits: { nodes: [{ commit: { ...head, statusCheckRollup: { state } } }] },
+      checks: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes } } } }] },
+    };
+  };
+  const optional = {
+    __typename: "CheckRun",
+    name: "(Optional) schema diff",
+    status: "COMPLETED",
+    conclusion: "FAILURE",
+    isRequired: false,
+  };
+  const backend = { __typename: "CheckRun", name: "backend", status: "COMPLETED", conclusion: "SUCCESS", isRequired: true };
+  const only = normalize(withChecks("FAILURE", [optional, backend]), NOW);
+  assert.deepEqual([only.ci, only.checks_failed, only.checks_optional], ["green", ["(Optional) schema diff"], ["(Optional) schema diff"]]);
+  const running = normalize(withChecks("FAILURE", [optional, { ...backend, status: "IN_PROGRESS", conclusion: null }]), NOW);
+  assert.equal(running.ci, "pending");
+  const acceptance = { __typename: "StatusContext", context: "Acceptance", state: "FAILURE", isRequired: true };
+  const both = normalize(withChecks("FAILURE", [optional, acceptance]), NOW);
+  assert.deepEqual(
+    [both.ci, both.checks_failed, both.checks_optional],
+    ["red", ["(Optional) schema diff", "Acceptance"], ["(Optional) schema diff"]],
+  );
+  // A repo that requires nothing: every failure counts, as GitHub's rollup says.
+  const none = normalize(withChecks("FAILURE", [{ ...optional, name: "test" }]), NOW);
+  assert.deepEqual([none.ci, none.checks_optional], ["red", undefined]);
 });

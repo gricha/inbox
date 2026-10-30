@@ -9,7 +9,7 @@ import { judgeStatusText } from "../view.ts";
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const EXAMPLE = `For example:
-Dependency bumps from bots are FYI unless CI is red.
+Dependency bumps from bots can be hidden unless CI is red.
 Anything touching billing is Today, whoever asked.
 Docs-only PRs from my teams can wait until Later.`;
 
