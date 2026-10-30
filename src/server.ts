@@ -47,6 +47,10 @@ export function createApp(desk: Desk, port: number): Hono {
     if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new DeskError(403, "forbidden host");
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin)) throw new DeskError(403, "forbidden origin");
+    // A no-cors GET (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
+    const site = c.req.header("sec-fetch-site");
+    if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
+      throw new DeskError(403, "forbidden cross-site request");
     await next();
     c.header("X-Frame-Options", "DENY");
     c.header("Content-Security-Policy", "frame-ancestors 'none'");
@@ -103,6 +107,8 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
+    // Only the desk's own page approves (a a): the browser marks its requests same-origin; curl, the CLI and agents don't.
+    if (c.req.header("sec-fetch-site") !== "same-origin") throw new DeskError(403, "approve from the PR's review in the desk (a a)");
     const { head_oid, body } = await c.req
       .json<{ head_oid?: unknown; body?: unknown }>()
       .catch((): { head_oid?: unknown; body?: unknown } => ({}));

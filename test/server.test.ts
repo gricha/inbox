@@ -61,6 +61,14 @@ test("rejects foreign Host and Origin", async () => {
   assert.equal((await t.req("/api/overview", { headers: { origin: "http://localhost:47823" } })).status, 200);
   assert.equal((await t.req("/mcp", { method: "POST", headers: { origin: "https://evil.example" }, body: "{}" })).status, 403);
   assert.equal((await t.app.request("http://evil.example/mcp", { method: "POST", body: "{}" })).status, 403);
+  // What a browser sends for an <img> on another site: no Origin, so only Sec-Fetch-Site says it's foreign.
+  const img = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors" };
+  assert.equal((await t.req("/api/review/api%237", { headers: img })).status, 403, "opening a review can start an AI run");
+  assert.equal((await t.req("/api/queue", { headers: { "sec-fetch-site": "same-site" } })).status, 403, "another localhost port");
+  assert.equal((await t.req("/mcp", { method: "POST", headers: img, body: "{}" })).status, 403);
+  assert.equal((await t.req("/api/review/api%237", { headers: { "sec-fetch-site": "same-origin" } })).status, 200, "the desk's own page");
+  assert.equal((await t.req("/api/queue", { headers: { "sec-fetch-site": "none" } })).status, 200, "typed into the address bar");
+  assert.notEqual((await t.req("/", { headers: img })).status, 403, "the page itself isn't the API");
   t.cleanup();
 });
 
@@ -158,8 +166,8 @@ test("activity: the log over HTTP, a long-poll that answers when an event lands,
 // This desk has no diff reader, agent or write client, so every review route answers without touching GitHub or an agent.
 test("review routes take the PR's id encoded in one segment or with its slash", async () => {
   const t = await setup();
-  const post = (p: string, body: unknown) =>
-    t.req(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const post = (p: string, body: unknown, site = "same-origin") =>
+    t.req(p, { method: "POST", headers: { "content-type": "application/json", "sec-fetch-site": site }, body: JSON.stringify(body) });
   for (const p of ["/api/review/acme%2Fapi%237", "/api/review/acme/api%237", "/api/review/api%237"]) {
     const v = await t.json(p);
     assert.equal(v.card.id, "acme/api#7", p);
@@ -170,6 +178,13 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   assert.equal(ai.status, 502);
   assert.match(((await ai.json()) as { error: string }).error, /AI review isn't available/);
   assert.equal((await post("/api/review/acme/api%237/approve", { head_oid: "h7" })).status, 409);
+  const curl = await t.req("/api/review/acme/api%237/approve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ head_oid: "h7" }),
+  });
+  assert.equal(curl.status, 403, "not from curl, the CLI or an agent: only the desk's page approves");
+  assert.match(((await curl.json()) as { error: string }).error, /review in the desk/);
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", {})).status, 400, "the commit you reviewed is required");
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", { head_oid: "h7", body: 5 })).status, 400);
   assert.equal((await t.req("/api/review/acme%2Fapi%2399")).status, 404);
