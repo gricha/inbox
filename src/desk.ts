@@ -549,6 +549,7 @@ export class Desk {
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
       verdict: snap.briefs.get(it.id)?.head_oid === it.head_oid ? snap.briefs.get(it.id)!.verdict : null,
       resolved: e.resolved?.reason ?? null,
+      resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
     };
   }
 
@@ -633,26 +634,18 @@ export class Desk {
       }
     }
     const cleared: Card[] = [];
-    const resolved: Entry[] = [];
+    const resolved: Card[] = [];
     for (const board of loaded.boards) {
       const b = snap.boards.get(board.config.id)!;
       for (const id of b.result.inactive) {
         if (seen.has(id)) continue;
         seen.add(id);
         const e = snap.entries.get(id)!;
-        if (e.resolved) resolved.push(e);
+        if (e.resolved) resolved.push(this.card(e, this.placementOf(id, snap), snap));
         else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
     }
-    const resolvedAt = (e: Entry) => e.resolved?.at ?? e.item.updated_at;
-    return {
-      sections,
-      hidden,
-      cleared,
-      resolved: resolved
-        .sort((a, b) => resolvedAt(b).localeCompare(resolvedAt(a)))
-        .map((e) => this.card(e, this.placementOf(e.item.id, snap), snap)),
-    };
+    return { sections, hidden, cleared, resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")) };
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).

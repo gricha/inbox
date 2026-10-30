@@ -52,6 +52,7 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     snooze_until: null,
     verdict: null,
     resolved: null,
+    resolved_at: null,
     ...extra,
   };
 }

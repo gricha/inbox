@@ -125,6 +125,7 @@ interface Card {
   snooze_until: string | null;
   verdict: "look" | "skim" | "skip" | null; // from a brief
   resolved: string | null; // why it needs nobody now: "merged", "closed", "approved by alice", "no longer requested"
+  resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
 }
 
 interface QueueView {

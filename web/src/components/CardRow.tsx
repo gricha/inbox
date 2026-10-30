@@ -64,6 +64,8 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
     </>
   );
   const compact = !!inRun && variant === "active";
+  // A resolved item isn't waiting any more: its time is when it resolved.
+  const since = card.resolved_at ?? card.waiting_since;
   return (
     <div
       className={cls(
@@ -120,8 +122,8 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
               </span>
             )}
           </span>
-          <span className="age" title={`waiting since ${new Date(card.waiting_since).toLocaleString()}`}>
-            {age(card.waiting_since, ctx.now)}
+          <span className="age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
+            {age(since, ctx.now)}
           </span>
         </button>
         {variant === "cleared" && (

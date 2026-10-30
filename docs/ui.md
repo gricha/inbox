@@ -32,7 +32,7 @@ One surface. The window is the queue; Settings is the only other place, and it's
 - One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
 - Sorted away: later, FYI, resolved, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
-- Resolved rows are dimmed like cleared ones and show the reason ("merged", "approved by alice", "no longer requested") where the why goes. Acting on one (done, snooze) keeps it under Resolved.
+- Resolved rows are dimmed like cleared ones and show the reason ("merged", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
 - Opening an item (Enter) shows facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys.
 - Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
 

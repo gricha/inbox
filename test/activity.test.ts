@@ -59,9 +59,10 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
     ["acme/api#2"],
   );
   assert.deepEqual(
-    q.resolved.map((c) => [c.id, c.why, c.resolved, c.pinned]),
-    [["acme/api#1", "approved by bob", "approved by bob", true]],
+    q.resolved.map((c) => [c.id, c.why, c.resolved, c.resolved_at, c.pinned]),
+    [["acme/api#1", "approved by bob", "approved by bob", iso(0.5), true]],
   );
+  assert.equal(q.sections.now[0]?.resolved_at, null);
   assert.deepEqual(
     t.desk.focus().sections.now.map((c) => c.id),
     ["acme/api#2"],
@@ -118,8 +119,8 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   assert.deepEqual(kinds(t.desk).slice(2), ["merged acme/api#1", "resolved acme/api#1"]);
   assert.equal(t.desk.store.activity({ after: 2, limit: 1 })[0]?.actor, "dana");
   assert.deepEqual(
-    t.desk.queue().resolved.map((c) => [c.id, c.why]),
-    [["acme/api#1", "merged"]],
+    t.desk.queue().resolved.map((c) => [c.id, c.why, c.resolved_at]),
+    [["acme/api#1", "merged", iso(0.1)]],
   );
 
   // Still gone an hour later: not refreshed again, still shown.

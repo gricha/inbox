@@ -308,6 +308,7 @@ export interface Card {
   snooze_until: string | null;
   verdict: Brief["verdict"] | null; // from an LLM brief, if you asked for one
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
+  resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
 }
 
 export interface BoardSummary {

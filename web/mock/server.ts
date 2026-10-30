@@ -1014,6 +1014,7 @@ function cardOf(r: Rec, p: Placement): Card {
     snooze_until: r.state.snooze_until,
     verdict: briefs.get(r.id)?.verdict ?? null,
     resolved: s.resolved ?? null,
+    resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
   };
 }
 
@@ -1086,7 +1087,7 @@ function queue(): QueueView {
     sections: { now: of("now"), today: of("today"), later: of("later"), fyi: of("fyi") },
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
-    resolved: [...resolved.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
   };
 }
 
