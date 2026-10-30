@@ -125,9 +125,10 @@ async function itemText(api: DeskClient, ref: string): Promise<string> {
       ...(d.placements.length
         ? d.placements.flatMap(traceLines)
         : ["not on any board now: a board filter drops it, or no board's search returns it anymore"]),
-      ...(d.brief
+      ...(d.ai
         ? [
-            `brief (${d.brief.model}${d.brief_stale ? ", stale: new commits since" : ""}): ${d.brief.verdict}, risk ${d.brief.risk}. ${oneLine(d.brief.summary)}`,
+            `AI review (${d.ai.model}${d.ai_stale ? ", stale: new commits since" : ""}): ${d.ai.verdict}, risk ${d.ai.risk}. ${oneLine(d.ai.summary)}`,
+            ...d.ai.concerns.map((x) => `- concern: ${oneLine(x)}`),
           ]
         : []),
       "hand-off prompt:",
@@ -221,14 +222,22 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_brief",
     {
       description:
-        "Ask Claude (via the user's claude CLI, no tools) whether a PR needs the user's attention: look, skim or skip, with a summary. Costs a model call and takes up to a minute; the result is cached per commit.",
+        "A PR's AI review, written by the user's agent (Claude Code or Codex, no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs in Now and Today; otherwise it costs a model call and takes a minute or two. Cached per commit.",
       inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ ref }) =>
       run(async () => {
-        const b = (await api.analyze(ref)).brief;
-        return untrusted([`${b.verdict} · risk ${b.risk}`, oneLine(b.summary), ...b.reasons.map((r) => `- ${oneLine(r)}`), json(b)]);
+        const b = (await api.aiReview(ref)).ai;
+        return untrusted([
+          `${b.verdict} · risk ${b.risk}`,
+          oneLine(b.summary),
+          ...b.concerns.map((r) => `- concern: ${oneLine(r)}`),
+          ...b.notes.map(
+            (n) => `- note on ${oneLine(n.path)}${n.line ? `:${n.line}${n.side === "old" ? " (old)" : ""}` : ""}: ${oneLine(n.body)}`,
+          ),
+          json(b),
+        ]);
       }),
   );
 

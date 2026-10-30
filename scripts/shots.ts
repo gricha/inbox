@@ -34,7 +34,8 @@ async function up(url: string, ms = 30_000): Promise<void> {
 async function start(): Promise<string> {
   const node = (args: string[], env: Record<string, string>) =>
     kids.push(spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: "ignore" }));
-  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], { MOCK_PORT: String(MOCK) });
+  // An AI review that never finishes during the run, so every theme and size shows it being written.
+  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], { MOCK_PORT: String(MOCK), MOCK_AI_MS: "3600000" });
   node(["node_modules/vite/bin/vite.js", "--config", "web/vite.config.ts", "--port", String(VITE), "--strictPort"], {
     DESK_API: `http://127.0.0.1:${MOCK}`,
   });
@@ -85,14 +86,41 @@ const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
   await page.waitForTimeout(400);
 };
+// A PR's review, once Pierre has drawn and highlighted its diffs.
+const review =
+  (id: string, keys: string[] = []) =>
+  async (page: Page) => {
+    await at(`#/review/${encodeURIComponent(id)}`)(page);
+    await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(900);
+    for (const k of keys) {
+      await page.keyboard.press(k);
+      await page.waitForTimeout(250);
+    }
+  };
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
   {
+    // Enter on a PR opens its review; an issue still opens in place.
     name: "expanded",
     go: async (page) => {
       await at("#/")(page);
-      await page.keyboard.press("Enter");
+      await page.locator(".row", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
+    },
+  },
+  { name: "review", go: review("acme/api#4127") },
+  { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
+  { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
+  {
+    // Enter from the queue on a PR with no AI review yet: it's being written.
+    name: "review-writing",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".row", { hasText: "Drop the legacy v1 auth middleware" }).locator(".row-main").focus();
+      await page.keyboard.press("Enter");
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(600);
     },
   },
   {
@@ -153,6 +181,8 @@ const SHOTS: Shot[] = [
       await at("#/settings/notify")(page);
     },
   },
+  // Last: its "press a again" toast would sit over the next shot.
+  { name: "review-approve", go: review("acme/api#4127", ["a"]) },
 ];
 const SIZES = [
   { name: "wide", width: 1280, height: 820, mac: false },

@@ -4,15 +4,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
+import { canned } from "./diffs.ts";
 import type {
   Action,
   ActivityEvent,
   ActivityKind,
   AgentStatus,
+  AiReview,
   BoardConfig,
   BoardSummary,
   BoardView,
-  Brief,
   Bucket,
   Card,
   Ci,
@@ -30,6 +31,7 @@ import type {
   Placement,
   PreviewResult,
   ReviewDecision,
+  ReviewView,
   ReviewState,
   SettingsView,
   SettingValue,
@@ -230,7 +232,7 @@ const SEEDS: Seed[] = [
     wait: 3,
     by: "priya",
     direct: true,
-    size: [214, 38, 9],
+    size: [62, 7, 5], // matches its canned diff in diffs.ts
     close: 9,
     comments: 4,
     fresh: true,
@@ -313,7 +315,7 @@ const SEEDS: Seed[] = [
     by: "sam",
     team: "ml-team",
     owner: true,
-    size: [58, 14, 2],
+    size: [28, 3, 4], // matches its canned diff in diffs.ts
     close: 12,
     on: { "work-review": ["close", "owners"] },
   },
@@ -1012,7 +1014,7 @@ function cardOf(r: Rec, p: Placement): Card {
     pinned: r.state.pinned,
     status: status(r),
     snooze_until: r.state.snooze_until,
-    verdict: briefs.get(r.id)?.verdict ?? null,
+    verdict: reviews.get(r.id)?.head_oid === itemOf(r).head_oid ? reviews.get(r.id)!.verdict : null,
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
   };
@@ -1233,7 +1235,7 @@ function detail(r: Rec): ItemDetail {
   if (!placements.length) throw new HttpError(404, `${r.id} isn't on any board`);
   const best = placements.reduce((a, b) => (RANK[b.bucket] < RANK[a.bucket] ? b : a));
   const item = itemOf(r);
-  const brief = briefs.get(r.id) ?? null;
+  const ai = reviews.get(r.id) ?? null;
   return {
     card: cardOf(r, best),
     item,
@@ -1241,9 +1243,9 @@ function detail(r: Rec): ItemDetail {
     placements,
     state: r.state,
     handoff_prompt: render(config.handoff.prompt, sig),
-    brief,
-    brief_stale: !!brief && brief.head_oid !== item.head_oid,
-    analyzing: analyzing.has(r.id),
+    ai,
+    ai_stale: !!ai && ai.head_oid !== item.head_oid,
+    generating: generating.has(r.id),
     activity: EVENTS.filter((e) => e.item_id === r.id)
       .toReversed()
       .slice(0, 8),
@@ -1251,43 +1253,92 @@ function detail(r: Rec): ItemDetail {
 }
 
 // ---------------------------------------------------------------------------
-// Briefs: a canned stand-in for the claude CLI. MOCK_ANALYZE_FAIL=1 makes it fail like a missing CLI.
+// The review view: canned diffs and a canned agent. MOCK_ANALYZE_FAIL=1 fails like a missing CLI; MOCK_AI_MS is how long it takes.
 
-const briefs = new Map<string, Brief>();
-const analyzing = new Set<string>();
+const reviews = new Map<string, AiReview>();
+const generating = new Set<string>();
+const aiErrors = new Map<string, string>();
+const approved = new Set<string>();
 
-async function analyze(r: Rec): Promise<Brief> {
-  const sig = signals(r);
-  if (sig.item.kind !== "pr") throw new HttpError(400, "briefs are for pull requests");
-  if (analyzing.has(r.id)) throw new HttpError(409, `already analyzing ${r.id}`);
-  analyzing.add(r.id);
+// Two PRs start with their AI review written, as the background run would have left them.
+for (const r of recs) {
+  const c = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
+  if (c.ai) reviews.set(r.id, { ...c.ai, head_oid: itemOf(r).head_oid, model: "sonnet", at: iso(1) });
+}
+
+async function generate(r: Rec): Promise<AiReview> {
+  if (signals(r).item.kind !== "pr") throw new HttpError(400, "AI reviews are for pull requests");
+  if (generating.has(r.id)) throw new HttpError(409, `already reviewing ${r.id}`);
+  generating.add(r.id);
+  aiErrors.delete(r.id);
   bump();
   try {
     await new Promise((ok) => {
-      setTimeout(ok, 2500);
+      setTimeout(ok, Number(process.env.MOCK_AI_MS ?? 2500));
     });
-    if (process.env.MOCK_ANALYZE_FAIL) throw new HttpError(502, "spawn claude ENOENT: is the claude CLI installed and on PATH?");
-    const verdict = sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim";
-    const reasons = [
-      sig.author.close ? `you review a lot of ${sig.author.login}'s work` : `${sig.author.login} rarely asks you`,
-      sig.pr.size > 800 ? `large: ${sig.pr.size} lines across ${sig.pr.files} files` : `${sig.pr.size} lines across ${sig.pr.files} files`,
-      sig.me.requested_codeowner ? `CODEOWNERS ping via @${sig.me.requested_team}` : "touches code you've changed recently",
-    ];
-    const brief: Brief = {
-      verdict,
+    if (process.env.MOCK_ANALYZE_FAIL)
+      throw new HttpError(502, 'claude command "claude" not found: set its full path under Settings → AI review → Claude command');
+    const sig = signals(r);
+    const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
+    const [f] = files;
+    const ai: AiReview = {
+      verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
       risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
-      summary: `Mock brief. ${r.seed.title}: the diff mostly touches ${sig.item.name} internals; no API surface changes.`,
-      reasons,
-      model: config.analyze.model,
+      summary: `${r.seed.title}: swaps the legacy path for the new one and times it. No change to the public API.`,
+      concerns:
+        sig.pr.size > 200
+          ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
+          : [],
+      notes: f
+        ? [
+            {
+              path: f.path,
+              side: "new",
+              line: f.path.endsWith(".py") ? 16 : 12,
+              body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
+            },
+          ]
+        : [],
       head_oid: itemOf(r).head_oid,
+      model: config.analyze.model,
       at: new Date().toISOString(),
     };
-    briefs.set(r.id, brief);
-    return brief;
+    reviews.set(r.id, ai);
+    return ai;
+  } catch (e) {
+    aiErrors.set(r.id, (e as Error).message);
+    throw e;
   } finally {
-    analyzing.delete(r.id);
+    generating.delete(r.id);
     bump();
   }
+}
+
+// Like the desk, opening a PR with no AI review asks for one.
+function reviewView(r: Rec): ReviewView {
+  const d = detail(r);
+  if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
+  if (!d.ai && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME) {
+    void generate(r).catch(() => {});
+    d.generating = true;
+  }
+  const mine = d.card.author === ME;
+  return {
+    card: d.card,
+    item: d.item,
+    handoff_prompt: d.handoff_prompt,
+    files: canned(r.id, r.seed.repo, r.seed.n, r.seed.title).files,
+    files_error: null,
+    ai: d.ai,
+    ai_stale: d.ai_stale,
+    ai_error: generating.has(r.id) ? null : (aiErrors.get(r.id) ?? null),
+    generating: d.generating,
+    approve: mine
+      ? { ok: false, reason: "it's your PR" }
+      : approved.has(r.id)
+        ? { ok: false, reason: "you approved this commit" }
+        : { ok: true, reason: null },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1799,9 +1850,25 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
   }
-  if (route === "POST /api/analyze") {
-    const r = resolve(String((await readBody(req)).id));
-    return { ok: true, brief: await analyze(r) };
+  const review = /^\/api\/review\/(.+?)(\/ai|\/approve)?$/.exec(url.pathname);
+  if (review) {
+    const r = resolve(decodeURIComponent(review[1]!));
+    if (req.method === "GET" && !review[2]) return reviewView(r);
+    if (req.method === "POST" && review[2] === "/ai") {
+      const { force } = await readBody(req);
+      const cur = reviews.get(r.id);
+      return { ok: true, ai: cur && !force ? cur : await generate(r) };
+    }
+    // A no-op: the mock never talks to GitHub. It only remembers, so the view shows you approved.
+    if (req.method === "POST" && review[2] === "/approve") {
+      const why = reviewView(r).approve.reason;
+      if (why) throw new HttpError(409, `can't approve ${r.id}: ${why}`);
+      if ((await readBody(req)).head_oid !== itemOf(r).head_oid)
+        throw new HttpError(409, `can't approve ${r.id}: it has new commits since you opened it`);
+      approved.add(r.id);
+      bump();
+      return { ok: true, url: `${urlOf(r.seed)}#pullrequestreview-mock` };
+    }
   }
   if (route === "POST /api/undo") {
     const body = await readBody(req);

@@ -48,6 +48,14 @@ export function TopBar({
       </a>
       {inSettings ? (
         <span className="crumb">Settings</span>
+      ) : route.name === "review" ? (
+        <a className="back" href="#/" title="Back to the queue (esc)">
+          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M10 3.5 5.5 8l4.5 4.5" />
+          </svg>
+          <span>Queue</span>
+          <kbd>esc</kbd>
+        </a>
       ) : (
         <label className="search">
           <svg viewBox="0 0 16 16" aria-hidden="true">

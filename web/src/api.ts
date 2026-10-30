@@ -1,7 +1,7 @@
 import type {
   Action,
   AgentStatus,
-  Brief,
+  AiReview,
   ConfigError,
   FieldDoc,
   ItemDetail,
@@ -9,6 +9,7 @@ import type {
   Overview,
   PreviewResult,
   QueueView,
+  ReviewView,
   SettingsView,
   SettingValue,
 } from "../../src/types.ts";
@@ -50,7 +51,11 @@ export const api = {
   item: (id: string) => call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent(id)}`),
   act: (id: string, action: Action, until?: string) =>
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
-  analyze: (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }),
+  review: (id: string) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`),
+  aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
+  // The one call that writes to GitHub: only the review view's approve key reaches it.
+  approve: (id: string, head_oid: string) =>
+    call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   config: () => call<{ path: string; text: string; errors: ConfigError[]; warnings?: ConfigError[] }>("GET", "/api/config"),

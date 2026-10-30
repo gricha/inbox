@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 const KEYS: [string[], string][] = [
   [["j", "k"], "Move down and up (or the arrow keys)"],
-  [["enter"], "Open or close the selected item"],
+  [["enter"], "Review the selected PR; an issue opens in place"],
   [["o"], "Open on GitHub"],
   [["e"], "Done: it comes back when someone else acts. On a cleared item, restore it"],
   [["s"], "Snooze, then 1 to 5 to pick how long"],
@@ -10,8 +10,8 @@ const KEYS: [string[], string][] = [
   [["p"], "Pin or unpin"],
   [["u"], "Undo what you just did"],
   [["c"], "Copy a review prompt for Claude"],
-  [["i"], "Ask Claude for a brief (30 to 90 seconds)"],
-  [["w"], "Show the raw signals"],
+  [["i"], "AI review: summary, concerns and notes from your agent (a minute or two)"],
+  [["w"], "Show the item's rule trace and raw signals"],
   [["g", "l"], "Open or close Later (g f FYI, g d resolved, g h hidden, g x cleared)"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter"],
@@ -19,6 +19,16 @@ const KEYS: [string[], string][] = [
   [[","], "Settings (esc goes back)"],
   [["g", "r"], "Rules"],
   [["?"], "This list"],
+];
+
+const REVIEW_KEYS: [string[], string][] = [
+  [["n", "p"], "Next and previous file"],
+  [["]", "["], "Next and previous AI note"],
+  [["a"], "Approve on GitHub: press a, then a again within 3 seconds"],
+  [["i"], "Ask for the AI review again"],
+  [["o"], "Open on GitHub"],
+  [["c"], "Copy a review prompt for Claude"],
+  [["esc"], "Back to the queue"],
 ];
 
 export function Help({ onClose }: { onClose: () => void }) {
@@ -47,19 +57,34 @@ export function Help({ onClose }: { onClose: () => void }) {
             Close<kbd>esc</kbd>
           </button>
         </div>
-        <dl className="keys">
-          {KEYS.map(([ks, v]) => (
-            <div key={v} className="fact">
-              <dt>
-                {ks.map((k) => (
-                  <kbd key={k}>{k}</kbd>
-                ))}
-              </dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="keys-cols">
+          <section>
+            <h3 className="keys-head">In the queue</h3>
+            <Keys keys={KEYS} />
+          </section>
+          <section>
+            <h3 className="keys-head">In a PR's review</h3>
+            <Keys keys={REVIEW_KEYS} />
+          </section>
+        </div>
       </div>
     </div>
+  );
+}
+
+function Keys({ keys }: { keys: [string[], string][] }) {
+  return (
+    <dl className="keys">
+      {keys.map(([ks, v]) => (
+        <div key={v} className="fact">
+          <dt>
+            {ks.map((k) => (
+              <kbd key={k}>{k}</kbd>
+            ))}
+          </dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

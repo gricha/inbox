@@ -3,8 +3,8 @@ import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../..
 import { age, BUCKET_LABEL, cls, eventText, when } from "../format.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
-const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
-const REVIEW: Record<ReviewDecision, string> = {
+export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
+export const REVIEW: Record<ReviewDecision, string> = {
   approved: "approved",
   changes_requested: "changes requested",
   required: "review required",
@@ -73,7 +73,6 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   const placements = [...detail.placements].sort((a, b) => Number(b.board === card.board) - Number(a.board === card.board));
   const [main, ...others] = placements;
   const muted = card.status === "muted";
-  const busy = detail.analyzing || ctx.analyzing.has(card.id);
   const run = (k: string) => {
     ctx.run(card, k);
   };
@@ -132,53 +131,28 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           </ul>
         </div>
       )}
-      {pr && !busy && ctx.briefErrors[card.id] && (
+      {pr && detail.ai && (
         <div className="brief">
-          <h4 className="d-head">Brief</h4>
-          <p className="t-bad">{ctx.briefErrors[card.id]}</p>
-          <p className="quiet">
-            Press <kbd>i</kbd> to try again.
+          <h4 className="d-head">
+            AI review{" "}
+            <span className="quiet">
+              from {detail.ai.model}, {when(detail.ai.at)}
+              {detail.ai_stale ? ", before the latest commits" : ""}
+            </span>
+          </h4>
+          <p>
+            <span className={`verdict v-${detail.ai.verdict}`}>{detail.ai.verdict}</span>. {detail.ai.summary}
           </p>
         </div>
       )}
-      {pr && (detail.brief ?? busy) && (
-        <div className="brief">
-          <h4 className="d-head">
-            Brief{" "}
-            {detail.brief && (
-              <span className="quiet">
-                from {detail.brief.model}, {when(detail.brief.at)}
-                {detail.brief_stale ? ", before the latest commits" : ""}
-              </span>
-            )}
-          </h4>
-          {busy && <p className="quiet">Asking Claude. This takes 30 to 90 seconds; you can keep working.</p>}
-          {detail.brief && !busy && (
-            <>
-              <p className="brief-line">
-                <span className={`verdict v-${detail.brief.verdict}`}>{detail.brief.verdict}</span>
-                <span className={`risk r-${detail.brief.risk}`}>{detail.brief.risk} risk</span>
-              </p>
-              <p>{detail.brief.summary}</p>
-              {detail.brief.reasons.length > 0 && (
-                <ul className="reasons">
-                  {detail.brief.reasons.map((r) => (
-                    <li key={r}>{r}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
-      )}
       <div className="actions">
+        {pr && <KeyButton k="enter" label="Review" run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
         <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
         <KeyButton k="p" label={card.pinned ? "Unpin" : "Pin"} run={run} />
         <KeyButton k="c" label="Copy prompt" run={run} />
-        {pr && <KeyButton k="i" label={busy ? "Analyzing…" : detail.brief ? "Refresh brief" : "Brief"} disabled={busy} run={run} />}
         <KeyButton k="w" label={ctx.showSignals ? "Hide signals" : "Signals"} run={run} />
       </div>
       {ctx.showSignals && <pre className="signals">{JSON.stringify(s, null, 2)}</pre>}
@@ -210,11 +184,26 @@ function PlacementView({ p }: { p: Placement }) {
   );
 }
 
-function KeyButton({ k, label, run, disabled }: { k: string; label: string; run: (k: string) => void; disabled?: boolean }) {
+export function KeyButton({
+  k,
+  label,
+  run,
+  disabled,
+  title,
+  className,
+}: {
+  k: string;
+  label: string;
+  run: (k: string) => void;
+  disabled?: boolean;
+  title?: string;
+  className?: string;
+}) {
   return (
     <button
       type="button"
-      className="act"
+      className={cls("act", className)}
+      title={title}
       onClick={() => {
         run(k);
       }}

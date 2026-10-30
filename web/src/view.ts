@@ -1,8 +1,8 @@
-import type { Card, QueueView, SettingDef, SettingValue } from "../../src/types.ts";
+import type { Card, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
 import { shortRef } from "./format.ts";
 
-// One surface (the queue) plus Settings, whose sections include the rules editor.
-export type Route = { name: "queue" } | { name: "settings"; section: string };
+// One surface (the queue), a PR's review in its place, and Settings, whose sections include the rules editor.
+export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "settings"; section: string };
 export type GroupKey = "now" | "today" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
 export type Variant = "active" | "hidden" | "cleared" | "resolved";
 
@@ -22,10 +22,53 @@ export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] === undefined || m[1] === "" ? "github" : m[1] };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
+  const review = /^#\/review\/(.+)$/.exec(hash);
+  if (review) {
+    try {
+      return { name: "review", id: decodeURIComponent(review[1]!) };
+    } catch {
+      return { name: "queue" }; // a mangled link
+    }
+  }
   return { name: "queue" };
 }
 
-export const routeHash = (r: Route) => (r.name === "settings" ? `#/settings/${r.section}` : "#/");
+export const routeHash = (r: Route) =>
+  r.name === "settings" ? `#/settings/${r.section}` : r.name === "review" ? `#/review/${encodeURIComponent(r.id)}` : "#/";
+
+// ---------------------------------------------------------------- review
+
+// GitHub's file patch is only hunks; the diff renderer wants git's file headers too.
+export function filePatch(f: ReviewFile): string {
+  const before = f.previous_path ?? f.path;
+  const mode = f.status === "added" ? "new file mode 100644\n" : f.status === "removed" ? "deleted file mode 100644\n" : "";
+  const from = f.status === "added" ? "/dev/null" : `a/${before}`;
+  const to = f.status === "removed" ? "/dev/null" : `b/${f.path}`;
+  return `diff --git a/${before} b/${f.path}\n${mode}--- ${from}\n+++ ${to}\n${f.patch ?? ""}\n`;
+}
+
+// Notes in reading order: by file as listed, a file's own notes first, then down the diff.
+export function orderNotes(notes: ReviewNote[], files: ReviewFile[]): ReviewNote[] {
+  const at = new Map(files.map((f, i) => [f.path, i]));
+  return notes
+    .filter((n) => at.has(n.path))
+    .map((n, i) => ({ n, i }))
+    .sort((a, b) => at.get(a.n.path)! - at.get(b.n.path)! || a.n.line - b.n.line || a.i - b.i)
+    .map((x) => x.n);
+}
+
+// "src/planner/" and "plan.ts", so the name can stay whole while the folder truncates.
+export function splitPath(p: string): [string, string] {
+  const i = p.lastIndexOf("/");
+  return [p.slice(0, i + 1), p.slice(i + 1)];
+}
+
+// Which file the reader is in: the last one whose top has scrolled past the line under the top bar.
+export function currentFile(tops: number[], line: number): number {
+  let cur = 0;
+  for (const [i, top] of tops.entries()) if (top <= line) cur = i;
+  return cur;
+}
 
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());

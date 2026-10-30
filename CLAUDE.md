@@ -6,20 +6,21 @@ Product principle: minimize surfaces (ideally one) and maximize automation. New 
 
 ## Where a change goes
 
-| To change                                          | Edit                                                                                                                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A setting (Settings page, `desk settings`)         | One entry in `SETTINGS` in `src/settings.ts`; read it via `desk.settings["section.key"]`. The UI renders it from the schema                                        |
-| Boards, rules, spaces                              | `~/.review-desk/config.toml` (the Rules page), or the first-run template `defaultConfigText` in `src/config.ts`                                                    |
-| A field rules can use (`me.*`, `pr.*`, …)          | `FIELDS` and `analyze()` in `src/signals.ts`; any new GitHub data in `src/github/queries.ts` + `normalize.ts`                                                      |
-| What GitHub is asked                               | `src/github/` (read-only: the client refuses `mutation`)                                                                                                           |
-| How a source syncs, what counts as an event        | `src/connectors/` (`github.ts`: reconcile and the notifications feed; `github-events.ts`: the pure snapshot diff), the event log in `activity` (`src/store.ts`)    |
-| When an item counts as resolved                    | `resolution()` in `src/resolve.ts`                                                                                                                                 |
-| An HTTP route                                      | `src/server.ts` → a method on `Desk` in `src/desk.ts`                                                                                                              |
-| The queue / Settings UI                            | `web/src/components/` (Queue, CardRow, Settings, Rules), routes in `web/src/view.ts`, wiring in `web/src/App.tsx`, styles and theme tokens in `web/src/styles.css` |
-| The desktop app (window, tray, hotkey, login item) | `electron/main.ts`; pure helpers in `electron/lib.ts`                                                                                                              |
-| CLI / MCP                                          | `src/cli.ts` / `src/mcp.ts` (both talk HTTP to the running desk via `src/client.ts`)                                                                               |
-| Shared types                                       | `src/types.ts` (the web UI imports these too)                                                                                                                      |
-| The skill                                          | `skills/review-desk/SKILL.md`; connecting agents to the desk in `src/agents.ts`                                                                                    |
+| To change                                          | Edit                                                                                                                                                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A setting (Settings page, `desk settings`)         | One entry in `SETTINGS` in `src/settings.ts`; read it via `desk.settings["section.key"]`. The UI renders it from the schema                                          |
+| Boards, rules, spaces                              | `~/.review-desk/config.toml` (the Rules page), or the first-run template `defaultConfigText` in `src/config.ts`                                                      |
+| A field rules can use (`me.*`, `pr.*`, …)          | `FIELDS` and `analyze()` in `src/signals.ts`; any new GitHub data in `src/github/queries.ts` + `normalize.ts`                                                        |
+| What GitHub is asked                               | `src/github/` (the read client refuses `mutation`; the only write, approve, is in `src/github/write.ts`)                                                             |
+| How a source syncs, what counts as an event        | `src/connectors/` (`github.ts`: reconcile and the notifications feed; `github-events.ts`: the pure snapshot diff), the event log in `activity` (`src/store.ts`)      |
+| When an item counts as resolved                    | `resolution()` in `src/resolve.ts`                                                                                                                                   |
+| An HTTP route                                      | `src/server.ts` → a method on `Desk` in `src/desk.ts`                                                                                                                |
+| The queue / review / Settings UI                   | `web/src/components/` (Queue, CardRow, Review, Settings, Rules), routes in `web/src/view.ts`, wiring in `web/src/App.tsx`, styles and tokens in `web/src/styles.css` |
+| The AI review (prompt, agents, diff fetch)         | `src/review.ts`; kept per commit and run in the background by `Desk` in `src/desk.ts`                                                                                |
+| The desktop app (window, tray, hotkey, login item) | `electron/main.ts`; pure helpers in `electron/lib.ts`                                                                                                                |
+| CLI / MCP                                          | `src/cli.ts` / `src/mcp.ts` (both talk HTTP to the running desk via `src/client.ts`)                                                                                 |
+| Shared types                                       | `src/types.ts` (the web UI imports these too)                                                                                                                        |
+| The skill                                          | `skills/review-desk/SKILL.md`; connecting agents to the desk in `src/agents.ts`                                                                                      |
 
 ## Run
 
@@ -36,7 +37,7 @@ npm run format     # prettier --write
 
 ## Rules
 
-- Never write to GitHub: no mutations, no comments, no reviews.
+- The desk writes to GitHub only through `src/github/write.ts`, and only on an explicit user action in the UI (today: approve, `a a` in a PR's review). Its `ALLOWED` map is the complete list of mutations; adding one is a product decision, not a refactor. Every write is logged and recorded in the action log. Nothing an agent can call (MCP tools, the CLI) reaches it, and the read client in `src/github/client.ts` keeps refusing every `mutation`. Tests use a fake write client; live checks stub it (`startServer({ writer })`) and never touch real PRs.
 - Node runs the `.ts` files directly (type stripping): no enums, namespaces or parameter properties; relative imports end in `.ts`; type-only imports use `import type`.
 - Comments: one line, only for a non-obvious why.
 - Add or update a test in `test/` (or `web/test/`) for logic changes.

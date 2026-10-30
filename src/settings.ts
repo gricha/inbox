@@ -25,14 +25,18 @@ const ACCELERATOR =
   "([A-Za-z0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|Esc|Plus|[-=\\[\\];',./`\\\\])$";
 
 export const SECTIONS: SettingsSection[] = [
-  { id: "github", title: "GitHub", help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk never writes to GitHub." },
+  {
+    id: "github",
+    title: "GitHub",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR.",
+  },
   { id: "agent", title: "Agents" },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
   {
-    id: "analyze",
-    title: "Briefs",
-    help: "Pressing i on a PR asks Claude whether it needs you. It sends the diff to whichever account the claude CLI is logged in to.",
+    id: "review",
+    title: "AI review",
+    help: "Your agent (Agents above) reads a PR's diff and writes a summary, concerns and notes on the changes. It sends the diff to whichever account that CLI is logged in to.",
   },
   {
     id: "handoff",
@@ -126,18 +130,26 @@ export const SETTINGS = [
   { key: "app.open_at_login", section: "app", label: "Open at login", type: "boolean", default: false, desktop: true },
   { key: "app.menu_bar_count", section: "app", label: "Show counts in the menu bar", type: "boolean", default: true, desktop: true },
   {
+    key: "review.auto_ai",
+    section: "review",
+    label: "Review PRs in Now and Today ahead of time",
+    type: "boolean",
+    default: true,
+    help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: press i in a review to ask for one.",
+  },
+  {
     key: "analyze.command",
-    section: "analyze",
+    section: "review",
     label: "Claude command",
     type: "string",
     default: "claude",
     required: true,
-    help: "A name on PATH or an absolute path.",
+    help: "A name on PATH or an absolute path. Codex runs as codex from PATH.",
   },
   {
     key: "analyze.model",
-    section: "analyze",
-    label: "Model",
+    section: "review",
+    label: "Claude model",
     type: "string",
     default: "sonnet",
     required: true,

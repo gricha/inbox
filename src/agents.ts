@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "smol-toml";
-import { claudeSpawn } from "./analyze.ts";
+import { claudeSpawn } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
 const SKILL = fileURLToPath(new URL("../skills/review-desk", import.meta.url));

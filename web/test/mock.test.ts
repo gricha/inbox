@@ -15,8 +15,10 @@ import type {
   Overview,
   PreviewResult,
   QueueView,
+  ReviewView,
   SettingsView,
 } from "../../src/types.ts";
+import { parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -238,4 +240,32 @@ test("resolved items sit apart from the queue's groups and boards; items carry t
     o.connectors.map((c) => [c.id, c.name]),
     [["github", "GitHub"]],
   );
+});
+
+test("review view: canned diffs whose notes sit on real lines, and approve as a no-op", async () => {
+  const { data: v } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/api#4127")}`);
+  assert.equal(v.card.id, "acme/api#4127");
+  assert.deepEqual([v.item.additions, v.item.deletions, v.item.changed_files], [62, 7, 5], "the header matches the files");
+  assert.ok(v.ai && v.ai.notes.length > 2 && !v.ai_stale);
+  const { data: py } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/ml-pipeline#311")}`);
+  assert.ok(py.ai);
+  // parseReview moves a note it can't place to line 0; every canned note must stay where it was put.
+  assert.deepEqual(parseReview(v.ai, v.files).notes, v.ai.notes);
+  assert.deepEqual(parseReview(py.ai, py.files).notes, py.ai.notes);
+  for (const f of [...v.files, ...py.files]) {
+    for (const h of (f.patch ?? "").matchAll(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@.*\n((?:[ +-].*(?:\n|$))*)/gm)) {
+      const lines = h[3]!.split("\n").filter((l) => l !== "");
+      const counted = (c: string) => lines.filter((l) => l[0] === " " || l[0] === c).length;
+      assert.deepEqual([counted("-"), counted("+")], [Number(h[1] ?? 1), Number(h[2] ?? 1)], `${f.path}: ${h[0].split("\n")[0]}`);
+    }
+  }
+  assert.deepEqual(v.approve, { ok: true, reason: null });
+  const url = `/api/review/${encodeURIComponent("acme/api#4127")}/approve`;
+  assert.equal((await call("POST", url, { head_oid: "an-older-commit" })).status, 409, "only the commit you read");
+  const { data: ok } = await call<{ ok: boolean; url: string }>("POST", url, { head_oid: v.item.head_oid });
+  assert.equal(ok.ok, true);
+  const { data: again } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("api#4127")}`);
+  assert.equal(again.approve.reason, "you approved this commit");
+  const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, { head_oid: "x" });
+  assert.equal(mine.status, 409);
 });
