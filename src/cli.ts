@@ -35,7 +35,7 @@ const USAGE = `usage: desk <command>
   undo [seq]                          undo the last action (or the one with that number)
   sync                                sync with GitHub now (read only)
   prompt <ref>                        print the review hand-off prompt
-  brief <ref> [--force]               ask Claude whether the PR needs you (look/skim/skip); cached per commit
+  brief <ref> [--force]               the PR's AI review: look/skim/skip, summary, concerns; cached per commit
   config [path|check|edit]            where the config lives, validate it, or edit it
   settings [--json]                   every setting by section; * = changed from the default
   settings set <key> <value>          change one; lists: a,b or a JSON array; booleans: true/false, yes/no, on/off
@@ -490,12 +490,13 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
     return 0;
   },
   brief: async (x) => {
-    const b = (await api.analyze(x.args[0]!, !!x.opts.force)).brief;
+    const b = (await api.aiReview(x.args[0]!, !!x.opts.force)).ai;
     const clean = (t: string) => t.replaceAll(/\p{Cc}/gu, " ");
     const color = b.verdict === "look" ? x.c.red : b.verdict === "skim" ? x.c.yellow : x.c.dim;
     x.out(`${color(b.verdict.toUpperCase())} · risk ${b.risk} · ${b.model}`);
     x.out(clean(b.summary));
-    for (const r of b.reasons) x.out(`  - ${clean(r)}`);
+    for (const r of b.concerns) x.out(`  - ${clean(r)}`);
+    if (b.notes.length) x.out(x.c.dim(`${b.notes.length} notes on the code: open the PR in the desk to read them`));
     return 0;
   },
   mcp: async () => {

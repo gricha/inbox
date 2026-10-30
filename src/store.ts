@@ -194,6 +194,14 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
+  // GitHub writes (approve) go in the same log, stored as undone: the desk can't take them back.
+  logWrite(itemId: string, action: string, at: string): number {
+    const r = this.db
+      .prepare("INSERT INTO events (at, item_id, action, before, undone) VALUES (?, ?, ?, ?, 1)")
+      .run(at, itemId, action, JSON.stringify(this.state(itemId)));
+    return Number(r.lastInsertRowid);
+  }
+
   lastAction(seq?: number): ActionEvent | null {
     const r =
       seq === undefined
@@ -233,6 +241,16 @@ export class Store {
   prefixed<T>(prefix: string): Map<string, T> {
     const rows = this.db.prepare("SELECT key, value FROM kv WHERE key >= ? AND key < ?").all(prefix, prefix + "\uffff");
     return new Map(rows.map((r) => [(r.key as string).slice(prefix.length), JSON.parse(r.value as string) as T]));
+  }
+
+  // Drops `prefix<id>` rows whose id isn't in `keep`.
+  pruneKv(prefix: string, keep: Set<string>): void {
+    const rows = this.db.prepare("SELECT key FROM kv WHERE key >= ? AND key < ?").all(prefix, `${prefix}\uffff`);
+    const del = this.db.prepare("DELETE FROM kv WHERE key = ?");
+    for (const r of rows) {
+      const key = r.key as string;
+      if (!keep.has(key.slice(prefix.length))) del.run(key);
+    }
   }
 
   set(key: string, value: unknown): void {

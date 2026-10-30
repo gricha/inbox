@@ -2,12 +2,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { GitHub, SearchHit } from "./github/index.ts";
+import type { GitHubWriter } from "./github/write.ts";
 import type {
   Action,
   AgentStatus,
+  AiReview,
   BoardSummary,
   BoardView,
-  Brief,
   Bucket,
   Card,
   ConfigDoc,
@@ -21,8 +22,11 @@ import type {
   Placement,
   PreviewResult,
   QueueView,
+  ReviewFile,
+  ReviewView,
   SettingsView,
   SettingValue,
+  Signals,
   Status,
 } from "./types.ts";
 import { defaultConfigText, parseConfig, type LoadedConfig } from "./config.ts";
@@ -31,7 +35,7 @@ import { classify, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { analyzePr } from "./analyze.ts";
+import type { AgentOpts, PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import {
   checkSetting,
@@ -49,6 +53,8 @@ import {
 const HOUR = 3_600_000;
 const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 const MAX_QUERY = 256; // GitHub search rejects longer queries
+const AI_AT_ONCE = 2;
+const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 
 export class DeskError extends Error {
   status: number;
@@ -72,7 +78,7 @@ interface Snapshot {
   rev: number;
   at: number;
   entries: Map<string, Entry>;
-  briefs: Map<string, Brief>;
+  reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
 }
@@ -83,7 +89,13 @@ export interface DeskOptions {
   now?: () => Date;
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
-  analyzer?: typeof analyzePr;
+  review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
+  writer?: GitHubWriter; // approve; without it approving is off
+}
+
+export interface ReviewDeps {
+  fetchPr(item: Item): Promise<PrText>;
+  generate(item: Item, s: Signals, why: string, pr: PrText, opts: AgentOpts): Promise<AiReview>;
 }
 
 export class Desk {
@@ -100,7 +112,8 @@ export class Desk {
   now: () => Date;
   notifyFn: (title: string, body: string) => void;
   log: (msg: string) => void;
-  analyzer: typeof analyzePr;
+  review: ReviewDeps | null;
+  writer: GitHubWriter | null;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -118,7 +131,10 @@ export class Desk {
   tick: (() => Promise<void>) | null = null;
   snap: Snapshot | null = null;
   stopped = false;
-  analyzing = new Set<string>();
+  generating = new Map<string, Promise<AiReview>>();
+  aiErrors = new Map<string, { head_oid: string; message: string; at: number }>();
+  fetching = new Map<string, Promise<PrText>>();
+  approving = new Set<string>();
   contextError: string | null = null;
 
   constructor(opts: DeskOptions) {
@@ -131,7 +147,8 @@ export class Desk {
       ((m) => {
         console.error(`[desk] ${m}`);
       });
-    this.analyzer = opts.analyzer ?? analyzePr;
+    this.review = opts.review ?? null;
+    this.writer = opts.writer ?? null;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
     this.settingsPath = settingsPath(this.home);
@@ -239,6 +256,7 @@ export class Desk {
     if (this.configText) this.reloadConfig(true);
     else this.changed();
     if (this.tick && this.settings["github.poll_seconds"] !== poll) this.arm();
+    this.pumpAi();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -411,6 +429,10 @@ export class Desk {
       this.store.putItems(items, now.toISOString());
       this.store.touchItems([...hits.keys()], now.toISOString());
       this.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString());
+      const kept = new Set(this.store.itemMeta().keys());
+      this.store.pruneKv("review:", kept);
+      this.store.pruneKv("pr:", kept);
+      this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
       if (!this.store.get("baseline_at")) this.store.set("baseline_at", now.toISOString());
       const [firstError] = errors;
       if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
@@ -432,6 +454,7 @@ export class Desk {
   afterSync(): void {
     this.changed();
     this.notifyNewNow();
+    this.pumpAi();
     if (this.syncAgain) {
       this.syncAgain = false;
       void this.sync();
@@ -508,7 +531,7 @@ export class Desk {
         if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(id, p);
       }
     }
-    return { rev, at: now.getTime(), entries, briefs: this.store.prefixed<Brief>("brief:"), boards, best };
+    return { rev, at: now.getTime(), entries, reviews: this.store.prefixed<AiReview>("review:"), boards, best };
   }
 
   boardQueriesFor(loaded: LoadedConfig, board: CompiledBoard): string[] {
@@ -555,7 +578,7 @@ export class Desk {
       pinned: e.state.pinned,
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
-      verdict: snap.briefs.get(it.id)?.head_oid === it.head_oid ? snap.briefs.get(it.id)!.verdict : null,
+      verdict: snap.reviews.get(it.id)?.head_oid === it.head_oid ? snap.reviews.get(it.id)!.verdict : null,
     };
   }
 
@@ -711,33 +734,187 @@ export class Desk {
             : loaded.config.handoff.prompt,
         e.analysis.signals,
       ),
-      brief: snap.briefs.get(id) ?? null,
-      brief_stale: (snap.briefs.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
-      analyzing: this.analyzing.has(id),
+      ai: snap.reviews.get(id) ?? null,
+      ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
+      generating: this.generating.has(id),
     };
   }
 
-  async analyze(ref: string, force = false): Promise<Brief> {
-    const loaded = this.requireConfig();
-    const id = this.resolve(ref);
+  // ---------------------------------------------------------------- review
+
+  pr(ref: string): Entry {
+    this.requireConfig();
+    const e = this.snapshot().entries.get(this.resolve(ref))!;
+    if (e.item.kind !== "pr") throw new DeskError(400, `${e.item.id} is an issue; reviews are for pull requests`);
+    return e;
+  }
+
+  // GET /api/review/:id. Opening a PR asks for its AI review when auto_ai is on and there's none for this commit.
+  async reviewView(ref: string): Promise<ReviewView> {
+    const id = this.pr(ref).item.id;
+    let files: ReviewFile[] = [];
+    let filesError: string | null = null;
+    try {
+      files = (await this.prText(id)).files;
+    } catch (err) {
+      filesError = (err as Error).message;
+    }
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
-    if (e.item.kind !== "pr") throw new DeskError(400, "briefs are for pull requests");
-    const cached = snap.briefs.get(id);
+    if (this.settings["review.auto_ai"] && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
+    const d = this.item(id);
+    const err = this.aiErrors.get(id);
+    return {
+      card: d.card,
+      item: d.item,
+      handoff_prompt: d.handoff_prompt,
+      files,
+      files_error: filesError,
+      ai: d.ai,
+      ai_stale: d.ai_stale,
+      ai_error: err?.head_oid === e.item.head_oid && !this.generating.has(id) ? err.message : null,
+      generating: this.generating.has(id),
+      approve: this.canApprove(e),
+    };
+  }
+
+  // The changed files and description, kept per head commit.
+  prText(id: string): Promise<PrText> {
+    const review = this.review;
+    if (!review) return Promise.reject(new Error("diffs aren't available in this desk"));
+    const item = this.snapshot().entries.get(id)!.item;
+    const cached = this.store.get(`pr:${id}`) as (PrText & { head_oid: string }) | null;
+    if (cached?.head_oid === item.head_oid) return Promise.resolve(cached);
+    const running = this.fetching.get(id);
+    if (running) return running;
+    const p = review
+      .fetchPr(item)
+      .then((t) => {
+        if (!this.stopped) this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
+        return t;
+      })
+      .finally(() => {
+        this.fetching.delete(id);
+      });
+    this.fetching.set(id, p);
+    return p;
+  }
+
+  // POST /api/review/:id/ai (and desk_brief, `desk brief`): the cached review for this commit unless `force`.
+  async aiReview(ref: string, force = false): Promise<AiReview> {
+    const e = this.pr(ref);
+    const cached = this.snapshot().reviews.get(e.item.id);
     if (cached && cached.head_oid === e.item.head_oid && !force) return cached;
-    if (this.analyzing.has(id)) throw new DeskError(409, `already analyzing ${id}`);
-    this.analyzing.add(id);
-    this.changed();
     try {
-      const brief = await this.analyzer(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", loaded.config.analyze);
-      this.store.set(`brief:${id}`, brief);
-      return brief;
+      return await this.generate(e.item.id);
     } catch (err) {
       throw new DeskError(502, (err as Error).message);
-    } finally {
-      this.analyzing.delete(id);
-      this.changed();
     }
+  }
+
+  // One run per PR at a time; asking again joins it.
+  generate(id: string): Promise<AiReview> {
+    const running = this.generating.get(id);
+    if (running) return running;
+    const p = this.runAi(id);
+    this.generating.set(id, p);
+    this.changed();
+    // Awaits p before any caller can, so the slot is free by the time they resume.
+    void (async () => {
+      let ok = true;
+      try {
+        await p;
+      } catch {
+        ok = false;
+      }
+      this.generating.delete(id);
+      if (this.stopped) return;
+      this.changed();
+      if (ok) this.pumpAi(); // after a failure, wait for the next sync
+    })();
+    return p;
+  }
+
+  async runAi(id: string): Promise<AiReview> {
+    const snap = this.snapshot();
+    const e = snap.entries.get(id)!;
+    try {
+      if (!this.review) throw new Error("AI review isn't available in this desk");
+      const pr = await this.prText(id);
+      const s = this.settings;
+      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, {
+        driver: s["agent.driver"],
+        command: s["analyze.command"],
+        model: s["analyze.model"],
+      });
+      if (this.stopped) return ai;
+      this.store.set(`review:${id}`, ai);
+      this.aiErrors.delete(id);
+      this.log(`AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes`);
+      return ai;
+    } catch (err) {
+      this.aiErrors.set(id, { head_oid: e.item.head_oid, message: (err as Error).message, at: Date.now() });
+      this.log(`AI review of ${id} failed: ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
+  // Someone else's open PR with no AI review of its head yet, and no recent failure on it.
+  wantsAi(e: Entry, snap: Snapshot): boolean {
+    const it = e.item;
+    if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author || this.generating.has(it.id)) return false;
+    if (snap.reviews.get(it.id)?.head_oid === it.head_oid) return false;
+    const err = this.aiErrors.get(it.id);
+    return !(err && err.head_oid === it.head_oid && Date.now() - err.at < AI_RETRY);
+  }
+
+  // Background AI reviews for what's in Now and Today, a couple at a time. After a failure it waits for the next sync.
+  pumpAi(): void {
+    if (!this.review || this.stopped || !this.loaded || !this.settings["review.auto_ai"] || this.settings["agent.driver"] === "none")
+      return;
+    if (this.generating.size >= AI_AT_ONCE) return;
+    const f = this.focus();
+    const snap = this.snapshot();
+    for (const c of [...f.sections.now, ...f.sections.today]) {
+      if (this.generating.size >= AI_AT_ONCE) return;
+      const e = snap.entries.get(c.id);
+      if (e && this.wantsAi(e, snap)) void this.generate(c.id).catch(() => {});
+    }
+  }
+
+  canApprove(e: Entry): ReviewView["approve"] {
+    const it = e.item;
+    const me = this.me().toLowerCase();
+    const no = (reason: string) => ({ ok: false, reason });
+    if (e.analysis.signals.me.author) return no("it's your PR");
+    if (it.state !== "open") return no(`it's ${it.state}`);
+    const mine = it.reviews.findLast((r) => r.author.toLowerCase() === me);
+    if (mine?.state === "approved" && mine.commit === it.head_oid) return no("you approved this commit");
+    if (!this.writer) return no("approving isn't available in this desk");
+    return { ok: true, reason: null };
+  }
+
+  // POST /api/review/:id/approve: the desk's one GitHub write, on your keypress in the review view.
+  async approve(ref: string, body?: string): Promise<{ url: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const can = this.canApprove(e);
+    if (!can.ok) throw new DeskError(409, `can't approve ${id}: ${can.reason}`);
+    if (this.approving.has(id)) throw new DeskError(409, `already approving ${id}`);
+    this.approving.add(id);
+    let url: string;
+    try {
+      ({ url } = await this.writer!.approve(e.item.node_id, body));
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't take the approval: ${(err as Error).message}`);
+    } finally {
+      this.approving.delete(id);
+    }
+    this.store.logWrite(id, "approve", this.now().toISOString());
+    this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
+    this.changed();
+    void this.sync(); // so the approval shows and the item can resolve
+    return { url };
   }
 
   // ---------------------------------------------------------------- actions

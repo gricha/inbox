@@ -163,7 +163,7 @@ export interface Config {
   signals: { close_collaborator_min: number; bots: string[]; my_repos: string[] };
   notify: { enabled: boolean; quiet: string }; // quiet = "19:00-09:00", "" for none
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
-  analyze: { command: string; model: string }; // `i`: on-demand brief via the claude CLI
+  analyze: { command: string; model: string }; // the AI review's claude command and model
   spaces: SpaceConfig[];
   boards: BoardConfig[];
 }
@@ -304,7 +304,7 @@ export interface Card {
   pinned: boolean;
   status: Status;
   snooze_until: string | null;
-  verdict: Brief["verdict"] | null; // from an LLM brief, if you asked for one
+  verdict: AiReview["verdict"] | null; // from the AI review of the current commit
 }
 
 export interface BoardSummary {
@@ -345,13 +345,33 @@ export interface QueueView {
   cleared: Card[]; // done, snoozed, muted
 }
 
-export interface Brief {
+// One changed file, from GitHub's pulls/{n}/files.
+export interface ReviewFile {
+  path: string;
+  previous_path: string | null; // renames
+  status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
+  additions: number;
+  deletions: number;
+  patch: string | null; // unified hunks; null for binary files and diffs GitHub won't show
+}
+
+// A short "what this does / why it matters" note on a line of the diff; line 0 is about the whole file.
+export interface ReviewNote {
+  path: string;
+  line: number;
+  side: "new" | "old"; // old = a removed line, numbered in the old file
+  body: string;
+}
+
+// Written by the configured agent (Settings → Agents) from the diff. Untrusted: the diff came from GitHub.
+export interface AiReview {
   verdict: "look" | "skim" | "skip";
   risk: "low" | "medium" | "high";
   summary: string;
-  reasons: string[];
-  model: string;
+  concerns: string[];
+  notes: ReviewNote[];
   head_oid: string; // the commit it read; a newer push makes it stale
+  model: string;
   at: string;
 }
 
@@ -362,9 +382,23 @@ export interface ItemDetail {
   placements: Placement[];
   state: ItemState;
   handoff_prompt: string;
-  brief: Brief | null;
-  brief_stale: boolean;
-  analyzing: boolean;
+  ai: AiReview | null;
+  ai_stale: boolean;
+  generating: boolean;
+}
+
+// GET /api/review/:id: one PR's review view.
+export interface ReviewView {
+  card: Card;
+  item: Item;
+  handoff_prompt: string;
+  files: ReviewFile[];
+  files_error: string | null; // the diff couldn't be fetched
+  ai: AiReview | null; // the latest, even if stale
+  ai_stale: boolean;
+  ai_error: string | null; // the last failed attempt on this commit
+  generating: boolean;
+  approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
 }
 
 // GET /api/config

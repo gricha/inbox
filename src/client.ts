@@ -2,8 +2,8 @@
 
 import type {
   Action,
+  AiReview,
   BoardView,
-  Brief,
   ConfigDoc,
   ConfigError,
   FieldDoc,
@@ -108,7 +108,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     putSettings: (patch: SettingsPatch) =>
       call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
     status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
-    analyze: (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }, 240_000),
+    aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${q(id)}/ai`, { force }, 360_000),
     health: () => call<{ ok: true; version: string }>("GET", "/health"),
   };
 }
@@ -129,6 +129,6 @@ export const {
   settings,
   putSettings,
   status,
-  analyze,
+  aiReview,
   health,
 } = createClient();

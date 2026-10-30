@@ -132,6 +132,27 @@ test("API round trip: overview, board, item, act, undo, status", async () => {
   t.cleanup();
 });
 
+// This desk has no diff reader, agent or write client, so every review route answers without touching GitHub or an agent.
+test("review routes take the PR's id encoded in one segment or with its slash", async () => {
+  const t = await setup();
+  const post = (p: string, body: unknown) =>
+    t.req(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  for (const p of ["/api/review/acme%2Fapi%237", "/api/review/acme/api%237", "/api/review/api%237"]) {
+    const v = await t.json(p);
+    assert.equal(v.card.id, "acme/api#7", p);
+    assert.equal(v.files_error, "diffs aren't available in this desk");
+    assert.deepEqual(v.approve, { ok: false, reason: "approving isn't available in this desk" });
+  }
+  const ai = await post("/api/review/acme%2Fapi%237/ai", { force: true });
+  assert.equal(ai.status, 502);
+  assert.match(((await ai.json()) as { error: string }).error, /AI review isn't available/);
+  const approve = await post("/api/review/acme/api%237/approve", {});
+  assert.equal(approve.status, 409);
+  assert.equal((await post("/api/review/acme%2Fapi%237/approve", { body: 5 })).status, 400);
+  assert.equal((await t.req("/api/review/acme%2Fapi%2399")).status, 404);
+  t.cleanup();
+});
+
 test("errors: unknown board/item, bad action", async () => {
   const t = await setup();
   assert.equal((await t.req("/api/boards/nope")).status, 404);

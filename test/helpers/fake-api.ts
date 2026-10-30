@@ -127,9 +127,9 @@ function detail(c: Card): ItemDetail {
     ],
     state: state(c.id),
     handoff_prompt: `Review ${c.url}\nTitle: ${c.title}`,
-    brief: null,
-    brief_stale: false,
-    analyzing: false,
+    ai: null,
+    ai_stale: false,
+    generating: false,
   };
 }
 

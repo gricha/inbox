@@ -9,9 +9,11 @@ import { serve } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
+import { createWriter, type GitHubWriter } from "./github/write.ts";
 import { Desk, DeskError } from "./desk.ts";
 import { createMcpServer } from "./mcp.ts";
 import { openUrl } from "./notify.ts";
+import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
 import type { Action } from "./types.ts";
 
@@ -89,11 +91,21 @@ export function createApp(desk: Desk, port: number): Hono {
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
     return c.json({ ok: true, ...desk.act(body.id, body.action, body.until) });
   });
-  app.post("/api/analyze", async (c) => {
+  // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
+  app.get("/api/review/:id{.+}", async (c) => {
     ready();
-    const { id, force } = await c.req.json<{ id?: string; force?: boolean }>();
-    if (!id) throw new DeskError(400, "need { id }");
-    return c.json({ ok: true, brief: await desk.analyze(id, force === true) });
+    return c.json(await desk.reviewView(c.req.param("id")));
+  });
+  app.post("/api/review/:id{.+}/ai", async (c) => {
+    ready();
+    const { force } = await c.req.json<{ force?: boolean }>().catch((): { force?: boolean } => ({}));
+    return c.json({ ok: true, ai: await desk.aiReview(c.req.param("id"), force === true) });
+  });
+  app.post("/api/review/:id{.+}/approve", async (c) => {
+    ready();
+    const { body } = await c.req.json<{ body?: unknown }>().catch((): { body?: unknown } => ({}));
+    if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
+    return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), body)) });
   });
   app.post("/api/undo", async (c) => {
     ready();
@@ -180,6 +192,7 @@ export async function startServer(
     home?: string;
     notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
     log?: (msg: string) => void;
+    writer?: GitHubWriter; // a stand-in for live checks that must not approve anything
   } = {},
 ): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);
@@ -189,7 +202,14 @@ export async function startServer(
     ((m: string) => {
       console.error(`${new Date().toISOString()} ${m}`);
     });
-  const desk = new Desk({ home, github: createGitHub({ log }), log, notify: opts.notify });
+  const desk = new Desk({
+    home,
+    github: createGitHub({ log }),
+    log,
+    notify: opts.notify,
+    review: { fetchPr, generate: generateReview },
+    writer: opts.writer ?? createWriter({ log }),
+  });
   const app = createApp(desk, port);
   const url = `http://localhost:${port}`;
 
