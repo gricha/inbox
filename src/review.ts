@@ -278,9 +278,11 @@ export function askClaude(prompt: string, opts: { command: string; model: string
   );
 }
 
-// claude's error text, with the fix for an expired or missing login.
-export const claudeError = (msg: string) =>
-  /401|authenticate|log ?in/i.test(msg) ? `claude CLI isn't logged in (${msg}). Run: claude auth login` : msg;
+// claude's error text, with the fix for an expired or missing login. An API error's JSON body comes down to its message.
+export function claudeError(raw: string): string {
+  const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");
+  return /401|authenticate|log ?in/i.test(msg) ? `claude CLI isn't logged in (${msg.replace(/\.$/, "")}). Run: claude auth login` : msg;
+}
 
 export function claudeEnvelope(out: string): unknown {
   const env = JSON.parse(out) as { is_error?: boolean; result?: string; structured_output?: unknown };

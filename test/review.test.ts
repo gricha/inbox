@@ -11,6 +11,7 @@ import {
   askCodex,
   buildPrompt,
   claudeEnvelope,
+  claudeError,
   claudeSpawn,
   numberPatch,
   parseFiles,
@@ -118,6 +119,17 @@ test("claude's envelope: structured output, JSON in the result, and login errors
     () => claudeEnvelope(JSON.stringify({ is_error: true, result: "API Error: 401 OAuth access token has expired" })),
     /claude auth login/,
   );
+  // The real 401: its JSON body shows as its message, not as JSON on a status line.
+  const real =
+    'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}';
+  assert.throws(() => claudeEnvelope(JSON.stringify({ is_error: true, result: real })), {
+    message: "claude CLI isn't logged in (Failed to authenticate. API Error: 401 OAuth token has expired). Run: claude auth login",
+  });
+  assert.equal(
+    claudeError("Not logged in · Please run /login"),
+    "claude CLI isn't logged in (Not logged in · Please run /login). Run: claude auth login",
+  );
+  assert.equal(claudeError("Overloaded"), "Overloaded");
 });
 
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {
