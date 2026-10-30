@@ -8,6 +8,8 @@ test("default configs parse cleanly", () => {
     assert.deepEqual(errors, []);
     assert.ok(loaded!.config.boards.length >= 3);
     for (const b of loaded!.config.boards) assert.ok(loaded!.config.spaces.some((s) => s.id === b.space));
+    // Caps apply after the judge, so a board without them would let the policy fill Now.
+    for (const b of loaded!.config.boards) assert.equal(b.caps?.now, 3, b.id);
   }
   const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
   assert.equal(cfg.spaces.find((s) => s.id === "personal")!.scope, "-org:acme");
