@@ -8,6 +8,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { DeskApiError, DeskDownError } from "./client.ts";
+import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { openCommand } from "./notify.ts";
 import { effective, readSettings, settingDef, settingsPath } from "./settings.ts";
@@ -226,6 +227,7 @@ async function show(x: Ctx): Promise<number> {
       x.out(`  ${mark} ${(t.index < 0 ? "filter" : `#${t.index}`).padEnd(6)} ${t.when}${t.error ? x.c.red(`  ${t.error}`) : ""}`);
     }
     if (p.rule === null) x.out(x.c.dim(`  → default`));
+    if (p.judge) x.out(`  → ${plain(judgeText(p.judge))}`);
   }
   return 0;
 }

@@ -12,8 +12,9 @@ import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
-async function setup() {
+async function setup(settings?: Record<string, unknown>) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-srv-"));
+  if (settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(settings));
   const items = [
     makeItem({
       number: 7,
@@ -82,10 +83,13 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     assert.deepEqual((await client.listTools()).tools.map((x) => x.name).sort(), [
       "desk_act",
       "desk_brief",
+      "desk_config",
       "desk_events",
       "desk_item",
       "desk_list",
+      "desk_note",
       "desk_overview",
+      "desk_policy",
       "desk_sync",
       "desk_undo",
     ]);
@@ -216,7 +220,90 @@ test("config preview and save", async () => {
   assert.equal(put.ok, true);
   const fields = await t.json("/api/fields");
   assert.ok(fields.some((f: { path: string }) => f.path === "me.requested_direct"));
+  const put2 = (base: string) =>
+    t.req("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: cfg.text, base }),
+    });
+  assert.equal((await put2(cfg.hash)).status, 200, "the hash from GET works as base");
+  assert.equal((await put2("0123456789abcdef")).status, 409);
   t.cleanup();
+});
+
+test("policy: empty by default, saved to policy.md with the hash as base, 409 when stale", async (c) => {
+  // No agent: the judge must not start a real one here (test/judge.test.ts runs it against a fake).
+  const t = await setup({ "agent.driver": "none" });
+  c.after(t.cleanup);
+  const put = (body: unknown) =>
+    t.req("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const p = await t.json("/api/policy");
+  assert.equal(p.text, "");
+  assert.equal(p.path, path.join(t.desk.home, "policy.md"));
+  assert.deepEqual([p.judge.state, p.judge.off_reason], ["off", "there's no policy yet"]);
+  const saved = (await (await put({ text: "Bot PRs are FYI.\n", base: p.hash })).json()) as { ok: boolean; hash: string };
+  assert.equal(saved.ok, true);
+  assert.equal(fs.readFileSync(path.join(t.desk.home, "policy.md"), "utf8"), "Bot PRs are FYI.\n");
+  const again = await t.json("/api/policy");
+  assert.deepEqual([again.text, again.hash], ["Bot PRs are FYI.\n", saved.hash]);
+  assert.equal(again.judge.off_reason, "there's no agent: pick one under Agents");
+  assert.equal((await put({ text: "x", base: p.hash })).status, 409, "the old hash is stale now");
+  assert.equal((await put({ base: saved.hash })).status, 400);
+  assert.equal((await put({ text: "x".repeat(20_001), base: saved.hash })).status, 400);
+});
+
+test("the coordinator's MCP calls carry X-Desk-Agent: its actions and notes land in its log, with reasons and undo", async () => {
+  const t = await setup();
+  const srv = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const s = serve({ fetch: t.app.fetch, port: 0, hostname: "127.0.0.1" }, () => {
+      resolve(s);
+    });
+  });
+  const { port } = srv.address() as AddressInfo;
+  const url = new URL(`http://127.0.0.1:${port}/mcp`);
+  const coordinator = new Client({ name: "coordinator", version: "0" });
+  await coordinator.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { "X-Desk-Agent": "coordinator" } } }));
+  const other = new Client({ name: "someone", version: "0" });
+  await other.connect(new StreamableHTTPClientTransport(url));
+  try {
+    await coordinator.callTool({ name: "desk_act", arguments: { ref: "api#7", action: "snooze", until: "3h", reason: "waiting on CI" } });
+    await coordinator.callTool({ name: "desk_note", arguments: { text: "Snoozed api#7 until CI finishes" } });
+    await other.callTool({ name: "desk_act", arguments: { ref: "api#7", action: "pin", reason: "not the coordinator" } });
+    const view = await t.json("/api/coordinator");
+    assert.deepEqual(
+      view.log.map((e: { kind: string; text: string; item_id: string | null; action: string | null; bucket: string | null }) => [
+        e.kind,
+        e.text,
+        e.item_id,
+        e.action,
+        e.bucket,
+      ]),
+      [
+        ["note", "Snoozed api#7 until CI finishes", null, null, null],
+        ["act", "waiting on CI", "acme/api#7", "snooze", "now"],
+      ],
+    );
+    const ov = await t.json("/api/overview");
+    assert.deepEqual(ov.coordinator.acted.counts, { snooze: 1 });
+    assert.deepEqual(ov.coordinator.acted.buckets, ["now"]);
+    assert.equal(ov.coordinator.state, "off", "no MCP URL given to this desk, so its runs are off; its tools still work");
+
+    // Undo the pin first (a later action on the same item), then the coordinator's snooze.
+    await t.json("/api/undo", { method: "POST" });
+    await t.json("/api/undo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seq: view.log[1].undo_seq }),
+    });
+    const after = await t.json("/api/coordinator");
+    assert.equal(after.log[1].undone, true);
+    assert.equal((await t.json("/api/overview")).coordinator.acted, null, "undone actions don't count");
+  } finally {
+    await coordinator.close();
+    await other.close();
+    srv.close();
+    t.cleanup();
+  }
 });
 
 test("opening a URL and notifying per platform, all as argv", () => {

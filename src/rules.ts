@@ -1,5 +1,5 @@
 // Places items on a board: filter, first matching rule, caps, sort.
-import type { BoardConfig, Bucket, ConfigError, Placement, Signals, TraceStep } from "./types.ts";
+import type { BoardConfig, Bucket, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
 
 export interface CompiledBoard {
@@ -50,23 +50,35 @@ function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
   }
 }
 
-function place(board: CompiledBoard, s: Signals, kept = false): Placement | null {
+// The policy judge's answer for an item, while judging is on.
+export type JudgeLookup = (id: string) => JudgeStep;
+
+function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement | null {
   const trace: TraceStep[] = [];
   const cfg = board.config;
-  if (board.filter && cfg.filter && !kept) {
+  const s = e.signals;
+  if (board.filter && cfg.filter && !e.kept) {
     const r = truthy(board.filter, s);
     trace.push({ index: -1, when: cfg.filter, ...r });
     if (!r.matched) return null;
   }
+  // The gray zone: the board default, unless the judge placed it. Its empty why (the policy says nothing) keeps the rules'.
+  const gray = (rule: number | null, why: string): Placement => {
+    const p: Placement = { board: cfg.id, bucket: cfg.default, rule_bucket: cfg.default, rule, why: renderTemplate(why, s), trace };
+    if (!judge) return p;
+    const j = judge(e.id);
+    if (j.bucket === null) return { ...p, judge: j };
+    return { ...p, bucket: j.bucket, rule_bucket: j.bucket, why: j.why.trim() ? j.why : p.why, judge: j };
+  };
   for (const [i, c] of board.rules.entries()) {
     const rule = cfg.rules[i]!; // board.rules is compiled 1:1 from cfg.rules
     const r = truthy(c, s);
     trace.push({ index: i, when: rule.when, ...r });
-    if (r.matched) {
-      return { board: cfg.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: renderTemplate(rule.why ?? "", s), trace };
-    }
+    if (!r.matched) continue;
+    if (rule.bucket === "judge") return gray(i, rule.why?.trim() ? rule.why : cfg.default_why);
+    return { board: cfg.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: renderTemplate(rule.why ?? "", s), trace };
   }
-  return { board: cfg.id, bucket: cfg.default, rule_bucket: cfg.default, rule: null, why: renderTemplate(cfg.default_why, s), trace };
+  return gray(null, cfg.default_why);
 }
 
 const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
@@ -75,13 +87,14 @@ const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
   newest: (a, b) => b.created_at.localeCompare(a.created_at),
 };
 
-export function classify(board: CompiledBoard, entries: Entry[]): BoardResult {
+// Caps apply after the judge: a judged item counts like any other.
+export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup): BoardResult {
   const cfg = board.config;
   const placements = new Map<string, Placement>();
   const byBucket: Record<Bucket, Entry[]> = { now: [], today: [], later: [], fyi: [], hide: [] };
   const inactive: string[] = [];
   for (const e of entries) {
-    const p = place(board, e.signals, e.kept);
+    const p = place(board, e, judge);
     if (!p) continue;
     placements.set(e.id, p);
     if (e.active) byBucket[p.bucket].push(e);

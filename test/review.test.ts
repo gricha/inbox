@@ -175,7 +175,7 @@ test(
       "codex",
       `out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; echo '{"summary":"from codex","notes":[]}' > "$out"`,
     );
-    assert.deepEqual(await askCodex("PROMPT", f.bin), { summary: "from codex", notes: [] });
+    assert.deepEqual(await askCodex("PROMPT", { command: f.bin }), { summary: "from codex", notes: [] });
     const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
     assert.equal(args[0], "exec");
     for (const a of ["--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--output-schema", "-o"])

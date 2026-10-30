@@ -61,16 +61,33 @@ export function claudeSpawn(command: string, args: string[], platform: NodeJS.Pl
   return { file: line, args: [], shell: true };
 }
 
+export interface RunOpts {
+  input?: string;
+  cwd?: string;
+  timeout: number;
+  stdoutOnError?: boolean;
+  missing: string;
+  signal?: AbortSignal; // aborting kills the process
+}
+
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
-function run(s: Spawn, opts: { input?: string; cwd?: string; timeout: number; stdoutOnError?: boolean; missing: string }): Promise<string> {
+export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       s.file,
       s.args,
-      { cwd: opts.cwd, timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024, shell: s.shell },
+      { cwd: opts.cwd, timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024, shell: s.shell, signal: opts.signal },
       (err, stdout, stderr) => {
-        if (!err || (opts.stdoutOnError && stdout)) {
+        if (!err || (opts.stdoutOnError && stdout && !err.killed)) {
           resolve(stdout);
+          return;
+        }
+        if (opts.signal?.aborted) {
+          reject(new Error("stopped"));
+          return;
+        }
+        if (err.killed) {
+          reject(new Error(`no answer in ${Math.round(opts.timeout / 60_000)} minutes, so it was stopped`));
           return;
         }
         // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
@@ -94,7 +111,7 @@ export interface PrText {
 export async function fetchPr(item: Item): Promise<PrText> {
   const [owner, name] = item.repo.split("/");
   const pr = `repos/${owner}/${name}/pulls/${item.number}`;
-  const gh = (args: string[]) => run({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
+  const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
   const fields = ".[] | {filename, previous_filename, status, additions, deletions, patch}";
   const [files, body] = await Promise.all([
     gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", fields]),
@@ -222,7 +239,16 @@ function room<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   });
 }
 
-export function askClaude(prompt: string, opts: { command: string; model: string }): Promise<unknown> {
+// The answer's shape, and a signal that kills the run (the desk stopping).
+export interface AskOpts {
+  schema?: object;
+  signal?: AbortSignal;
+}
+
+export const claudeMissing = (command: string) =>
+  `claude command "${command}" not found: set its full path under Settings → AI review → Claude command`;
+
+export function askClaude(prompt: string, opts: { command: string; model: string } & AskOpts): Promise<unknown> {
   const args = [
     "-p",
     "--output-format",
@@ -235,20 +261,30 @@ export function askClaude(prompt: string, opts: { command: string; model: string
     "--strict-mcp-config",
     "--no-session-persistence",
     "--json-schema",
-    JSON.stringify(SCHEMA),
+    JSON.stringify(opts.schema ?? SCHEMA),
   ];
-  const missing = `claude command "${opts.command}" not found: set its full path under Settings → AI review → Claude command`;
+  const missing = claudeMissing(opts.command);
   return room(async (cwd) =>
-    claudeEnvelope(await run(claudeSpawn(opts.command, args), { input: prompt, cwd, timeout: TIMEOUT, stdoutOnError: true, missing })),
+    claudeEnvelope(
+      await runCommand(claudeSpawn(opts.command, args), {
+        input: prompt,
+        cwd,
+        timeout: TIMEOUT,
+        stdoutOnError: true,
+        missing,
+        signal: opts.signal,
+      }),
+    ),
   );
 }
 
+// claude's error text, with the fix for an expired or missing login.
+export const claudeError = (msg: string) =>
+  /401|authenticate|log ?in/i.test(msg) ? `claude CLI isn't logged in (${msg}). Run: claude auth login` : msg;
+
 export function claudeEnvelope(out: string): unknown {
   const env = JSON.parse(out) as { is_error?: boolean; result?: string; structured_output?: unknown };
-  if (env.is_error) {
-    const msg = env.result ?? "claude failed";
-    throw new Error(/401|authenticate|log ?in/i.test(msg) ? `claude CLI isn't logged in (${msg}). Run: claude auth login` : msg);
-  }
+  if (env.is_error) throw new Error(claudeError(env.result ?? "claude failed"));
   return env.structured_output ?? JSON.parse(/\{[\s\S]*\}/.exec(env.result ?? "")?.[0] ?? "{}");
 }
 
@@ -259,9 +295,10 @@ const CODEX_NO_TOOLS = ["shell_tool", "unified_exec", "apps", "plugins", "browse
 ]);
 
 // No user config: that's where MCP servers (the desk's own among them) and tools live. Sandboxed read-only in an empty dir.
-export function askCodex(prompt: string, command = "codex"): Promise<unknown> {
+export function askCodex(prompt: string, opts: { command?: string } & AskOpts = {}): Promise<unknown> {
+  const command = opts.command ?? "codex";
   return room(async (dir) => {
-    fs.writeFileSync(path.join(dir, "schema.json"), JSON.stringify(SCHEMA));
+    fs.writeFileSync(path.join(dir, "schema.json"), JSON.stringify(opts.schema ?? SCHEMA));
     const out = path.join(dir, "out.json");
     const args = [
       "exec",
@@ -285,8 +322,8 @@ export function askCodex(prompt: string, command = "codex"): Promise<unknown> {
       "-",
     ];
     const missing = `codex isn't on PATH: install Codex, or pick Claude Code under Settings → Agents`;
-    await run(claudeSpawn(command, args), { input: prompt, cwd: dir, timeout: TIMEOUT, missing });
-    if (!fs.existsSync(out)) throw new Error("codex wrote no review");
+    await runCommand(claudeSpawn(command, args), { input: prompt, cwd: dir, timeout: TIMEOUT, missing, signal: opts.signal });
+    if (!fs.existsSync(out)) throw new Error("codex wrote no answer");
     return JSON.parse(fs.readFileSync(out, "utf8")) as unknown;
   });
 }
@@ -295,7 +332,7 @@ export async function generateReview(item: Item, s: Signals, why: string, pr: Pr
   if (opts.driver !== "claude-code" && opts.driver !== "codex")
     throw new Error("AI review is off: pick Claude Code or Codex under Settings → Agents");
   const prompt = buildPrompt(item, s, why, pr);
-  const raw = opts.driver === "codex" ? await askCodex(prompt) : await askClaude(prompt, opts);
+  const raw = opts.driver === "codex" ? await askCodex(prompt) : await askClaude(prompt, { command: opts.command, model: opts.model });
   return {
     ...parseReview(raw, pr.files),
     head_oid: item.head_oid,

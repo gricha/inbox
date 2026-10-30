@@ -9,10 +9,12 @@ import type {
   AgentStatus,
   BoardView,
   ConfigError,
+  CoordinatorView,
   FieldDoc,
   FocusView,
   ItemDetail,
   Overview,
+  PolicyDoc,
   PreviewResult,
   QueueView,
   ReviewView,
@@ -268,4 +270,36 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   assert.equal(again.approve.reason, "you approved this commit");
   const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, { head_oid: "x" });
   assert.equal(mine.status, 409);
+});
+
+test("policy and coordinator: a policy with its judge, the coordinator's log, and what it did for the top bar", async () => {
+  const { data: p } = await call<PolicyDoc>("GET", "/api/policy");
+  assert.ok(p.text.trim());
+  assert.equal(p.judge.state, "idle");
+  assert.equal((await call("PUT", "/api/policy", { text: "x", base: "stale" })).status, 409);
+  const { data: saved } = await call<{ ok: boolean; hash: string }>("PUT", "/api/policy", { text: p.text, base: p.hash });
+  assert.notEqual(saved.hash, p.hash);
+
+  const { data: o } = await call<Overview>("GET", "/api/overview");
+  assert.deepEqual(o.coordinator.acted?.counts, { snooze: 3 });
+  assert.deepEqual(o.coordinator.acted?.buckets, ["fyi", "fyi", "fyi"]);
+  const { data: v } = await call<CoordinatorView>("GET", "/api/coordinator");
+  assert.equal(v.status.state, "idle");
+  assert.ok(v.status.command?.includes(`--resume ${v.status.session_id}`));
+  const acts = v.log.filter((e) => e.kind === "act");
+  assert.equal(acts.length, 3);
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  for (const a of acts)
+    assert.ok(
+      q.cleared.some((c) => c.id === a.item_id && c.status === "snoozed"),
+      `${a.item_id} is snoozed`,
+    );
+
+  // Undoing one from the log takes it out of the top bar's count.
+  await call("POST", "/api/undo", { seq: acts[0]!.undo_seq });
+  const { data: undone } = await call<CoordinatorView>("GET", "/api/coordinator");
+  assert.equal(undone.log.find((e) => e.seq === acts[0]!.seq)?.undone, true);
+  assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 2 });
+  await call("POST", "/api/coordinator/note", { text: "from the test" });
+  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log[0]?.text, "from the test");
 });

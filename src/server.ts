@@ -32,6 +32,9 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+// Which agent a call came from; only for attribution in the coordinator's log, not a permission.
+const agentOf = (header: string | undefined) => (header === "coordinator" ? header : undefined);
+
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
   const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
@@ -87,9 +90,10 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/act", async (c) => {
     ready();
-    const body = await c.req.json<{ id?: string; action?: Action; until?: string }>();
+    const body = await c.req.json<{ id?: string; action?: Action; until?: string; reason?: unknown }>();
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
-    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until) });
+    const reason = typeof body.reason === "string" ? body.reason : undefined;
+    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, { agent: agentOf(c.req.header("x-desk-agent")), reason }) });
   });
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
@@ -132,7 +136,20 @@ export function createApp(desk: Desk, port: number): Hono {
   app.put("/api/config", async (c) => {
     ready();
     const { text, base } = await c.req.json<{ text: string; base?: string }>();
-    return c.json(desk.putConfig(text ?? "", base));
+    return c.json(desk.putConfig(text ?? "", base, agentOf(c.req.header("x-desk-agent"))));
+  });
+  app.get("/api/policy", (c) => c.json(desk.getPolicy()));
+  app.put("/api/policy", async (c) => {
+    const { text, base } = await c.req.json<{ text?: unknown; base?: unknown }>();
+    if (typeof text !== "string") throw new DeskError(400, "need { text }");
+    if (base !== undefined && typeof base !== "string") throw new DeskError(400, "base must be the hash from GET /api/policy");
+    return c.json(desk.putPolicy(text, base, agentOf(c.req.header("x-desk-agent"))));
+  });
+  app.get("/api/coordinator", (c) => c.json(desk.coordinatorView()));
+  app.post("/api/coordinator/note", async (c) => {
+    const { text } = await c.req.json<{ text?: unknown }>().catch((): { text?: unknown } => ({}));
+    desk.note(typeof text === "string" ? text : "");
+    return c.json({ ok: true });
   });
   app.get("/api/fields", (c) => c.json(FIELDS));
   app.get("/api/settings", (c) => c.json(desk.getSettings()));
@@ -173,10 +190,16 @@ export function createApp(desk: Desk, port: number): Hono {
   );
 
   // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
-  const inProcess = createClient((p, init) => app.request(p, init));
+  // The coordinator's MCP config sends X-Desk-Agent, which goes along so its actions are logged as its own.
   app.post("/mcp", async (c) => {
+    const agent = agentOf(c.req.header("x-desk-agent"));
+    const api = createClient((p, init) => {
+      const headers = new Headers(init.headers);
+      if (agent) headers.set("x-desk-agent", agent);
+      return app.request(p, { ...init, headers });
+    });
     const transport = new WebStandardStreamableHTTPServerTransport();
-    await createMcpServer(inProcess).connect(transport);
+    await createMcpServer(api).connect(transport);
     return transport.handleRequest(c.req.raw);
   });
   // Stateless: no server-initiated stream and no session to end, which the spec answers with 405.
@@ -223,6 +246,7 @@ export async function startServer(
     notify: opts.notify,
     review: { fetchPr, generate: generateReview },
     writer: opts.writer ?? createWriter({ log }),
+    mcpUrl: `http://127.0.0.1:${port}/mcp`,
   });
   const app = createApp(desk, port);
   const url = `http://localhost:${port}`;

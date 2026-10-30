@@ -12,6 +12,7 @@ import type {
   ItemDetail,
   ItemState,
   Overview,
+  PolicyDoc,
   PreviewResult,
   QueueView,
   SettingsView,
@@ -98,12 +99,17 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     queue: () => call<QueueView>("GET", "/api/queue"),
     board: (id: string) => call<BoardView>("GET", `/api/boards/${q(id)}`),
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
-    act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
+    act: (id: string, action: Action, until?: string, reason?: string) =>
+      call<ActResult>("POST", "/api/act", { id, action, until, reason }),
     undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
     getConfig: () => call<ConfigDoc>("GET", "/api/config"),
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
-    putConfig: (text: string) => call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text }),
+    putConfig: (text: string, base?: string) =>
+      call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text, base }),
+    policy: () => call<PolicyDoc>("GET", "/api/policy"),
+    putPolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
+    note: (text: string) => call<{ ok: true }>("POST", "/api/coordinator/note", { text }),
     fields: () => call<FieldDoc[]>("GET", "/api/fields"),
     settings: () => call<SettingsView>("GET", "/api/settings"),
     putSettings: (patch: SettingsPatch) =>

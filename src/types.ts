@@ -133,9 +133,12 @@ export interface Signals {
 // ---------------------------------------------------------------------------
 // Config (~/.review-desk/config.toml)
 
+// A rule's bucket, or "judge": hand the item to the policy judge (the board default until it answers).
+export type RuleBucket = Bucket | "judge";
+
 export interface Rule {
   when: string;
-  bucket: Bucket;
+  bucket: RuleBucket;
   why?: string;
   nocap?: boolean; // matched items don't count toward caps and are never demoted
 }
@@ -226,6 +229,79 @@ export interface AgentStatus {
   skill: { state: "installed" | "outdated" | "missing"; path: string; command: string } | null; // path: the installed SKILL.md
 }
 
+// GET /api/policy: ~/.review-desk/policy.md, prose the judge and the coordinator follow.
+export interface PolicyDoc {
+  path: string;
+  text: string;
+  hash: string; // pass it back as `base` when saving
+  judge: JudgeStatus;
+}
+
+export interface JudgeStatus {
+  state: "off" | "idle" | "running" | "error";
+  off_reason: string | null; // why it's off: no policy, the setting, no agent
+  waiting: number; // gray-zone items without a fresh answer
+  judged: number; // items with an answer under this policy
+  spent: number; // items sent in the last hour
+  max_per_hour: number;
+  last_at: string | null; // the last call that finished
+  error: string | null; // the last call's failure, until one succeeds
+  retry_at: string | null; // after a failure, no call before this
+}
+
+// GET /api/coordinator: the Claude Code session the desk wakes on new events.
+export interface CoordinatorStatus {
+  state: "off" | "idle" | "waiting" | "running" | "error";
+  off_reason: string | null; // e.g. "Coordinator needs Claude Code for now"
+  session_id: string;
+  started: boolean; // its first run made the session
+  dir: string; // its working directory (Claude Code keeps sessions per directory)
+  command: string | null; // talk to it in a terminal; null until it's started
+  running_since: string | null;
+  pending: number; // events waiting for the next run
+  next_at: string | null; // the next run starts at this time
+  last_run: CoordinatorRun | null;
+  error: string | null; // the last run's failure, until one succeeds
+  policy_empty: boolean; // it only wakes on events once there's a policy
+  held: boolean; // you have it open in a terminal: runs wait until you close it
+}
+
+export interface CoordinatorRun {
+  n: number;
+  kind: "intro" | "events";
+  started_at: string;
+  ms: number;
+  ok: boolean;
+  events: number;
+  actions: number;
+  error: string | null;
+}
+
+export interface CoordinatorLogEntry {
+  seq: number;
+  at: string;
+  run: number; // 0: not during a run
+  kind: "run" | "act" | "note" | "policy" | "config";
+  text: string; // an act's reason, a note, what a run did; untrusted when the coordinator wrote it
+  item_id: string | null;
+  action: string | null; // an act's action: snooze, done, mute, ...
+  bucket: Bucket | null; // where the item sat when it acted
+  undo_seq: number | null; // an act's undo seq
+  undone: boolean;
+}
+
+export interface CoordinatorView {
+  status: CoordinatorStatus;
+  log: CoordinatorLogEntry[]; // newest first
+}
+
+// What the coordinator did in its latest run with actions, for the queue's top bar; null when nothing recent.
+export interface CoordinatorActed {
+  counts: Record<string, number>; // per action, e.g. { snooze: 3, mute: 1 }, undone ones left out
+  buckets: Bucket[]; // where those items sat when it acted
+  at: string; // its last action
+}
+
 // window.desktop: set by the desktop app's preload; undefined in a browser.
 export interface DesktopBridge {
   platform: string; // process.platform
@@ -267,11 +343,28 @@ export interface TraceStep {
 export interface Placement {
   board: string;
   bucket: Bucket; // after caps
-  rule_bucket: Bucket; // before caps
+  rule_bucket: Bucket; // before caps (after the judge)
   rule: number | null; // matched rule index, null = default
   why: string;
   demoted?: string; // e.g. "Now was full (3)"
   trace: TraceStep[];
+  judge?: JudgeStep; // set in the gray zone (no rule matched, or a "judge" rule) while the policy judge is on
+}
+
+// The policy judge's step in a placement.
+export interface JudgeStep {
+  bucket: Bucket | null; // its answer; null: none, so the board default
+  why: string;
+  pending: boolean; // not judged under this policy since the item last changed (an older answer may still show)
+}
+
+// Kept per item in kv `judge:<id>`: good for this updated_at under this policy.
+export interface JudgeAnswer {
+  updated_at: string;
+  policy: string; // the policy's hash
+  bucket: Bucket | null; // null: the agent gave no answer for it
+  why: string;
+  at: string;
 }
 
 export type Status = "active" | "done" | "snoozed" | "muted";
@@ -330,6 +423,7 @@ export interface Overview {
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number };
   rate_limit: { remaining: number; reset_at: string } | null;
+  coordinator: { state: CoordinatorStatus["state"]; acted: CoordinatorActed | null };
 }
 
 // A source of items and events: GitHub today.
@@ -455,6 +549,7 @@ export interface ActivityPage {
 export interface ConfigDoc {
   path: string;
   text: string;
+  hash: string; // PUT /api/config takes it (or the whole text) as `base`
   errors: ConfigError[];
   warnings?: ConfigError[]; // leftover pre-settings keys: ignored, not fatal
 }
