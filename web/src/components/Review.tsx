@@ -400,13 +400,14 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
       {busy && <p className="quiet">Your agent is reading the diff. This takes a minute or two; the notes land in the code below.</p>}
       {!busy && view.ai_error && (
         <p>
-          {view.ai_error}{" "}
+          {withCode(view.ai_error)}{" "}
           <span className="quiet">
             Press <kbd>i</kbd> to try again.
           </span>
         </p>
       )}
-      {!busy && !ai && !view.ai_error && (
+      {!busy && !ai && !view.ai_error && view.item.state !== "open" && <p className="quiet">No AI review.</p>}
+      {!busy && !ai && !view.ai_error && view.item.state === "open" && (
         <p className="quiet">
           None yet. Press <kbd>i</kbd> to ask your agent for a summary, concerns and notes on the changes.
         </p>
@@ -439,6 +440,11 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
       )}
     </section>
   );
+}
+
+// A command in an agent's message (`claude auth login`) reads as code.
+function withCode(text: string) {
+  return text.split("`").map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part));
 }
 
 function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {
