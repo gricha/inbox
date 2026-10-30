@@ -25,8 +25,18 @@ const LOG_CHARS = 12_000;
 const BODY_CHARS = 1_500;
 
 // What a run is allowed to do in Bash, beyond the repo's own test and lint commands. Everything else is refused (dontAsk).
-const GIT_READ = ["status", "diff", "log", "show", "grep", "blame", "ls-files", "rev-parse"];
-const GIT_WRITE = ["add", "commit", "restore", "rm", "mv"];
+// No git grep: its --open-files-in-pager runs a program (the Grep tool searches instead).
+const GIT_READ = ["status", "diff", "log", "show", "blame", "ls-files", "rev-parse"];
+const GIT_WRITE = ["add", "restore", "rm", "mv"];
+// A message on the command line only: -F/--file would put any file it can name into a commit the push publishes.
+const GIT_COMMIT = ["git commit -m *", "git commit -am *", "git commit -a -m *"];
+// Options that make an allowed git command write a file anywhere (.git/config included), run a program, or read a file
+// outside the worktree. Deny rules win over allow rules.
+const GIT_DENY = [
+  ...["--output", "--ext-diff", "--no-index", "--contents", "--open-files-in-pager"].map((o) => `Bash(git * ${o}*)`),
+  "Bash(git commit* -F*)",
+  "Bash(git commit* --file*)",
+];
 
 // The babysitter's record of one PR, kept in the desk's kv store as sitter:<id>.
 export interface Sitter {
@@ -233,6 +243,7 @@ export function repoCommands(dir: string): { run: string[]; exact: string[] } {
 export interface ArgsInput {
   session: string;
   name: string;
+  model: string; // analyze.model, as for the judge and the coordinator
   mcpUrl: string;
   branch: string;
   base: string;
@@ -250,6 +261,7 @@ export function claudeArgs(o: ArgsInput): string[] {
     "Grep",
     ...GIT_READ.flatMap((c) => [`Bash(git ${c})`, `Bash(git ${c}:*)`]),
     ...GIT_WRITE.map((c) => `Bash(git ${c}:*)`),
+    ...GIT_COMMIT.map((c) => `Bash(${c})`),
     "Bash(git fetch origin)",
     `Bash(git fetch origin ${o.branch})`,
     `Bash(git merge origin/${o.branch})`,
@@ -271,6 +283,8 @@ export function claudeArgs(o: ArgsInput): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
+    "--model",
+    o.model,
     "--session-id",
     o.session,
     "--name",
@@ -283,6 +297,8 @@ export function claudeArgs(o: ArgsInput): string[] {
     "--mcp-config",
     JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: o.mcpUrl } } }),
     "--strict-mcp-config",
+    "--disallowedTools",
+    ...GIT_DENY,
     "--allowedTools",
     ...allow,
   ];
@@ -383,7 +399,8 @@ export function buildPrompt(p: PromptInput): string {
   const comments = ctx.comments.filter((c) => !c.bot && lc(c.author) !== lc(me) && c.at > p.since).slice(-10);
   const cmds = [...p.commands.exact, ...p.commands.run];
   const task = [
-    ci && `- CI is failing: ${ctx.checks.map((c) => c.name).join(", ") || "see the checks below"}.`,
+    // Check names are chosen by whatever app posts them: they stay inside the fence below.
+    ci && `- CI is failing: ${ctx.checks.length ? `${plural(ctx.checks.length, "failing check")}, below` : "see the PR's checks"}.`,
     conflict && `- It conflicts with ${item.base}.`,
     (threads.length || reviews.length || comments.length) &&
       `- Reviewers left ${plural(threads.length, "open thread")}${reviews.length || comments.length ? ` and ${plural(reviews.length + comments.length, "comment")}` : ""}.`,
@@ -426,7 +443,7 @@ export function buildPrompt(p: PromptInput): string {
     ``,
     `How to work:`,
     `- Fix the cause, in the PR's own spirit. Keep the change small; don't touch unrelated code.`,
-    `- Run the relevant tests and linters before you commit. Commit messages: one plain line saying what and why.`,
+    `- Run the relevant tests and linters before you commit. Commit with git commit -m and one plain line saying what and why.`,
     `- A review comment you agree with: make the change, push, and draft a reply saying what you did. One you disagree with, or that's unclear: draft a reply or escalate; don't make the change.`,
     `- CI failing for reasons outside the code (infrastructure, a flaky test, missing secrets): change nothing; escalate with what you found.`,
     `- Finish with one line saying what you did.`,
@@ -827,7 +844,15 @@ export class Babysitter {
       s.runs = [...s.runs, run].slice(-KEEP_RUNS);
     });
     const prompt = buildPrompt({ item: { ...it, head_oid: head }, me, since, todo, ctx, logs, commands });
-    const args = claudeArgs({ session, name: `desk: ${id}`, mcpUrl: desk.mcpUrl!, branch, base: it.base, commands });
+    const args = claudeArgs({
+      session,
+      name: `desk: ${id}`,
+      model: desk.settings["analyze.model"],
+      mcpUrl: desk.mcpUrl!,
+      branch,
+      base: it.base,
+      commands,
+    });
     desk.log(`babysitter: ${id}: started on ${run.why.join(", ")} at ${short(head)} (session ${session}, log ${logFile})`);
     this.spawn(id, dir, prompt, args, run, keys, branch);
   }

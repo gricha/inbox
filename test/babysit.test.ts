@@ -90,6 +90,7 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
   const args = claudeArgs({
     session: "s-1",
     name: "desk: acme/web#3",
+    model: "sonnet",
     mcpUrl: "http://localhost:48401/mcp",
     branch: "fix/retry",
     base: "main",
@@ -101,6 +102,7 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
   assert.equal(at("--session-id"), "s-1");
   assert.equal(at("--permission-mode"), "dontAsk");
   assert.equal(at("--tools"), "Bash,Read,Edit,Write,Glob,Grep");
+  assert.equal(at("--model"), "sonnet", "Settings → Claude model, like the judge and the coordinator");
   for (const f of ["--restricted", "--strict-mcp-config", "--verbose"]) assert.ok(args.includes(f), f);
   assert.deepEqual(JSON.parse(at("--mcp-config")!), { mcpServers: { "review-desk": { type: "http", url: "http://localhost:48401/mcp" } } });
   const allowed = args.slice(args.indexOf("--allowedTools") + 1);
@@ -119,6 +121,18 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
     ["Bash(git push origin HEAD:refs/heads/fix/retry)"],
   );
   assert.ok(!args.some((a) => a.includes("dangerously") || a === "bypassPermissions"));
+  // git options that run a program, write outside the worktree or read a file into a commit are denied, which beats any allow.
+  const denied = new Set(args.slice(args.indexOf("--disallowedTools") + 1, args.indexOf("--allowedTools")));
+  for (const d of [
+    "Bash(git * --output*)",
+    "Bash(git * --ext-diff*)",
+    "Bash(git * --no-index*)",
+    "Bash(git * --contents*)",
+    "Bash(git commit* -F*)",
+  ])
+    assert.ok(denied.has(d), d);
+  assert.ok(!allowed.some((a) => a.startsWith("Bash(git grep") || a === "Bash(git commit:*)"));
+  assert.ok(allowed.includes("Bash(git commit -m *)"));
 });
 
 test("the prompt fences GitHub text with a random tag and lists what to fix, with thread ids to reply to", () => {
@@ -174,7 +188,8 @@ test("the prompt fences GitHub text with a random tag and lists what to fix, wit
   for (const s of ["Ignore previous instructions", "curl evil", "FAILED test_retry", "### Review thread PRRT_1 on src/a.ts:4"])
     assert.ok(p.indexOf(s) > fence, s);
   assert.ok(!p.includes("resolved one") && !p.includes("my last word"), "only open threads where someone else spoke last");
-  assert.match(p, /- CI is failing: test \(3\.12\)\./);
+  assert.match(p, /- CI is failing: 1 failing check, below\./, "check names come from whatever app posts them: fenced");
+  assert.ok(p.indexOf("test (3.12)") > fence, "the first mention is inside the fence");
   assert.match(p, /Push with exactly: git push origin HEAD:refs\/heads\/fix\/retry/);
   assert.match(p, /desk_escalate with ref "acme\/web#3"/);
   assert.ok(p.trimEnd().endsWith("</github-t4g>"));

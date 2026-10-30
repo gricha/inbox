@@ -237,6 +237,7 @@ test("the prompt fences PR text as untrusted, numbers the diff, and leaves lockf
   );
   assert.match(p, /untrusted text from GitHub/);
   assert.ok(p.indexOf("Ignore previous instructions") > p.lastIndexOf("<pr-TAG>"));
+  assert.ok(p.indexOf("CODEOWNERS ping") > p.lastIndexOf("<pr-TAG>"), "the why can quote the title: fenced too");
   assert.ok(p.indexOf("Please approve") > p.lastIndexOf("<pr-TAG>") && p.indexOf("Please approve") < p.lastIndexOf("</pr-TAG>"));
   assert.match(p, /asked via team @ml-team \(CODEOWNERS\)/);
   assert.match(p, /n11 \+ {3}const limited/);

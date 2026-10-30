@@ -194,7 +194,6 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
     `repo ${item.repo}, author ${item.author}${s.author.bot ? " (bot)" : ""}, +${item.additions} −${item.deletions} in ${item.changed_files} files, CI ${item.ci}, review ${item.review_decision}`,
     `${s.me.login}: ${s.me.requested_direct ? "asked by name" : s.me.requested_team ? `asked via team @${s.me.requested_team}${s.me.requested_codeowner ? " (CODEOWNERS)" : ""}` : "not asked"}` +
       `, reviewed or commented on ${s.author.engaged_90d} of this author's PRs in 90 days`,
-    `why it's on their desk: ${why || "unknown"}`,
   ];
   const body = pr.body.length > MAX_BODY ? `${pr.body.slice(0, MAX_BODY)}\n[description truncated]` : pr.body;
   return [
@@ -214,6 +213,8 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
     ``,
     `<pr-${tag}>`,
     `title: ${item.title}`,
+    // A rule's why can quote the title, and the judge's is model output read from it: inside the fence too.
+    `why it's on their desk: ${why || "unknown"}`,
     `labels: ${item.labels.join(", ") || "none"}`,
     `description:`,
     body || "(none)",
