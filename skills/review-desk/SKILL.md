@@ -9,7 +9,7 @@ Review Desk is a desktop app on the user's machine that turns their GitHub revie
 
 - **Now**: needs them now. Kept short on purpose.
 - **Today**: worth doing today.
-- **Sorted away**: later, FYI, resolved (merged, closed, approved by someone else, no longer requested: it comes back if that changes), hidden by a rule, and cleared (done, snoozed, muted).
+- **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted).
 
 Rules decide where each item lands. A board is one or more GitHub searches plus ordered rules; the first rule whose `when` is true sets the bucket and a `why` ("alice asked you directly"). Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket with a note.
 

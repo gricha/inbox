@@ -32,7 +32,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 - One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
 - Sorted away: later, FYI, resolved, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
-- Resolved rows are dimmed like cleared ones and show the reason ("merged", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
+- Resolved rows are dimmed like cleared ones and show the reason ("merged", "you approved", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
 - Enter (or a click) on a PR opens its review (below). On an issue it opens the item in place: facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys. `w` opens a PR in place too, with its rule trace and raw signals.
 - A row whose PR has an AI review of its current commit says so after its facts: "AI says look".
 - Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
@@ -42,9 +42,11 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 `#/review/<id>`, Linear-style: the PR is read and approved in the desk, in the queue's place, with the sidebar still there. The column widens to 1280px.
 
 ```
-  api#4127  by priya
-  Stream partial results from the query planner
-  asked you directly · CI passing · review required · +62 −7 in 5 files
+  api#4127  by priya                                       Recent activity
+  Stream partial results from the query planner            sam commented · 37m
+  asked you directly · CI passing · review required        you were mentioned · 1h
+  +62 −7 in 5 files                                        priya pushed · 2h
+                                                           2 more
 
   AI review from sonnet, 14:32
   Look closely   medium risk
@@ -62,8 +64,10 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
                         │ │    ┃ The core of the change: rows come out in ... │  an AI note, at its line
 ```
 
-- Header: the ref (highlighted when it's in Now), author, title, then one line: why it's on the desk, CI, the review state, size. Problems are coloured words, as in the queue.
-- The AI review: verdict, risk (only high is coloured), summary, concerns, and how many notes sit in the code. While it's being written, a quiet line says so; a failure shows its reason and `i` tries again. A review of an older commit stays, marked "before the latest commits", and its notes aren't placed in the new code.
+- Header: the ref (highlighted when it's in Now), author, title, then one line: why it's on the desk, CI, the review state, size. Problems are coloured words, as in the queue. A wrapped line starts with a fact, never a "·".
+- A resolved PR (Enter on a row under Resolved, or one you just approved) says so in one pencil line under the facts, "Resolved: merged · 2h" (the reason, and how long ago), in place of the why; its ref loses Now's highlighter.
+- Recent activity sits beside the facts (under them below about 1000px of column, so the diff stays near the top): the PR's latest events in the queue's words, one line each, newest first, three of them and the rest behind a quiet "n more". A resolved PR leaves out its "resolved" event; the line above says it.
+- The AI review: verdict, risk (only high is coloured), summary, concerns, and how many notes sit in the code. While it's being written, a quiet line says so; a failure shows its reason in ink, not red (it's about the agent, not the PR), and `i` tries again. When AI reviews are paused after failures in a row, a PR that wasn't tried says that. A review of an older commit stays, marked "before the latest commits", and its notes aren't placed in the new code.
 - Files on the left (sticky; above the diff at 1100px and below), with a dot on files that have notes. The file you're reading follows the scroll and wears the cursor's fill and pencil ring.
 - Diffs: `@pierre/diffs`, unified, word-level changes, wrapped lines, Shiki highlighting in Pierre's light and dark themes, on `--sheet` in a hairline frame. Its CSS variables take the app's fonts (JetBrains Mono for code). Each file's name sticks under the top bar while you read it.
 - AI notes are margin notes under the line they explain: a thin rule, the note in the UI font. The one `]`/`[` landed on gets the cursor's fill and ring. Notes about a whole file sit above its diff.
