@@ -24,6 +24,18 @@ test("the first sync logs each item as new; an unchanged sync logs nothing", asy
   t.cleanup();
 });
 
+test("a snapshot older than the stored one (the feed and the full pass raced) is dropped, not diffed backwards", async () => {
+  const t = await setup([reviewAsk(1)]);
+  await t.desk.sync();
+  const old = reviewAsk(1);
+  const pushed = reviewAsk(1, { updated_at: iso(0.5), head_oid: "def" });
+  t.desk.ingest(t.desk.gh, [pushed]);
+  t.desk.ingest(t.desk.gh, [old]);
+  assert.deepEqual(kinds(t.desk), ["new acme/api#1", "pushed acme/api#1"]);
+  assert.equal(t.desk.store.itemsById(["acme/api#1"]).get("acme/api#1")?.head_oid, "def");
+  t.cleanup();
+});
+
 test("someone else approves: reviewed and resolved; it leaves Now for Resolved, keeping your triage state", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
   await t.desk.sync();

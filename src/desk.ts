@@ -353,10 +353,12 @@ export class Desk {
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips.
-  ingest(from: Connector, items: Item[]): void {
+  ingest(from: Connector, all: Item[]): void {
+    const prev = this.store.itemsById(all.map((i) => i.id));
+    // The feed and the full pass can fetch the same item at once; an older answer landing last would replay changes backwards.
+    const items = all.filter((i) => !(i.updated_at < (prev.get(i.id)?.updated_at ?? "")));
     if (!items.length) return;
     const now = this.now().toISOString();
-    const prev = this.store.itemsById(items.map((i) => i.id));
     const events: NewEvent[] = [];
     for (const next of items) {
       const before = prev.get(next.id) ?? null;
