@@ -1,6 +1,6 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: what needs you **now**, what's for **today**, and everything else sorted away by rules you control. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. Approving is the only thing it ever writes to GitHub.
+A desktop app that turns your GitHub review load into one queue: what needs you **now**, what's for **today**, and everything else sorted away by rules you control. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `d` puts it in flight: babysitter agents fix red CI, merge the base in on a conflict and draft replies to reviewers, and it comes back only when it needs you. Approving, and sending a reply you've read, are the only things the desk writes to GitHub; babysitters push to your PR's own branch.
 
 Runs on macOS, Linux and Windows.
 
@@ -27,6 +27,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 - **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested). Click a count to look inside.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
+- **In flight** (the sidebar, `g i`): your own PRs you've marked done with `d`, in plain words: CI, reviews, threads, conflicts, and what each babysitter is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). A drafted reply waits there for you to send (`y`); a question from a babysitter puts the PR in Now. Settings → In flight turns babysitting off, sets how many run at once, and where your clones are.
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, AI review, Hand-off prompts. Changes save as you go.
 - In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
 
@@ -35,6 +36,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `j` / `k` | move                                                           |
 | `Enter`   | review a PR (diff, AI notes, approve); an issue opens in place |
 | `o`       | open on GitHub                                                 |
+| `d`       | your own PR: in flight (babysitters take it); again: take back |
 | `e`       | done: hidden until someone else comments, reviews or pushes    |
 | `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
 | `m` / `p` | mute / pin                                                     |
@@ -43,7 +45,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `i`       | AI review: look / skim / skip, summary, concerns, notes        |
 | `/`       | filter · `r` sync · `,` settings · `g r` rules · `?` all keys  |
 
-Done, snooze, mute and pin are local. Nothing is sent to GitHub.
+Done, snooze, mute, pin and in flight are local. Nothing is sent to GitHub.
 
 ## Rules
 
@@ -118,7 +120,7 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 
 ## Never
 
-- Its one write to GitHub is approving a PR, when you press `a` twice in its review. That goes through `src/github/write.ts`, whose allowlist holds only that mutation; agents can't reach it. Everything else is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
+- Its writes to GitHub are approving a PR, when you press `a` twice in its review, and sending a reply a babysitter drafted on your own PR, when you press Send. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it. Babysitters push commits to your in-flight PR's own branch, never with force, from a worktree of your clone. Everything else is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
 - It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools.
 

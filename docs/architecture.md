@@ -1,6 +1,6 @@
 # Architecture
 
-One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only (its one write is approving a PR when you press `a a` in its review), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
+One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only (its writes are approving a PR when you press `a a` in its review, and sending a reply an agent drafted when you press Send), runs babysitter agents on your PRs in flight, keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
 GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src/connectors/github.ts
@@ -8,7 +8,10 @@ GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src
                                                                    ▼
                                                      src/store.ts (node:sqlite: items, activity, ...)
 gh api (a PR's files) ──────────> src/review.ts ──> claude -p / codex exec (the AI review)
-your approve key ──> src/github/write.ts ──(addPullRequestReview: APPROVE, the only write)──> GitHub
+your approve key, Send ──> src/github/write.ts ──(approve, reply, comment: the only API writes)──> GitHub
+event log ──> src/babysit.ts ──> claude -p in a worktree of your clone ──(git push to the PR's branch)──> GitHub
+                    ▲                 │ desk_draft_reply, desk_escalate (MCP)
+                    └─────────────────┘
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
 settings.json ──> src/settings.ts ──┘                src/resolve.ts (resolved or not)
@@ -22,7 +25,7 @@ settings.json ──> src/settings.ts ──┘                src/resolve.ts (r
 
 Runtime: Node ≥ 22.18 (Electron 45 bundles Node 24), TypeScript run directly, in the packaged app too (type stripping: no enums, namespaces or parameter properties; relative imports end in `.ts`; type-only imports use `import type`). Tests: `node --test` in `test/`. No native modules.
 
-Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `desk.db`, `desk.log`. Port: `47823` (override `DESK_PORT`).
+Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `desk.db`, `desk.log`, `worktrees/` (babysitters' worktrees of your clones) and `babysit/` (their transcripts). Port: `47823` (override `DESK_PORT`).
 
 ## Concepts
 
@@ -37,7 +40,9 @@ Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces,
 - **Event log**: the `activity` table. Every fresh snapshot is compared with the stored one (`src/connectors/github-events.ts`, pure) and the differences are logged: review requested, reviewed, pushed, CI, commented, merged, resolved, … ([api.md](api.md#the-event-log)).
 - **Resolved**: `resolution()` in `src/resolve.ts` says when the world has dealt with an item (merged, closed, approved by someone else, no longer requested). Derived from each snapshot, never stored; resolved items leave the buckets for the Resolved group ([api.md](api.md#resolved)).
 - **Settings**: `SETTINGS` in `src/settings.ts` is the schema (key, type, default, validation, help). The Settings page and `desk settings` render from it. Old configs had these keys in config.toml; they move to settings.json on first start (config.toml.bak keeps the original).
-- **Local state** (never sent to GitHub): `done` (hidden until someone else acts), `snooze` (until a time, or until activity), `mute` (until unmuted), `pin`, `seen`.
+- **Local state** (never sent to GitHub): `done` (hidden until someone else acts), `snooze` (until a time, or until activity), `mute` (until unmuted), `pin`, `seen`, `inflight` (your own PR, done with: the In-flight lane has it).
+- **In flight**: your open PRs marked with `d`. They leave the queue's buckets for the In-flight lane and come back to the top of Now only when they need you (a question, a reply to send, a problem nobody is fixing, ready to merge). `Desk.inflight()` builds the lane; `Desk.compute()` puts the ones that need you in Now ([api.md](api.md#in-flight)).
+- **Babysitter** (`src/babysit.ts`): for an in-flight PR that needs work (CI red, a conflict, feedback from others), one `claude -p` run in a git worktree of your local clone, started from the event log, at most `inflight.max_agents` at once. It may edit, run the repo's tests, commit and push to the PR's own branch; replies are drafts (`desk_draft_reply`) you send, decisions go back to you (`desk_escalate`). Its record per PR (runs, what it tried, drafts, the question) is `sitter:<id>` in `kv`.
 
 ## Expression language (`src/expr.ts`)
 
@@ -62,7 +67,9 @@ FIELDS: FieldDoc[]                                     // every signal path, typ
 
 Read only: only `query` operations, never `mutation`, and REST only through `get()`, which refuses any method but GET. Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` (and `/notifications`) directly. The sync logic that uses it (searches, details, the notifications feed, context) lives in the connector, `src/connectors/github.ts`.
 
-The one exception is `src/github/write.ts`: an allowlist with exactly one mutation, `addPullRequestReview(event: APPROVE)` pinned to the commit the view showed (`commitOID`), sent only by `POST /api/review/:id/approve` (the review view's `a a`). It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
+The one exception is `src/github/write.ts`: an allowlist with exactly three mutations. `addPullRequestReview(event: APPROVE)` pinned to the commit the view showed (`commitOID`), sent only by `POST /api/review/:id/approve` (the review view's `a a`); `addPullRequestReviewThreadReply` and `addComment`, sent only by `POST /api/inflight/:id/send` (Send on a drafted reply, on your own PR, from the desk's window). It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
+
+A babysitter's prompt also gets `prContext()` (a PR's review threads with their ids, reviews, comments and failing checks, one query) and the tail of a failing GitHub Actions job's log (`gh api repos/:repo/actions/jobs/:id/logs`, a GET). Your own PRs' details also carry the head branch, where it lives and the failing check names.
 
 Measured on the real queue (2026-10-27): a search with full PR details is too slow (25 PRs = 9 s, 50 = timeout). So sync is two-stage:
 
@@ -101,7 +108,7 @@ Errors: retries 502/503/timeouts twice with backoff; on secondary rate limit or 
 
 ## Store (`src/store.ts`)
 
-`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id, kept)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)` (the undo log of your triage actions), `activity(seq PK, at, source, item_id, kind, actor, data JSON)` (the event log), `kv(key PK, value JSON)` (context, sync status, the notifications cursor, notified set; `review:<id>`, the AI review, and `pr:<id>`, the PR's files and description, each kept for one head commit and dropped with the item).
+`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id, kept)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)` (`inflight_at` included), `events(seq PK, at, item_id, action, before JSON, undone)` (the undo log of your triage actions), `activity(seq PK, at, source, item_id, kind, actor, data JSON)` (the event log), `kv(key PK, value JSON)` (context, sync status, the notifications cursor, notified set; `review:<id>`, the AI review, and `pr:<id>`, the PR's files and description, each kept for one head commit and dropped with the item; `sitter:<id>`, a babysitter's record of your PR, dropped with the item).
 
 Done and snooze record `acked_at`, the latest activity you had seen; the item comes back when someone else acts after that. Timed snoozes also wake early on activity.
 
@@ -109,32 +116,37 @@ Done and snooze record `acked_at`, the latest activity you had seen; the item co
 
 Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1` and whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`). JSON everywhere; types in `src/types.ts`.
 
-| Method | Path                      | Body / query                                           | Returns                                                                                                                                                             |
-| ------ | ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/overview`           |                                                        | `Overview`                                                                                                                                                          |
-| GET    | `/api/queue`              |                                                        | `QueueView` (the UI's main surface)                                                                                                                                 |
-| GET    | `/api/focus`              |                                                        | `FocusView` (now + today)                                                                                                                                           |
-| GET    | `/api/boards/:id`         |                                                        | `BoardView`                                                                                                                                                         |
-| GET    | `/api/item`               | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                        |
-| POST   | `/api/act`                | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                  |
-| POST   | `/api/undo`               | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                  |
-| GET    | `/api/review/:id`         | `:id` = `owner%2Frepo%23123`                           | `ReviewView`: facts, changed files (kept per commit), the AI review, whether you can approve                                                                        |
-| POST   | `/api/review/:id/ai`      | `{ force? }`                                           | `{ ok: true, ai: AiReview }` — the one for this commit unless `force`; otherwise runs the agent in `agent.driver` (a minute or two); 502 with the reason on failure |
-| POST   | `/api/review/:id/approve` | `{ head_oid, body? }`                                  | `{ ok: true, url }` — approves `head_oid` on GitHub through `src/github/write.ts`; 409 for your own or a closed PR, or new commits since                            |
-| POST   | `/api/sync`               |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                  |
-| GET    | `/api/config`             |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                             |
-| POST   | `/api/config/preview`     | `{ text }`                                             | `PreviewResult`                                                                                                                                                     |
-| PUT    | `/api/config`             | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                            |
-| GET    | `/api/fields`             |                                                        | `FieldDoc[]`                                                                                                                                                        |
-| GET    | `/api/settings`           |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                    |
-| PUT    | `/api/settings`           | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                 |
-| GET    | `/api/agents`             |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                             |
-| POST   | `/api/agents/connect`     |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                               |
-| GET    | `/api/status`             |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                            |
-| GET    | `/api/activity`           | `?after=&limit=&item=&wait=` (wait ≤ 60 s)             | `{ events, last_seq }`: the event log; a long-poll that answers as soon as an event lands                                                                           |
-| GET    | `/api/events`             |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                       |
-| GET    | `/health`                 |                                                        | `{ ok: true, version }`                                                                                                                                             |
-| POST   | `/mcp`                    | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                       |
+| Method | Path                         | Body / query                                           | Returns                                                                                                                                                             |
+| ------ | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/overview`              |                                                        | `Overview`                                                                                                                                                          |
+| GET    | `/api/queue`                 |                                                        | `QueueView` (the UI's main surface)                                                                                                                                 |
+| GET    | `/api/focus`                 |                                                        | `FocusView` (now + today)                                                                                                                                           |
+| GET    | `/api/boards/:id`            |                                                        | `BoardView`                                                                                                                                                         |
+| GET    | `/api/item`                  | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                        |
+| POST   | `/api/act`                   | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                  |
+| POST   | `/api/undo`                  | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                  |
+| GET    | `/api/review/:id`            | `:id` = `owner%2Frepo%23123`                           | `ReviewView`: facts, changed files (kept per commit), the AI review, whether you can approve                                                                        |
+| POST   | `/api/review/:id/ai`         | `{ force? }`                                           | `{ ok: true, ai: AiReview }` — the one for this commit unless `force`; otherwise runs the agent in `agent.driver` (a minute or two); 502 with the reason on failure |
+| POST   | `/api/review/:id/approve`    | `{ head_oid, body? }`                                  | `{ ok: true, url }` — approves `head_oid` on GitHub through `src/github/write.ts`; 409 for your own or a closed PR, or new commits since                            |
+| POST   | `/api/sync`                  |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                  |
+| GET    | `/api/config`                |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                             |
+| POST   | `/api/config/preview`        | `{ text }`                                             | `PreviewResult`                                                                                                                                                     |
+| PUT    | `/api/config`                | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                            |
+| GET    | `/api/fields`                |                                                        | `FieldDoc[]`                                                                                                                                                        |
+| GET    | `/api/settings`              |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                    |
+| PUT    | `/api/settings`              | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                 |
+| GET    | `/api/agents`                |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                             |
+| POST   | `/api/agents/connect`        |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                               |
+| GET    | `/api/status`                |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                            |
+| GET    | `/api/inflight`              |                                                        | `InflightView`: your PRs in flight, their status in plain words, the babysitter's state, drafts and question                                                        |
+| POST   | `/api/inflight/:id/draft`    | `{ body, thread_id? }`                                 | `{ ok, draft }` — `desk_draft_reply`: a reply waiting in the lane for you to send                                                                                   |
+| POST   | `/api/inflight/:id/escalate` | `{ question }`                                         | `{ ok, question }` — `desk_escalate`: the PR goes to Now with the question as its why                                                                               |
+| POST   | `/api/inflight/:id/dismiss`  | `{ draft_id? }`                                        | `{ ok }` — discards a draft, or the question                                                                                                                        |
+| POST   | `/api/inflight/:id/send`     | `{ draft_id }`                                         | `{ ok, url }` — posts the draft on GitHub through `src/github/write.ts`; only with the desk's own `Origin`                                                          |
+| GET    | `/api/activity`              | `?after=&limit=&item=&wait=` (wait ≤ 60 s)             | `{ events, last_seq }`: the event log; a long-poll that answers as soon as an event lands                                                                           |
+| GET    | `/api/events`                |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                       |
+| GET    | `/health`                    |                                                        | `{ ok: true, version }`                                                                                                                                             |
+| POST   | `/mcp`                       | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                       |
 
 Errors: `{ error: string }` with 4xx/5xx. Unknown item → 404. Ambiguous short id → 409 with `candidates`.
 
@@ -176,8 +188,10 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_brief({ ref })` — the PR's AI review: verdict, risk, summary, concerns, notes (a model call unless it's written already; kept per commit).
 - `desk_sync()`.
 - `desk_events({ after?, wait?, limit?, item? })` — the event log after `after`; with `wait` it returns when the next event lands (for the coordinator).
+- `desk_draft_reply({ ref, thread_id?, body })` — a reply on your own in-flight PR, kept as a draft you send from the lane.
+- `desk_escalate({ ref, question })` — hands a decision on your in-flight PR back to you, in Now.
 
-Every tool result marks PR titles and bodies as untrusted data. No tool writes to GitHub: agents never approve.
+Every tool result marks PR titles and bodies as untrusted data. No tool writes to GitHub: agents never approve or post.
 
 ## Web UI (`web/`)
 
