@@ -706,8 +706,10 @@ export class Desk {
     const needs = new Map<string, string>();
     for (const e of entries.values()) {
       if (!laneOwned(e)) continue;
-      const why = this.sitterView(e.item).needs_you;
-      if (!why) continue;
+      const v = this.sitterView(e.item);
+      if (!v.needs_you) continue;
+      // Among other people's asks, say it's your PR in flight, unless it already says who's asking.
+      const why = v.escalation && v.escalation.by !== "desk" ? v.needs_you : `in flight: ${v.needs_you}`;
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });

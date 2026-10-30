@@ -654,11 +654,11 @@ test("no clone, a fork, or babysitting off: the lane says why, and the PR is you
     () => s.desk.inflight().rows.find((r) => r.card.id === a.id)?.sitter.text === "no local clone of acme/web",
   );
   const rows = new Map(s.desk.inflight().rows.map((r) => [r.card.id, r]));
-  assert.equal(rows.get(a.id)?.needs_you, "CI failing: no local clone of acme/web");
+  assert.equal(rows.get(a.id)?.needs_you, "no local clone of acme/web, so no babysitter", "the facts already say CI is failing");
   assert.equal(rows.get(b.id)?.sitter.text, "the branch is in a fork (me/web)");
   assert.equal(s.w.count(), 0);
   s.desk.putSettings({ set: { "inflight.babysit": false } });
-  assert.equal(new Map(s.desk.inflight().rows.map((r) => [r.card.id, r])).get(a.id)?.needs_you, "CI failing");
+  assert.equal(new Map(s.desk.inflight().rows.map((r) => [r.card.id, r])).get(a.id)?.needs_you, "babysitting is off");
   // inflight.repos names the clone directly, and checks its origin.
   s.desk.putSettings({ set: { "inflight.babysit": true, "inflight.repos": [`acme/web = ${s.w.root}`] } });
   await until(
@@ -861,5 +861,5 @@ test("turning babysitting off stops the agents already running", posix, async (c
   await until("the run to stop", () => s.record(item.id).runs.at(-1)?.outcome === "stopped");
   assert.equal(s.desk.sitter.live.size, 0);
   assert.deepEqual(s.record(item.id).tried, [], "it goes again when you turn it back on");
-  assert.equal(s.desk.inflight().rows[0]?.needs_you, "CI failing");
+  assert.equal(s.desk.inflight().rows[0]?.needs_you, "babysitting is off");
 });

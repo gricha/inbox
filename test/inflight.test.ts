@@ -147,8 +147,8 @@ test("with babysitting off, an in-flight PR comes back to Now when CI fails, and
   assert.deepEqual(
     now.map((x) => [x.id, x.why]),
     [
-      ["acme/web#3", "CI failing"],
-      ["acme/web#4", "approved and green: merge it"],
+      ["acme/web#3", "in flight: babysitting is off"],
+      ["acme/web#4", "in flight: approved and green: merge it"],
     ],
   );
   assert.ok(now.every((x) => x.inflight));
@@ -167,9 +167,9 @@ test("desk_escalate: the PR goes to Now with the question as its why, notifies, 
   const r = t.desk.escalate("web#3", "  Bump the API version,\nor keep v1 compatible?  ");
   assert.equal(r.question, "Bump the API version, or keep v1 compatible?");
   const [top] = t.desk.queue().sections.now;
-  assert.equal(top?.why, "Bump the API version, or keep v1 compatible?");
+  assert.equal(top?.why, "your agent asks: Bump the API version, or keep v1 compatible?", "who asks: not a reviewer");
   assert.equal(t.desk.inflight().rows[0]?.sitter.text, "needs you: Bump the API version, or keep v1 compatible?");
-  assert.deepEqual(t.notes, ["web#3 · Bump the API version, or keep v1 compatible?"]);
+  assert.deepEqual(t.notes, ["web#3 · your agent asks: Bump the API version, or keep v1 compatible?"]);
   t.desk.dismiss("web#3");
   assert.equal(t.desk.queue().sections.now.length, 0);
   assert.throws(() => {
@@ -205,7 +205,7 @@ test("desk_draft_reply: a reply to one of the PR's threads waits for Send, which
     "a new draft for the same thread replaces the old one",
   );
   assert.equal(row.needs_you, "reply ready to send");
-  assert.equal(t.desk.queue().sections.now[0]?.why, "reply ready to send");
+  assert.equal(t.desk.queue().sections.now[0]?.why, "in flight: reply ready to send");
   await assert.rejects(t.desk.sendDraft("web#3", first.id), /no draft/);
   assert.deepEqual(await t.desk.sendDraft("web#3", d.id), { url: "https://github.com/acme/web/pull/3#discussion_r1" });
   assert.deepEqual(w.calls, [["reply", "PRRT_open", "Yes: it retries 502s twice, in abc123."]]);
@@ -316,5 +316,5 @@ test("approved and green stays in Now while a babysitter answers a later comment
     t.desk.changed();
     t.desk.notifyNewNow();
   }
-  assert.deepEqual(t.notes, ["web#3 · approved and green: merge it"]);
+  assert.deepEqual(t.notes, ["web#3 · in flight: approved and green: merge it"]);
 });

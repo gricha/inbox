@@ -317,7 +317,7 @@ interface InflightRow {
   threads_unresolved: number;
   mergeable: "clean" | "conflict" | "unknown";
   draft: boolean;
-  needs_you: string | null; // why it's back with you: the question, "reply ready to send", "CI failing: no local clone of acme/web", "approved and green: merge it"
+  needs_you: string | null; // why it's back with you: "babysitter asks: <question>", "reply ready to send", "no local clone of acme/web, so no babysitter", "approved and green: merge it"
   escalation: { question: string; at: string } | null;
   sitter: { state: "running" | "queued" | "done" | "waiting" | "blocked" | "idle"; text: string; since: string | null }; // "fixing CI", "pushed a fix for 2 comments · abc1234"
   drafts: Draft[]; // unsent: { id, thread_id, to: "dana on src/api.ts:12", quote, body, at, sent_at, url }
@@ -340,7 +340,7 @@ Your own PRs and issues only resolve by merging or closing. An item that drops o
 
 ## In flight
 
-Your own open PR, once you're done with it: `d` in the queue, on the open item or in its review marks it in flight (`inflight_at` in `ItemState`, local and undoable); `d` again takes it back, which stops its babysitter and removes its worktree; undoing that brings back its drafts and question, and marking it again later starts afresh. It leaves Now, Today and the sorted-away groups for the In-flight lane (`GET /api/inflight`), and comes back to the top of Now only when it needs you, with the reason as its why: a question from its babysitter, a reply ready to send, comments from outside contributors (nobody else will read them), a problem nobody is fixing (babysitting off, no local clone, a fork, CI still red after 3 runs, a run that failed), or approved and green, so merge it. Merged and closed ones stay in the lane for 3 days. While it's in flight its babysitter has it: done, snooze and mute answer 409 (take it back first; marking it clears an earlier one, and undo brings that back), the judge doesn't place it, and its events don't wake the coordinator.
+Your own open PR, once you're done with it: `d` in the queue, on the open item or in its review marks it in flight (`inflight_at` in `ItemState`, local and undoable); `d` again takes it back, which stops its babysitter and removes its worktree; undoing that brings back its drafts and question, and marking it again later starts afresh. It leaves Now, Today and the sorted-away groups for the In-flight lane (`GET /api/inflight`), and comes back to the top of Now only when it needs you, with the reason as its why ("in flight: reply ready to send", or "babysitter asks: …" for a question, so it doesn't read like a reviewer's): a question from its babysitter, a reply ready to send, comments from outside contributors (nobody else will read them), a problem nobody is fixing (babysitting off, no local clone, a fork, CI still red after 3 runs, a run that failed), or approved and green, so merge it. Merged and closed ones stay in the lane for 3 days. While it's in flight its babysitter has it: done, snooze and mute answer 409 (take it back first; marking it clears an earlier one, and undo brings that back), the judge doesn't place it, and its events don't wake the coordinator.
 
 ### Babysitters
 

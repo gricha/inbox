@@ -1090,7 +1090,11 @@ export class Babysitter {
   // Why the PR is back with you, or null while the babysitter has it (or nothing's wrong).
   needsYou(it: Item, s: Sitter, st: SitterStatus): string | null {
     if (it.state !== "open") return null;
-    if (s.escalation) return s.escalation.question;
+    // Who's asking: the queue shows it next to other people's asks, where a bare question reads like a reviewer's.
+    if (s.escalation)
+      return s.escalation.by === "desk"
+        ? s.escalation.question
+        : `${s.escalation.by === "agent" ? "your agent" : "babysitter"} asks: ${s.escalation.question}`;
     const unsent = s.drafts.filter((d) => !d.sent_at).length;
     if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
     if (this.outside(it, s)) return "comments from outside contributors";
@@ -1100,13 +1104,13 @@ export class Babysitter {
     if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
     const work = this.problems(it);
     const [first] = work;
-    // Nobody will do it: it's yours.
+    // Nobody will do it: it's yours. Its facts say what's wrong (CI failing, a merge conflict); this says why it's yours.
     if (st.state === "blocked" && first) {
-      const what = first.kind === "ci" ? "CI failing" : first.kind === "conflict" ? `conflicts with ${it.base}` : "new review comments";
-      return st.text === "babysitting is off" ? what : st.text.startsWith("CI still") ? st.text : `${what}: ${st.text}`;
+      if (st.text === "babysitting is off" || st.text.startsWith("CI still")) return st.text;
+      return first.kind === "feedback" ? `new review comments: ${st.text}` : `${st.text}, so no babysitter`;
     }
     // Tried and still broken. Comments a run answered are on the reviewers now.
-    const broken = it.ci === "red" ? "CI failing" : it.mergeable === "conflict" ? `conflicts with ${it.base}` : null;
+    const broken = it.ci === "red" ? "CI failing" : it.mergeable === "conflict" ? "merge conflict" : null;
     const last = s.runs.at(-1);
     if (last?.outcome === "pushed" && it.head_oid === last.head_oid) return null; // the desk hasn't seen the fix land yet
     if (broken && !this.todo(it, s).some((p) => p.kind !== "feedback")) {
