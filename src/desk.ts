@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Babysitter, openThreads, worktreePath, type SitterOptions } from "./babysit.ts";
+import { Babysitter, threadRef, worktreePath, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -1158,14 +1158,8 @@ export class Desk {
         const ctx = await this.gh.api.prContext(e.item.node_id).catch((err: unknown) => {
           throw new DeskError(502, `couldn't read the PR's threads: ${(err as Error).message}`);
         });
-        const found = openThreads(ctx, this.me()).find((x) => x.id === threadId) ?? ctx.threads.find((x) => x.id === threadId);
-        const last = found?.comments.at(-1);
-        if (found && last)
-          t = {
-            id: found.id,
-            to: `${last.author} on ${found.path}${found.line ? `:${found.line}` : ""}`,
-            quote: last.body.replaceAll(/\s+/g, " ").slice(0, 200),
-          };
+        const found = ctx.threads.find((x) => x.id === threadId);
+        t = (found && threadRef(found)) ?? undefined;
       }
       if (!t) throw new DeskError(400, `no review thread "${threadId}" on ${id}`);
       ({ to, quote } = t);

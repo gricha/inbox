@@ -18,6 +18,7 @@ import {
   repoCommands,
   repoOfRemote,
   stepOf,
+  threadRef,
   worktreePath,
 } from "../src/babysit.ts";
 import type { PrContext } from "../src/github/index.ts";
@@ -229,6 +230,27 @@ test("an expired or missing claude login reads as one, whatever claude says", ()
   ])
     assert.ok(authFailure(m), m);
   for (const m of ["npm test failed", "gave up after 30m", "API Error: 529 Overloaded"]) assert.ok(!authFailure(m), m);
+});
+
+test("a draft's quote is the comment it answers as one plain line, without a bot's hidden markers", () => {
+  const thread = (body: string) => ({
+    id: "PRRT_1",
+    resolved: false,
+    outdated: false,
+    path: "src/a.ts",
+    line: null,
+    comments: [{ author: "cursor", bot: true, body, at: hoursAgo(1) }],
+  });
+  assert.deepEqual(
+    threadRef(thread("### Judge criterion is off\n\n**High Severity**\n\n<!-- DESCRIPTION START -->\nThe test case contradicts itself.")),
+    {
+      id: "PRRT_1",
+      to: "cursor on src/a.ts",
+      quote: "Judge criterion is off High Severity The test case contradicts itself.",
+    },
+  );
+  assert.equal(threadRef(thread("x".repeat(300)))?.quote, `${"x".repeat(199)}…`);
+  assert.equal(threadRef({ ...thread(""), comments: [] }), null);
 });
 
 test("the lane says what a run did, in plain words", () => {

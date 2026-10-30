@@ -334,8 +334,24 @@ export interface PromptInput {
 }
 
 // The threads a run should answer: open, with the last word from someone else.
-export const openThreads = (ctx: PrContext, me: string) =>
+const openThreads = (ctx: PrContext, me: string) =>
   ctx.threads.filter((t) => !t.resolved && t.comments.length && lc(t.comments.at(-1)!.author) !== lc(me));
+
+// What a draft for this thread answers: "dana on src/api.ts:12", and the start of the last comment as one plain line.
+export function threadRef(t: PrContext["threads"][number]): Sitter["threads"][number] | null {
+  const last = t.comments.at(-1);
+  if (!last) return null;
+  const text = last.body
+    .replaceAll(/<!--[\s\S]*?-->/g, " ") // bots hide markers in comments
+    .replaceAll(/^#+\s+|\*\*/gm, "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  return {
+    id: t.id,
+    to: `${last.author} on ${t.path}${t.line ? `:${t.line}` : ""}`,
+    quote: text.length > 200 ? `${text.slice(0, 199)}…` : text,
+  };
+}
 
 // What a run is about, in words: "CI", "a merge conflict", "2 comments".
 function whyOf(todo: Problem[], ctx: PrContext, me: string, since: string): string[] {
@@ -530,7 +546,8 @@ export class Babysitter {
     if (this.paused && Date.now() < this.paused.until) return this.paused.why;
     if (s.escalation) return "waiting for your answer";
     if (it.head_repo && lc(it.head_repo) !== lc(it.repo)) return `the branch is in a fork (${it.head_repo})`;
-    if (!it.head_ref || !safeRef(it.head_ref) || (it.base && !safeRef(it.base))) return "the desk doesn't know the PR's branch yet";
+    if (!it.head_ref) return "the desk doesn't know the PR's branch yet";
+    if (!safeRef(it.head_ref) || (it.base && !safeRef(it.base))) return "its branch name has characters the desk won't pass to git";
     if (it.ci === "red" && s.ci_tries >= MAX_CI_TRIES) return `CI still failing after ${MAX_CI_TRIES} tries`;
     if (!this.desk.mcpUrl) return "the desk's MCP address isn't known";
     return null;
@@ -789,11 +806,7 @@ export class Babysitter {
     this.update(id, (s) => {
       s.tried = [...s.tried, ...keys].slice(-50);
       if (todo.some((p) => p.kind === "ci")) s.ci_tries++;
-      s.threads = openThreads(ctx, me).map((t) => ({
-        id: t.id,
-        to: `${t.comments.at(-1)!.author} on ${t.path}${t.line ? `:${t.line}` : ""}`,
-        quote: clip(t.comments.at(-1)!.body.replaceAll(/\s+/g, " "), 200),
-      }));
+      s.threads = openThreads(ctx, me).flatMap((t) => threadRef(t) ?? []);
       s.runs = [...s.runs, run].slice(-KEEP_RUNS);
     });
     const prompt = buildPrompt({ item: { ...it, head_oid: head }, me, since, todo, ctx, logs, commands });
