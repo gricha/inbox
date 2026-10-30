@@ -1144,7 +1144,7 @@ function detail(r: Rec): ItemDetail {
 }
 
 // ---------------------------------------------------------------------------
-// The review view: canned diffs, and a canned stand-in for the agent. MOCK_ANALYZE_FAIL=1 makes it fail like a missing CLI.
+// The review view: canned diffs and a canned agent. MOCK_ANALYZE_FAIL=1 fails like a missing CLI; MOCK_AI_MS is how long it takes.
 
 const reviews = new Map<string, AiReview>();
 const generating = new Set<string>();
@@ -1165,7 +1165,7 @@ async function generate(r: Rec): Promise<AiReview> {
   bump();
   try {
     await new Promise((ok) => {
-      setTimeout(ok, 2500);
+      setTimeout(ok, Number(process.env.MOCK_AI_MS ?? 2500));
     });
     if (process.env.MOCK_ANALYZE_FAIL)
       throw new HttpError(502, 'claude command "claude" not found: set its full path under Settings → AI review → Claude command');

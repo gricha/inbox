@@ -34,7 +34,8 @@ async function up(url: string, ms = 30_000): Promise<void> {
 async function start(): Promise<string> {
   const node = (args: string[], env: Record<string, string>) =>
     kids.push(spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: "ignore" }));
-  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], { MOCK_PORT: String(MOCK) });
+  // An AI review that never finishes during the run, so every theme and size shows it being written.
+  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], { MOCK_PORT: String(MOCK), MOCK_AI_MS: "3600000" });
   node(["node_modules/vite/bin/vite.js", "--config", "web/vite.config.ts", "--port", String(VITE), "--strictPort"], {
     DESK_API: `http://127.0.0.1:${MOCK}`,
   });
