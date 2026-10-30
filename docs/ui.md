@@ -14,7 +14,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ ● ● ●  Review Desk        [ Filter  / ]     Synced 1m ago  ⌨ ⚙ │  title bar (drag region in the app)
+│ ● ● ●  Review Desk  [ Filter / ]  Coordinator · 4m  Synced 1m │  title bar (drag region in the app)
 ├───────────────────────────────────────────────────────────────┤
 │        Now 1                                                  │
 │        seer#8463    Read eval API keys from macOS Keychain 32d │
@@ -35,7 +35,11 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 - Resolved rows are dimmed like cleared ones and show the reason ("merged", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
 - Enter (or a click) on a PR opens its review (below). On an issue it opens the item in place: facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys. `w` opens a PR in place too, with its rule trace and raw signals.
 - A row whose PR has an AI review of its current commit says so after its facts: "AI says look".
+- An item the policy judge placed shows the judge's why as its why; its detail says "by your policy", and the rule trace ends with a `policy` step (`today, the tokenizer you maintain`, or `not judged yet, so the board default`).
+- The coordinator: when it acted in the last day, the top bar carries one quiet pencil line, "Coordinator snoozed 3 FYI items · 4m" (below 1000px just "Coordinator · 4m"). A click (Esc closes it) opens its log above the queue: each run, each action with its reason and an Undo, its notes. No colour, no badge.
 - Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
+- Settings → Policy, right after Rules: one sentence ("Prose guidance the judge and the coordinator follow."), a plain text editor in the UI font (an example as its placeholder), Save (⌘S, which saves the editor you're in) and Revert, then one quiet line of the judge's status ("23 items placed by the policy. 7 of 60 this hour.", or why it's off, or its last failure and the next try) and the file's path. If the file changed since you opened it, Save keeps your text and says so.
+- Settings → Agents → Coordinator: the switch, one line of status ("Idle. Last run 5m ago: 6 events, 3 actions.", "Running, started 20s ago.", its last error and next try, or why it's off), then its session id and the command that opens it in a terminal, with Copy.
 
 ## The review view
 
@@ -79,14 +83,15 @@ Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 
 ## Files
 
-|                                                             |                                                                                                 |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `web/src/App.tsx`                                           | state, data loading, SSE, keyboard                                                              |
-| `web/src/view.ts`                                           | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
-| `web/src/components/TopBar.tsx`                             | wordmark, filter, sync, help, settings                                                          |
-| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx` | the queue                                                                                       |
-| `web/src/components/Review.tsx`                             | a PR's review: header, AI review, files, Pierre diffs with notes, approve                       |
-| `web/src/components/Settings.tsx`, `Rules.tsx`              | configuration                                                                                   |
-| `web/src/styles.css`                                        | tokens for both themes, then layout by area                                                     |
-| `web/src/fonts/`                                            | Instrument Sans (UI), JetBrains Mono (code), bundled so nothing loads from the network          |
-| `web/mock/server.ts`, `diffs.ts`                            | an in-memory API for UI work without GitHub: `node web/mock/server.ts`; real-looking diffs      |
+|                                                              |                                                                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `web/src/App.tsx`                                            | state, data loading, SSE, keyboard                                                              |
+| `web/src/view.ts`                                            | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
+| `web/src/components/TopBar.tsx`                              | wordmark, filter, the coordinator's line, sync, help, settings                                  |
+| `web/src/components/CoordinatorLog.tsx`                      | the coordinator's log, opened from the top bar                                                  |
+| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`  | the queue                                                                                       |
+| `web/src/components/Review.tsx`                              | a PR's review: header, AI review, files, Pierre diffs with notes, approve                       |
+| `web/src/components/Settings.tsx`, `Rules.tsx`, `Policy.tsx` | configuration; the coordinator's status sits in Settings.tsx                                    |
+| `web/src/styles.css`                                         | tokens for both themes, then layout by area                                                     |
+| `web/src/fonts/`                                             | Instrument Sans (UI), JetBrains Mono (code), bundled so nothing loads from the network          |
+| `web/mock/server.ts`, `diffs.ts`                             | an in-memory API for UI work without GitHub: `node web/mock/server.ts`; real-looking diffs      |
