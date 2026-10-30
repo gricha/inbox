@@ -51,7 +51,7 @@ export function eventText(e: ActivityEvent, me = ""): string {
     case "review_requested":
       return `${who ? `${who} asked` : "asked"} ${d.type === "team" ? `@${String(d.reviewer)}` : "you"}`;
     case "request_removed":
-      return d.type === "team" ? `request to @${String(d.reviewer)} removed` : "your request removed";
+      return `request to ${d.type === "team" ? `@${String(d.reviewer)}` : "you"} removed`;
     case "reviewed":
       return `${who} ${REVIEWED[String(d.state)] ?? "reviewed"}`;
     case "pushed":
