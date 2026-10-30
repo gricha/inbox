@@ -713,3 +713,18 @@ test("a run whose processes ignore SIGTERM is killed anyway", posix, async (c) =
   await until("the timeout", () => s.record(item.id).runs.at(-1)?.outcome === "timeout");
   assert.equal(s.desk.sitter.live.size, 0);
 });
+
+test("turning babysitting off stops the agents already running", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  const item = pr(95, s.w.head);
+  s.gh.items.set(item.id, item);
+  await s.desk.sync();
+  s.w.mode("sleep");
+  s.desk.act("web#95", "inflight");
+  await until("the run to start", () => s.desk.sitter.live.size === 1 && s.w.count() === 1);
+  s.desk.putSettings({ set: { "inflight.babysit": false } });
+  await until("the run to stop", () => s.record(item.id).runs.at(-1)?.outcome === "stopped");
+  assert.equal(s.desk.sitter.live.size, 0);
+  assert.deepEqual(s.record(item.id).tried, [], "it goes again when you turn it back on");
+  assert.equal(s.desk.inflight().rows[0]?.needs_you, "CI failing");
+});

@@ -633,6 +633,13 @@ export class Babysitter {
     this.clones = null;
     this.notes.clear();
     this.paused = null;
+    // Off is off: agents already running stop too.
+    const st = this.desk.settings;
+    if (!st["inflight.babysit"] || st["agent.driver"] !== "claude-code")
+      for (const l of this.live.values()) {
+        l.aborted ??= "babysitting turned off";
+        this.kill(l.child);
+      }
     this.considerAll();
   }
 
