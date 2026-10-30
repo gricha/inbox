@@ -411,6 +411,32 @@ test("settings move once: leftovers in config.toml only warn, and a later reset 
   fs.rmSync(home, { recursive: true });
 });
 
+test("a config saved after the first start can't set settings: the agent-reachable command stays put", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  const desks: Desk[] = [];
+  c.after(() => {
+    for (const d of desks) d.stop();
+    fs.rmSync(home, { recursive: true });
+  });
+  const open = async () => {
+    const d = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+    desks.push(d);
+    await d.init();
+    return d;
+  };
+  const first = await open();
+  const r = first.putConfig(`${first.getConfig().text}\n[analyze]\ncommand = "/tmp/not-claude"\n`, first.getConfig().hash);
+  assert.equal(r.ok, true);
+  await idle(first);
+  first.stop();
+  const desk = await open();
+  assert.equal(desk.settings["analyze.command"], "claude");
+  assert.deepEqual(
+    desk.getConfig().warnings?.map((w) => w.path),
+    ["analyze"],
+  );
+});
+
 test("settings that change the searches sync right away", async () => {
   const t = await setup([]);
   await t.desk.sync();

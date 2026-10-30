@@ -350,7 +350,11 @@ export class Desk {
     if (this.store.get("settings_migrated") || !fs.existsSync(this.configPath)) return;
     const text = fs.readFileSync(this.configPath, "utf8");
     const m = migrateLegacy(text);
-    if (!m) return;
+    if (!m) {
+      // Nothing to move, so it's done: legacy keys saved later (desk_config save, an agent) only warn, never become settings.
+      if (parseConfig(text, this.settings).loaded) this.store.set("settings_migrated", this.now().toISOString());
+      return;
+    }
     if (this.settingsErrors.some((e) => e.path === "settings.json")) {
       this.log("settings.json can't be read; not moving settings out of config.toml until it's fixed");
       return;
