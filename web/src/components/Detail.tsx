@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText, when } from "../format.ts";
+import { judgeStepText } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
@@ -97,7 +98,9 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           )}
           <p className="pl-head">
             {card.resolved && "Otherwise "}
-            <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board{main.why && <>: {main.why}</>}
+            <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
+            {main.judge?.bucket && main.judge.why && " by your policy"}
+            {main.why && <>: {main.why}</>}
           </p>
           {main.demoted && (
             <p className="demote-note">
@@ -173,10 +176,21 @@ function PlacementView({ p }: { p: Placement }) {
           </li>
         ))}
         {p.rule === null && (
-          <li className="hit">
-            <span className="tick ok">→</span>
+          <li className={cls(!p.judge?.bucket && "hit")}>
+            <span className={cls("tick", !p.judge?.bucket && "ok")}>→</span>
             <span className="idx">default</span>
-            <span>no rule matched, so {BUCKET_LABEL[p.rule_bucket].toLowerCase()}</span>
+            <span>
+              {p.judge?.bucket
+                ? "no rule matched, so the policy decides"
+                : `no rule matched, so ${BUCKET_LABEL[p.rule_bucket].toLowerCase()}`}
+            </span>
+          </li>
+        )}
+        {p.judge && (
+          <li className={cls(p.judge.bucket && "hit")}>
+            <span className={cls("tick", p.judge.bucket ? "ok" : "no")}>{p.judge.bucket ? "→" : "…"}</span>
+            <span className="idx">policy</span>
+            <span>{judgeStepText(p.judge)}</span>
           </li>
         )}
       </ol>

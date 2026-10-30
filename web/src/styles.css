@@ -1759,6 +1759,142 @@ kbd {
   margin-top: 8px;
 }
 
+/* Policy: prose, so the UI font and wrapped lines. */
+.policy {
+  max-width: 760px;
+  margin-top: 24px;
+}
+
+.editor.prose {
+  height: 240px;
+  min-height: 160px;
+  font: 14px/1.6 var(--sans);
+  white-space: pre-wrap;
+}
+
+.editor.prose::placeholder {
+  color: var(--pencil);
+}
+
+.policy .s-path {
+  margin-top: 6px;
+}
+
+/* The coordinator, under its switch in Settings → Agents. */
+.coord {
+  flex-basis: 100%;
+}
+
+.coord-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.coord-cmd code {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* The queue's top bar: one quiet line when the coordinator acted recently. */
+.coord-line {
+  height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--pencil);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.coord-line:hover,
+.coord-line.on {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+@media (width <= 1000px) {
+  .coord-line .cl-what {
+    display: none;
+  }
+}
+
+.coord-log {
+  margin-bottom: 30px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.cl-head,
+.cl-list li {
+  display: grid;
+  grid-template-columns: var(--ref-w) minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--gap);
+  padding: 0 12px;
+}
+
+.cl-head {
+  margin-bottom: 8px;
+}
+
+.cl-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.cl-status {
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.cl-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+}
+
+.cl-list li {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.cl-when {
+  color: var(--pencil);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cl-text {
+  color: var(--ink-2);
+}
+
+.cl-run .cl-text,
+.undone .cl-text {
+  color: var(--pencil);
+}
+
+.cl-undone {
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
 .side-col {
   position: sticky;
   top: 80px;

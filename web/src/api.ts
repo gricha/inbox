@@ -3,10 +3,12 @@ import type {
   AgentStatus,
   AiReview,
   ConfigError,
+  CoordinatorView,
   FieldDoc,
   ItemDetail,
   ItemState,
   Overview,
+  PolicyDoc,
   PreviewResult,
   QueueView,
   ReviewView,
@@ -68,4 +70,8 @@ export const api = {
     call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
   agents: () => call<AgentStatus>("GET", "/api/agents"),
   connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
+  policy: () => call<PolicyDoc>("GET", "/api/policy"),
+  // 409 when `base` (the hash it was read at) is stale.
+  savePolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
+  coordinator: () => call<CoordinatorView>("GET", "/api/coordinator"),
 };
