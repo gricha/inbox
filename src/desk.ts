@@ -581,7 +581,7 @@ export class Desk {
       updated_at: it.updated_at,
       activity_at: e.analysis.activity_at,
       waiting_since: e.analysis.waiting_since,
-      new: e.isNew,
+      new: e.isNew && !e.resolved && e.status === "active", // a resolved or cleared row needs nobody, so no dot
       pinned: e.state.pinned,
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,

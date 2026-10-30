@@ -58,9 +58,10 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
     q.sections.now.map((c) => c.id),
     ["acme/api#2"],
   );
+  // Bob's approval is new activity, but a resolved row carries no "new" dot.
   assert.deepEqual(
-    q.resolved.map((c) => [c.id, c.why, c.resolved, c.resolved_at, c.pinned]),
-    [["acme/api#1", "approved by bob", "approved by bob", iso(0.5), true]],
+    q.resolved.map((c) => [c.id, c.why, c.resolved, c.resolved_at, c.pinned, c.new]),
+    [["acme/api#1", "approved by bob", "approved by bob", iso(0.5), true, false]],
   );
   assert.equal(q.sections.now[0]?.resolved_at, null);
   assert.deepEqual(

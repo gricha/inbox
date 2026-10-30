@@ -302,7 +302,7 @@ export interface Card {
   updated_at: string;
   activity_at: string; // latest activity by someone else
   waiting_since: string; // request time if requested, else created_at
-  new: boolean; // activity since you last looked
+  new: boolean; // activity since you last looked, on an item that isn't resolved or cleared
   pinned: boolean;
   status: Status;
   snooze_until: string | null;

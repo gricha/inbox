@@ -1027,7 +1027,7 @@ function cardOf(r: Rec, p: Placement): Card {
     updated_at: r.activity_at,
     activity_at: r.activity_at,
     waiting_since: waitingSince(r),
-    new: r.fresh,
+    new: r.fresh && !s.resolved && status(r) === "active", // like the desk: a resolved or cleared row carries no dot
     pinned: r.state.pinned,
     status: status(r),
     snooze_until: r.state.snooze_until,
