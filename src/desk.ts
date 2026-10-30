@@ -147,7 +147,7 @@ export class Desk {
     if (!this.ctx) await this.refreshContext();
     if (!fs.existsSync(this.configPath)) {
       // The default spaces come from where your work is; don't guess them from a failed fetch.
-      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < Date.now() - 24 * HOUR)
+      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.now().getTime() - 24 * HOUR)
         throw new Error(`couldn't read your GitHub context to write a first config: ${this.contextError ?? "unknown error"}`);
       const orgs = Object.entries(this.ctx?.orgs ?? {})
         .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
