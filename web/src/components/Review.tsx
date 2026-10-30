@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type { ActivityEvent, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { cls, copyText, shortRef, when } from "../format.ts";
+import { age, cls, copyText, eventText, shortRef, when } from "../format.ts";
 import { currentFile, filePatch, orderNotes, splitPath } from "../view.ts";
 import { CI, KeyButton, REVIEW } from "./Detail.tsx";
 
@@ -13,6 +13,7 @@ interface NoteMeta {
 }
 
 const ARM_MS = 3000;
+const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the file you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
@@ -34,12 +35,16 @@ const DIFF: FileDiffOptions<NoteMeta, undefined> = {
 export function Review({
   id,
   loads,
+  me,
+  now,
   inert,
   flash,
   onBack,
 }: {
   id: string;
   loads: number; // bumped on every refresh, so the review follows the server's updates
+  me: string;
+  now: number;
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onBack: () => void;
@@ -254,31 +259,46 @@ export function Review({
 
   return (
     <div className="review">
-      <header className={cls("rv-head", `b-${card.bucket}`, card.status !== "active" && "dim")}>
-        <p className="rv-ref">
-          <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
-            <span className="ref-ink">
-              <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+      {/* A resolved PR needs nobody now, so it doesn't wear Now's highlighter. */}
+      <header className={cls("rv-head", `b-${card.bucket}`, (card.status !== "active" || card.resolved) && "dim")}>
+        <div className="rv-facts">
+          <p className="rv-ref">
+            <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
+              <span className="ref-ink">
+                <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+              </span>
+            </a>
+            <span className="rv-by">
+              by {card.author}
+              {card.author_bot ? " (bot)" : ""}
             </span>
-          </a>
-          <span className="rv-by">
-            by {card.author}
-            {card.author_bot ? " (bot)" : ""}
-          </span>
-        </p>
-        <h1 className="rv-title">{card.title}</h1>
-        <p className="rv-meta">
-          {card.why && <span className="why">{card.why}</span>}
-          <span className={ciTone}>CI {CI[item.ci]}</span>
-          <span className={reviewTone}>
-            {REVIEW[item.review_decision]}
-            {approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}
-          </span>
-          {item.draft && <span>draft</span>}
-          <span>
-            +{item.additions} −{item.deletions} in {item.changed_files} {item.changed_files === 1 ? "file" : "files"}
-          </span>
-        </p>
+          </p>
+          <h1 className="rv-title">{card.title}</h1>
+          <p className="rv-meta">
+            {card.why && !card.resolved && <span className="why">{card.why}</span>}
+            <span className={ciTone}>CI {CI[item.ci]}</span>
+            <span className={reviewTone}>
+              {REVIEW[item.review_decision]}
+              {approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}
+            </span>
+            {item.draft && <span>draft</span>}
+            <span>
+              +{item.additions} −{item.deletions} in {item.changed_files} {item.changed_files === 1 ? "file" : "files"}
+            </span>
+          </p>
+          {card.resolved && (
+            <p className="rv-resolved">
+              Resolved: {card.resolved}
+              {card.resolved_at && ` · ${age(card.resolved_at, now)}`}
+            </p>
+          )}
+        </div>
+        <Activity
+          // The resolved line already says it.
+          events={view.activity.filter((e) => !(card.resolved && e.kind === "resolved"))}
+          me={me}
+          now={now}
+        />
       </header>
 
       <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
@@ -379,7 +399,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
       </h2>
       {busy && <p className="quiet">Your agent is reading the diff. This takes a minute or two; the notes land in the code below.</p>}
       {!busy && view.ai_error && (
-        <p className="t-bad">
+        <p>
           {view.ai_error}{" "}
           <span className="quiet">
             Press <kbd>i</kbd> to try again.
@@ -416,6 +436,36 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
             </p>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {
+  const [all, setAll] = useState(false);
+  if (!events.length) return null;
+  const more = events.length - EVENTS_SHOWN;
+  return (
+    <section className="rv-activity" aria-label="Recent activity">
+      <h2 className="d-head">Recent activity</h2>
+      <ul className="events">
+        {(all ? events : events.slice(0, EVENTS_SHOWN)).map((e) => (
+          <li key={e.seq}>
+            {eventText(e, me)} <span className="quiet">· {age(e.at, now)}</span>
+          </li>
+        ))}
+      </ul>
+      {more > 0 && (
+        <button
+          type="button"
+          className="rv-more"
+          aria-expanded={all}
+          onClick={() => {
+            setAll((a) => !a);
+          }}
+        >
+          {all ? "Fewer" : `${more} more`}
+        </button>
       )}
     </section>
   );

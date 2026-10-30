@@ -626,6 +626,8 @@ export function App() {
               key={route.id} // a different PR starts fresh: first file, no note, nothing armed
               id={route.id}
               loads={loads}
+              me={overview?.me ?? ""}
+              now={now}
               inert={help}
               flash={reviewFlash}
               onBack={() => {

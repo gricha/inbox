@@ -214,6 +214,7 @@ test("resolved items sit apart from the queue's groups and boards; items carry t
     [
       ["acme/api#4093", "approved by dana", "approved by dana"],
       ["acme/web#2284", "merged", "merged"],
+      ["acme/web#2292", "you approved", "you approved"],
       ["acme/worker#868", "no longer requested", "no longer requested"],
     ],
   );
@@ -266,6 +267,8 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   assert.equal(ok.ok, true);
   const { data: again } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("api#4127")}`);
   assert.equal(again.approve.reason, "you approved this commit");
+  assert.equal(again.card.resolved, "you approved", "like the desk, your approval resolves it");
+  assert.deepEqual([again.activity[0]?.kind, again.activity[0]?.actor], ["resolved", "me"]);
   const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, { head_oid: "x" });
   assert.equal(mine.status, 409);
 });

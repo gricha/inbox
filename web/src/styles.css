@@ -1979,9 +1979,19 @@ kbd {
   padding: 0 12px;
 }
 
+/* The facts, with recent activity beside them where there's room and below them where there isn't. */
 .rv-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 48px;
+  align-items: start;
+}
+
+.rv-facts {
   display: grid;
+  flex: 1 1 520px;
   gap: 6px;
+  min-width: 0;
 }
 
 .rv-ref {
@@ -2036,6 +2046,39 @@ kbd {
 .rv-meta .t-bad,
 .rv-meta .t-warn {
   font-weight: 600;
+}
+
+.rv-resolved {
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+/* Recent activity: a few quiet lines; the rest behind "n more". */
+.rv-activity {
+  display: grid;
+  flex: 0 1 300px;
+  gap: 4px;
+  justify-items: start;
+  padding-top: 3px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.rv-activity .d-head {
+  margin: 0;
+}
+
+.rv-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pencil);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rv-more:hover {
+  color: var(--ink);
 }
 
 .rv-ai {

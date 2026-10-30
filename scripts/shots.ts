@@ -133,21 +133,39 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The Resolved group open, with one resolved item's detail and its recent activity. Before "sorted-away" opens Later.
+    // The Resolved group open, scrolled into view. Before "sorted-away" opens Later.
     name: "resolved",
     go: async (page) => {
       await at("#/")(page);
       await page.keyboard.press("g");
       await page.keyboard.press("d");
       await page.waitForTimeout(300);
-      const row = page.locator(".g-resolved .row-main").nth(1);
-      if (await row.isVisible()) {
-        await row.click();
-        await page.waitForTimeout(400);
-        await page.mouse.move(600, 400);
-        await page.mouse.wheel(0, 700);
-        await page.waitForTimeout(300);
+      await page.locator(".g-resolved").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Enter on a resolved PR: its review says why it resolved, and when, under the facts.
+    name: "review-resolved",
+    go: async (page) => {
+      await at("#/")(page);
+      const row = page.locator(".g-resolved .row", { hasText: "Tighten the CSP" }).locator(".row-main");
+      if (!(await row.isVisible())) {
+        await page.keyboard.press("g");
+        await page.keyboard.press("d");
       }
+      await row.click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(600);
+    },
+  },
+  {
+    // A PR's recent activity, every line of it.
+    name: "review-activity",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      await page.locator(".rv-more").click();
+      await page.waitForTimeout(200);
     },
   },
   {

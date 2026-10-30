@@ -218,7 +218,7 @@ interface Seed {
   fresh?: boolean;
   on: Partial<Record<string, Key[] | "filtered">>;
   st?: Partial<ItemState>;
-  resolved?: string; // the world dealt with it: "merged", "approved by dana", ...
+  resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
 }
 
@@ -453,6 +453,22 @@ const SEEDS: Seed[] = [
       ["ci", "", 3.5, { from: "pending", to: "green" }],
       ["merged", "li-wei", 1, {}],
     ],
+  },
+  {
+    repo: "acme/web",
+    n: 2292,
+    title: "Lazy-load the settings panes",
+    author: "marco",
+    age: 26,
+    wait: 24,
+    upd: 2,
+    by: "marco",
+    direct: true,
+    size: [48, 20, 4],
+    reviews: [[ME, "approved", 2]],
+    on: { "work-review": ["direct"] },
+    resolved: "you approved",
+    log: [["commented", "sam", 5, {}]],
   },
   {
     repo: "acme/worker",
@@ -793,7 +809,8 @@ function signals(r: Rec): Signals {
   const [add, del, files] = pr ? (s.size ?? [0, 0, 0]) : [0, 0, 0];
   const reviews = s.reviews ?? [];
   const myReview = reviews.findLast(([a]) => a === ME);
-  const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested"; // that ask was removed
+  // Removing the ask, or your approval, clears it.
+  const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
   return {
     item: {
       kind,
@@ -1115,7 +1132,7 @@ function storyOf(r: Rec): Omit<ActivityEvent, "seq">[] {
   }
   for (const [a, state, h] of s.reviews ?? []) if (a !== ME) out.push(ev("reviewed", a, h, { state }));
   for (const [kind, actor, h, data] of s.log ?? []) out.push(ev(kind, actor, h, data));
-  if (s.resolved) out.push(ev("resolved", "", s.upd ?? 1, { reason: s.resolved }));
+  if (s.resolved) out.push(ev("resolved", s.resolved === "you approved" ? ME : "", s.upd ?? 1, { reason: s.resolved }));
   return out;
 }
 
@@ -1314,11 +1331,12 @@ async function generate(r: Rec): Promise<AiReview> {
   }
 }
 
-// Like the desk, opening a PR with no AI review asks for one.
+// Like the desk, opening an open PR with no AI review asks for one; a merged or closed one can't be approved.
 function reviewView(r: Rec): ReviewView {
   const d = detail(r);
   if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
-  if (!d.ai && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME) {
+  const ended = r.seed.resolved === "merged" || r.seed.resolved === "closed";
+  if (!d.ai && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME && !ended) {
     void generate(r).catch(() => {});
     d.generating = true;
   }
@@ -1335,9 +1353,12 @@ function reviewView(r: Rec): ReviewView {
     generating: d.generating,
     approve: mine
       ? { ok: false, reason: "it's your PR" }
-      : approved.has(r.id)
-        ? { ok: false, reason: "you approved this commit" }
-        : { ok: true, reason: null },
+      : ended
+        ? { ok: false, reason: `it's ${r.seed.resolved}` }
+        : approved.has(r.id)
+          ? { ok: false, reason: "you approved this commit" }
+          : { ok: true, reason: null },
+    activity: d.activity,
   };
 }
 
@@ -1866,6 +1887,18 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       if ((await readBody(req)).head_oid !== itemOf(r).head_oid)
         throw new HttpError(409, `can't approve ${r.id}: it has new commits since you opened it`);
       approved.add(r.id);
+      // Like the desk: your approval resolves it, as of now.
+      r.seed.resolved = "you approved";
+      r.seed.upd = (T0 - Date.now()) / HOUR;
+      EVENTS.push({
+        seq: EVENTS.length + 1,
+        at: new Date().toISOString(),
+        source: "github",
+        item_id: r.id,
+        kind: "resolved",
+        actor: ME,
+        data: { reason: "you approved" },
+      });
       bump();
       return { ok: true, url: `${urlOf(r.seed)}#pullrequestreview-mock` };
     }
