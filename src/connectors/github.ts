@@ -9,7 +9,7 @@ import { itemEvents } from "./github-events.ts";
 
 const HOUR = 3_600_000;
 const MAX_QUERY = 256; // GitHub search rejects longer queries
-const KEEP_RESOLVED = 3 * 24 * HOUR; // an item that left every search stays on its boards this long, under Resolved
+export const KEEP_RESOLVED = 3 * 24 * HOUR; // an item that left every search stays on its boards this long, under Resolved
 const FEED_RETRY = 10 * 60_000;
 // Notification reasons that mean an item the desk doesn't have yet may belong on it.
 const FRESH_REASONS = new Set(["review_requested", "mention", "team_mention", "assign", "author"]);

@@ -137,6 +137,33 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   t.cleanup();
 });
 
+test("you approved: still in the reviewed-by search, it passes the board's filter to show under Resolved for 3 days", async () => {
+  const t = await setup([reviewAsk(1), reviewAsk(2)]);
+  const route = t.gh.route;
+  t.gh.route = (q) =>
+    q.includes("reviewed-by:@me")
+      ? [...t.gh.items.values()].filter((i) => i.reviews.some((r) => r.author === "me")).map((i) => i.id)
+      : route(q);
+  await t.desk.sync();
+  t.setNow(later(0.25));
+  t.gh.items.set("acme/api#1", reviewAsk(1, { review_requests: [], reviews: [approve("me", iso(0.1))], updated_at: iso(0.1) }));
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.store.activity({ after: 2, limit: 10 }).map((e) => [e.kind, e.actor, e.data]),
+    [["resolved", "me", { reason: "you approved" }]],
+  );
+  assert.deepEqual(
+    t.desk.queue().resolved.map((c) => [c.id, c.why, c.resolved_at]),
+    [["acme/api#1", "you approved", iso(0.1)]],
+  );
+  assert.ok(!t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"));
+
+  t.setNow(later(80));
+  await t.desk.sync();
+  assert.deepEqual(t.desk.queue().resolved, [], "three days on, the filter drops it again");
+  t.cleanup();
+});
+
 test("unrequested without a review: request removed, resolved as no longer requested", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();

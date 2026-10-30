@@ -4,7 +4,7 @@ import path from "node:path";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
-import { GitHubConnector } from "./connectors/github.ts";
+import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import type {
   Action,
@@ -497,6 +497,9 @@ export class Desk {
     const hits = this.store.hits();
     const kept = this.store.kept();
     const fetched = this.store.queries();
+    // A recently resolved item still in a search (you approved: reviewed-by:@me) passes its board's filter, to show under Resolved.
+    const keepSince = new Date(now.getTime() - KEEP_RESOLVED).toISOString();
+    const recent = (e: Entry) => e.resolved !== null && (e.resolved.at ?? e.item.updated_at) > keepSince;
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
     for (const board of loaded.boards) {
@@ -519,7 +522,7 @@ export class Desk {
           pinned: e.state.pinned,
           // Resolved items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved,
-          kept: kept.has(e.item.id),
+          kept: kept.has(e.item.id) || recent(e),
         })),
       );
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
