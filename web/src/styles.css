@@ -1973,23 +1973,21 @@ kbd {
 }
 
 .rv-head,
+.rv-activity,
 .rv-ai,
 .rv-actions,
 .rv-files-err {
   padding: 0 12px;
 }
 
-/* The facts, with recent activity beside them where there's room and below them where there isn't. */
-.rv-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 48px;
-  align-items: start;
+/* The facts, recent activity and the AI review; the activity's place depends on the width (see Narrow windows). */
+.rv-top {
+  display: grid;
+  gap: 22px;
 }
 
-.rv-facts {
+.rv-head {
   display: grid;
-  flex: 1 1 520px;
   gap: 6px;
   min-width: 0;
 }
@@ -2029,7 +2027,8 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* Every fact starts with its "·"; shifting the line left by one and clipping it hides the one that starts each wrapped line. */
+/* Every fact starts with its "·" in a padded gutter; shifting the line left by one and clipping it hides the one that
+   starts each wrapped line, and a fact that wraps itself carries on after the gutter, not under it. */
 .rv-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2040,30 +2039,32 @@ kbd {
   font-size: 13px;
 }
 
-.rv-meta > span::before {
-  display: inline-block;
+.rv-meta > span {
+  position: relative;
+  padding-left: 18px;
+}
+
+.rv-meta > span::before,
+.rv-age::before {
+  position: absolute;
+  left: 0;
   width: 18px;
   color: var(--pencil);
   text-align: center;
   content: "·";
 }
 
-.rv-meta .t-bad,
-.rv-meta .t-warn {
-  font-weight: 600;
-}
-
 .rv-resolved {
   color: var(--pencil);
-  font-size: 13px;
 }
 
-/* Recent activity: a few quiet lines; the rest behind "n more". */
+/* Recent activity: a few quiet lines, the time after the same "·" as the facts; the rest behind "n more". */
 .rv-activity {
   display: grid;
-  flex: 0 1 300px;
   gap: 4px;
+  align-content: start;
   justify-items: start;
+  min-width: 0;
   padding-top: 3px;
   color: var(--ink-2);
   font-size: 13px;
@@ -2071,6 +2072,12 @@ kbd {
 
 .rv-activity .d-head {
   margin: 0;
+}
+
+.rv-age {
+  position: relative;
+  padding-left: 18px;
+  color: var(--pencil);
 }
 
 .rv-more {
@@ -2200,11 +2207,13 @@ kbd {
   white-space: nowrap;
 }
 
+/* Right to left, so a long folder gives way from its start ("…/migrations/") and the name after it stays whole. */
 .rv-dir {
   min-width: 0;
   overflow: hidden;
   color: var(--pencil);
   text-overflow: ellipsis;
+  direction: rtl;
 }
 
 .rv-base {
@@ -2338,7 +2347,69 @@ kbd {
   }
 }
 
+/* Wide: recent activity in a column of its own beside the facts and the AI review. */
+@media (width > 1100px) {
+  .rv-top:has(.rv-activity) {
+    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    column-gap: 48px;
+  }
+
+  .rv-top .rv-activity {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+
+  .rv-top .rv-ai {
+    grid-column: 1;
+  }
+}
+
 @media (width <= 1100px) {
+  /* Under the facts, recent activity is one wrapped line, so the AI review and the diff stay near the top. */
+  .rv-activity {
+    display: flex;
+    align-items: baseline;
+    margin-top: -8px;
+    padding-top: 0;
+  }
+
+  .rv-activity .d-head {
+    flex: none;
+    margin-right: 10px;
+  }
+
+  .rv-activity .events {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 0;
+    min-width: 0;
+    margin-left: -18px;
+    clip-path: inset(0 0 0 18px);
+  }
+
+  .rv-activity .events > li {
+    position: relative;
+    padding-left: 18px;
+  }
+
+  .rv-activity .events > li::before {
+    position: absolute;
+    left: 0;
+    width: 18px;
+    color: var(--pencil);
+    text-align: center;
+    content: "·";
+  }
+
+  .rv-age {
+    padding-left: 0.3em;
+  }
+
+  .rv-age::before {
+    content: none;
+  }
+
   .rv-body {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;

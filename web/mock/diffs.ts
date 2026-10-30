@@ -176,6 +176,16 @@ const tokenizer: ReviewFile[] = [
 +        return
 +    get_tokenizer(settings.TOKENIZER)`,
   ),
+  // At the repo's root, so the shots show a file with no folder.
+  file(
+    "requirements.txt",
+    "modified",
+    `@@ -3,3 +3,3 @@ numpy==1.26.4
+ pydantic==2.8.2
+-transformers==4.44.0
++transformers==4.46.1
+ uvicorn==0.30.6`,
+  ),
   file(
     "pipeline/worker.py",
     "modified",
@@ -189,6 +199,17 @@ const tokenizer: ReviewFile[] = [
 
  def worker_exit(server, worker):
      metrics.flush()`,
+  ),
+  // Deep enough that its folder gives way in the file list.
+  file(
+    "pipeline/migrations/versions/0008_tokenizer_cache.py",
+    "added",
+    `@@ -0,0 +1,5 @@
++"""Adds the tokenizer cache size setting."""
++
++
++def upgrade(op):
++    op.add_setting("tokenizer_cache_size", default=4)`,
   ),
   file(
     "tests/test_tokenize.py",

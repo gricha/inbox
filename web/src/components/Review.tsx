@@ -4,7 +4,7 @@ import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre
 import type { ActivityEvent, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, orderNotes, splitPath } from "../view.ts";
+import { currentFile, filePatch, orderNotes, resolvedHead, splitPath } from "../view.ts";
 import { CI, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
@@ -254,14 +254,31 @@ export function Review({
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const approvals = item.reviews.filter((r) => r.state === "approved").length;
-  const ciTone = item.ci === "red" ? "t-bad" : "";
-  const reviewTone = item.review_decision === "changes_requested" ? "t-warn" : "";
+  // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
+  const facts = [
+    { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "" },
+    {
+      text: `${REVIEW[item.review_decision]}${approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}`,
+      tone: item.review_decision === "changes_requested" ? "t-warn" : "",
+    },
+    ...(item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
+    ...(item.draft ? [{ text: "draft", tone: "" }] : []),
+    { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
+  ];
+  const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
+  const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
 
   return (
     <div className="review">
-      {/* A resolved PR needs nobody now, so it doesn't wear Now's highlighter. */}
-      <header className={cls("rv-head", `b-${card.bucket}`, (card.status !== "active" || card.resolved) && "dim")}>
-        <div className="rv-facts">
+      <div className="rv-top">
+        {/* A resolved PR needs nobody now, so it doesn't wear Now's highlighter. */}
+        <header
+          className={cls(
+            "rv-head",
+            `b-${card.bucket}`,
+            (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
+          )}
+        >
           <p className="rv-ref">
             <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
               <span className="ref-ink">
@@ -275,33 +292,23 @@ export function Review({
           </p>
           <h1 className="rv-title">{card.title}</h1>
           <p className="rv-meta">
-            {card.why && !card.resolved && <span className="why">{card.why}</span>}
-            <span className={ciTone}>CI {CI[item.ci]}</span>
-            <span className={reviewTone}>
-              {REVIEW[item.review_decision]}
-              {approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}
-            </span>
-            {item.draft && <span>draft</span>}
-            <span>
-              +{item.additions} −{item.deletions} in {item.changed_files} {item.changed_files === 1 ? "file" : "files"}
-            </span>
+            {why && <span className="why">{why}</span>}
+            {facts.map((f) => (
+              <span key={f.text} className={cls("fact-word", f.tone)}>
+                {f.text}
+              </span>
+            ))}
           </p>
-          {card.resolved && (
-            <p className="rv-resolved">
-              Resolved: {card.resolved}
-              {card.resolved_at && ` · ${age(card.resolved_at, now)}`}
+          {resolved && (
+            <p className="rv-meta rv-resolved">
+              <span>{resolved.line}</span>
+              {card.resolved_at && <span>{Date.parse(card.resolved_at) > now - 60_000 ? "just now" : age(card.resolved_at, now)}</span>}
             </p>
           )}
-        </div>
-        <Activity
-          // The resolved line already says it.
-          events={view.activity.filter((e) => !(card.resolved && e.kind === "resolved"))}
-          me={me}
-          now={now}
-        />
-      </header>
-
-      <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
+        </header>
+        <Activity events={resolved?.events ?? view.activity} me={me} now={now} />
+        <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
+      </div>
 
       <div className="actions rv-actions">
         <KeyButton
@@ -351,7 +358,7 @@ export function Review({
                       }}
                     >
                       <span className="rv-fname">
-                        <span className="rv-dir">{dir}</span>
+                        {dir && <Dir path={dir} />}
                         <span className="rv-base">{name}</span>
                       </span>
                       {n > 0 && <span className="rv-nn" title={`${n} AI ${n === 1 ? "note" : "notes"}`} />}
@@ -457,23 +464,35 @@ function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; no
       <ul className="events">
         {(all ? events : events.slice(0, EVENTS_SHOWN)).map((e) => (
           <li key={e.seq}>
-            {eventText(e, me)} <span className="quiet">· {age(e.at, now)}</span>
+            {eventText(e, me)}
+            <span className="rv-age">{age(e.at, now)}</span>
           </li>
         ))}
+        {more > 0 && (
+          <li>
+            <button
+              type="button"
+              className="rv-more"
+              aria-expanded={all}
+              onClick={() => {
+                setAll((a) => !a);
+              }}
+            >
+              {all ? "Fewer" : `${more} more`}
+            </button>
+          </li>
+        )}
       </ul>
-      {more > 0 && (
-        <button
-          type="button"
-          className="rv-more"
-          aria-expanded={all}
-          onClick={() => {
-            setAll((a) => !a);
-          }}
-        >
-          {all ? "Fewer" : `${more} more`}
-        </button>
-      )}
     </section>
+  );
+}
+
+// A long directory gives way from its start, so the file's own name stays whole and every name sits right after its folder.
+function Dir({ path }: { path: string }) {
+  return (
+    <span className="rv-dir">
+      <bdi>{path}</bdi>
+    </span>
   );
 }
 
@@ -506,7 +525,7 @@ function FileSection({
     <section className="rv-file-sec" id={`rv-f-${index}`} aria-label={file.path}>
       <h3 className="rv-fhead">
         <span className="rv-fname">
-          <span className="rv-dir">{dir}</span>
+          {dir && <Dir path={dir} />}
           <span className="rv-base">{name}</span>
         </span>
         {status && (

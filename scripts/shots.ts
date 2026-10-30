@@ -111,7 +111,18 @@ const SHOTS: Shot[] = [
   },
   { name: "review", go: review("acme/api#4127") },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
+  // n lands on requirements.txt: a file at the repo's root, with a long folder below it in the list.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
+  {
+    // Rule whys are yours to write and can run long: a fact that wraps carries on after its "·", never under it.
+    name: "review-long-why",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      await page.evaluate(
+        `document.querySelector(".rv-meta .why").textContent = "close collaborator: you engaged with 128 of their PRs in 90 days, and the observability team wants your eyes on the query explorer directly"`,
+      );
+    },
+  },
   {
     // Enter from the queue on a PR with no AI review yet: it's being written.
     name: "review-writing",

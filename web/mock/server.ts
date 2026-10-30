@@ -315,7 +315,7 @@ const SEEDS: Seed[] = [
     by: "sam",
     team: "ml-team",
     owner: true,
-    size: [28, 3, 4], // matches its canned diff in diffs.ts
+    size: [34, 4, 6], // matches its canned diff in diffs.ts
     close: 12,
     on: { "work-review": ["close", "owners"] },
   },
@@ -445,12 +445,14 @@ const SEEDS: Seed[] = [
     by: "li-wei",
     direct: true,
     size: [24, 6, 2],
+    ci: "red", // merged anyway: its review still shouldn't shout about it
     reviews: [["marco", "approved", 4]],
     review: "approved",
+    fresh: true, // a resolved row carries no "new" dot all the same
     on: { "work-review": ["direct"] },
     resolved: "merged",
     log: [
-      ["ci", "", 3.5, { from: "pending", to: "green" }],
+      ["ci", "", 3.5, { from: "pending", to: "red" }],
       ["merged", "li-wei", 1, {}],
     ],
   },
@@ -902,7 +904,7 @@ function itemOf(r: Rec): Item {
     url: sig.item.url,
     author: s.author,
     author_bot: sig.author.bot,
-    state: "open",
+    state: s.resolved === "merged" ? "merged" : s.resolved === "closed" ? "closed" : "open",
     draft: !!s.draft,
     labels: s.labels ?? [],
     assignees: s.assignee ? [ME] : [],

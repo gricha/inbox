@@ -1,4 +1,4 @@
-import type { Card, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
+import type { ActivityEvent, Card, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
 import { shortRef } from "./format.ts";
 
 // One surface (the queue), a PR's review in its place, and Settings, whose sections include the rules editor.
@@ -61,6 +61,22 @@ export function orderNotes(notes: ReviewNote[], files: ReviewFile[]): ReviewNote
 export function splitPath(p: string): [string, string] {
   const i = p.lastIndexOf("/");
   return [p.slice(0, i + 1), p.slice(i + 1)];
+}
+
+// A resolved PR's "Resolved: …" line takes the event that caused it (and who merged or closed it), so Recent activity
+// doesn't say it again; the "resolved" events go too. `events` are newest first.
+export function resolvedHead(events: ActivityEvent[], resolved: string, me: string): { line: string; events: ActivityEvent[] } {
+  const ended = resolved === "merged" || resolved === "closed";
+  const approver = /^approved by (.+)$/.exec(resolved)?.[1]?.toLowerCase();
+  const cause = events.find((e) =>
+    ended
+      ? e.kind === resolved
+      : resolved === "no longer requested"
+        ? e.kind === "request_removed"
+        : e.kind === "reviewed" && e.data.state === "approved" && e.actor.toLowerCase() === approver,
+  );
+  const who = ended && cause?.actor ? ` by ${cause.actor.toLowerCase() === me.toLowerCase() ? "you" : cause.actor}` : "";
+  return { line: `Resolved: ${resolved}${who}`, events: events.filter((e) => e !== cause && e.kind !== "resolved") };
 }
 
 // Which file the reader is in: the last one whose top has scrolled past the line under the top bar.

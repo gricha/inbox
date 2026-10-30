@@ -14,6 +14,7 @@ import {
   parseList,
   parseRoute,
   removeCard,
+  resolvedHead,
   routeHash,
   valueOf,
   type KeyLike,
@@ -228,6 +229,47 @@ test("events read as plain words", () => {
       "came back (was approved by alice)",
     ],
   );
+});
+
+test("a resolved PR's header says what resolved it once: the line takes its cause out of Recent activity", () => {
+  let seq = 0;
+  const e = (kind: ActivityEvent["kind"], actor = "", data: ActivityEvent["data"] = {}): ActivityEvent => ({
+    seq: ++seq,
+    at: "",
+    source: "github",
+    item_id: "acme/api#1",
+    kind,
+    actor,
+    data,
+  });
+  const merged = [e("resolved", "", { reason: "merged" }), e("merged", "li-wei"), e("ci", "", { to: "red" }), e("merged", "old")];
+  const m = resolvedHead(merged, "merged", "me");
+  assert.equal(m.line, "Resolved: merged by li-wei");
+  assert.deepEqual(
+    m.events.map((x) => x.seq),
+    [3, 4],
+    "only the newest merge goes",
+  );
+  assert.equal(resolvedHead([e("merged", "me")], "merged", "Me").line, "Resolved: merged by you");
+  assert.equal(resolvedHead([e("closed")], "closed", "me").line, "Resolved: closed", "nobody named, nobody said");
+
+  const approved = [e("reviewed", "Carol", { state: "approved" }), e("reviewed", "dan", { state: "approved" }), e("commented", "carol")];
+  const a = resolvedHead(approved, "approved by carol", "me");
+  assert.equal(a.line, "Resolved: approved by carol");
+  assert.deepEqual(
+    a.events.map((x) => x.actor),
+    ["dan", "carol"],
+  );
+  assert.deepEqual(
+    resolvedHead(
+      [e("request_removed", "", { reviewer: "ml-team", type: "team" }), e("new", "kofi")],
+      "no longer requested",
+      "me",
+    ).events.map((x) => x.kind),
+    ["new"],
+  );
+  const mine = [e("resolved", "me", { reason: "you approved" }), e("commented", "sam")];
+  assert.deepEqual(resolvedHead(mine, "you approved", "me"), { line: "Resolved: you approved", events: [mine[1]] });
 });
 
 const TOML = `poll_seconds = 60
