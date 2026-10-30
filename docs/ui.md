@@ -115,7 +115,6 @@ Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 
 |                                                              |                                                                                                 |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `web/src/App.tsx`                                            | state, data loading, SSE, keyboard                                                              |
 | `web/src/view.ts`                                            | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`) |
 | `web/src/components/TopBar.tsx`                              | wordmark, filter, the coordinator's line, sync, help, settings                                  |
