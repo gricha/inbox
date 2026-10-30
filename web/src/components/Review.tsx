@@ -15,7 +15,7 @@ interface NoteMeta {
 const ARM_MS = 3000;
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the file you're in" is read off
-const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
+export const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
 const delta = (f: ReviewFile) => (f.patch === null && !f.additions && !f.deletions ? "binary" : `+${f.additions} −${f.deletions}`);
 

@@ -6,7 +6,9 @@ import { age, ago, clearedText, eventText, shortId, shortRef } from "../src/form
 import {
   acceleratorOf,
   actedText,
+  aiWord,
   authProblem,
+  cardFacts,
   coordinatorText,
   DEFAULT_OPEN,
   draftOf,
@@ -14,7 +16,9 @@ import {
   groupsOf,
   judgeStatusText,
   judgeStepText,
+  keyParts,
   laneFacts,
+  lead,
   lineOf,
   logText,
   navigable,
@@ -283,6 +287,65 @@ test("your PR's next step leaves out what its why already says", () => {
     "Enter opens In flight, y sends it",
   );
   assert.equal(nextText({ why: "x", next: undefined }), undefined);
+});
+
+test("a card's next step sets its keys apart", () => {
+  assert.deepEqual(keyParts("Enter opens In flight, y sends it"), ["", "Enter", " opens In flight, ", "y", " sends it"]);
+  assert.deepEqual(keyParts("d hands it to a babysitter"), ["", "d", " hands it to a babysitter"]);
+  assert.deepEqual(keyParts("a draft: mark it ready for review when it is"), ["a draft: mark it ready for review when it is"]);
+});
+
+test("a card shows the AI summary's first sentence", () => {
+  assert.equal(lead("Splits the scheduler in two. Lease owns the jobs table."), "Splits the scheduler in two.");
+  assert.equal(
+    lead("Caches it per process, so the first request no longer pays the 1.5 s load."),
+    "Caches it per process, so the first request no longer pays the 1.5 s load.",
+  );
+  assert.equal(lead("Adds an http2: 'prior-knowledge' option. HTTP/1.1 keeps working."), "Adds an http2: 'prior-knowledge' option.");
+});
+
+test("a card's AI word: the verdict, marked when it's for an older commit, or why there's none yet", () => {
+  assert.deepEqual(aiWord({ state: "ready", verdict: "look" }), { verdict: "look", note: "" });
+  assert.deepEqual(aiWord({ state: "stale", verdict: "skim" }), { verdict: "skim", note: "updating" });
+  assert.deepEqual(aiWord({ state: "paused", verdict: "look" }), { verdict: "look", note: "paused" });
+  assert.deepEqual(aiWord({ state: "off", verdict: "skip" }), { verdict: "skip", note: "earlier commit" });
+  assert.deepEqual(aiWord({ state: "running" }), { verdict: null, note: "AI review being written" });
+  assert.deepEqual(aiWord({ state: "queued" }), { verdict: null, note: "AI review queued" });
+  assert.deepEqual(aiWord({ state: "paused" }), { verdict: null, note: "AI review paused" });
+  assert.equal(aiWord({ state: "off" }), null);
+  assert.equal(aiWord({ state: "none" }), null);
+});
+
+test("the selected card's facts leave out what its why says", () => {
+  const pr = card("acme/api#1", {
+    chips: ["CI red", "conflict", "3 unresolved", "+62 −7"],
+    ci: "red",
+    preflight: { state: "ready", risk: "medium", notes: 5 },
+    demoted: "Now was full (3)",
+  });
+  const text = (c: Card, me = "me") => cardFacts(c, me).map((f) => (f.tone ? `${f.text} (${f.tone})` : f.text));
+  assert.deepEqual(text(pr), [
+    "by dana",
+    "+62 −7",
+    "CI failing (bad)",
+    "merge conflict (warn)",
+    "3 unresolved threads",
+    "medium risk",
+    "5 notes on the changes",
+    "Now was full (3)",
+  ]);
+  assert.deepEqual(text({ ...pr, why: "merge conflict", author: "me", demoted: undefined }), [
+    "+62 −7",
+    "CI failing (bad)",
+    "3 unresolved threads",
+    "medium risk",
+    "5 notes on the changes",
+  ]);
+  assert.deepEqual(
+    text({ ...pr, chips: ["1 unresolved"], ci: "green", preflight: { state: "stale", risk: "high", notes: 2 }, demoted: undefined }),
+    ["by dana", "CI passing", "1 unresolved thread"],
+  );
+  assert.deepEqual(text(card("acme/api#2", { kind: "issue", ci: "none", author: "nina" })), ["by nina"]);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

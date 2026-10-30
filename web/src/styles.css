@@ -47,6 +47,8 @@
   --green: #28703f;
   --scrim: rgb(27 29 33 / 30%);
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
+  --card-shadow: 0 0 0 1px rgb(27 29 33 / 5%), 0 1px 2px rgb(27 29 33 / 6%);
+  --card-lift: 0 0 0 1px rgb(27 29 33 / 9%), 0 2px 6px rgb(27 29 33 / 8%);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
   --ref-w: 124px;
@@ -82,6 +84,8 @@
     --green: #7dcb98;
     --scrim: rgb(0 0 0 / 55%);
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
+    --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+    --card-lift: 0 0 0 1px rgb(255 255 255 / 9%);
 
     color-scheme: dark;
   }
@@ -578,8 +582,8 @@ kbd {
 
 /* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
 .ai-paused {
-  margin: 0;
-  padding: 0 12px;
+  margin: 0 0 -12px;
+  padding: 0 18px;
   color: var(--ink-2);
   font-size: 13.5px;
 }
@@ -648,24 +652,24 @@ kbd {
   outline-offset: -2px;
 }
 
-.row:hover:not(.sel) .row-main {
+.lane-row:hover:not(.sel) .row-main {
   background: color-mix(in srgb, var(--wash) 60%, transparent);
 }
 
 /* The keyboard cursor: neutral, with a pencil ring so it never looks like hover. */
-.row.sel .row-main {
+.lane-row.sel .row-main {
   background: var(--sel);
   box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
-.row.sel.open .row-main {
+.lane-row.sel.open .row-main {
   box-shadow:
     inset 0 1.5px 0 var(--pencil),
     inset 1.5px 0 0 var(--pencil),
     inset -1.5px 0 0 var(--pencil);
 }
 
-.row.open .row-main {
+.lane-row.open .row-main {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -837,15 +841,6 @@ kbd {
   color: var(--ink-2);
 }
 
-.meta.inline {
-  flex: none;
-  margin: 0 0 0 6px;
-}
-
-.meta.context {
-  display: block;
-}
-
 .fact-word {
   font-variant-numeric: tabular-nums;
 }
@@ -853,10 +848,6 @@ kbd {
 .fact-word.t-bad,
 .fact-word.t-warn {
   font-weight: 600;
-}
-
-.demoted {
-  color: var(--pencil);
 }
 
 .b-later .fact-word.t-bad,
@@ -893,25 +884,10 @@ kbd {
   margin-right: 8px;
 }
 
-.run {
-  margin: 4px 0;
-}
-
-.run-head {
-  display: grid;
-  gap: 1px;
-  padding: 10px 12px 4px calc(12px + var(--ref-w) + var(--gap));
-}
-
 .run-title {
   color: var(--ink);
   font-size: 13.5px;
   font-weight: 600;
-}
-
-.run .row-main {
-  padding-top: 6px;
-  padding-bottom: 7px;
 }
 
 .away .run-title {
@@ -984,6 +960,309 @@ kbd {
   background: var(--paper);
   color: var(--ink-2);
   font-size: 15px;
+}
+
+/* Cards ------------------------------------------------------------------------
+   Now and Today: a sheet each, three lines (the title; why, ref and verdict; the AI's first sentence). The selected one
+   opens in place with the rest. Sorted-away groups stay flat rows. */
+
+.deck .group-head,
+.deck .group-empty {
+  padding-right: 18px;
+  padding-left: 18px;
+}
+
+.cards {
+  gap: 8px;
+}
+
+.card {
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: var(--card-shadow);
+}
+
+.card:hover:not(.sel) {
+  box-shadow: var(--card-lift);
+}
+
+/* The cursor: the card's own sheet, with the pencil ring. */
+.card.sel {
+  box-shadow:
+    inset 0 0 0 1.5px var(--pencil),
+    var(--card-shadow);
+}
+
+.card .row-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 16px;
+  padding: 13px 18px 14px;
+  border-radius: 12px;
+}
+
+/* Focus is the selection here, and the card's ring already shows it. */
+.card .row-main:focus-visible {
+  outline: none;
+}
+
+.card .title-line {
+  display: block;
+}
+
+.card .title {
+  overflow: visible;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.card .new-dot,
+.card .pin {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.card .age {
+  grid-area: 1 / 2;
+}
+
+.card .context {
+  grid-column: 1 / -1;
+}
+
+/* Inline, so a long why wraps under the ref instead of dropping below it. */
+.card .meta {
+  display: block;
+  margin: 0;
+  font-size: 13px;
+}
+
+.card .meta > * {
+  margin-right: 12px;
+}
+
+/* Inline, the ref has the line's room: nothing truncates and nothing clips the highlighter. */
+.card .ref {
+  margin: 0 12px 0 0;
+  padding: 0;
+  overflow: visible;
+  font-size: 12.5px;
+}
+
+.card .ref-ink {
+  max-width: none;
+}
+
+.card .ref-repo {
+  overflow: visible;
+}
+
+/* The AI's word sits under the age: verdicts read down the right edge, refs down the left. */
+.ai-word {
+  display: flex;
+  grid-area: 2 / 2;
+  gap: 8px;
+  justify-content: flex-end;
+  align-self: baseline;
+  color: var(--pencil);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.ai-word > :not(:first-child)::before {
+  margin-right: 8px;
+  color: var(--faint);
+  content: "·";
+}
+
+.card .verdict {
+  color: var(--ink);
+}
+
+.card .v-skip {
+  color: var(--pencil);
+}
+
+.ai-word .t-bad {
+  font-weight: 600;
+}
+
+.context {
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+/* An AI review of an older commit, kept until the new one lands. */
+.context.older {
+  color: var(--pencil);
+}
+
+.context b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.more {
+  display: grid;
+  gap: 12px;
+  padding: 0 18px 14px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+/* Concerns sit like the review's margin notes: a thin rule, no box. */
+.concerns {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.concerns li {
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid var(--rule-strong);
+  overflow-wrap: anywhere;
+}
+
+.card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+.card .detail {
+  padding: 2px 18px 16px;
+}
+
+.deck .fold {
+  margin-top: 4px;
+  padding: 10px 18px;
+  border-radius: 12px;
+}
+
+/* The cursor on the fold is the cards' cursor: a sheet with the pencil ring. */
+.deck .fold.sel {
+  background: var(--sheet);
+  box-shadow:
+    inset 0 0 0 1.5px var(--pencil),
+    var(--card-shadow);
+}
+
+.deck .fold:focus-visible {
+  outline: none;
+}
+
+/* A run (three or more from one author, for one reason) is one stack: a sheet, its cards ruled apart. */
+.run {
+  margin: 6px 0 2px;
+}
+
+.run-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0 0 6px;
+  padding: 0 18px;
+}
+
+.deck .run-cards {
+  display: grid;
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: var(--card-shadow);
+}
+
+.run-cards > .card,
+.run-cards > .card:hover:not(.sel) {
+  box-shadow: none;
+}
+
+.run-cards > .card + .card {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.run-cards > .card:has(+ .card) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.run-cards > .card + .card::before {
+  display: block;
+  margin: 0 18px;
+  border-top: 1px solid var(--rule);
+  content: "";
+}
+
+.run-cards > .card.sel {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+}
+
+.run-cards > .card.sel::before,
+.run-cards > .card.sel + .card::before {
+  border-color: transparent;
+}
+
+.run-why {
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.deck .popover {
+  left: 10px;
+}
+
+/* Sorted away: flat rows on the paper, so the cards above stay the ones that need you. */
+.away .card {
+  background: none;
+  box-shadow: none;
+}
+
+.away .card:hover:not(.sel) {
+  background: color-mix(in srgb, var(--wash) 60%, transparent);
+}
+
+.away .card.sel {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+}
+
+.away .cards {
+  gap: 0;
+}
+
+.away .run-cards {
+  background: none;
+  box-shadow: none;
+}
+
+.away .card .row-main {
+  padding-top: 9px;
+  padding-bottom: 10px;
+}
+
+.away .card .title {
+  font-size: 14.5px;
+}
+
+.deck .away-bar {
+  padding-left: 18px;
+}
+
+.g-now.none > .group-head > span:first-child {
+  color: var(--ink);
+}
+
+.g-now.none > .group-head > span:first-child::before {
+  content: none;
 }
 
 /* In flight ------------------------------------------------------------------
@@ -1064,7 +1343,7 @@ kbd {
   font-size: 13px;
 }
 
-.row.sel .detail {
+.lane-row.sel .detail {
   background: color-mix(in srgb, var(--sel) 50%, transparent);
   box-shadow:
     inset 1.5px 0 0 var(--pencil),
@@ -2791,9 +3070,7 @@ kbd {
     grid-row: 1;
   }
 
-  .run-head,
-  .detail,
-  .fold {
+  .detail {
     padding-left: 12px;
   }
 

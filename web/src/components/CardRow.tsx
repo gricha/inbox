@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, shortRef, SNOOZE } from "../format.ts";
-import { nextText, type Variant } from "../view.ts";
-import { Detail } from "./Detail.tsx";
+import { aiWord, cardFacts, keyParts, lead, nextText, type Variant } from "../view.ts";
+import { Detail, KeyButton } from "./Detail.tsx";
+import { VERDICT } from "./Review.tsx";
 
 // Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i).
 export interface RowCtx {
@@ -32,46 +33,36 @@ function PinGlyph() {
   );
 }
 
-// Rows show only problems; everything else (size, approvals, threads) is in the open item.
-function problem(chip: string): { text: string; tone: "bad" | "warn" } | null {
-  if (chip === "CI red") return { text: "CI failing", tone: "bad" };
-  if (chip === "conflict") return { text: "merge conflict", tone: "warn" };
-  if (chip === "changes requested") return { text: chip, tone: "warn" };
-  return null;
-}
-
-export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Variant; ctx: RowCtx; inRun?: boolean }) {
+// A card says three things: what it is, why it's here with the AI's verdict, and the AI's first sentence (for your own
+// PR, what's next). The selected card opens in place with the rest: the whole summary, concerns, facts and keys.
+export function CardRow({
+  card,
+  variant,
+  ctx,
+  inRun,
+  away,
+}: {
+  card: Card;
+  variant: Variant;
+  ctx: RowCtx;
+  inRun?: boolean;
+  away?: boolean;
+}) {
   const open = ctx.expanded === card.id;
-  // Skip facts the reason already says ("merge conflict" twice reads as noise).
-  const facts = card.chips
-    .map(problem)
-    .filter((f): f is NonNullable<typeof f> => f !== null && !card.why.toLowerCase().includes(f.text.toLowerCase()));
-  const words = (
-    <>
-      {facts.map((f) => (
-        <span key={f.text} className={`fact-word t-${f.tone}`}>
-          {f.text}
-        </span>
-      ))}
-      {card.verdict && (
-        <span className={`fact-word verdict v-${card.verdict}`} title="From the AI review">
-          AI says {card.verdict}
-        </span>
-      )}
-      {card.demoted && <span className="fact-word demoted">{card.demoted}</span>}
-    </>
-  );
-  const compact = !!inRun && variant === "active";
-  // Plain for now: what the AI review found, or for your own PR what's next, less what its why already says.
-  const context = card.preflight?.summary ?? nextText(card);
+  const sel = ctx.selected === card.id;
+  const p = card.preflight;
+  const ai = variant === "resolved" ? null : p ? aiWord(p) : card.verdict && { verdict: card.verdict, note: "" };
+  const next = nextText(card);
+  const summary = p?.summary && (sel ? p.summary : lead(p.summary));
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
     <div
       className={cls(
         "row",
+        "card",
         `b-${card.bucket}`,
-        ctx.selected === card.id && "sel",
+        sel && "sel",
         open && "open",
         ctx.leaving.has(card.id) && "leaving",
         variant !== "active" && "dim",
@@ -79,11 +70,14 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
       data-id={card.id}
     >
       <div className="row-line">
-        {/* Tab focus and the j/k cursor are the same thing. */}
+        {/* Focus selects (Tab and j/k are one cursor); not on mousedown, as the selected card grows and would shift this one. */}
         <button
           type="button"
           className="row-main"
           aria-expanded={open}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
           onClick={() => {
             ctx.click(card);
           }}
@@ -91,41 +85,45 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
             ctx.select(card);
           }}
         >
-          <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
-            <span className="ref-ink">
-              <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
-            </span>
-          </span>
-          <span className="row-body">
-            <span className="title-line">
-              <span className="title" title={card.title}>
-                {card.title}
-              </span>
-              {card.new && (
-                // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a CSS-drawn dot with no image file behind it
-                <span className="new-dot" role="img" aria-label="new activity" title="New activity since you looked" />
-              )}
-              {card.pinned && <PinGlyph />}
-              {/* In a run the header already says who and why, so the facts fit on the title line. */}
-              {compact && <span className="meta inline">{words}</span>}
-            </span>
-            {!compact && (
-              <span className="meta">
-                {variant === "cleared" ? (
-                  <span>{clearedText(card)}</span>
-                ) : variant === "hidden" ? (
-                  <span>Hidden by a rule. Open it to see which.</span>
-                ) : (
-                  (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
-                )}
-                {variant !== "resolved" && words}
-              </span>
+          <span className="title-line">
+            <span className="title">{card.title}</span>
+            {card.new && (
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a CSS-drawn dot with no image file behind it
+              <span className="new-dot" role="img" aria-label="new activity" title="New activity since you looked" />
             )}
-            {context && <span className="meta context">{context}</span>}
+            {card.pinned && <PinGlyph />}
           </span>
           <span className="age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
             {age(since, ctx.now)}
           </span>
+          <span className="meta">
+            <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
+              <span className="ref-ink">
+                <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+              </span>
+            </span>
+            {variant === "cleared" ? (
+              <span>{clearedText(card)}</span>
+            ) : variant === "hidden" ? (
+              <span>Hidden by a rule. Open it to see which.</span>
+            ) : (
+              (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
+            )}
+            {away && card.demoted && <span>{card.demoted}</span>}
+          </span>
+          {/* Right-aligned under the age, so the verdicts read down the cards' edge. */}
+          {ai && (
+            <span className="ai-word">
+              {p?.risk === "high" && <span className="t-bad">high risk</span>}
+              {ai.verdict && <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict].toLowerCase()}</span>}
+              {ai.note && <span>{ai.note}</span>}
+            </span>
+          )}
+          {summary ? (
+            <span className={cls("context", p?.state !== "ready" && "older")}>{summary}</span>
+          ) : (
+            next && <span className="context">{keyParts(next).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part))}</span>
+          )}
         </button>
         {variant === "cleared" && (
           <button
@@ -147,7 +145,51 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
           />
         )}
       </div>
+      {sel && !open && <More card={card} ctx={ctx} />}
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
+    </div>
+  );
+}
+
+// The selected card's rest: concerns as margin notes, its facts, and its keys.
+function More({ card, ctx }: { card: Card; ctx: RowCtx }) {
+  const run = (k: string) => {
+    ctx.run(card, k);
+  };
+  const concerns = card.preflight?.concerns ?? [];
+  const facts = cardFacts(card, ctx.me);
+  const mine = card.kind === "pr" && !card.resolved && card.author.toLowerCase() === ctx.me.toLowerCase();
+  return (
+    <div className="more">
+      {concerns.length > 0 && (
+        <ul className="concerns" aria-label="Concerns">
+          {concerns.map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      )}
+      {facts.length > 0 && (
+        <p className="card-facts">
+          {facts.map((f) => (
+            <span key={f.text} className={cls("fact-word", f.tone && `t-${f.tone}`)}>
+              {f.text}
+            </span>
+          ))}
+        </p>
+      )}
+      <div className="actions">
+        <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : card.inflight ? "Show in flight" : "Review"} run={run} />
+        <KeyButton k="o" label="Open on GitHub" run={run} />
+        {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
+        {/* A PR in flight is its babysitter's: d takes it back first. */}
+        {!card.inflight && (
+          <>
+            <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
+            <KeyButton k="s" label="Snooze" run={run} />
+            <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

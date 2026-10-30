@@ -41,14 +41,15 @@ export function Queue({
   const opened = away.filter((g) => g.open && g.cards.length);
 
   return (
-    <div className="queue">
+    <div className="queue deck">
       {view.ai_paused && <p className="ai-paused">AI reviews are paused: {withCode(view.ai_paused)}</p>}
       {filtering && !top.length && <p className="group-empty">No matches in Now or Today.</p>}
       {top.map((g) => (
-        <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
+        // An empty Now has nothing urgent, so it carries no highlighter and no 0.
+        <section key={g.key} className={cls("group", `g-${g.key}`, !g.total && "none")} aria-labelledby={`h-${g.key}`}>
           <h2 id={`h-${g.key}`} className="group-head">
             <span>{g.label}</span>
-            <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>
+            {g.total > 0 && <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>}
           </h2>
           {g.cards.length ? <Rows cards={g.cards} g={g} ctx={ctx} /> : <p className="group-empty">{EMPTY[g.key]}</p>}
           {g.fold > 0 && (
@@ -101,22 +102,26 @@ export function Queue({
 }
 
 function Rows({ cards, g, ctx }: { cards: Card[]; g: Group; ctx: RowCtx }) {
+  const away = SORTED_AWAY.includes(g.key);
   return (
-    <div className="rows">
+    <div className="rows cards">
       {runs(cards).map((r) =>
         r.cards.length < 3 ? (
-          r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} />)
+          r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} />)
         ) : (
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- <fieldset> is for form controls; this groups a run of rows
           <div key={`run:${r.id}`} className="run" role="group" aria-labelledby={`run-${r.id}`}>
-            <div className="run-head" id={`run-${r.id}`}>
-              <span className="run-title" title={r.why}>
+            <p className="run-head" id={`run-${r.id}`}>
+              <span className="run-title">
                 {r.cards.length} {r.cards.every((c) => c.kind === "pr") ? "PRs" : "items"} from {r.author}
               </span>
+              {r.why && <span className="run-why">{r.why}</span>}
+            </p>
+            <div className="run-cards">
+              {r.cards.map((c) => (
+                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} inRun />
+              ))}
             </div>
-            {r.cards.map((c) => (
-              <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} inRun />
-            ))}
           </div>
         ),
       )}

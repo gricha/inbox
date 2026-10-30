@@ -7,6 +7,7 @@ import type {
   InflightRow,
   JudgeStatus,
   JudgeStep,
+  Preflight,
   QueueView,
   ReviewFile,
   ReviewNote,
@@ -200,6 +201,56 @@ export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
   const [what = "", todo] = (card.next ?? "").split(/: (.*)/);
   const why = card.why.toLowerCase();
   return todo && why && (why.startsWith(what.toLowerCase()) || what.toLowerCase().startsWith(why)) ? todo : card.next;
+}
+
+// "Enter opens In flight, y sends it" split so its keys can be set apart: odd indexes are keys.
+export const keyParts = (text: string): string[] => text.split(/(?<=^|, )(Enter|[a-z])(?= (?:opens|sends|hands|puts) )/);
+
+// The first sentence of an AI summary: all a card says until it's selected.
+export const lead = (summary: string): string => /^.+?[.!?](?=\s+[A-Z(`'"])/s.exec(summary)?.[0] ?? summary;
+
+const OLDER: Partial<Record<Preflight["state"], string>> = { stale: "updating", paused: "paused", off: "earlier commit" };
+const WAITING: Partial<Record<Preflight["state"], string>> = {
+  running: "AI review being written",
+  queued: "AI review queued",
+  paused: "AI review paused",
+};
+
+// What a card says about its AI review after its why: the verdict, with a note when it's for an older commit, or why
+// there's none yet. Nothing for an issue, your own PR, or auto reviews off with none written.
+export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"] | null; note: string } | null {
+  if (!p || p.state === "none") return null;
+  if (p.verdict) return { verdict: p.verdict, note: OLDER[p.state] ?? "" };
+  const note = WAITING[p.state];
+  return note ? { verdict: null, note } : null;
+}
+
+const CI_WORD = { green: "passing", red: "failing", pending: "running" };
+
+// The selected card's facts, in the review header's words, less what its why already says; problems carry their tone.
+export function cardFacts(
+  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted">,
+  me: string,
+): { text: string; tone: "" | "bad" | "warn" }[] {
+  const out: { text: string; tone: "" | "bad" | "warn" }[] = [];
+  const add = (text: string, tone: "" | "bad" | "warn" = "") => out.push({ text, tone });
+  if (c.author.toLowerCase() !== me.toLowerCase()) add(`by ${c.author}`);
+  const size = c.chips.find((x) => /^\+\d+ −\d+$/.test(x));
+  if (size) add(size);
+  if (c.kind === "pr" && c.ci !== "none") add(`CI ${CI_WORD[c.ci]}`, c.ci === "red" ? "bad" : "");
+  if (c.chips.includes("changes requested")) add("changes requested", "warn");
+  if (c.chips.includes("approved")) add("approved");
+  if (c.chips.includes("conflict")) add("merge conflict", "warn");
+  const threads = /^(\d+) unresolved$/.exec(c.chips.find((x) => x.endsWith(" unresolved")) ?? "")?.[1];
+  if (threads) add(`${threads} unresolved ${threads === "1" ? "thread" : "threads"}`);
+  if (c.chips.includes("draft")) add("draft");
+  const risk = c.preflight?.risk;
+  if (risk && risk !== "high") add(`${risk} risk`);
+  const notes = c.preflight?.state === "ready" ? (c.preflight.notes ?? 0) : 0;
+  if (notes) add(`${notes} ${notes === 1 ? "note" : "notes"} on the changes`);
+  if (c.demoted) add(c.demoted);
+  const why = c.why.toLowerCase();
+  return out.filter((f) => !why.includes(f.text.toLowerCase()));
 }
 
 // The cards on screen, in screen order.
