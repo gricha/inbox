@@ -156,6 +156,27 @@ test("you approved, then asked again (or still asked): back", () => {
   );
 });
 
+test("you approved, then a push or someone else's reply: back where its rules put it", () => {
+  const pushed = youApproved({ reviews: [review("me", "approved", hoursAgo(2))], head_oid: "def", head_committed_at: hoursAgo(1) });
+  assert.equal(resolve(pushed), null, "new commits since your approval");
+  assert.equal(
+    resolve(youApproved({ head_oid: "def", head_author: "me", head_committed_at: hoursAgo(1) })),
+    "you approved",
+    "your own push",
+  );
+  const reply = [{ author: "alice", author_bot: false, at: hoursAgo(1) }];
+  assert.equal(resolve(youApproved({ comments: reply, comments_total: 1 })), null, "the author @mentions you after it");
+  assert.equal(
+    resolve(youApproved({ comments: [...reply, { author: "me", author_bot: false, at: hoursAgo(0.5) }], comments_total: 2 })),
+    "you approved",
+    "you answered",
+  );
+  assert.equal(resolve(youApproved({ comments: [{ author: "ci-bot[bot]", author_bot: true, at: hoursAgo(1) }] })), "you approved", "a bot");
+  // Someone else approving after you: still resolved, under their name.
+  const both = [review("me", "approved", hoursAgo(3)), review("carol", "approved", hoursAgo(1))];
+  assert.equal(resolve(youApproved({ reviews: both, review_decision: "approved" })), "approved by carol");
+});
+
 test("your approval doesn't resolve when it isn't your latest verdict, nor when nobody asked you", () => {
   const taken = [review("me", "approved", hoursAgo(3)), review("me", "changes_requested", hoursAgo(1))];
   assert.equal(resolve(youApproved({ reviews: taken })), null, "your changes request still doesn't resolve");

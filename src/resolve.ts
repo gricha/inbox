@@ -25,8 +25,15 @@ export function resolution(item: Item, s: Signals, settings: ResolveSettings, te
   if (!s.me.requested && !lastAsk) return null; // nobody asked you, so there's nothing to resolve
 
   // Your latest verdict approves and nobody asked you again since (approving clears your ask on GitHub).
+  // A push or someone else's reply after it brings the PR back to wherever its rules put it.
   const yours = item.reviews.findLast((r) => lc(r.author) === me && r.state !== "commented" && r.state !== "pending");
-  if (yours?.state === "approved" && !s.me.requested && !(lastAsk && lastAsk.at > yours.at))
+  if (
+    yours?.state === "approved" &&
+    !s.me.requested &&
+    !(lastAsk && lastAsk.at > yours.at) &&
+    !s.me.pushed_since_review &&
+    !s.me.new_activity
+  )
     return { reason: "you approved", actor: s.me.login, at: yours.at };
 
   const mode = settings["github.resolve_on_others_approval"];
