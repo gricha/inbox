@@ -322,6 +322,14 @@ case "$(cat "$D/mode")" in
     echo '{"type":"system","subtype":"init"}'
     exec sleep 30
     ;;
+  ok)
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"Nothing to change."}'
+    ;;
+  stubborn)
+    trap '' TERM
+    echo '{"type":"system","subtype":"init"}'
+    while :; do sleep 1; done
+    ;;
 esac
 `,
   );
@@ -630,4 +638,27 @@ test("a run that fails on review comments hands them back to you", posix, async 
   await until("the lane to say so", () => s.desk.inflight().rows[0]?.needs_you === "new review comments: the babysitter failed");
   assert.equal(s.desk.inflight().rows[0]?.sitter.text, "failed: Tool use failed");
   assert.equal(s.w.count(), 1, "not retried on the same comments");
+});
+
+test("two PRs from one clone get ready one after the other: git can't fetch into a repo twice at once", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  const seed = path.join(s.w.root, "seed");
+  gitIn(seed, "checkout", "-qb", "fix/other");
+  gitIn(seed, "push", "-q", "origin", "HEAD:refs/heads/fix/other");
+  // main moves, so both runs' fetches update origin/main in your clone.
+  gitIn(seed, "checkout", "-q", "main");
+  fs.writeFileSync(path.join(seed, "main.txt"), "moved\n");
+  gitIn(seed, "add", ".");
+  gitIn(seed, "commit", "-qm", "main moved");
+  gitIn(seed, "push", "-q", "origin", "HEAD:refs/heads/main");
+  const a = pr(81, s.w.head);
+  const b = pr(82, s.w.head, { head_ref: "fix/other" });
+  for (const it of [a, b]) s.gh.items.set(it.id, it);
+  await s.desk.sync();
+  s.w.mode("ok");
+  s.desk.act("web#81", "inflight");
+  s.desk.act("web#82", "inflight");
+  await until("both runs", () => [a, b].every((it) => s.record(it.id).runs.at(-1)?.outcome === "nothing"));
+  assert.equal(s.w.count(), 2);
+  assert.deepEqual([...s.desk.sitter.notes.values()], []);
 });

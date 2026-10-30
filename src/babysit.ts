@@ -477,6 +477,7 @@ export class Babysitter {
   clones: { at: number; map: Map<string, string> } | null = null;
   stopped = false;
   recheck: NodeJS.Timeout | null = null;
+  gitQueues = new Map<string, Promise<unknown>>(); // per clone: git can't fetch into one repo twice at once
 
   constructor(desk: Desk, opts: SitterOptions = {}) {
     this.desk = desk;
@@ -676,7 +677,8 @@ export class Babysitter {
     const s = this.record(id);
     const wt = dir ?? s.worktree ?? (fs.existsSync(worktreePath(this.desk.home, id)) ? worktreePath(this.desk.home, id) : null);
     if (wt) {
-      await removeWorktree(s.clone, wt);
+      const clone = s.clone;
+      await (clone ? this.serial(clone, () => removeWorktree(clone, wt)) : removeWorktree(null, wt));
       this.desk.log(`babysitter: removed the worktree for ${id}`);
     }
     if (this.stopped) return;
@@ -688,6 +690,16 @@ export class Babysitter {
   }
 
   // ------------------------------------------------------------------ clones
+
+  // Git work on a clone (fetch, worktree add and remove), after whatever is already queued on it.
+  serial<T>(clone: string, fn: () => Promise<T>): Promise<T> {
+    const next = (this.gitQueues.get(clone) ?? Promise.resolve()).then(fn, fn);
+    this.gitQueues.set(
+      clone,
+      next.catch(() => {}),
+    );
+    return next;
+  }
 
   async findClone(repo: string): Promise<{ dir: string } | { problem: string }> {
     const want = lc(repo);
@@ -732,7 +744,7 @@ export class Babysitter {
     let ctx: PrContext;
     const logs = new Map<string, string>();
     try {
-      head = await prepareWorktree(found.dir, dir, branch, it.base);
+      head = await this.serial(found.dir, () => prepareWorktree(found.dir, dir, branch, it.base));
       this.update(id, (s) => {
         s.clone = found.dir;
         s.worktree = dir;
@@ -894,10 +906,11 @@ export class Babysitter {
       let outcome: SitterRun["outcome"] = r.aborted ? "stopped" : r.timedOut ? "timeout" : r.error ? "failed" : "nothing";
       let pushed: string | null = null;
       let rewritten = false;
-      if (!r.aborted && fs.existsSync(dir)) {
+      const clone = this.record(id).clone;
+      if (!r.aborted && fs.existsSync(dir) && clone) {
         try {
           const local = await git(dir, ["rev-parse", "HEAD"]);
-          await git(dir, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]);
+          await this.serial(clone, () => git(dir, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]));
           const remote = await git(dir, ["rev-parse", `refs/remotes/origin/${branch}`]);
           rewritten = !(await git(dir, ["merge-base", "--is-ancestor", run.head_oid, remote]).then(
             () => true,
