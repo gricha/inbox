@@ -68,7 +68,7 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
 });
 
 test("asked again after the approval: unresolved, and back in Now", async () => {
-  const approved = reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", hoursAgo(0.5))] });
+  const approved = reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" });
   const t = await setup([approved]);
   await t.desk.sync();
   assert.equal(t.desk.queue().resolved.length, 1);
@@ -78,6 +78,7 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
     reviewAsk(1, {
       updated_at: iso(1.5),
       reviews: approved.reviews,
+      review_decision: "approved",
       request_events: [
         ...approved.request_events,
         { at: iso(1.5), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" },
@@ -138,7 +139,7 @@ test("unrequested without a review: request removed, resolved as no longer reque
 });
 
 test("settings: never resolving on others' approvals puts it back", async () => {
-  const t = await setup([reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))] })]);
+  const t = await setup([reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" })]);
   await t.desk.sync();
   assert.equal(t.desk.queue().resolved.length, 1);
   t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } });
@@ -267,7 +268,7 @@ test("activity: after, item and limit; a long-poll answers when an event lands, 
 });
 
 test("done on a resolved item stays done when it comes back", async () => {
-  const approved = (o: Partial<Item> = {}) => reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], ...o });
+  const approved = (o: Partial<Item> = {}) => reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved", ...o });
   const t = await setup([approved()]);
   await t.desk.sync();
   t.desk.act("api#1", "done");

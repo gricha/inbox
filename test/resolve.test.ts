@@ -26,12 +26,19 @@ const review = (author: string, state: Item["reviews"][number]["state"], at: str
   at,
   commit: "abc",
 });
+// GitHub's decision once an approval is enough to merge; tests of "required" set it themselves.
 const asked = (o: Partial<Item> = {}) =>
-  makeItem({ review_requests: [{ reviewer: "me", type: "user", codeowner: false }], request_events: [ask(hoursAgo(10))], ...o });
+  makeItem({
+    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+    request_events: [ask(hoursAgo(10))],
+    review_decision: "approved",
+    ...o,
+  });
 const teamAsked = (o: Partial<Item> = {}) =>
   makeItem({
     review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }],
     request_events: [ask(hoursAgo(10), "ml-team", "team")],
+    review_decision: "approved",
     ...o,
   });
 
@@ -91,6 +98,12 @@ test("asked again after the approval: back", () => {
 test("your changes request keeps it yours even when someone else approves", () => {
   const it = asked({ reviews: [review("me", "changes_requested", hoursAgo(5)), review("carol", "approved", hoursAgo(2))] });
   assert.equal(resolve(it), null);
+});
+
+test("an approval that isn't enough to merge (more reviews required) leaves it yours", () => {
+  const reviews = [review("carol", "approved", hoursAgo(2))];
+  assert.equal(resolve(teamAsked({ reviews, review_decision: "required" })), null);
+  assert.equal(resolve(asked({ reviews, review_decision: "required" })), null);
 });
 
 test("resolve_on_others_approval: team_only and never", () => {

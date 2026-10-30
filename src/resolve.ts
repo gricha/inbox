@@ -26,8 +26,9 @@ export function resolution(item: Item, s: Signals, settings: ResolveSettings, te
 
   const mode = settings["github.resolve_on_others_approval"];
   const viaTeam = s.me.requested ? !s.me.requested_direct : lastAsk?.reviewer_type === "team";
-  // Your changes request still blocks the merge, so it waits for you.
-  if ((mode === "always" || (mode === "team_only" && viaTeam)) && s.me.review_state !== "changes_requested") {
+  // Your changes request still blocks the merge, and "required" means more reviews (maybe yours or your team's) are needed.
+  const blocked = s.me.review_state === "changes_requested" || item.review_decision === "required";
+  if ((mode === "always" || (mode === "team_only" && viaTeam)) && !blocked) {
     const bots = new Set(settings["github.bots"].map(lc));
     const isBot = (r: Item["reviews"][number]) => r.author_bot || bots.has(lc(r.author)) || r.author.endsWith("[bot]");
     const since = lastAsk?.at ?? "";

@@ -84,7 +84,7 @@ export const SETTINGS = [
       { value: "team_only", label: "Only when your team was asked" },
       { value: "never", label: "Never" },
     ],
-    help: "A PR you were asked to review moves to Resolved once someone else approves it after the ask. It comes back if you're asked again.",
+    help: "A PR you were asked to review moves to Resolved once someone else approves it after the ask and no more reviews are required. It comes back if you're asked again.",
   },
   {
     key: "agent.driver",
