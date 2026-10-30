@@ -13,6 +13,7 @@ import type { ActivityEvent, Draft, Item, SitterRun, SitterStatus } from "./type
 
 const RUN_TIMEOUT = 30 * 60_000;
 const SETTLE = 3_000; // events land in bursts (a review and its comments, a push and its CI); start once they have
+const KILL_AFTER = 10_000; // SIGTERM, then SIGKILL for whatever ignored it
 const PAUSE = 15 * 60_000; // after the agent can't log in, no new runs for this long
 const NOT_LOGGED_IN = "claude isn't logged in (run claude auth login)";
 const MAX_CI_TRIES = 3; // runs on red CI before it's handed back to you
@@ -484,6 +485,7 @@ export class Babysitter {
   jobLog: (repo: string, jobId: number) => Promise<string>;
   settle: number;
   timeout: number;
+  killAfter = KILL_AFTER;
   live = new Map<string, Live>();
   starting = new Set<string>();
   queue: string[] = [];
@@ -608,12 +610,23 @@ export class Babysitter {
 
   // A process group, so the agent's own children (test runners, git) stop with it.
   kill(child: ChildProcess): void {
-    try {
-      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
-      else child.kill();
-    } catch {
-      child.kill();
-    }
+    const signal = (sig: NodeJS.Signals) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, sig);
+        else child.kill(sig);
+      } catch {
+        child.kill(sig);
+      }
+    };
+    signal("SIGTERM");
+    // A test runner that ignores SIGTERM must not keep a run, or a take-back waiting on it, alive.
+    const hard = setTimeout(() => {
+      signal("SIGKILL");
+    }, this.killAfter);
+    hard.unref();
+    child.once("close", () => {
+      clearTimeout(hard);
+    });
   }
 
   settingsChanged(): void {

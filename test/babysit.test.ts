@@ -684,3 +684,16 @@ test("two PRs from one clone get ready one after the other: git can't fetch into
   assert.equal(s.w.count(), 2);
   assert.deepEqual([...s.desk.sitter.notes.values()], []);
 });
+
+test("a run whose processes ignore SIGTERM is killed anyway", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  s.desk.sitter.timeout = 300;
+  s.desk.sitter.killAfter = 200;
+  const item = pr(91, s.w.head);
+  s.gh.items.set(item.id, item);
+  await s.desk.sync();
+  s.w.mode("stubborn");
+  s.desk.act("web#91", "inflight");
+  await until("the timeout", () => s.record(item.id).runs.at(-1)?.outcome === "timeout");
+  assert.equal(s.desk.sitter.live.size, 0);
+});
