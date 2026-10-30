@@ -237,7 +237,7 @@ export class Judge {
       const raw =
         s["agent.driver"] === "codex"
           ? await askCodex(prompt, opts)
-          : await askClaude(prompt, { ...opts, command: s["analyze.command"], model: s["analyze.model"] });
+          : (await askClaude(prompt, { ...opts, command: s["analyze.command"] })).answer;
       const answers = parseVerdicts(raw, ids);
       if (desk.stopped) return;
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.

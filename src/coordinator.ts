@@ -277,15 +277,12 @@ export class Coordinator {
       "-p",
       "--output-format",
       "json",
-      "--model",
-      this.desk.settings["analyze.model"],
       ...(intro ? ["--session-id", st.session_id, "--name", NAME] : ["--resume", st.session_id]),
       "--append-system-prompt",
       SYSTEM_PROMPT,
       "--mcp-config",
       this.mcpFile(),
       "--strict-mcp-config",
-      "--restricted",
       "--tools",
       "",
       "--allowedTools",
@@ -321,7 +318,7 @@ export class Coordinator {
     let error: string | null = null;
     let cause = "";
     try {
-      if (st.error === NOT_LOGGED_IN) await probeLogin(cmd, desk.settings["analyze.model"], this.abort.signal);
+      if (st.error === NOT_LOGGED_IN) await probeLogin(cmd, this.abort.signal);
       const out = await runCommand(claudeSpawn(cmd, this.args(st, intro)), {
         input: intro ? INTRO.replace("{me}", desk.me() || "the owner") : this.message(events),
         cwd: this.dir(),

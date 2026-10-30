@@ -42,7 +42,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "review",
     title: "AI review",
-    help: "Your agent (Agents above) reads a PR's diff and writes a summary, concerns and notes on the changes. It sends the diff to whichever account that CLI is logged in to.",
+    help: "Your agent (Agents above) reads a PR's diff and writes a summary, concerns and notes on the changes. It runs as you, with your own login, model and settings, so the diff goes to whichever account that CLI is logged in to.",
   },
   {
     id: "handoff",
@@ -225,17 +225,7 @@ export const SETTINGS = [
     type: "string",
     default: "claude",
     required: true,
-    help: "A name on PATH or an absolute path. Codex runs as codex from PATH.",
-  },
-  {
-    key: "analyze.model",
-    section: "review",
-    label: "Claude model",
-    type: "string",
-    default: "sonnet",
-    required: true,
-    pattern: "^[\\w.\\[\\]-]+$",
-    pattern_hint: "a model alias or id, like sonnet",
+    help: "A name on PATH or an absolute path. Every agent the desk runs uses it. Codex runs as codex from PATH.",
   },
   { key: "handoff.prompt", section: "handoff", label: "Someone else's PR", type: "text", default: DEFAULT_PROMPT, required: true },
   { key: "handoff.mine", section: "handoff", label: "Your PR", type: "text", default: DEFAULT_MINE, required: true },
@@ -279,6 +269,9 @@ export function checkSetting(key: string, value: unknown): string | null {
   throw new Error("unknown setting type");
 }
 
+// Settings that no longer exist: ignored when read, and gone from the file on the next save.
+const REMOVED = new Set(["analyze.model"]);
+
 // Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
 export function readSettings(file: string): {
   overrides: Record<string, SettingValue>;
@@ -296,12 +289,13 @@ export function readSettings(file: string): {
     return { overrides: {}, errors: [{ path: "settings.json", message: "must be a JSON object" }], raw: null };
   const overrides: Record<string, SettingValue> = {};
   const errors: ConfigError[] = [];
-  for (const [k, v] of Object.entries(raw)) {
+  const kept = Object.entries(raw).filter(([k]) => !REMOVED.has(k));
+  for (const [k, v] of kept) {
     const err = checkSetting(k, v);
     if (err) errors.push({ path: k, message: err });
     else overrides[k] = v as SettingValue;
   }
-  return { overrides, errors, raw: raw as Record<string, unknown> };
+  return { overrides, errors, raw: Object.fromEntries(kept) };
 }
 
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });
@@ -328,7 +322,6 @@ const LEGACY: Record<string, string> = {
   "handoff.mine": "handoff.mine",
   "handoff.issue": "handoff.issue",
   "analyze.command": "analyze.command",
-  "analyze.model": "analyze.model",
 };
 export const LEGACY_TABLES = ["signals", "notify", "handoff", "analyze"];
 

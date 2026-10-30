@@ -127,8 +127,8 @@ test("the first run starts the session: a fixed id, its job, the desk's MCP serv
   assert.ok(tools.every((x) => x.startsWith("mcp__review-desk__desk_")));
   assert.ok(!tools.some((x) => x.endsWith("draft_reply") || x.endsWith("escalate")));
   assert.equal(after("--permission-mode"), "dontAsk");
-  for (const flag of ["--strict-mcp-config", "--restricted"]) assert.ok(args.includes(flag), flag);
-  assert.ok(!args.includes("--resume"));
+  assert.ok(args.includes("--strict-mcp-config"));
+  for (const flag of ["--model", "--restricted", "--resume", "--system-prompt", "--agents"]) assert.ok(!args.includes(flag), flag);
   assert.deepEqual(JSON.parse(fs.readFileSync(after("--mcp-config")!, "utf8")), {
     mcpServers: { "review-desk": { type: "http", url: MCP, headers: { "X-Desk-Agent": "coordinator" } } },
   });
@@ -243,6 +243,7 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
   assert.equal(t.fake.calls(), 3);
   assert.ok(t.fake.args(2).includes("--no-session-persistence") && !t.fake.args(2).includes("--session-id"));
   assert.ok(t.fake.args(3).includes("--session-id"));
+  for (const n of [1, 2, 3]) assert.ok(!t.fake.args(n).some((a) => a === "--model" || a === "--restricted"), `run ${n}`);
   assert.deepEqual([t.co.status().state, t.co.status().started], ["idle", true]);
 });
 

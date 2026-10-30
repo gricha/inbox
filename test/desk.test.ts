@@ -293,6 +293,18 @@ test("settings: saving changes the live config; bad values write nothing", async
   t.cleanup();
 });
 
+test("a stored Claude model from before is ignored: no settings problem, and the next save drops it", async () => {
+  const t = await setup([reviewAsk(1)], { settings: { "analyze.model": "sonnet", "notify.enabled": false } });
+  assert.deepEqual(t.desk.getSettings().errors, []);
+  assert.equal(t.desk.settings["notify.enabled"], false);
+  assert.equal(t.desk.putSettings({ set: { "github.poll_seconds": 120 } }).ok, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), {
+    "github.poll_seconds": 120,
+    "notify.enabled": false,
+  });
+  t.cleanup();
+});
+
 test("settings move out of an old config.toml on start", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   const boards = (await import("../src/config.ts")).defaultConfigText({ workOrgs: ["acme"] });

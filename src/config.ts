@@ -183,7 +183,7 @@ export function parseConfig(
     },
     notify: { enabled: settings["notify.enabled"], quiet: settings["notify.quiet"] },
     handoff: { prompt: settings["handoff.prompt"], mine: settings["handoff.mine"], issue: settings["handoff.issue"] },
-    analyze: { command: settings["analyze.command"], model: settings["analyze.model"] },
+    analyze: { command: settings["analyze.command"] },
     spaces,
     boards,
   };

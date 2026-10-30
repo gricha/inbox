@@ -35,6 +35,15 @@ export function when(at: string): string {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
+// Who wrote an AI review: "claude-opus-5[1m]" → "Opus 5", "claude-sonnet-4-5-20250929" → "Sonnet 4.5", "codex" → "Codex".
+export function modelName(id: string): string {
+  if (id === "claude-code") return "Claude Code";
+  const m = /^(?:claude-)?([a-z]+)((?:-\d{1,2})*)(?:-\d{8})?(?:\[\w+\])?$/.exec(id);
+  if (!m) return id;
+  const [, family = "", version = ""] = m;
+  return `${family[0]!.toUpperCase()}${family.slice(1)}${version.replaceAll("-", ".").replace(/^\./, " ")}`;
+}
+
 export function clearedText(c: Card): string {
   if (c.status === "muted") return "muted";
   if (c.status === "done") return "done until someone else acts";

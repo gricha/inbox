@@ -242,8 +242,9 @@ test("the judge places the gray zone by the policy, through claude with no tools
   await t.sync();
   assert.equal(t.fake.calls(), 1, "one call for the batch");
   const args = t.fake.args(1);
-  for (const a of ["-p", "--restricted", "--strict-mcp-config", "--no-session-persistence"]) assert.ok(args.includes(a), a);
+  for (const a of ["-p", "--strict-mcp-config", "--no-session-persistence"]) assert.ok(args.includes(a), a);
   assert.equal(args[args.indexOf("--tools") + 1], "");
+  for (const a of ["--model", "--restricted"]) assert.ok(!args.includes(a), `${a}: your own model and settings`);
   assert.deepEqual(JSON.parse(args[args.indexOf("--json-schema") + 1]!), JUDGE_SCHEMA);
   const prompt = t.fake.stdin(1);
   assert.match(prompt, /Team asks from the ml-team are today\./);

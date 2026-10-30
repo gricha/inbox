@@ -31,6 +31,9 @@ import { hoursAgo } from "./helpers/items.ts";
 // Your global git config (hooks, signing) stays out of it.
 process.env.GIT_CONFIG_GLOBAL = os.devNull;
 process.env.GIT_CONFIG_NOSYSTEM = "1";
+// Where claudeArgs looks for your Claude Code settings: an empty scratch dir, not ~/.claude.
+const CLAUDE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "desk-claude-config-"));
+process.env.CLAUDE_CONFIG_DIR = CLAUDE_DIR;
 
 const posix = { skip: process.platform === "win32" };
 const REPO_URL = "https://github.com/acme/web.git";
@@ -97,25 +100,27 @@ test("problems: red CI and a conflict per head commit, and trusted feedback from
   assert.equal(feedbackAt({ ...base, reviews, review_decision: "approved" }, "me", hoursAgo(1), trust), "");
 });
 
+const ARGS = {
+  pr: "acme/web#3",
+  session: "s-1",
+  name: "desk: acme/web#3",
+  mcpUrl: "http://localhost:48401/mcp",
+  branch: "fix/retry",
+  base: "main",
+  commands: { run: ["npm test"], exact: ["npm ci"] },
+};
+
 test("claude runs unattended in the worktree only: restricted, dontAsk, the desk's MCP alone, one exact push", () => {
-  const args = claudeArgs({
-    pr: "acme/web#3",
-    session: "s-1",
-    name: "desk: acme/web#3",
-    model: "sonnet",
-    mcpUrl: "http://localhost:48401/mcp",
-    branch: "fix/retry",
-    base: "main",
-    commands: { run: ["npm test"], exact: ["npm ci"] },
-  });
+  const args = claudeArgs(ARGS);
   const at = (flag: string) => args[args.indexOf(flag) + 1];
   assert.equal(args[0], "-p");
   assert.equal(at("--output-format"), "stream-json");
   assert.equal(at("--session-id"), "s-1");
   assert.equal(at("--permission-mode"), "dontAsk");
   assert.equal(at("--tools"), "Bash,Read,Edit,Write,Glob,Grep");
-  assert.equal(at("--model"), "sonnet", "Settings → Claude model, like the judge and the coordinator");
   for (const f of ["--restricted", "--strict-mcp-config", "--verbose"]) assert.ok(args.includes(f), f);
+  // Your own model, no API key route, no agents or system prompt of the desk's.
+  for (const f of ["--model", "--bare", "--agents", "--agent", "--system-prompt"]) assert.ok(!args.includes(f), f);
   // Its MCP calls say which PR's babysitter it is: it may draft and escalate on that PR only.
   assert.deepEqual(JSON.parse(at("--mcp-config")!), {
     mcpServers: {
@@ -154,6 +159,39 @@ test("claude runs unattended in the worktree only: restricted, dontAsk, the desk
     assert.ok(denied.has(d), d);
   assert.ok(!allowed.some((a) => a.startsWith("Bash(git grep") || a === "Bash(git commit:*)"));
   assert.ok(allowed.includes("Bash(git commit -m *)"));
+});
+
+test("babysitters get your Claude Code settings back when you have them, with the desk's rules unchanged", (c) => {
+  const without = claudeArgs(ARGS);
+  assert.ok(!without.includes("--settings"), "no settings.json, no --settings");
+  const file = path.join(CLAUDE_DIR, "settings.json");
+  fs.writeFileSync(file, "{}");
+  c.after(() => {
+    fs.rmSync(file);
+  });
+  const args = claudeArgs(ARGS);
+  assert.equal(args[args.indexOf("--settings") + 1], file);
+  assert.ok(args.includes("--restricted"), "file tools stay confined to the worktree");
+  assert.deepEqual(
+    args.filter((a) => a !== "--settings" && a !== file),
+    without,
+  );
+});
+
+test("without CLAUDE_CONFIG_DIR, your settings are found in ~/.claude", { skip: process.platform === "win32" }, (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  const env = { HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+  c.after(() => {
+    Object.assign(process.env, env);
+    fs.rmSync(home, { recursive: true });
+  });
+  process.env.HOME = home;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  assert.ok(!claudeArgs(ARGS).includes("--settings"));
+  fs.mkdirSync(path.join(home, ".claude"));
+  fs.writeFileSync(path.join(home, ".claude", "settings.json"), "{}");
+  const args = claudeArgs(ARGS);
+  assert.equal(args[args.indexOf("--settings") + 1], path.join(home, ".claude", "settings.json"));
 });
 
 test("the prompt fences GitHub text with a random tag and lists what to fix, with thread ids to reply to", () => {
@@ -601,13 +639,13 @@ test("an expired claude login fails one run with a clear status, then nothing re
   assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 0);
   // Settings → In flight says it once.
   assert.equal(s.desk.getSettings().paused.babysitters?.why, `Babysitters are paused: ${NOT_LOGGED_IN}`);
-  // Any other save keeps the pause; a new agent setting (say, the claude command or model) lifts it.
+  // Any other save keeps the pause; a new agent setting (say, the claude command) lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
   await new Promise((r) => {
     setTimeout(r, 200);
   });
   assert.equal(s.w.count(), 1);
-  s.desk.putSettings({ set: { "analyze.model": "opus" } });
+  s.desk.putSettings({ set: { "analyze.command": `${path.dirname(s.w.claude)}/./claude` } });
   await until("another attempt", () => s.w.count() >= 2);
   // Still logged out: a call that saves no session finds that out, and no run (with its session) starts.
   await until("the pause again", () => s.desk.sitter.paused !== null);

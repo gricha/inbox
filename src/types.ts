@@ -172,7 +172,7 @@ export interface Config {
   signals: { close_collaborator_min: number; bots: string[]; my_repos: string[] };
   notify: { enabled: boolean; quiet: string }; // quiet = "19:00-09:00", "" for none
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
-  analyze: { command: string; model: string }; // the AI review's claude command and model
+  analyze: { command: string }; // the claude command every agent run uses
   spaces: SpaceConfig[];
   boards: BoardConfig[];
 }
@@ -489,7 +489,7 @@ export interface AiReview {
   concerns: string[];
   notes: ReviewNote[];
   head_oid: string; // the commit it read; a newer push makes it stale
-  model: string;
+  model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"; or "codex"
   at: string;
 }
 

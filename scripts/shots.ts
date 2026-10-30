@@ -253,6 +253,7 @@ const SHOTS: Shot[] = [
   { name: "settings-policy", go: at("#/settings/policy") },
   { name: "settings-app", go: at("#/settings/app") },
   { name: "settings-inflight", go: at("#/settings/inflight") },
+  { name: "settings-review", go: at("#/settings/review") },
   {
     // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",

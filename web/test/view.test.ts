@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
 import type { ActivityEvent, Card, CoordinatorLogEntry, CoordinatorStatus, JudgeStatus, QueueView } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, shortId, shortRef } from "../src/format.ts";
+import { age, ago, clearedText, eventText, modelName, shortId, shortRef } from "../src/format.ts";
 import {
   acceleratorOf,
   actedText,
@@ -393,6 +393,16 @@ test("formatting", () => {
   assert.equal(shortId("getsentry/seer#9085"), "seer#9085");
   assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_until: null })), "snoozed until activity");
   assert.equal(clearedText(card("a/b#1", { status: "muted" })), "muted");
+});
+
+test("an AI review names the model that wrote it the way people say it", () => {
+  assert.equal(modelName("claude-opus-5[1m]"), "Opus 5");
+  assert.equal(modelName("claude-sonnet-4-5-20250929"), "Sonnet 4.5");
+  assert.equal(modelName("claude-opus-4-1"), "Opus 4.1");
+  assert.equal(modelName("sonnet"), "Sonnet", "a review from before, by the old setting");
+  assert.equal(modelName("claude-code"), "Claude Code");
+  assert.equal(modelName("codex"), "Codex");
+  assert.equal(modelName("claude-3-5-sonnet-20241022"), "claude-3-5-sonnet-20241022");
 });
 
 test("lineOf finds rules written as an inline array", () => {

@@ -16,6 +16,7 @@ import {
   numberPatch,
   parseFiles,
   parseReview,
+  probeLogin,
   type PrText,
 } from "../src/review.ts";
 import { analyze } from "../src/signals.ts";
@@ -112,9 +113,16 @@ test("parseReview anchors notes to real diff lines and drops what it can't place
   assert.throws(() => parseReview({ verdict: "look" }, []), /no summary/);
 });
 
-test("claude's envelope: structured output, JSON in the result, and login errors", () => {
-  assert.deepEqual(claudeEnvelope(JSON.stringify({ structured_output: { summary: "s" } })), { summary: "s" });
-  assert.deepEqual(claudeEnvelope(JSON.stringify({ result: 'Here: {"summary":"t"}' })), { summary: "t" });
+test("claude's envelope: structured output, JSON in the result, the model it ran, and login errors", () => {
+  assert.deepEqual(claudeEnvelope(JSON.stringify({ structured_output: { summary: "s" } })), {
+    answer: { summary: "s" },
+    model: "claude-code",
+  });
+  assert.deepEqual(claudeEnvelope(JSON.stringify({ result: 'Here: {"summary":"t"}' })).answer, { summary: "t" });
+  // The model is whatever your Claude Code ran, as it reports it.
+  const usage = { "claude-opus-5[1m]": { inputTokens: 900, outputTokens: 120 }, "claude-haiku-4-5": { inputTokens: 40 } };
+  assert.equal(claudeEnvelope(JSON.stringify({ structured_output: {}, modelUsage: usage })).model, "claude-opus-5[1m]");
+  assert.equal(claudeEnvelope(JSON.stringify({ structured_output: {}, modelUsage: null })).model, "claude-code");
   assert.throws(
     () => claudeEnvelope(JSON.stringify({ is_error: true, result: "API Error: 401 OAuth access token has expired" })),
     /claude auth login/,
@@ -153,12 +161,12 @@ test("claude's envelope: structured output, JSON in the result, and login errors
 });
 
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {
-  const args = ["-p", "--model", "sonnet", "--tools", "", "--json-schema", '{"a":["b"]}'];
+  const args = ["-p", "--name", "desk: a", "--tools", "", "--json-schema", '{"a":["b"]}'];
   assert.deepEqual(claudeSpawn("claude", args, "darwin"), { file: "claude", args, shell: false });
   assert.deepEqual(claudeSpawn("claude", args, "linux"), { file: "claude", args, shell: false });
   assert.deepEqual(claudeSpawn("C:\\tools\\claude.EXE", args, "win32"), { file: "C:\\tools\\claude.EXE", args, shell: false });
   assert.deepEqual(claudeSpawn("C:\\Program Files\\nodejs\\claude.cmd", args, "win32"), {
-    file: String.raw`"C:\Program Files\nodejs\claude.cmd" "-p" "--model" "sonnet" "--tools" "" "--json-schema" "{\"a\":[\"b\"]}"`,
+    file: String.raw`"C:\Program Files\nodejs\claude.cmd" "-p" "--name" "desk: a" "--tools" "" "--json-schema" "{\"a\":[\"b\"]}"`,
     args: [],
     shell: true,
   });
@@ -169,7 +177,7 @@ test("claude runs directly, except a Windows shim, which goes through cmd.exe fu
 
 test("a missing claude command says where to set its path", async () => {
   await assert.rejects(
-    askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude"), model: "sonnet" }),
+    askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude") }),
     /not found: set its full path under Settings → AI review → Claude command/,
   );
 });
@@ -184,17 +192,26 @@ function fakeAgent(name: string, script: string): { bin: string; dir: string } {
 }
 
 test(
-  "claude gets no tools, no MCP, the schema, and the prompt on stdin in an empty directory",
+  "claude gets your own setup but no tools, no MCP, the schema, and the prompt on stdin in an empty directory",
   { skip: process.platform === "win32" },
   async () => {
-    const f = fakeAgent("claude", `ls -A > "$(dirname "$0")/cwd-listing"; echo '{"structured_output":{"summary":"ok"}}'`);
-    assert.deepEqual(await askClaude("PROMPT", { command: f.bin, model: "sonnet" }), { summary: "ok" });
+    const f = fakeAgent(
+      "claude",
+      `ls -A > "$(dirname "$0")/cwd-listing"; pwd >> "$(dirname "$0")/cwds"; echo '{"structured_output":{"summary":"ok"},"modelUsage":{"claude-opus-5[1m]":{}}}'`,
+    );
+    assert.deepEqual(await askClaude("PROMPT", { command: f.bin }), { answer: { summary: "ok" }, model: "claude-opus-5[1m]" });
     const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
-    for (const a of ["-p", "--restricted", "--strict-mcp-config", "--no-session-persistence", "--json-schema"])
-      assert.ok(args.includes(a), a);
+    for (const a of ["-p", "--strict-mcp-config", "--no-session-persistence", "--json-schema"]) assert.ok(args.includes(a), a);
     assert.equal(args[args.indexOf("--tools") + 1], "");
+    // Your model, effort and plugins: no model of the desk's, and your settings aren't skipped.
+    for (const a of ["--model", "--restricted", "--settings", "--bare", "--agents", "--system-prompt"]) assert.ok(!args.includes(a), a);
     assert.equal(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), "PROMPT");
     assert.equal(fs.readFileSync(path.join(f.dir, "cwd-listing"), "utf8"), "");
+    // The login check too, without its own model: and every call runs in one directory, so one ~/.claude/projects entry.
+    await probeLogin(f.bin);
+    const probe = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
+    assert.ok(probe.includes("--no-session-persistence") && !probe.includes("--model") && !probe.includes("--restricted"));
+    assert.equal(new Set(fs.readFileSync(path.join(f.dir, "cwds"), "utf8").trim().split("\n")).size, 1);
     fs.rmSync(f.dir, { recursive: true });
   },
 );
@@ -282,7 +299,7 @@ function fakeDeps() {
       fetched.push(`${item.id}@${item.head_oid}`);
       return Promise.resolve({ body: "why", files: [FILE] } satisfies PrText);
     },
-    generate: async (item, _s, _why, pr, opts) => {
+    generate: async (item, _s, _why, pr) => {
       started.push(item.id);
       const g = deferred();
       gates.set(item.id, g);
@@ -292,7 +309,7 @@ function fakeDeps() {
       return {
         ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes }, pr.files),
         head_oid: item.head_oid,
-        model: opts.model,
+        model: "claude-opus-5[1m]",
         at: NOW.toISOString(),
       } satisfies AiReview;
     },
@@ -468,7 +485,7 @@ test("changing the agent settings lifts the pause and tries the failed PRs again
   assert.ok(t.desk.aiPausedNow(), "another setting leaves it paused");
   assert.equal(t.f.started.length, 2);
 
-  t.desk.putSettings({ set: { "analyze.model": "opus" } });
+  t.desk.putSettings({ set: { "analyze.command": "/opt/bin/claude" } });
   await flush();
   assert.equal(t.desk.aiPausedNow(), false);
   assert.equal(t.f.started.length, 4, "two more start at once");

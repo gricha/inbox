@@ -269,16 +269,17 @@ export interface ArgsInput {
   pr: string; // owner/repo#123: the one PR its MCP calls may draft on or escalate
   session: string;
   name: string;
-  model: string; // analyze.model, as for the judge and the coordinator
   mcpUrl: string;
   branch: string;
   base: string;
   commands: { run: string[]; exact: string[] };
 }
 
-// Claude Code, unattended, in the worktree only: restricted mode (no user or project settings, file tools confined to the
-// working directory), dontAsk (anything not allowed below is refused, never asked), the desk's MCP tools and nothing else.
+// Claude Code, unattended, in the worktree only: restricted mode (file tools confined to the working directory, no project
+// settings), dontAsk (anything not allowed below is refused, never asked), the desk's MCP tools and nothing else.
 export function claudeArgs(o: ArgsInput): string[] {
+  // --restricted skips your settings; passing them back brings your model, effort and plugins.
+  const settings = path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"), "settings.json");
   const allow = [
     "Read",
     "Edit",
@@ -309,13 +310,12 @@ export function claudeArgs(o: ArgsInput): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
-    "--model",
-    o.model,
     "--session-id",
     o.session,
     "--name",
     o.name,
     "--restricted",
+    ...(fs.existsSync(settings) ? ["--settings", settings] : []),
     "--tools",
     "Bash,Read,Edit,Write,Glob,Grep",
     "--permission-mode",
@@ -875,7 +875,7 @@ export class Babysitter {
     this.notes.delete(id);
     if (this.loggedOut) {
       // Anything but the login failing again (a timeout, say) lets the run try.
-      const still = await probeLogin(desk.settings["analyze.command"], desk.settings["analyze.model"]).then(
+      const still = await probeLogin(desk.settings["analyze.command"]).then(
         () => false,
         (e: unknown) => (e as Error).message === NOT_LOGGED_IN,
       );
@@ -919,7 +919,6 @@ export class Babysitter {
       pr: id,
       session,
       name: `desk: ${id}`,
-      model: desk.settings["analyze.model"],
       mcpUrl: desk.mcpUrl!,
       branch,
       base: it.base,
