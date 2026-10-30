@@ -234,10 +234,7 @@ export class Judge {
     try {
       const prompt = buildJudgePrompt(batch, policy.text, desk.me() || "the owner");
       const opts = { schema: JUDGE_SCHEMA, signal: this.abort.signal };
-      const raw =
-        s["agent.driver"] === "codex"
-          ? await askCodex(prompt, opts)
-          : (await askClaude(prompt, { ...opts, command: s["analyze.command"] })).answer;
+      const raw = s["agent.driver"] === "codex" ? await askCodex(prompt, opts) : (await askClaude(prompt, opts)).answer;
       const answers = parseVerdicts(raw, ids);
       if (desk.stopped) return;
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.

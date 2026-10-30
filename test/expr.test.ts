@@ -61,3 +61,10 @@ test("templates interpolate fields and round numbers", () => {
   assert.equal(renderTemplate("{author.login} · {author.engaged_90d} PRs · {item.created_hours}h", sig), "alice · 12 PRs · 48h");
   assert.equal(renderTemplate("{nope.field} {item.labels}", sig), "{nope.field} bug, area:ml");
 });
+
+test("a count of 1 takes the singular", () => {
+  const one = { ...sig, pr: { ...sig.pr, unresolved_threads: 1 } };
+  assert.equal(renderTemplate("{pr.unresolved_threads} unresolved threads", one), "1 unresolved thread");
+  assert.equal(renderTemplate("{pr.unresolved_threads} threads, {author.engaged_90d} of their PRs", one), "1 thread, 12 of their PRs");
+  assert.equal(renderTemplate("{pr.unresolved_threads} unresolved threads", sig), `${sig.pr.unresolved_threads} unresolved threads`);
+});

@@ -50,6 +50,7 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
+const ARM_MS = 3000; // a first y arms Send, a second one within this sends: a reply on GitHub can't be taken back with a key
 const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
@@ -94,6 +95,7 @@ export function App() {
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
+  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed
   const [reviewFrom, setReviewFrom] = useState<"queue" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
@@ -263,6 +265,17 @@ export function App() {
   }, [down, load]);
 
   useEffect(() => {
+    const t = armed
+      ? setTimeout(() => {
+          setArmed(null);
+        }, ARM_MS)
+      : undefined;
+    return () => {
+      clearTimeout(t);
+    };
+  }, [armed]);
+
+  useEffect(() => {
     const t = setInterval(() => {
       setNow(Date.now());
     }, 15_000);
@@ -293,7 +306,13 @@ export function App() {
     }
     if (pending.current && pending.current.id === selected && Date.now() < pending.current.until) return;
     const next = flat[Math.min(lastIndex.current, flat.length - 1)];
-    if (next) setSelected(next.id);
+    if (!next) return;
+    setSelected(next.id);
+    // The first pick of a session takes focus too, so the first Tab reaches its keys and not the sidebar.
+    if (document.activeElement === document.body && routeRef.current.name === "queue")
+      requestAnimationFrame(() => {
+        focusRow(next.id);
+      });
     // tick re-checks once the undo hold has run out.
   }, [flat, cursor, selected, tick]);
 
@@ -480,6 +499,17 @@ export function App() {
     void act(c, c.inflight ? "takeback" : "inflight");
   }
 
+  // y arms Send (the key line and a toast say so); a second y within 3 s sends it, any other key lets it lapse.
+  function sendArmed(id: string, d: Draft) {
+    if (!armed || armed.id !== d.id || Date.now() - armed.at > ARM_MS) {
+      setArmed({ id: d.id, at: Date.now() });
+      flash(`Press y again to send your reply to ${d.to}`, false, false, ARM_MS);
+      return;
+    }
+    setArmed(null);
+    void send(id, d);
+  }
+
   async function send(id: string, d: Draft) {
     if (sending) return;
     setSending(d.id);
@@ -519,7 +549,7 @@ export function App() {
     else if (k === "d" && r.state === "open") void act(c, "takeback");
     else if (k === "y") {
       const draft = d ?? r.drafts[0];
-      if (draft) void send(c.id, draft);
+      if (draft) sendArmed(c.id, draft);
       else flash(`No reply to send on ${shortRef(c)}`);
     } else if (k === "x") {
       if (d) void dismiss(r, d);
@@ -529,13 +559,25 @@ export function App() {
     } else if (k === "c") void copyResume(r);
   }
 
-  async function copyResume(r: InflightRow) {
-    if (!r.resume) {
+  const copyResume = (r: InflightRow) => copyCommand(r.resume);
+
+  async function dismissQuestion(c: Card) {
+    try {
+      await api.dismiss(c.id);
+      flash(`Dismissed the question on ${shortRef(c)}`);
+    } catch (e) {
+      flash(message(e), true);
+    }
+    refresh(0);
+  }
+
+  async function copyCommand(resume: string | null) {
+    if (!resume) {
       flash("No babysitter session to open yet");
       return;
     }
     try {
-      await copyText(r.resume);
+      await copyText(resume);
       flash("Copied: paste it in a terminal to open the babysitter's session");
     } catch (e) {
       flash(`Couldn't copy: ${message(e)}`, true);
@@ -565,10 +607,13 @@ export function App() {
       setSnoozeFor(c.id);
     } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
+    // On your PR in flight with a question, c and x are the lane's: answer it in the babysitter's session, or dismiss it.
+    else if (k === "c" && c.inflight && c.escalated) void copyCommand(c.resume ?? null);
+    else if (k === "x" && c.inflight && c.escalated) void dismissQuestion(c);
     else if (k === "c") void copy(c);
     else if (k === "i") void aiReview(c);
     else if (k === "y") {
-      if (c.inflight && c.reply) void send(c.id, c.reply);
+      if (c.inflight && c.reply) sendArmed(c.id, c.reply);
       else flash(`No reply to send on ${shortRef(c)}`);
     } else if (k === "w") {
       if (expanded === c.id) setShowSignals((s) => !s);
@@ -623,6 +668,11 @@ export function App() {
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
+    // Any other key lets an armed Send lapse; Esc only does that.
+    if (armed && k !== "y" && !["Shift", "Meta", "Control", "Alt"].includes(k)) {
+      setArmed(null);
+      if (k === "Escape") return;
+    }
     if (help) {
       if (k === "Escape" || k === "?") setHelp(false);
       return;
@@ -673,7 +723,7 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oesmpcwidy".includes(k)) {
+    } else if (current && k.length === 1 && "oesmpcwidyx".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
@@ -717,6 +767,7 @@ export function App() {
     me: overview?.me ?? "",
     selected,
     expanded,
+    armed: armed?.id ?? null,
     leaving,
     snoozeFor,
     showSignals,
@@ -836,13 +887,23 @@ export function App() {
               flash={reviewFlash}
               onInflight={inflight}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
+              armed={armed?.id ?? null}
+              onLane={laneRun}
               onBack={() => {
                 go({ name: reviewFrom });
               }}
             />
           )}
           {route.name === "inflight" && !broken && (
-            <Inflight view={lane} now={now} selected={laneCur?.card.id ?? null} sending={sending} select={setLaneSel} run={laneRun} />
+            <Inflight
+              view={lane}
+              now={now}
+              selected={laneCur?.card.id ?? null}
+              sending={sending}
+              armed={armed?.id ?? null}
+              select={setLaneSel}
+              run={laneRun}
+            />
           )}
           {/* Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue. */}
           {settingsSeen && (

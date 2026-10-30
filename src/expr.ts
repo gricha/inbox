@@ -373,12 +373,20 @@ export function compile(src: string): Compiled {
   }
 }
 
+// A count of 1 takes the singular of the plural that follows it: "{pr.unresolved_threads} unresolved threads" → "1 unresolved thread".
 export function renderTemplate(tpl: string, s: Signals): string {
-  return tpl.replaceAll(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, path: string) => {
-    if (!FIELD_PATHS.has(path)) return whole;
-    const v = lookup(s, path);
-    if (typeof v === "number") return String(Math.round(v));
-    if (Array.isArray(v)) return v.join(", ");
-    return String(v ?? "");
-  });
+  return tpl.replaceAll(
+    /\{([a-z_]+(?:\.[a-z_0-9]+)+)\}( (?:[a-z]+ )?[a-z]{3,}s\b)?/g,
+    (whole: string, path: string, noun: string | undefined) => {
+      if (!FIELD_PATHS.has(path)) return whole;
+      const v = lookup(s, path);
+      if (typeof v === "number") {
+        const n = Math.round(v);
+        const word = noun ?? "";
+        return `${n}${n === 1 && !/(ss|this|does|plus|always)$/.test(word) ? word.slice(0, -1) : word}`;
+      }
+      if (Array.isArray(v)) return `${v.join(", ")}${noun ?? ""}`;
+      return `${String(v ?? "")}${noun ?? ""}`;
+    },
+  );
 }

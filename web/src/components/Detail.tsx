@@ -50,8 +50,8 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     ctx.run(card, k);
   };
   const asked = request(s);
-  // Its activity, unless that's only "first seen".
-  const events = detail.activity.some((e) => e.kind !== "new") ? detail.activity : [];
+  // Its activity, less the desk's own "first seen" and what the why already says ("assigned to you").
+  const events = detail.activity.filter((e) => e.kind !== "new" && !says(card.why, eventText(e, ctx.me)));
   // The why, the board and the trace, saying only what the card's own why doesn't.
   const why = main && (
     <div className="why-block">
@@ -164,7 +164,13 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         ? item.reviews.map((r) => `${r.author} ${r.state.replace("_", " ")} ${age(r.at, ctx.now)} ago`).join(", ")
         : "none yet",
     ]);
-  if (item.threads_total) facts.push(["Threads", `${item.threads_unresolved} of ${item.threads_total} unresolved`]);
+  if (item.threads_total)
+    facts.push([
+      "Threads",
+      item.threads_unresolved
+        ? `${item.threads_unresolved} of ${item.threads_total} unresolved`
+        : `${plural(item.threads_total, "thread")}, none unresolved`,
+    ]);
   facts.push(["Activity", `${age(card.activity_at, ctx.now)} ago, ${plural(item.comments_total, "comment")}`]);
 
   // `w`: the item's signals in full, its rule trace and its raw signals.

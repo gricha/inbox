@@ -114,8 +114,23 @@ body {
 }
 
 a {
-  color: var(--blue);
+  color: var(--ink-2);
   text-decoration: none;
+}
+
+/* A link in a sentence: ink-2 over a quiet rule. Colour is for urgency, so no blue. */
+a:not([class]),
+.link-btn {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
+}
+
+a:not([class]):hover,
+.link-btn:hover {
+  color: var(--ink);
+  text-decoration-color: var(--pencil);
 }
 
 a:hover {
@@ -133,9 +148,18 @@ code {
 }
 
 :focus-visible {
-  outline: 2px solid var(--blue);
+  outline: 1.5px solid var(--pencil);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* A key under the keyboard is the cursor: a neutral fill and the pencil ring, never an outline box. */
+.act:focus-visible,
+.cl-undo:focus-visible {
+  outline: none;
+  border-radius: 8px;
+  background: var(--card-sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
 [hidden] {
@@ -300,8 +324,9 @@ kbd {
   height: 52px;
   padding: 0 16px 0 20px;
   border-bottom: 1px solid var(--rule);
-  background: color-mix(in srgb, var(--paper) 86%, transparent);
-  backdrop-filter: saturate(1.4) blur(14px);
+
+  /* Opaque: the highlighter scrolling under a frosted bar smeared into a yellow blob. */
+  background: var(--paper);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -395,9 +420,8 @@ kbd {
 }
 
 .search:focus-within {
-  border-color: var(--blue);
+  border-color: var(--pencil);
   background: var(--sheet);
-  box-shadow: 0 0 0 1px var(--blue);
 }
 
 .search svg {
@@ -1030,8 +1054,9 @@ kbd {
   margin-right: 12px;
 }
 
+/* A fact keeps its words together; a list in it ("waiting on azulus and 5 teams") wraps between its items. */
 .card .meta > .fact-word {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 /* Inline, the ref has the line's room: nothing truncates and nothing clips the highlighter. */
@@ -1060,12 +1085,13 @@ kbd {
   font-weight: 600;
 }
 
-.why.owed b.t-bad {
-  color: var(--red);
+.why.owed .t-bad,
+.why.owed .t-warn {
+  font-weight: 600;
 }
 
-.why.owed b.t-warn {
-  color: var(--amber);
+.nowrap {
+  white-space: nowrap;
 }
 
 .ai-word {
@@ -1172,8 +1198,9 @@ kbd {
   font-size: 13px;
 }
 
+/* A concern is one whole sentence; four lines only guards against a runaway one. */
 .concern.clip {
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 4;
 }
 
 /* The selected card's facts, then its keys under a hairline, as far below it as the facts sit above. */
@@ -1434,8 +1461,17 @@ kbd {
 
 .lane-link a {
   color: var(--pencil);
-  text-decoration: underline;
-  text-decoration-color: var(--rule-strong);
+}
+
+/* Landed reads like Resolved: a flat row on the paper, its title regular and pencil. */
+.lane .dim.card {
+  background: none;
+  box-shadow: none;
+}
+
+.lane .dim .title {
+  color: var(--pencil);
+  font-weight: 400;
 }
 
 .gist.sitter {
@@ -1475,6 +1511,21 @@ kbd {
   margin-top: 12px;
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+/* Each key stays with its label; the line wraps between pairs, so no "·" is needed (or left at a line's start). */
+.keys-more .dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.keys-more .dots > span {
+  white-space: nowrap;
+}
+
+.keys-more .dots > :not(:first-child)::before {
+  content: none;
 }
 
 /* Expanded item ------------------------------------------------------------ */
@@ -1613,7 +1664,14 @@ kbd {
   margin-bottom: 4px;
 }
 
+/* Below high, risk is a fact, not a second verdict. */
 .risk {
+  color: var(--pencil);
+  font-weight: 400;
+}
+
+.risk.t-bad {
+  color: var(--red);
   font-weight: 600;
 }
 
@@ -1758,14 +1816,8 @@ kbd {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--blue);
   font-size: 12.5px;
   cursor: pointer;
-}
-
-.link-btn:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .input {
@@ -1780,9 +1832,8 @@ kbd {
 }
 
 .input:focus {
-  border-color: var(--blue);
+  border-color: var(--pencil);
   outline: none;
-  box-shadow: 0 0 0 3px var(--blue-wash);
 }
 
 .input::placeholder {
@@ -1838,7 +1889,7 @@ kbd {
 }
 
 .switch:checked {
-  background: var(--blue);
+  background: var(--ink);
 }
 
 .switch:checked::after {
@@ -1987,7 +2038,9 @@ kbd {
 
 .keys {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+
+  /* One key column for every section, so their descriptions share an edge. */
+  grid-template-columns: 52px minmax(0, 1fr);
   gap: 9px 18px;
   margin: 0;
   font-size: 13.5px;
@@ -2016,13 +2069,6 @@ kbd {
   margin-bottom: 8px;
 }
 
-.s-page-head h1 {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-
 .s-page-head .quiet {
   font-size: 12.5px;
 }
@@ -2038,7 +2084,7 @@ kbd {
 
 .s-section h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -2134,6 +2180,7 @@ kbd {
 }
 
 .s-live {
+  max-width: 72ch;
   margin-top: 8px;
   font-size: 13px;
 }
@@ -2161,7 +2208,7 @@ kbd {
 }
 
 .hotkey-input:read-only {
-  background: var(--blue-wash);
+  background: var(--wash);
 }
 
 .gh {
@@ -2181,7 +2228,7 @@ kbd {
 
 .gh-who {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 14.5px;
 }
 
 .gh-teams {
@@ -2251,9 +2298,8 @@ kbd {
 }
 
 .editor:focus {
-  border-color: var(--blue);
+  border-color: var(--pencil);
   outline: none;
-  box-shadow: 0 0 0 3px var(--blue-wash);
 }
 
 .editor-foot {
@@ -2567,7 +2613,7 @@ kbd {
 
 .pv-moved .mono {
   flex: none;
-  color: var(--blue);
+  color: var(--pencil);
   font: 11.5px var(--mono);
 }
 
@@ -2761,6 +2807,11 @@ kbd {
   color: var(--pencil);
 }
 
+/* Your PR's reply waiting for y, on the facts' edge. */
+.rv-draft {
+  margin: 4px 0 0;
+}
+
 /* Recent activity: a few quiet lines, the time after the same "·" as the facts; the rest behind "n more". */
 .rv-activity {
   display: grid;
@@ -2950,7 +3001,7 @@ kbd {
   flex: none;
   max-width: calc(100% - 1.8em);
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 @media (width >= 1280px) {
@@ -3093,6 +3144,15 @@ kbd {
   .rv-top .rv-activity {
     grid-row: 1 / span 2;
     grid-column: 2;
+  }
+
+  /* Your own PR without an AI review: no empty row under the facts. */
+  .rv-top:has(.rv-activity):not(:has(.rv-ai)) {
+    grid-template-rows: auto;
+  }
+
+  .rv-top:not(:has(.rv-ai)) .rv-activity {
+    grid-row: 1;
   }
 
   .rv-top .rv-ai {

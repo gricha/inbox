@@ -229,8 +229,10 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
 
 export interface AgentOpts {
   driver: string; // agent.driver
-  command: string; // analyze.command (Claude Code)
 }
+
+// Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
+export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
 function room<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
@@ -245,8 +247,7 @@ export interface AskOpts {
   signal?: AbortSignal;
 }
 
-export const claudeMissing = (command: string) =>
-  `claude command "${command}" not found: set its full path under Settings → AI review → Claude command`;
+export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
 
 // One empty directory for this process's claude calls: claude keeps a ~/.claude/projects entry per directory it runs in.
 let claudeRoom = "";
@@ -256,7 +257,8 @@ function claudeDir(): string {
 }
 
 // No --restricted: with no tools and no MCP servers, your settings only bring your model, effort and plugins.
-export async function askClaude(prompt: string, opts: { command: string } & AskOpts): Promise<ClaudeAnswer> {
+export async function askClaude(prompt: string, opts: { command?: string } & AskOpts = {}): Promise<ClaudeAnswer> {
+  const command = opts.command ?? claudeCommand();
   const args = [
     "-p",
     "--output-format",
@@ -268,12 +270,12 @@ export async function askClaude(prompt: string, opts: { command: string } & AskO
     "--json-schema",
     JSON.stringify(opts.schema ?? SCHEMA),
   ];
-  const out = await runCommand(claudeSpawn(opts.command, args), {
+  const out = await runCommand(claudeSpawn(command, args), {
     input: prompt,
     cwd: claudeDir(),
     timeout: TIMEOUT,
     stdoutOnError: true,
-    missing: claudeMissing(opts.command),
+    missing: claudeMissing(command),
     signal: opts.signal,
   });
   return claudeEnvelope(out);
@@ -283,7 +285,7 @@ export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth logi
 
 // Does the login work? A tiny call that leaves no session behind, before a run that would: a session run that fails on
 // the login still saves a session, which piles up in claude --resume. Throws claudeError's error when it doesn't.
-export async function probeLogin(command: string, signal?: AbortSignal): Promise<void> {
+export async function probeLogin(command = claudeCommand(), signal?: AbortSignal): Promise<void> {
   const args = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
   const out = await runCommand(claudeSpawn(command, args), {
     input: "Reply with the word ok.",
@@ -377,8 +379,7 @@ export async function generateReview(item: Item, s: Signals, why: string, pr: Pr
   if (opts.driver !== "claude-code" && opts.driver !== "codex")
     throw new Error("AI review is off: pick Claude Code or Codex under Settings → Agents");
   const prompt = buildPrompt(item, s, why, pr);
-  const { answer, model } =
-    opts.driver === "codex" ? { answer: await askCodex(prompt), model: "codex" } : await askClaude(prompt, { command: opts.command });
+  const { answer, model } = opts.driver === "codex" ? { answer: await askCodex(prompt), model: "codex" } : await askClaude(prompt);
   return { ...parseReview(answer, pr.files), head_oid: item.head_oid, model, at: new Date().toISOString() };
 }
 

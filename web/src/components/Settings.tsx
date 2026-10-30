@@ -11,7 +11,7 @@ import type {
   SettingValue,
 } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, copyText, when } from "../format.ts";
+import { ago, cls, copyText, tilde, when } from "../format.ts";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -360,12 +360,12 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   );
 }
 
-function PausedLine({ p, now }: { p: SettingsView["paused"]["ai"]; now: number }) {
+function PausedLine({ p, label, now }: { p: SettingsView["paused"]["ai"]; label: string; now: number }) {
   if (!p) return null;
   const left = Math.max(1, Math.round((Date.parse(p.until) - now) / 60_000));
   return (
     <p className="s-live">
-      {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m, or now if you change the agent settings.
+      <b>{label}</b> {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m.
     </p>
   );
 }
@@ -547,7 +547,6 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
 }
 
 // "/Users/me/.review-desk/settings.json" → "~/.review-desk/settings.json"
-const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]:\\Users\\[^\\]+(?=\\)/, "~");
 
 const RULES = {
   id: "rules",
@@ -605,8 +604,8 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
+      {/* The sidebar names the page; the head is only where it's saved. */}
       <header className="s-page-head">
-        <h1>Settings</h1>
         {view && (
           <p className="quiet" title={view.path}>
             Saved as you go to <code>{tilde(view.path)}</code>
@@ -644,7 +643,11 @@ export function Settings({
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
             {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
             {view && (x.id === "review" || x.id === "inflight") && (
-              <PausedLine p={view.paused[x.id === "review" ? "ai" : "babysitters"]} now={now} />
+              <PausedLine
+                p={view.paused[x.id === "review" ? "ai" : "babysitters"]}
+                label={x.id === "review" ? "AI reviews are paused:" : "Babysitters are paused:"}
+                now={now}
+              />
             )}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}

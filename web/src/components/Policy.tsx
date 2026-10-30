@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { cls } from "../format.ts";
+import { cls, tilde } from "../format.ts";
 import { KeyButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
@@ -139,7 +139,7 @@ export function Policy({
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       <p className="s-path quiet" title={doc?.path}>
-        <code>{doc ? doc.path.replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, "~") : "…"}</code>. The coordinator edits it too when you ask it to.
+        <code>{doc ? tilde(doc.path) : "…"}</code>. The coordinator edits it too when you ask it to.
       </p>
     </div>
   );

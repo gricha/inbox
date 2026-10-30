@@ -129,7 +129,9 @@ function Rows({ cards, g, ctx, folded }: { cards: Card[]; g: Group; ctx: RowCtx;
         if (r.cards.length < 3) return r.cards.map((c) => <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} away={away} />);
         const first = r.cards[0]!;
         // Your own stack is one card's worth: what's wrong once, in its colour, and what d does once; each PR a short line.
-        const mine = !away && first.kind === "pr" && !!me && r.author.toLowerCase() === me;
+        // Sorted away, it's still yours by name, without the d hint.
+        const yours = first.kind === "pr" && !!me && r.author.toLowerCase() === me;
+        const mine = yours && !away;
         const kind = r.cards.every((c) => c.kind === "pr") ? "PRs" : "items";
         const why = r.why.startsWith(`${r.author} `) ? r.why.slice(r.author.length + 1) : r.why;
         const tone = g.variant === "active" && !away ? problems(first).find((f) => says(r.why, f.text))?.tone : undefined;
@@ -138,7 +140,7 @@ function Rows({ cards, g, ctx, folded }: { cards: Card[]; g: Group; ctx: RowCtx;
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- <fieldset> is for form controls; this groups a run of rows
           <div key={`run:${r.id}`} className={cls("run", mine && "mine")} role="group" aria-labelledby={`run-${r.id}`}>
             <p className="run-head" id={`run-${r.id}`}>
-              <span className="run-title">{mine ? `Your ${r.cards.length} ${kind}` : `${r.cards.length} ${kind} from ${r.author}`}</span>
+              <span className="run-title">{yours ? `Your ${r.cards.length} ${kind}` : `${r.cards.length} ${kind} from ${r.author}`}</span>
               {why && <span className={cls("run-why", tone && `t-${tone}`)}>{why}</span>}
               {next && <span className="run-next">{withKeys(next)}</span>}
             </p>

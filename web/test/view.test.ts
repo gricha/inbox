@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
 import type { ActivityEvent, Card, CoordinatorLogEntry, CoordinatorStatus, JudgeStatus, QueueView } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, modelName, shortId, shortRef } from "../src/format.ts";
+import { age, ago, clearedText, eventText, modelName, shortId, shortRef, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
   actedText,
@@ -12,10 +12,12 @@ import {
   coordinatorText,
   DEFAULT_OPEN,
   draftOf,
+  firstClause,
   foldOf,
   groupsOf,
   judgeStatusText,
   judgeStepText,
+  keepUnits,
   keyParts,
   laneFacts,
   lineOf,
@@ -35,6 +37,7 @@ import {
   sizeOf,
   stops,
   valueOf,
+  waitingText,
   type KeyLike,
 } from "../src/view.ts";
 
@@ -150,6 +153,12 @@ test("an in-flight row's status in plain words", () => {
     laneFacts({ ...row, failing: ["tacos-gha / TACOS Unlock (terraform/eng-tools/workflow-engine)"] })[0]?.text,
     "CI failing: tacos-gha / TACOS Unlock (terraform/eng…",
   );
+  // A CODEOWNERS list of teams is a count, people first.
+  const teams = ["@issue-detection-backend", "@issues-feed", "@security", "@foundations", "@owners-auth"];
+  assert.ok(laneFacts({ ...row, waiting_on: ["azulus", ...teams] }).some((f) => f.text === "waiting on azulus and 5 teams"));
+  assert.equal(waitingText(teams), "5 teams");
+  assert.equal(waitingText(["a", "b", "c", "@t"]), "a, b and 2 more");
+  assert.equal(waitingText(["a", "@t"]), "a, @t");
 });
 
 test("settings fields: text to value and back", () => {
@@ -296,13 +305,26 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
     card("acme/api#20", { author: "a20", preflight: skip }),
     card("acme/api#21", { author: "a21", preflight: { state: "ready", verdict: "skim" } }),
     card("acme/api#22", { author: "a22", preflight: look }),
-    card("acme/api#23", { author: "me", inflight: true, why: "in flight: reply ready to send" }),
+    card("acme/api#25", { author: "me", inflight: true, why: "in flight: no local clone of oss/tinyhttp, so no babysitter" }),
+    card("acme/api#23", {
+      author: "me",
+      inflight: true,
+      why: "in flight: reply ready to send",
+      reply: { id: "d1", thread_id: null, to: "dana", quote: "", body: "Kept it.", at: "", sent_at: null, url: null },
+    }),
     card("acme/api#24", { author: "a24", preflight: { state: "ready", verdict: "skim", risk: "high" } }),
   ];
   const v = { ...queue(), sections: { ...queue().sections, now }, now_cards: 3 };
   const g = groupsOf(v, DEFAULT_OPEN, "", {}, "me").find((x) => x.key === "now")!;
-  // A close look, your PR one key from done and high risk first; skip last; otherwise as the rules ordered them.
-  assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#22", "acme/api#23", "acme/api#24"], 2]);
+  // A close look, your PR one key from done and high risk first; skip last; otherwise as the rules ordered them. Your PR
+  // in flight that no key can finish (no clone) is one of the rest.
+  assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#22", "acme/api#23", "acme/api#24"], 3]);
+  assert.deepEqual(
+    groupsOf(v, DEFAULT_OPEN, "", { now: true }, "me")
+      .find((x) => x.key === "now")!
+      .cards.map((c) => c.id),
+    ["acme/api#22", "acme/api#23", "acme/api#24", "acme/api#21", "acme/api#25", "acme/api#20"],
+  );
   assert.ok(stops([g], new Set()).includes(foldOf("now")));
   const demoted = card("acme/web#30", { demoted: "Now was full on PRs to review (3)" });
   const today = [card("acme/web#31", { author: "a31" }), card("acme/web#32", { author: "a32", preflight: skip }), demoted];
@@ -410,6 +432,7 @@ test("the selected card's facts leave out what the card already says", () => {
   assert.deepEqual(cardFacts(pr, "me"), ["by dana", "3 unresolved threads", "medium risk", "5 notes on the changes", "Now was full (3)"]);
   // A sorted-away row shows its note already.
   assert.ok(!cardFacts(pr, "me", true).includes("Now was full (3)"));
+  assert.ok(!cardFacts(pr, "me", false, true).includes("by dana"), "in a stack, its head names the author");
   assert.ok(says("conflicts with main", "merge conflict"));
   assert.ok(!says("asked you directly", "merge conflict"));
   assert.deepEqual(cardFacts({ ...pr, why: "3 unresolved threads", author: "me", demoted: undefined }, "me"), [
@@ -588,12 +611,31 @@ test("formatting", () => {
   assert.equal(age("2026-10-27T11:20:00Z", now), "40m");
   assert.equal(age("2026-10-27T07:00:00Z", now), "5h");
   assert.equal(age("2026-10-24T12:00:00Z", now), "3d");
+  // Rounded before the switch to days: 47.6h and 48.3h both read "2d".
+  assert.equal(age(new Date(now - 47.6 * 3_600_000).toISOString(), now), "2d");
+  assert.equal(age(new Date(now - 48.3 * 3_600_000).toISOString(), now), "2d");
+  assert.equal(age(new Date(now - 47.4 * 3_600_000).toISOString(), now), "47h");
+  assert.equal(ago(new Date(now - 47.6 * 3_600_000).toISOString(), now), "2d ago");
+  assert.equal(tilde("/Users/greg/.review-desk/config.toml"), "~/.review-desk/config.toml");
   assert.equal(ago("2026-10-27T11:59:20Z", now), "40s ago");
   assert.equal(ago("2026-10-27T12:00:05Z", now), "0s ago");
   assert.equal(shortRef({ repo: "getsentry/seer", number: 9085 }), "seer#9085");
   assert.equal(shortId("getsentry/seer#9085"), "seer#9085");
   assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_until: null })), "snoozed until activity");
   assert.equal(clearedText(card("a/b#1", { status: "muted" })), "muted");
+});
+
+test("a skip's gist is its first clause when the sentence won't fit a line; units stay with their numbers", () => {
+  assert.equal(
+    firstClause("Runs eval shard setup and sandbox provisioning in the background, with most of the change in evals-runner. More."),
+    "Runs eval shard setup and sandbox provisioning in the background.",
+  );
+  assert.equal(firstClause("Deletes an unused helper and its tests. Nothing else."), "Deletes an unused helper and its tests.");
+  assert.equal(
+    keepUnits("maps raw readings to 0–100 % moisture every 15 s"),
+    "maps raw readings to 0–\u2060100\u202f% moisture every 15\u202fs",
+  );
+  assert.equal(keepUnits("2 sensors"), "2 sensors");
 });
 
 test("an AI review names the model that wrote it the way people say it", () => {

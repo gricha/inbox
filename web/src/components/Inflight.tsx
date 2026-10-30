@@ -1,7 +1,7 @@
 import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { laneFacts, sitterParts } from "../view.ts";
-import { Owed } from "./CardRow.tsx";
+import { atCommas, Owed } from "./CardRow.tsx";
 import { Dots, KeyButton } from "./Detail.tsx";
 
 // The In-flight lane: your PRs marked done, what each babysitter is doing, and what's back with you.
@@ -10,6 +10,7 @@ export function Inflight({
   now,
   selected,
   sending,
+  armed,
   select,
   run,
 }: {
@@ -17,6 +18,7 @@ export function Inflight({
   now: number;
   selected: string | null;
   sending: string | null; // the draft on its way to GitHub
+  armed: string | null; // the draft a first y armed
   select: (id: string) => void;
   run: (row: InflightRow, key: string, draft?: Draft) => void; // the lane's keys: enter o d y x c
 }) {
@@ -26,7 +28,7 @@ export function Inflight({
   const rows = (list: InflightRow[]) => (
     <div className="rows cards">
       {list.map((r) => (
-        <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} sending={sending} select={select} run={run} />
+        <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} sending={sending} armed={armed} select={select} run={run} />
       ))}
     </div>
   );
@@ -39,7 +41,14 @@ export function Inflight({
             <span className="count">{open.length}</span>
           </h2>
           <p className="lane-intro">
-            Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in Now only when it needs you.
+            {view.babysitting ? (
+              "Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in Now only when it needs you."
+            ) : (
+              <>
+                Your PRs marked done. <a href="#/settings/inflight">Babysitting is off</a>, so a PR is back in Now when CI fails or
+                reviewers ask for something.
+              </>
+            )}
           </p>
           {rows(open)}
         </section>
@@ -71,6 +80,7 @@ function Row({
   now,
   on,
   sending,
+  armed,
   select,
   run,
 }: {
@@ -78,6 +88,7 @@ function Row({
   now: number;
   on: boolean;
   sending: string | null;
+  armed: string | null;
   select: (id: string) => void;
   run: (row: InflightRow, key: string, draft?: Draft) => void;
 }) {
@@ -93,6 +104,7 @@ function Row({
     run(r, k);
   };
   const since = c.resolved_at ?? c.waiting_since;
+  const draft = live ? r.drafts[0] : undefined;
   return (
     <div className={cls("row", "card", "lane-row", needs && "b-now", on && "sel", !live && "dim")} data-id={c.id}>
       <div className="row-line">
@@ -128,7 +140,7 @@ function Row({
               {live ? (
                 laneFacts(r).map((f) => (
                   <span key={f.text} className={cls("fact-word", needs && f.tone && `t-${f.tone}`)}>
-                    {f.text}
+                    {atCommas(f.text)}
                   </span>
                 ))
               ) : (
@@ -144,8 +156,9 @@ function Row({
           <a href="#/settings/inflight">Set up local clones</a>
         </p>
       )}
+      {/* A drafted reply is a margin note; the selected row's keys send or discard the first. */}
       {live &&
-        r.drafts.map((d, i) => (
+        r.drafts.map((d) => (
           <div key={d.id} className="draft">
             <p className="draft-to">
               {/* Not its babysitter's: another agent over MCP drafted it, so say so before you send it as you. */}
@@ -153,30 +166,33 @@ function Row({
               {d.quote && <span className="draft-quote">: “{d.quote}”</span>}
             </p>
             <p className="draft-body">{d.body}</p>
-            <div className="actions">
-              <KeyButton
-                k={on && i === 0 ? "y" : ""}
-                label={sending === d.id ? "Sending…" : "Send"}
-                disabled={sending !== null}
-                title="Post this reply on GitHub, as you"
-                run={() => {
-                  run(r, "y", d);
-                }}
-              />
-              <KeyButton
-                k={on && i === 0 && !r.escalation && !r.outside_at ? "x" : ""}
-                label="Discard"
-                run={() => {
-                  run(r, "x", d);
-                }}
-              />
-            </div>
           </div>
         ))}
       {on && (
         <div className="more">
           <div className="actions card-keys">
             <KeyButton k="enter" label="Review" run={keys} />
+            {draft && (
+              <KeyButton
+                k="y"
+                label={sending === draft.id ? "Sending…" : armed === draft.id ? "Press y again to send" : "Send"}
+                disabled={sending !== null}
+                title="Post this reply on GitHub, as you: press y twice"
+                className={cls(armed === draft.id && "armed")}
+                run={() => {
+                  run(r, "y", draft);
+                }}
+              />
+            )}
+            {draft && !r.escalation && !r.outside_at && (
+              <KeyButton
+                k="x"
+                label="Discard"
+                run={() => {
+                  run(r, "x", draft);
+                }}
+              />
+            )}
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {live && <KeyButton k="d" label="Take back" run={keys} />}
             {live && r.escalation && <KeyButton k="x" label="Dismiss the question" run={keys} />}

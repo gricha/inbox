@@ -380,7 +380,7 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   assert.deepEqual(
     q.sections.now.map((c) => [c.id, c.why]),
     [
-      ["acme/web#8", "in flight: babysitting is off"],
+      ["acme/web#8", "in flight: CI failing"],
       ["acme/api#1", "carol asked you directly"],
     ],
     "the ask came an hour ago, so it isn't quiet whatever updated_at says",
@@ -512,7 +512,7 @@ test("a config saved after the first start can't set settings: the agent-reachab
   await idle(first);
   first.stop();
   const desk = await open();
-  assert.equal(desk.settings["analyze.command"], "claude");
+  assert.ok(!("analyze.command" in desk.settings), "no Claude command setting: every agent is claude from PATH");
 });
 
 test("settings that change the searches sync right away", async () => {

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, orderNotes, resolvedHead, sitterParts, splitPath } from "../view.ts";
+import { currentFile, filePatch, orderNotes, resolvedHead, says, sitterParts, splitPath } from "../view.ts";
+import { Owed } from "./CardRow.tsx";
 import { CI, Dots, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
@@ -41,6 +42,8 @@ export function Review({
   flash,
   onInflight,
   row,
+  armed: armedDraft,
+  onLane,
   onBack,
 }: {
   id: string;
@@ -51,6 +54,8 @@ export function Review({
   flash: (text: string, error?: boolean, ms?: number) => void;
   onInflight: (c: Card) => void; // d: in flight, or take it back
   row: InflightRow | null; // your PR in flight: its lane line goes under the facts, as in the lane
+  armed: string | null; // the draft a first y armed
+  onLane: (row: InflightRow, key: string, draft?: Draft) => void; // y sends its reply, x discards it, as in the lane
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
@@ -65,6 +70,8 @@ export function Review({
   const listRef = useRef<HTMLElement>(null);
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
+  // Your PR in flight with a reply waiting: it's shown under the header, and y sends it from here too.
+  const draft = row?.state === "open" ? row.drafts[0] : undefined;
 
   useEffect(() => {
     if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
@@ -215,6 +222,7 @@ export function Review({
     else if (k === "i") void askAi();
     else if (k === "a") void approve();
     else if (k === "d" && v) onInflight(v.card);
+    else if ((k === "y" || k === "x") && draft && row) onLane(row, k, draft);
     else if (k === "esc") onBack();
   }
 
@@ -226,8 +234,9 @@ export function Review({
     if (armed && e.key !== "a" && e.key !== "Escape") setArmed(0); // any other key lets the approval lapse
     if (e.key === "Escape") {
       if (armed) setArmed(0);
-      else onBack();
-    } else if ("npoci[]ad".includes(e.key) && e.key.length === 1) {
+      // An armed Send lapses on Esc (App drops it); only an unarmed Esc goes back.
+      else if (!draft || armedDraft !== draft.id) onBack();
+    } else if ((draft ? "npoci[]adyx" : "npoci[]ad").includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
     }
@@ -256,23 +265,32 @@ export function Review({
     );
 
   const { card, item, files } = view;
-  const mine = item.state === "open" && !!me && card.author.toLowerCase() === me.toLowerCase();
+  const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
+  const mine = item.state === "open" && isMine;
+  const armedY = !!draft && armedDraft === draft.id;
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
-  const approvals = item.reviews.filter((r) => r.state === "approved").length;
+  const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
+  const approvals = approvers.length;
   // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
   const facts = [
     { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "" },
     {
-      text: `${REVIEW[item.review_decision]}${approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}`,
+      text:
+        item.review_decision === "approved" && approvals
+          ? `approved by ${approvers.join(", ")}`
+          : `${REVIEW[item.review_decision]}${approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}`,
       tone: item.review_decision === "changes_requested" ? "t-warn" : "",
     },
     ...(item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
     ...(item.draft ? [{ text: "draft", tone: "" }] : []),
     { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
   ];
+  // The why leaves out a fact it already says, as on the card ("conflicts with main" says "merge conflict").
   const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
+  const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
+  const open = item.state === "open";
 
   return (
     <div className="review">
@@ -292,14 +310,14 @@ export function Review({
               </span>
             </a>
             <span className="rv-by">
-              by {card.author}
+              by {isMine ? "you" : card.author}
               {card.author_bot ? " (bot)" : ""}
             </span>
           </p>
           <h1 className="rv-title">{card.title}</h1>
           <p className="rv-meta">
-            {why && <span className="why">{why}</span>}
-            {facts.map((f) => (
+            {why && (mine ? <Owed why={why} /> : <span className="why">{why}</span>)}
+            {shownFacts.map((f) => (
               <span key={f.text} className={cls("fact-word", f.tone)}>
                 {f.text}
               </span>
@@ -319,9 +337,22 @@ export function Review({
               ))}
             </p>
           )}
+          {draft && (
+            <div className="draft rv-draft">
+              <p className="draft-to">
+                {draft.by === "agent" ? "Your agent's reply" : "Reply"} to {draft.to}
+                {draft.quote && <span className="draft-quote">: “{draft.quote}”</span>}
+              </p>
+              <p className="draft-body">{draft.body}</p>
+            </div>
+          )}
         </header>
-        <Activity events={resolved?.events ?? view.activity} me={me} now={now} />
-        <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
+        {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
+        <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
+        {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
+        {(!mine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
+          <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
+        )}
       </div>
 
       <div className="actions rv-actions">
@@ -335,22 +366,39 @@ export function Review({
             run={run}
           />
         )}
-        <KeyButton
-          k="a"
-          label={busy === "approve" ? "Approving…" : armed ? "Press a again to approve" : "Approve"}
-          run={run}
-          disabled={!canApprove || busy === "approve"}
-          title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-          className={cls(armed > 0 && "armed")}
-        />
+        {draft && (
+          <>
+            <KeyButton
+              k="y"
+              label={armedY ? "Press y again to send" : "Send"}
+              title="Post this reply on GitHub, as you: press y twice"
+              className={cls(armedY && "armed")}
+              run={run}
+            />
+            <KeyButton k="x" label="Discard" run={run} />
+          </>
+        )}
+        {/* Only someone else's open PR is yours to approve. */}
+        {open && !isMine && (
+          <KeyButton
+            k="a"
+            label={busy === "approve" ? "Approving…" : armed ? "Press a again to approve" : "Approve"}
+            run={run}
+            disabled={!canApprove || busy === "approve"}
+            title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
+            className={cls(armed > 0 && "armed")}
+          />
+        )}
         <KeyButton k="o" label="Open on GitHub" run={run} />
         <KeyButton k="c" label="Copy prompt" run={run} />
-        <KeyButton
-          k="i"
-          label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
-          run={run}
-          disabled={view.generating || busy === "ai"}
-        />
+        {(open || view.ai) && (
+          <KeyButton
+            k="i"
+            label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
+            run={run}
+            disabled={view.generating || busy === "ai"}
+          />
+        )}
       </div>
 
       {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
@@ -381,7 +429,7 @@ export function Review({
                     >
                       <span className="rv-fname">
                         {dir && <Dir path={dir} />}
-                        <span className="rv-base">{name}</span>
+                        <span className="rv-base">{breakable(name)}</span>
                       </span>
                       {n > 0 && <span className="rv-nn" title={`${n} AI ${n === 1 ? "note" : "notes"}`} />}
                       <span className="rv-delta">{delta(f)}</span>
@@ -509,6 +557,16 @@ function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; no
     </section>
   );
 }
+
+// A long file name wraps after a "_", "-" or ".", never mid-word.
+const breakable = (name: string) =>
+  name.split(/(?<=[_.-])/).map((part, i) => (
+    // oxlint-disable-next-line react/no-array-index-key -- parts are positional and never reorder
+    <span key={i}>
+      {i > 0 && <wbr />}
+      {part}
+    </span>
+  ));
 
 // A long directory gives way from its start, so the file's own name stays whole and every name sits right after its folder.
 function Dir({ path }: { path: string }) {

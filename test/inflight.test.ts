@@ -65,7 +65,8 @@ test("d on your own open PR puts it in flight: it leaves the queue for the lane,
   const lane = t.desk.inflight().rows;
   assert.deepEqual(
     lane.map((x) => [x.card.id, x.card.inflight, x.needs_you, x.sitter.text]),
-    [["acme/web#3", true, null, "watching"]],
+    [["acme/web#3", true, null, ""]],
+    "babysitting is off here, so nothing is watching it",
   );
   assert.deepEqual(t.desk.overview().inflight, { total: 1, needs_you: 0 });
   assert.throws(() => t.desk.act("web#3", "inflight"), /already in flight/);
@@ -93,7 +94,8 @@ test("only your own open PRs go in flight", async (c) => {
 });
 
 test("in flight, its babysitter owns it: done, snooze and mute are refused, and the judge and coordinator leave it alone", async (c) => {
-  const t = await setup([myPr(3, { ci: "pending" })], { settings: { ...OFF, "analyze.command": "/nonexistent/claude" } });
+  process.env.DESK_CLAUDE = "/nonexistent/claude";
+  const t = await setup([myPr(3, { ci: "pending" })], { settings: OFF });
   c.after(t.cleanup);
   await t.desk.sync();
   // Muted before you marked it: marking clears that, so its questions can reach Now.
@@ -147,7 +149,7 @@ test("with babysitting off, an in-flight PR comes back to Now when CI fails, and
   assert.deepEqual(
     now.map((x) => [x.id, x.why]),
     [
-      ["acme/web#3", "in flight: babysitting is off"],
+      ["acme/web#3", "in flight: CI failing"],
       ["acme/web#4", "in flight: approved and green: merge it"],
     ],
   );

@@ -100,6 +100,25 @@ test("caps demote overflow in order; pinned and nocap are exempt", () => {
   assert.equal(r.placements.get("acme/api#4")!.rule_bucket, "now");
 });
 
+test("over a cap, what the AI says to skip leaves first, so the next item gets the slot", () => {
+  const { board: b } = compileBoard(board({ caps: { today: 2 }, rules: [{ when: "true", bucket: "today" }] }), "x");
+  const items = [1, 2, 3, 4].map((n) => makeItem({ number: n, created_at: hoursAgo(100 - n) }));
+  const r = classify(
+    b,
+    items.map((it) => entry(it, { skip: it.number === 1 })),
+  );
+  assert.deepEqual(r.order.today, ["acme/api#2", "acme/api#3"]);
+  assert.deepEqual(r.order.later, ["acme/api#1", "acme/api#4"]);
+  assert.equal(r.placements.get("acme/api#1")!.demoted, "the AI says skip it");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today was full on B (2)");
+  // Under the cap, a skip keeps its place.
+  const under = classify(
+    b,
+    items.slice(0, 2).map((it) => entry(it, { skip: true })),
+  );
+  assert.deepEqual(under.order.today, ["acme/api#1", "acme/api#2"]);
+});
+
 test("inactive items are placed but not sorted or counted toward caps", () => {
   const { board: b } = compileBoard(board({ caps: { now: 1 }, rules: [{ when: "true", bucket: "now" }] }), "x");
   const r = classify(b, [entry(makeItem({ number: 1 }), { active: false }), entry(makeItem({ number: 2 }))]);

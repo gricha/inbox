@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Desk } from "./desk.ts";
-import { claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, probeLogin, runCommand } from "./review.ts";
+import { claudeCommand, claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, probeLogin, runCommand } from "./review.ts";
 import type {
   ActivityEvent,
   ActivityKind,
@@ -256,7 +256,7 @@ export class Coordinator {
 
   // `claude agents --json` lists the sessions open on this machine. Best effort: if it fails, go ahead.
   async openElsewhere(id: string): Promise<boolean> {
-    const cmd = this.desk.settings["analyze.command"];
+    const cmd = claudeCommand();
     try {
       const out = await runCommand(claudeSpawn(cmd, ["agents", "--json"]), {
         timeout: 15_000,
@@ -314,7 +314,7 @@ export class Coordinator {
     this.save({ runs: n });
     desk.log(`coordinator run ${n}: ${intro ? "first run" : `${events.length} events`}`);
     desk.changed();
-    const cmd = desk.settings["analyze.command"];
+    const cmd = claudeCommand();
     let error: string | null = null;
     let cause = "";
     try {
@@ -461,7 +461,7 @@ export class Coordinator {
     const st = this.load();
     const off = this.offReason();
     const dir = path.join(this.desk.home, "coordinator");
-    const cmd = this.desk.settings["analyze.command"];
+    const cmd = claudeCommand();
     const policyEmpty = !this.desk.policy.text.trim();
     return {
       state: this.state(),

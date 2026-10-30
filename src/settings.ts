@@ -33,7 +33,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "queue",
     title: "Queue",
-    help: "Now and Today are the queue. Later and resolved stay out of it (g l, g d).",
+    help: "Now and Today are the queue. Later and resolved stay out of it, on one quiet line below.",
   },
   { id: "agent", title: "Agents" },
   { id: "policy", title: "Policy", help: "Prose guidance the judge and the coordinator follow." },
@@ -253,15 +253,6 @@ export const SETTINGS = [
     default: true,
     help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: press i in a review to ask for one.",
   },
-  {
-    key: "analyze.command",
-    section: "review",
-    label: "Claude command",
-    type: "string",
-    default: "claude",
-    required: true,
-    help: "A name on PATH or an absolute path. Every agent the desk runs uses it. Codex runs as codex from PATH.",
-  },
   { key: "handoff.prompt", section: "handoff", label: "Someone else's PR", type: "text", default: DEFAULT_PROMPT, required: true },
   { key: "handoff.mine", section: "handoff", label: "Your PR", type: "text", default: DEFAULT_MINE, required: true },
   { key: "handoff.issue", section: "handoff", label: "An issue", type: "text", default: DEFAULT_ISSUE, required: true },
@@ -305,7 +296,7 @@ export function checkSetting(key: string, value: unknown): string | null {
 }
 
 // Settings that no longer exist: ignored when read, and gone from the file on the next save.
-const REMOVED = new Set(["analyze.model"]);
+const REMOVED = new Set(["analyze.model", "analyze.command"]);
 
 // Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
 export function readSettings(file: string): {
@@ -356,7 +347,6 @@ const LEGACY: Record<string, string> = {
   "handoff.prompt": "handoff.prompt",
   "handoff.mine": "handoff.mine",
   "handoff.issue": "handoff.issue",
-  "analyze.command": "analyze.command",
 };
 export const LEGACY_TABLES = ["signals", "notify", "handoff", "analyze"];
 

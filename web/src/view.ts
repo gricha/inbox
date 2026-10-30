@@ -70,6 +70,16 @@ export function checkNames(names: string[]): string {
   return names.length > 2 ? `${clip(names[0]!)} and ${names.length - 1} more` : names.map(clip).join(", ");
 }
 
+// Reviewers not heard from yet, people first: a CODEOWNERS list of teams is a count ("azulus and 5 teams").
+export function waitingText(names: string[]): string {
+  if (names.length <= 2) return names.join(", ");
+  const people = names.filter((n) => !n.startsWith("@")).slice(0, 2);
+  const rest = names.length - people.length;
+  const teams = names.length - names.filter((n) => !n.startsWith("@")).length;
+  const tail = rest === teams ? `${teams} teams` : `${rest} more`;
+  return people.length ? `${people.join(", ")} and ${tail}` : tail;
+}
+
 // An in-flight PR's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
 // Tones as in the queue and the review: CI failing is bad, changes requested and a merge conflict are warnings.
 export function laneFacts(
@@ -84,7 +94,7 @@ export function laneFacts(
   else if (r.ci === "pending") add("CI running");
   if (r.approved_by.length) add(`approved by ${r.approved_by.join(", ")}`);
   if (r.changes_by.length) add(`changes requested by ${r.changes_by.join(", ")}`, "warn");
-  if (r.waiting_on.length) add(`waiting on ${r.waiting_on.join(", ")}`);
+  if (r.waiting_on.length) add(`waiting on ${waitingText(r.waiting_on)}`);
   if (r.threads_unresolved) add(`${r.threads_unresolved} unresolved ${r.threads_unresolved === 1 ? "thread" : "threads"}`);
   if (r.mergeable === "conflict") add("merge conflict", "warn");
   return out;
@@ -174,12 +184,14 @@ const mineOf = (c: Pick<Card, "kind" | "author" | "resolved">, me: string) =>
   c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
 
 // How much a card wants you first: 0 for a close look, high risk, an item a cap pushed down, or your PR one key from done
-// (a reply to send, a question, approved and green); 2 for the AI's "skip it"; 1 for the rest.
+// (a reply to send, a question, approved and green); 2 for the AI's "skip it"; 1 for the rest, your PR in flight that's
+// stuck (no clone, no babysitter) included.
 function weight(c: Card, me: string): number {
   const p = c.preflight;
+  if (p?.verdict === "skip") return 2;
   if (c.demoted || p?.risk === "high" || p?.verdict === "look") return 0;
-  if (mineOf(c, me) && (c.inflight || (c.ci === "green" && c.chips.includes("approved")))) return 0;
-  return p?.verdict === "skip" ? 2 : 1;
+  const done = (c.inflight && (!!c.reply || !!c.escalated)) || (c.ci === "green" && c.chips.includes("approved"));
+  return mineOf(c, me) && done ? 0 : 1;
 }
 
 // Consecutive cards with the same author and reason (a stack of PRs) read as one block from three on.
@@ -276,6 +288,17 @@ export function opening(text: string, max = 200, clauses = true): string {
   return out.replace(/;$/, ".");
 }
 
+// A skip's gist: the first sentence, or its first clause when the sentence won't fit on one line.
+export function firstClause(text: string, max = 72): string {
+  const first = opening(text, 0);
+  if (first.length <= max) return first;
+  const cut = /[,;] /.exec(first);
+  return cut && cut.index <= max ? `${first.slice(0, cut.index)}.` : first;
+}
+
+// A number keeps its unit and a range its ends on one line: "0–100 %", "15 s".
+export const keepUnits = (text: string) => text.replaceAll(/(\d) (%|ms\b|s\b)/g, "$1\u202f$2").replaceAll(/(\d)–(\d)/g, "$1–\u2060$2");
+
 // Whether a why already says a problem: "conflicts with main" says "merge conflict".
 export const says = (why: string, problem: string) =>
   why.toLowerCase().includes(problem.toLowerCase()) || (problem === "merge conflict" && /conflict/i.test(why));
@@ -313,9 +336,10 @@ export function cardFacts(
   c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted">,
   me: string,
   away = false,
+  inRun = false, // its stack's head names the author
 ): string[] {
   const out: string[] = [];
-  if (c.author.toLowerCase() !== me.toLowerCase()) out.push(`by ${c.author}`);
+  if (c.author.toLowerCase() !== me.toLowerCase() && !inRun) out.push(`by ${c.author}`);
   if (c.kind === "pr" && c.ci === "green") out.push("CI passing");
   if (c.kind === "pr" && c.ci === "pending") out.push("CI running");
   if (c.chips.includes("approved")) out.push("approved");

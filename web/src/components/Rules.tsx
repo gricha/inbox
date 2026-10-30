@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Bucket, ConfigError, FieldDoc, PreviewResult } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { BUCKET_LABEL, cls, shortId } from "../format.ts";
+import { BUCKET_LABEL, cls, shortId, tilde } from "../format.ts";
 import { lineOf } from "../view.ts";
 import { KeyButton } from "./Detail.tsx";
 
@@ -251,7 +251,7 @@ export function Rules({
             <span className="pos">Line {pos.replace(":", ", column ")}</span>
           </div>
           <p className="s-path quiet">
-            <code>{doc?.path ?? "…"}</code>. Tab indents, Esc leaves the editor.
+            <code>{doc ? tilde(doc.path) : "…"}</code>. Tab indents, Esc leaves the editor.
           </p>
         </div>
 

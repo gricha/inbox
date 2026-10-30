@@ -458,10 +458,10 @@ async function until(what: string, ok: () => boolean, ms = 10_000) {
 
 async function sitterDesk(c: TestContext, items: Item[], settings: Record<string, unknown> = {}) {
   const w = world();
+  process.env.DESK_CLAUDE = w.claude;
   const jobs: number[] = [];
   const t = await setup(items, {
     settings: {
-      "analyze.command": w.claude,
       "inflight.clone_roots": [path.join(w.root, "code")],
       "notify.enabled": false,
       ...settings,
@@ -639,13 +639,13 @@ test("an expired claude login fails one run with a clear status, then nothing re
   assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 0);
   // Settings → In flight says it once.
   assert.equal(s.desk.getSettings().paused.babysitters?.why, `Babysitters are paused: ${NOT_LOGGED_IN}`);
-  // Any other save keeps the pause; a new agent setting (say, the claude command) lifts it.
+  // Any other save keeps the pause; a change to the agent settings lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
   await new Promise((r) => {
     setTimeout(r, 200);
   });
   assert.equal(s.w.count(), 1);
-  s.desk.putSettings({ set: { "analyze.command": `${path.dirname(s.w.claude)}/./claude` } });
+  s.desk.putSettings({ set: { "review.auto_ai": false } });
   await until("another attempt", () => s.w.count() >= 2);
   // Still logged out: a call that saves no session finds that out, and no run (with its session) starts.
   await until("the pause again", () => s.desk.sitter.paused !== null);
@@ -702,7 +702,9 @@ test("no clone, a fork, or babysitting off: the lane says why, and the PR is you
   assert.equal(rows.get(b.id)?.sitter.text, "the branch is in a fork (me/web)");
   assert.equal(s.w.count(), 0);
   s.desk.putSettings({ set: { "inflight.babysit": false } });
-  assert.equal(new Map(s.desk.inflight().rows.map((r) => [r.card.id, r])).get(a.id)?.needs_you, "babysitting is off");
+  // Off, the why is the problem itself; the lane's head says babysitting is off.
+  assert.equal(new Map(s.desk.inflight().rows.map((r) => [r.card.id, r])).get(a.id)?.needs_you, "CI failing");
+  assert.equal(s.desk.inflight().babysitting, false);
   // inflight.repos names the clone directly, and checks its origin.
   s.desk.putSettings({ set: { "inflight.babysit": true, "inflight.repos": [`acme/web = ${s.w.root}`] } });
   await until(
@@ -905,5 +907,5 @@ test("turning babysitting off stops the agents already running", posix, async (c
   await until("the run to stop", () => s.record(item.id).runs.at(-1)?.outcome === "stopped");
   assert.equal(s.desk.sitter.live.size, 0);
   assert.deepEqual(s.record(item.id).tried, [], "it goes again when you turn it back on");
-  assert.equal(s.desk.inflight().rows[0]?.needs_you, "babysitting is off");
+  assert.equal(s.desk.inflight().rows[0]?.needs_you, "CI failing");
 });

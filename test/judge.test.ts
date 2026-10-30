@@ -195,7 +195,8 @@ async function until(cond: () => boolean): Promise<void> {
 async function setup(c: TestContext, items: Item[], o: { policy?: string; settings?: Record<string, unknown> } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-judge-"));
   const fake = fakeClaude();
-  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "analyze.command": fake.bin, ...o.settings }));
+  process.env.DESK_CLAUDE = fake.bin;
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ ...o.settings }));
   if (o.policy !== undefined) fs.writeFileSync(path.join(home, "policy.md"), o.policy);
   const gh: FakeGitHub = new FakeGitHub(items, (q) =>
     q.includes("review-requested:@me") && !q.includes("-review-requested") ? [...gh.items.values()].map((i) => i.id) : [],

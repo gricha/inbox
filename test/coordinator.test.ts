@@ -69,7 +69,8 @@ async function setup(c: TestContext, o: { policy?: string; settings?: Record<str
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-coord-"));
   const fake = fakeClaude();
   // policy.judge off: these tests are about the coordinator, and the judge would call the same fake.
-  const settings = { "analyze.command": fake.bin, "policy.judge": false, ...o.settings };
+  process.env.DESK_CLAUDE = fake.bin;
+  const settings = { "policy.judge": false, ...o.settings };
   fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(settings));
   if (o.policy !== undefined) fs.writeFileSync(path.join(home, "policy.md"), o.policy);
   const gh: FakeGitHub = new FakeGitHub([ask(1)], (q) =>
@@ -248,20 +249,22 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
 });
 
 test(
-  "fixing the agent's settings retries the judge and the coordinator now; so does a call that shows the login works",
+  "changing the agent settings retries the judge and the coordinator now; so does a call that shows the login works",
   posix,
   async (c) => {
     const t = await setup(c, {
       policy: "Team asks are today.",
-      settings: { "policy.judge": true, "analyze.command": "/nonexistent/claude" },
+      settings: { "policy.judge": true },
     });
+    process.env.DESK_CLAUDE = "/nonexistent/claude";
     const team = (n: number) => ask(n, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }], request_events: [] });
     t.gh.items.set("acme/api#2", team(2));
     await t.sync();
     await until(() => !!t.desk.judge.error && !t.desk.judge.running && !!t.co.load().error && !t.co.current);
     assert.match(t.desk.judge.error!, /not found/);
-    // Set the right path, as the error says: both try now instead of in five minutes.
-    t.desk.putSettings({ set: { "analyze.command": t.fake.bin } });
+    // Claude Code installed, and an agent setting changed: both try now instead of in five minutes.
+    process.env.DESK_CLAUDE = t.fake.bin;
+    t.desk.putSettings({ set: { "review.auto_ai": false } });
     await until(() => t.desk.judge.lastAt !== null && t.co.status().started);
     assert.deepEqual([t.desk.judge.error, t.co.load().error], [null, null]);
 

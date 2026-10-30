@@ -346,13 +346,14 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.notEqual(saved.hash, p.hash);
 
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.coordinator.acted?.counts, { snooze: 3 });
-  assert.deepEqual(o.coordinator.acted?.buckets, ["fyi", "fyi", "fyi"]);
+  // Its latest run snoozed a Today item, so the top bar names Today; the FYI run before it stays in the log.
+  assert.deepEqual(o.coordinator.acted?.counts, { snooze: 1 });
+  assert.deepEqual(o.coordinator.acted?.buckets, ["today"]);
   const { data: v } = await call<CoordinatorView>("GET", "/api/coordinator");
   assert.equal(v.status.state, "idle");
   assert.ok(v.status.command?.includes(`--resume ${v.status.session_id}`));
   const acts = v.log.filter((e) => e.kind === "act");
-  assert.equal(acts.length, 3);
+  assert.equal(acts.length, 4);
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   for (const a of acts)
     assert.ok(
@@ -360,11 +361,11 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
       `${a.item_id} is snoozed`,
     );
 
-  // Undoing one from the log takes it out of the top bar's count.
+  // Undoing one from the log takes it out of the top bar's count: the run before it is the latest that acted.
   await call("POST", "/api/undo", { seq: acts[0]!.undo_seq });
   const { data: undone } = await call<CoordinatorView>("GET", "/api/coordinator");
   assert.equal(undone.log.find((e) => e.seq === acts[0]!.seq)?.undone, true);
-  assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 2 });
+  assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 3 });
   await call("POST", "/api/coordinator/note", { text: "from the test" });
   assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log[0]?.text, "from the test");
 });

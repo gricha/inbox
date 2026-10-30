@@ -99,14 +99,13 @@ let overrides: Record<string, SettingValue> = {
 };
 
 // The config fields that come from settings (src/config.ts does the same).
-function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "notify" | "handoff" | "analyze"> {
+function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "notify" | "handoff"> {
   const s = { ...DEFAULTS, ...overrides };
   return {
     poll_seconds: s["github.poll_seconds"],
     signals: { close_collaborator_min: s["github.close_collaborator_min"], bots: s["github.bots"], my_repos: s["github.my_repos"] },
     notify: { enabled: s["notify.enabled"], quiet: s["notify.quiet"] },
     handoff: { prompt: s["handoff.prompt"], mine: s["handoff.mine"], issue: s["handoff.issue"] },
-    analyze: { command: s["analyze.command"] },
   };
 }
 
@@ -692,7 +691,11 @@ const SEEDS: Seed[] = [
     size: [45, 120, 9],
     on: { "work-mine": [] },
     st: { inflight_at: iso(28) },
-    fly: { sitter: { state: "idle", text: "watching", since: null }, waiting: ["sam", "@backend"] },
+    // A CODEOWNERS-sized list of teams, so the lane's "waiting on" has to stay short.
+    fly: {
+      sitter: { state: "idle", text: "watching", since: null },
+      waiting: ["sam", "@backend", "@issue-detection-backend", "@issues-feed", "@security", "@owners-auth"],
+    },
   },
   {
     repo: "acme/worker",
@@ -721,7 +724,10 @@ const SEEDS: Seed[] = [
     comments: 12,
     fresh: true,
     on: { "work-mentions": ["newact"] },
-    log: [["commented", "tomas", 4, {}]],
+    log: [
+      ["mentioned", "", 50, { reason: "mention" }],
+      ["commented", "tomas", 4, {}],
+    ],
   },
   {
     repo: "acme/web",
@@ -1299,10 +1305,31 @@ function top(c: Card): Card {
       s.optional?.length && { checks_optional: s.optional },
     );
     if (reply) out.reply = reply;
+    if (laneOwned(r)) {
+      const f = flightOf(r);
+      const resume = laneRow(r).resume;
+      if (f.question) Object.assign(out, { escalated: true }, resume && { resume });
+      // As Desk.neededSince(): when it started needing you, never before d.
+      const at = f.question?.at ?? reply?.at ?? "";
+      const from = r.state.inflight_at ?? out.waiting_since;
+      out.waiting_since = at > from ? at : from;
+    }
   }
   if (s.kind === "issue") {
     const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
     if (last) out.last_event = last;
+    const me = signals(r).me;
+    const mentioned = EVENTS.some((e) => e.item_id === r.id && e.kind === "mentioned");
+    const involved = me.assignee
+      ? "assigned to you"
+      : me.author
+        ? "your issue"
+        : mentioned
+          ? "you were mentioned"
+          : me.commented
+            ? "you commented"
+            : "";
+    if (involved) out.involved = involved;
   }
   return out;
 }
@@ -1444,7 +1471,10 @@ function laneRow(r: Rec): InflightRow {
 function inflight(): InflightView {
   const rows = recs.filter((r) => r.state.inflight_at && r.seed.author === ME).map(laneRow);
   const rank = (x: InflightRow) => (x.state !== "open" ? 3 : x.needs_you ? 0 : x.sitter.state === "running" ? 1 : 2);
-  return { rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)) };
+  return {
+    rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)),
+    babysitting: setting("inflight.babysit"),
+  };
 }
 
 // Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves the lane.
@@ -2585,20 +2615,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-// The coordinator's history: a quiet run an hour ago, then three FYI items snoozed until tomorrow, each with its reason.
+// The coordinator's history: three FYI items snoozed this morning, a quiet run an hour ago, then one Today item snoozed,
+// which is what the top bar says.
 note(26 * 60, 0, "policy", "Updated the policy");
-note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
-note(61, 13, "run", "2 events, 0 actions · 18s");
 for (const [id, why] of [
   ["acme/infra#540", "CODEOWNERS ping for a staging key rotation; FYI by your policy"],
   ["acme/api#4101", "CODEOWNERS ping, nina already has two approvals coming"],
   ["acme/web#2288", "a thread you haven't replied to in a week; FYI by your policy"],
 ] as const) {
   const { undo_seq } = act(resolve(id), "snooze", "tomorrow");
-  note(3, 14, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
+  note(5 * 60, 12, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
 }
-note(3, 14, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left. Nothing else needed you.");
-note(3, 14, "run", "6 events, 3 actions · 41s");
+note(5 * 60, 12, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left.");
+note(5 * 60, 12, "run", "6 events, 3 actions · 41s");
+note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
+note(61, 13, "run", "2 events, 0 actions · 18s");
+{
+  const { undo_seq } = act(resolve("acme/ml-pipeline#311"), "snooze", "tomorrow");
+  note(3, 14, "act", "a CODEOWNERS ping to @ml-team; sam is a close collaborator, but nobody asked you by name", {
+    item_id: "acme/ml-pipeline#311",
+    action: "snooze",
+    bucket: "today",
+    undo_seq,
+  });
+}
+note(3, 14, "note", "Snoozed one Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
+note(3, 14, "run", "3 events, 1 action · 22s");
 
 // Two reviews being written, for longer than a test run or a round of shots.
 if (!aiPaused)

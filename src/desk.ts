@@ -73,7 +73,7 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
-const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["review.auto_ai"]]);
+const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
 const MAX_DRAFT = 5_000;
@@ -670,6 +670,12 @@ export class Desk {
     const recent = (e: Entry) => !!e.resolved?.at && e.resolved.at > keepSince;
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
+    const reviews = this.store.prefixed<AiReview>("review:");
+    // The AI said to skip this commit: it gives up its capped slot first, so the next item gets one and its own review.
+    const skip = (e: Entry) => {
+      const ai = reviews.get(e.item.id);
+      return ai?.head_oid === e.item.head_oid && ai.verdict === "skip";
+    };
     // An answer for an older version of the item stays until a fresh one lands, so the queue doesn't jump back and forth.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
     const judge = answers
@@ -700,6 +706,7 @@ export class Desk {
           // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved && !e.inflight,
           kept: kept.has(e.item.id) || recent(e),
+          skip: skip(e),
         })),
         judge,
         this.settings["queue.quiet_days"],
@@ -725,7 +732,7 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews: this.store.prefixed<AiReview>("review:"), boards, best, needs };
+    return { rev, at: now.getTime(), entries, reviews, boards, best, needs };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -841,14 +848,41 @@ export class Desk {
       if (next) c.next = next;
       if (it.checks_failed?.length) c.checks_failed = it.checks_failed;
       if (it.checks_optional?.length) c.checks_optional = it.checks_optional;
-      const reply = e.inflight ? this.sitterView(it).drafts[0] : undefined;
-      if (reply) c.reply = reply;
+      if (e.inflight) {
+        const v = this.sitterView(it);
+        if (v.drafts[0]) c.reply = v.drafts[0];
+        if (v.escalation) c.escalated = true;
+        if (v.escalation && v.resume) c.resume = v.resume;
+        c.waiting_since = this.neededSince(e, v);
+      }
     }
     if (it.kind === "issue") {
-      const last = this.store.activity({ after: 0, limit: 3, item: it.id, latest: true }).find((x) => x.kind !== "new");
+      const recent = this.store.activity({ after: 0, limit: 20, item: it.id, latest: true });
+      const last = recent.find((x) => x.kind !== "new");
       if (last) c.last_event = last;
+      const me = e.analysis.signals.me;
+      const involved = me.assignee
+        ? "assigned to you"
+        : me.author
+          ? "your issue"
+          : recent.some((x) => x.kind === "mentioned")
+            ? "you were mentioned"
+            : me.commented
+              ? "you commented"
+              : "";
+      if (involved) c.involved = involved;
     }
     return c;
+  }
+
+  // When your PR in flight started needing you: its question or reply, else the latest conflict or red CI; never before d.
+  neededSince(e: Entry, v: Pick<InflightRow, "escalation" | "drafts">): string {
+    const raised = this.store
+      .activity({ after: 0, limit: 20, item: e.item.id, latest: true })
+      .find((x) => x.kind === "conflict" || (x.kind === "ci" && x.data.to === "red"));
+    const at = v.escalation?.at ?? v.drafts[0]?.at ?? raised?.at ?? "";
+    const from = e.state.inflight_at ?? e.analysis.waiting_since;
+    return at > from ? at : from;
   }
 
   // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
@@ -1145,10 +1179,7 @@ export class Desk {
       if (!this.review) throw new Error("AI review isn't available in this desk");
       const pr = await this.prText(id);
       const s = this.settings;
-      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, {
-        driver: s["agent.driver"],
-        command: s["analyze.command"],
-      });
+      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, { driver: s["agent.driver"] });
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
       this.aiErrors.delete(id);
@@ -1418,7 +1449,7 @@ export class Desk {
           ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
           : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
     );
-    return { rows };
+    return { rows, babysitting: this.settings["inflight.babysit"] };
   }
 
   // Your own open PR in flight, for what agents and the lane may do to it.

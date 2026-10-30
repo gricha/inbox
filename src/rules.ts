@@ -33,6 +33,7 @@ export interface Entry {
   pinned: boolean;
   active: boolean; // not done, snoozed or muted; only active items count toward caps
   kept?: boolean; // gone from the board's searches but shown as resolved: the filter judged it while it was there
+  skip?: boolean; // the AI review of its current commit says skip it: over a cap, it goes first
 }
 
 export interface BoardResult {
@@ -152,21 +153,16 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   };
   const demote = (from: "now" | "today", to: Bucket, cap: number | undefined) => {
     if (cap === undefined) return;
-    let counted = 0;
-    const keep: Entry[] = [],
-      over: Entry[] = [];
-    for (const e of byBucket[from]) {
-      if (exempt(e)) keep.push(e);
-      else if (counted < cap) {
-        keep.push(e);
-        counted++;
-      } else over.push(e);
-    }
+    const counts = byBucket[from].filter((e) => !exempt(e));
+    // Over the cap, what the AI says to skip leaves first, so a slot goes to an item it hasn't seen yet.
+    const kept = new Set(counts.length > cap ? [...counts.filter((e) => !e.skip), ...counts.filter((e) => e.skip)].slice(0, cap) : counts);
+    const keep = byBucket[from].filter((e) => exempt(e) || kept.has(e));
+    const over = byBucket[from].filter((e) => !keep.includes(e));
     for (const e of over) {
       const p = placements.get(e.id)!;
       p.bucket = to;
       // Caps are per board, so the note names it: Now across boards can hold more than one board's cap.
-      p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full on ${cfg.name} (${cap})`;
+      p.demoted = e.skip ? "the AI says skip it" : `${from.charAt(0).toUpperCase()}${from.slice(1)} was full on ${cfg.name} (${cap})`;
     }
     byBucket[from] = keep;
     byBucket[to] = [...over, ...byBucket[to]];

@@ -50,15 +50,16 @@ test("settings.json: bad entries fall back to defaults", () => {
   assert.equal(readSettings(file).raw, null);
 });
 
-test("a setting that no longer exists (the Claude model) loads without errors and is dropped on the next save", () => {
+test("settings that no longer exist (the Claude model and command) load without errors and are dropped on the next save", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
   const file = path.join(dir, "settings.json");
-  fs.writeFileSync(file, JSON.stringify({ "analyze.model": "opus", "analyze.command": "/opt/bin/claude" }));
+  fs.writeFileSync(file, JSON.stringify({ "analyze.model": "opus", "analyze.command": "/opt/bin/claude", "notify.enabled": false }));
   const { overrides, errors, raw } = readSettings(file);
   assert.deepEqual(errors, []);
-  assert.deepEqual(overrides, { "analyze.command": "/opt/bin/claude" });
-  assert.deepEqual(raw, { "analyze.command": "/opt/bin/claude" });
+  assert.deepEqual(overrides, { "notify.enabled": false });
+  assert.deepEqual(raw, { "notify.enabled": false });
   assert.equal(checkSetting("analyze.model", "opus"), 'unknown setting "analyze.model"', "and can't be set again");
+  assert.equal(checkSetting("analyze.command", "/opt/bin/claude"), 'unknown setting "analyze.command"');
 });
 
 test("writeSettings writes through a symlinked settings.json", () => {
@@ -111,7 +112,6 @@ test("migrateLegacy moves settings out of config.toml and keeps boards", () => {
     "handoff.prompt": "Review {item.url}.\n[not a table] inside a string\nDo not post.",
     "handoff.mine": "x",
     "handoff.issue": "y",
-    "analyze.command": "/opt/bin/claude",
   });
   assert.ok(m.text);
   assert.ok(m.text.startsWith("# header\n"));

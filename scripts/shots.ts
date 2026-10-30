@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page } from "playwright-core";
-import type { Overview, QueueView } from "../src/types.ts";
+import type { QueueView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -316,24 +316,12 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The coordinator's line in the top bar, shown once it touched Today, opened: its recent log above the queue.
+    // The coordinator's line in the top bar (its latest run touched Today), opened: its recent log above the queue.
     name: "coordinator-log",
     go: async (page) => {
-      await page.route("**/api/overview", async (route) => {
-        const res = await route.fetch();
-        const o = (await res.json()) as Overview;
-        if (o.coordinator.acted) o.coordinator.acted.buckets = ["today"];
-        await route.fulfill({ response: res, json: o });
-      });
       await at("#/")(page);
-      await page.reload();
       await page.locator(".coord-line").click();
       await page.locator(".cl-list li").first().waitFor({ timeout: 5000 });
-    },
-    after: async (page) => {
-      await page.unroute("**/api/overview");
-      await page.reload();
-      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
     },
   },
   {

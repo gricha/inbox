@@ -8,7 +8,7 @@ import path from "node:path";
 import type { Desk } from "./desk.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
-import { claudeError, claudeSpawn, NOT_LOGGED_IN, probeLogin } from "./review.ts";
+import { claudeCommand, claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, probeLogin } from "./review.ts";
 import type { ActivityEvent, Draft, InflightRow, Item, SitterRun, SitterStatus } from "./types.ts";
 
 const RUN_TIMEOUT = 30 * 60_000;
@@ -875,7 +875,7 @@ export class Babysitter {
     this.notes.delete(id);
     if (this.loggedOut) {
       // Anything but the login failing again (a timeout, say) lets the run try.
-      const still = await probeLogin(desk.settings["analyze.command"]).then(
+      const still = await probeLogin().then(
         () => false,
         (e: unknown) => (e as Error).message === NOT_LOGGED_IN,
       );
@@ -935,7 +935,7 @@ export class Babysitter {
     const env = { ...rest, GIT_TERMINAL_PROMPT: "0" };
     let s: ReturnType<typeof claudeSpawn>;
     try {
-      s = claudeSpawn(desk.settings["analyze.command"], args);
+      s = claudeSpawn(claudeCommand(), args);
     } catch (e) {
       this.finish(id, run, keys, { error: (e as Error).message }, branch, dir);
       return;
@@ -981,10 +981,7 @@ export class Babysitter {
       this.kill(child);
     }, this.timeout);
     child.on("error", (e: NodeJS.ErrnoException) => {
-      spawnError =
-        e.code === "ENOENT"
-          ? `claude command "${desk.settings["analyze.command"]}" not found: set its full path under Settings → AI review → Claude command`
-          : e.message;
+      spawnError = e.code === "ENOENT" ? claudeMissing(claudeCommand()) : e.message;
     });
     child.stdout.on("data", (chunk: Buffer) => {
       fs.writeSync(out, chunk);
@@ -1101,7 +1098,8 @@ export class Babysitter {
     const note = work.length ? (this.notes.get(id) ?? this.blocker(it, s)) : null;
     if (note) return { state: "blocked", text: note, since: null };
     if (last) return { state: "done", text: doneText(last), since: last.ended_at };
-    return { state: "idle", text: it.state === "open" ? "watching" : it.state, since: null };
+    // Nothing watches it while babysitting is off.
+    return { state: "idle", text: it.state !== "open" ? it.state : this.desk.settings["inflight.babysit"] ? "watching" : "", since: null };
   }
 
   // Why the PR is back with you, or null while the babysitter has it (or nothing's wrong).
@@ -1123,7 +1121,10 @@ export class Babysitter {
     const [first] = work;
     // Nobody will do it: it's yours. Its facts say what's wrong (CI failing, a merge conflict); this says why it's yours.
     if (st.state === "blocked" && first) {
-      if (st.text === "babysitting is off" || st.text.startsWith("CI still")) return st.text;
+      // Off, the lane says so once; the why is the problem itself.
+      if (st.text === "babysitting is off")
+        return first.kind === "ci" ? "CI failing" : first.kind === "conflict" ? "merge conflict" : "new review comments";
+      if (st.text.startsWith("CI still")) return st.text;
       return first.kind === "feedback" ? `new review comments: ${st.text}` : `${st.text}, so no babysitter`;
     }
     // Tried and still broken. Comments a run answered are on the reviewers now.

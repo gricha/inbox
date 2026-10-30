@@ -178,7 +178,7 @@ test("claude runs directly, except a Windows shim, which goes through cmd.exe fu
 test("a missing claude command says where to set its path", async () => {
   await assert.rejects(
     askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude") }),
-    /not found: set its full path under Settings → AI review → Claude command/,
+    /not found: install Claude Code so claude runs from your PATH/,
   );
 });
 
@@ -485,7 +485,7 @@ test("changing the agent settings lifts the pause and tries the failed PRs again
   assert.ok(t.desk.aiPausedNow(), "another setting leaves it paused");
   assert.equal(t.f.started.length, 2);
 
-  t.desk.putSettings({ set: { "analyze.command": "/opt/bin/claude" } });
+  t.desk.putSettings({ set: { "agent.driver": "codex" } });
   await flush();
   assert.equal(t.desk.aiPausedNow(), false);
   assert.equal(t.f.started.length, 4, "two more start at once");

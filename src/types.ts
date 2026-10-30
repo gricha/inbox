@@ -173,7 +173,6 @@ export interface Config {
   signals: { close_collaborator_min: number; bots: string[]; my_repos: string[] };
   notify: { enabled: boolean; quiet: string }; // quiet = "19:00-09:00", "" for none
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
-  analyze: { command: string }; // the claude command every agent run uses
   spaces: SpaceConfig[];
   boards: BoardConfig[];
 }
@@ -413,6 +412,9 @@ export interface Card {
   checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
   checks_optional?: string[]; // those of them its base branch doesn't require
   reply?: Draft; // your PR in flight: the first reply waiting for Send (y sends it from the queue too)
+  escalated?: boolean; // your PR in flight: its babysitter (or the desk) asked you something; x dismisses it from the queue
+  resume?: string; // ...and the command that opens the babysitter's session, which c copies from the queue
+  involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
@@ -640,6 +642,7 @@ export interface InflightRow {
 
 export interface InflightView {
   rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days
+  babysitting: boolean; // inflight.babysit: off, the lane says so once instead of on every row
 }
 
 // GET /api/config

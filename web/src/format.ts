@@ -9,7 +9,9 @@ const MIN = 60_000;
 export function age(at: string, now: number): string {
   const m = Math.max(0, Math.round((now - Date.parse(at)) / MIN));
   if (m < 60) return `${m}m`;
-  if (m < 48 * 60) return `${Math.round(m / 60)}h`;
+  // Rounded before the switch, so 47.6h and 48.3h both read "2d".
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h`;
   return `${Math.round(m / 1440)}d`;
 }
 
@@ -20,8 +22,10 @@ export const sinceText = (at: string, now: number) => (Date.parse(at) > now - 60
 export function ago(at: string, now: number): string {
   const s = Math.max(0, Math.round((now - Date.parse(at)) / 1000));
   if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 172_800) return `${Math.round(s / 3600)}h ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(s / 3600);
+  if (h < 48) return `${h}h ago`;
   return `${Math.round(s / 86_400)}d ago`;
 }
 
@@ -91,6 +95,9 @@ export function eventText(e: ActivityEvent, me = ""): string {
   }
   return e.kind;
 }
+
+// "~/.review-desk/settings.json" rather than the full home path.
+export const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]:\\Users\\[^\\]+(?=\\)/, "~");
 
 export const BUCKET_LABEL: Record<Bucket, string> = { now: "Now", today: "Today", later: "Later", fyi: "FYI", hide: "Hidden" };
 
