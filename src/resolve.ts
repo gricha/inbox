@@ -3,7 +3,7 @@ import type { Settings } from "./settings.ts";
 import type { Item, Signals } from "./types.ts";
 
 export interface Resolution {
-  reason: string; // "merged", "closed", "approved by alice", "no longer requested"
+  reason: string; // "merged", "closed", "you approved", "approved by alice", "no longer requested"
   actor: string; // who resolved it, "" if unknown
   at: string | null; // when, if known
 }
@@ -23,6 +23,11 @@ export function resolution(item: Item, s: Signals, settings: ResolveSettings, te
   const asks = item.request_events.filter((e) => (e.reviewer_type === "user" ? lc(e.reviewer) === me : myTeams.has(lc(e.reviewer))));
   const lastAsk = asks.at(-1) ?? null;
   if (!s.me.requested && !lastAsk) return null; // nobody asked you, so there's nothing to resolve
+
+  // Your latest verdict approves and nobody asked you again since (approving clears your ask on GitHub).
+  const yours = item.reviews.findLast((r) => lc(r.author) === me && r.state !== "commented" && r.state !== "pending");
+  if (yours?.state === "approved" && !s.me.requested && !(lastAsk && lastAsk.at > yours.at))
+    return { reason: "you approved", actor: s.me.login, at: yours.at };
 
   const mode = settings["github.resolve_on_others_approval"];
   const viaTeam = s.me.requested ? !s.me.requested_direct : lastAsk?.reviewer_type === "team";

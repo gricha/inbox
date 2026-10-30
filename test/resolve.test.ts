@@ -123,6 +123,48 @@ test("no longer requested and never reviewed; reviewing or never being asked kee
   assert.equal(resolve(makeItem({ request_events: [ask(hoursAgo(10), "web-team", "team")] })), null);
 });
 
+// After you approve, GitHub drops your ask: review_requests no longer lists you.
+const youApproved = (o: Partial<Item> = {}) =>
+  makeItem({ request_events: [ask(hoursAgo(10))], reviews: [review("me", "approved", hoursAgo(2))], ...o });
+
+test("you approved: resolved by you, whatever else GitHub still needs", () => {
+  const it = youApproved();
+  assert.deepEqual(resolution(it, analyze(it, ctx, cfg, NOW).signals, DEFAULTS, ctx.teams), {
+    reason: "you approved",
+    actor: "me",
+    at: hoursAgo(2),
+  });
+  assert.equal(resolve(youApproved({ review_decision: "required" })), "you approved", "more reviews required, but not yours");
+  assert.equal(resolve(youApproved({ request_events: [ask(hoursAgo(10), "ml-team", "team")] })), "you approved", "asked via your team");
+  // A later comment (a thread reply) doesn't take it back; yours names it before someone else's approval.
+  const more = [review("me", "approved", hoursAgo(3)), review("carol", "approved", hoursAgo(2)), review("me", "commented", hoursAgo(1))];
+  assert.equal(resolve(youApproved({ reviews: more, review_decision: "approved" })), "you approved");
+  assert.equal(resolve(youApproved(), { "github.resolve_on_others_approval": "never" }), "you approved", "not about others' approvals");
+});
+
+test("you approved, then asked again (or still asked): back", () => {
+  assert.equal(resolve(youApproved({ request_events: [ask(hoursAgo(10)), ask(hoursAgo(1))] })), null);
+  assert.equal(
+    resolve(youApproved({ request_events: [ask(hoursAgo(10)), ask(hoursAgo(1))], review_requests: [] })),
+    null,
+    "asked again after your approval, even if that ask was later withdrawn",
+  );
+  assert.equal(
+    resolve(youApproved({ review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] })),
+    null,
+    "GitHub still asks you",
+  );
+});
+
+test("your approval doesn't resolve when it isn't your latest verdict, nor when nobody asked you", () => {
+  const taken = [review("me", "approved", hoursAgo(3)), review("me", "changes_requested", hoursAgo(1))];
+  assert.equal(resolve(youApproved({ reviews: taken })), null, "your changes request still doesn't resolve");
+  assert.equal(resolve(youApproved({ reviews: [review("me", "approved", hoursAgo(3)), review("me", "dismissed", hoursAgo(1))] })), null);
+  assert.equal(resolve(youApproved({ reviews: [review("me", "changes_requested", hoursAgo(2))] })), null);
+  assert.equal(resolve(youApproved({ request_events: [] })), null, "nobody asked you");
+  assert.equal(resolve(youApproved({ author: "me" })), null, "your own PR");
+});
+
 test("your own PRs and issues only resolve by closing", () => {
   const mine = makeItem({ author: "me", request_events: [ask(hoursAgo(10))], reviews: [review("carol", "approved", hoursAgo(2))] });
   assert.equal(resolve(mine), null);
