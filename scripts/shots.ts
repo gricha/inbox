@@ -13,8 +13,8 @@ const arg = (name: string) => {
   return i > 0 ? process.argv[i + 1] : undefined;
 };
 const out = path.resolve(arg("--out") ?? path.join(root, ".shots"));
-const MOCK = 47830;
-const VITE = 5190;
+const MOCK = Number(process.env.SHOTS_MOCK_PORT ?? 47830); // separate ports let two checkouts run shots at once
+const VITE = Number(process.env.SHOTS_VITE_PORT ?? 5190);
 const kids: ChildProcess[] = [];
 
 async function up(url: string, ms = 30_000): Promise<void> {
