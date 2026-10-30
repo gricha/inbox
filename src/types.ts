@@ -412,7 +412,7 @@ export interface ReviewView {
   files_error: string | null; // the diff couldn't be fetched
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
-  ai_error: string | null; // the last failed attempt on this commit
+  ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first

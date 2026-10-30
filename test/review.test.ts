@@ -118,6 +118,20 @@ test("claude's envelope: structured output, JSON in the result, and login errors
     () => claudeEnvelope(JSON.stringify({ is_error: true, result: "API Error: 401 OAuth access token has expired" })),
     /claude auth login/,
   );
+  // What claude -p 2.1 prints with an expired login (exit 1).
+  const expired = {
+    type: "result",
+    subtype: "success",
+    is_error: true,
+    api_error_status: 401,
+    terminal_reason: "api_error",
+    result: "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+  };
+  assert.throws(
+    () => claudeEnvelope(JSON.stringify(expired)),
+    (e: Error) => e.message === "Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.",
+  );
+  assert.throws(() => claudeEnvelope(JSON.stringify({ is_error: true, result: "Overloaded" })), /^Error: Overloaded$/);
 });
 
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {
@@ -386,6 +400,38 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   await t.f.release("acme/api#1");
   assert.equal((await again).verdict, "skim");
   assert.equal((await t.desk.reviewView("api#1")).ai_error, null);
+  t.cleanup();
+});
+
+test("failures in a row (an expired login) pause AI reviews nobody asked for; asking still runs, and a success resumes them", async () => {
+  const t = await setup([ask(1), ask(2), ask(3)]);
+  t.f.setFail("Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.");
+  await t.sync();
+  const [first, second] = t.f.started;
+  const untried = ["acme/api#1", "acme/api#2", "acme/api#3"].find((id) => !t.f.started.includes(id))!;
+  assert.equal(t.f.started.length, 2);
+  await t.f.release(first!);
+  await t.f.release(second!);
+
+  await t.sync();
+  await t.sync();
+  const v = await t.desk.reviewView(untried);
+  assert.equal(t.f.started.length, 2, "no sync and no opened PR starts another run");
+  assert.equal(v.generating, false);
+  assert.equal(
+    v.ai_error,
+    "AI reviews paused after 2 failures in a row: Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.",
+  );
+  assert.match((await t.desk.reviewView(first!)).ai_error ?? "", /^Claude Code isn't logged in/, "a PR that was tried shows its own error");
+
+  const asked = t.desk.aiReview(untried);
+  await flush();
+  assert.equal(t.f.started.length, 3, "asking runs it");
+  t.f.setFail(null);
+  await t.f.release(untried);
+  assert.equal((await asked).verdict, "skim");
+  assert.equal(t.desk.aiPaused, null, "a success resumes them");
+  assert.equal((await t.desk.reviewView(untried)).ai_error, null);
   t.cleanup();
 });
 

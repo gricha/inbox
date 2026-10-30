@@ -60,6 +60,7 @@ const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
 const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
+const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 
 export class DeskError extends Error {
   status: number;
@@ -134,6 +135,8 @@ export class Desk {
   stopped = false;
   generating = new Map<string, Promise<AiReview>>();
   aiErrors = new Map<string, { head_oid: string; message: string; at: number }>();
+  aiFailures = 0; // in a row, across PRs
+  aiPaused: { message: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
   approving = new Set<string>();
 
@@ -770,6 +773,9 @@ export class Desk {
     if (this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
     const d = this.item(id);
     const err = this.aiErrors.get(id);
+    const own = err?.head_oid === e.item.head_oid ? err.message : null;
+    // A PR that wasn't tried says why nothing is being written for it.
+    const paused = this.aiPausedNow() && !(d.ai && !d.ai_stale) ? this.aiPaused!.message : null;
     return {
       card: d.card,
       item: d.item,
@@ -778,7 +784,7 @@ export class Desk {
       files_error: filesError,
       ai: d.ai,
       ai_stale: d.ai_stale,
-      ai_error: err?.head_oid === e.item.head_oid && !this.generating.has(id) ? err.message : null,
+      ai_error: this.generating.has(id) ? null : (own ?? paused),
       generating: this.generating.has(id),
       approve: this.canApprove(e),
       activity: d.activity,
@@ -857,13 +863,28 @@ export class Desk {
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
       this.aiErrors.delete(id);
+      this.aiFailures = 0;
+      if (this.aiPaused) this.log("AI reviews resume");
+      this.aiPaused = null;
       this.log(`AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes`);
       return ai;
     } catch (err) {
-      this.aiErrors.set(id, { head_oid: e.item.head_oid, message: (err as Error).message, at: Date.now() });
-      this.log(`AI review of ${id} failed: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
+      this.log(`AI review of ${id} failed: ${message}`);
+      if (++this.aiFailures >= AI_PAUSE_AFTER) {
+        if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
+        this.aiPaused = {
+          message: `AI reviews paused after ${this.aiFailures} failures in a row: ${message}`,
+          until: Date.now() + AI_RETRY,
+        };
+      }
       throw err;
     }
+  }
+
+  aiPausedNow(): boolean {
+    return !!this.aiPaused && Date.now() < this.aiPaused.until;
   }
 
   // Someone else's open PR with no AI review of its head yet, and no recent failure on it.
@@ -876,9 +897,9 @@ export class Desk {
   }
 
   // Background AI reviews for what's in Now and Today, a couple at a time. After a failure it waits for the next sync.
-  // AI reviews nobody asked for: on unless review.auto_ai is off or there's no agent to write them.
+  // AI reviews nobody asked for: on unless review.auto_ai is off, there's no agent to write them, or they keep failing.
   autoAi(): boolean {
-    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none";
+    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none" && !this.aiPausedNow();
   }
 
   pumpAi(): void {

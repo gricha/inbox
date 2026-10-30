@@ -244,10 +244,15 @@ export function askClaude(prompt: string, opts: { command: string; model: string
 }
 
 export function claudeEnvelope(out: string): unknown {
-  const env = JSON.parse(out) as { is_error?: boolean; result?: string; structured_output?: unknown };
+  const env = JSON.parse(out) as { is_error?: boolean; result?: string; api_error_status?: number; structured_output?: unknown };
   if (env.is_error) {
     const msg = env.result ?? "claude failed";
-    throw new Error(/401|authenticate|log ?in/i.test(msg) ? `claude CLI isn't logged in (${msg}). Run: claude auth login` : msg);
+    if (env.api_error_status === 401 || /401|authenticate|log ?in/i.test(msg)) {
+      // "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." → "401 OAuth access token has expired"
+      const why = msg.replace(/^Failed to authenticate\.\s*(API Error:\s*)?/i, "").replace(/\.?\s*Re-authenticate to continue\.?$/i, "");
+      throw new Error(`Claude Code isn't logged in (${why}). Run claude auth login in a terminal.`);
+    }
+    throw new Error(msg);
   }
   return env.structured_output ?? JSON.parse(/\{[\s\S]*\}/.exec(env.result ?? "")?.[0] ?? "{}");
 }
