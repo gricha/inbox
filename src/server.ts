@@ -48,8 +48,9 @@ const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
   const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+  // Vite's default ports, or DESK_DEV_PORT when it runs on another.
   if (process.env.DESK_DEV)
-    for (const p of [5173, 5174]) {
+    for (const p of [5173, 5174, Number(process.env.DESK_DEV_PORT) || 5173]) {
       origins.add(`http://localhost:${p}`);
       origins.add(`http://127.0.0.1:${p}`);
     }

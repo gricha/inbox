@@ -201,6 +201,31 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   t.cleanup();
 });
 
+test("DESK_DEV lets the Vite dev server's page in, on its usual ports or DESK_DEV_PORT", async (c) => {
+  const prev = { dev: process.env.DESK_DEV, port: process.env.DESK_DEV_PORT };
+  c.after(() => {
+    for (const [k, v] of [
+      ["DESK_DEV", prev.dev],
+      ["DESK_DEV_PORT", prev.port],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  });
+  const t = await setup();
+  const from = (app: ReturnType<typeof createApp>, origin: string) =>
+    app.request("http://127.0.0.1:47823/api/queue", { headers: { origin } }).then((r) => r.status);
+  process.env.DESK_DEV = "1";
+  process.env.DESK_DEV_PORT = "48531";
+  const dev = createApp(t.desk, 47823);
+  assert.deepEqual(
+    [await from(dev, "http://localhost:5173"), await from(dev, "http://localhost:48531"), await from(dev, "http://localhost:48532")],
+    [200, 200, 403],
+  );
+  delete process.env.DESK_DEV;
+  assert.equal(await from(createApp(t.desk, 47823), "http://localhost:48531"), 403, "only in dev");
+  t.cleanup();
+});
+
 test("errors: unknown board/item, bad action", async () => {
   const t = await setup();
   assert.equal((await t.req("/api/boards/nope")).status, 404);

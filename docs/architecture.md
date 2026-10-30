@@ -121,7 +121,7 @@ Done and snooze record `acked_at`, the latest activity you had seen; the item co
 
 ## HTTP API (`src/server.ts`)
 
-Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1`, whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`), and API requests a browser marks `Sec-Fetch-Site: cross-site` or `same-site`; approve and Send take only the desk's own page: `same-origin` with its `Origin`. JSON everywhere; types in `src/types.ts`.
+Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Host` isn't `localhost`/`127.0.0.1`, whose `Origin` (when present) isn't this server (or the Vite dev server when `DESK_DEV=1`: 5173, 5174 or `DESK_DEV_PORT`), and API requests a browser marks `Sec-Fetch-Site: cross-site` or `same-site`; approve and Send take only the desk's own page: `same-origin` with its `Origin`. JSON everywhere; types in `src/types.ts`.
 
 | Method | Path                         | Body / query                                           | Returns                                                                                                                                                             |
 | ------ | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
