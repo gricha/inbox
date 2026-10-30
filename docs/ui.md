@@ -31,13 +31,14 @@ One surface. The window is the queue; Settings is the only other place, and it's
 - A 232px sidebar: Queue (Now, Today), Sorted away (Later, FYI, Hidden, Cleared: a click opens the group and scrolls to it) and Settings (its sections). The active item is a neutral filled pill. At 820px and below it hides; Settings then uses a dropdown.
 - One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
-- Sorted away: later, FYI, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
-- Opening an item (Enter) shows facts, one line of why, a collapsed rule trace, and one line of actions with their keys.
+- Sorted away: later, FYI, resolved, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
+- Resolved rows are dimmed like cleared ones and show the reason ("merged", "approved by alice", "no longer requested") where the why goes. Acting on one (done, snooze) keeps it under Resolved.
+- Opening an item (Enter) shows facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys.
 - Settings: sections are listed in the sidebar (a dropdown below 820px). Sections come from the schema in `src/settings.ts`, plus Rules (the TOML editor with preview). Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue.
 
 ## Keys
 
-`j/k` move · `Enter` open · `o` GitHub · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` brief · `w` signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g l/f/h/x` sorted-away groups · `?` help.
+`j/k` move · `Enter` open · `o` GitHub · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` brief · `w` signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g l/f/d/h/x` sorted-away groups · `?` help.
 
 Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 

@@ -25,7 +25,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 ## Use it
 
-- **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared. Click a count to look inside.
+- **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested). Click a count to look inside.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, Briefs, Hand-off prompts. Changes save as you go.
 - In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
@@ -84,7 +84,7 @@ The first run writes a starting config: one space for the org with most of your 
 
 Pick the agent you work in under Settings → Agents: Claude Code (the default), Codex, or none. Review Desk connects to it in two parts, and **Connect** there does whatever is missing:
 
-- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
+- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
 - **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK).
 
 | Agent       | MCP tools                                                                             | Skill                                     |
@@ -118,7 +118,7 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 
 ## Never
 
-- It never writes to GitHub. It only runs GraphQL queries (the client refuses any document containing `mutation`), plus one read-only `gh api` GET for a brief's diff.
+- It never writes to GitHub. It only runs GraphQL queries (the client refuses any document containing `mutation`), GETs of your notifications (never marking them read), plus one read-only `gh api` GET for a brief's diff.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
 - It never puts PR text into the hand-off prompt, only the URL and number. The brief prompt fences PR text as untrusted.
 

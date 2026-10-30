@@ -3,12 +3,15 @@
 One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only, keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
-GitHub GraphQL ──(read only)──> src/github/*  ──> src/store.ts (node:sqlite)
+GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src/connectors/github.ts
+                                                                   │ snapshots, events
+                                                                   ▼
+                                                     src/store.ts (node:sqlite: items, activity, ...)
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
-settings.json ──> src/settings.ts ──┘
+settings.json ──> src/settings.ts ──┘                src/resolve.ts (resolved or not)
                                                      │
-                                  src/desk.ts (views, actions, sync loop, notify)
+                                  src/desk.ts (runs the connectors, views, actions, event log, notify)
                                                      │
                                   src/server.ts (Hono: /api/*, /mcp, web/dist, SSE)
                                    │           │            │
@@ -27,7 +30,10 @@ Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces,
 - **Rule**: `{ when, bucket, why, nocap }`. The first rule whose `when` is true places the item. `why` is a template: `{author.login}` interpolates a signal.
 - **Bucket**: `now`, `today`, `later`, `fyi`, or `hide`. Hidden items are listed under the board with the rule that hid them; nothing disappears silently.
 - **Caps**: `caps = { now = 3, today = 6 }`. Overflow is demoted one bucket (now → today → later), keeping order. Pinned items and items matched by a `nocap` rule are exempt and don't count.
-- **Queue**: the one surface. Every item once, at its best placement across boards: Now, Today, then "sorted away" (later, FYI, hidden by rules, cleared). **Focus** is its Now + Today part (the CLI, MCP and status line use it).
+- **Queue**: the one surface. Every item once, at its best placement across boards: Now, Today, then "sorted away" (later, FYI, resolved, hidden by rules, cleared). **Focus** is its Now + Today part (the CLI, MCP and status line use it).
+- **Connector**: a source of items and events (`src/connectors/connector.ts`): a full reconcile pass, a cheap change feed, and a diff of two snapshots of an item into events. GitHub is the only one so far; the desk runs whatever is in `Desk.connectors` and lists them in the overview.
+- **Event log**: the `activity` table. Every fresh snapshot is compared with the stored one (`src/connectors/github-events.ts`, pure) and the differences are logged: review requested, reviewed, pushed, CI, commented, merged, resolved, … ([api.md](api.md#the-event-log)).
+- **Resolved**: `resolution()` in `src/resolve.ts` says when the world has dealt with an item (merged, closed, approved by someone else, no longer requested). Derived from each snapshot, never stored; resolved items leave the buckets for the Resolved group ([api.md](api.md#resolved)).
 - **Settings**: `SETTINGS` in `src/settings.ts` is the schema (key, type, default, validation, help). The Settings page and `desk settings` render from it. Old configs had these keys in config.toml; they move to settings.json on first start (config.toml.bak keeps the original).
 - **Local state** (never sent to GitHub): `done` (hidden until someone else acts), `snooze` (until a time, or until activity), `mute` (until unmuted), `pin`, `seen`.
 
@@ -52,7 +58,7 @@ FIELDS: FieldDoc[]                                     // every signal path, typ
 
 ## GitHub module (`src/github/`)
 
-Read only: only `query` operations, never `mutation`. Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` directly.
+Read only: only `query` operations, never `mutation`, and REST only through `get()`, which refuses any method but GET. Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` (and `/notifications`) directly. The sync logic that uses it (searches, details, the notifications feed, context) lives in the connector, `src/connectors/github.ts`.
 
 Measured on the real queue (2026-10-27): a search with full PR details is too slow (25 PRs = 9 s, 50 = timeout). So sync is two-stage:
 
@@ -76,10 +82,14 @@ export interface GitHub {
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
   details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
+  // Threads updated since `since`, read or not (all=true); a 304 when If-Modified-Since says nothing changed.
+  notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 export function createGitHub(opts?: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void }): GitHub;
 ```
+
+Two loops in the connector: the **reconcile** (every board's searches, then details for what changed) on `github.poll_seconds`, and the **feed**, which polls notifications every `X-Poll-Interval` seconds (60 by default). A thread about an item the desk holds refreshes that item at once; one about an item it doesn't hold, for a review request, mention, team mention, assignment or your own item, starts a reconcile early. An item that leaves every search gets one detail refresh, so the desk learns it merged, closed or stopped asking you; a resolved one stays on its boards for 3 days (a `kept` hit, past the board filter) to show under Resolved. A rate limit pauses both loops.
 
 Context (refreshed daily): teams via `viewer.organizations.teams(userLogins:[me])`; affinity from `is:pr reviewed-by:@me -author:@me updated:>=<90d>` and `is:pr commenter:@me -author:@me updated:>=<90d>` (distinct PRs per author, up to 1000 each); `repo_prs` from `is:pr author:@me created:>=<90d>`; `orgs` from `is:open involves:@me` counted by owner.
 
@@ -87,7 +97,7 @@ Errors: retries 502/503/timeouts twice with backoff; on secondary rate limit or 
 
 ## Store (`src/store.ts`)
 
-`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)`, `kv(key PK, value JSON)` (context, sync status, notified set, briefs).
+`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id, kept)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)` (the undo log of your triage actions), `activity(seq PK, at, source, item_id, kind, actor, data JSON)` (the event log), `kv(key PK, value JSON)` (context, sync status, the notifications cursor, notified set, briefs).
 
 Done and snooze record `acked_at`, the latest activity you had seen; the item comes back when someone else acts after that. Timed snoozes also wake early on activity.
 
@@ -115,6 +125,7 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | GET    | `/api/agents`         |                                                        | `AgentStatus`: whether `agent.driver` has the MCP tools and the skill, and the commands                                                                                      |
 | POST   | `/api/agents/connect` |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                                        |
 | GET    | `/api/status`         |                                                        | `{ now, today, new, text }` (`text` e.g. `desk ●2 ◐5 +3`, `""` when 0/0)                                                                                                     |
+| GET    | `/api/activity`       | `?after=&limit=&item=&wait=` (wait ≤ 60 s)             | `{ events, last_seq }`: the event log; a long-poll that answers as soon as an event lands                                                                                    |
 | GET    | `/api/events`         |                                                        | SSE: `event: update` `data: {"rev": n}` after any change; `: ping` every 25 s                                                                                                |
 | GET    | `/health`             |                                                        | `{ ok: true, version }`                                                                                                                                                      |
 | POST   | `/mcp`                | MCP JSON-RPC                                           | Streamable HTTP, stateless: the `desk mcp` tools, calling the routes above in-process. GET and DELETE are 405                                                                |
@@ -158,6 +169,7 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_undo({ seq? })` — undo that action (default: the latest from anyone).
 - `desk_brief({ ref })` — look / skim / skip from the claude CLI (a model call; kept per commit).
 - `desk_sync()`.
+- `desk_events({ after?, wait?, limit?, item? })` — the event log after `after`; with `wait` it returns when the next event lands (for the coordinator).
 
 Every tool result marks PR titles and bodies as untrusted data. Nothing writes to GitHub.
 

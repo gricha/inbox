@@ -9,7 +9,7 @@ Review Desk is a desktop app on the user's machine that turns their GitHub revie
 
 - **Now**: needs them now. Kept short on purpose.
 - **Today**: worth doing today.
-- **Sorted away**: later, FYI, hidden by a rule, and cleared (done, snoozed, muted).
+- **Sorted away**: later, FYI, resolved (merged, closed, approved by someone else, no longer requested: it comes back if that changes), hidden by a rule, and cleared (done, snoozed, muted).
 
 Rules decide where each item lands. A board is one or more GitHub searches plus ordered rules; the first rule whose `when` is true sets the bucket and a `why` ("alice asked you directly"). Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket with a note.
 
@@ -30,6 +30,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 | `desk_undo`     | Undo an action by `seq`. Without `seq` it undoes the latest action from anyone, so always pass it.                           |
 | `desk_brief`    | Ask for a look / skim / skip verdict on a PR's diff. Runs the user's `claude` CLI: a model call, 30–90 s, cached per commit. |
 | `desk_sync`     | Sync with GitHub now (read only). The desk also syncs on its own every minute or two.                                        |
+| `desk_events`   | Read what happened (asked, approved, pushed, CI red, merged, resolved). Pass `last_seq` back as `after`; `wait` up to 60 s.  |
 
 `until`: `1h`, `3h`, `2d`, `tomorrow` (09:00), `monday` (09:00), `activity` (until someone else acts), `YYYY-MM-DD`, or an ISO time. `done` also lasts until someone else acts.
 
