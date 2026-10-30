@@ -2029,17 +2029,22 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+/* Every fact starts with its "·"; shifting the line left by one and clipping it hides the one that starts each wrapped line. */
 .rv-meta {
   display: flex;
   flex-wrap: wrap;
   row-gap: 2px;
+  margin-left: -18px;
+  clip-path: inset(0 0 0 18px);
   color: var(--ink-2);
   font-size: 13px;
 }
 
-.rv-meta > span + span::before {
-  margin: 0 8px;
+.rv-meta > span::before {
+  display: inline-block;
+  width: 18px;
   color: var(--pencil);
+  text-align: center;
   content: "·";
 }
 
