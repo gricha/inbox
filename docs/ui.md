@@ -66,7 +66,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 - Files on the left (sticky; above the diff at 1100px and below), with a dot on files that have notes. The file you're reading follows the scroll and wears the cursor's fill and pencil ring.
 - Diffs: `@pierre/diffs`, unified, word-level changes, wrapped lines, Shiki highlighting in Pierre's light and dark themes, on `--sheet` in a hairline frame. Its CSS variables take the app's fonts (JetBrains Mono for code). Each file's name sticks under the top bar while you read it.
 - AI notes are margin notes under the line they explain: a thin rule, the note in the UI font. The one `]`/`[` landed on gets the cursor's fill and ring. Notes about a whole file sit above its diff.
-- Approve: `a` arms it (the key line and a toast say "Press a again to approve"), a second `a` within 3 s sends it; anything else lets it lapse. It's disabled, with the reason as its tooltip, on your own PR, a closed one, or one you already approved at this commit. The approval is the desk's one write to GitHub ([api.md](api.md#security-model)).
+- Approve: `a` arms it (the key line and a toast say "Press a again to approve"), a second `a` within 3 s sends it; anything else lets it lapse. It's disabled, with the reason as its tooltip, on your own PR, a closed one, or one you already approved at this commit. It approves the commit on screen: if the desk has seen a newer push, it refuses. The approval is the desk's one write to GitHub ([api.md](api.md#security-model)).
 
 ## Keys
 

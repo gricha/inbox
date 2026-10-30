@@ -897,17 +897,18 @@ export class Desk {
     return { ok: true, reason: null };
   }
 
-  // POST /api/review/:id/approve: the desk's one GitHub write, on your keypress in the review view.
-  async approve(ref: string, body?: string): Promise<{ url: string }> {
+  // POST /api/review/:id/approve: the desk's one GitHub write, on your keypress; `head` is the commit the view showed, so a newer push isn't approved unread.
+  async approve(ref: string, head: string, body?: string): Promise<{ url: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
     const can = this.canApprove(e);
     if (!can.ok) throw new DeskError(409, `can't approve ${id}: ${can.reason}`);
+    if (head !== e.item.head_oid) throw new DeskError(409, `can't approve ${id}: it has new commits since you opened it`);
     if (this.approving.has(id)) throw new DeskError(409, `already approving ${id}`);
     this.approving.add(id);
     let url: string;
     try {
-      ({ url } = await this.writer!.approve(e.item.node_id, body));
+      ({ url } = await this.writer!.approve(e.item.node_id, head, body));
     } catch (err) {
       throw new DeskError(502, `GitHub didn't take the approval: ${(err as Error).message}`);
     } finally {

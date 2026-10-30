@@ -176,7 +176,7 @@ export function Review({
     setArmed(0);
     setBusy("approve");
     try {
-      await api.approve(v.card.id);
+      await api.approve(v.card.id, v.item.head_oid);
       setApproved(v.card.id);
       flash(`Approved ${shortRef(v.card)} on GitHub`);
     } catch (e) {

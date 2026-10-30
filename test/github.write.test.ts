@@ -15,10 +15,13 @@ function fakeFetch(reply: { status?: number; body: unknown }) {
 
 test("the allowlist is exactly one mutation: approve", () => {
   assert.deepEqual(Object.keys(ALLOWED), ["approve"]);
-  assert.match(ALLOWED.approve, /addPullRequestReview\(input: \{ pullRequestId: \$pr, event: APPROVE, body: \$body \}\)/);
+  assert.match(
+    ALLOWED.approve,
+    /addPullRequestReview\(input: \{ pullRequestId: \$pr, commitOID: \$commit, event: APPROVE, body: \$body \}\)/,
+  );
 });
 
-test("approve sends the allowlisted mutation once, with its own token, and logs it", async () => {
+test("approve sends the allowlisted mutation once, pinned to the commit, with its own token, and logs it", async () => {
   const f = fakeFetch({ body: { data: { addPullRequestReview: { pullRequestReview: { url: "https://github.com/a/b/pull/1#r1" } } } } });
   const logs: string[] = [];
   const w = createWriter({
@@ -28,20 +31,20 @@ test("approve sends the allowlisted mutation once, with its own token, and logs 
       logs.push(m);
     },
   });
-  assert.deepEqual(await w.approve("PR_node", "LGTM"), { url: "https://github.com/a/b/pull/1#r1" });
+  assert.deepEqual(await w.approve("PR_node", "abc123", "LGTM"), { url: "https://github.com/a/b/pull/1#r1" });
   assert.equal(f.calls.length, 1);
   const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
   assert.equal(sent.query, ALLOWED.approve);
-  assert.deepEqual(sent.variables, { pr: "PR_node", body: "LGTM" });
+  assert.deepEqual(sent.variables, { pr: "PR_node", commit: "abc123", body: "LGTM" });
   assert.equal(f.calls[0]!.headers.authorization, "bearer t0k");
-  assert.deepEqual(logs, ["github write: approve PR_node"]);
+  assert.deepEqual(logs, ["github write: approve PR_node at abc123"]);
 });
 
 test("GitHub's errors come back as errors, and nothing is retried", async () => {
   const gql = fakeFetch({ body: { errors: [{ message: "Can not approve your own pull request" }] } });
-  await assert.rejects(createWriter({ token: "t", fetch: gql.fetch }).approve("PR_x"), /Can not approve your own pull request/);
+  await assert.rejects(createWriter({ token: "t", fetch: gql.fetch }).approve("PR_x", "c"), /Can not approve your own pull request/);
   const down = fakeFetch({ status: 502, body: { message: "bad gateway" } });
-  await assert.rejects(createWriter({ token: "t", fetch: down.fetch }).approve("PR_x"), /HTTP 502/);
+  await assert.rejects(createWriter({ token: "t", fetch: down.fetch }).approve("PR_x", "c"), /HTTP 502/);
   assert.equal(down.calls.length, 1);
 });
 

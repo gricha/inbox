@@ -413,11 +413,11 @@ test("reviews are for PRs: an issue answers 400", async () => {
 // ---------------------------------------------------------------- approve
 
 function fakeWriter() {
-  const calls: { pr: string; body?: string }[] = [];
+  const calls: { pr: string; commit: string; body?: string }[] = [];
   let fail = false;
   const writer: GitHubWriter = {
-    approve: (pr, body) => {
-      calls.push({ pr, body });
+    approve: (pr, commit, body) => {
+      calls.push({ pr, commit, body });
       if (fail) return Promise.reject(new Error("Resource not accessible"));
       return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
     },
@@ -437,9 +437,9 @@ test("approve goes through the write client, lands in the action log, and undo s
   await t.sync();
   assert.deepEqual((await t.desk.reviewView("api#1")).approve, { ok: true, reason: null });
   t.desk.act("api#1", "pin");
-  const r = await t.desk.approve("api#1", "LGTM");
+  const r = await t.desk.approve("api#1", "h1", "LGTM");
   assert.equal(r.url, "https://github.com/acme/api/pull/1#pullrequestreview-1");
-  assert.deepEqual(w.calls, [{ pr: "PR_acme/api_1", body: "LGTM" }]);
+  assert.deepEqual(w.calls, [{ pr: "PR_acme/api_1", commit: "h1", body: "LGTM" }], "pinned to the commit you read");
   const logged = t.desk.store.db.prepare("SELECT action, undone FROM events WHERE item_id = ? ORDER BY seq").all("acme/api#1");
   assert.deepEqual(
     logged.map((e) => [e.action, e.undone]),
@@ -451,7 +451,7 @@ test("approve goes through the write client, lands in the action log, and undo s
   assert.equal(t.desk.undo().action, "pin", "undo walks past the approval");
 
   assert.deepEqual((await t.desk.reviewView("web#4")).approve, { ok: false, reason: "it's your PR" });
-  await assert.rejects(t.desk.approve("web#4"), (e: Error & { status: number }) => e.status === 409 && e.message.includes("your PR"));
+  await assert.rejects(t.desk.approve("web#4", "h4"), (e: Error & { status: number }) => e.status === 409 && e.message.includes("your PR"));
   t.gh.items.set("acme/api#2", { ...ask(2), state: "closed" });
   t.gh.items.set("acme/api#3", {
     ...ask(3),
@@ -462,9 +462,17 @@ test("approve goes through the write client, lands in the action log, and undo s
   assert.equal((await t.desk.reviewView("api#3")).approve.reason, "you approved this commit");
   assert.equal(w.calls.length, 1);
 
+  t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
+  await t.sync();
+  await assert.rejects(
+    t.desk.approve("api#1", "h1"),
+    (e: Error & { status: number }) => e.status === 409 && e.message.includes("new commits since you opened it"),
+  );
+  assert.equal(w.calls.length, 1, "a push since you opened it approves nothing");
+
   w.failNext();
   await assert.rejects(
-    t.desk.approve("api#1"),
+    t.desk.approve("api#1", "h1b"),
     (e: Error & { status: number }) => e.status === 502 && e.message.includes("Resource not accessible"),
   );
   t.cleanup();
@@ -474,6 +482,6 @@ test("without a write client, approving is off", async () => {
   const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
   await t.sync();
   assert.deepEqual((await t.desk.reviewView("api#1")).approve, { ok: false, reason: "approving isn't available in this desk" });
-  await assert.rejects(t.desk.approve("api#1"), /isn't available/);
+  await assert.rejects(t.desk.approve("api#1", "h1"), /isn't available/);
   t.cleanup();
 });

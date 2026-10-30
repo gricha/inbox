@@ -103,9 +103,12 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
-    const { body } = await c.req.json<{ body?: unknown }>().catch((): { body?: unknown } => ({}));
+    const { head_oid, body } = await c.req
+      .json<{ head_oid?: unknown; body?: unknown }>()
+      .catch((): { head_oid?: unknown; body?: unknown } => ({}));
+    if (typeof head_oid !== "string" || !head_oid) throw new DeskError(400, "need { head_oid }: the commit you reviewed");
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
-    return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), body)) });
+    return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
   });
   app.post("/api/undo", async (c) => {
     ready();

@@ -146,9 +146,9 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   const ai = await post("/api/review/acme%2Fapi%237/ai", { force: true });
   assert.equal(ai.status, 502);
   assert.match(((await ai.json()) as { error: string }).error, /AI review isn't available/);
-  const approve = await post("/api/review/acme/api%237/approve", {});
-  assert.equal(approve.status, 409);
-  assert.equal((await post("/api/review/acme%2Fapi%237/approve", { body: 5 })).status, 400);
+  assert.equal((await post("/api/review/acme/api%237/approve", { head_oid: "h7" })).status, 409);
+  assert.equal((await post("/api/review/acme%2Fapi%237/approve", {})).status, 400, "the commit you reviewed is required");
+  assert.equal((await post("/api/review/acme%2Fapi%237/approve", { head_oid: "h7", body: 5 })).status, 400);
   assert.equal((await t.req("/api/review/acme%2Fapi%2399")).status, 404);
   t.cleanup();
 });

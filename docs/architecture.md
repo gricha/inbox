@@ -56,7 +56,7 @@ FIELDS: FieldDoc[]                                     // every signal path, typ
 
 Read only: only `query` operations, never `mutation` (the client refuses any document containing it). Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` directly.
 
-The one exception is `src/github/write.ts`: an allowlist with exactly one mutation, `addPullRequestReview(event: APPROVE)`, sent only by `POST /api/review/:id/approve` (the review view's `a a`). It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
+The one exception is `src/github/write.ts`: an allowlist with exactly one mutation, `addPullRequestReview(event: APPROVE)` pinned to the commit the view showed (`commitOID`), sent only by `POST /api/review/:id/approve` (the review view's `a a`). It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
 
 Measured on the real queue (2026-10-27): a search with full PR details is too slow (25 PRs = 9 s, 50 = timeout). So sync is two-stage:
 
@@ -110,7 +110,7 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | POST   | `/api/undo`               | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                  |
 | GET    | `/api/review/:id`         | `:id` = `owner%2Frepo%23123`                           | `ReviewView`: facts, changed files (kept per commit), the AI review, whether you can approve                                                                        |
 | POST   | `/api/review/:id/ai`      | `{ force? }`                                           | `{ ok: true, ai: AiReview }` — the one for this commit unless `force`; otherwise runs the agent in `agent.driver` (a minute or two); 502 with the reason on failure |
-| POST   | `/api/review/:id/approve` | `{ body? }`                                            | `{ ok: true, url }` — approves on GitHub through `src/github/write.ts`; 409 for your own or a closed PR                                                             |
+| POST   | `/api/review/:id/approve` | `{ head_oid, body? }`                                  | `{ ok: true, url }` — approves `head_oid` on GitHub through `src/github/write.ts`; 409 for your own or a closed PR, or new commits since                            |
 | POST   | `/api/sync`               |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                  |
 | GET    | `/api/config`             |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                             |
 | POST   | `/api/config/preview`     | `{ text }`                                             | `PreviewResult`                                                                                                                                                     |

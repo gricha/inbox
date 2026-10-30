@@ -1754,6 +1754,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     if (req.method === "POST" && review[2] === "/approve") {
       const why = reviewView(r).approve.reason;
       if (why) throw new HttpError(409, `can't approve ${r.id}: ${why}`);
+      if ((await readBody(req)).head_oid !== itemOf(r).head_oid)
+        throw new HttpError(409, `can't approve ${r.id}: it has new commits since you opened it`);
       approved.add(r.id);
       bump();
       return { ok: true, url: `${urlOf(r.seed)}#pullrequestreview-mock` };

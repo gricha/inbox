@@ -223,10 +223,12 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
     }
   }
   assert.deepEqual(v.approve, { ok: true, reason: null });
-  const { data: ok } = await call<{ ok: boolean; url: string }>("POST", `/api/review/${encodeURIComponent("acme/api#4127")}/approve`, {});
+  const url = `/api/review/${encodeURIComponent("acme/api#4127")}/approve`;
+  assert.equal((await call("POST", url, { head_oid: "an-older-commit" })).status, 409, "only the commit you read");
+  const { data: ok } = await call<{ ok: boolean; url: string }>("POST", url, { head_oid: v.item.head_oid });
   assert.equal(ok.ok, true);
   const { data: again } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("api#4127")}`);
   assert.equal(again.approve.reason, "you approved this commit");
-  const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, {});
+  const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, { head_oid: "x" });
   assert.equal(mine.status, 409);
 });

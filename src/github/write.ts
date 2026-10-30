@@ -9,14 +9,15 @@ const ENDPOINT = "https://api.github.com/graphql";
 const execFileAsync = promisify(execFile);
 
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve.
+// commitOID pins the approval to the commit you read, not whatever was pushed since.
 export const ALLOWED = {
-  approve: `mutation DeskApprove($pr: ID!, $body: String) {
-  addPullRequestReview(input: { pullRequestId: $pr, event: APPROVE, body: $body }) { pullRequestReview { url } }
+  approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {
+  addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: APPROVE, body: $body }) { pullRequestReview { url } }
 }`,
 } as const;
 
 export interface GitHubWriter {
-  approve(prNodeId: string, body?: string): Promise<{ url: string }>;
+  approve(prNodeId: string, commit: string, body?: string): Promise<{ url: string }>;
 }
 
 export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHubWriter {
@@ -39,7 +40,7 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
 
   // No retries: a write that timed out may have landed.
   async function send(name: keyof typeof ALLOWED, variables: Record<string, unknown>): Promise<unknown> {
-    log(`github write: ${name} ${String(variables.pr)}`);
+    log(`github write: ${name} ${String(variables.pr)} at ${String(variables.commit)}`);
     const res = await doFetch(ENDPOINT, {
       method: "POST",
       headers: { authorization: `bearer ${await token()}`, "content-type": "application/json", "user-agent": "review-desk" },
@@ -54,8 +55,8 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
   }
 
   return {
-    approve: async (pr, body) => {
-      const data = (await send("approve", { pr, body: body ?? null })) as {
+    approve: async (pr, commit, body) => {
+      const data = (await send("approve", { pr, commit, body: body ?? null })) as {
         addPullRequestReview?: { pullRequestReview?: { url?: string } | null } | null;
       } | null;
       return { url: data?.addPullRequestReview?.pullRequestReview?.url ?? "" };
