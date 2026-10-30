@@ -368,6 +368,8 @@ export function judgeStatusText(j: JudgeStatus, now: number): string {
   if (j.state === "error")
     return `The judge's last call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
   const placed = `${count(j.judged, "item")} placed by the policy${j.waiting ? `, ${j.waiting} waiting` : ""}`;
+  if (j.state === "idle" && j.retry_at)
+    return `${sentence(placed)} The hour's limit is reached (${j.max_per_hour}); next batch in ${until(j.retry_at, now)}.`;
   return j.state === "running" ? `Judging now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
 }
 

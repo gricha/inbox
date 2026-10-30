@@ -249,7 +249,7 @@ export interface JudgeStatus {
   max_per_hour: number;
   last_at: string | null; // the last call that finished
   error: string | null; // the last call's failure, until one succeeds
-  retry_at: string | null; // after a failure, no call before this
+  retry_at: string | null; // after a failure, or with the hour's limit reached and items waiting: no call before this
 }
 
 // GET /api/coordinator: the Claude Code session the desk wakes on new events.

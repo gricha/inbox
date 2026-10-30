@@ -484,6 +484,10 @@ test("the judge in plain words", () => {
     judgeStatusText({ ...j, state: "error", error: "claude CLI isn't logged in", retry_at: "2026-10-27T12:10:00Z" }, now),
     "The judge's last call failed: Claude CLI isn't logged in. Next try in 10m.",
   );
+  assert.equal(
+    judgeStatusText({ ...j, spent: 60, retry_at: "2026-10-27T12:12:00Z" }, now),
+    "14 items placed by the policy, 2 waiting. The hour's limit is reached (60); next batch in 12m.",
+  );
   assert.equal(judgeStepText({ bucket: "today", why: "your library", pending: false }), "today, your library");
   assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, it says nothing about this item");
   assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not judged yet, so the board default");

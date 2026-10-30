@@ -187,8 +187,7 @@ export class Judge {
     const desk = this.desk;
     if (this.offReason()) {
       // Like the AI review's i: turning it off and on (after `claude auth login`, say) tries again now.
-      this.retryAt = 0;
-      this.failures = 0;
+      this.retry();
       return;
     }
     if (desk.stopped || this.running || !desk.loaded) return;
@@ -205,7 +204,14 @@ export class Judge {
       this.arm(spent[0]! + HOUR - now);
       return;
     }
-    void this.run(queue.slice(0, Math.min(BATCH, room)), spent);
+    void this.run(queue.slice(0, Math.min(BATCH, room)));
+  }
+
+  // Forgets the last failure and its backoff: the next pump calls now.
+  retry(): void {
+    this.retryAt = 0;
+    this.failures = 0;
+    this.error = null;
   }
 
   arm(ms: number): void {
@@ -218,12 +224,11 @@ export class Judge {
     );
   }
 
-  async run(batch: GrayItem[], spent: number[]): Promise<void> {
+  async run(batch: GrayItem[]): Promise<void> {
     const desk = this.desk;
     const s = desk.settings;
     const policy = desk.policy;
     this.running = true;
-    desk.store.set("judge_spent", [...spent, ...batch.map(() => Date.now())]);
     desk.changed();
     const ids = batch.map((g) => g.item.id);
     try {
@@ -235,6 +240,8 @@ export class Judge {
           : await askClaude(prompt, { ...opts, command: s["analyze.command"], model: s["analyze.model"] });
       const answers = parseVerdicts(raw, ids);
       if (desk.stopped) return;
+      // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.
+      desk.store.set("judge_spent", [...this.spent(), ...batch.map(() => Date.now())]);
       const at = new Date().toISOString();
       for (const g of batch) {
         const a = answers.get(g.item.id);
@@ -250,7 +257,8 @@ export class Judge {
       this.failures++;
       this.retryAt = Date.now() + BACKOFF[Math.min(this.failures, BACKOFF.length) - 1]!;
       this.error = (err as Error).message;
-      desk.log(`judge failed on ${batch.length} items: ${this.error}`);
+      const cause = (err as Error).cause;
+      desk.log(`judge failed on ${batch.length} items: ${this.error}${typeof cause === "string" ? ` (${cause})` : ""}`);
     } finally {
       this.running = false;
       if (!desk.stopped) {
@@ -265,6 +273,7 @@ export class Judge {
     const off = this.offReason();
     let waiting = 0;
     let judged = 0;
+    const spent = this.spent();
     if (!off && desk.loaded) {
       waiting = this.queue().length;
       for (const a of desk.store.prefixed<JudgeAnswer>("judge:").values()) if (a.policy === desk.policy.hash) judged++;
@@ -274,11 +283,16 @@ export class Judge {
       off_reason: off,
       waiting,
       judged,
-      spent: this.spent().length,
+      spent: spent.length,
       max_per_hour: desk.settings["policy.max_per_hour"],
       last_at: this.lastAt,
       error: this.error,
-      retry_at: this.error && this.retryAt > Date.now() ? new Date(this.retryAt).toISOString() : null,
+      retry_at:
+        this.error && this.retryAt > Date.now()
+          ? new Date(this.retryAt).toISOString()
+          : waiting && spent.length >= desk.settings["policy.max_per_hour"] && spent[0]
+            ? new Date(spent[0] + HOUR).toISOString()
+            : null,
     };
   }
 

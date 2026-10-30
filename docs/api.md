@@ -37,9 +37,9 @@ Rules come first: they're cheap and say exactly what they do. What they leave op
 
 With a policy, the judge sends the gray zone to the same agent as the AI review, with the same isolation: `claude -p --json-schema … --tools "" --restricted --strict-mcp-config --no-session-persistence` (or `codex exec` as for the review), the prompt on stdin in an empty temporary directory, the policy and the items fenced with a random tag. Each item gets back a bucket (`now` `today` `later` `fyi` `hide`) and a few words of why, which the queue shows as its why. Then caps apply as usual.
 
-- Up to 20 items per call, one call at a time, never-judged items first, at most `policy.max_per_hour` items an hour (default 60). `policy.judge` (default on) turns it off.
+- Up to 20 items per call, one call at a time, never-judged items first, at most `policy.max_per_hour` items an hour (default 60; only calls that answered count). `policy.judge` (default on) turns it off.
 - Answers are kept per item, its `updated_at` and the policy's hash. An item that changed keeps its old answer until the new one lands; a new policy starts over.
-- Until an item has an answer, or if the call fails, it sits at the board's default. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on (once you've run `claude auth login`, say) tries again now.
+- Until an item has an answer, or if the call fails, it sits at the board's default. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on (once you've run `claude auth login`, say), or changing the agent settings, tries again now; desk.log keeps Claude's own words.
 - The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `policy: today, <why>`, or `policy: not judged yet, so the board default`.
 
 ### The coordinator

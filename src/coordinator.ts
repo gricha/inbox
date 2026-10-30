@@ -315,6 +315,7 @@ export class Coordinator {
     desk.changed();
     const cmd = desk.settings["analyze.command"];
     let error: string | null = null;
+    let cause = "";
     try {
       const out = await runCommand(claudeSpawn(cmd, this.args(st, intro)), {
         input: intro ? INTRO.replace("{me}", desk.me() || "the owner") : this.message(events),
@@ -327,6 +328,7 @@ export class Coordinator {
       checkResult(out);
     } catch (e) {
       error = (e as Error).message;
+      if (typeof (e as Error).cause === "string") cause = ` (${(e as Error).cause as string})`;
     }
     if (desk.stopped) return; // killed with the desk; the store is closed
     const actions = desk.store.log({ limit: READ, since: startedAt, kind: "act" }).filter((r) => r.run === n).length;
@@ -358,7 +360,7 @@ export class Coordinator {
         Object.assign(patch, { session_id: randomUUID(), started_at: null });
       this.save(patch);
       this.log(n, "run", `Failed: ${error}`);
-      desk.log(`coordinator run ${n} failed: ${error}`);
+      desk.log(`coordinator run ${n} failed: ${error}${cause}`);
     }
     desk.changed();
   }
