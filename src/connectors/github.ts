@@ -239,6 +239,22 @@ export class GitHubConnector implements Connector {
     }
   }
 
+  // One item's details now, outside the loops: after you approve it, so it resolves in seconds, not at the next pass.
+  async refresh(id: string): Promise<void> {
+    const desk = this.desk;
+    const m = desk.store.itemMeta().get(id);
+    if (!m || this.stopped || Date.now() < this.pausedUntil) return;
+    try {
+      const items = await this.api.details([hitOf(id, m)], desk.me());
+      if (this.stopped) return;
+      desk.ingest(this, items);
+      desk.synced();
+    } catch (e) {
+      if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
+      desk.log(`refresh of ${id} failed: ${(e as Error).message}`);
+    }
+  }
+
   // ---------------------------------------------------------------- the change feed: notifications
 
   async poll(): Promise<void> {

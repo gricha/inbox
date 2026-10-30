@@ -781,6 +781,7 @@ export class Desk {
       ai_error: err?.head_oid === e.item.head_oid && !this.generating.has(id) ? err.message : null,
       generating: this.generating.has(id),
       approve: this.canApprove(e),
+      activity: d.activity,
     };
   }
 
@@ -923,7 +924,8 @@ export class Desk {
     this.store.logWrite(id, "approve", this.now().toISOString());
     this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
     this.changed();
-    void this.sync(); // so the approval shows and the item can resolve
+    // The PR itself first, so it resolves as "you approved" within seconds; the search index lags, so a full pass alone wouldn't see it.
+    void this.gh.refresh(id).then(() => this.sync());
     return { url };
   }
 

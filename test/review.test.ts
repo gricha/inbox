@@ -414,13 +414,15 @@ test("reviews are for PRs: an issue answers 400", async () => {
 
 // ---------------------------------------------------------------- approve
 
-function fakeWriter() {
+// `landed` plays GitHub taking the approval.
+function fakeWriter(landed = () => {}) {
   const calls: { pr: string; commit: string; body?: string }[] = [];
   let fail = false;
   const writer: GitHubWriter = {
     approve: (pr, commit, body) => {
       calls.push({ pr, commit, body });
       if (fail) return Promise.reject(new Error("Resource not accessible"));
+      landed();
       return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
     },
   };
@@ -477,6 +479,67 @@ test("approve goes through the write client, lands in the action log, and undo s
     t.desk.approve("api#1", "h1b"),
     (e: Error & { status: number }) => e.status === 502 && e.message.includes("Resource not accessible"),
   );
+  t.cleanup();
+});
+
+test("after you approve, the PR alone is refreshed first and resolves as 'you approved'; asked again, it's back", async () => {
+  // GitHub after the approval: your review is in and your ask is gone. Same updatedAt, as the search index lags.
+  const approved = {
+    ...ask(1),
+    review_requests: [],
+    reviews: [{ author: "me", author_bot: false, state: "approved" as const, at: hoursAgo(0.5), commit: "h1" }],
+  };
+  const w = fakeWriter(() => {
+    t.gh.items.set("acme/api#1", approved);
+  });
+  const t = await setup([ask(1), ask(2)], { writer: w.writer, settings: { "review.auto_ai": false } });
+  await t.sync();
+  const calls: string[] = [];
+  const details = t.gh.details.bind(t.gh);
+  const search = t.gh.search.bind(t.gh);
+  t.gh.details = (hits) => {
+    calls.push(`details ${hits.map((h) => h.id).join(" ")}`);
+    return details(hits);
+  };
+  t.gh.search = (q) => {
+    calls.push("search");
+    return search(q);
+  };
+
+  await t.desk.approve("api#1", "h1");
+  await flush();
+  assert.equal(calls[0], "details acme/api#1", "the PR itself, before any search");
+  assert.equal(t.desk.queue().resolved.find((c) => c.id === "acme/api#1")?.why, "you approved");
+  assert.ok(!t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"), "out of Now");
+  await t.sync();
+  assert.ok(calls.includes("search"), "the full pass still runs");
+
+  const view = await t.desk.reviewView("api#1");
+  assert.deepEqual(view.card.resolved, "you approved");
+  assert.deepEqual(
+    view.activity.map((e) => [e.kind, e.actor, e.data]),
+    [
+      ["resolved", "me", { reason: "you approved" }],
+      ["new", "carol", { kind: "pr" }],
+    ],
+    "newest first",
+  );
+
+  t.gh.items.set("acme/api#1", {
+    ...approved,
+    updated_at: hoursAgo(0.2),
+    review_requests: ask(1).review_requests,
+    request_events: [
+      ...approved.request_events,
+      { at: hoursAgo(0.2), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" },
+    ],
+  });
+  await t.sync();
+  assert.ok(
+    t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"),
+    "re-requested: back in Now",
+  );
+  assert.deepEqual(t.desk.store.activity({ after: 0, limit: 1, item: "acme/api#1", latest: true })[0]?.data, { was: "you approved" });
   t.cleanup();
 });
 

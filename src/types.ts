@@ -415,6 +415,7 @@ export interface ReviewView {
   ai_error: string | null; // the last failed attempt on this commit
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
+  activity: ActivityEvent[]; // the PR's last 8 events, newest first
 }
 
 // ---------------------------------------------------------------------------
