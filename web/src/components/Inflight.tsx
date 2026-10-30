@@ -154,7 +154,8 @@ function Row({
             r.drafts.map((d, i) => (
               <div key={d.id} className="draft">
                 <p className="draft-to">
-                  Reply to {d.to}
+                  {/* Not its babysitter's: another agent over MCP drafted it, so say so before you send it as you. */}
+                  {d.by === "agent" ? "Your agent's reply" : "Reply"} to {d.to}
                   {d.quote && <span className="draft-quote">: “{d.quote}”</span>}
                 </p>
                 <p className="draft-body">{d.body}</p>

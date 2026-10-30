@@ -204,7 +204,7 @@ const SHOTS: Shot[] = [
     name: "inflight-landed",
     go: async (page) => {
       await at("#/inflight")(page);
-      await page.locator(".lane h3").scrollIntoViewIfNeeded();
+      await page.evaluate(`document.querySelector(".lane h3").scrollIntoView({ block: "center" })`);
       await page.waitForTimeout(200);
     },
   },
