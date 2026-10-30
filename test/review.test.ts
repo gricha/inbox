@@ -404,7 +404,7 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
 });
 
 test("failures in a row (an expired login) pause AI reviews nobody asked for; asking still runs, and a success resumes them", async () => {
-  const t = await setup([ask(1), ask(2), ask(3)]);
+  const t = await setup([ask(1), ask(2), ask(3), ask(4, { state: "merged" })]);
   t.f.setFail("Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.");
   await t.sync();
   const [first, second] = t.f.started;
@@ -423,6 +423,7 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
     "AI reviews paused after 2 failures in a row: Claude Code isn't logged in (401 OAuth access token has expired). Run claude auth login in a terminal.",
   );
   assert.match((await t.desk.reviewView(first!)).ai_error ?? "", /^Claude Code isn't logged in/, "a PR that was tried shows its own error");
+  assert.equal((await t.desk.reviewView("api#4")).ai_error, null, "not on one it wouldn't review on its own (merged)");
 
   const asked = t.desk.aiReview(untried);
   await flush();

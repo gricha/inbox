@@ -777,8 +777,8 @@ export class Desk {
     const d = this.item(id);
     const err = this.aiErrors.get(id);
     const own = err?.head_oid === e.item.head_oid ? err.message : null;
-    // A PR that wasn't tried says why nothing is being written for it.
-    const paused = this.aiPausedNow() && !(d.ai && !d.ai_stale) ? this.aiPaused!.message : null;
+    // A PR the desk would have reviewed on its own says why it didn't.
+    const paused = this.aiPausedNow() && this.wantsAi(e, snap) ? this.aiPaused!.message : null;
     return {
       card: d.card,
       item: d.item,
