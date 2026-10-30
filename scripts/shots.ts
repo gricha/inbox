@@ -159,6 +159,17 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
     },
   },
+  // Your PRs in flight: a reply to send, a question, no local clone, CI being fixed, one waiting on reviewers, one landed.
+  { name: "inflight", go: at("#/inflight") },
+  {
+    name: "inflight-question",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      await page.keyboard.press("j");
+      await page.keyboard.press("j");
+      await page.waitForTimeout(200);
+    },
+  },
   {
     name: "help",
     go: async (page) => {
@@ -171,6 +182,7 @@ const SHOTS: Shot[] = [
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
   { name: "settings-app", go: at("#/settings/app") },
+  { name: "settings-inflight", go: at("#/settings/inflight") },
   {
     // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",

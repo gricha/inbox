@@ -1,13 +1,25 @@
-import type { QueueView } from "../../../src/types.ts";
+import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import type { Route } from "../view.ts";
 
-// Sources of work, one entry each (just GitHub for now), and Settings in the footer.
-export function Sidebar({ route, view, inert }: { route: Route; view: QueueView | null; inert?: boolean }) {
+// Sources of work, one entry each (just GitHub for now), your PRs in flight, and Settings in the footer.
+export function Sidebar({
+  route,
+  view,
+  overview,
+  inert,
+}: {
+  route: Route;
+  view: QueueView | null;
+  overview: Overview | null;
+  inert?: boolean;
+}) {
   const onQueue = route.name === "queue" || route.name === "review";
+  const onLane = route.name === "inflight";
   const onSettings = route.name === "settings";
   const now = view?.sections.now.length ?? 0;
   const today = view?.sections.today.length ?? 0;
+  const flight = overview?.inflight;
   return (
     <aside className="side" inert={inert}>
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
@@ -35,6 +47,16 @@ export function Sidebar({ route, view, inert }: { route: Route; view: QueueView 
         >
           <span className="side-name">GitHub</span>
           <span className="side-count">{view ? now + today : ""}</span>
+        </a>
+        {/* The count is what needs you; the rest is the babysitters'. */}
+        <a
+          href="#/inflight"
+          className={cls("side-item", onLane && "on")}
+          aria-current={onLane ? "page" : undefined}
+          title={flight ? `${flight.total} in flight, ${flight.needs_you} need you (g i)` : "Your PRs in flight (g i)"}
+        >
+          <span className="side-name">In flight</span>
+          <span className="side-count">{flight && flight.needs_you > 0 ? flight.needs_you : ""}</span>
         </a>
       </nav>
       <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>

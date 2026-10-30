@@ -9,6 +9,7 @@ import {
   DEFAULT_OPEN,
   draftOf,
   groupsOf,
+  laneFacts,
   lineOf,
   navigable,
   parseList,
@@ -72,6 +73,58 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute(routeHash({ name: "settings", section: "app" })), { name: "settings", section: "app" });
   assert.equal(routeHash({ name: "queue" }), "#/");
   assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "github" });
+  assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
+  assert.equal(routeHash({ name: "inflight" }), "#/inflight");
+});
+
+test("an in-flight row's status in plain words", () => {
+  const row = {
+    ci: "red" as const,
+    failing: ["test (3.12)", "lint"],
+    approved_by: ["marco"],
+    changes_by: ["dana"],
+    waiting_on: ["sam", "@backend"],
+    threads_unresolved: 2,
+    mergeable: "conflict" as const,
+    draft: false,
+  };
+  assert.deepEqual(laneFacts(row, "main"), [
+    { text: "CI failing: test (3.12), lint", problem: true },
+    { text: "approved by marco", problem: false },
+    { text: "changes requested by dana", problem: true },
+    { text: "waiting on sam, @backend", problem: false },
+    { text: "2 unresolved threads", problem: false },
+    { text: "conflicts with main", problem: true },
+  ]);
+  assert.deepEqual(
+    laneFacts(
+      { ...row, ci: "green", failing: [], approved_by: [], changes_by: [], waiting_on: [], threads_unresolved: 1, mergeable: "clean" },
+      "main",
+    ).map((f) => f.text),
+    ["CI passing", "1 unresolved thread"],
+  );
+  assert.deepEqual(
+    laneFacts(
+      {
+        ...row,
+        ci: "pending",
+        failing: [],
+        approved_by: [],
+        changes_by: [],
+        waiting_on: [],
+        threads_unresolved: 0,
+        mergeable: "unknown",
+        draft: true,
+      },
+      "main",
+    ).map((f) => f.text),
+    ["draft", "CI running"],
+  );
+  assert.equal(laneFacts({ ...row, failing: ["a", "b", "c"] }, "main")[0]?.text, "CI failing: a and 2 more");
+  assert.equal(
+    laneFacts({ ...row, failing: ["tacos-gha / TACOS Unlock (terraform/eng-tools/workflow-engine)"] }, "main")[0]?.text,
+    "CI failing: tacos-gha / TACOS Unlock (terraform/eng…",
+  );
 });
 
 test("settings fields: text to value and back", () => {

@@ -1,8 +1,8 @@
-import type { Card, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
+import type { Card, InflightRow, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
 import { shortRef } from "./format.ts";
 
-// One surface (the queue), a PR's review in its place, and Settings, whose sections include the rules editor.
-export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "settings"; section: string };
+// One surface (the queue), a PR's review in its place, your in-flight PRs, and Settings, whose sections include the rules editor.
+export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "inflight" } | { name: "settings"; section: string };
 export type GroupKey = "now" | "today" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
 export type Variant = "active" | "hidden" | "cleared" | "resolved";
 
@@ -22,6 +22,7 @@ export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] === undefined || m[1] === "" ? "github" : m[1] };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
+  if (hash === "#/inflight") return { name: "inflight" };
   const review = /^#\/review\/(.+)$/.exec(hash);
   if (review) {
     try {
@@ -33,8 +34,36 @@ export function parseRoute(hash: string): Route {
   return { name: "queue" };
 }
 
-export const routeHash = (r: Route) =>
-  r.name === "settings" ? `#/settings/${r.section}` : r.name === "review" ? `#/review/${encodeURIComponent(r.id)}` : "#/";
+export function routeHash(r: Route): string {
+  if (r.name === "settings") return `#/settings/${r.section}`;
+  if (r.name === "review") return `#/review/${encodeURIComponent(r.id)}`;
+  return r.name === "inflight" ? "#/inflight" : "#/";
+}
+
+// ---------------------------------------------------------------- in flight
+
+// An in-flight PR's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
+export function laneFacts(
+  r: Pick<InflightRow, "ci" | "failing" | "approved_by" | "changes_by" | "waiting_on" | "threads_unresolved" | "mergeable" | "draft">,
+  base: string,
+): { text: string; problem: boolean }[] {
+  const out: { text: string; problem: boolean }[] = [];
+  const add = (text: string, problem = false) => out.push({ text, problem });
+  if (r.draft) add("draft");
+  // Check names can be long ("tacos-gha / TACOS Unlock (terragrunt/regions/…)"): two at most, each clipped.
+  const clip = (n: string) => (n.length > 40 ? `${n.slice(0, 39)}…` : n);
+  const f = r.failing;
+  const failing = f.length > 2 ? `${clip(f[0]!)} and ${f.length - 1} more` : f.map(clip).join(", ");
+  if (r.ci === "red") add(failing ? `CI failing: ${failing}` : "CI failing", true);
+  else if (r.ci === "green") add("CI passing");
+  else if (r.ci === "pending") add("CI running");
+  if (r.approved_by.length) add(`approved by ${r.approved_by.join(", ")}`);
+  if (r.changes_by.length) add(`changes requested by ${r.changes_by.join(", ")}`, true);
+  if (r.waiting_on.length) add(`waiting on ${r.waiting_on.join(", ")}`);
+  if (r.threads_unresolved) add(`${r.threads_unresolved} unresolved ${r.threads_unresolved === 1 ? "thread" : "threads"}`);
+  if (r.mergeable === "conflict") add(`conflicts with ${base}`, true);
+  return out;
+}
 
 // ---------------------------------------------------------------- review
 
