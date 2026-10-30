@@ -172,8 +172,9 @@ test("activity: the log over HTTP, a long-poll that answers when an event lands,
 // This desk has no diff reader, agent or write client, so every review route answers without touching GitHub or an agent.
 test("review routes take the PR's id encoded in one segment or with its slash", async () => {
   const t = await setup();
-  const post = (p: string, body: unknown, site = "same-origin") =>
-    t.req(p, { method: "POST", headers: { "content-type": "application/json", "sec-fetch-site": site }, body: JSON.stringify(body) });
+  const page = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  const post = (p: string, body: unknown, headers: Record<string, string> = page) =>
+    t.req(p, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   for (const p of ["/api/review/acme%2Fapi%237", "/api/review/acme/api%237", "/api/review/api%237"]) {
     const v = await t.json(p);
     assert.equal(v.card.id, "acme/api#7", p);
@@ -191,6 +192,9 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   });
   assert.equal(curl.status, 403, "not from curl, the CLI or an agent: only the desk's page approves");
   assert.match(((await curl.json()) as { error: string }).error, /review in the desk/);
+  // One forged header isn't enough: the desk's page sends both.
+  for (const one of [{ "sec-fetch-site": "same-origin" }, { origin: "http://localhost:47823" }])
+    assert.equal((await post("/api/review/acme/api%237/approve", { head_oid: "h7" }, one)).status, 403, JSON.stringify(one));
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", {})).status, 400, "the commit you reviewed is required");
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", { head_oid: "h7", body: 5 })).status, 400);
   assert.equal((await t.req("/api/review/acme%2Fapi%2399")).status, 404);

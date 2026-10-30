@@ -40,6 +40,11 @@ const byOf = (c: { req: { header(name: string): string | undefined } }) => ({
   pr: c.req.header("x-desk-pr"),
 });
 
+// The desk's own page, for its GitHub writes (approve, Send): a browser marks the request same-origin and sends an Origin, which
+// the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
+const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
+  c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
+
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
   const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
@@ -116,8 +121,7 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
-    // Only the desk's own page approves (a a): the browser marks its requests same-origin; curl, the CLI and agents don't.
-    if (c.req.header("sec-fetch-site") !== "same-origin") throw new DeskError(403, "approve from the PR's review in the desk (a a)");
+    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk (a a)");
     const { head_oid, body } = await c.req
       .json<{ head_oid?: unknown; body?: unknown }>()
       .catch((): { head_oid?: unknown; body?: unknown } => ({}));
@@ -153,11 +157,10 @@ export function createApp(desk: Desk, port: number): Hono {
     desk.dismiss(c.req.param("id"), str((await fields(c)).draft_id, "draft_id", true));
     return c.json({ ok: true });
   });
-  // Posts a drafted reply to GitHub. Only the desk's own window sends it: a browser always sets Origin on a POST, and the
-  // check above only lets ours through; MCP and the CLI send none.
+  // Posts a drafted reply to GitHub, from the desk's own window only.
   app.post("/api/inflight/:id{.+}/send", async (c) => {
     ready();
-    if (!c.req.header("origin")) throw new DeskError(403, "replies are sent from the desk's window, by you");
+    if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
     return c.json({ ok: true, ...(await desk.sendDraft(c.req.param("id"), str((await fields(c)).draft_id, "draft_id")!)) });
   });
   app.post("/api/undo", async (c) => {

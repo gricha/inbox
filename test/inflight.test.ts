@@ -230,16 +230,21 @@ test("Send is the desk window's: the route refuses a request without the desk's 
   await t.desk.sync();
   t.desk.act("web#3", "inflight");
   const app = createApp(t.desk, 47823);
-  const post = (p: string, body: unknown, origin?: string) =>
+  const post = (p: string, body: unknown, origin?: string, site = "same-origin") =>
     app.request(`http://127.0.0.1:47823${p}`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
+      headers: { "content-type": "application/json", ...(origin ? { origin, "sec-fetch-site": site } : {}) },
       body: JSON.stringify(body),
     });
   const id = encodeURIComponent("acme/web#3");
   const draft = (await (await post(`/api/inflight/${id}/draft`, { body: "Thanks!" })).json()) as { draft: { id: string } };
   assert.equal((await post(`/api/inflight/${id}/send`, { draft_id: draft.draft.id })).status, 403);
   assert.equal((await post(`/api/inflight/${id}/send`, { draft_id: draft.draft.id }, "https://evil.example")).status, 403);
+  assert.equal(
+    (await post(`/api/inflight/${id}/send`, { draft_id: draft.draft.id }, "http://localhost:47823", "none")).status,
+    403,
+    "an Origin alone isn't the desk's page: approve's same-origin check applies too",
+  );
   assert.equal(w.calls.length, 0);
   const ok = await post(`/api/inflight/${id}/send`, { draft_id: draft.draft.id }, "http://localhost:47823");
   assert.equal(ok.status, 200);
