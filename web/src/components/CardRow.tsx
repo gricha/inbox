@@ -96,29 +96,31 @@ export function CardRow({
           <span className="age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
             {age(since, ctx.now)}
           </span>
-          <span className="meta">
-            <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
-              <span className="ref-ink">
-                <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+          {/* The verdict sits on the right edge, under the age, so verdicts read down the cards as refs do. */}
+          <span className="card-line">
+            <span className="meta">
+              <span className="ref" title={`${card.repo}#${card.number}`} aria-label={shortRef(card)}>
+                <span className="ref-ink">
+                  <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+                </span>
               </span>
+              {variant === "cleared" ? (
+                <span>{clearedText(card)}</span>
+              ) : variant === "hidden" ? (
+                <span>Hidden by a rule. Open it to see which.</span>
+              ) : (
+                (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
+              )}
+              {away && card.demoted && <span>{card.demoted}</span>}
             </span>
-            {variant === "cleared" ? (
-              <span>{clearedText(card)}</span>
-            ) : variant === "hidden" ? (
-              <span>Hidden by a rule. Open it to see which.</span>
-            ) : (
-              (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
+            {ai && (
+              <span className="ai-word">
+                {p?.risk === "high" && <span className="t-bad">high risk</span>}
+                {ai.verdict && <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict].toLowerCase()}</span>}
+                {ai.note && <span>{ai.note}</span>}
+              </span>
             )}
-            {away && card.demoted && <span>{card.demoted}</span>}
           </span>
-          {/* Right-aligned under the age, so the verdicts read down the cards' edge. */}
-          {ai && (
-            <span className="ai-word">
-              {p?.risk === "high" && <span className="t-bad">high risk</span>}
-              {ai.verdict && <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict].toLowerCase()}</span>}
-              {ai.note && <span>{ai.note}</span>}
-            </span>
-          )}
           {summary ? (
             <span className={cls("context", p?.state !== "ready" && "older")}>{summary}</span>
           ) : (

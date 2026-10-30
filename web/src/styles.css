@@ -1033,9 +1033,19 @@ kbd {
   grid-column: 1 / -1;
 }
 
+/* The ref and why on the left, the AI's word on the right; the title keeps the card's full width. */
+.card-line {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 16px;
+  align-items: baseline;
+}
+
 /* Inline, so a long why wraps under the ref instead of dropping below it. */
 .card .meta {
   display: block;
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 13px;
 }
@@ -1060,13 +1070,9 @@ kbd {
   overflow: visible;
 }
 
-/* The AI's word sits under the age: verdicts read down the right edge, refs down the left. */
 .ai-word {
   display: flex;
-  grid-area: 2 / 2;
   gap: 8px;
-  justify-content: flex-end;
-  align-self: baseline;
   color: var(--pencil);
   font-size: 13px;
   white-space: nowrap;
