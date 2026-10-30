@@ -4,7 +4,7 @@ import type { Route } from "../view.ts";
 
 // Sources of work, one entry each (just GitHub for now), and Settings in the footer.
 export function Sidebar({ route, view, inert }: { route: Route; view: QueueView | null; inert?: boolean }) {
-  const onQueue = route.name === "queue";
+  const onQueue = route.name === "queue" || route.name === "review";
   const onSettings = route.name === "settings";
   const now = view?.sections.now.length ?? 0;
   const today = view?.sections.today.length ?? 0;
@@ -27,7 +27,7 @@ export function Sidebar({ route, view, inert }: { route: Route; view: QueueView 
           title={view ? `${now} now, ${today} today` : undefined}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
-            if (onQueue) {
+            if (route.name === "queue") {
               e.preventDefault();
               window.scrollTo({ top: 0 });
             }

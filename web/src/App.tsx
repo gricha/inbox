@@ -6,6 +6,7 @@ import { DEFAULT_OPEN, groupsOf, navigable, parseRoute, removeCard, routeHash, t
 import type { RowCtx } from "./components/CardRow.tsx";
 import { Help } from "./components/Help.tsx";
 import { Queue } from "./components/Queue.tsx";
+import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { TopBar } from "./components/TopBar.tsx";
@@ -71,8 +72,6 @@ export function App() {
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState<Set<string>>(new Set());
-  const [briefErrors, setBriefErrors] = useState<Record<string, string>>({});
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(loadOpen);
   const [filter, setFilter] = useState("");
@@ -102,13 +101,19 @@ export function App() {
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
   const pending = useRef<{ id: string; until: number } | null>(null);
 
-  const flash = useCallback((text: string, error = false, canUndo = false) => {
+  const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000) => {
     clearTimeout(toastTimer.current);
     setToast({ id: Date.now(), text, error, undo: canUndo });
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
-    }, 6000);
+    }, ms);
   }, []);
+  const reviewFlash = useCallback(
+    (text: string, error = false, ms?: number) => {
+      flash(text, error, false, ms);
+    },
+    [flash],
+  );
 
   const saveSettingsView = useCallback((s: SettingsView) => {
     settingsSeq.current++;
@@ -383,38 +388,36 @@ export function App() {
     }
   }
 
-  async function brief(c: Card) {
+  // A PR opens its review in place of the queue; an issue opens in place.
+  function openCard(c: Card) {
     if (c.kind !== "pr") {
-      flash("Briefs are for pull requests", true);
+      toggle(c);
       return;
     }
-    if (analyzing.has(c.id)) return;
-    setAnalyzing((s) => new Set(s).add(c.id));
-    setBriefErrors((m) => {
-      const next = { ...m };
-      delete next[c.id];
-      return next;
-    });
-    if (expanded !== c.id) toggle(c);
+    setSelected(c.id);
+    setSnoozeFor(null);
+    go({ name: "review", id: c.id });
+    void seen(c);
+  }
+
+  // Starts the PR's AI review without opening it; the verdict shows on the row when it's done.
+  async function aiReview(c: Card) {
+    if (c.kind !== "pr") {
+      flash("AI reviews are for pull requests", true);
+      return;
+    }
+    flash(`Asked for an AI review of ${shortRef(c)}. It takes a minute or two.`);
     try {
-      const d = details[c.id];
-      const r = await api.analyze(c.id, typeof d === "object" && d.brief !== null);
-      flash(`Brief for ${shortRef(c)}: ${r.brief.verdict}`);
-      void fetchDetail(c.id);
+      const r = await api.aiReview(c.id);
+      flash(`AI review of ${shortRef(c)}: ${r.ai.verdict}`);
     } catch (e) {
-      setBriefErrors((m) => ({ ...m, [c.id]: message(e) }));
-      flash(`Brief failed for ${shortRef(c)}: ${message(e)}`, true);
-    } finally {
-      setAnalyzing((s) => {
-        const next = new Set(s);
-        next.delete(c.id);
-        return next;
-      });
+      flash(`AI review of ${shortRef(c)} failed: ${message(e)}`, true);
     }
   }
 
   function run(c: Card, k: string) {
-    if (k === "o") {
+    if (k === "enter") openCard(c);
+    else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);
     } else if (k === "e") void act(c, c.status === "active" ? "done" : "restore");
@@ -424,7 +427,7 @@ export function App() {
     } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
     else if (k === "c") void copy(c);
-    else if (k === "i") void brief(c);
+    else if (k === "i") void aiReview(c);
     else if (k === "w") {
       if (expanded === c.id) setShowSignals((s) => !s);
       else {
@@ -496,6 +499,8 @@ export function App() {
     else if (k === "u") void undo();
     else if (route.name === "settings") {
       if (k === "Escape") go({ name: "queue" });
+    } else if (route.name === "review") {
+      // The review view reads its own keys.
     } else if (k === "/") {
       e.preventDefault();
       filterRef.current?.focus();
@@ -507,7 +512,7 @@ export function App() {
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
     } else if (k === "Enter" && current) {
       e.preventDefault();
-      toggle(current);
+      openCard(current);
     } else if (current && k.length === 1 && "oesmpcwi".includes(k)) {
       e.preventDefault();
       run(current, k);
@@ -533,10 +538,8 @@ export function App() {
     snoozeFor,
     showSignals,
     details,
-    analyzing,
-    briefErrors,
     boardLabel,
-    click: toggle,
+    click: openCard,
     select: (c) => {
       setSelected(c.id);
     },
@@ -615,6 +618,17 @@ export function App() {
           )}
           {route.name === "queue" && !broken && (
             <Queue view={view} overview={overview} groups={groups} ctx={ctx} filter={filter} toggle={toggleGroup} />
+          )}
+          {route.name === "review" && !broken && (
+            <Review
+              id={route.id}
+              loads={loads}
+              inert={help}
+              flash={reviewFlash}
+              onBack={() => {
+                go({ name: "queue" });
+              }}
+            />
           )}
           {/* Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue. */}
           {settingsSeen && (

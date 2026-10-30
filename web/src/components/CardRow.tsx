@@ -4,7 +4,7 @@ import { age, clearedText, cls, shortRef, SNOOZE } from "../format.ts";
 import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (o e s m p c w i).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i).
 export interface RowCtx {
   now: number;
   selected: string | null;
@@ -13,8 +13,6 @@ export interface RowCtx {
   snoozeFor: string | null;
   showSignals: boolean;
   details: Record<string, ItemDetail | string>; // string = load error
-  analyzing: Set<string>;
-  briefErrors: Record<string, string>; // last failed brief per card, until the next try
   boardLabel: (id: string) => string;
   click: (c: Card) => void;
   select: (c: Card) => void;
@@ -55,8 +53,8 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
         </span>
       ))}
       {card.verdict && (
-        <span className={`fact-word verdict v-${card.verdict}`} title="Claude's brief">
-          brief says {card.verdict}
+        <span className={`fact-word verdict v-${card.verdict}`} title="From the AI review">
+          AI says {card.verdict}
         </span>
       )}
       {card.demoted && <span className="fact-word demoted">{card.demoted}</span>}
