@@ -1130,8 +1130,12 @@ export class Desk {
     const now = this.now();
     const before = this.store.state(id);
     const s: StateRow = { ...before };
+    const entry = this.snapshot().entries.get(id)!;
+    // Its babysitter keeps working whatever its status, and a question it asks must stay in Now.
+    if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
+      throw new DeskError(409, `${id} is in flight, so its babysitter has it; take it back (d) first`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
-    const seen = this.snapshot().entries.get(id)!.analysis.activity_at;
+    const seen = entry.analysis.activity_at;
     switch (action) {
       case "done":
         s.done_at = now.toISOString();
@@ -1177,11 +1181,12 @@ export class Desk {
         break;
       case "inflight": {
         // "I'm done": only your own open PR, and babysitters take it from here.
-        const it = this.snapshot().entries.get(id)!;
-        if (it.item.kind !== "pr" || !it.analysis.signals.me.author || it.item.state !== "open")
+        if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
           throw new DeskError(409, `only your own open PRs go in flight; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is already in flight`);
         s.inflight_at = now.toISOString();
+        // The lane has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
+        Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
         this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was in flight
         break;
       }

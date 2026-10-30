@@ -530,6 +530,7 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "d") inflight(c);
+    else if (c.inflight && ["e", "s", "m"].includes(k)) flash(`${shortRef(c)} is in flight, so its babysitter has it. d takes it back.`);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);

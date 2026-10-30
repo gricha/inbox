@@ -186,7 +186,13 @@ export class Coordinator {
   }
 
   pending(cursor: number): ActivityEvent[] {
-    return this.desk.store.activity({ after: cursor, limit: READ }).filter(wakes);
+    return this.wakesOn(this.desk.store.activity({ after: cursor, limit: READ }));
+  }
+
+  // Your PRs in flight are their babysitters': what happens to them doesn't wake the coordinator.
+  wakesOn(events: ActivityEvent[]): ActivityEvent[] {
+    const lane = new Set([...this.desk.store.states()].filter(([, s]) => s.inflight_at).map(([id]) => id));
+    return events.filter((e) => wakes(e) && !lane.has(e.item_id));
   }
 
   schedule(): void {
@@ -293,7 +299,7 @@ export class Coordinator {
     if (!intro) {
       const read = desk.store.activity({ after: upTo, limit: READ });
       upTo = read.at(-1)?.seq ?? upTo;
-      events = read.filter(wakes);
+      events = this.wakesOn(read);
       if (!events.length || !desk.policy.text.trim()) {
         this.save({ cursor: upTo });
         return;

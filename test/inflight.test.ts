@@ -92,6 +92,47 @@ test("only your own open PRs go in flight", async (c) => {
   assert.throws(() => t.desk.act("web#3", "takeback"), /isn't in flight/);
 });
 
+test("in flight, its babysitter owns it: done, snooze and mute are refused, and the judge and coordinator leave it alone", async (c) => {
+  const t = await setup([myPr(3, { ci: "pending" })], { settings: { ...OFF, "analyze.command": "/nonexistent/claude" } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  // Muted before you marked it: marking clears that, so its questions can reach Now.
+  const muted = t.desk.act("web#3", "mute");
+  const marked = t.desk.act("web#3", "inflight");
+  assert.equal(marked.state.muted, false);
+  t.desk.escalate("web#3", "Keep v1 or bump?");
+  for (const action of ["done", "snooze", "mute"] as const)
+    assert.throws(
+      () => t.desk.act("web#3", action, undefined, { agent: "coordinator", reason: "policy" }),
+      (e: Error & { status: number }) => e.status === 409 && e.message.includes("take it back"),
+    );
+  assert.deepEqual(
+    t.desk.focus().sections.now.map((x) => x.id),
+    ["acme/web#3"],
+  );
+  assert.equal(t.desk.overview().inflight.needs_you, 1);
+  // Undoing the mark brings back the mute.
+  t.desk.undo(marked.undo_seq);
+  assert.equal(t.desk.store.state("acme/web#3").muted, true);
+  t.desk.undo(muted.undo_seq);
+  t.desk.act("web#3", "inflight");
+
+  // Its comments and red CI are the babysitter's to act on, and the judge doesn't ask about it.
+  t.desk.putPolicy("Waiting PRs are fyi.");
+  assert.ok(!t.desk.judge.queue().some((g) => g.item.id === "acme/web#3"));
+  const cursor = t.desk.store.lastSeq();
+  const it = t.gh.items.get("acme/web#3")!;
+  t.gh.items.set(it.id, {
+    ...it,
+    updated_at: hoursAgo(0.5),
+    ci: "red",
+    comments: [{ author: "dana", author_bot: false, at: hoursAgo(0.5) }],
+  });
+  await t.desk.sync();
+  assert.ok(t.desk.store.activity({ after: cursor, limit: 10 }).some((e) => e.kind === "commented"));
+  assert.deepEqual(t.desk.coordinator.pending(cursor), []);
+});
+
 test("with babysitting off, an in-flight PR comes back to Now when CI fails, and when it's ready to merge", async (c) => {
   const t = await setup(
     [myPr(3, { ci: "red" }), myPr(4, { ci: "green", review_decision: "approved", mergeable: "clean" }), myPr(5, { ci: "pending" })],

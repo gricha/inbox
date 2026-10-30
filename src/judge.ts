@@ -156,7 +156,8 @@ export class Judge {
     return ((this.desk.store.get("judge_spent") as number[] | null) ?? []).filter((t) => t > cutoff);
   }
 
-  // Gray-zone items waiting for an answer: active, open, unresolved. Never-answered ones first (a changed item keeps its
+  // Gray-zone items waiting for an answer: active, open, unresolved, not in flight (the lane has those, so an answer
+  // wouldn't show, and each babysitter push would ask again). Never-answered ones first (a changed item keeps its
   // old answer meanwhile), then the most urgent board default, then the latest activity.
   queue(): GrayItem[] {
     const desk = this.desk;
@@ -168,7 +169,7 @@ export class Judge {
       for (const [id, p] of b.result.placements) {
         if (!p.judge?.pending || out.has(id)) continue;
         const e = snap.entries.get(id)!;
-        if (e.status !== "active" || e.resolved || e.item.state !== "open") continue;
+        if (e.status !== "active" || e.resolved || e.inflight || e.item.state !== "open") continue;
         out.set(id, { item: e.item, signals: e.analysis.signals, board: names.get(board) ?? board, placement: p });
       }
     }
