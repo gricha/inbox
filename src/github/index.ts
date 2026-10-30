@@ -1,9 +1,9 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
-import type { Context, Item } from "../types.ts";
+import type { Context, Item, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
-import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
-import { DETAILS_MINE, DETAILS_REVIEW, LIGHT_SEARCH, TEAMS, VIEWER } from "./queries.ts";
+import { checkFailed, checkName, normalize, toHit, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
+import { DETAILS_MINE, DETAILS_REVIEW, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
 
 export interface SearchHit {
   node_id: string;
@@ -26,6 +26,21 @@ export interface NotificationPage {
   poll_interval: number; // seconds GitHub asks clients to wait (X-Poll-Interval)
   date: string | null; // GitHub's clock
 }
+// A PR's conversation and failing checks, for a babysitter's prompt. Every text field is untrusted GitHub text.
+export interface PrContext {
+  threads: {
+    id: string; // the review thread's node id: what a reply goes to
+    resolved: boolean;
+    outdated: boolean;
+    path: string;
+    line: number | null;
+    comments: { author: string; bot: boolean; body: string; at: string }[];
+  }[];
+  reviews: { author: string; bot: boolean; state: ReviewState; body: string; at: string }[];
+  comments: { author: string; bot: boolean; body: string; at: string }[]; // on the PR itself
+  checks: { name: string; job_id: number | null; app: string; url: string; summary: string }[]; // the failing ones
+}
+
 export interface GitHub {
   viewer(): Promise<string>;
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
@@ -33,7 +48,81 @@ export interface GitHub {
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
+  prContext(nodeId: string): Promise<PrContext>; // a PR's threads, reviews, comments and failing checks
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
+}
+
+interface Author {
+  __typename?: string;
+  login: string;
+}
+interface RawPrContext {
+  node: {
+    reviewThreads?: {
+      nodes: {
+        id: string;
+        isResolved: boolean;
+        isOutdated: boolean;
+        path: string;
+        line: number | null;
+        comments: { nodes: { author: Author | null; body: string; createdAt: string }[] };
+      }[];
+    };
+    reviews?: { nodes: { author: Author | null; state: string; body: string; submittedAt: string | null; createdAt: string }[] };
+    comments?: { nodes: { author: Author | null; body: string; createdAt: string }[] };
+    commits?: {
+      nodes: {
+        commit: {
+          statusCheckRollup: {
+            contexts: {
+              nodes: (
+                | (RawCheck & {
+                    databaseId?: number | null;
+                    detailsUrl?: string | null;
+                    title?: string | null;
+                    summary?: string | null;
+                    description?: string | null;
+                    targetUrl?: string | null;
+                    checkSuite?: { app: { slug: string } | null } | null;
+                  })
+                | null
+              )[];
+            };
+          } | null;
+        };
+      }[];
+    };
+  } | null;
+}
+
+const who = (a: Author | null) => ({ author: a?.login ?? "ghost", bot: a?.__typename === "Bot" || !!a?.login.endsWith("[bot]") });
+
+function parsePrContext(data: RawPrContext): PrContext {
+  const n = data.node;
+  const checks = n?.commits?.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+  return {
+    threads: (n?.reviewThreads?.nodes ?? []).map((t) => ({
+      id: t.id,
+      resolved: t.isResolved,
+      outdated: t.isOutdated,
+      path: t.path,
+      line: t.line,
+      comments: t.comments.nodes.map((c) => Object.assign(who(c.author), { body: c.body, at: c.createdAt })),
+    })),
+    reviews: (n?.reviews?.nodes ?? []).map((r) =>
+      Object.assign(who(r.author), { state: r.state.toLowerCase() as ReviewState, body: r.body, at: r.submittedAt ?? r.createdAt }),
+    ),
+    comments: (n?.comments?.nodes ?? []).map((c) => Object.assign(who(c.author), { body: c.body, at: c.createdAt })),
+    checks: checks
+      .filter((c) => c !== null && checkFailed(c))
+      .map((c) => ({
+        name: checkName(c!),
+        job_id: c!.databaseId ?? null,
+        app: c!.checkSuite?.app?.slug ?? "",
+        url: c!.detailsUrl ?? c!.targetUrl ?? "",
+        summary: [c!.title, c!.summary, c!.description].filter(Boolean).join("\n"),
+      })),
+  };
 }
 
 interface RawThread {
@@ -198,6 +287,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     details,
     context,
     notifications,
+    prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
     rateLimit: () => client.rateLimit(),
   };
 }

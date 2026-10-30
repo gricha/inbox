@@ -171,3 +171,35 @@ test("toHit builds the light search hit", () => {
     author_bot: false,
   });
 });
+
+test("your PR's head branch, where it lives, and the names of its failing checks", () => {
+  const raw: RawNode = {
+    ...fixture("pr-mine"),
+    headRefName: "fix/retry",
+    headRepository: { nameWithOwner: "octo-dev/infra" },
+    checks: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: {
+              contexts: {
+                nodes: [
+                  { __typename: "CheckRun", name: "test (3.12)", conclusion: "TIMED_OUT" },
+                  { __typename: "CheckRun", name: "lint", conclusion: "SUCCESS" },
+                  { __typename: "CheckRun", name: "flaky", conclusion: "CANCELLED" },
+                  { __typename: "StatusContext", context: "buildkite", state: "FAILURE" },
+                  null,
+                ],
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+  const it = normalize(raw, NOW);
+  assert.deepEqual([it.head_ref, it.head_repo, it.checks_failed], ["fix/retry", "octo-dev/infra", ["test (3.12)", "buildkite"]]);
+  // Someone else's PR isn't asked for checks, so it has no list rather than an empty one.
+  assert.equal(normalize(fixture("pr-mine"), NOW).checks_failed, undefined);
+  assert.equal(normalize({ ...fixture("pr-mine"), headRepository: null }, NOW).head_repo, "");
+});

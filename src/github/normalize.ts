@@ -52,9 +52,12 @@ export interface RawNode extends RawHit {
   deletions?: number;
   changedFiles?: number;
   baseRefName?: string;
+  headRefName?: string;
+  headRepository?: { nameWithOwner: string } | null;
   reviewDecision?: string | null;
   mergedBy?: { login: string } | null;
   mergeable?: string;
+  checks?: Conn<{ commit: { statusCheckRollup: { contexts: Conn<RawCheck | null> } | null } }>;
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
   timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
   latestReviews?: Conn<RawReview>;
@@ -78,6 +81,19 @@ const DECISION: Record<string, ReviewDecision> = {
   REVIEW_REQUIRED: "required",
 };
 const MERGEABLE: Record<string, Mergeable> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
+
+// A check run or a commit status, as the statusCheckRollup lists them.
+export interface RawCheck {
+  __typename: string;
+  name?: string;
+  conclusion?: string | null;
+  context?: string;
+  state?: string;
+}
+// Cancelled and skipped runs aren't the code's fault, so they don't count.
+const FAILED = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]);
+export const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "");
+export const checkName = (c: RawCheck) => (c.__typename === "CheckRun" ? c.name : c.context) ?? "";
 
 const login = (a: Actor | null) => a?.login ?? "ghost";
 // GraphQL drops the [bot] suffix for apps, so __typename is the reliable signal.
@@ -137,6 +153,13 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_oid: head?.oid ?? "",
     head_committed_at: head?.committedDate ?? null,
     head_author: head?.author?.user?.login ?? "",
+    head_ref: n.headRefName ?? "",
+    head_repo: n.headRepository?.nameWithOwner ?? "",
+    ...(n.checks && {
+      checks_failed: (n.checks.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
+        .filter((c): c is RawCheck => c !== null && checkFailed(c))
+        .map(checkName),
+    }),
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
       .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),

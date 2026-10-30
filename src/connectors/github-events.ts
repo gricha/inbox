@@ -85,6 +85,9 @@ export function itemEvents(prev: Item | null, next: Item, ctx: DiffContext): New
   // A push restarts CI; "running" right after it says nothing new.
   if (next.ci !== prev.ci && next.ci !== "none" && !(pushed && next.ci === "pending"))
     out.push(ev("ci", "", ctx.now, { from: prev.ci, to: next.ci }));
+  // Only your own PRs carry mergeable; "unknown" is GitHub still working it out, not a change.
+  if (next.state === "open" && next.mergeable === "conflict" && prev.mergeable !== "conflict")
+    out.push(ev("conflict", "", ctx.now, { base: next.base }));
 
   const lastComment = latestAt(prev.comments);
   for (const c of next.comments) {

@@ -40,6 +40,9 @@ export interface Item {
   head_oid: string;
   head_committed_at: string | null;
   head_author: string; // login of the head commit's author, "" if unknown
+  head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
+  head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
+  checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
   reviews: { author: string; author_bot: boolean; state: ReviewState; at: string; commit: string }[]; // most recent last; commit = oid reviewed
@@ -433,6 +436,7 @@ export type ActivityKind =
   | "reopened"
   | "mentioned" // data: reason (mention, team_mention)
   | "assigned" // to you
+  | "conflict" // your PR started conflicting with its base; data: base
   | "resolved" // data: reason
   | "unresolved"; // data: was (the reason that stopped holding)
 

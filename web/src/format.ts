@@ -70,6 +70,8 @@ export function eventText(e: ActivityEvent, me = ""): string {
       return d.reason === "team_mention" ? "your team was mentioned" : "you were mentioned";
     case "assigned":
       return "assigned to you";
+    case "conflict":
+      return d.base ? `conflicts with ${String(d.base)}` : "merge conflict";
     case "resolved":
       return `resolved: ${String(d.reason)}`;
     case "unresolved":

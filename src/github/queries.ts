@@ -28,7 +28,7 @@ const COMMON = `
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
 const PR = `${COMMON}
-  isDraft additions deletions changedFiles baseRefName reviewDecision mergedBy { login }
+  isDraft additions deletions changedFiles baseRefName headRefName headRepository { nameWithOwner } reviewDecision mergedBy { login }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
     nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }
@@ -51,9 +51,32 @@ const details = (pr: string) => `query($ids: [ID!]!) {
 export const DETAILS_REVIEW = details(`${PR}
   reviewThreads(first: 60) { totalCount nodes { isResolved } }`);
 
+const CHECK = "__typename ... on CheckRun { name conclusion } ... on StatusContext { context state }";
+
+// Failing check names are for the In-flight lane, so they're only asked of your own PRs too.
 export const DETAILS_MINE = details(`${PR}
   mergeable
-  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } createdAt } } } }`);
+  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } createdAt } } } }
+  checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${CHECK} } } } } } }`);
+
+// What a babysitter needs to work on your PR: its review threads (with ids to reply to), reviews, comments and failing checks.
+export const PR_CONTEXT = `query($id: ID!) {
+  ${RATE}
+  node(id: $id) {
+    ... on PullRequest {
+      reviewThreads(first: 100) {
+        nodes { id isResolved isOutdated path line comments(first: 30) { nodes { author { __typename login } body createdAt url } } }
+      }
+      reviews(last: 30) { nodes { author { __typename login } state body submittedAt createdAt } }
+      comments(last: 20) { nodes { author { __typename login } body createdAt } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+        __typename
+        ... on CheckRun { name conclusion databaseId detailsUrl title summary checkSuite { app { slug } } }
+        ... on StatusContext { context state description targetUrl }
+      } } } } } }
+    }
+  }
+}`;
 
 export const TEAMS = `query($me: String!) {
   ${RATE}
