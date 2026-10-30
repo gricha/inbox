@@ -144,10 +144,7 @@ test("the first run starts the session: a fixed id, its job, the desk's MCP serv
   );
   assert.deepEqual(
     t.desk.coordinatorView().log.map((e) => [e.kind, e.run, e.text.replace(/\d+s/, "Ns")]),
-    [
-      ["run", 1, "Done in Ns"],
-      ["run", 1, "Starting the session"],
-    ],
+    [["run", 1, "Started the session · Ns"]],
   );
 });
 
@@ -242,7 +239,10 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
   assert.deepEqual([t.co.status().state, t.co.status().next_at], ["off", null], "nothing stays scheduled while it's off");
   t.desk.putSettings({ set: { "coordinator.enabled": true } });
   await t.settle();
-  assert.equal(t.fake.calls(), 2);
+  // After a login failure a call that saves no session checks the login first: failed runs would each leave one behind.
+  assert.equal(t.fake.calls(), 3);
+  assert.ok(t.fake.args(2).includes("--no-session-persistence") && !t.fake.args(2).includes("--session-id"));
+  assert.ok(t.fake.args(3).includes("--session-id"));
   assert.deepEqual([t.co.status().state, t.co.status().started], ["idle", true]);
 });
 

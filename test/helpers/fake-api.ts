@@ -194,6 +194,7 @@ function settingsView(overrides: Record<string, SettingValue>): SettingsView {
     overridden: Object.keys(overrides),
     errors: [],
     github: { login: "you", auth: "gh CLI", error: null, synced_at: ago(0.05), rate_limit: null, teams: [], orgs: [] },
+    paused: { ai: null, babysitters: null },
   };
 }
 

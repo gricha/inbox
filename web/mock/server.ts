@@ -814,7 +814,7 @@ const SEEDS: Seed[] = [
     st: { inflight_at: iso(19) },
     fly: {
       sitter: { state: "blocked", text: "no local clone of oss/tinyhttp", since: null },
-      needs: "CI failing: no local clone of oss/tinyhttp",
+      needs: "no local clone of oss/tinyhttp, so no babysitter",
       failing: ["node 22", "lint"],
       waiting: ["ana-k"],
     },
@@ -1241,9 +1241,22 @@ function needsYou(r: Rec): string | null {
   if (!laneOwned(r)) return null;
   const f = flightOf(r);
   const unsent = f.drafts.filter((d) => !d.sent_at).length;
-  if (f.question) return f.question.question;
+  if (f.question) return `babysitter asks: ${f.question.question}`;
   if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
   return r.seed.fly?.needs ?? null;
+}
+
+// As Desk.compute(): among other people's asks, it says it's your PR in flight unless it already says who's asking.
+function needsWhy(r: Rec): string | null {
+  const needs = needsYou(r);
+  return needs && !flightOf(r).question ? `in flight: ${needs}` : needs;
+}
+
+// As Desk.shownAt(): Now with its reason when it needs you, else calm, as in the lane.
+function shownAt(r: Rec, p: Placement): Placement {
+  if (!laneOwned(r)) return p;
+  const why = needsWhy(r);
+  return why ? { ...p, bucket: "now", why } : { ...p, bucket: "fyi", why: "in flight" };
 }
 
 function bestPlacement(r: Rec): Placement {
@@ -1255,11 +1268,7 @@ function bestPlacement(r: Rec): Placement {
   return best ?? { board: "", bucket: "later", rule_bucket: "later", rule: null, why: "", trace: [] };
 }
 
-const needsCards = () =>
-  recs.flatMap((r) => {
-    const why = needsYou(r);
-    return why ? [cardOf(r, { ...bestPlacement(r), bucket: "now", why })] : [];
-  });
+const needsCards = () => recs.flatMap((r) => (needsYou(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
 
 function laneRow(r: Rec): InflightRow {
   const s = r.seed;
@@ -1273,7 +1282,7 @@ function laneRow(r: Rec): InflightRow {
   const running = sitter.state === "running";
   const [owner = "", name = ""] = s.repo.split("/");
   return {
-    card: cardOf(r, bestPlacement(r)),
+    card: cardOf(r, shownAt(r, bestPlacement(r))),
     state: s.resolved === "merged" ? "merged" : s.resolved === "closed" ? "closed" : "open",
     base: sig.pr.base,
     ci: sig.pr.ci,
@@ -1487,7 +1496,7 @@ function detail(r: Rec): ItemDetail {
   const item = itemOf(r);
   const ai = reviews.get(r.id) ?? null;
   return {
-    card: cardOf(r, best),
+    card: cardOf(r, shownAt(r, best)),
     item,
     signals: sig,
     placements,
@@ -2006,6 +2015,7 @@ const settingsView = (): SettingsView => ({
   overridden: Object.keys(overrides),
   errors: [],
   github: github(),
+  paused: { ai: null, babysitters: null },
 });
 
 // Same contract as Desk.putSettings: nothing is written if any value is invalid.
@@ -2324,10 +2334,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
 // The coordinator's history: a quiet run an hour ago, then three FYI items snoozed until tomorrow, each with its reason.
 note(26 * 60, 0, "policy", "Updated the policy");
-note(62, 13, "run", "Woke on 2 events");
 note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
-note(61, 13, "run", "Done in 18s");
-note(4, 14, "run", "Woke on 6 events");
+note(61, 13, "run", "2 events, 0 actions · 18s");
 for (const [id, why] of [
   ["acme/infra#540", "CODEOWNERS ping for a staging key rotation; FYI by your policy"],
   ["acme/api#4101", "CODEOWNERS ping, nina already has two approvals coming"],
@@ -2337,7 +2345,7 @@ for (const [id, why] of [
   note(3, 14, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
 }
 note(3, 14, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left. Nothing else needed you.");
-note(3, 14, "run", "Done in 41s, 3 actions");
+note(3, 14, "run", "6 events, 3 actions · 41s");
 
 const server = createServer((req, res) => {
   void handle(req, res);

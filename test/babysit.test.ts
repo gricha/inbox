@@ -363,7 +363,7 @@ case "$(cat "$D/mode")" in
     echo '{"type":"result","subtype":"success","is_error":false,"result":"Fixed the retry test and pushed."}'
     ;;
   auth)
-    echo '{"type":"system","subtype":"init"}'
+    case "$*" in *stream-json*) echo '{"type":"system","subtype":"init"}' ;; esac
     echo '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token has expired"}'
     exit 1
     ;;
@@ -599,6 +599,8 @@ test("an expired claude login fails one run with a clear status, then nothing re
     assert.equal(rows.get(id)?.needs_you, null);
   }
   assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 0);
+  // Settings → In flight says it once.
+  assert.equal(s.desk.getSettings().paused.babysitters?.why, `Babysitters are paused: ${NOT_LOGGED_IN}`);
   // Any other save keeps the pause; a new agent setting (say, the claude command or model) lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
   await new Promise((r) => {
@@ -607,6 +609,10 @@ test("an expired claude login fails one run with a clear status, then nothing re
   assert.equal(s.w.count(), 1);
   s.desk.putSettings({ set: { "analyze.model": "opus" } });
   await until("another attempt", () => s.w.count() >= 2);
+  // Still logged out: a call that saves no session finds that out, and no run (with its session) starts.
+  await until("the pause again", () => s.desk.sitter.paused !== null);
+  assert.ok(fs.readFileSync(path.join(s.w.root, "args"), "utf8").includes("--no-session-persistence"));
+  assert.equal(s.record(a.id).runs.length, 1);
 });
 
 test("a failed run says what claude said in plain words; only a real login failure pauses babysitters", posix, async (c) => {

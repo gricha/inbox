@@ -281,6 +281,35 @@ export function askClaude(prompt: string, opts: { command: string; model: string
 
 export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 
+// Does the login work? A tiny call that leaves no session behind, before a run that would: a session run that fails on
+// the login still saves a session, which piles up in claude --resume. Throws claudeError's error when it doesn't.
+export async function probeLogin(command: string, model: string, signal?: AbortSignal): Promise<void> {
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--model",
+    model,
+    "--restricted",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--no-session-persistence",
+  ];
+  await room(async (cwd) =>
+    claudeEnvelope(
+      await runCommand(claudeSpawn(command, args), {
+        input: "Reply with the word ok.",
+        cwd,
+        timeout: 60_000,
+        stdoutOnError: true,
+        missing: claudeMissing(command),
+        signal,
+      }),
+    ),
+  );
+}
+
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `cause`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): Error {
   const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");

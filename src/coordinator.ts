@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Desk } from "./desk.ts";
-import { claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, runCommand } from "./review.ts";
+import { claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, probeLogin, runCommand } from "./review.ts";
 import type {
   ActivityEvent,
   ActivityKind,
@@ -76,6 +76,7 @@ interface State {
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ");
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function fence(lines: string[]): string[] {
   const n = randomBytes(4).toString("hex");
@@ -314,13 +315,13 @@ export class Coordinator {
     const t0 = Date.now();
     this.running = { n, since: startedAt };
     this.save({ runs: n });
-    this.log(n, "run", intro ? "Starting the session" : `Woke on ${events.length} event${events.length === 1 ? "" : "s"}`);
     desk.log(`coordinator run ${n}: ${intro ? "first run" : `${events.length} events`}`);
     desk.changed();
     const cmd = desk.settings["analyze.command"];
     let error: string | null = null;
     let cause = "";
     try {
+      if (st.error === NOT_LOGGED_IN) await probeLogin(cmd, desk.settings["analyze.model"], this.abort.signal);
       const out = await runCommand(claudeSpawn(cmd, this.args(st, intro)), {
         input: intro ? INTRO.replace("{me}", desk.me() || "the owner") : this.message(events),
         cwd: this.dir(),
@@ -349,7 +350,9 @@ export class Coordinator {
     this.running = null;
     if (!error) {
       this.save({ started_at: st.started_at ?? startedAt, cursor: upTo, last_run: run, failures: 0, retry_at: 0, error: null });
-      this.log(n, "run", `Done in ${Math.round(run.ms / 1000)}s${actions ? `, ${actions} action${actions === 1 ? "" : "s"}` : ""}`);
+      // One line per run, logged when it ends so it sits above its actions: "6 events, 3 actions · 41s".
+      const did = intro ? "Started the session" : `${plural(events.length, "event")}, ${plural(actions, "action")}`;
+      this.log(n, "run", `${did} · ${Math.round(run.ms / 1000)}s`);
       desk.log(`coordinator run ${n} done in ${run.ms} ms, ${actions} actions`);
       desk.retryAgents(NOT_LOGGED_IN);
     } else {

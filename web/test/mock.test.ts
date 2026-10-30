@@ -328,9 +328,9 @@ test("in flight: the lane's states, needs-you cards at the top of Now, send and 
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const now = q.sections.now.filter((c) => c.inflight).map((c) => [c.id, c.why]);
   assert.deepEqual(now.slice(0, 3), [
-    ["acme/api#4122", "reply ready to send"],
-    ["acme/api#4110", row("acme/api#4110").escalation!.question],
-    ["oss/tinyhttp#205", "CI failing: no local clone of oss/tinyhttp"],
+    ["acme/api#4122", "in flight: reply ready to send"],
+    ["acme/api#4110", `babysitter asks: ${row("acme/api#4110").escalation!.question}`],
+    ["oss/tinyhttp#205", "in flight: no local clone of oss/tinyhttp, so no babysitter"],
   ]);
   assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "the babysitter has it");
   const { data: o } = await call<Overview>("GET", "/api/overview");

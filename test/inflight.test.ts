@@ -153,6 +153,11 @@ test("with babysitting off, an in-flight PR comes back to Now when CI fails, and
   );
   assert.ok(now.every((x) => x.inflight));
   assert.ok(!t.desk.queue().sections.today.some((x) => x.id === "acme/web#5"));
+  // Its review and detail are as calm as its lane row: not in Now, whatever its boards would say.
+  assert.deepEqual(
+    [t.desk.item("web#5").card.bucket, t.desk.item("web#5").card.why, t.desk.item("web#3").card.bucket],
+    ["fyi", "in flight", "now"],
+  );
   assert.deepEqual(t.desk.overview().inflight, { total: 3, needs_you: 2 });
   assert.equal(t.desk.focus().sections.now.length, 2);
 });

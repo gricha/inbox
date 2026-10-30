@@ -468,6 +468,13 @@ export class Desk {
           .sort((a, b) => b[1] - a[1])
           .map(([org, items]) => ({ org, items, space: spaces.find((s) => s.scope.split(/\s+/).includes(`org:${org}`))?.name ?? null })),
       },
+      paused: {
+        ai: this.aiPausedNow() ? { why: this.aiPaused!.message, until: new Date(this.aiPaused!.until).toISOString() } : null,
+        babysitters:
+          this.sitter.paused && Date.now() < this.sitter.paused.until
+            ? { why: `Babysitters are paused: ${this.sitter.paused.why}`, until: new Date(this.sitter.paused.until).toISOString() }
+            : null,
+      },
     };
   }
 
@@ -877,6 +884,13 @@ export class Desk {
     return all.sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
   }
 
+  // Where an item's card says it is: its best placement; a PR in flight that doesn't need you is calm, as in the lane,
+  // whatever its boards would say ("CI failing" is its babysitter's to fix).
+  shownAt(e: Entry, snap: Snapshot): Placement | null {
+    const p = snap.best.get(e.item.id) ?? this.placementOf(e.item.id, snap);
+    return p && laneOwned(e) && !snap.needs.has(e.item.id) ? { ...p, bucket: "fyi", why: "in flight" } : p;
+  }
+
   board(id: string): BoardView {
     const loaded = this.requireConfig();
     if (!loaded.config.boards.some((b) => b.id === id)) throw new DeskError(404, `no board "${id}"`);
@@ -923,10 +937,9 @@ export class Desk {
     const placements = loaded.boards
       .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
       .filter((p): p is Placement => p !== undefined);
-    const best = snap.best.get(id) ?? this.placementOf(id, snap);
     const { snoozed_at: _, acked_at: __, ...state } = e.state;
     return {
-      card: this.card(e, best, snap),
+      card: this.card(e, this.shownAt(e, snap), snap),
       item: e.item,
       signals: e.analysis.signals,
       placements,
@@ -1305,9 +1318,8 @@ export class Desk {
         )
           verdicts.set(r.author.toLowerCase(), r);
       const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
-      const p = snap.best.get(it.id) ?? this.placementOf(it.id, snap);
       rows.push({
-        card: this.card(e, p, snap),
+        card: this.card(e, this.shownAt(e, snap), snap),
         state: it.state,
         base: it.base,
         ci: it.ci,

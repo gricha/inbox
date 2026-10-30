@@ -8,7 +8,7 @@ import path from "node:path";
 import type { Desk } from "./desk.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
-import { claudeError, claudeSpawn, NOT_LOGGED_IN } from "./review.ts";
+import { claudeError, claudeSpawn, NOT_LOGGED_IN, probeLogin } from "./review.ts";
 import type { ActivityEvent, Draft, InflightRow, Item, SitterRun, SitterStatus } from "./types.ts";
 
 const RUN_TIMEOUT = 30 * 60_000;
@@ -547,6 +547,7 @@ export class Babysitter {
   timers = new Map<string, NodeJS.Timeout>();
   notes = new Map<string, string>(); // why a PR can't be babysat right now: "no local clone of acme/web"
   paused: { until: number; why: string } | null = null;
+  loggedOut = false; // the last run failed on the login: probe it before the next (see probeLogin)
   clones: { at: number; map: Map<string, string> } | null = null;
   stopped = false;
   recheck: NodeJS.Timeout | null = null;
@@ -872,6 +873,20 @@ export class Babysitter {
       return;
     }
     this.notes.delete(id);
+    if (this.loggedOut) {
+      // Anything but the login failing again (a timeout, say) lets the run try.
+      const still = await probeLogin(desk.settings["analyze.command"], desk.settings["analyze.model"]).then(
+        () => false,
+        (e: unknown) => (e as Error).message === NOT_LOGGED_IN,
+      );
+      if (this.stopped) return;
+      if (still) {
+        this.pause(NOT_LOGGED_IN);
+        desk.changed();
+        return;
+      }
+      this.loggedOut = false;
+    }
 
     const me = desk.me();
     const since = this.since(id);
@@ -1040,7 +1055,10 @@ export class Babysitter {
       const auth = r.error === NOT_LOGGED_IN;
       const said = (r.summary ?? "").trim().split("\n").findLast(Boolean)?.slice(0, 300) ?? "";
       const summary = r.aborted ?? (r.error ? r.error.replaceAll(/\s+/g, " ").slice(0, 300) : said);
-      if (auth) this.pause(NOT_LOGGED_IN);
+      if (auth) {
+        this.pause(NOT_LOGGED_IN);
+        this.loggedOut = true;
+      }
       const s = this.update(id, (x) => {
         const rec = x.runs.find((y) => y.id === run.id);
         if (rec) Object.assign(rec, { outcome, pushed_oid: pushed, summary, ended_at: new Date().toISOString() });

@@ -224,6 +224,8 @@ export interface SettingsView {
   overridden: string[]; // keys set in settings.json
   errors: ConfigError[]; // settings.json problems; bad entries fall back to defaults
   github: GitHubStatus;
+  // Paused after failures in a row (an expired login): why, and when it tries again. Shown once in Settings, not per PR.
+  paused: { ai: { why: string; until: string } | null; babysitters: { why: string; until: string } | null };
 }
 
 // GET /api/agents: whether the agent in agent.driver has the desk's MCP tools and the Review Desk skill. null for driver "none".
