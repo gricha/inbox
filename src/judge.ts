@@ -184,7 +184,13 @@ export class Judge {
   // One call at a time, up to 20 items, within policy.max_per_hour. After a failure it waits (BACKOFF).
   pump(): void {
     const desk = this.desk;
-    if (desk.stopped || this.running || !desk.loaded || this.offReason()) return;
+    if (this.offReason()) {
+      // Like the AI review's i: turning it off and on (after `claude auth login`, say) tries again now.
+      this.retryAt = 0;
+      this.failures = 0;
+      return;
+    }
+    if (desk.stopped || this.running || !desk.loaded) return;
     const now = Date.now();
     if (now < this.retryAt) {
       this.arm(this.retryAt - now);

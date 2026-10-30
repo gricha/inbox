@@ -39,7 +39,7 @@ With a policy, the judge sends the gray zone to the same agent as the AI review,
 
 - Up to 20 items per call, one call at a time, never-judged items first, at most `policy.max_per_hour` items an hour (default 60). `policy.judge` (default on) turns it off.
 - Answers are kept per item, its `updated_at` and the policy's hash. An item that changed keeps its old answer until the new one lands; a new policy starts over.
-- Until an item has an answer, or if the call fails, it sits at the board's default. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner.
+- Until an item has an answer, or if the call fails, it sits at the board's default. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on (once you've run `claude auth login`, say) tries again now.
 - The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `policy: today, <why>`, or `policy: not judged yet, so the board default`.
 
 ### The coordinator
@@ -51,7 +51,7 @@ A Claude Code session the desk runs for you, wired to the desk's MCP server and 
 - **What it does.** Reads the policy (`desk_policy`), looks at the items (`desk_item`), and acts only where the policy calls for it, with `desk_act` and a `reason`, then says what it did with `desk_note`. When you ask, it rewrites the policy (`desk_policy set`) and the rules (`desk_config`: preview, show you what moves, save only on your yes). It can't post to GitHub or approve: those aren't among its tools.
 - **Its log.** Every run, action (with its reason and undo), note and policy or rules change goes in its log (`GET /api/coordinator`). When it acted in the last day, the queue's top bar says so in one quiet line ("Coordinator snoozed 3 FYI items · 4m"); a click opens the log, where each action can be undone.
 - **Talking to it.** `cd ~/.review-desk/coordinator && claude --resume <id> --mcp-config mcp.json --strict-mcp-config --tools '' --allowedTools mcp__review-desk` (Settings has it with a Copy button). While you have it open, the desk's runs wait (it checks `claude agents --json`) and pick up the events once you close it.
-- **Hygiene.** Each run is stopped after 10 minutes and killed when the desk stops; every run is logged to `desk.log` and its log. A failed run (a 401, a timeout) shows in Settings and waits 5, 10, 20, then 60 minutes before the next try; a failed first run starts over with a fresh id.
+- **Hygiene.** Each run is stopped after 10 minutes and killed when the desk stops; every run is logged to `desk.log` and its log. A failed run (a 401, a timeout) shows in Settings and waits 5, 10, 20, then 60 minutes before the next try (turning it off and on tries now); a failed first run starts over with a fresh id.
 - **Why not `claude --bg`.** A background session stays up after its turn, so resuming it with the next batch would start a copy, and the desk couldn't time it out, stop it or read its errors. A `claude -p --resume` turn exits when it's done, so it costs nothing between wakes, and it's the same session you resume in a terminal.
 - **Codex** isn't supported as the coordinator yet (Settings says so); the judge and the AI review work with it.
 

@@ -160,9 +160,10 @@ export class Coordinator {
     if (desk.stopped) return;
     const st = this.load();
     const last = desk.store.lastSeq();
-    // Turned off: what happens meanwhile isn't replayed when it's turned back on.
+    // Turned off: what happens meanwhile isn't replayed when it's turned back on, and that tries again now.
     if (this.offReason()) {
       if (st.cursor !== null && st.cursor !== last) this.save({ cursor: last });
+      if (st.retry_at) this.save({ failures: 0, retry_at: 0 });
       return;
     }
     // The first sync's flood of "new" items isn't news; start after it.

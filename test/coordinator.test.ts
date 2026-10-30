@@ -231,6 +231,14 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
   }
   assert.equal(t.fake.calls(), 1, "no retry storm");
   assert.match(t.desk.coordinatorView().log[0]!.text, /^Failed: claude CLI isn't logged in/);
+
+  // Logged in again: turning it off and on tries now instead of waiting out the pause.
+  t.fake.clear("fail");
+  t.desk.putSettings({ set: { "coordinator.enabled": false } });
+  t.desk.putSettings({ set: { "coordinator.enabled": true } });
+  await t.settle();
+  assert.equal(t.fake.calls(), 2);
+  assert.deepEqual([t.co.status().state, t.co.status().started], ["idle", true]);
 });
 
 test("while you have the session open in a terminal, runs wait", posix, async (c) => {

@@ -299,6 +299,14 @@ test("a failure leaves the board default, says why, and waits before trying agai
   assert.deepEqual([t.placed(1).bucket, t.placed(1).judge], ["later", { bucket: null, why: "", pending: true }]);
   for (let i = 0; i < 3; i++) await t.sync();
   assert.equal(t.fake.calls(), 1, "no retry storm: syncs don't call again while it waits");
+
+  // Logged in again: turning it off and on tries now instead of waiting out the pause.
+  fs.rmSync(path.join(t.fake.dir, "fail"));
+  t.desk.putSettings({ set: { "policy.judge": false } });
+  t.desk.putSettings({ set: { "policy.judge": true } });
+  await until(() => t.fake.calls() === 2);
+  await t.settle();
+  assert.deepEqual([t.desk.getPolicy().judge.state, t.placed(1).bucket], ["idle", "today"]);
 });
 
 test("one call at a time, 20 items per call, and no more than policy.max_per_hour items an hour", posix, async (c) => {
