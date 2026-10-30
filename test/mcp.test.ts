@@ -57,6 +57,7 @@ test("lists the tools", async () => {
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     "desk_act",
     "desk_brief",
+    "desk_events",
     "desk_item",
     "desk_list",
     "desk_overview",
@@ -161,6 +162,18 @@ test("desk_sync", async () => {
   assert.equal(lastCall().path, "/api/sync");
 });
 
+test("desk_events passes the cursor and wait, and fences the events", async () => {
+  const r = await call("desk_events", { after: 40, wait: 5, item: "seer#8949" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(lastCall(), { method: "GET", path: "/api/activity?after=40&wait=5&item=seer%238949", body: undefined });
+  assert.match(r.text, /^2 event\(s\) after 40 on seer#8949 · last_seq 42/);
+  assertFenced(r.text, "#41  ");
+  assert.match(r.text, /getsentry\/seer#8949 {2}reviewed by alice {2}state=approved/);
+  assert.equal(jsonBlock(r.text).last_seq, 42);
+  const none = await call("desk_events", { after: 42 });
+  assert.match(none.text, /^0 event\(s\) after 42 · last_seq 42/);
+});
+
 test("tools report a down desk as an error", async () => {
   const prev = process.env.DESK_PORT;
   process.env.DESK_PORT = String(await unusedPort());
@@ -181,7 +194,7 @@ test("`desk mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 7);
+    assert.equal((await c.listTools()).tools.length, 8);
     const r = await c.callTool({ name: "desk_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

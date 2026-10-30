@@ -1,9 +1,13 @@
-// The desk: sync loop, classification snapshot, views, and local actions.
+// The desk: runs the connectors, keeps the event log, and serves the classified views and local actions.
 import fs from "node:fs";
 import path from "node:path";
-import type { GitHub, SearchHit } from "./github/index.ts";
+import type { GitHub } from "./github/index.ts";
+import type { Connector, NewEvent } from "./connectors/connector.ts";
+import { GitHubConnector } from "./connectors/github.ts";
+import { resolution, type Resolution } from "./resolve.ts";
 import type {
   Action,
+  ActivityPage,
   AgentStatus,
   BoardSummary,
   BoardView,
@@ -27,7 +31,7 @@ import type {
 } from "./types.ts";
 import { defaultConfigText, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, type Analysis } from "./signals.ts";
-import { classify, type BoardResult, type CompiledBoard } from "./rules.ts";
+import { classify, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
@@ -48,7 +52,8 @@ import {
 
 const HOUR = 3_600_000;
 const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
-const MAX_QUERY = 256; // GitHub search rejects longer queries
+const ITEM_ACTIVITY = 8;
+const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
 
 export class DeskError extends Error {
   status: number;
@@ -66,6 +71,7 @@ interface Entry {
   state: StateRow;
   status: Status;
   isNew: boolean;
+  resolved: Resolution | null;
 }
 
 interface Snapshot {
@@ -88,7 +94,8 @@ export interface DeskOptions {
 
 export class Desk {
   store: Store;
-  github: GitHub;
+  gh: GitHubConnector;
+  connectors: Connector[];
   home: string;
   configPath: string;
   settingsPath: string;
@@ -108,22 +115,14 @@ export class Desk {
   configWarnings: ConfigError[] = [];
   ctx: Context | null = null;
   rev = 0;
-  syncing = false;
-  syncAgain = false;
-  syncedAt: string | null = null;
-  syncError: string | null = null;
-  pausedUntil = 0;
   listeners = new Set<(rev: number) => void>();
-  timer: NodeJS.Timeout | null = null;
-  tick: (() => Promise<void>) | null = null;
+  waiters = new Set<() => void>(); // long-polls on the event log
   snap: Snapshot | null = null;
   stopped = false;
   analyzing = new Set<string>();
-  contextError: string | null = null;
 
   constructor(opts: DeskOptions) {
     this.home = opts.home;
-    this.github = opts.github;
     this.now = opts.now ?? (() => new Date());
     this.notifyFn = opts.notify ?? notify;
     this.log =
@@ -138,17 +137,37 @@ export class Desk {
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
     this.ctx = this.store.get("context") as Context | null;
-    this.syncedAt = this.store.get("synced_at") as string | null;
+    this.gh = new GitHubConnector(this, opts.github);
+    this.connectors = [this.gh];
+  }
+
+  // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
+  get syncing(): boolean {
+    return this.connectors.some((c) => c.status().status === "syncing");
+  }
+
+  get syncError(): string | null {
+    return this.connectors.map((c) => c.status().error).find((e) => e !== null) ?? null;
+  }
+
+  get syncedAt(): string | null {
+    let oldest: string | null = null;
+    for (const c of this.connectors) {
+      const t = c.status().synced_at;
+      if (t === null) return null;
+      if (oldest === null || t < oldest) oldest = t;
+    }
+    return oldest;
   }
 
   // ---------------------------------------------------------------- lifecycle
 
   async init(): Promise<void> {
-    if (!this.ctx) await this.refreshContext();
+    if (!this.ctx) await this.gh.refreshContext();
     if (!fs.existsSync(this.configPath)) {
       // The default spaces come from where your work is; don't guess them from a failed fetch.
       if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.now().getTime() - 24 * HOUR)
-        throw new Error(`couldn't read your GitHub context to write a first config: ${this.contextError ?? "unknown error"}`);
+        throw new Error(`couldn't read your GitHub context to write a first config: ${this.gh.contextError ?? "unknown error"}`);
       const orgs = Object.entries(this.ctx?.orgs ?? {})
         .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
         .sort((a, b) => b[1] - a[1])
@@ -170,22 +189,13 @@ export class Desk {
   }
 
   start(): void {
-    this.tick = async () => {
-      await this.sync();
-      if (!this.stopped) this.arm();
-    };
-    void this.tick();
-  }
-
-  arm(): void {
-    if (this.timer) clearTimeout(this.timer);
-    const wait = Math.max(this.settings["github.poll_seconds"] * 1000, this.pausedUntil - Date.now());
-    this.timer = setTimeout(() => void this.tick!(), wait);
+    for (const c of this.connectors) c.start();
   }
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearTimeout(this.timer);
+    for (const c of this.connectors) c.stop();
+    for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
     this.store.close();
@@ -238,7 +248,7 @@ export class Desk {
     // Sync now: bots and close_collaborator_min change the {close_authors} searches.
     if (this.configText) this.reloadConfig(true);
     else this.changed();
-    if (this.tick && this.settings["github.poll_seconds"] !== poll) this.arm();
+    if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -279,9 +289,9 @@ export class Desk {
       github: {
         login: this.me() || null,
         auth: process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : "gh CLI",
-        error: this.syncError ?? this.contextError,
-        synced_at: this.syncedAt,
-        rate_limit: this.github.rateLimit(),
+        error: this.gh.error ?? this.gh.contextError,
+        synced_at: this.gh.syncedAt,
+        rate_limit: this.gh.api.rateLimit(),
         teams: ctx?.teams ?? [],
         orgs: Object.entries(ctx?.orgs ?? {})
           .sort((a, b) => b[1] - a[1])
@@ -329,112 +339,89 @@ export class Desk {
     }
   }
 
-  // ---------------------------------------------------------------- sync
+  // ---------------------------------------------------------------- sync and the event log
 
-  async refreshContext(): Promise<void> {
-    const me = this.ctx?.me ?? (await this.github.viewer());
-    try {
-      const c = await this.github.context(me);
-      this.ctx = { ...c, me, refreshed_at: this.now().toISOString() };
-      this.contextError = null;
-    } catch (e) {
-      this.contextError = (e as Error).message;
-      this.log(`context refresh failed: ${this.contextError}`);
-      // Retry in about an hour rather than on every poll.
-      const retry = new Date(this.now().getTime() - 23 * HOUR).toISOString();
-      this.ctx = this.ctx
-        ? { ...this.ctx, refreshed_at: retry }
-        : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
-    }
-    this.store.set("context", this.ctx);
-  }
-
-  // Board query → expanded GitHub search strings (null when it can't run, e.g. no collaborators yet).
-  expandQuery(q: string, scope: string, loaded = this.loaded): string | null {
-    let base = `${q} ${scope}`.replaceAll("{me}", this.me()).replaceAll(/\s+/g, " ").trim();
-    if (!base.includes("{close_authors}")) return base;
-    base = base.replace("{close_authors}", "").replaceAll(/\s+/g, " ").trim();
-    const min = loaded?.config.signals.close_collaborator_min ?? 3;
-    const bots = new Set((loaded?.config.signals.bots ?? []).map((b) => b.toLowerCase()));
-    const authors = Object.entries(this.ctx?.affinity ?? {})
-      .filter(([a, n]) => n >= min && a.toLowerCase() !== this.me().toLowerCase() && !bots.has(a.toLowerCase()) && !a.endsWith("[bot]"))
-      .sort((a, b) => b[1] - a[1]);
-    let out = base;
-    for (const [a] of authors) {
-      if (out.length + ` author:${a}`.length > MAX_QUERY) break;
-      out += ` author:${a}`;
-    }
-    return out === base ? null : out;
-  }
-
+  // A full pass on every connector; their own loops also run it on github.poll_seconds.
   async sync(): Promise<void> {
-    if (!this.loaded || this.stopped) return;
-    if (this.syncing) {
-      this.syncAgain = true;
-      return;
-    }
-    if (Date.now() < this.pausedUntil) return;
-    this.syncing = true;
-    this.changed();
-    try {
-      const now = this.now();
-      if (!this.ctx || now.getTime() - Date.parse(this.ctx.refreshed_at) > 24 * HOUR) await this.refreshContext();
-      const me = this.me().toLowerCase();
-      const loaded = this.loaded;
-      const queries = [...new Set(loaded.boards.flatMap((b) => this.boardQueriesFor(loaded, b)))];
-      const hits = new Map<string, SearchHit>();
-      const errors: string[] = [];
-      for (const q of queries) {
-        try {
-          const r = await this.github.search(q, 300);
-          this.store.setHits(
-            q,
-            r.hits.map((h) => h.id),
-            r.total,
-            now.toISOString(),
-          );
-          for (const h of r.hits) hits.set(h.id, h);
-        } catch (e) {
-          if (isRateLimited(e)) throw e;
-          this.store.setQueryError(q, (e as Error).message, now.toISOString());
-          errors.push(`${q}: ${(e as Error).message}`);
-        }
-      }
-      const meta = this.store.itemMeta();
-      const need = [...hits.values()].filter((h) => {
-        const m = meta.get(h.id);
-        if (!m || m.updated_at !== h.updated_at) return true;
-        const ttl = h.author.toLowerCase() === me ? 3 * 60_000 : 30 * 60_000;
-        return now.getTime() - Date.parse(m.detail_at) > ttl;
-      });
-      const items = need.length ? await this.github.details(need, this.me()) : [];
-      this.store.putItems(items, now.toISOString());
-      this.store.touchItems([...hits.keys()], now.toISOString());
-      this.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString());
-      if (!this.store.get("baseline_at")) this.store.set("baseline_at", now.toISOString());
-      const [firstError] = errors;
-      if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
-      this.syncedAt = this.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
-      this.store.set("synced_at", this.syncedAt);
-      this.syncError = errors.length ? `${errors.length} search(es) failed: ${errors[0]}` : null;
-      this.log(`synced ${queries.length} searches, ${hits.size} items, ${items.length} refreshed`);
-    } catch (e) {
-      if (this.stopped) return;
-      this.syncError = (e as Error).message;
-      if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
-      this.log(`sync failed: ${this.syncError}`);
-    } finally {
-      this.syncing = false;
-      if (!this.stopped) this.afterSync();
-    }
+    await Promise.all(this.connectors.map((c) => c.reconcile()));
   }
 
-  afterSync(): void {
+  // A connector brought in something new.
+  synced(): void {
     this.changed();
     this.notifyNewNow();
-    if (this.syncAgain) {
-      this.syncAgain = false;
-      void this.sync();
+  }
+
+  // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips.
+  ingest(from: Connector, items: Item[]): void {
+    if (!items.length) return;
+    const now = this.now().toISOString();
+    const prev = this.store.itemsById(items.map((i) => i.id));
+    const events: NewEvent[] = [];
+    for (const next of items) {
+      const before = prev.get(next.id) ?? null;
+      events.push(...from.events(before, next));
+      const was = before && this.resolutionOf(before);
+      const is = this.resolutionOf(next);
+      if (!was && is) {
+        const at = is.at && is.at < now ? is.at : now;
+        events.push({ at, item_id: next.id, kind: "resolved", actor: is.actor, data: { reason: is.reason } });
+      } else if (was && !is) events.push({ at: now, item_id: next.id, kind: "unresolved", actor: "", data: { was: was.reason } });
+    }
+    this.store.putItems(items, now);
+    this.record(from.id, events);
+  }
+
+  // Appends to the event log and wakes the long-polls.
+  record(source: string, events: NewEvent[]): void {
+    if (!events.length) return;
+    this.store.addActivity(events.map((e) => ({ ...e, source })));
+    for (const wake of this.waiters) wake();
+  }
+
+  resolutionOf(item: Item): Resolution | null {
+    if (!this.loaded) return null;
+    const ctx = this.ctx ?? NO_CONTEXT;
+    return resolution(item, analyze(item, ctx, this.loaded.config, this.now()).signals, this.settings, ctx.teams);
+  }
+
+  isResolved(id: string): boolean {
+    const item = this.store.itemsById([id]).get(id);
+    return !!item && this.resolutionOf(item) !== null;
+  }
+
+  // Events after `after`, oldest first. With `wait` (seconds, up to 60) it answers as soon as one arrives.
+  async activity(q: { after?: number; limit?: number; item?: string; wait?: number; signal?: AbortSignal }): Promise<ActivityPage> {
+    const after = q.after ?? 0;
+    const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
+    const item = q.item ? this.itemId(q.item) : undefined;
+    const deadline = Date.now() + Math.min(q.wait ?? 0, 60) * 1000;
+    for (;;) {
+      if (this.stopped) return { events: [], last_seq: after };
+      const events = this.store.activity({ after, limit, item });
+      const left = deadline - Date.now();
+      if (events.length || left <= 0 || q.signal?.aborted) return { events, last_seq: events.at(-1)?.seq ?? this.store.lastSeq() };
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          this.waiters.delete(done);
+          q.signal?.removeEventListener("abort", done);
+          resolve();
+        };
+        const timer = setTimeout(done, left);
+        this.waiters.add(done);
+        q.signal?.addEventListener("abort", done);
+      });
+    }
+  }
+
+  // A ref on the desk, or an exact id the desk no longer holds (its events outlive it).
+  itemId(ref: string): string {
+    try {
+      return this.resolve(ref);
+    } catch (e) {
+      if (e instanceof DeskError && e.status === 404 && /^[\w.-]+\/[\w.-]+#\d+$/.test(ref)) return ref;
+      throw e;
     }
   }
 
@@ -467,7 +454,7 @@ export class Desk {
 
   compute(loaded: LoadedConfig, rev: number): Snapshot {
     const now = this.now();
-    const ctx = this.ctx ?? { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
+    const ctx = this.ctx ?? NO_CONTEXT;
     const states = this.store.states();
     const baseline = (this.store.get("baseline_at") as string | null) ?? now.toISOString();
     const entries = new Map<string, Entry>();
@@ -475,18 +462,23 @@ export class Desk {
       const analysis = analyze(item, ctx, loaded.config, now);
       const state = states.get(item.id) ?? emptyState(item.id);
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
-      entries.set(item.id, { item, analysis, state, status: statusOf(state, analysis.activity_at, now), isNew });
+      const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
+      entries.set(item.id, { item, analysis, state, status: statusOf(state, analysis.activity_at, now), isNew, resolved });
     }
 
     const hits = this.store.hits();
+    const kept = this.store.kept();
     const fetched = this.store.queries();
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
     for (const board of loaded.boards) {
-      const queries = this.boardQueriesFor(loaded, board);
+      const queries = this.gh.queriesFor(loaded, board);
       const ids = new Set<string>();
       for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
-      const list = [...ids].map((id) => entries.get(id)).filter((e): e is Entry => e !== undefined);
+      // A kept item is only there to show as resolved.
+      const list = [...ids]
+        .map((id) => entries.get(id))
+        .filter((e): e is Entry => e !== undefined && (!kept.has(e.item.id) || e.resolved !== null));
       const result = classify(
         board,
         list.map((e) => ({
@@ -497,23 +489,21 @@ export class Desk {
           created_at: e.item.created_at,
           activity_at: e.analysis.activity_at,
           pinned: e.state.pinned,
-          active: e.status === "active",
+          // Resolved items leave the buckets (and the caps) like cleared ones.
+          active: e.status === "active" && !e.resolved,
+          kept: kept.has(e.item.id),
         })),
       );
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
       for (const [id, p] of result.placements) {
-        if (entries.get(id)!.status !== "active") continue;
+        const e = entries.get(id)!;
+        if (e.status !== "active" || e.resolved) continue;
         const cur = best.get(id);
         if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(id, p);
       }
     }
     return { rev, at: now.getTime(), entries, briefs: this.store.prefixed<Brief>("brief:"), boards, best };
-  }
-
-  boardQueriesFor(loaded: LoadedConfig, board: CompiledBoard): string[] {
-    const scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "";
-    return board.config.queries.map((q) => this.expandQuery(q, scope, loaded)).filter((q): q is string => q !== null);
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -538,7 +528,7 @@ export class Desk {
       author: it.author,
       author_bot: e.analysis.signals.author.bot,
       bucket: p?.bucket ?? "fyi",
-      why: p?.why ?? "",
+      why: e.resolved?.reason ?? p?.why ?? "",
       demoted: p?.demoted,
       board: p?.board ?? "",
       boards,
@@ -556,6 +546,7 @@ export class Desk {
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
       verdict: snap.briefs.get(it.id)?.head_oid === it.head_oid ? snap.briefs.get(it.id)!.verdict : null,
+      resolved: e.resolved?.reason ?? null,
     };
   }
 
@@ -569,7 +560,8 @@ export class Desk {
   summary(id: string, snap: Snapshot): BoardSummary {
     const cfg = this.requireConfig().config.boards.find((b) => b.id === id)!;
     const b = snap.boards.get(id)!;
-    const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared: b.result.inactive.length };
+    const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved).length;
+    const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared };
     let fresh = 0;
     for (const bucket of Object.keys(b.result.order) as Bucket[]) {
       counts[bucket] = b.result.order[bucket].length;
@@ -588,6 +580,7 @@ export class Desk {
       syncing: this.syncing,
       sync_error: this.syncError,
       config_errors: this.configErrors,
+      connectors: this.connectors.map((c) => c.status()),
       spaces: loaded.config.spaces.map((s) => ({
         id: s.id,
         name: s.name,
@@ -598,7 +591,7 @@ export class Desk {
         today: focus.sections.today.length,
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
       },
-      rate_limit: this.github.rateLimit(),
+      rate_limit: this.gh.api.rateLimit(),
     };
   }
 
@@ -638,15 +631,32 @@ export class Desk {
       }
     }
     const cleared: Card[] = [];
+    const resolved: Entry[] = [];
     for (const board of loaded.boards) {
       const b = snap.boards.get(board.config.id)!;
       for (const id of b.result.inactive) {
         if (seen.has(id)) continue;
         seen.add(id);
-        cleared.push(this.card(snap.entries.get(id)!, b.result.placements.get(id)!, snap));
+        const e = snap.entries.get(id)!;
+        if (e.resolved) resolved.push(e);
+        else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
     }
-    return { sections, hidden, cleared };
+    const resolvedAt = (e: Entry) => e.resolved?.at ?? e.item.updated_at;
+    return {
+      sections,
+      hidden,
+      cleared,
+      resolved: resolved
+        .sort((a, b) => resolvedAt(b).localeCompare(resolvedAt(a)))
+        .map((e) => this.card(e, this.placementOf(e.item.id, snap), snap)),
+    };
+  }
+
+  // The most urgent board placement, for items that have no active one (resolved, cleared).
+  placementOf(id: string, snap: Snapshot): Placement | null {
+    const all = [...snap.boards.values()].map((b) => b.result.placements.get(id)).filter((p): p is Placement => p !== undefined);
+    return all.sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
   }
 
   board(id: string): BoardView {
@@ -664,7 +674,7 @@ export class Desk {
         fyi: cards(b.result.order.fyi),
       },
       hidden: cards(b.result.order.hide),
-      cleared: cards(b.result.inactive),
+      cleared: cards(b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved)),
     };
   }
 
@@ -695,7 +705,7 @@ export class Desk {
     const placements = loaded.boards
       .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
       .filter((p): p is Placement => p !== undefined);
-    const best = snap.best.get(id) ?? placements.slice().sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
+    const best = snap.best.get(id) ?? this.placementOf(id, snap);
     const { snoozed_at: _, acked_at: __, ...state } = e.state;
     return {
       card: this.card(e, best, snap),
@@ -714,6 +724,7 @@ export class Desk {
       brief: snap.briefs.get(id) ?? null,
       brief_stale: (snap.briefs.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
       analyzing: this.analyzing.has(id),
+      activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
     };
   }
 
@@ -893,10 +904,6 @@ function statusOf(s: StateRow, activityAt: string, now: Date): Status {
   if (s.snooze_until && now.toISOString() < s.snooze_until && !(s.snooze_on_activity && activityAt > (s.acked_at ?? s.snoozed_at ?? "")))
     return "snoozed";
   return "active";
-}
-
-function isRateLimited(e: unknown): boolean {
-  return (e as Error)?.name === "RateLimitedError" || (typeof e === "object" && e !== null && "resetAt" in e);
 }
 
 function shortRef(c: { repo: string; number: number }): string {

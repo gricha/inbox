@@ -27,6 +27,8 @@ export interface Item {
   assignees: string[];
   created_at: string;
   updated_at: string;
+  closed_at?: string | null; // merged or closed; absent on items stored before it was fetched
+  merged_by?: string; // login, "" if unknown
   // PR-only facts; zero values for issues.
   additions: number;
   deletions: number;
@@ -305,6 +307,7 @@ export interface Card {
   status: Status;
   snooze_until: string | null;
   verdict: Brief["verdict"] | null; // from an LLM brief, if you asked for one
+  resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
 }
 
 export interface BoardSummary {
@@ -322,9 +325,19 @@ export interface Overview {
   syncing: boolean;
   sync_error: string | null;
   config_errors: ConfigError[];
+  connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number };
   rate_limit: { remaining: number; reset_at: string } | null;
+}
+
+// A source of items and events: GitHub today.
+export interface ConnectorStatus {
+  id: string; // "github"
+  name: string; // "GitHub"
+  status: "ok" | "syncing" | "paused" | "error"; // paused = rate limited
+  synced_at: string | null; // when the last full pass finished
+  error: string | null;
 }
 
 export interface BoardView {
@@ -343,6 +356,7 @@ export interface QueueView {
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
+  resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
 }
 
 export interface Brief {
@@ -365,6 +379,41 @@ export interface ItemDetail {
   brief: Brief | null;
   brief_stale: boolean;
   analyzing: boolean;
+  activity: ActivityEvent[]; // the latest events for this item, newest first
+}
+
+// ---------------------------------------------------------------------------
+// The event log (GET /api/activity, the desk_events MCP tool)
+
+export type ActivityKind =
+  | "new" // first seen on the desk
+  | "review_requested" // from you or your team; data: reviewer, type, codeowner
+  | "request_removed" // data: reviewer, type
+  | "reviewed" // by someone else; data: state (approved, changes_requested, commented)
+  | "pushed" // a new head commit; data: oid
+  | "ci" // data: from, to (green, red, pending)
+  | "commented" // by someone else
+  | "merged"
+  | "closed"
+  | "reopened"
+  | "mentioned" // data: reason (mention, team_mention)
+  | "assigned" // to you
+  | "resolved" // data: reason
+  | "unresolved"; // data: was (the reason that stopped holding)
+
+export interface ActivityEvent {
+  seq: number; // increasing; pass the last one you saw as `after`
+  at: string; // when it happened if the source says, else when the desk noticed
+  source: string; // connector id, e.g. "github"
+  item_id: string;
+  kind: ActivityKind;
+  actor: string; // login, "" if unknown
+  data: Record<string, string | boolean>;
+}
+
+export interface ActivityPage {
+  events: ActivityEvent[]; // oldest first
+  last_seq: number; // the next call's `after`: the last event's seq, or the log's latest when there are none
 }
 
 // GET /api/config

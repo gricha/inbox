@@ -5,67 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
-import type { Item } from "../src/types.ts";
+import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-
-const reviewAsk = (n: number, o: Partial<Item> = {}) =>
-  makeItem({
-    number: n,
-    author: "carol",
-    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
-    request_events: [{ at: hoursAgo(n), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
-    ...o,
-  });
-const teamPing = (n: number) =>
-  makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
-const myPr = (n: number, o: Partial<Item> = {}) =>
-  makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
-
-async function setup(items: Item[]) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
-  const gh: FakeGitHub = new FakeGitHub(items, (q) => {
-    const all = [...gh.items.values()];
-    if (q.includes("review-requested:@me") && !q.includes("-review-requested"))
-      return all.filter((i) => i.review_requests.length).map((i) => i.id);
-    if (q.includes("author:@me") && !q.includes("-author:@me")) return all.filter((i) => i.author === "me").map((i) => i.id);
-    return [];
-  });
-  let now = NOW;
-  gh.clock = () => now;
-  const notes: string[] = [];
-  const desk = new Desk({
-    home,
-    github: gh,
-    now: () => now,
-    notify: (_t, b) => {
-      notes.push(b);
-    },
-    log: () => {},
-  });
-  await desk.init();
-  return {
-    desk,
-    gh,
-    notes,
-    home,
-    setNow: (d: Date) => {
-      now = d;
-    },
-    cleanup: () => {
-      desk.stop();
-      fs.rmSync(home, { recursive: true });
-    },
-  };
-}
-
-// Lets a sync started in the background (by a save or a timer) finish.
-async function idle(desk: Desk) {
-  while (desk.syncing) {
-    await new Promise((r) => {
-      setImmediate(r);
-    });
-  }
-}
 
 test("first run writes a config with a space for the busiest org", async () => {
   const t = await setup([]);
@@ -226,11 +167,11 @@ test("notifies only for new NOW entries after the first sync", async () => {
 test("close_authors expands within GitHub's 256-char query limit", async () => {
   const t = await setup([]);
   t.desk.ctx!.affinity = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`collaborator-${i}`, 50 - i]));
-  const q = t.desk.expandQuery("is:pr is:open archived:false -is:draft -author:@me -review-requested:@me {close_authors}", "org:acme")!;
+  const q = t.desk.gh.expandQuery("is:pr is:open archived:false -is:draft -author:@me -review-requested:@me {close_authors}", "org:acme")!;
   assert.ok(q.length <= 256);
   assert.match(q, /author:collaborator-0 author:collaborator-1/);
   t.desk.ctx!.affinity = {};
-  assert.equal(t.desk.expandQuery("is:pr {close_authors}", ""), null);
+  assert.equal(t.desk.gh.expandQuery("is:pr {close_authors}", ""), null);
   t.cleanup();
 });
 

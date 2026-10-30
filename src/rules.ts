@@ -32,6 +32,7 @@ export interface Entry {
   activity_at: string;
   pinned: boolean;
   active: boolean; // not done, snoozed or muted; only active items count toward caps
+  kept?: boolean; // gone from the board's searches but shown as resolved: the filter judged it while it was there
 }
 
 export interface BoardResult {
@@ -49,10 +50,10 @@ function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
   }
 }
 
-function place(board: CompiledBoard, s: Signals): Placement | null {
+function place(board: CompiledBoard, s: Signals, kept = false): Placement | null {
   const trace: TraceStep[] = [];
   const cfg = board.config;
-  if (board.filter && cfg.filter) {
+  if (board.filter && cfg.filter && !kept) {
     const r = truthy(board.filter, s);
     trace.push({ index: -1, when: cfg.filter, ...r });
     if (!r.matched) return null;
@@ -80,7 +81,7 @@ export function classify(board: CompiledBoard, entries: Entry[]): BoardResult {
   const byBucket: Record<Bucket, Entry[]> = { now: [], today: [], later: [], fyi: [], hide: [] };
   const inactive: string[] = [];
   for (const e of entries) {
-    const p = place(board, e.signals);
+    const p = place(board, e.signals, e.kept);
     if (!p) continue;
     placements.set(e.id, p);
     if (e.active) byBucket[p.bucket].push(e);

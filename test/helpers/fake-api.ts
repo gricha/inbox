@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { checkSetting, DEFAULTS, SECTIONS, SETTINGS } from "../../src/settings.ts";
 import type {
+  ActivityEvent,
   Bucket,
   BoardSummary,
   BoardView,
@@ -50,6 +51,7 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     status: "active",
     snooze_until: null,
     verdict: null,
+    resolved: null,
     ...extra,
   };
 }
@@ -66,7 +68,21 @@ export const CARDS = {
   hidden: card("getsentry/sentry#303", "hide", "Bot PR", "bot author"),
   cleared: card("getsentry/sentry#404", "today", "Already handled", "done", { status: "done" }),
   hostile: card("acme/widgets#66", "today", "Hi\x1b]52;c;cm0gLXJmIH4=\x07\rthere", "x"),
+  resolved: card("getsentry/sentry#505", "today", "Someone else approved", "approved by alice", { resolved: "approved by alice" }),
 };
+
+export const EVENTS: ActivityEvent[] = [
+  { seq: 41, at: ago(3), source: "github", item_id: CARDS.now.id, kind: "reviewed", actor: "alice", data: { state: "approved" } },
+  {
+    seq: 42,
+    at: ago(1),
+    source: "github",
+    item_id: CARDS.resolved.id,
+    kind: "resolved",
+    actor: "alice",
+    data: { reason: "approved by alice" },
+  },
+];
 
 const summary: BoardSummary = {
   id: "reviews",
@@ -82,6 +98,7 @@ const overview: Overview = {
   syncing: false,
   sync_error: null,
   config_errors: [],
+  connectors: [{ id: "github", name: "GitHub", status: "ok", synced_at: ago(0.05), error: null }],
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
   focus: { now: 1, today: 1, new: 1 },
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
@@ -93,6 +110,7 @@ const queueView: QueueView = {
   sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
+  resolved: [CARDS.resolved],
 };
 
 const boardView: BoardView = {
@@ -130,6 +148,7 @@ function detail(c: Card): ItemDetail {
     brief: null,
     brief_stale: false,
     analyzing: false,
+    activity: EVENTS.filter((e) => e.item_id === c.id).toReversed(),
   };
 }
 
@@ -239,6 +258,11 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, putSettings(api, body));
     case "GET /api/status":
       return reply(200, { now: 1, today: 1, new: 1, text: "desk ●1 ◐1 +1" });
+    case "GET /api/activity": {
+      const after = Number(url.searchParams.get("after") ?? 0);
+      const events = EVENTS.filter((e) => e.seq > after);
+      return reply(200, { events, last_seq: events.at(-1)?.seq ?? 42 });
+    }
   }
   if (url.pathname.startsWith("/api/boards/")) return reply(404, { error: `unknown board ${decodeURIComponent(url.pathname.slice(12))}` });
   return reply(404, { error: "not found" });

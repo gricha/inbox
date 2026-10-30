@@ -1,0 +1,67 @@
+// A Desk over a FakeGitHub in a temp home, with a clock the test moves.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Desk } from "../../src/desk.ts";
+import type { Item } from "../../src/types.ts";
+import { FakeGitHub, hoursAgo, makeItem, NOW } from "./items.ts";
+
+export const reviewAsk = (n: number, o: Partial<Item> = {}) =>
+  makeItem({
+    number: n,
+    author: "carol",
+    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+    request_events: [{ at: hoursAgo(n), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
+    ...o,
+  });
+export const teamPing = (n: number) =>
+  makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+export const myPr = (n: number, o: Partial<Item> = {}) =>
+  makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
+
+// Searches return what GitHub would: open items requested from you, and your own open PRs.
+export async function setup(items: Item[]) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  const gh: FakeGitHub = new FakeGitHub(items, (q) => {
+    const all = [...gh.items.values()].filter((i) => i.state === "open");
+    if (q.includes("review-requested:@me") && !q.includes("-review-requested"))
+      return all.filter((i) => i.review_requests.length).map((i) => i.id);
+    if (q.includes("author:@me") && !q.includes("-author:@me")) return all.filter((i) => i.author === "me").map((i) => i.id);
+    return [];
+  });
+  let now = NOW;
+  gh.clock = () => now;
+  const notes: string[] = [];
+  const desk = new Desk({
+    home,
+    github: gh,
+    now: () => now,
+    notify: (_t, b) => {
+      notes.push(b);
+    },
+    log: () => {},
+  });
+  await desk.init();
+  return {
+    desk,
+    gh,
+    notes,
+    home,
+    setNow: (d: Date) => {
+      now = d;
+    },
+    cleanup: () => {
+      desk.stop();
+      fs.rmSync(home, { recursive: true });
+    },
+  };
+}
+
+// Lets a sync started in the background (by a save, a timer or the feed) finish.
+export async function idle(desk: Desk) {
+  while (desk.syncing) {
+    await new Promise((r) => {
+      setImmediate(r);
+    });
+  }
+}

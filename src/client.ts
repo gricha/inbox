@@ -2,6 +2,7 @@
 
 import type {
   Action,
+  ActivityPage,
   BoardView,
   Brief,
   ConfigDoc,
@@ -109,6 +110,11 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
     status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
     analyze: (id: string, force = false) => call<{ ok: true; brief: Brief }>("POST", "/api/analyze", { id, force }, 240_000),
+    activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));
+      return call<ActivityPage>("GET", `/api/activity?${params.toString()}`, undefined, ((o.wait ?? 0) + 15) * 1000);
+    },
     health: () => call<{ ok: true; version: string }>("GET", "/health"),
   };
 }

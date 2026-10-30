@@ -132,6 +132,17 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     return c.json(desk.status());
   });
+  // The event log. A long-poll: with ?wait= it answers as soon as there's an event after ?after=.
+  app.get("/api/activity", async (c) => {
+    const int = (key: string) => {
+      const v = c.req.query(key);
+      const n = Number(v);
+      if (v && (!Number.isInteger(n) || n < 0)) throw new DeskError(400, `${key} must be a whole number`);
+      return v ? n : undefined;
+    };
+    const q = { after: int("after"), limit: int("limit"), wait: int("wait"), item: c.req.query("item") };
+    return c.json(await desk.activity({ ...q, signal: c.req.raw.signal }));
+  });
 
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {

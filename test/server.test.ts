@@ -82,6 +82,7 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     assert.deepEqual((await client.listTools()).tools.map((x) => x.name).sort(), [
       "desk_act",
       "desk_brief",
+      "desk_events",
       "desk_item",
       "desk_list",
       "desk_overview",
@@ -89,6 +90,9 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_undo",
     ]);
     assert.match((await call("desk_overview")).text, /focus: 1 now, 0 today/);
+    const events = await call("desk_events", { after: 0, item: "api#7" });
+    assert.match(events.text, /^1 event\(s\) after 0 on api#7 · last_seq 1/);
+    assert.match(events.text, /#1 {2}\S+ {2}acme\/api#7 {2}new by alice {2}kind=pr/);
 
     const act = await call("desk_act", { ref: "api#7", action: "done" });
     const seq = Number(/Undo with desk_undo seq=(\d+)/.exec(act.text)?.[1]);
@@ -129,6 +133,25 @@ test("API round trip: overview, board, item, act, undo, status", async () => {
   const undo = await t.json("/api/undo", { method: "POST" });
   assert.deepEqual(undo, { ok: true, id: "acme/api#7", action: "done" });
   assert.equal((await t.json("/api/status")).text, "desk ●1");
+  t.cleanup();
+});
+
+test("activity: the log over HTTP, a long-poll that answers when an event lands, and bad params", async () => {
+  const t = await setup();
+  assert.deepEqual(
+    (await t.json("/api/activity")).events.map((e: { seq: number; kind: string }) => [e.seq, e.kind]),
+    [[1, "new"]],
+  );
+  assert.deepEqual(await t.json("/api/activity?after=1&item=api%237"), { events: [], last_seq: 1 });
+  const waiting = t.json("/api/activity?after=1&wait=30");
+  setTimeout(() => {
+    t.desk.record("github", [{ at: NOW.toISOString(), item_id: "acme/api#7", kind: "pushed", actor: "alice", data: { oid: "b2" } }]);
+  }, 20);
+  const page = await waiting;
+  assert.deepEqual([page.last_seq, page.events[0].kind, page.events[0].data], [2, "pushed", { oid: "b2" }]);
+  assert.equal((await t.req("/api/activity?after=-1")).status, 400);
+  assert.equal((await t.req("/api/activity?wait=soon")).status, 400);
+  assert.equal((await t.req("/api/activity?item=api%2399")).status, 404);
   t.cleanup();
 });
 

@@ -6,7 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createClient, type DeskClient } from "./client.ts";
-import type { Card, Placement } from "./types.ts";
+import type { ActivityEvent, Card, Placement } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
 const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
@@ -66,6 +66,7 @@ async function overviewText(api: DeskClient): Promise<string> {
   const o = await api.overview();
   const lines = [
     `me: ${o.me} · synced: ${o.synced_at ?? "never"}${o.syncing ? " (syncing)" : ""}${o.sync_error ? ` · sync error: ${o.sync_error}` : ""}`,
+    `sources: ${o.connectors.map((c) => `${c.name} ${c.status}`).join(", ")}`,
     `focus: ${o.focus.now} now, ${o.focus.today} today, ${o.focus.new} new`,
   ];
   for (const s of o.spaces) {
@@ -134,6 +135,20 @@ async function itemText(api: DeskClient, ref: string): Promise<string> {
       json({ card: compact(c), placements: d.placements, state: d.state }),
     ])
   );
+}
+
+const eventLine = (e: ActivityEvent) => {
+  const data = Object.entries(e.data)
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join(" ");
+  return oneLine(`#${e.seq}  ${e.at}  ${e.item_id}  ${e.kind}${e.actor ? ` by ${e.actor}` : ""}${data ? `  ${data}` : ""}`);
+};
+
+async function eventsText(api: DeskClient, q: { after?: number; wait?: number; limit?: number; item?: string }): Promise<string> {
+  const page = await api.activity(q);
+  const head = `${page.events.length} event(s) after ${q.after ?? 0}${q.item ? ` on ${q.item}` : ""} · last_seq ${page.last_seq}: pass it as \`after\` next time`;
+  if (!page.events.length) return `${head}\n${json(page)}`;
+  return head + "\n" + untrusted([...page.events.map(eventLine), json(page)]);
 }
 
 async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[number], until?: string): Promise<string> {
@@ -230,6 +245,22 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
         const r = await api.undo(seq);
         return `undid ${r.action} on ${r.id}`;
       }),
+  );
+
+  server.registerTool(
+    "desk_events",
+    {
+      description:
+        "The desk's event log, oldest first: review requested, someone else reviewed, pushed, CI went red or green, commented, merged, closed, resolved, and so on. Pass the last_seq you got as `after`. With `wait` (seconds, up to 60) it returns as soon as a new event arrives, so calling it in a loop follows the desk as things happen.",
+      inputSchema: {
+        after: z.number().int().min(0).optional().describe("Only events with a higher seq; default 0 (from the start)"),
+        wait: z.number().int().min(0).max(60).optional().describe("Seconds to wait for an event when there is none yet; default 0"),
+        limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
+        item: z.string().optional().describe("Only this item: owner/repo#123, or repo#123 if unique"),
+      },
+      annotations: readOnly,
+    },
+    (q) => run(() => eventsText(api, q)),
   );
 
   server.registerTool(

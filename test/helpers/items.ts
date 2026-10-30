@@ -1,5 +1,5 @@
 import type { Context, Item } from "../../src/types.ts";
-import type { GitHub, SearchHit } from "../../src/github/index.ts";
+import type { GitHub, NotificationPage, NotificationThread, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
 export const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();
@@ -66,6 +66,10 @@ export class FakeGitHub implements GitHub {
   searches: string[] = [];
   detailCalls: string[][] = [];
   clock = () => NOW;
+  // The notifications feed: the next poll returns `threads` (then nothing until more are queued).
+  threads: NotificationThread[] = [];
+  pollInterval = 60;
+  feedCalls: { since: string | null; last_modified: string | null }[] = [];
 
   constructor(items: Item[], route: (q: string) => string[], ctx = makeContext()) {
     for (const it of items) this.items.set(it.id, it);
@@ -94,6 +98,22 @@ export class FakeGitHub implements GitHub {
   context() {
     const { refreshed_at: _, ...rest } = this.ctx;
     return Promise.resolve(rest);
+  }
+
+  notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
+    this.feedCalls.push(opts);
+    const threads = this.threads;
+    this.threads = [];
+    const date = this.clock().toISOString();
+    if (!threads.length && opts.last_modified)
+      return Promise.resolve({ modified: false, threads, last_modified: opts.last_modified, poll_interval: this.pollInterval, date });
+    return Promise.resolve({
+      modified: true,
+      threads,
+      last_modified: `lm-${this.feedCalls.length}`,
+      poll_interval: this.pollInterval,
+      date,
+    });
   }
 
   rateLimit() {

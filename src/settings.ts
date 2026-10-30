@@ -74,6 +74,19 @@ export const SETTINGS = [
     help: "repo.mine is true for these. Repos you own count automatically.",
   },
   {
+    key: "github.resolve_on_others_approval",
+    section: "github",
+    label: "Resolve when someone else approves",
+    type: "select",
+    default: "always",
+    options: [
+      { value: "always", label: "Always" },
+      { value: "team_only", label: "Only when your team was asked" },
+      { value: "never", label: "Never" },
+    ],
+    help: "A PR you were asked to review moves to Resolved once someone else approves it after the ask. It comes back if you're asked again.",
+  },
+  {
     key: "agent.driver",
     section: "agent",
     label: "Main agent",

@@ -1,6 +1,15 @@
-// SQLite cache of GitHub items and your local triage state.
+// SQLite cache of GitHub items, your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { Item, ItemState } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Item, ItemState } from "./types.ts";
+
+export interface ItemMeta {
+  node_id: string;
+  kind: Item["kind"];
+  author: string;
+  updated_at: string;
+  detail_at: string;
+  last_hit_at: string; // the last time a search returned it
+}
 
 export interface StateRow extends ItemState {
   snoozed_at: string | null;
@@ -42,12 +51,19 @@ export class Store {
       CREATE TABLE IF NOT EXISTS state (id TEXT PRIMARY KEY, done_at TEXT, snooze_until TEXT, snooze_on_activity INTEGER NOT NULL DEFAULT 0, snoozed_at TEXT, muted INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, seen_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, item_id TEXT NOT NULL, action TEXT NOT NULL, before TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
     `);
     const cols = this.db
       .prepare("PRAGMA table_info(state)")
       .all()
       .map((c) => c.name);
     if (!cols.includes("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
+    const hitCols = this.db
+      .prepare("PRAGMA table_info(hits)")
+      .all()
+      .map((c) => c.name);
+    if (!hitCols.includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
   }
 
   close(): void {
@@ -75,20 +91,42 @@ export class Store {
       .map((r) => JSON.parse(r.data as string) as Item);
   }
 
-  itemMeta(): Map<string, { node_id: string; updated_at: string; detail_at: string }> {
-    const rows = this.db.prepare("SELECT id, node_id, updated_at, detail_at FROM items").all();
+  itemsById(ids: string[]): Map<string, Item> {
+    const stmt = this.db.prepare("SELECT data FROM items WHERE id = ?");
+    const out = new Map<string, Item>();
+    for (const id of ids) {
+      const r = stmt.get(id);
+      if (r) out.set(id, JSON.parse(r.data as string) as Item);
+    }
+    return out;
+  }
+
+  itemMeta(): Map<string, ItemMeta> {
+    const rows = this.db
+      .prepare(
+        "SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at FROM items",
+      )
+      .all();
     return new Map(
-      rows.map((r) => [
-        r.id as string,
-        { node_id: r.node_id as string, updated_at: r.updated_at as string, detail_at: r.detail_at as string },
-      ]),
+      rows.map((r) => {
+        const meta: ItemMeta = {
+          node_id: r.node_id as string,
+          kind: r.kind as Item["kind"],
+          author: r.author as string,
+          updated_at: r.updated_at as string,
+          detail_at: r.detail_at as string,
+          last_hit_at: r.last_hit_at as string,
+        };
+        return [r.id as string, meta];
+      }),
     );
   }
 
+  // last_hit_at is set on insert and by touchItems: refreshing an item no search returns doesn't renew it.
   putItems(items: Item[], now: string): void {
     const stmt = this.db.prepare(
       `INSERT INTO items (id, node_id, data, updated_at, detail_at, last_hit_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET node_id = excluded.node_id, data = excluded.data, updated_at = excluded.updated_at, detail_at = excluded.detail_at, last_hit_at = excluded.last_hit_at`,
+       ON CONFLICT(id) DO UPDATE SET node_id = excluded.node_id, data = excluded.data, updated_at = excluded.updated_at, detail_at = excluded.detail_at`,
     );
     this.tx(() => {
       for (const it of items) stmt.run(it.id, it.node_id, JSON.stringify(it), it.updated_at, it.detail_at, now);
@@ -108,11 +146,13 @@ export class Store {
 
   // --- query results
 
-  setHits(query: string, ids: string[], total: number, now: string): void {
+  // `kept`: items the search no longer returns, held on its boards for a while to show as resolved.
+  setHits(query: string, ids: string[], total: number, now: string, kept: string[] = []): void {
     this.tx(() => {
       this.db.prepare("DELETE FROM hits WHERE query = ?").run(query);
-      const stmt = this.db.prepare("INSERT OR IGNORE INTO hits (query, item_id) VALUES (?, ?)");
-      for (const id of ids) stmt.run(query, id);
+      const stmt = this.db.prepare("INSERT OR IGNORE INTO hits (query, item_id, kept) VALUES (?, ?, ?)");
+      for (const id of ids) stmt.run(query, id, 0);
+      for (const id of kept) stmt.run(query, id, 1);
       this.db
         .prepare(
           "INSERT INTO queries (query, fetched_at, total, error) VALUES (?, ?, ?, NULL) ON CONFLICT(query) DO UPDATE SET fetched_at = excluded.fetched_at, total = excluded.total, error = NULL",
@@ -137,6 +177,15 @@ export class Store {
       out.get(q)!.add(r.item_id as string);
     }
     return out;
+  }
+
+  kept(): Set<string> {
+    return new Set(
+      this.db
+        .prepare("SELECT DISTINCT item_id FROM hits WHERE kept = 1")
+        .all()
+        .map((r) => r.item_id as string),
+    );
   }
 
   queries(): Map<string, { fetched_at: string; total: number; error: string | null }> {
@@ -221,6 +270,37 @@ export class Store {
 
   markUndone(seq: number): void {
     this.db.prepare("UPDATE events SET undone = 1 WHERE seq = ?").run(seq);
+  }
+
+  // --- activity (the event log)
+
+  addActivity(events: Omit<ActivityEvent, "seq">[]): void {
+    const stmt = this.db.prepare("INSERT INTO activity (at, source, item_id, kind, actor, data) VALUES (?, ?, ?, ?, ?, ?)");
+    this.tx(() => {
+      for (const e of events) stmt.run(e.at, e.source, e.item_id, e.kind, e.actor, JSON.stringify(e.data));
+    });
+  }
+
+  // Oldest first, after `after`; or the newest `limit` for one item with `latest`.
+  activity(q: { after: number; limit: number; item?: string; latest?: boolean }): ActivityEvent[] {
+    const where = q.item === undefined ? "seq > ?" : "seq > ? AND item_id = ?";
+    const args = q.item === undefined ? [q.after, q.limit] : [q.after, q.item, q.limit];
+    return this.db
+      .prepare(`SELECT * FROM activity WHERE ${where} ORDER BY seq ${q.latest ? "DESC" : "ASC"} LIMIT ?`)
+      .all(...args)
+      .map((r) => ({
+        seq: r.seq as number,
+        at: r.at as string,
+        source: r.source as string,
+        item_id: r.item_id as string,
+        kind: r.kind as ActivityKind,
+        actor: r.actor as string,
+        data: JSON.parse(r.data as string) as ActivityEvent["data"],
+      }));
+  }
+
+  lastSeq(): number {
+    return (this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq as number | null) ?? 0;
   }
 
   // --- key/value
