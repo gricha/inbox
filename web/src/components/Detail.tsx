@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
-import { age, BUCKET_LABEL, cls, eventText, when } from "../format.ts";
+import { age, BUCKET_LABEL, cls, eventText, modelName, when } from "../format.ts";
 import { judgeStepText } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
@@ -140,7 +140,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           <h4 className="d-head">
             AI review{" "}
             <span className="quiet">
-              from {detail.ai.model}, {when(detail.ai.at)}
+              from {modelName(detail.ai.model)}, {when(detail.ai.at)}
               {detail.ai_stale ? ", before the latest commits" : ""}
             </span>
           </h4>

@@ -73,7 +73,7 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
-const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["analyze.model"], s["review.auto_ai"]]);
+const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["analyze.command"], s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
 const MAX_DRAFT = 5_000;
@@ -1140,7 +1140,6 @@ export class Desk {
       const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, {
         driver: s["agent.driver"],
         command: s["analyze.command"],
-        model: s["analyze.model"],
       });
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);

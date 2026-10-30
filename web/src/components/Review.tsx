@@ -3,7 +3,7 @@ import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, copyText, eventText, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
 import { currentFile, filePatch, orderNotes, resolvedHead, sitterLine, splitPath } from "../view.ts";
 import { CI, KeyButton, REVIEW } from "./Detail.tsx";
 
@@ -420,7 +420,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
         AI review{" "}
         {ai && (
           <span className="quiet">
-            from {ai.model}, {when(ai.at)}
+            from {modelName(ai.model)}, {when(ai.at)}
             {view.ai_stale ? ", before the latest commits" : ""}
           </span>
         )}

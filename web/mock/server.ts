@@ -106,7 +106,7 @@ function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "notify" | "h
     signals: { close_collaborator_min: s["github.close_collaborator_min"], bots: s["github.bots"], my_repos: s["github.my_repos"] },
     notify: { enabled: s["notify.enabled"], quiet: s["notify.quiet"] },
     handoff: { prompt: s["handoff.prompt"], mine: s["handoff.mine"], issue: s["handoff.issue"] },
-    analyze: { command: s["analyze.command"], model: s["analyze.model"] },
+    analyze: { command: s["analyze.command"] },
   };
 }
 
@@ -1599,6 +1599,7 @@ function detail(r: Rec): ItemDetail {
 // The review view: canned diffs and a canned agent. MOCK_ANALYZE_FAIL=1 fails like a missing CLI; MOCK_AI_MS is how long it takes.
 
 const reviews = new Map<string, AiReview>();
+const MODEL = "claude-opus-5[1m]";
 const generating = new Set<string>();
 const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
@@ -1712,7 +1713,7 @@ function written(r: Rec, head: string): AiReview {
         ]
       : [],
     head_oid: head,
-    model: config.analyze.model,
+    model: MODEL,
     at: new Date().toISOString(),
   };
 }
@@ -1720,7 +1721,7 @@ function written(r: Rec, head: string): AiReview {
 // As the background run would have left them: most of Now and Today written, one before the latest push.
 for (const r of recs) {
   const c = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
-  if (c.ai) reviews.set(r.id, { ...c.ai, head_oid: itemOf(r).head_oid, model: "sonnet", at: iso(1) });
+  if (c.ai) reviews.set(r.id, { ...c.ai, head_oid: itemOf(r).head_oid, model: MODEL, at: iso(1) });
   else if (WRITTEN[r.id] && r.id !== RUNNING && r.id !== QUEUED)
     reviews.set(r.id, { ...written(r, r.id === STALE ? "8c1f0e2a" : itemOf(r).head_oid), at: iso(r.id === STALE ? 26 : 2) });
 }

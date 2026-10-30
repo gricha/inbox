@@ -50,6 +50,17 @@ test("settings.json: bad entries fall back to defaults", () => {
   assert.equal(readSettings(file).raw, null);
 });
 
+test("a setting that no longer exists (the Claude model) loads without errors and is dropped on the next save", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
+  const file = path.join(dir, "settings.json");
+  fs.writeFileSync(file, JSON.stringify({ "analyze.model": "opus", "analyze.command": "/opt/bin/claude" }));
+  const { overrides, errors, raw } = readSettings(file);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(overrides, { "analyze.command": "/opt/bin/claude" });
+  assert.deepEqual(raw, { "analyze.command": "/opt/bin/claude" });
+  assert.equal(checkSetting("analyze.model", "opus"), 'unknown setting "analyze.model"', "and can't be set again");
+});
+
 test("writeSettings writes through a symlinked settings.json", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
   const real = path.join(dir, "dotfiles.json");
