@@ -363,7 +363,7 @@ export function App() {
         setView((v) => v && removeCard(v, c.id));
       }
       const verb = action === "snooze" ? `Snoozed ${SNOOZE.find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
-      flash(`${verb}: ${shortRef(c)}${action === "inflight" ? ". Babysitters take it from here." : ""}`, false, true);
+      flash(`${verb}: ${shortRef(c)}`, false, true);
     } catch (e) {
       flash(message(e), true);
     } finally {

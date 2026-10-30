@@ -28,7 +28,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "github",
     title: "GitHub",
-    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR.",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR or send a drafted reply.",
   },
   { id: "agent", title: "Agents" },
   { id: "policy", title: "Policy", help: "Prose guidance the judge and the coordinator follow." },
@@ -120,10 +120,10 @@ export const SETTINGS = [
   {
     key: "policy.judge",
     section: "policy",
-    label: "Let the agent place what your rules leave open",
+    label: "Let the judge place what your rules leave open",
     type: "boolean",
     default: true,
-    help: "Items no rule matched, and items a rule sends to judge, go to your agent with the policy, 20 at a time. Until it answers they use the board's default. Nothing is judged while the policy is empty.",
+    help: "Items no rule matched, and items a rule sends to judge, go to the judge (your main agent) with the policy, 20 at a time. Until it answers they use the board's default. Nothing is judged while the policy is empty.",
   },
   {
     key: "policy.max_per_hour",

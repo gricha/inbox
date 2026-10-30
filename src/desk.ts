@@ -1127,7 +1127,7 @@ export class Desk {
     return { ok: true, reason: null };
   }
 
-  // POST /api/review/:id/approve: the desk's one GitHub write, on your keypress; `head` is the commit the view showed, so a newer push isn't approved unread.
+  // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your keypress; `head` is the commit the view showed, so a newer push isn't approved unread.
   async approve(ref: string, head: string, body?: string): Promise<{ url: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
