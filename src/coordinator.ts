@@ -162,6 +162,9 @@ export class Coordinator {
     const last = desk.store.lastSeq();
     // Turned off: what happens meanwhile isn't replayed when it's turned back on, and that tries again now.
     if (this.offReason()) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+      this.nextAt = null;
       if (st.cursor !== null && st.cursor !== last) this.save({ cursor: last });
       if (st.retry_at) this.save({ failures: 0, retry_at: 0 });
       return;

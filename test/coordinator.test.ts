@@ -235,6 +235,7 @@ test("a 401 shows as the status, waits before the next try, and doesn't retry on
   // Logged in again: turning it off and on tries now instead of waiting out the pause.
   t.fake.clear("fail");
   t.desk.putSettings({ set: { "coordinator.enabled": false } });
+  assert.deepEqual([t.co.status().state, t.co.status().next_at], ["off", null], "nothing stays scheduled while it's off");
   t.desk.putSettings({ set: { "coordinator.enabled": true } });
   await t.settle();
   assert.equal(t.fake.calls(), 2);
