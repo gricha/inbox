@@ -426,15 +426,15 @@ test("a config saved after the first start can't set settings: the agent-reachab
   };
   const first = await open();
   const r = first.putConfig(`${first.getConfig().text}\n[analyze]\ncommand = "/tmp/not-claude"\n`, first.getConfig().hash);
-  assert.equal(r.ok, true);
+  assert.deepEqual(
+    [r.ok, r.errors.map((e) => e.path)],
+    [false, ["analyze"]],
+    "refused, so a desk that hasn't moved its settings yet can't take it at the next start",
+  );
   await idle(first);
   first.stop();
   const desk = await open();
   assert.equal(desk.settings["analyze.command"], "claude");
-  assert.deepEqual(
-    desk.getConfig().warnings?.map((w) => w.path),
-    ["analyze"],
-  );
 });
 
 test("settings that change the searches sync right away", async () => {

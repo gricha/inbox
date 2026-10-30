@@ -1502,6 +1502,8 @@ export class Desk {
       throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
     if (!loaded) return { ok: false, errors, warnings };
+    // A save never brings settings back into config.toml: an unmigrated desk would move them to settings.json on its next start.
+    if (warnings.length) return { ok: false, errors: warnings, warnings: [] };
     const real = fs.realpathSync(this.configPath); // keep a symlinked config a symlink
     fs.writeFileSync(`${real}.tmp`, text);
     fs.renameSync(`${real}.tmp`, real);
