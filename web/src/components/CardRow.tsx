@@ -6,9 +6,11 @@ import {
   cardFacts,
   checkNames,
   firstClause,
+  handLabel,
   keepUnits,
   keyParts,
   nextText,
+  noCloneOf,
   opening,
   problems,
   says,
@@ -25,6 +27,7 @@ export interface RowCtx {
   selected: string | null;
   expanded: string | null;
   armed: string | null; // the draft a first y armed: a second y sends it
+  babysitting: boolean; // d hands your PR to a babysitter, or only puts it in flight
   leaving: Set<string>;
   snoozeFor: string | null;
   showSignals: boolean;
@@ -99,8 +102,9 @@ export function CardRow({
   // The gist is as long as the call is heavy: up to three lines to look closely, two to skim, one to skip.
   const lines = p?.verdict === "skip" ? 1 : p?.verdict === "skim" ? 2 : 3;
   // Selected, about four lines of it: Enter opens the review with the rest.
-  const gist =
-    p?.summary && (sel ? opening(p.summary, 320) : lines === 1 ? firstClause(p.summary) : opening(p.summary, lines === 2 ? 140 : 200));
+  // A re-review leads with what changed since you looked; Enter's review has the whole summary.
+  const text = p?.since ?? p?.summary;
+  const gist = text && (sel ? opening(text, 320) : lines === 1 ? firstClause(text) : opening(text, lines === 2 ? 140 : 200));
   const summary = gist && keepUnits(gist);
   const concerns = (p?.concerns ?? []).map(keepUnits);
   const shown = sel ? concerns : p?.verdict === "look" || p?.risk === "high" ? concerns.slice(0, 1).map((c) => opening(c, 0, false)) : [];
@@ -111,13 +115,18 @@ export function CardRow({
   const named = mine && card.inflight && card.ci === "red" && required.length ? `CI failing: ${checkNames(required)}` : "";
   const failing = mine && !card.inflight && card.ci === "red" && required.length ? `${checkNames(required)} failing` : "";
   const optional = mine && card.ci !== "red" && card.checks_optional?.length ? "optional check failing" : "";
-  const event = card.kind === "issue" && variant === "active" ? card.last_event : undefined;
+  // An issue's latest event, or who last spoke on your PR: context the why doesn't give.
+  const event = variant === "active" && (card.kind === "issue" || (mine && !card.inflight)) ? card.last_event : undefined;
+  // In flight with no clone to work in: the problem is the why, and the link under the card says where to set one up.
+  const noClone = mine && card.inflight ? noCloneOf(card) : undefined;
   const why =
-    event && onlyNews(card.why)
+    event && card.kind === "issue" && onlyNews(card.why)
       ? (card.involved ?? "")
-      : named && card.why.endsWith("CI failing")
-        ? `${card.why}: ${checkNames(required)}`
-        : card.why;
+      : noClone
+        ? `no babysitter${named ? `: ${named}` : ""}`
+        : named && card.why.endsWith("CI failing")
+          ? `${card.why}: ${checkNames(required)}`
+          : card.why;
   // A problem the why already says colours the why instead of showing twice.
   const said = (f: { text: string }) => says(why, f.text);
   const all = problems(card);
@@ -128,8 +137,6 @@ export function CardRow({
   // Your own PR's size tells you nothing.
   const size = p && card.kind === "pr" && !mine ? sizeOf(card) : undefined;
   const reply = mine && card.inflight ? card.reply : undefined;
-  // In flight with no clone to work in: where to set one up.
-  const noClone = mine && card.inflight ? /no local clone of (\S+?),/.exec(card.why)?.[1] : undefined;
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -163,7 +170,7 @@ export function CardRow({
         >
           <span className="title-line">
             <span className="title">{card.title}</span>
-            {card.new && !event && (
+            {card.new && !(event && card.kind === "issue") && (
               // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a CSS-drawn dot with no image file behind it
               <span className="new-dot" role="img" aria-label="new activity" title="New activity since you looked" />
             )}
@@ -183,7 +190,7 @@ export function CardRow({
               {variant === "cleared" ? (
                 <span>{clearedText(card)}</span>
               ) : variant === "hidden" ? (
-                <span>Hidden by a rule. Open it to see which.</span>
+                <span className="why">{card.why || "hidden by your rules"}</span>
               ) : (
                 (!inRun || variant === "resolved") &&
                 why &&
@@ -197,7 +204,8 @@ export function CardRow({
                 ))}
               {compact && failing && <span className="fact-word">{atCommas(failing)}</span>}
               {optional && <span className="fact-word nowrap">{optional}</span>}
-              {away && card.demoted && <span>{card.demoted}</span>}
+              {/* The verdict on the right already says skip it. */}
+              {away && card.demoted && !(ai?.verdict === "skip" && card.demoted === "the AI says skip it") && <span>{card.demoted}</span>}
             </span>
             {(size !== undefined || ai) && (
               <span className="ai-word">
@@ -209,16 +217,24 @@ export function CardRow({
             )}
           </span>
           {compact ? null : summary ? (
-            <span className={cls("gist", older && "older", !sel && `clip clip-${lines}`)}>{summary}</span>
+            <span className={cls("gist", older && "older", !sel && `clip clip-${lines}`)}>
+              {p?.since && <b>Since your review: </b>}
+              {summary}
+            </span>
           ) : reply ? (
-            // The reply you'd send with y, as the lane shows it: a margin note.
-            <span className={cls("concern", "reply", !sel && "clip")}>{sel ? reply.body : opening(reply.body, 0, false)}</span>
-          ) : failing || (next && !sel) ? (
-            // Selected, the keys say what d does.
-            <Dots className="gist" parts={[failing, !sel && next && withKeys(next)].filter(Boolean)} />
+            // The reply y sends, as the lane shows it: who and what it answers, in pencil, then what you'd post as you.
+            <span className={cls("concern", "reply", !sel && "clip")}>
+              <span className="reply-to">{replyTo(reply, sel)}</span>{" "}
+              <span className="reply-body">{sel ? reply.body : opening(reply.body, 0, false)}</span>
+            </span>
+          ) : event && !open ? (
+            // Opened, an issue's activity is listed below. Selected, the keys say what d does.
+            <Dots
+              className="gist event"
+              parts={[failing, eventText(event, ctx.me), age(event.at, ctx.now), !sel && next && withKeys(next)].filter(Boolean)}
+            />
           ) : (
-            // Opened, its activity is listed below.
-            event && !open && <Dots className="gist event" parts={[eventText(event, ctx.me), age(event.at, ctx.now)]} />
+            (failing || (next && !sel)) && <Dots className="gist" parts={[failing, !sel && next && withKeys(next)].filter(Boolean)} />
           )}
           {shown.map((c) => (
             <span key={c} className={cls("concern", older && "older", !sel && "clip")}>
@@ -229,7 +245,7 @@ export function CardRow({
       </div>
       {noClone && (
         <p className="lane-link">
-          <a href="#/settings/inflight">Set up a local clone of {noClone} so a babysitter can take it</a>
+          <a href="#/settings/inflight">Set up a local clone of {noClone}</a>
         </p>
       )}
       {sel && !open && <More card={card} ctx={ctx} mine={mine} away={!!away} inRun={!!inRun} />}
@@ -266,47 +282,65 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
     ctx.run(card, k);
   };
   const facts = cardFacts(card, ctx.me, away, inRun);
-  const hand = card.next?.includes("hands it to a babysitter") ? "Hand to a babysitter" : "In flight";
   const armed = !!card.reply && ctx.armed === card.reply.id;
+  const github = <KeyButton k="o" label={card.why.startsWith("approved and green") ? "Merge on GitHub" : "Open on GitHub"} run={run} />;
+  // In flight, the key that finishes it comes first (Send, or Answer), then x, enter and o, and d last, as in the lane.
+  if (mine && card.inflight)
+    return (
+      <div className="more">
+        <Facts facts={facts} />
+        <div className="actions card-keys">
+          {card.reply && (
+            <KeyButton
+              k="y"
+              label={armed ? "again to send" : "Send"}
+              title="Post this reply on GitHub, as you: press y twice"
+              className={cls(armed && "armed")}
+              run={run}
+            />
+          )}
+          {card.escalated && card.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${card.resume}`} run={run} />}
+          {card.escalated && <KeyButton k="x" label="Dismiss the question" run={run} />}
+          <KeyButton k="enter" label={noCloneOf(card) ? "Set up a local clone" : "Show in flight"} run={run} />
+          {github}
+          <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />
+        </div>
+      </div>
+    );
   return (
     <div className="more">
-      {facts.length > 0 && (
-        <p className="card-facts">
-          {facts.map((f) => (
-            <span key={f}>{f}</span>
-          ))}
-        </p>
-      )}
+      <Facts facts={facts} />
       <div className="actions card-keys">
-        <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : card.inflight ? "Show in flight" : "Review"} run={run} />
-        <KeyButton k="o" label="Open on GitHub" run={run} />
-        {mine && card.inflight && card.reply && (
-          <KeyButton
-            k="y"
-            label={armed ? "Press y again to send" : "Send"}
-            title="Post this reply on GitHub, as you: press y twice"
-            className={cls(armed && "armed")}
-            run={run}
-          />
-        )}
-        {mine && card.inflight && card.escalated && (
-          <>
-            {card.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${card.resume}`} run={run} />}
-            <KeyButton k="x" label="Dismiss" title="Dismiss the question" run={run} />
-          </>
-        )}
-        {mine && <KeyButton k="d" label={card.inflight ? "Take back" : hand} run={run} />}
-        {/* A PR in flight is its babysitter's: d takes it back first. */}
-        {!card.inflight && (
-          <>
-            <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
-            <KeyButton k="s" label="Snooze" run={run} />
-            <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />
-          </>
-        )}
+        {/* Approved and green, merging is the next step: o says so, first. */}
+        {card.why.startsWith("approved and green") && github}
+        <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : "Review"} run={run} />
+        {!card.why.startsWith("approved and green") && github}
+        {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
+        <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
+        <KeyButton k="s" label="Snooze" run={run} />
+        <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />
       </div>
     </div>
   );
+}
+
+function Facts({ facts }: { facts: string[] }) {
+  if (!facts.length) return null;
+  return (
+    <p className="card-facts">
+      {facts.map((f) => (
+        <span key={f}>{f}</span>
+      ))}
+    </p>
+  );
+}
+
+// "To dana:" on the card; selected, what it answers too: 'To dana on src/api.ts:88: "Should the cursor be opaque?"'.
+function replyTo(d: NonNullable<Card["reply"]>, whole: boolean): string {
+  const by = d.by === "agent" ? "Your agent's reply to" : "To";
+  if (!whole || !d.quote) return `${by} ${whole ? d.to : d.to.split(" on ")[0]}:`;
+  const first = opening(d.quote, 0, false);
+  return `${by} ${d.to}: “${first}${first.length < d.quote.trim().length ? "…" : ""}”`;
 }
 
 function SnoozeMenu({ onPick, onClose }: { onPick: (until: string) => void; onClose: () => void }) {

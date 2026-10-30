@@ -809,6 +809,7 @@ const SEEDS: Seed[] = [
     age: 90,
     upd: 6,
     reviews: [["kai", "commented", 6]],
+    log: [["commented", "priya", 2]],
     mergeable: "clean",
     size: [420, 66, 12],
     threads: [3, 4],
@@ -1139,14 +1140,24 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
   ] as const) {
     const cap = b.caps?.[from];
     if (cap === undefined) continue;
-    let used = 0;
-    for (const { r, p } of rows) {
-      if (p.bucket !== from || status(r) !== "active" || r.seed.resolved || laneOwned(r)) continue;
-      if (r.state.pinned || (p.rule !== null && b.rules[p.rule]?.nocap)) continue;
-      if (++used > cap) {
-        p.bucket = to;
-        p.demoted = `${from.charAt(0).toUpperCase()}${from.slice(1)} was full on ${b.name} (${cap})`;
-      }
+    // As src/rules.ts: over the cap, the lightest AI call leaves first (skip, skim, not reviewed yet).
+    const call = (r: Rec) => {
+      const ai = reviews.get(r.id);
+      if (ai?.head_oid !== itemOf(r).head_oid) return 1;
+      return ai.risk === "high" || ai.verdict === "look" ? 0 : ai.verdict === "skim" ? 2 : 3;
+    };
+    const counted = rows.filter(
+      ({ r, p }) =>
+        p.bucket === from &&
+        status(r) === "active" &&
+        !r.seed.resolved &&
+        !laneOwned(r) &&
+        !r.state.pinned &&
+        !(p.rule !== null && b.rules[p.rule]?.nocap),
+    );
+    for (const { r, p } of counted.toSorted((x, y) => call(x.r) - call(y.r)).slice(cap)) {
+      p.bucket = to;
+      p.demoted = call(r) === 3 ? "the AI says skip it" : `${from.charAt(0).toUpperCase()}${from.slice(1)} takes ${cap} from ${b.name}`;
     }
   }
   return rows;
@@ -1170,7 +1181,10 @@ function chips(r: Rec): string[] {
 function cardOf(r: Rec, p: Placement): Card {
   const s = r.seed;
   const sig = signals(r);
+  const me = sig.me;
+  const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
   return {
+    ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
     id: r.id,
     kind: sig.item.kind,
     repo: s.repo,
@@ -1202,6 +1216,13 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
   };
+}
+
+// As Desk.queue(): a cleared item the coordinator put away, its latest action still in effect, says so and why.
+function byCoordinator(c: Card): Card {
+  const a = log.find((e) => e.kind === "act" && e.item_id === c.id && !undone(e));
+  const last = events.findLast((x) => x.id === c.id);
+  return a && last && a.undo_seq === last.seq ? { ...c, cleared_by_coordinator: a.text } : c;
 }
 
 // Like src/desk.ts, a board view skips resolved items; the queue lists them under Resolved.
@@ -1264,7 +1285,14 @@ function queue(): QueueView {
   for (const b of config.boards) {
     for (const { r, p } of boardPlacements(b)) {
       if (r.seed.resolved) {
-        if (!resolved.has(r.id)) resolved.set(r.id, cardOf(r, p));
+        // As Desk.queue(): what was in Now or Today, or what you touched, from the last day.
+        const yours =
+          p.bucket === "now" ||
+          p.bucket === "today" ||
+          !!r.state.seen_at ||
+          r.seed.resolved === "you approved" ||
+          r.seed.resolved === "no longer requested";
+        if (!resolved.has(r.id) && yours && (r.seed.upd ?? 1) <= 24) resolved.set(r.id, cardOf(r, p));
         continue;
       }
       if (laneOwned(r)) continue; // the In-flight lane has it
@@ -1281,11 +1309,12 @@ function queue(): QueueView {
   return {
     sections: { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") },
     hidden: of("hide"),
-    cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
+    cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
     now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
     ai_paused: autoAiOn() ? aiPaused : null,
+    babysitting: setting("inflight.babysit"),
   };
 }
 
@@ -1305,6 +1334,9 @@ function top(c: Card): Card {
       s.optional?.length && { checks_optional: s.optional },
     );
     if (reply) out.reply = reply;
+    // As Desk.card(): who last spoke on it.
+    const said = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
+    if (said && !laneOwned(r)) out.last_event = said;
     if (laneOwned(r)) {
       const f = flightOf(r);
       const resume = laneRow(r).resume;
@@ -1339,7 +1371,15 @@ function preflightOf(r: Rec): Preflight {
   if ((r.seed.kind ?? "pr") !== "pr" || r.seed.author === ME || r.seed.resolved) return { state: "none" };
   const ai = reviews.get(r.id);
   const got = ai
-    ? { verdict: ai.verdict, risk: ai.risk, summary: ai.summary, concerns: ai.concerns.slice(0, 2), notes: ai.notes.length, at: ai.at }
+    ? {
+        verdict: ai.verdict,
+        risk: ai.risk,
+        summary: ai.summary,
+        ...(ai.since && { since: ai.since }),
+        concerns: ai.concerns.slice(0, 2),
+        notes: ai.notes.length,
+        at: ai.at,
+      }
     : {};
   const state = (): Preflight["state"] => {
     if (ai?.head_oid === itemOf(r).head_oid) return "ready";
@@ -1356,8 +1396,7 @@ function nextOf(r: Rec): string | undefined {
   const sig = signals(r);
   const ready = sig.pr.review === "approved" && sig.pr.ci === "green" && sig.pr.mergeable === "clean" && !sig.item.draft;
   if (laneOwned(r) || ready) return undefined;
-  const hand =
-    setting("inflight.babysit") && setting("agent.driver") === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
+  const hand = setting("inflight.babysit") ? "d hands it to a babysitter" : "d puts it in flight";
   if (sig.pr.mergeable === "conflict") return `merge conflict with ${sig.pr.base}: ${hand}`;
   if (sig.pr.ci === "red") return `CI failing: ${hand}`;
   if (sig.pr.review === "changes_requested") return `changes requested: ${hand}`;
@@ -1395,6 +1434,13 @@ function needsYou(r: Rec): string | null {
   const unsent = f.drafts.filter((d) => !d.sent_at).length;
   if (f.question) return `babysitter asks: ${f.question.question}`;
   if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
+  // As babysit.ts: with babysitting off, nobody works on it, so the problem itself is why it's back with you.
+  if (!setting("inflight.babysit")) {
+    const sig = signals(r);
+    if (sig.pr.ci === "red") return "CI failing";
+    if (sig.pr.mergeable === "conflict") return "merge conflict";
+    return sig.pr.review === "changes_requested" ? "new review comments" : null;
+  }
   return r.seed.fly?.needs ?? null;
 }
 
@@ -1427,10 +1473,14 @@ function laneRow(r: Rec): InflightRow {
   const f = flightOf(r);
   const sig = signals(r);
   const by = (st: ReviewState) => (s.reviews ?? []).filter(([a, x]) => x === st && a !== ME).map(([a]) => a);
+  const off = !setting("inflight.babysit");
+  // Off, nothing watches it or works on it (the lane's intro says so once); a question already asked still waits.
   const sitter: SitterStatus = f.question
     ? { state: "waiting", text: `needs you: ${f.question.question}`, since: f.question.at }
-    : (s.fly?.sitter ?? { state: "idle", text: "watching", since: null });
-  const session = s.fly?.session;
+    : off
+      ? { state: "idle", text: "", since: null }
+      : (s.fly?.sitter ?? { state: "idle", text: "watching", since: null });
+  const session = off ? undefined : s.fly?.session;
   const running = sitter.state === "running";
   const [owner = "", name = ""] = s.repo.split("/");
   return {
@@ -1676,15 +1726,16 @@ const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
 const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
-const autoAiOn = () => setting("review.auto_ai") && setting("agent.driver") !== "none";
+const autoAiOn = () => setting("review.auto_ai");
 
 // What the agent wrote (or will write) for the other PRs in Now and Today, so every card has something real to skim.
-const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "concerns">> = {
+const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns">> = {
   "acme/api#4099": {
     verdict: "look",
     risk: "medium",
     summary:
       "Removes the v1 session-cookie middleware and moves the four routes that still used it onto token auth. Most of the diff deletes compatibility shims and their tests.",
+    since: "Moves /v1/export onto token auth too and adds a Deprecation header, but cookie callers still break with no window to switch.",
     concerns: ["/v1/export still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."],
   },
   "acme/web#2301": {
@@ -1762,7 +1813,7 @@ const QUEUED = "acme/ml-pipeline#307";
 
 function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
-  const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
+  const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   const [f] = files;
   return {
     verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
@@ -1791,7 +1842,7 @@ function written(r: Rec, head: string): AiReview {
 
 // As the background run would have left them: most of Now and Today written, one before the latest push.
 for (const r of recs) {
-  const c = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
+  const c = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   if (c.ai) reviews.set(r.id, { ...c.ai, head_oid: itemOf(r).head_oid, model: MODEL, at: iso(1) });
   else if (WRITTEN[r.id] && r.id !== RUNNING && r.id !== QUEUED)
     reviews.set(r.id, { ...written(r, r.id === STALE ? "8c1f0e2a" : itemOf(r).head_oid), at: iso(r.id === STALE ? 26 : 2) });
@@ -1856,7 +1907,7 @@ function reviewView(r: Rec): ReviewView {
     card: d.card,
     item: d.item,
     handoff_prompt: d.handoff_prompt,
-    files: canned(r.id, r.seed.repo, r.seed.n, r.seed.title).files,
+    files: canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size).files,
     files_error: null,
     ai: d.ai,
     ai_stale: d.ai_stale,
@@ -2289,10 +2340,7 @@ const settingsView = (): SettingsView => ({
   errors: [],
   github: github(),
   paused: {
-    ai:
-      autoAiOn() && aiPaused
-        ? { why: `AI reviews are paused: ${aiPaused}`, until: new Date(Date.now() + 30 * 60_000).toISOString() }
-        : null,
+    ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
     babysitters: null,
   },
 });
@@ -2323,12 +2371,9 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 
 const linked = new Set(["claude-code mcp"]);
 function agentStatus(): AgentStatus {
-  const driver = String(overrides["agent.driver"] ?? DEFAULTS["agent.driver"]);
-  if (driver === "none") return { driver, mcp: null, skill: null };
-  const [command, skills] =
-    driver === "codex"
-      ? ["codex mcp add review-desk --url http://localhost:47823/mcp", `${homedir()}/.agents/skills`]
-      : ["claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp", `${homedir()}/.claude/skills`];
+  const driver = "claude-code";
+  const command = "claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp";
+  const skills = `${homedir()}/.claude/skills`;
   return {
     driver,
     mcp: { connected: linked.has(`${driver} mcp`), command },
@@ -2355,7 +2400,6 @@ const setting = <K extends keyof typeof DEFAULTS>(k: K) => ({ ...DEFAULTS, ...ov
 function judgeOff(): string | null {
   if (!policyText.trim()) return "there's no policy yet";
   if (!setting("policy.judge")) return "it's turned off";
-  if (setting("agent.driver") === "none") return "there's no agent: pick one under Agents";
   return null;
 }
 
@@ -2398,15 +2442,7 @@ const note = (minutesAgo: number, run: number, kind: CoordinatorLogEntry["kind"]
 const undone = (e: CoordinatorLogEntry) => e.undo_seq !== null && !events.some((x) => x.seq === e.undo_seq);
 
 function coordinatorStatus(): CoordinatorStatus {
-  const driver = setting("agent.driver");
-  const off =
-    driver === "codex"
-      ? "Coordinator needs Claude Code for now"
-      : driver === "none"
-        ? "Pick Claude Code above to use it"
-        : !setting("coordinator.enabled")
-          ? "Off"
-          : null;
+  const off = setting("coordinator.enabled") ? null : "Off";
   const dir = `${homedir()}/.review-desk/coordinator`;
   return {
     state: off ? "off" : "idle",
@@ -2414,11 +2450,11 @@ function coordinatorStatus(): CoordinatorStatus {
     session_id: SESSION,
     started: true,
     dir,
-    command: `cd ${dir} && claude --resume ${SESSION} --mcp-config mcp.json --strict-mcp-config --tools '' --allowedTools mcp__review-desk`,
+    command: `cd ${dir} && claude --resume ${SESSION} --mcp-config mcp.json`,
     running_since: null,
     pending: 0,
     next_at: null,
-    last_run: { n: 14, kind: "events", started_at: iso(0.06), ms: 41_000, ok: true, events: 6, actions: 3, error: null },
+    last_run: { n: 14, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
     error: null,
     policy_empty: !policyText.trim(),
     held: false,
@@ -2626,7 +2662,7 @@ for (const [id, why] of [
   const { undo_seq } = act(resolve(id), "snooze", "tomorrow");
   note(5 * 60, 12, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
 }
-note(5 * 60, 12, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left.");
+note(5 * 60, 12, "note", "Snoozed 3 FYI items until tomorrow: 2 CODEOWNERS pings and a thread you've left.");
 note(5 * 60, 12, "run", "6 events, 3 actions · 41s");
 note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
 note(61, 13, "run", "2 events, 0 actions · 18s");
@@ -2639,7 +2675,7 @@ note(61, 13, "run", "2 events, 0 actions · 18s");
     undo_seq,
   });
 }
-note(3, 14, "note", "Snoozed one Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
+note(3, 14, "note", "Snoozed 1 Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
 note(3, 14, "run", "3 events, 1 action · 22s");
 
 // Two reviews being written, for longer than a test run or a round of shots.

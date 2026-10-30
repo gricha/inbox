@@ -106,9 +106,14 @@ export function TopBar({
           >
             <Dots
               parts={[
-                <>
-                  Coordinator<span className="cl-what">{shown && ` ${actedText(shown)}`}</span>
-                </>,
+                shown ? (
+                  <>
+                    <span className="cl-wide">Coordinator {actedText(shown)}</span>
+                    <span className="cl-narrow">{actedText(shown).replace(/^./, (c) => c.toUpperCase())}</span>
+                  </>
+                ) : (
+                  "Coordinator"
+                ),
                 ...(shown ? [sinceText(shown.at, now)] : []),
               ]}
             />

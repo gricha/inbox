@@ -1,5 +1,5 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
-import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type {
   AgentStatus,
   CoordinatorView,
@@ -387,6 +387,15 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
 
+// "--resume <id>" stays together when a command wraps.
+const argGroups = (command: string) =>
+  command.split(" ").reduce<string[]>((out, a) => {
+    const last = out.at(-1);
+    if (last?.startsWith("--") && !last.includes(" ") && !a.startsWith("--")) out[out.length - 1] = `${last} ${a}`;
+    else out.push(a);
+    return out;
+  }, []);
+
 // Under the coordinator switch: what it's doing, and the command that opens its session in a terminal.
 function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads: number; now: number; flash: Flash }) {
   const [view, setView] = useState<CoordinatorView | null>(null);
@@ -415,8 +424,16 @@ function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads
             Session {s.session_id.slice(0, 8)}. Talk to it in a terminal to shape the policy or the rules:
           </p>
           <div className="coord-cmd">
-            {/* One line, so a wrap can't split the id or an argument from its flag; Copy copies all of it. */}
-            <code title={command}>{command}</code>
+            {/* Every flag shows: it wraps between arguments, never inside one or between a flag and its value. */}
+            <code>
+              {argGroups(command).map((g, i) => (
+                // oxlint-disable-next-line react/no-array-index-key -- positional parts of one command
+                <Fragment key={i}>
+                  {i > 0 && " "}
+                  <span className="nowrap">{g}</span>
+                </Fragment>
+              ))}
+            </code>
             <button
               type="button"
               className="btn"
@@ -433,7 +450,7 @@ function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads
   );
 }
 
-// Keyed by the driver picked above it, so picking another agent starts fresh.
+// Whether Claude Code has the desk's MCP tools and skill, and Connect when it doesn't.
 function AgentLink({ active, loads }: { active: boolean; loads: number }) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -649,6 +666,7 @@ export function Settings({
                 now={now}
               />
             )}
+            {x.id === "agent" && <AgentLink active={active} loads={loads} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
             {view && defs.length > 0 && (
@@ -660,9 +678,7 @@ export function Settings({
                     view={view}
                     onView={onView}
                     extra={
-                      d.key === "agent.driver" ? (
-                        <AgentLink key={String(view.values[d.key])} active={active} loads={loads} />
-                      ) : d.key === "coordinator.enabled" ? (
+                      d.key === "coordinator.enabled" ? (
                         <CoordinatorInfo active={active} loads={loads} now={now} flash={flash} />
                       ) : (
                         d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />

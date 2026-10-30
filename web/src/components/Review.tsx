@@ -1,10 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, orderNotes, resolvedHead, says, sitterParts, splitPath } from "../view.ts";
+import {
+  currentFile,
+  filePatch,
+  handLabel,
+  noCloneOf,
+  orderNotes,
+  resolvedHead,
+  says,
+  sitterNews,
+  sitterParts,
+  splitPath,
+} from "../view.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, Dots, KeyButton, REVIEW } from "./Detail.tsx";
 
@@ -37,6 +48,7 @@ export function Review({
   id,
   loads,
   me,
+  babysitting,
   now,
   inert,
   flash,
@@ -49,6 +61,7 @@ export function Review({
   id: string;
   loads: number; // bumped on every refresh, so the review follows the server's updates
   me: string; // your login: d is for your own PRs
+  babysitting: boolean; // d hands your PR to a babysitter, or only puts it in flight
   now: number;
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
@@ -72,6 +85,10 @@ export function Review({
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
   // Your PR in flight with a reply waiting: it's shown under the header, and y sends it from here too.
   const draft = row?.state === "open" ? row.drafts[0] : undefined;
+  // ...or with a question from its babysitter: c answers it in a terminal and x dismisses it, as in the lane.
+  const asking = row?.state === "open" && !!row.escalation;
+  // A PR in flight is its babysitter's: no prompt to copy or AI review to ask for.
+  const flying = !!row && row.state === "open";
 
   useEffect(() => {
     if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
@@ -218,11 +235,13 @@ export function Review({
     else if (k === "]") goNote(1);
     else if (k === "[") goNote(-1);
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
-    else if (k === "c") void copyPrompt();
-    else if (k === "i") void askAi();
+    else if (k === "c" && asking && row) onLane(row, "c");
+    else if (k === "x" && asking && row) onLane(row, "x");
+    else if ((k === "y" || k === "x") && draft && row) onLane(row, k, draft);
+    else if (k === "c" && !flying) void copyPrompt();
+    else if (k === "i" && !flying) void askAi();
     else if (k === "a") void approve();
     else if (k === "d" && v) onInflight(v.card);
-    else if ((k === "y" || k === "x") && draft && row) onLane(row, k, draft);
     else if (k === "esc") onBack();
   }
 
@@ -236,7 +255,7 @@ export function Review({
       if (armed) setArmed(0);
       // An armed Send lapses on Esc (App drops it); only an unarmed Esc goes back.
       else if (!draft || armedDraft !== draft.id) onBack();
-    } else if ((draft ? "npoci[]adyx" : "npoci[]ad").includes(e.key) && e.key.length === 1) {
+    } else if ((draft || asking ? "npoci[]adyx" : "npoci[]ad").includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
     }
@@ -282,7 +301,8 @@ export function Review({
           : `${REVIEW[item.review_decision]}${approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}`,
       tone: item.review_decision === "changes_requested" ? "t-warn" : "",
     },
-    ...(item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
+    // Merged or closed, a conflict no longer matters.
+    ...(item.state === "open" && item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
     ...(item.draft ? [{ text: "draft", tone: "" }] : []),
     { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
   ];
@@ -329,12 +349,18 @@ export function Review({
               {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
             </p>
           )}
-          {/* In flight: the why above says why it needs you ("in flight: …"); this is the lane's babysitter line under it. */}
-          {row?.state === "open" && row.sitter.text && (
+          {/* In flight: the why above says why it needs you ("in flight: …"); this is the lane's babysitter line under it, unless
+              it only repeats the why. With no clone, where to set one up. */}
+          {row && sitterNews(row) && (
             <p className="rv-meta rv-lane">
               {sitterParts(row, now).map((p) => (
                 <span key={p}>{p}</span>
               ))}
+            </p>
+          )}
+          {row?.state === "open" && noCloneOf({ why: row.needs_you ?? "", repo: card.repo }) && (
+            <p className="rv-meta rv-lane">
+              <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
             </p>
           )}
           {draft && (
@@ -350,39 +376,29 @@ export function Review({
         {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
         <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
         {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
-        {(!mine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
+        {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
           <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
         )}
       </div>
 
+      {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, d last. */}
       <div className="actions rv-actions">
-        {mine && (
+        {draft && (
           <KeyButton
-            k="d"
-            label={card.inflight ? "Take back" : "In flight"}
-            title={
-              card.inflight ? "Back to you: babysitters stop" : "You're done: babysitters keep CI green and draft replies until it merges"
-            }
+            k="y"
+            label={armedY ? "again to send" : "Send"}
+            title="Post this reply on GitHub, as you: press y twice"
+            className={cls(armedY && "armed")}
             run={run}
           />
         )}
-        {draft && (
-          <>
-            <KeyButton
-              k="y"
-              label={armedY ? "Press y again to send" : "Send"}
-              title="Post this reply on GitHub, as you: press y twice"
-              className={cls(armedY && "armed")}
-              run={run}
-            />
-            <KeyButton k="x" label="Discard" run={run} />
-          </>
-        )}
+        {asking && row.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${row.resume}`} run={run} />}
+        {asking ? <KeyButton k="x" label="Dismiss the question" run={run} /> : draft && <KeyButton k="x" label="Discard" run={run} />}
         {/* Only someone else's open PR is yours to approve. */}
         {open && !isMine && (
           <KeyButton
             k="a"
-            label={busy === "approve" ? "Approving…" : armed ? "Press a again to approve" : "Approve"}
+            label={busy === "approve" ? "Approving…" : armed ? "again to approve" : "Approve"}
             run={run}
             disabled={!canApprove || busy === "approve"}
             title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
@@ -390,13 +406,23 @@ export function Review({
           />
         )}
         <KeyButton k="o" label="Open on GitHub" run={run} />
-        <KeyButton k="c" label="Copy prompt" run={run} />
-        {(open || view.ai) && (
+        {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
+        {!flying && (open || view.ai) && (
           <KeyButton
             k="i"
             label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
             run={run}
             disabled={view.generating || busy === "ai"}
+          />
+        )}
+        {mine && (
+          <KeyButton
+            k="d"
+            label={handLabel(card, babysitting)}
+            title={
+              card.inflight ? "Back to you: babysitters stop" : "You're done: babysitters keep CI green and draft replies until it merges"
+            }
+            run={run}
           />
         )}
       </div>
@@ -428,7 +454,7 @@ export function Review({
                       }}
                     >
                       <span className="rv-fname">
-                        {dir && <Dir path={dir} />}
+                        {dir && <ListDir path={dir} />}
                         <span className="rv-base">{breakable(name)}</span>
                       </span>
                       {n > 0 && <span className="rv-nn" title={`${n} AI ${n === 1 ? "note" : "notes"}`} />}
@@ -478,7 +504,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
           </span>
         )}
       </h2>
-      {busy && <p className="quiet">Your agent is reading the diff. This takes a minute or two; the notes land in the code below.</p>}
+      {busy && <p className="quiet">Claude Code is reading the diff. This takes a minute or two; the notes land in the code below.</p>}
       {!busy && view.ai_error && (
         <p>
           {withCode(view.ai_error)}{" "}
@@ -490,7 +516,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
       {!busy && !ai && !view.ai_error && view.item.state !== "open" && <p className="quiet">No AI review.</p>}
       {!busy && !ai && !view.ai_error && view.item.state === "open" && (
         <p className="quiet">
-          None yet. Press <kbd>i</kbd> to ask your agent for a summary, concerns and notes on the changes.
+          None yet. Press <kbd>i</kbd> to ask Claude Code for a summary, concerns and notes on the changes.
         </p>
       )}
       {ai && (
@@ -500,6 +526,11 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
             <span className={cls("risk", ai.risk === "high" && "t-bad")}>{ai.risk} risk</span>
           </p>
           <p className="rv-summary">{ai.summary}</p>
+          {ai.since && (
+            <p className="rv-summary">
+              <b>Since your review:</b> {ai.since}
+            </p>
+          )}
           {ai.concerns.length > 0 ? (
             <ul className="rv-concerns" aria-label="Concerns">
               {ai.concerns.map((c) => (
@@ -567,6 +598,44 @@ const breakable = (name: string) =>
       {part}
     </span>
   ));
+
+// In the file list a long folder gives way a whole segment at a time from its start ("…/kind/"), measured against the room
+// its row leaves, so no folder is cut mid-word and every row starts on the same edge.
+function ListDir({ path }: { path: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [shown, setShown] = useState(path);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const row = el?.parentElement;
+    const base = el?.nextElementSibling;
+    const ctx = document.createElement("canvas").getContext("2d");
+    const fit = () => {
+      if (!ctx || !el || !row || !base) return;
+      ctx.font = getComputedStyle(el).font;
+      const room = row.clientWidth - base.getBoundingClientRect().width;
+      const parts = path.split("/").filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const text = `${i ? "…/" : ""}${parts.slice(i).join("/")}/`;
+        if (ctx.measureText(text).width <= room) {
+          setShown(text);
+          return;
+        }
+      }
+      setShown("…/");
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    if (row) watch.observe(row);
+    return () => {
+      watch.disconnect();
+    };
+  }, [path]);
+  return (
+    <span ref={ref} className="rv-dir" title={path}>
+      {shown}
+    </span>
+  );
+}
 
 // A long directory gives way from its start, so the file's own name stays whole and every name sits right after its folder.
 function Dir({ path }: { path: string }) {

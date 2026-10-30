@@ -1,6 +1,6 @@
 // The coordinator's recent log, opened from the top bar's line: its runs, its actions with their reasons, its notes.
-import { useCallback, useEffect, useState } from "react";
-import type { CoordinatorView } from "../../../src/types.ts";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import type { CoordinatorLogEntry, CoordinatorView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { cls, shortId, sinceText } from "../format.ts";
 import { coordinatorText, logText } from "../view.ts";
@@ -59,25 +59,48 @@ export function CoordinatorLog({
       </div>
       {view && !view.log.length && <p className="group-empty">Nothing yet.</p>}
       <ul className="cl-list">
-        {view?.log.slice(0, SHOWN).map((e) => (
-          <li key={e.seq} className={cls(`cl-${e.kind}`, e.undone && "undone")}>
-            <span className="cl-text">{e.kind === "run" ? <Dots parts={logText(e).split(" · ")} /> : withCode(logText(e))}</span>
-            {e.kind === "act" && e.undo_seq !== null && !e.undone && (
-              <button
-                type="button"
-                className="cl-undo"
-                onClick={() => {
-                  void undo(e.undo_seq!);
-                }}
-              >
-                Undo
-              </button>
-            )}
-            {e.undone && <span className="cl-undone">undone</span>}
-            <span className="cl-when">{sinceText(e.at, now)}</span>
-          </li>
-        ))}
+        {view &&
+          shownLog(view.log).map((e, i, all) => (
+            <Fragment key={e.seq}>
+              {/* Outside a run (you edited the policy with it in a terminal): its own line, not under the run before it. */}
+              {e.run === 0 && all[i - 1]?.run !== 0 && (
+                <li className="cl-run">
+                  <span className="cl-text">In a terminal</span>
+                  <span className="cl-when">{sinceText(e.at, now)}</span>
+                </li>
+              )}
+              <Entry e={e} now={now} undo={undo} />
+            </Fragment>
+          ))}
       </ul>
     </section>
+  );
+}
+
+// The latest entries, less a run's note that only says what its one action already says.
+function shownLog(log: CoordinatorLogEntry[]): CoordinatorLogEntry[] {
+  const acts = new Map<number, number>();
+  for (const e of log) if (e.kind === "act" && e.run) acts.set(e.run, (acts.get(e.run) ?? 0) + 1);
+  return log.slice(0, SHOWN).filter((e) => !(e.kind === "note" && acts.get(e.run) === 1));
+}
+
+function Entry({ e, now, undo }: { e: CoordinatorLogEntry; now: number; undo: (seq: number) => Promise<void> }) {
+  return (
+    <li className={cls(`cl-${e.kind}`, e.undone && "undone")}>
+      <span className="cl-text">{e.kind === "run" ? <Dots parts={logText(e).split(" · ")} /> : withCode(logText(e))}</span>
+      {e.kind === "act" && e.undo_seq !== null && !e.undone && (
+        <button
+          type="button"
+          className="cl-undo"
+          onClick={() => {
+            void undo(e.undo_seq!);
+          }}
+        >
+          Undo
+        </button>
+      )}
+      {e.undone && <span className="cl-undone">undone</span>}
+      <span className="cl-when">{sinceText(e.at, now)}</span>
+    </li>
   );
 }

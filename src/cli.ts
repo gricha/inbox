@@ -11,7 +11,6 @@ import { DeskApiError, DeskDownError } from "./client.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { openCommand } from "./notify.ts";
-import { effective, readSettings, settingDef, settingsPath } from "./settings.ts";
 import type { Action, Bucket, Card, SettingDef, SettingValue } from "./types.ts";
 
 export interface Out {
@@ -400,18 +399,19 @@ async function settings(x: Ctx): Promise<number> {
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
 
-// Works with the desk down too: it reads the driver from settings.json and the agent's own config files.
+// The harness you work in, given the desk's tools: Claude Code unless you name Codex. Works with the desk down too: it
+// reads the agent's own config files.
+const HARNESSES: Record<string, { id: string; label: string }> = {
+  claude: { id: "claude-code", label: "Claude Code" },
+  codex: { id: "codex", label: "Codex" },
+};
+
 async function connect(x: Ctx): Promise<number> {
-  const name =
-    x.args[0] === "claude" ? "claude-code" : (x.args[0] ?? effective(readSettings(settingsPath(deskHome())).overrides)["agent.driver"]);
-  const driver = settingDef("agent.driver")?.options?.find((o) => o.value === name);
-  if (!driver) throw new UsageError(`unknown agent: ${name} (try: desk connect claude, or codex)`);
+  const driver = HARNESSES[x.args[0] ?? "claude"];
+  if (!driver) throw new UsageError(`unknown agent: ${x.args[0]} (try: desk connect claude, or codex)`);
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
-  const s = x.opts.apply ? await agents.connect(driver.value, url) : agents.status(driver.value, url);
-  if (!s.mcp || !s.skill) {
-    x.out("No agent selected in Settings → Agents. Pick one there, or: desk connect claude (or codex)");
-    return 0;
-  }
+  const s = x.opts.apply ? await agents.connect(driver.id, url) : agents.status(driver.id, url);
+  if (!s.mcp || !s.skill) throw new Error(`can't check ${driver.label}`);
   if (s.mcp.connected && s.skill.state === "installed") {
     x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
     return 0;

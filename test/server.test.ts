@@ -278,8 +278,8 @@ test("config preview and save", async () => {
 });
 
 test("policy: empty by default, saved to policy.md with the hash as base, 409 when stale", async (c) => {
-  // No agent: the judge must not start a real one here (test/judge.test.ts runs it against a fake).
-  const t = await setup({ "agent.driver": "none" });
+  // No judge: it must not start a real claude here (test/judge.test.ts runs it against a fake).
+  const t = await setup({ "policy.judge": false });
   c.after(t.cleanup);
   const put = (body: unknown) =>
     t.req("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -292,14 +292,14 @@ test("policy: empty by default, saved to policy.md with the hash as base, 409 wh
   assert.equal(fs.readFileSync(path.join(t.desk.home, "policy.md"), "utf8"), "Bot PRs are FYI.\n");
   const again = await t.json("/api/policy");
   assert.deepEqual([again.text, again.hash], ["Bot PRs are FYI.\n", saved.hash]);
-  assert.equal(again.judge.off_reason, "there's no agent: pick one under Agents");
+  assert.equal(again.judge.off_reason, "it's turned off");
   assert.equal((await put({ text: "x", base: p.hash })).status, 409, "the old hash is stale now");
   assert.equal((await put({ base: saved.hash })).status, 400);
   assert.equal((await put({ text: "x".repeat(20_001), base: saved.hash })).status, 400);
 });
 
 test("the coordinator changes the policy and the rules only in a conversation, never on a wake", async (c) => {
-  const t = await setup({ "agent.driver": "none" }); // no judge: nothing may start a real claude here
+  const t = await setup({ "policy.judge": false }); // no judge: nothing may start a real claude here
   c.after(t.cleanup);
   const put = (p: string, body: unknown, agent?: string) =>
     t.req(p, {
@@ -392,7 +392,7 @@ test("opening a URL and notifying per platform, all as argv", () => {
 });
 
 // A scratch HOME (USERPROFILE on Windows) and an empty PATH: the real ~/.claude, ~/.claude.json and ~/.codex are never touched.
-test("agents: status for agent.driver, and connect", async () => {
+test("agents: Claude Code's status, and connect", async () => {
   const t = await setup();
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH };
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
@@ -409,18 +409,6 @@ test("agents: status for agent.driver, and connect", async () => {
     const after = await t.json("/api/agents/connect", { method: "POST" });
     assert.equal(after.skill.state, "installed");
     assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "review-desk", "SKILL.md")));
-
-    const put = { method: "PUT", headers: { "content-type": "application/json" } };
-    await t.json("/api/settings", { ...put, body: JSON.stringify({ set: { "agent.driver": "none" } }) });
-    assert.deepEqual(await t.json("/api/agents"), { driver: "none", mcp: null, skill: null });
-    if (process.platform !== "win32") {
-      await t.json("/api/settings", { ...put, body: JSON.stringify({ set: { "agent.driver": "codex" } }) });
-      const r = await t.req("/api/agents/connect", { method: "POST" });
-      assert.equal(r.status, 502);
-      assert.deepEqual(await r.json(), {
-        error: "codex isn't on PATH. Run it yourself: codex mcp add review-desk --url http://localhost:47823/mcp",
-      });
-    }
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];

@@ -613,8 +613,6 @@ export class Babysitter {
   blocker(it: Item, s: Sitter): string | null {
     const st = this.desk.settings;
     if (!st["inflight.babysit"]) return "babysitting is off";
-    if (st["agent.driver"] !== "claude-code")
-      return st["agent.driver"] === "none" ? "no agent (Settings → Agents)" : "babysitters run on Claude Code only (Settings → Agents)";
     if (this.paused && Date.now() < this.paused.until) return this.paused.why;
     if (s.escalation) return "waiting for your answer";
     if (it.head_repo && lc(it.head_repo) !== lc(it.repo)) return `the branch is in a fork (${it.head_repo})`;
@@ -705,7 +703,7 @@ export class Babysitter {
     this.notes.clear();
     // Off is off: agents already running stop too.
     const st = this.desk.settings;
-    if (!st["inflight.babysit"] || st["agent.driver"] !== "claude-code")
+    if (!st["inflight.babysit"])
       for (const l of this.live.values()) {
         l.aborted ??= "babysitting turned off";
         this.kill(l.child);

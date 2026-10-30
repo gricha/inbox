@@ -228,7 +228,7 @@ export interface SettingsView {
   paused: { ai: { why: string; until: string } | null; babysitters: { why: string; until: string } | null };
 }
 
-// GET /api/agents: whether the agent in agent.driver has the desk's MCP tools and the Review Desk skill. null for driver "none".
+// GET /api/agents: whether Claude Code has the desk's MCP tools and the Review Desk skill. null for an agent the desk doesn't know.
 export interface AgentStatus {
   driver: string;
   mcp: { connected: boolean; command: string } | null; // command: what Connect runs to register the desk
@@ -353,7 +353,7 @@ export interface Placement {
   rule_bucket: Bucket; // before caps (after the judge)
   rule: number | null; // matched rule index, null = default
   why: string;
-  demoted?: string; // e.g. "Now was full on PRs to review (3)"
+  demoted?: string; // e.g. "Now takes 3 from PRs to review"
   trace: TraceStep[];
   judge?: JudgeStep; // set in the gray zone (no rule matched, or a "judge" rule) while the policy judge is on
 }
@@ -419,6 +419,8 @@ export interface Card {
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
+  cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
+  team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
@@ -428,6 +430,7 @@ export interface Preflight {
   verdict?: "look" | "skim" | "skip";
   risk?: "low" | "medium" | "high";
   summary?: string;
+  since?: string; // what changed since your last review: a re-review's gist
   concerns?: string[]; // at most 2
   notes?: number; // notes on the changes, in the review view
   at?: string; // when it was written
@@ -488,6 +491,7 @@ export interface QueueView {
   now_cards: number; // as in FocusView
   today_cards: number;
   ai_paused: string | null;
+  babysitting: boolean; // inflight.babysit: d on your PR hands it to a babysitter, or only puts it in flight
 }
 
 // One changed file, from GitHub's pulls/{n}/files.
@@ -508,15 +512,16 @@ export interface ReviewNote {
   body: string;
 }
 
-// Written by the configured agent (Settings → Agents) from the diff. Untrusted: the diff came from GitHub.
+// Written by your own Claude Code from the diff. Untrusted: the diff came from GitHub.
 export interface AiReview {
   verdict: "look" | "skim" | "skip";
   risk: "low" | "medium" | "high";
   summary: string;
+  since?: string; // a re-review: what changed since your last review, and whether it settles the concerns
   concerns: string[];
   notes: ReviewNote[];
   head_oid: string; // the commit it read; a newer push makes it stale
-  model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"; or "codex"
+  model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
   at: string;
 }
 

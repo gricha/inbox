@@ -135,20 +135,21 @@ test("AI reviews paused: the queue says so once, cards wait as paused, and resum
     "paused",
     "ready",
   ]);
-  assert.match((await call<SettingsView>("GET", "/api/settings")).data.paused.ai?.why ?? "", /^AI reviews are paused: Claude Code/);
+  assert.match((await call<SettingsView>("GET", "/api/settings")).data.paused.ai?.why ?? "", /^Claude Code/);
   await call("POST", "/api/mock/ai-paused", { paused: false });
   const { data: back } = await call<QueueView>("GET", "/api/queue");
   assert.equal(back.ai_paused, null);
-  assert.equal(back.sections.now.find((c) => c.id === "acme/web#2301")?.preflight?.state, "running");
+  assert.equal([...back.sections.now, ...back.sections.today].find((c) => c.id === "acme/web#2301")?.preflight?.state, "running");
 });
 
 test("item detail resolves short refs and explains placement", async () => {
-  const { data: d } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("api#4127")}`);
-  assert.equal(d.item.id, "acme/api#4127");
+  // Over the board's Now cap, the one with no review yet gives way to the close looks.
+  const { data: d } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("web#2301")}`);
+  assert.equal(d.item.id, "acme/web#2301");
   const review = d.placements.find((p) => p.board === "work-review")!;
   assert.equal(review.rule_bucket, "now");
   assert.equal(review.bucket, "today");
-  assert.match(review.demoted ?? "", /Now was full/);
+  assert.match(review.demoted ?? "", /Now takes/);
   assert.deepEqual(
     review.trace.map((t) => [t.index, t.matched]),
     [
@@ -156,7 +157,7 @@ test("item detail resolves short refs and explains placement", async () => {
       [0, true],
     ],
   );
-  assert.match(d.handoff_prompt, /acme\/api#4127/);
+  assert.match(d.handoff_prompt, /acme\/web#2301/);
   assert.equal((await call("GET", "/api/item?id=nope%231")).status, 404);
 });
 
@@ -165,7 +166,7 @@ test("act, undo and the cap reflow", async () => {
   let { data: v } = await call<BoardView>("GET", "/api/boards/work-review");
   assert.ok(v.cleared.some((c) => c.id === "acme/api#4099" && c.status === "done"));
   assert.ok(
-    v.sections.now.some((c) => c.id === "acme/api#4127"),
+    v.sections.now.some((c) => c.id === "acme/web#2301"),
     "a freed NOW slot promotes the demoted card",
   );
 
@@ -258,28 +259,24 @@ test("settings: schema, save, reject and reset", async () => {
   assert.match(p.errors[0]?.message ?? "", /moved to Settings/);
 });
 
-test("agents: status for the selected driver, and connect", async () => {
+test("agents: Claude Code's status, and connect", async () => {
   const { data: a } = await call<AgentStatus>("GET", "/api/agents");
   assert.equal(a.driver, "claude-code");
   assert.equal(a.mcp?.connected, true);
   assert.equal(a.skill?.state, "missing");
   const { data: c } = await call<AgentStatus>("POST", "/api/agents/connect", {});
   assert.equal(c.skill?.state, "installed");
-  await call("PUT", "/api/settings", { set: { "agent.driver": "none" } });
-  assert.deepEqual((await call<AgentStatus>("GET", "/api/agents")).data, { driver: "none", mcp: null, skill: null });
-  await call("PUT", "/api/settings", { reset: ["agent.driver"] });
 });
 
 test("resolved items sit apart from the queue's groups and boards; items carry their recent activity", async () => {
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   assert.deepEqual(
     q.resolved.map((c) => [c.id, c.why, c.resolved]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    // What was in Now or Today, asked of you, or yours to resolve: the hidden one and your in-flight PR resolve silently.
     [
-      ["acme/api#4093", "approved by dana", "approved by dana"],
       ["acme/web#2284", "merged", "merged"],
       ["acme/web#2292", "you approved", "you approved"],
       ["acme/worker#868", "no longer requested", "no longer requested"],
-      ["acme/worker#871", "merged", "merged"],
     ],
   );
   const elsewhere = new Set([...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared].map((c) => c.id));

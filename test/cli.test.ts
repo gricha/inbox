@@ -336,7 +336,7 @@ test("settings lists effective values by section and stars overrides", async () 
   fake.settings = { "github.poll_seconds": 120 };
   const r = await run(["settings"]);
   assert.equal(r.code, 0);
-  assert.match(r.out, /^GitHub\n\* github\.poll_seconds +120\n {2}github\.close_collaborator_min +3\n {2}github\.bots +\(none\)\n/);
+  assert.match(r.out, /^GitHub\n\* github\.poll_seconds +120\n {2}github\.close_collaborator_min +5\n {2}github\.bots +\(none\)\n/);
   assert.match(r.out, /\n\nNotifications\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/);
   assert.match(r.out, /\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
   assert.match(r.out, /\n\n\* set in \/home\/you\/\.review-desk\/settings\.json\n$/);
@@ -355,7 +355,6 @@ test("settings set parses the value by the setting's type", async () => {
     ["notify.quiet", "", ""],
     ["app.hotkey", "Control+Shift+K", "Control+Shift+K"],
     ["handoff.issue", "Look at {item.url}\nThen reply.", "Look at {item.url}\nThen reply."],
-    ["agent.driver", "codex", "codex"],
   ];
   for (const [key, raw, value] of cases) {
     const r = await run(["settings", "set", key, raw]);
@@ -375,7 +374,6 @@ test("settings set rejects bad values without writing", async () => {
     [["github.poll_seconds", "soon"], "desk: github.poll_seconds must be a number\n"],
     [["notify.enabled", "maybe"], "desk: notify.enabled must be true or false (yes/no, on/off)\n"],
     [["github.my_repos", "nope"], `desk: github.my_repos "nope" isn't owner/name\n`],
-    [["agent.driver", "vim"], "desk: agent.driver must be one of claude-code, codex, none\n"],
     [["nope.key", "1"], `desk: unknown setting "nope.key"; desk settings lists them\n`],
   ];
   for (const [args, err] of bad) {
@@ -410,13 +408,14 @@ test("connect claude prints what's missing and the commands that fix it", async 
   assert.match(lines[4]!, /^mkdir -p .*\.claude.skills'? && cp -R .*review-desk'? .*\.claude.skills'?\/$/);
 });
 
-test("connect without an argument uses the agent in settings", async () => {
-  const codex = await withEnv(scratchHome({ "agent.driver": "codex" }), () => run(["connect"]));
+test("connect without an argument connects Claude Code; codex connects Codex", async () => {
+  const claude = await withEnv(scratchHome(), () => run(["connect"]));
+  assert.match(claude.out, /^# Claude Code \(desk connect --apply does this\)\n/);
+  const codex = await withEnv(scratchHome(), () => run(["connect", "codex"]));
   assert.equal(codex.code, 0, codex.err);
-  assert.match(codex.out, /^# Codex \(desk connect --apply does this\)\n/);
+  assert.match(codex.out, /^# Codex \(desk connect codex --apply does this\)\n/);
   assert.match(codex.out, /^codex mcp add review-desk --url http:\/\/localhost:47960\/mcp$/m);
-  const none = await withEnv(scratchHome({ "agent.driver": "none" }), () => run(["connect"]));
-  assert.equal(none.out, "No agent selected in Settings → Agents. Pick one there, or: desk connect claude (or codex)\n");
+  assert.equal((await withEnv(scratchHome(), () => run(["connect", "vim"]))).code, 2);
 });
 
 // A fake claude, alone on PATH, so the real one (and the user's config) is never reached.

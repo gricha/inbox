@@ -81,19 +81,20 @@ export function Help({ onClose }: { onClose: () => void }) {
             <kbd>esc</kbd>Close
           </button>
         </div>
+        {/* The quick keys first: at a short window's bottom edge they'd be cut off with nothing saying more scrolls below. */}
+        <p className="keys-more">
+          <Dots
+            parts={MORE_KEYS.map(([k, v]) => (
+              <span key={k}>
+                <kbd>{k}</kbd> {v}
+              </span>
+            ))}
+          />
+        </p>
         <div className="keys-cols">
           <section>
             <h3 className="keys-head">In the queue</h3>
             <Keys keys={KEYS} />
-            <p className="keys-more">
-              <Dots
-                parts={MORE_KEYS.map(([k, v]) => (
-                  <span key={k}>
-                    <kbd>{k}</kbd> {v}
-                  </span>
-                ))}
-              />
-            </p>
           </section>
           <section>
             <h3 className="keys-head">In a PR's review</h3>

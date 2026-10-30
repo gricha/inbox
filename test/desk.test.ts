@@ -357,6 +357,55 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   t.cleanup();
 });
 
+test("what the coordinator cleared says so, with its reason, until something else acts on it", async () => {
+  const t = await setup([reviewAsk(1), reviewAsk(2)]);
+  await t.desk.sync();
+  t.desk.act("api#1", "snooze", "tomorrow", { agent: "coordinator", reason: "a CODEOWNERS ping" });
+  t.desk.act("api#2", "snooze", "tomorrow");
+  const by = () => Object.fromEntries(t.desk.queue().cleared.map((c) => [c.id, c.cleared_by_coordinator]));
+  assert.deepEqual(by(), { "acme/api#1": "a CODEOWNERS ping", "acme/api#2": undefined });
+  t.desk.act("api#1", "mute");
+  assert.equal(by()["acme/api#1"], undefined, "your own action since is the one in effect");
+  t.cleanup();
+});
+
+test("Resolved lists the last day's items that were in Now or Today or asked of you; a team ping resolves silently", async () => {
+  const t = await setup([reviewAsk(1), teamPing(2)]);
+  await t.desk.sync();
+  const merged = (n: number, o = {}) => ({ ...t.gh.items.get(`acme/api#${n}`)!, state: "merged" as const, closed_at: hoursAgo(0.5), ...o });
+  t.gh.items.set("acme/api#1", merged(1));
+  t.gh.items.set("acme/api#2", merged(2));
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.queue().resolved.map((c) => c.id),
+    ["acme/api#1"],
+  );
+  t.setNow(new Date(NOW.getTime() + 30 * 3_600_000));
+  await t.desk.sync();
+  assert.deepEqual(t.desk.queue().resolved, [], "a day on, it's gone");
+  t.cleanup();
+});
+
+test("your PR's card carries who last spoke on it; nobody asked you by name says so", async () => {
+  const t = await setup([
+    myPr(3, { ci: "green", threads_unresolved: 2 }),
+    reviewAsk(4, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] }),
+  ]);
+  await t.desk.sync();
+  t.gh.items.set("acme/web#3", {
+    ...t.gh.items.get("acme/web#3")!,
+    comments: [{ author: "priya", author_bot: false, at: hoursAgo(0.2) }],
+    updated_at: hoursAgo(0.2),
+  });
+  await t.desk.sync();
+  const q = t.desk.queue();
+  const all = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi];
+  const mine = all.find((c) => c.id === "acme/web#3");
+  assert.deepEqual([mine?.last_event?.kind, mine?.last_event?.actor], ["commented", "priya"]);
+  assert.equal(all.find((c) => c.id === "acme/api#4")?.team_ask, "CODEOWNERS ping to @ml-team");
+  t.cleanup();
+});
+
 test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in flight that needs you stays", async () => {
   const days = (d: number) => hoursAgo(d * 24);
   const t = await setup([

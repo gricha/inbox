@@ -107,8 +107,8 @@ test("caps apply after the judge", () => {
   assert.deepEqual(
     demoted.map((p) => [p.bucket, p.rule_bucket, p.demoted]),
     [
-      ["today", "now", "Now was full on B (1)"],
-      ["today", "now", "Now was full on B (1)"],
+      ["today", "now", "Now takes 1 from B"],
+      ["today", "now", "Now takes 1 from B"],
     ],
   );
 });
@@ -346,25 +346,6 @@ test("items never judged go before ones that changed since their answer", posix,
   assert.equal(asked.length, 1, "one left in the hour");
   assert.match(asked[0], /acme\/api#[45]$/, "a new item takes it, not the changed one");
   assert.deepEqual([t.placed(1).bucket, t.placed(1).judge?.pending], ["today", true]);
-});
-
-test("codex judges too, through codex exec with the same schema", posix, async (c) => {
-  const t = await setup(c, [gray(1)], { policy: "Team asks are today.", settings: { "agent.driver": "codex" } });
-  const bin = path.join(t.fake.dir, "bin");
-  fs.mkdirSync(bin);
-  fs.writeFileSync(
-    path.join(bin, "codex"),
-    `#!/bin/sh\nout=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done\necho '{"items":[{"id":"acme/api#1","bucket":"fyi","why":"from codex"}]}' > "$out"\n`,
-  );
-  fs.chmodSync(path.join(bin, "codex"), 0o755);
-  const prev = process.env.PATH;
-  process.env.PATH = `${bin}${path.delimiter}${prev}`;
-  c.after(() => {
-    process.env.PATH = prev;
-  });
-  await t.sync();
-  assert.deepEqual([t.placed(1).bucket, t.placed(1).why], ["fyi", "from codex"]);
-  assert.equal(t.fake.calls(), 0, "not claude");
 });
 
 test("answers are kept per item, updated_at and policy hash", posix, async (c) => {

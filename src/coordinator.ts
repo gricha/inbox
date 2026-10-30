@@ -136,8 +136,6 @@ export class Coordinator {
 
   offReason(): string | null {
     const s = this.desk.settings;
-    if (s["agent.driver"] === "codex") return "Coordinator needs Claude Code for now";
-    if (s["agent.driver"] !== "claude-code") return "Pick Claude Code above to use it";
     if (!s["coordinator.enabled"]) return "Off";
     if (!this.desk.mcpUrl) return "This desk doesn't serve MCP, so there's nothing to wire it to";
     return null;
@@ -469,9 +467,7 @@ export class Coordinator {
       session_id: st.session_id,
       started: !!st.started_at,
       dir,
-      command: st.started_at
-        ? `cd ${sh(dir)} && ${sh(cmd)} --resume ${st.session_id} --mcp-config mcp.json --strict-mcp-config --tools '' --allowedTools mcp__${SERVER}`
-        : null,
+      command: st.started_at ? `cd ${sh(dir)} && ${sh(cmd)} --resume ${st.session_id} --mcp-config mcp.json` : null,
       running_since: this.running?.since ?? null,
       pending: off || !st.started_at || policyEmpty || st.cursor === null ? 0 : this.pending(st.cursor).length,
       next_at: this.nextAt ? new Date(this.nextAt).toISOString() : null,

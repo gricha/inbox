@@ -29,10 +29,10 @@ export function ago(at: string, now: number): string {
   return `${Math.round(s / 86_400)}d ago`;
 }
 
-// "14:30" today, "Tue 09:00" within a week, else "Nov 12 09:00"
+// "14:30" today, "Tue 9:00" within a week, else "Nov 12 9:00": as the snooze menu writes it.
 export function when(at: string): string {
   const d = new Date(at);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
   const days = (d.getTime() - Date.now()) / 86_400_000;
   if (d.toDateString() === new Date().toDateString()) return time;
   if (Math.abs(days) < 6) return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
@@ -48,10 +48,13 @@ export function modelName(id: string): string {
   return `${family[0]!.toUpperCase()}${family.slice(1)}${version.replaceAll("-", ".").replace(/^\./, " ")}`;
 }
 
+// "snoozed until Sat 9:00 or new activity"; the coordinator's own say so ("coordinator snoozed until …").
 export function clearedText(c: Card): string {
-  if (c.status === "muted") return "muted";
-  if (c.status === "done") return "done until someone else acts";
-  if (c.status === "snoozed") return c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity";
+  const by = c.cleared_by_coordinator === undefined ? "" : "coordinator ";
+  if (c.status === "muted") return `${by}muted`;
+  if (c.status === "done") return `${by}${by ? "cleared" : "done"} until someone else acts`;
+  if (c.status === "snoozed")
+    return `${by}${c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity"}`;
   return "";
 }
 

@@ -95,26 +95,31 @@ test("caps demote overflow in order; pinned and nocap are exempt", () => {
   assert.deepEqual(r.order.now, ["acme/api#7", "acme/api#6", "acme/api#1", "acme/api#2"]);
   assert.deepEqual(r.order.today, ["acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#4", "acme/api#5"]);
-  assert.equal(r.placements.get("acme/api#3")!.demoted, "Now was full on B (2)");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today was full on B (1)");
+  assert.equal(r.placements.get("acme/api#3")!.demoted, "Now takes 2 from B");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today takes 1 from B");
   assert.equal(r.placements.get("acme/api#4")!.rule_bucket, "now");
 });
 
-test("over a cap, what the AI says to skip leaves first, so the next item gets the slot", () => {
+test("over a cap, the lightest AI call leaves first: skip, then skim, then not reviewed yet, so a close look keeps its slot", () => {
   const { board: b } = compileBoard(board({ caps: { today: 2 }, rules: [{ when: "true", bucket: "today" }] }), "x");
   const items = [1, 2, 3, 4].map((n) => makeItem({ number: n, created_at: hoursAgo(100 - n) }));
   const r = classify(
     b,
-    items.map((it) => entry(it, { skip: it.number === 1 })),
+    items.map((it) => entry(it, { ai: it.number === 1 ? "skip" : undefined })),
   );
   assert.deepEqual(r.order.today, ["acme/api#2", "acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#1", "acme/api#4"]);
   assert.equal(r.placements.get("acme/api#1")!.demoted, "the AI says skip it");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today was full on B (2)");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today takes 2 from B");
+  const calls = classify(
+    b,
+    items.map((it) => entry(it, { ai: (["skim", undefined, "skim", "look"] as const)[it.number - 1] })),
+  );
+  assert.deepEqual(calls.order.today, ["acme/api#2", "acme/api#4"]);
   // Under the cap, a skip keeps its place.
   const under = classify(
     b,
-    items.slice(0, 2).map((it) => entry(it, { skip: true })),
+    items.slice(0, 2).map((it) => entry(it, { ai: "skip" })),
   );
   assert.deepEqual(under.order.today, ["acme/api#1", "acme/api#2"]);
 });
@@ -218,7 +223,7 @@ test("quiet items leave Now and Today for Later, before caps; pinned items and a
   assert.equal(r.order.now.length, 0);
   // Quiet ones leave before the cap counts, so Today's one slot (the pinned one doesn't count) goes to the fresh ask.
   assert.deepEqual(r.order.today, ["acme/api#3", "acme/api#4"]);
-  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today was full on B (1)"]);
+  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today takes 1 from B"]);
   assert.deepEqual(r.order.later, ["acme/api#5", "acme/api#1", "acme/api#2"]);
 
   const off = classify(b, entries, undefined, 0);

@@ -48,7 +48,7 @@ export function Sidebar({
           }}
         >
           <span className="side-name">GitHub</span>
-          <span className="side-count">{view ? now + today : ""}</span>
+          <span className="side-count">{view && now + today > 0 ? now + today : ""}</span>
         </a>
         {/* All of them, as the lane's heading says; the ones that need you are in Now already. */}
         <a

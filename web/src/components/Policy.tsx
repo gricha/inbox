@@ -60,7 +60,7 @@ export function Policy({
     try {
       const r = await api.savePolicy(text, doc.hash);
       setDoc({ ...doc, text, hash: r.hash });
-      flash(text.trim() ? "Policy saved. Your agent places what your rules leave open by it." : "Policy cleared. Nothing is judged now.");
+      flash(text.trim() ? "Policy saved. Claude Code places what your rules leave open by it." : "Policy cleared. Nothing is judged now.");
     } catch (e) {
       if ((e as { status?: number }).status === 409) {
         // Changed under us (the coordinator, an editor): keep your edit, take the new file as the base.

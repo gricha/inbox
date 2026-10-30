@@ -13,7 +13,19 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
-import { DEFAULT_OPEN, groupsOf, isFold, navigable, parseRoute, removeCard, routeHash, stops, type GroupKey, type Route } from "./view.ts";
+import {
+  DEFAULT_OPEN,
+  groupsOf,
+  isFold,
+  navigable,
+  noCloneOf,
+  parseRoute,
+  removeCard,
+  routeHash,
+  stops,
+  type GroupKey,
+  type Route,
+} from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
@@ -468,6 +480,11 @@ export function App() {
     }
     setSelected(c.id);
     setSnoozeFor(null);
+    // With no clone for a babysitter to work in, the next step is setting one up.
+    if (c.inflight && noCloneOf(c)) {
+      go({ name: "settings", section: "inflight" });
+      return;
+    }
     // An in-flight PR is in Now for what its babysitter left you (a reply to send, a question): that's in the lane.
     if (c.inflight) setLaneSel(c.id);
     go(c.inflight ? { name: "inflight" } : { name: "review", id: c.id });
@@ -768,6 +785,7 @@ export function App() {
     selected,
     expanded,
     armed: armed?.id ?? null,
+    babysitting: view?.babysitting ?? true,
     leaving,
     snoozeFor,
     showSignals,
@@ -882,6 +900,7 @@ export function App() {
               id={route.id}
               loads={loads}
               me={overview?.me ?? ""}
+              babysitting={view?.babysitting ?? true}
               now={now}
               inert={help}
               flash={reviewFlash}

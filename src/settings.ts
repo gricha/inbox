@@ -35,7 +35,11 @@ export const SECTIONS: SettingsSection[] = [
     title: "Queue",
     help: "Now and Today are the queue. Later and resolved stay out of it, on one quiet line below.",
   },
-  { id: "agent", title: "Agents" },
+  {
+    id: "agent",
+    title: "Agents",
+    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill.",
+  },
   { id: "policy", title: "Policy", help: "Prose guidance the judge and the coordinator follow." },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
@@ -47,7 +51,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "review",
     title: "AI review",
-    help: "Your agent (Agents above) reads a PR's diff and writes a summary, concerns and notes on the changes. It runs as you, with your own login, model and settings, so the diff goes to whichever account that CLI is logged in to.",
+    help: "Claude Code reads a PR's diff and writes a summary, concerns and notes on the changes, with your own login, model and settings, so the diff goes to whichever account it's logged in to.",
   },
   {
     id: "handoff",
@@ -63,7 +67,7 @@ export const SETTINGS = [
     section: "github",
     label: "Close collaborator after",
     type: "number",
-    default: 3,
+    default: 5,
     min: 1,
     max: 100,
     help: "author.close is true when you reviewed or commented on at least this many of their PRs in 90 days.",
@@ -132,19 +136,6 @@ export const SETTINGS = [
     help: "The rest sit behind one line you can open. 0 shows them all.",
   },
   {
-    key: "agent.driver",
-    section: "agent",
-    label: "Main agent",
-    type: "select",
-    default: "claude-code",
-    options: [
-      { value: "claude-code", label: "Claude Code" },
-      { value: "codex", label: "Codex" },
-      { value: "none", label: "None" },
-    ],
-    help: "The agent you work in. Review Desk connects to it: its MCP tools and the Review Desk skill.",
-  },
-  {
     key: "coordinator.enabled",
     section: "agent",
     label: "Coordinator",
@@ -158,7 +149,7 @@ export const SETTINGS = [
     label: "Let the judge place what your rules leave open",
     type: "boolean",
     default: true,
-    help: "Items no rule matched, and items a rule sends to judge, go to the judge (your main agent) with the policy, 20 at a time. Until it answers they use the board's default. Nothing is judged while the policy is empty.",
+    help: "Items no rule matched, and items a rule sends to judge, go to Claude Code with the policy, 20 at a time. Until it answers they use the board's default. Nothing is judged while the policy is empty.",
   },
   {
     key: "policy.max_per_hour",
@@ -296,7 +287,7 @@ export function checkSetting(key: string, value: unknown): string | null {
 }
 
 // Settings that no longer exist: ignored when read, and gone from the file on the next save.
-const REMOVED = new Set(["analyze.model", "analyze.command"]);
+const REMOVED = new Set(["analyze.model", "analyze.command", "agent.driver"]);
 
 // Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
 export function readSettings(file: string): {

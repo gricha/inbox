@@ -20,6 +20,7 @@ import type {
   ConfigDoc,
   ConfigError,
   Context,
+  CoordinatorLogEntry,
   CoordinatorView,
   Draft,
   FocusView,
@@ -49,7 +50,7 @@ import { classify, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { NOT_LOGGED_IN, type AgentOpts, type PrText } from "./review.ts";
+import { NOT_LOGGED_IN, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { Judge, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
@@ -73,9 +74,10 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const AI_AT_ONCE = 2;
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
-const agentKey = (s: Settings) => JSON.stringify([s["agent.driver"], s["review.auto_ai"]]);
+const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
+const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_DRAFT = 5_000;
 const MAX_QUESTION = 300;
 
@@ -127,8 +129,8 @@ export interface DeskOptions {
 const MAX_POLICY = 20_000; // it goes with every judge call
 
 export interface ReviewDeps {
-  fetchPr(item: Item): Promise<PrText>;
-  generate(item: Item, s: Signals, why: string, pr: PrText, opts: AgentOpts): Promise<AiReview>;
+  fetchPr(item: Item, since?: string): Promise<PrText>;
+  generate(item: Item, s: Signals, why: string, pr: PrText): Promise<AiReview>;
 }
 
 export class Desk {
@@ -470,12 +472,10 @@ export class Desk {
           .map(([org, items]) => ({ org, items, space: spaces.find((s) => s.scope.split(/\s+/).includes(`org:${org}`))?.name ?? null })),
       },
       paused: {
-        ai: this.aiPausedNow()
-          ? { why: `AI reviews are paused: ${this.aiPaused!.why}`, until: new Date(this.aiPaused!.until).toISOString() }
-          : null,
+        ai: this.aiPausedNow() ? { why: this.aiPaused!.why, until: new Date(this.aiPaused!.until).toISOString() } : null,
         babysitters:
           this.sitter.paused && Date.now() < this.sitter.paused.until
-            ? { why: `Babysitters are paused: ${this.sitter.paused.why}`, until: new Date(this.sitter.paused.until).toISOString() }
+            ? { why: this.sitter.paused.why, until: new Date(this.sitter.paused.until).toISOString() }
             : null,
       },
     };
@@ -509,12 +509,12 @@ export class Desk {
   // ---------------------------------------------------------------- agents
 
   agentStatus(mcpUrl: string): AgentStatus {
-    return agents.status(this.settings["agent.driver"], mcpUrl);
+    return agents.status("claude-code", mcpUrl);
   }
 
   async connectAgent(mcpUrl: string): Promise<AgentStatus> {
     try {
-      return await agents.connect(this.settings["agent.driver"], mcpUrl);
+      return await agents.connect("claude-code", mcpUrl);
     } catch (e) {
       throw new DeskError(502, (e as Error).message);
     }
@@ -671,10 +671,11 @@ export class Desk {
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
     const reviews = this.store.prefixed<AiReview>("review:");
-    // The AI said to skip this commit: it gives up its capped slot first, so the next item gets one and its own review.
-    const skip = (e: Entry) => {
+    // The AI's call on this commit: over a cap, the lightest gives up its slot first, so a close look keeps one.
+    const call = (e: Entry) => {
       const ai = reviews.get(e.item.id);
-      return ai?.head_oid === e.item.head_oid && ai.verdict === "skip";
+      const current = ai?.head_oid === e.item.head_oid ? ai : null;
+      return current?.risk === "high" ? "look" : current?.verdict;
     };
     // An answer for an older version of the item stays until a fresh one lands, so the queue doesn't jump back and forth.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
@@ -706,7 +707,7 @@ export class Desk {
           // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved && !e.inflight,
           kept: kept.has(e.item.id) || recent(e),
-          skip: skip(e),
+          ai: call(e),
         })),
         judge,
         this.settings["queue.quiet_days"],
@@ -747,7 +748,10 @@ export class Desk {
     if (it.review_decision === "approved") chips.push("approved");
     if (it.threads_unresolved > 0) chips.push(`${it.threads_unresolved} unresolved`);
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
+    const me = e.analysis.signals.me;
+    const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     return {
+      ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
       kind: it.kind,
       repo: it.repo,
@@ -854,6 +858,12 @@ export class Desk {
         if (v.escalation) c.escalated = true;
         if (v.escalation && v.resume) c.resume = v.resume;
         c.waiting_since = this.neededSince(e, v);
+      } else {
+        // Who last spoke on it: a reviewer's comment or review is the context its threads and next step don't give.
+        const said = this.store
+          .activity({ after: 0, limit: 20, item: it.id, latest: true })
+          .find((x) => x.kind === "commented" || x.kind === "reviewed");
+        if (said) c.last_event = said;
       }
     }
     if (it.kind === "issue") {
@@ -891,7 +901,15 @@ export class Desk {
     if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return { state: "none" };
     const ai = snap.reviews.get(it.id);
     const got = ai
-      ? { verdict: ai.verdict, risk: ai.risk, summary: ai.summary, concerns: ai.concerns.slice(0, 2), notes: ai.notes.length, at: ai.at }
+      ? {
+          verdict: ai.verdict,
+          risk: ai.risk,
+          summary: ai.summary,
+          ...(ai.since && { since: ai.since }),
+          concerns: ai.concerns.slice(0, 2),
+          notes: ai.notes.length,
+          at: ai.at,
+        }
       : {};
     const state = (): Preflight["state"] => {
       if (ai?.head_oid === it.head_oid) return "ready";
@@ -910,7 +928,7 @@ export class Desk {
     const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
     if (e.inflight || ready) return undefined;
     const s = this.settings;
-    const hand = s["inflight.babysit"] && s["agent.driver"] === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
+    const hand = s["inflight.babysit"] ? "d hands it to a babysitter" : "d puts it in flight";
     if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
     if (it.ci === "red") return `CI failing: ${hand}`;
     if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
@@ -970,6 +988,16 @@ export class Desk {
     }
     const cleared: Card[] = [];
     const resolved: Card[] = [];
+    // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
+    // items, and the rest of Later, resolve silently.
+    const since = new Date(this.now().getTime() - RESOLVED_SHOWN).toISOString();
+    const yours = (e: Entry, p: Placement | null) =>
+      (e.resolved?.at ?? e.item.updated_at) >= since &&
+      (p?.bucket === "now" ||
+        p?.bucket === "today" ||
+        !!e.state.seen_at ||
+        e.resolved?.reason === "no longer requested" ||
+        e.resolved?.actor.toLowerCase() === this.me().toLowerCase());
     for (const board of loaded.boards) {
       const b = snap.boards.get(board.config.id)!;
       for (const id of b.result.inactive) {
@@ -977,9 +1005,19 @@ export class Desk {
         seen.add(id);
         const e = snap.entries.get(id)!;
         if (laneOwned(e)) continue; // the In-flight lane shows it
-        if (e.resolved) resolved.push(this.card(e, this.placementOf(id, snap), snap));
-        else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
+        if (e.resolved) {
+          const p = this.placementOf(id, snap);
+          if (yours(e, p)) resolved.push(this.card(e, p, snap));
+        } else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
+    }
+    // What the coordinator cleared says so: on a managed desk you see what the agent put away, and why.
+    const acts = new Map<string, CoordinatorLogEntry>();
+    for (const a of this.store.log({ limit: 1000, kind: "act" }))
+      if (a.item_id && !a.undone && a.undo_seq !== null && !acts.has(a.item_id)) acts.set(a.item_id, a);
+    for (const c of cleared) {
+      const a = acts.get(c.id);
+      if (a && a.undo_seq === this.store.lastActionSeq(c.id)) c.cleared_by_coordinator = a.text;
     }
     return {
       sections,
@@ -989,6 +1027,7 @@ export class Desk {
       now_cards: this.settings["queue.now_cards"],
       today_cards: this.settings["queue.today_cards"],
       ai_paused: this.aiPausedWhy(),
+      babysitting: this.settings["inflight.babysit"],
     };
   }
 
@@ -1119,13 +1158,19 @@ export class Desk {
   prText(id: string): Promise<PrText> {
     const review = this.review;
     if (!review) return Promise.reject(new Error("diffs aren't available in this desk"));
-    const item = this.snapshot().entries.get(id)!.item;
+    const e = this.snapshot().entries.get(id)!;
+    const item = e.item;
+    // Pushed since you reviewed it: the diff since your review's commit too, for a "since your review" line.
+    const me = e.analysis.signals.me;
+    const since = me.pushed_since_review
+      ? item.reviews.findLast((r) => r.author.toLowerCase() === me.login.toLowerCase() && !!r.commit)?.commit
+      : undefined;
     const cached = this.store.get(`pr:${id}`) as (PrText & { head_oid: string }) | null;
     if (cached?.head_oid === item.head_oid) return Promise.resolve(cached);
     const running = this.fetching.get(id);
     if (running) return running;
     const p = review
-      .fetchPr(item)
+      .fetchPr(item, since)
       .then((t) => {
         if (!this.stopped) this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
         return t;
@@ -1178,8 +1223,7 @@ export class Desk {
     try {
       if (!this.review) throw new Error("AI review isn't available in this desk");
       const pr = await this.prText(id);
-      const s = this.settings;
-      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, { driver: s["agent.driver"] });
+      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr);
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
       this.aiErrors.delete(id);
@@ -1215,9 +1259,9 @@ export class Desk {
     return !(err && err.head_oid === it.head_oid && Date.now() - err.at < AI_RETRY);
   }
 
-  // AI reviews nobody asked for: on unless review.auto_ai is off or there's no agent to write them...
+  // AI reviews nobody asked for: on unless review.auto_ai is off...
   autoAiOn(): boolean {
-    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none";
+    return !!this.review && this.settings["review.auto_ai"];
   }
 
   // ...and not paused because they keep failing.

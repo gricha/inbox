@@ -23,9 +23,8 @@ test("checkSetting", () => {
   assert.equal(checkSetting("app.hotkey", "CommandOrControl+Shift+K"), null);
   assert.match(checkSetting("app.hotkey", "K")!, /modifiers/);
   assert.match(checkSetting("handoff.prompt", "  ")!, /empty/);
-  assert.equal(checkSetting("agent.driver", "codex"), null);
-  assert.equal(checkSetting("agent.driver", "vim"), "must be one of claude-code, codex, none");
-  assert.match(checkSetting("agent.driver", 1)!, /one of/);
+  // There's no agent to pick: every agent is your own Claude Code.
+  assert.match(checkSetting("agent.driver", "codex")!, /unknown/);
   assert.match(checkSetting("nope.nope", 1)!, /unknown/);
 });
 
@@ -78,7 +77,7 @@ const LEGACY = `# header
 poll_seconds = 60
 
 [signals]
-close_collaborator_min = 3   # default, so it isn't copied
+close_collaborator_min = 5   # default, so it isn't copied
 bots = ["ci-helper"]
 my_repos = []
 

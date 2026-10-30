@@ -258,6 +258,12 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
+  // The item's latest action still in effect: whose it was is in the coordinator's log, by its undo seq.
+  lastActionSeq(itemId: string): number | null {
+    const r = this.db.prepare("SELECT MAX(seq) AS seq FROM events WHERE item_id = ? AND undone = 0").get(itemId);
+    return (r?.seq as number | null) ?? null;
+  }
+
   lastAction(seq?: number): ActionEvent | null {
     const r =
       seq === undefined

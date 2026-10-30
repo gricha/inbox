@@ -100,6 +100,10 @@ export function laneFacts(
   return out;
 }
 
+// Whether the babysitter's line says more than why the PR needs you ("babysitter asks: …", "no local clone of …" say it).
+export const sitterNews = (r: Pick<InflightRow, "state" | "needs_you" | "sitter">) =>
+  r.state === "open" && !!r.sitter.text && (!r.needs_you || r.sitter.state === "done" || r.sitter.state === "running");
+
 // What a PR's babysitter is doing, in the lane's words: "fixing CI", "4m", "npm test"; "pushed a fix for 2 comments", "abc1234".
 export function sitterParts(r: Pick<InflightRow, "sitter" | "run">, now: number): string[] {
   const s = r.sitter;
@@ -183,15 +187,19 @@ const LABEL: Record<GroupKey, string> = {
 const mineOf = (c: Pick<Card, "kind" | "author" | "resolved">, me: string) =>
   c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
 
-// How much a card wants you first: 0 for a close look, high risk, an item a cap pushed down, or your PR one key from done
-// (a reply to send, a question, approved and green); 2 for the AI's "skip it"; 1 for the rest, your PR in flight that's
-// stuck (no clone, no babysitter) included.
+// How much a card wants you first, lowest first: your PR one key from done that only you can answer (a reply to send, a
+// question); a close look or high risk on the current commit, then one on an older commit; an item a cap pushed out of Now;
+// your PR approved and green; the rest (your stuck PR in flight among them); someone else's PR with CI failing, which waits
+// on its author; the AI's "skip it".
 function weight(c: Card, me: string): number {
   const p = c.preflight;
-  if (p?.verdict === "skip") return 2;
-  if (c.demoted || p?.risk === "high" || p?.verdict === "look") return 0;
-  const done = (c.inflight && (!!c.reply || !!c.escalated)) || (c.ci === "green" && c.chips.includes("approved"));
-  return mineOf(c, me) && done ? 0 : 1;
+  const mine = mineOf(c, me);
+  if (p?.verdict === "skip") return 7;
+  if (mine && c.inflight && (!!c.reply || !!c.escalated)) return 0;
+  if (!mine && c.kind === "pr" && c.ci === "red") return 6;
+  if (p?.risk === "high" || p?.verdict === "look") return p.state === "ready" ? 1 : 2;
+  if (c.demoted) return 3;
+  return mine && c.ci === "green" && c.chips.includes("approved") ? 4 : 5;
 }
 
 // Consecutive cards with the same author and reason (a stack of PRs) read as one block from three on.
@@ -240,7 +248,9 @@ export function groupsOf(
             .sort((a, b) => a.w - b.w || a.i - b.i)
             .map((x) => x.c);
     const forced = !!q && matched.length > 0 && !open[key];
-    const n = cap && !q && !unfolded[key] && ordered.length > cap ? foldAt(ordered, cap) : ordered.length;
+    // A fold that would hide one card costs more than the card: it folds only when two or more would go behind it.
+    const at = cap && !q && !unfolded[key] ? foldAt(ordered, cap) : ordered.length;
+    const n = ordered.length - at < 2 ? ordered.length : at;
     const cards = ordered.slice(0, n);
     return {
       key,
@@ -273,6 +283,13 @@ export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
   return todo && why && (why.startsWith(what.toLowerCase()) || what.toLowerCase().startsWith(why)) ? todo : card.next;
 }
 
+// d's label on your PR, the same on a card, an opened item and a review.
+export const handLabel = (c: Pick<Card, "inflight">, babysitting: boolean) =>
+  c.inflight ? "Take back" : babysitting ? "Hand to a babysitter" : "Put in flight";
+
+// Your PR in flight with no local clone for a babysitter to work in: the repo to clone.
+export const noCloneOf = (c: Pick<Card, "why" | "repo">) => (/\bno local clone of /.test(c.why) ? c.repo : undefined);
+
 // "d hands it to a babysitter" split so its keys can be set apart: odd indexes are keys.
 export const keyParts = (text: string): string[] => text.split(/(?<=^|, )(enter|[a-z])(?= (?:opens|sends|hands|puts) )/);
 
@@ -293,7 +310,14 @@ export function firstClause(text: string, max = 72): string {
   const first = opening(text, 0);
   if (first.length <= max) return first;
   const cut = /[,;] /.exec(first);
-  return cut && cut.index <= max ? `${first.slice(0, cut.index)}.` : first;
+  if (cut && cut.index <= max) return `${first.slice(0, cut.index)}.`;
+  // No clause fits: end at the last joint that does (" and ", " with ", " (", else a word), never in an ellipsis.
+  const head = first.slice(0, max);
+  const joint = Math.max(head.lastIndexOf(" and "), head.lastIndexOf(" with "), head.lastIndexOf(" ("));
+  let out = first.slice(0, joint > 0 ? joint : Math.max(head.lastIndexOf(" "), 1));
+  // A cut inside brackets drops the bracket.
+  if (out.split("(").length > out.split(")").length) out = out.slice(0, out.lastIndexOf(" ("));
+  return `${out.replace(/[\s,;:–-]+$/, "")}.`;
 }
 
 // A number keeps its unit and a range its ends on one line: "0–100 %", "15 s".
@@ -333,14 +357,16 @@ export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"
 // The selected card's facts, in the review header's words, less what the card already says: its why, its problems and
 // size, which every card shows, and a sorted-away row's note.
 export function cardFacts(
-  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted">,
+  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "cleared_by_coordinator">,
   me: string,
   away = false,
   inRun = false, // its stack's head names the author
 ): string[] {
   const out: string[] = [];
   if (c.author.toLowerCase() !== me.toLowerCase() && !inRun) out.push(`by ${c.author}`);
-  if (c.kind === "pr" && c.ci === "green") out.push("CI passing");
+  // Nobody asked you by name: a why like "close collaborator" doesn't say so.
+  if (c.team_ask && !c.why.includes("@")) out.push(c.team_ask);
+  if (c.kind === "pr" && c.ci === "green" && !/\bgreen\b/i.test(c.why)) out.push("CI passing");
   if (c.kind === "pr" && c.ci === "pending") out.push("CI running");
   if (c.chips.includes("approved")) out.push("approved");
   const threads = /^(\d+) unresolved$/.exec(c.chips.find((x) => x.endsWith(" unresolved")) ?? "")?.[1];
@@ -351,6 +377,8 @@ export function cardFacts(
   const notes = c.preflight?.state === "ready" ? (c.preflight.notes ?? 0) : 0;
   if (notes) out.push(`${notes} ${notes === 1 ? "note" : "notes"} on the changes`);
   if (c.demoted && !away) out.push(c.demoted);
+  // Why the coordinator put it away: e restores it, as with your own.
+  if (c.cleared_by_coordinator) out.push(`the coordinator: ${c.cleared_by_coordinator}`);
   const why = c.why.toLowerCase();
   return out.filter((f) => !why.includes(f.toLowerCase()));
 }

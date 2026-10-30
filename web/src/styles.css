@@ -153,12 +153,15 @@ code {
   border-radius: 6px;
 }
 
-/* A key under the keyboard is the cursor: a neutral fill and the pencil ring, never an outline box. */
+/* A key under the keyboard is the cursor: a neutral fill and the pencil ring, never an outline box. It sits on a selected
+   card's fill, so it takes the deeper one, and its padding clears the text without moving the row. */
 .act:focus-visible,
 .cl-undo:focus-visible {
   outline: none;
   border-radius: 8px;
-  background: var(--card-sel);
+  margin: 0 -8px;
+  padding: 0 8px;
+  background: var(--sel);
   box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
@@ -344,7 +347,8 @@ kbd {
     padding-left: max(20px, calc((100% - var(--col-w)) / 2 + 24px));
   }
 
-  .search {
+  /* .topbar for weight: the base .search below centres it, which put it wherever the sync label left room. */
+  .topbar .search {
     margin: 0;
   }
 
@@ -865,8 +869,8 @@ kbd {
 .b-fyi .fact-word.t-warn,
 .dim .fact-word.t-bad,
 .dim .fact-word.t-warn {
-  color: var(--ink-2);
-  font-weight: 500;
+  color: var(--pencil);
+  font-weight: 400;
 }
 
 .verdict {
@@ -1168,6 +1172,7 @@ kbd {
 
 /* An AI review of an older commit, kept until the new one lands. */
 .gist.older,
+.gist.older b,
 .concern.older {
   color: var(--pencil);
 }
@@ -1188,7 +1193,9 @@ kbd {
   -webkit-line-clamp: 2;
 }
 
+/* One line: the card's full width, since firstClause already ends it at a whole clause. */
 .gist.clip-1 {
+  max-width: none;
   -webkit-line-clamp: 1;
 }
 
@@ -1196,6 +1203,25 @@ kbd {
 .gist.event {
   color: var(--pencil);
   font-size: 13px;
+}
+
+/* The reply y sends on your PR: who it answers in pencil, then what you'd post as you, in ink. Selected, what it answers
+   gets its own line. */
+.concern.reply .reply-to {
+  color: var(--pencil);
+}
+
+.concern.reply .reply-body {
+  color: var(--ink);
+}
+
+.card.sel .concern.reply .reply-to {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.card.sel .concern.reply .reply-body {
+  white-space: pre-wrap;
 }
 
 /* A concern is one whole sentence; four lines only guards against a runaway one. */
@@ -1247,9 +1273,9 @@ kbd {
   border-radius: 12px;
 }
 
-/* The cursor on the fold is the cards' cursor. */
+/* The cursor on the fold: on the paper, the cards' lighter fill wouldn't show. */
 .deck .fold.sel {
-  background: var(--card-sel);
+  background: var(--sel);
   box-shadow: inset 0 0 0 1.5px var(--pencil);
   color: var(--ink-2);
 }
@@ -1508,7 +1534,7 @@ kbd {
 }
 
 .keys-more {
-  margin-top: 12px;
+  margin: 0 0 14px;
   color: var(--pencil);
   font-size: 12.5px;
 }
@@ -1943,6 +1969,12 @@ kbd {
   background: var(--wash);
 }
 
+/* Digits differ in width: a fixed key column starts every label on one edge. */
+.pop-item kbd {
+  min-width: 1ch;
+  font-variant-numeric: tabular-nums;
+}
+
 .toast {
   position: fixed;
   bottom: 22px;
@@ -2355,7 +2387,7 @@ kbd {
 /* The coordinator, under its switch in Settings → Agents. */
 .coord {
   flex-basis: 100%;
-  min-width: 0; /* the one-line command shrinks to an ellipsis instead of widening the page */
+  min-width: 0;
 }
 
 .coord-cmd {
@@ -2368,12 +2400,10 @@ kbd {
 .coord-cmd code {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
   color: var(--ink-2);
   font-size: 12px;
   line-height: 1.6;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Below 820px, where the sidebar's In flight entry is hidden: the same, in pencil. */
@@ -2415,9 +2445,18 @@ kbd {
   color: var(--ink);
 }
 
+/* Below 1000px the verb stays and the name goes ("Snoozed 1 Today item · 4m"): a name and a time alone say nothing. */
+.coord-line .cl-narrow {
+  display: none;
+}
+
 @media (width <= 1000px) {
-  .coord-line .cl-what {
+  .coord-line .cl-wide {
     display: none;
+  }
+
+  .coord-line .cl-narrow {
+    display: inline;
   }
 }
 
@@ -2891,8 +2930,9 @@ kbd {
   font-size: 13.5px;
 }
 
+/* Armed, a second press sends it: said in ink, since amber is for problems. */
 .act.armed {
-  color: var(--amber);
+  color: var(--ink);
   font-weight: 650;
 }
 
@@ -2992,9 +3032,11 @@ kbd {
   align-items: baseline;
 }
 
+/* Its text is already cut to whole segments that fit (ListDir), so it neither shrinks nor flips direction. */
 .rv-file .rv-dir {
-  flex: 0 1 auto;
-  min-width: 1.8em;
+  flex: none;
+  direction: ltr;
+  white-space: nowrap;
 }
 
 .rv-file .rv-base {
@@ -3033,8 +3075,10 @@ kbd {
   padding-bottom: 55vh;
 }
 
+/* minmax(0, 1fr): a long file name in the header wraps instead of widening the track, and the page, past the window. */
 .rv-file-sec {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
   scroll-margin-top: 52px;
@@ -3062,6 +3106,12 @@ kbd {
 
 .rv-fhead .rv-delta {
   margin-left: auto;
+}
+
+.rv-fhead .rv-base {
+  flex: 0 1 auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* Pierre's diff, in its own shadow root: its variables take our fonts and surfaces. */

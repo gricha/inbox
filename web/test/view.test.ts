@@ -14,6 +14,7 @@ import {
   draftOf,
   firstClause,
   foldOf,
+  handLabel,
   groupsOf,
   judgeStatusText,
   judgeStepText,
@@ -23,6 +24,7 @@ import {
   lineOf,
   logText,
   navigable,
+  noCloneOf,
   nextText,
   opening,
   parseList,
@@ -85,6 +87,7 @@ const queue = (): QueueView => ({
   now_cards: 5,
   today_cards: 5,
   ai_paused: null,
+  babysitting: true,
 });
 
 test("routes round-trip through the hash", () => {
@@ -316,17 +319,42 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
   ];
   const v = { ...queue(), sections: { ...queue().sections, now }, now_cards: 3 };
   const g = groupsOf(v, DEFAULT_OPEN, "", {}, "me").find((x) => x.key === "now")!;
-  // A close look, your PR one key from done and high risk first; skip last; otherwise as the rules ordered them. Your PR
-  // in flight that no key can finish (no clone) is one of the rest.
-  assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#22", "acme/api#23", "acme/api#24"], 3]);
+  // Your reply to send first, then a close look and high risk; skip last; otherwise as the rules ordered them. Your PR in
+  // flight that no key can finish (no clone) is one of the rest.
+  assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#23", "acme/api#22", "acme/api#24"], 3]);
   assert.deepEqual(
     groupsOf(v, DEFAULT_OPEN, "", { now: true }, "me")
       .find((x) => x.key === "now")!
       .cards.map((c) => c.id),
-    ["acme/api#22", "acme/api#23", "acme/api#24", "acme/api#21", "acme/api#25", "acme/api#20"],
+    ["acme/api#23", "acme/api#22", "acme/api#24", "acme/api#21", "acme/api#25", "acme/api#20"],
+  );
+  // Approved and green comes after the close looks, a look at an older commit after a current one, and someone else's red
+  // PR after the ones ready to review.
+  const order = groupsOf(
+    {
+      ...queue(),
+      sections: {
+        ...queue().sections,
+        now: [
+          card("acme/api#50", { author: "me", ci: "green", chips: ["approved"] }),
+          card("acme/api#51", { author: "a51", ci: "red", chips: ["CI red"], preflight: look }),
+          card("acme/api#52", { author: "a52", preflight: { state: "stale", verdict: "look" } }),
+          card("acme/api#53", { author: "a53", preflight: look }),
+          card("acme/api#54", { author: "a54", preflight: { state: "ready", verdict: "skim" } }),
+        ],
+      },
+    },
+    DEFAULT_OPEN,
+    "",
+    {},
+    "me",
+  ).find((x) => x.key === "now")!;
+  assert.deepEqual(
+    order.cards.map((c) => c.id),
+    ["acme/api#53", "acme/api#52", "acme/api#50", "acme/api#54", "acme/api#51"],
   );
   assert.ok(stops([g], new Set()).includes(foldOf("now")));
-  const demoted = card("acme/web#30", { demoted: "Now was full on PRs to review (3)" });
+  const demoted = card("acme/web#30", { demoted: "Now takes 3 from PRs to review" });
   const today = [card("acme/web#31", { author: "a31" }), card("acme/web#32", { author: "a32", preflight: skip }), demoted];
   const t = groupsOf({ ...queue(), sections: { ...queue().sections, today }, today_cards: 1 }, DEFAULT_OPEN, "").find(
     (x) => x.key === "today",
@@ -353,6 +381,9 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
     [1, 4],
   );
   assert.deepEqual([stacked(stack, 2).cards.length, stacked(stack, 2).fold], [4, 0]);
+  // A fold never hides just one card: the stack fills the slots and the one after it shows too.
+  const tail = stacked([...stack, card("acme/web#44", { author: "a44" })], 4);
+  assert.deepEqual([tail.cards.length, tail.fold], [5, 0]);
   assert.deepEqual(
     runs(stack).map((r) => r.cards.length),
     [4],
@@ -426,12 +457,12 @@ test("the selected card's facts leave out what the card already says", () => {
     chips: ["CI red", "conflict", "3 unresolved", "+62 −7"],
     ci: "red",
     preflight: { state: "ready", risk: "medium", notes: 5 },
-    demoted: "Now was full (3)",
+    demoted: "Now takes 3 from B",
   });
   // Problems and size are on every card, so the facts skip them.
-  assert.deepEqual(cardFacts(pr, "me"), ["by dana", "3 unresolved threads", "medium risk", "5 notes on the changes", "Now was full (3)"]);
+  assert.deepEqual(cardFacts(pr, "me"), ["by dana", "3 unresolved threads", "medium risk", "5 notes on the changes", "Now takes 3 from B"]);
   // A sorted-away row shows its note already.
-  assert.ok(!cardFacts(pr, "me", true).includes("Now was full (3)"));
+  assert.ok(!cardFacts(pr, "me", true).includes("Now takes 3 from B"));
   assert.ok(!cardFacts(pr, "me", false, true).includes("by dana"), "in a stack, its head names the author");
   assert.ok(says("conflicts with main", "merge conflict"));
   assert.ok(!says("asked you directly", "merge conflict"));
@@ -458,6 +489,32 @@ test("the selected card's facts leave out what the card already says", () => {
     "draft",
   ]);
   assert.deepEqual(cardFacts(card("acme/api#2", { kind: "issue", ci: "none", author: "nina" }), "me"), ["by nina"]);
+  // A team-only ask says so when the why doesn't; "approved and green" already says CI passes; the coordinator says why.
+  assert.deepEqual(
+    cardFacts(card("acme/api#3", { why: "close collaborator", team_ask: "CODEOWNERS ping to @ml-team", ci: "green" }), "me"),
+    ["by dana", "CODEOWNERS ping to @ml-team", "CI passing"],
+  );
+  assert.ok(
+    !cardFacts(card("acme/api#4", { why: "CODEOWNERS ping to @ml-team", team_ask: "CODEOWNERS ping to @ml-team" }), "me").some((f) =>
+      f.includes("@"),
+    ),
+  );
+  assert.deepEqual(
+    cardFacts(card("acme/api#5", { author: "me", why: "approved and green: merge it", ci: "green", chips: ["approved"] }), "me"),
+    [],
+  );
+  assert.deepEqual(cardFacts(card("acme/api#6", { ci: "none", cleared_by_coordinator: "a thread you've left" }), "me"), [
+    "by dana",
+    "the coordinator: a thread you've left",
+  ]);
+});
+
+test("d's label and a PR with no clone to work in", () => {
+  assert.equal(handLabel({ inflight: false }, true), "Hand to a babysitter");
+  assert.equal(handLabel({ inflight: false }, false), "Put in flight");
+  assert.equal(handLabel({ inflight: true }, true), "Take back");
+  assert.equal(noCloneOf({ why: "in flight: no local clone of oss/tinyhttp, so no babysitter", repo: "oss/tinyhttp" }), "oss/tinyhttp");
+  assert.equal(noCloneOf({ why: "in flight: reply ready to send", repo: "oss/tinyhttp" }), undefined);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {
@@ -623,6 +680,13 @@ test("formatting", () => {
   assert.equal(shortId("getsentry/seer#9085"), "seer#9085");
   assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_until: null })), "snoozed until activity");
   assert.equal(clearedText(card("a/b#1", { status: "muted" })), "muted");
+  // What the coordinator put away says so; times read as the snooze menu writes them.
+  const sat = new Date(2026, 9, 31, 9, 0).toISOString();
+  assert.match(
+    clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat, cleared_by_coordinator: "a CODEOWNERS ping" })),
+    /^coordinator snoozed until .*\b9:00 or new activity$/,
+  );
+  assert.equal(clearedText(card("a/b#1", { status: "muted", cleared_by_coordinator: "" })), "coordinator muted");
 });
 
 test("a skip's gist is its first clause when the sentence won't fit a line; units stay with their numbers", () => {
@@ -631,6 +695,15 @@ test("a skip's gist is its first clause when the sentence won't fit a line; unit
     "Runs eval shard setup and sandbox provisioning in the background.",
   );
   assert.equal(firstClause("Deletes an unused helper and its tests. Nothing else."), "Deletes an unused helper and its tests.");
+  // No comma in reach: it ends at the last joint that fits, with a period, never mid-clause.
+  assert.equal(
+    firstClause("Adds a two-point calibration per sensor (dry and wet readings) and maps raw readings to 0–100 % moisture."),
+    "Adds a two-point calibration per sensor (dry and wet readings).",
+  );
+  assert.equal(
+    firstClause("Adds a two-point calibration per sensor (dry readings and wet readings taken at install time on every board)."),
+    "Adds a two-point calibration per sensor.",
+  );
   assert.equal(
     keepUnits("maps raw readings to 0–100 % moisture every 15 s"),
     "maps raw readings to 0–\u2060100\u202f% moisture every 15\u202fs",

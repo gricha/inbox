@@ -139,10 +139,7 @@ test("the first run starts the session: a fixed id, its job, the desk's MCP serv
   // One line, without cmd.exe's special characters: it's a command-line argument.
   assert.doesNotMatch(SYSTEM_PROMPT, /[%!^&|<>\r\n]/);
 
-  assert.equal(
-    st.command,
-    `cd ${path.join(t.home, "coordinator")} && ${t.fake.bin} --resume ${st.session_id} --mcp-config mcp.json --strict-mcp-config --tools '' --allowedTools mcp__review-desk`,
-  );
+  assert.equal(st.command, `cd ${path.join(t.home, "coordinator")} && ${t.fake.bin} --resume ${st.session_id} --mcp-config mcp.json`);
   assert.deepEqual(
     t.desk.coordinatorView().log.map((e) => [e.kind, e.run, e.text.replace(/\d+s/, "Ns")]),
     [["run", 1, "Started the session · Ns"]],
@@ -320,17 +317,14 @@ test("a run that takes too long is stopped, and stopping the desk kills a run in
   });
 });
 
-test("off: codex, a setting, or no MCP server to wire it to", posix, async (c) => {
-  const codex = await setup(c, { settings: { "agent.driver": "codex" } });
-  await codex.sync();
-  assert.deepEqual([codex.co.status().state, codex.co.status().off_reason], ["off", "Coordinator needs Claude Code for now"]);
+test("off: the setting, or no MCP server to wire it to", posix, async (c) => {
   const off = await setup(c, { settings: { "coordinator.enabled": false } });
   await off.sync();
-  assert.equal(off.co.status().off_reason, "Off");
+  assert.deepEqual([off.co.status().state, off.co.status().off_reason], ["off", "Off"]);
   const bare = await setup(c, { mcpUrl: null });
   await bare.sync();
   assert.match(bare.co.status().off_reason ?? "", /doesn't serve MCP/);
-  assert.equal(codex.fake.calls() + off.fake.calls() + bare.fake.calls(), 0);
+  assert.equal(off.fake.calls() + bare.fake.calls(), 0);
 });
 
 test("a flood of new items (a new search's first sync) is one line, not a hundred", posix, async (c) => {

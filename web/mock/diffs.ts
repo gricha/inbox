@@ -307,15 +307,65 @@ const CANNED: Record<string, Canned> = {
   },
 };
 
-// Every other PR gets a small diff shaped by its title, and no review until one is asked for.
-function generic(repo: string, n: number, title: string): Canned {
-  const slug =
-    title
-      .toLowerCase()
-      .replaceAll(/[^a-z0-9]+/g, "_")
-      .replaceAll(/^_|_$/g, "")
-      .slice(0, 32) || `change_${n}`;
+const PARTS = [
+  "types",
+  "store",
+  "render",
+  "hooks",
+  "measure",
+  "keys",
+  "scroll",
+  "config",
+  "util",
+  "api",
+  "errors",
+  "index",
+  "cache",
+  "retry",
+];
+
+// The rest of a seed's size, so the review's header and its file list agree: whole names, +/− adding up.
+function filler(dir: string, ext: string, adds: number, dels: number, count: number): ReviewFile[] {
+  return Array.from({ length: count }, (_, i) => {
+    const a = Math.floor(adds / count) + (i < adds % count ? 1 : 0);
+    const d = Math.floor(dels / count) + (i < dels % count ? 1 : 0);
+    const name = `${dir}/${PARTS[i % PARTS.length]}${i >= PARTS.length ? `-${Math.floor(i / PARTS.length) + 1}` : ""}.${ext}`;
+    const lines = [
+      `@@ -1,${d} +1,${a} @@`,
+      ...Array.from({ length: d }, (_x, k) => `-${ext === "py" ? "    " : "  "}legacy_step_${k}()`),
+      ...Array.from({ length: a }, (_x, k) => `+${ext === "py" ? "    " : "  "}step_${k}()`),
+    ];
+    return file(name, "modified", lines.join("\n"));
+  });
+}
+
+// Every other PR gets a diff shaped by its title and sized like its seed, and no review until one is asked for.
+function generic(repo: string, n: number, title: string, size?: [number, number, number]): Canned {
+  // Whole words, up to 32 characters: a cut name reads like a typo.
+  const words = title
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  let slug = "";
+  for (const w of words) {
+    const next = slug ? `${slug}_${w}` : w;
+    if (next.length > 32) break;
+    slug = next;
+  }
+  slug ||= `change_${n}`;
   const py = repo.includes("ml-");
+  const [adds, dels, count] = size ?? [0, 0, 1];
+  const first = py ? [4, 1] : [4, 2];
+  const rest =
+    count > 1
+      ? filler(
+          py ? `pipeline/${slug}` : `src/${slug.replaceAll("_", "-")}`,
+          py ? "py" : "ts",
+          Math.max(adds - first[0]!, count - 1),
+          Math.max(dels - first[1]!, 0),
+          count - 1,
+        )
+      : [];
   return {
     files: [
       py
@@ -352,11 +402,12 @@ function generic(repo: string, n: number, title: string): Canned {
 
  export { legacy };`,
           ),
+      ...rest,
     ],
     ai: null,
   };
 }
 
-export function canned(id: string, repo: string, n: number, title: string): Canned {
-  return CANNED[id] ?? generic(repo, n, title);
+export function canned(id: string, repo: string, n: number, title: string, size?: [number, number, number]): Canned {
+  return CANNED[id] ?? generic(repo, n, title, size);
 }

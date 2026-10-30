@@ -6,7 +6,7 @@ Runs on macOS, Linux and Windows.
 
 ## Start
 
-You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI (or `codex`) is only needed for AI reviews.
+You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI is only needed for the agents (AI reviews, the judge, the coordinator, babysitters): they're all your own Claude Code.
 
 ```bash
 cd ~/code/review-desk && npm install
@@ -84,7 +84,7 @@ The first run writes a starting config: one space for the org with most of your 
 
 ## Agents
 
-Pick the agent you work in under Settings → Agents: Claude Code (the default), Codex, or none. Review Desk connects to it in two parts, and **Connect** there does whatever is missing:
+Every agent the desk runs is your own Claude Code. Settings → Agents connects it to the desk in two parts, and **Connect** there does whatever is missing (if you also work in Codex, `desk connect codex` gives it the same):
 
 - **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
 - **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK).
@@ -97,9 +97,9 @@ Pick the agent you work in under Settings → Agents: Claude Code (the default),
 The same from a terminal:
 
 ```bash
-desk connect            # what the agent in Settings is missing, and the commands that fix it
+desk connect            # what Claude Code is missing, and the commands that fix it
 desk connect --apply    # do it
-desk connect codex      # or name the agent: claude, codex
+desk connect codex      # Codex instead
 ```
 
 The CLI and the MCP tools talk to the running desk.
@@ -108,7 +108,7 @@ The CLI and the MCP tools talk to the running desk.
 desk ls                 # Now and Today in the terminal; `--all` for the rest
 desk show seer#8463     # why it's there, with the rule trace
 desk done seer#8463     # also: snooze, mute, pin, restore, undo, sync, prompt, brief
-desk settings           # list settings; `desk settings set agent.driver codex`
+desk settings           # list settings; `desk settings set review.auto_ai false`
 desk status --short     # "desk ●2 ◐8", for a status line
 ```
 

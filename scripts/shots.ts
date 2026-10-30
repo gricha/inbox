@@ -116,11 +116,22 @@ const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
   await page.reload();
   await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
 };
-// Now folds after its first five: open it for a card that sits behind its line.
+// Now and Today fold after their first five: open them for a card that sits behind a line.
 const unfoldNow = async (page: Page) => {
-  const fold = page.locator(".g-now .fold");
-  if (await fold.isVisible()) await fold.click();
+  for (const g of [".g-now", ".g-today"]) {
+    const fold = page.locator(`${g} .fold`);
+    if (await fold.isVisible()) await fold.click();
+  }
   await page.waitForTimeout(200);
+};
+// A setting changed through the API, as Settings would; `after` puts it back.
+const setting = (key: string, value: unknown) => async (page: Page) => {
+  await page.evaluate(
+    `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(${JSON.stringify(
+      value === undefined ? { reset: [key] } : { set: { [key]: value } },
+    )}) })`,
+  );
+  await page.waitForTimeout(300);
 };
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
@@ -173,6 +184,16 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await page.reload();
       await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
+    // Tab from the selected card lands on its first key: the cursor's fill and ring, clear of the letters.
+    name: "queue-tab-key",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".row", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(200);
     },
   },
   {
@@ -343,6 +364,39 @@ const SHOTS: Shot[] = [
   { name: "settings-app", go: at("#/settings/app") },
   { name: "settings-inflight", go: at("#/settings/inflight") },
   { name: "settings-review", go: at("#/settings/review") },
+  {
+    // Paused after failures in a row: one line, its label in ink, said once.
+    name: "settings-review-paused",
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+      await at("#/settings/review")(page);
+      await page.evaluate(`document.querySelector("#s-review").scrollIntoView()`);
+      await page.waitForTimeout(200);
+    },
+    after: pauseAi(false),
+  },
+  {
+    // Babysitting off: the intro says so once, a PR that needs you has its problem as its why, nothing says "watching".
+    name: "inflight-babysit-off",
+    go: async (page) => {
+      await setting("inflight.babysit", false)(page);
+      await at("#/inflight")(page);
+    },
+    after: setting("inflight.babysit", undefined),
+  },
+  {
+    // Cleared, with what the coordinator put away saying so.
+    name: "cleared",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.keyboard.press("g");
+      await page.keyboard.press("x");
+      await page.waitForTimeout(300);
+      await page.locator(".g-cleared").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+  },
   {
     // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",

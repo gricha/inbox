@@ -2,7 +2,7 @@
 // by the owner's prose policy. Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
 import type { Desk } from "./desk.ts";
-import { askClaude, askCodex, NOT_LOGGED_IN } from "./review.ts";
+import { askClaude, NOT_LOGGED_IN } from "./review.ts";
 import {
   BUCKETS,
   type Bucket,
@@ -146,7 +146,6 @@ export class Judge {
     const s = this.desk.settings;
     if (!this.desk.policy.text.trim()) return "there's no policy yet";
     if (!s["policy.judge"]) return "it's turned off";
-    if (s["agent.driver"] !== "claude-code" && s["agent.driver"] !== "codex") return "there's no agent: pick one under Agents";
     return null;
   }
 
@@ -226,7 +225,6 @@ export class Judge {
 
   async run(batch: GrayItem[]): Promise<void> {
     const desk = this.desk;
-    const s = desk.settings;
     const policy = desk.policy;
     this.running = true;
     desk.changed();
@@ -234,7 +232,7 @@ export class Judge {
     try {
       const prompt = buildJudgePrompt(batch, policy.text, desk.me() || "the owner");
       const opts = { schema: JUDGE_SCHEMA, signal: this.abort.signal };
-      const raw = s["agent.driver"] === "codex" ? await askCodex(prompt, opts) : (await askClaude(prompt, opts)).answer;
+      const raw = (await askClaude(prompt, opts)).answer;
       const answers = parseVerdicts(raw, ids);
       if (desk.stopped) return;
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.

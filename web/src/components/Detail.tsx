@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
-import { cardFacts, judgeStepText, says } from "../view.ts";
+import { cardFacts, handLabel, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
@@ -115,7 +115,8 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       ...(says(card.why, asked) ? [] : [asked]),
       ...(item.labels.length ? [item.labels.join(", ")] : []),
       plural(item.comments_total, "comment"),
-      `active ${age(card.activity_at, ctx.now)} ago`,
+      // Recent activity below says when, and what.
+      ...(events.length ? [] : [`active ${age(card.activity_at, ctx.now)} ago`]),
     ];
     return (
       <div className="more opened">
@@ -129,7 +130,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <div className="actions card-keys">
           <KeyButton k="esc" label="Close" run={run} />
           <KeyButton k="o" label="Open on GitHub" run={run} />
-          {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
+          {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
           <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
           <KeyButton k="s" label="Snooze" run={run} />
           <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
@@ -143,7 +144,6 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     facts.push(
       // oxlint-disable-next-line react/jsx-key -- a [label, value] pair rendered on its own, not a list
       ["CI", <span className={`t-ci-${item.ci}`}>{CI[item.ci]}</span>],
-      ["Review", `${REVIEW[item.review_decision]}${s.pr.approvals ? `, ${plural(s.pr.approvals, "approval")}` : ""}`],
       ["Size", `+${item.additions} −${item.deletions} in ${plural(item.changed_files, "file")}`],
     );
     if (item.mergeable !== "unknown")
@@ -159,10 +159,12 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     ]);
   if (pr)
     facts.push([
-      "Reviews",
-      item.reviews.length
-        ? item.reviews.map((r) => `${r.author} ${r.state.replace("_", " ")} ${age(r.at, ctx.now)} ago`).join(", ")
-        : "none yet",
+      "Review",
+      `${REVIEW[item.review_decision].replace(/^review /, "")}${
+        item.reviews.length
+          ? `: ${item.reviews.map((r) => `${r.author} ${r.state.replace("_", " ")} ${age(r.at, ctx.now)} ago`).join(", ")}`
+          : ", none yet"
+      }`,
     ]);
   if (item.threads_total)
     facts.push([
@@ -189,7 +191,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       <div className="actions card-keys">
         {pr && <KeyButton k="enter" label={card.inflight ? "Show in flight" : "Review"} run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
-        {mine && <KeyButton k="d" label={card.inflight ? "Take back" : "In flight"} run={run} />}
+        {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
         <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />

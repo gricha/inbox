@@ -638,7 +638,7 @@ test("an expired claude login fails one run with a clear status, then nothing re
   }
   assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 0);
   // Settings → In flight says it once.
-  assert.equal(s.desk.getSettings().paused.babysitters?.why, `Babysitters are paused: ${NOT_LOGGED_IN}`);
+  assert.equal(s.desk.getSettings().paused.babysitters?.why, NOT_LOGGED_IN, "the reason only: Settings says what's paused");
   // Any other save keeps the pause; a change to the agent settings lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
   await new Promise((r) => {

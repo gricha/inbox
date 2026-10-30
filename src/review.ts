@@ -1,4 +1,4 @@
-// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review the configured agent writes from them.
+// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own Claude Code writes from them.
 // The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -19,13 +19,14 @@ const TIMEOUT = 300_000;
 const NOISE =
   /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.lock)$|\.(snap|min\.js|min\.css)$/;
 
-// Strict-mode friendly (all fields required, no extras) so Codex's --output-schema takes it as well as Claude's --json-schema.
+// Strict-mode friendly: all fields required, no extras.
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "concerns", "notes", "verdict", "risk"],
+  required: ["summary", "since", "concerns", "notes", "verdict", "risk"],
   properties: {
     summary: { type: "string" },
+    since: { type: "string" },
     concerns: { type: "array", items: { type: "string" } },
     notes: {
       type: "array",
@@ -105,19 +106,29 @@ export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
 export interface PrText {
   body: string;
   files: ReviewFile[];
+  since?: { base: string; files: ReviewFile[] }; // what changed since the commit you last reviewed
 }
 
-// Two read-only GETs: the changed files (every page) and the description.
-export async function fetchPr(item: Item): Promise<PrText> {
+// Read-only GETs: the changed files (every page) and the description; with `since` (the commit you last reviewed), the
+// diff from it to the head too. A base that's gone (a force-push) just leaves that out.
+export async function fetchPr(item: Item, since?: string): Promise<PrText> {
   const [owner, name] = item.repo.split("/");
-  const pr = `repos/${owner}/${name}/pulls/${item.number}`;
+  const repo = `repos/${owner}/${name}`;
+  const pr = `${repo}/pulls/${item.number}`;
   const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
-  const fields = ".[] | {filename, previous_filename, status, additions, deletions, patch}";
-  const [files, body] = await Promise.all([
-    gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", fields]),
+  const fields = "{filename, previous_filename, status, additions, deletions, patch}";
+  const [files, body, delta] = await Promise.all([
+    gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", `.[] | ${fields}`]),
     gh(["api", pr, "--jq", '.body // ""']),
+    since && /^[0-9a-f]{7,40}$/i.test(since)
+      ? gh(["api", `${repo}/compare/${since}...${item.head_oid}`, "--jq", `.files[] | ${fields}`]).catch(() => null)
+      : null,
   ]);
-  return { body: body.trimEnd(), files: parseFiles(files) };
+  return {
+    body: body.trimEnd(),
+    files: parseFiles(files),
+    ...(since && delta !== null && { since: { base: since, files: parseFiles(delta) } }),
+  };
 }
 
 // gh prints one compact JSON object per line.
@@ -202,6 +213,9 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
     ``,
     `Reply with these fields:`,
     `- summary: two or three plain sentences: what the PR changes and why.`,
+    pr.since
+      ? `- since: ${s.me.login} reviewed it before, at ${pr.since.base.slice(0, 7)}. One sentence on what changed since then (the "since your review" diff), and whether that settles the concerns you'd raise.`
+      : `- since: an empty string.`,
     `- concerns: the problems worth raising in the review: bugs, risky behaviour changes, missing error handling or tests, security. One specific sentence each, naming the file. Empty when nothing stands out; no style nits, no padding.`,
     `- notes: up to ${MAX_NOTES} short notes on the hunks worth explaining, each one or two sentences on what that change does and why it matters. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files.`,
     `  Anchor each note on the first line of the change it explains. Diff lines start with their line number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). Use side "new" with an n number; use side "old" with an o number only for a removal with nothing added. path is exactly as after "file:".`,
@@ -221,25 +235,17 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
     ``,
     `changed files (${pr.files.length}):`,
     diffText(pr.files),
+    ...(pr.since
+      ? [``, `since your review, from ${pr.since.base.slice(0, 7)} (${pr.since.files.length} files):`, diffText(pr.since.files)]
+      : []),
     `</pr-${tag}>`,
   ].join("\n");
 }
 
 // ---------------------------------------------------------------- the agents
 
-export interface AgentOpts {
-  driver: string; // agent.driver
-}
-
 // Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
 export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
-
-function room<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
-  return fn(dir).finally(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-}
 
 // The answer's shape, and a signal that kills the run (the desk stopping).
 export interface AskOpts {
@@ -329,57 +335,8 @@ export function claudeEnvelope(out: string): ClaudeAnswer {
   };
 }
 
-// Codex has no --tools "" like Claude's, so its built-in tools go off one by one (-c, unlike --disable, skips names a version lacks).
-const CODEX_NO_TOOLS = [
-  "shell_tool",
-  "unified_exec",
-  "apps",
-  "plugins",
-  "browser_use",
-  "computer_use",
-  "view_image",
-  "multi_agent",
-].flatMap((f) => ["-c", `features.${f}=false`]);
-
-// No user config: that's where MCP servers (the desk's own among them) and tools live. Sandboxed read-only in an empty dir.
-export function askCodex(prompt: string, opts: { command?: string } & AskOpts = {}): Promise<unknown> {
-  const command = opts.command ?? "codex";
-  return room(async (dir) => {
-    fs.writeFileSync(path.join(dir, "schema.json"), JSON.stringify(opts.schema ?? SCHEMA));
-    const out = path.join(dir, "out.json");
-    const args = [
-      "exec",
-      "--sandbox",
-      "read-only",
-      "--skip-git-repo-check",
-      "--ephemeral",
-      "--ignore-user-config",
-      "--ignore-rules",
-      ...CODEX_NO_TOOLS,
-      "-c",
-      'web_search="disabled"',
-      "--color",
-      "never",
-      "--output-schema",
-      path.join(dir, "schema.json"),
-      "-o",
-      out,
-      "-C",
-      dir,
-      "-",
-    ];
-    const missing = `codex isn't on PATH: install Codex, or pick Claude Code under Settings → Agents`;
-    await runCommand(claudeSpawn(command, args), { input: prompt, cwd: dir, timeout: TIMEOUT, missing, signal: opts.signal });
-    if (!fs.existsSync(out)) throw new Error("codex wrote no answer");
-    return JSON.parse(fs.readFileSync(out, "utf8")) as unknown;
-  });
-}
-
-export async function generateReview(item: Item, s: Signals, why: string, pr: PrText, opts: AgentOpts): Promise<AiReview> {
-  if (opts.driver !== "claude-code" && opts.driver !== "codex")
-    throw new Error("AI review is off: pick Claude Code or Codex under Settings → Agents");
-  const prompt = buildPrompt(item, s, why, pr);
-  const { answer, model } = opts.driver === "codex" ? { answer: await askCodex(prompt), model: "codex" } : await askClaude(prompt);
+export async function generateReview(item: Item, s: Signals, why: string, pr: PrText): Promise<AiReview> {
+  const { answer, model } = await askClaude(buildPrompt(item, s, why, pr));
   return { ...parseReview(answer, pr.files), head_oid: item.head_oid, model, at: new Date().toISOString() };
 }
 
@@ -413,7 +370,9 @@ export function parseReview(parsed: unknown, files: ReviewFile[]): Omit<AiReview
     const at = anchors.get(p)!.get(`${n.side === "old" ? "old" : "new"}:${Number(n.line)}`) ?? { side: "new", line: 0 };
     notes.push({ path: p, ...at, body: body.slice(0, 600) });
   }
+  const since = text(raw.since);
   return {
+    ...(since && { since }),
     verdict: (["look", "skim", "skip"] as const).find((v) => v === raw.verdict) ?? "skim",
     risk: (["low", "medium", "high"] as const).find((r) => r === raw.risk) ?? "medium",
     summary,

@@ -118,6 +118,7 @@ const queueView: QueueView = {
   now_cards: 5,
   today_cards: 5,
   ai_paused: null,
+  babysitting: true,
 };
 
 const boardView: BoardView = {

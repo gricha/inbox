@@ -1,6 +1,6 @@
 import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { laneFacts, sitterParts } from "../view.ts";
+import { laneFacts, sitterNews, sitterParts } from "../view.ts";
 import { atCommas, Owed } from "./CardRow.tsx";
 import { Dots, KeyButton } from "./Detail.tsx";
 
@@ -95,9 +95,7 @@ function Row({
   const c = r.card;
   const live = r.state === "open";
   const needs = live ? r.needs_you : null;
-  const s = r.sitter;
-  // The babysitter's own news, unless it only repeats why the PR needs you ("babysitter asks: …", "no local clone of …").
-  const sitter = live && (!needs || s.state === "done" || s.state === "running");
+  const sitter = sitterNews(r);
   // A missing clone is fixed in Settings: say where.
   const noClone = !!needs && needs.startsWith("no local clone");
   const keys = (k: string) => {
@@ -105,6 +103,9 @@ function Row({
   };
   const since = c.resolved_at ?? c.waiting_since;
   const draft = live ? r.drafts[0] : undefined;
+  const facts = live ? laneFacts(r) : [];
+  // With babysitting off the problem itself is the why ("CI failing"); its fact says it in full, so the why goes.
+  const said = !!needs && facts.some((f) => f.text === needs || f.text.startsWith(`${needs}: `));
   return (
     <div className={cls("row", "card", "lane-row", needs && "b-now", on && "sel", !live && "dim")} data-id={c.id}>
       <div className="row-line">
@@ -136,9 +137,9 @@ function Row({
                 </span>
               </span>
               {/* The highlighter on the ref already says it needs you: the reason, in ink, as the queue's why. */}
-              {needs && <Owed why={needs} />}
+              {needs && !said && <Owed why={needs} />}
               {live ? (
-                laneFacts(r).map((f) => (
+                facts.map((f) => (
                   <span key={f.text} className={cls("fact-word", needs && f.tone && `t-${f.tone}`)}>
                     {atCommas(f.text)}
                   </span>
@@ -170,12 +171,12 @@ function Row({
         ))}
       {on && (
         <div className="more">
+          {/* One order on every surface: what finishes it (y Send, c Answer), then x, enter and o, d last. */}
           <div className="actions card-keys">
-            <KeyButton k="enter" label="Review" run={keys} />
             {draft && (
               <KeyButton
                 k="y"
-                label={sending === draft.id ? "Sending…" : armed === draft.id ? "Press y again to send" : "Send"}
+                label={sending === draft.id ? "Sending…" : armed === draft.id ? "again to send" : "Send"}
                 disabled={sending !== null}
                 title="Post this reply on GitHub, as you: press y twice"
                 className={cls(armed === draft.id && "armed")}
@@ -184,6 +185,8 @@ function Row({
                 }}
               />
             )}
+            {live && r.escalation && r.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${r.resume}`} run={keys} />}
+            {live && r.escalation && <KeyButton k="x" label="Dismiss the question" run={keys} />}
             {draft && !r.escalation && !r.outside_at && (
               <KeyButton
                 k="x"
@@ -193,20 +196,13 @@ function Row({
                 }}
               />
             )}
-            <KeyButton k="o" label="Open on GitHub" run={keys} />
-            {live && <KeyButton k="d" label="Take back" run={keys} />}
-            {live && r.escalation && <KeyButton k="x" label="Dismiss the question" run={keys} />}
             {live && !r.escalation && r.outside_at && (
               <KeyButton k="x" label="Mark read" title="You've read the outside contributors' comments on GitHub" run={keys} />
             )}
-            {r.resume && (
-              <KeyButton
-                k="c"
-                label={live && r.escalation ? "Answer in a terminal" : "Copy resume command"}
-                title={`Copies ${r.resume}`}
-                run={keys}
-              />
-            )}
+            <KeyButton k="enter" label="Review" run={keys} />
+            <KeyButton k="o" label="Open on GitHub" run={keys} />
+            {r.resume && !(live && r.escalation) && <KeyButton k="c" label="Copy resume command" title={`Copies ${r.resume}`} run={keys} />}
+            {live && <KeyButton k="d" label="Take back" run={keys} />}
           </div>
         </div>
       )}

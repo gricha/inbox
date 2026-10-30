@@ -8,7 +8,6 @@ import { Desk, type ReviewDeps } from "../src/desk.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
   askClaude,
-  askCodex,
   buildPrompt,
   claudeEnvelope,
   claudeError,
@@ -216,28 +215,6 @@ test(
   },
 );
 
-test(
-  "codex runs sandboxed without the user's config and answers through --output-schema and -o",
-  { skip: process.platform === "win32" },
-  async () => {
-    const f = fakeAgent(
-      "codex",
-      `out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; echo '{"summary":"from codex","notes":[]}' > "$out"`,
-    );
-    assert.deepEqual(await askCodex("PROMPT", { command: f.bin }), { summary: "from codex", notes: [] });
-    const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
-    assert.equal(args[0], "exec");
-    for (const a of ["--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--output-schema", "-o"])
-      assert.ok(args.includes(a), a);
-    assert.equal(args[args.indexOf("--sandbox") + 1], "read-only");
-    const offFeatures = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use", "view_image", "multi_agent"];
-    for (const off of [...offFeatures.map((name) => `features.${name}=false`), 'web_search="disabled"'])
-      assert.equal(args[args.indexOf(off) - 1], "-c", off);
-    assert.equal(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), "PROMPT");
-    fs.rmSync(f.dir, { recursive: true });
-  },
-);
-
 test("the prompt fences PR text as untrusted, numbers the diff, and leaves lockfiles out", () => {
   const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
   const item = makeItem({
@@ -260,6 +237,20 @@ test("the prompt fences PR text as untrusted, numbers the diff, and leaves lockf
   assert.match(p, /n11 \+ {3}const limited/);
   assert.match(p, /file: package-lock\.json \(modified, \+900 −4\)\n\[diff left out: lockfile or generated\]/);
   assert.match(p, /rest of this file's diff left out/);
+});
+
+test("a re-review gets the diff since your review and answers with a since line", () => {
+  const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
+  const item = makeItem({});
+  const s = analyze(item, makeContext(), cfg, NOW).signals;
+  const later: ReviewFile = { ...FILE, path: "src/later.ts" };
+  const p = buildPrompt(item, s, "", { body: "", files: [FILE], since: { base: "abc1234def", files: [later] } }, "TAG");
+  assert.match(p, /- since: me reviewed it before, at abc1234/);
+  assert.ok(p.indexOf("since your review, from abc1234 (1 files):") > p.indexOf("file: src/planner/plan.ts"));
+  assert.ok(p.indexOf("file: src/later.ts") < p.lastIndexOf("</pr-TAG>"), "fenced like the rest");
+  assert.match(buildPrompt(item, s, "", { body: "", files: [FILE] }, "TAG"), /- since: an empty string\./);
+  assert.equal(parseReview({ summary: "x", since: " Drops the shim. " }, []).since, "Drops the shim.");
+  assert.ok(!("since" in parseReview({ summary: "x", since: "" }, [])));
 });
 
 // ---------------------------------------------------------------- the desk
@@ -472,46 +463,26 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
   t.cleanup();
 });
 
-test("changing the agent settings lifts the pause and tries the failed PRs again; with no agent, nothing reads as paused", async () => {
+test("turning auto reviews off and on lifts the pause and tries the failed PRs again", async () => {
   const t = await setup([ask(1), ask(2), ask(3), ask(4)]);
   t.f.setFail(LOGGED_OUT);
   await t.sync();
   for (const id of t.f.started.slice()) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow());
-  const untried = ["acme/api#1", "acme/api#2", "acme/api#3", "acme/api#4"].filter((id) => !t.f.started.includes(id));
 
   t.desk.putSettings({ set: { "github.poll_seconds": 120 } });
   await flush();
   assert.ok(t.desk.aiPausedNow(), "another setting leaves it paused");
   assert.equal(t.f.started.length, 2);
 
-  t.desk.putSettings({ set: { "agent.driver": "codex" } });
+  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  t.desk.putSettings({ set: { "review.auto_ai": true } });
   await flush();
   assert.equal(t.desk.aiPausedNow(), false);
   assert.equal(t.f.started.length, 4, "two more start at once");
-  assert.deepEqual(t.f.started.slice(2), t.f.started.slice(0, 2), "the failed ones first: their errors were for the old agent");
+  assert.deepEqual(t.f.started.slice(2), t.f.started.slice(0, 2), "the failed ones first");
   for (const id of t.f.started.slice(2)) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow(), "failing again pauses again");
-
-  // Asking (i) with the agent off fails too, but no PR should say AI reviews are paused.
-  t.desk.putSettings({ set: { "agent.driver": "none" } });
-  for (const id of untried) {
-    const failed = assert.rejects(t.desk.aiReview(id));
-    await flush();
-    await t.f.release(id);
-    await failed;
-  }
-  assert.ok(t.desk.aiPausedNow());
-  assert.equal((await t.desk.reviewView(t.f.started[0]!)).ai_error, null, "its error was for the old agent");
-  t.cleanup();
-});
-
-test("with no agent (agent.driver none) nothing runs on its own, not even on opening a PR", async () => {
-  const t = await setup([ask(1)], { settings: { "agent.driver": "none" } });
-  await t.sync();
-  assert.equal((await t.desk.reviewView("api#1")).generating, false);
-  await flush();
-  assert.equal(t.f.started.length, 0);
   t.cleanup();
 });
 
@@ -583,7 +554,7 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
     q.sections.now.map((c) => c.preflight?.state),
     ["paused", "paused", "paused"],
   );
-  assert.equal(t.desk.getSettings().paused.ai?.why, `AI reviews are paused: ${LOGGED_OUT}`, "Settings says it as before");
+  assert.equal(t.desk.getSettings().paused.ai?.why, LOGGED_OUT, "Settings says what's paused, once");
 
   // Turning auto_ai off: nothing is paused any more, it's off.
   t.desk.putSettings({ set: { "review.auto_ai": false } });
