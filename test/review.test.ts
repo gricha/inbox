@@ -181,6 +181,8 @@ test(
     for (const a of ["--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--output-schema", "-o"])
       assert.ok(args.includes(a), a);
     assert.equal(args[args.indexOf("--sandbox") + 1], "read-only");
+    for (const off of ["features.shell_tool=false", "features.unified_exec=false", "features.apps=false", 'web_search="disabled"'])
+      assert.equal(args[args.indexOf(off) - 1], "-c", off);
     assert.equal(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), "PROMPT");
     fs.rmSync(f.dir, { recursive: true });
   },

@@ -252,6 +252,12 @@ export function claudeEnvelope(out: string): unknown {
   return env.structured_output ?? JSON.parse(/\{[\s\S]*\}/.exec(env.result ?? "")?.[0] ?? "{}");
 }
 
+// Codex has no --tools "" like Claude's, so its built-in tools go off one by one (-c, unlike --disable, skips names a version lacks).
+const CODEX_NO_TOOLS = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "computer_use"].flatMap((f) => [
+  "-c",
+  `features.${f}=false`,
+]);
+
 // No user config: that's where MCP servers (the desk's own among them) and tools live. Sandboxed read-only in an empty dir.
 export function askCodex(prompt: string, command = "codex"): Promise<unknown> {
   return room(async (dir) => {
@@ -265,6 +271,9 @@ export function askCodex(prompt: string, command = "codex"): Promise<unknown> {
       "--ephemeral",
       "--ignore-user-config",
       "--ignore-rules",
+      ...CODEX_NO_TOOLS,
+      "-c",
+      'web_search="disabled"',
       "--color",
       "never",
       "--output-schema",
