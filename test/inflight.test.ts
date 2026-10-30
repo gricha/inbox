@@ -34,7 +34,7 @@ const CTX: PrContext = {
       outdated: false,
       path: "src/api.ts",
       line: 12,
-      comments: [{ author: "dana", bot: false, body: "Should this retry?\nIt fails on 502s.", at: hoursAgo(2) }],
+      comments: [{ author: "dana", bot: false, trusted: true, body: "Should this retry?\nIt fails on 502s.", at: hoursAgo(2) }],
     },
     {
       id: "PRRT_done",
@@ -42,7 +42,7 @@ const CTX: PrContext = {
       outdated: false,
       path: "src/b.ts",
       line: 3,
-      comments: [{ author: "dana", bot: false, body: "ok", at: hoursAgo(9) }],
+      comments: [{ author: "dana", bot: false, trusted: true, body: "ok", at: hoursAgo(9) }],
     },
   ],
   reviews: [],

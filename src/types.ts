@@ -45,12 +45,13 @@ export interface Item {
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
-  reviews: { author: string; author_bot: boolean; state: ReviewState; at: string; commit: string }[]; // most recent last; commit = oid reviewed
-  comments: { author: string; author_bot: boolean; at: string }[]; // last 10 issue comments, most recent last
+  // trusted: the author is a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); absent on items stored before the desk asked
+  reviews: { author: string; author_bot: boolean; trusted?: boolean; state: ReviewState; at: string; commit: string }[]; // most recent last; commit = oid reviewed
+  comments: { author: string; author_bot: boolean; trusted?: boolean; at: string }[]; // last 10 issue comments, most recent last
   comments_total: number;
   threads_total: number;
   threads_unresolved: number;
-  thread_last: { author: string; author_bot: boolean; at: string }[]; // last comment per review thread; PRs you authored only
+  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string }[]; // last comment per review thread; PRs you authored only
   detail_at: string; // when details were last fetched
 }
 
@@ -602,6 +603,7 @@ export interface InflightRow {
   draft: boolean; // a draft PR
   needs_you: string | null; // why it's back with you: the question, "reply ready to send", "approved and green: merge it", ...
   escalation: { question: string; at: string } | null; // from desk_escalate
+  outside_at: string | null; // feedback from someone who isn't a collaborator, not dismissed yet: yours to read, never an agent's
   sitter: SitterStatus;
   drafts: Draft[]; // unsent replies
   run: SitterRun | null; // the latest run

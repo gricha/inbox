@@ -2,7 +2,7 @@
 
 import type { Context, Item, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
-import { checkFailed, checkName, normalize, toHit, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
+import { checkFailed, checkName, collaborator, normalize, toHit, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
 import { DETAILS_MINE, DETAILS_REVIEW, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
 
 export interface SearchHit {
@@ -34,10 +34,11 @@ export interface PrContext {
     outdated: boolean;
     path: string;
     line: number | null;
-    comments: { author: string; bot: boolean; body: string; at: string }[];
+    comments: { author: string; bot: boolean; trusted: boolean; body: string; at: string }[];
   }[];
-  reviews: { author: string; bot: boolean; state: ReviewState; body: string; at: string }[];
-  comments: { author: string; bot: boolean; body: string; at: string }[]; // on the PR itself
+  // trusted: a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); only their words reach a babysitter.
+  reviews: { author: string; bot: boolean; trusted: boolean; state: ReviewState; body: string; at: string }[];
+  comments: { author: string; bot: boolean; trusted: boolean; body: string; at: string }[]; // on the PR itself
   checks: { name: string; job_id: number | null; app: string; url: string; summary: string }[]; // the failing ones
 }
 
@@ -56,6 +57,9 @@ interface Author {
   __typename?: string;
   login: string;
 }
+interface Assoc {
+  authorAssociation?: string;
+}
 interface RawPrContext {
   node: {
     reviewThreads?: {
@@ -65,11 +69,13 @@ interface RawPrContext {
         isOutdated: boolean;
         path: string;
         line: number | null;
-        comments: { nodes: { author: Author | null; body: string; createdAt: string }[] };
+        comments: { nodes: ({ author: Author | null; body: string; createdAt: string } & Assoc)[] };
       }[];
     };
-    reviews?: { nodes: { author: Author | null; state: string; body: string; submittedAt: string | null; createdAt: string }[] };
-    comments?: { nodes: { author: Author | null; body: string; createdAt: string }[] };
+    reviews?: {
+      nodes: ({ author: Author | null; state: string; body: string; submittedAt: string | null; createdAt: string } & Assoc)[];
+    };
+    comments?: { nodes: ({ author: Author | null; body: string; createdAt: string } & Assoc)[] };
     commits?: {
       nodes: {
         commit: {
@@ -95,7 +101,11 @@ interface RawPrContext {
   } | null;
 }
 
-const who = (a: Author | null) => ({ author: a?.login ?? "ghost", bot: a?.__typename === "Bot" || !!a?.login.endsWith("[bot]") });
+const who = (a: Author | null, assoc: Assoc) => ({
+  author: a?.login ?? "ghost",
+  bot: a?.__typename === "Bot" || !!a?.login.endsWith("[bot]"),
+  trusted: collaborator(assoc.authorAssociation),
+});
 
 function parsePrContext(data: RawPrContext): PrContext {
   const n = data.node;
@@ -107,12 +117,12 @@ function parsePrContext(data: RawPrContext): PrContext {
       outdated: t.isOutdated,
       path: t.path,
       line: t.line,
-      comments: t.comments.nodes.map((c) => Object.assign(who(c.author), { body: c.body, at: c.createdAt })),
+      comments: t.comments.nodes.map((c) => Object.assign(who(c.author, c), { body: c.body, at: c.createdAt })),
     })),
     reviews: (n?.reviews?.nodes ?? []).map((r) =>
-      Object.assign(who(r.author), { state: r.state.toLowerCase() as ReviewState, body: r.body, at: r.submittedAt ?? r.createdAt }),
+      Object.assign(who(r.author, r), { state: r.state.toLowerCase() as ReviewState, body: r.body, at: r.submittedAt ?? r.createdAt }),
     ),
-    comments: (n?.comments?.nodes ?? []).map((c) => Object.assign(who(c.author), { body: c.body, at: c.createdAt })),
+    comments: (n?.comments?.nodes ?? []).map((c) => Object.assign(who(c.author, c), { body: c.body, at: c.createdAt })),
     checks: checks
       .filter((c) => c !== null && checkFailed(c))
       .map((c) => ({

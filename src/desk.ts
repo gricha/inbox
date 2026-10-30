@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Babysitter, threadRef, worktreePath, type SitterOptions } from "./babysit.ts";
+import { answerable, Babysitter, threadRef, worktreePath, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -1261,14 +1261,15 @@ export class Desk {
   // ---------------------------------------------------------------- in flight
 
   // The babysitter's side of one PR: its status, drafts, question, and why it's back with you.
-  sitterView(it: Item): Pick<InflightRow, "needs_you" | "escalation" | "sitter" | "drafts" | "run" | "resume"> {
+  sitterView(it: Item): Pick<InflightRow, "needs_you" | "escalation" | "outside_at" | "sitter" | "drafts" | "run" | "resume"> {
     const s = this.sitter.record(it.id);
     const st = this.sitter.status(it.id, it, s);
     const run = s.runs.at(-1) ?? null;
     const wt = s.worktree ?? worktreePath(this.home, it.id);
     return {
-      needs_you: this.sitter.needsYou(it.id, it, s, st),
+      needs_you: this.sitter.needsYou(it, s, st),
       escalation: s.escalation,
+      outside_at: it.state === "open" ? this.sitter.outside(it, s) || null : null,
       sitter: st,
       drafts: s.drafts.filter((d) => !d.sent_at),
       run,
@@ -1345,7 +1346,8 @@ export class Desk {
         const ctx = await this.gh.api.prContext(e.item.node_id).catch((err: unknown) => {
           throw new DeskError(502, `couldn't read the PR's threads: ${(err as Error).message}`);
         });
-        const found = ctx.threads.find((x) => x.id === threadId);
+        // Not one an outsider spoke last in: an agent never answers their words.
+        const found = ctx.threads.find((x) => x.id === threadId && answerable(x, this.me(), this.sitter.trust()));
         t = (found && threadRef(found)) ?? undefined;
       }
       if (!t) throw new DeskError(400, `no review thread "${threadId}" on ${id}`);
@@ -1387,17 +1389,19 @@ export class Desk {
     return { question: clipped };
   }
 
-  // The lane's x: drop a draft, or the question (and the babysitter looks at the PR again).
+  // The lane's x: drop a draft, or the question (and the babysitter looks at the PR again), or else outsiders' comments you've read.
   dismiss(ref: string, draftId?: string): void {
     const e = this.pr(ref);
     const id = e.item.id;
     const s = this.sitter.record(id);
     if (draftId !== undefined && !s.drafts.some((d) => d.id === draftId && !d.sent_at))
       throw new DeskError(404, `no draft ${draftId} on ${id}`);
-    if (draftId === undefined && !s.escalation) throw new DeskError(404, `nothing to dismiss on ${id}`);
+    const outside = this.sitter.outside(e.item, s);
+    if (draftId === undefined && !s.escalation && !outside) throw new DeskError(404, `nothing to dismiss on ${id}`);
     this.sitter.update(id, (x) => {
-      if (draftId === undefined) x.escalation = null;
-      else x.drafts = x.drafts.filter((d) => d.id !== draftId);
+      if (draftId !== undefined) x.drafts = x.drafts.filter((d) => d.id !== draftId);
+      else if (x.escalation) x.escalation = null;
+      else x.outside_seen = outside;
     });
     this.changed();
     this.sitter.consider(id, 0);

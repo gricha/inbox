@@ -286,16 +286,25 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
               isOutdated: true,
               path: "src/a.ts",
               line: null,
-              comments: { nodes: [{ author: who("dana"), body: "Retry?", createdAt: "2026-03-01T10:00:00Z" }] },
+              comments: {
+                nodes: [{ author: who("dana"), authorAssociation: "MEMBER", body: "Retry?", createdAt: "2026-03-01T10:00:00Z" }],
+              },
             },
           ],
         },
         reviews: {
           nodes: [
-            { author: who("dana"), state: "CHANGES_REQUESTED", body: "See inline", submittedAt: null, createdAt: "2026-03-01T10:00:00Z" },
+            {
+              author: who("dana"),
+              authorAssociation: "MEMBER",
+              state: "CHANGES_REQUESTED",
+              body: "See inline",
+              submittedAt: null,
+              createdAt: "2026-03-01T10:00:00Z",
+            },
           ],
         },
-        comments: { nodes: [{ author: null, body: "+1", createdAt: "2026-03-01T11:00:00Z" }] },
+        comments: { nodes: [{ author: null, authorAssociation: "NONE", body: "+1", createdAt: "2026-03-01T11:00:00Z" }] },
         commits: {
           nodes: [
             {
@@ -338,13 +347,13 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
       outdated: true,
       path: "src/a.ts",
       line: null,
-      comments: [{ author: "dana", bot: false, body: "Retry?", at: "2026-03-01T10:00:00Z" }],
+      comments: [{ author: "dana", bot: false, trusted: true, body: "Retry?", at: "2026-03-01T10:00:00Z" }],
     },
   ]);
   assert.deepEqual(ctx.reviews, [
-    { author: "dana", bot: false, state: "changes_requested", body: "See inline", at: "2026-03-01T10:00:00Z" },
+    { author: "dana", bot: false, trusted: true, state: "changes_requested", body: "See inline", at: "2026-03-01T10:00:00Z" },
   ]);
-  assert.deepEqual(ctx.comments, [{ author: "ghost", bot: false, body: "+1", at: "2026-03-01T11:00:00Z" }]);
+  assert.deepEqual(ctx.comments, [{ author: "ghost", bot: false, trusted: false, body: "+1", at: "2026-03-01T11:00:00Z" }]);
   assert.deepEqual(ctx.checks, [
     { name: "test", job_id: 7, app: "github-actions", url: "https://x/7", summary: "1 failed" },
     { name: "ci/legacy", job_id: null, app: "", url: "https://y", summary: "boom" },

@@ -179,6 +179,17 @@ export const SETTINGS = [
     help: "One per PR at most.",
   },
   {
+    key: "inflight.trusted_bots",
+    section: "inflight",
+    label: "Bots whose comments babysitters act on",
+    type: "list",
+    default: [],
+    pattern: "^[\\w.-]+(\\[bot\\])?$",
+    pattern_hint: "a GitHub login",
+    placeholder: "cursor[bot]",
+    help: "Babysitters act on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in Now; their words never reach an agent.",
+  },
+  {
     key: "inflight.repos",
     section: "inflight",
     label: "Local clones",

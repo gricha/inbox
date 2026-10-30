@@ -48,6 +48,7 @@ export interface Sitter {
   escalation: { question: string; at: string } | null;
   drafts: Draft[];
   threads: { id: string; to: string; quote: string }[]; // the PR's open review threads as last read: what a draft may answer
+  outside_seen: string | null; // you dismissed feedback from outside contributors up to here
 }
 
 const emptySitter = (): Sitter => ({
@@ -59,6 +60,7 @@ const emptySitter = (): Sitter => ({
   escalation: null,
   drafts: [],
   threads: [],
+  outside_seen: null,
 });
 
 export interface Problem {
@@ -71,26 +73,49 @@ const short = (oid: string) => oid.slice(0, 7);
 // oxlint-disable-next-line no-control-regex -- stripping terminal escapes from CI logs is the point
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 
-// The newest feedback from someone else that still asks for something: open threads, changes requested, comments since you marked it.
-export function feedbackAt(item: Item, me: string, since: string): string {
+// Whose feedback reaches a babysitter: a collaborator on the repo (`trusted`: OWNER, MEMBER or COLLABORATOR), or a bot in
+// inflight.trusted_bots. Anyone can comment on a PR, and an agent that acts on it runs code as you.
+export interface Author {
+  author: string;
+  trusted?: boolean; // absent: stored before the desk asked; neither trusted nor an outsider until the next refresh
+  bot?: boolean;
+  author_bot?: boolean;
+}
+export type Trust = (a: Author) => boolean;
+export const trustOf = (bots: string[]): Trust => {
+  const ok = new Set(bots.map(lc));
+  return (a) => ((a.author_bot ?? a.bot) ? ok.has(lc(a.author)) : a.trusted === true);
+};
+const maxAt = (times: string[]) => times.reduce((a, t) => (t > a ? t : a), "");
+
+// The newest trusted feedback from someone else that still asks for something: open threads, changes requested, comments since you marked it.
+export function feedbackAt(item: Item, me: string, since: string, trust: Trust): string {
   const others = (a: string) => lc(a) !== lc(me);
   const times: string[] = [];
-  if (item.threads_unresolved > 0) for (const t of item.thread_last) if (others(t.author)) times.push(t.at);
+  if (item.threads_unresolved > 0) for (const t of item.thread_last) if (others(t.author) && trust(t)) times.push(t.at);
   for (const r of item.reviews) {
-    if (!others(r.author) || r.author_bot) continue;
+    if (!others(r.author) || !trust(r)) continue;
     if (r.state === "changes_requested" && item.review_decision === "changes_requested") times.push(r.at);
     else if (r.state === "commented" && r.at > since) times.push(r.at);
   }
-  for (const c of item.comments) if (others(c.author) && !c.author_bot && c.at > since) times.push(c.at);
-  return times.reduce((a, t) => (t > a ? t : a), "");
+  for (const c of item.comments) if (others(c.author) && trust(c) && c.at > since) times.push(c.at);
+  return maxAt(times);
+}
+
+// The newest feedback since you marked it from a person who isn't a collaborator: shown to you, never to an agent.
+export function outsideAt(item: Item, me: string, since: string, trust: Trust): string {
+  const outsider = (a: Author & { at: string }) =>
+    lc(a.author) !== lc(me) && !a.author_bot && a.trusted === false && !trust(a) && a.at > since;
+  const threads = item.threads_unresolved > 0 ? item.thread_last : [];
+  return maxAt([...threads, ...item.reviews.filter((r) => r.state !== "approved"), ...item.comments].filter(outsider).map((a) => a.at));
 }
 
 // What's wrong with the PR now. A problem a run already took on keeps its key, so it isn't tried again.
-export function problems(item: Item, me: string, since: string): Problem[] {
+export function problems(item: Item, me: string, since: string, trust: Trust): Problem[] {
   const out: Problem[] = [];
   if (item.ci === "red") out.push({ key: `ci:${item.head_oid}`, kind: "ci" });
   if (item.mergeable === "conflict") out.push({ key: `conflict:${item.head_oid}:${item.base}`, kind: "conflict" });
-  const fb = feedbackAt(item, me, since);
+  const fb = feedbackAt(item, me, since, trust);
   if (fb) out.push({ key: `feedback:${fb}`, kind: "feedback" });
   return out;
 }
@@ -346,12 +371,19 @@ export interface PromptInput {
   ctx: PrContext;
   logs: Map<string, string>; // check name → log excerpt
   commands: { run: string[]; exact: string[] };
+  trust: Trust;
   tag?: string;
 }
 
-// The threads a run should answer: open, with the last word from someone else.
-const openThreads = (ctx: PrContext, me: string) =>
-  ctx.threads.filter((t) => !t.resolved && t.comments.length && lc(t.comments.at(-1)!.author) !== lc(me));
+// The threads a run should answer: open, with the last word from someone else whose feedback it takes.
+const openThreads = (ctx: PrContext, me: string, trust: Trust) =>
+  ctx.threads.filter((t) => !t.resolved && t.comments.length && lc(t.comments.at(-1)!.author) !== lc(me) && trust(t.comments.at(-1)!));
+
+// A thread a draft may answer: its last word is yours or trusted, so not an outsider's.
+export const answerable = (t: PrContext["threads"][number], me: string, trust: Trust) => {
+  const last = t.comments.at(-1);
+  return !!last && (lc(last.author) === lc(me) || trust(last));
+};
 
 // What a draft for this thread answers: "dana on src/api.ts:12", and the start of the last comment as one plain line.
 export function threadRef(t: PrContext["threads"][number]): Sitter["threads"][number] | null {
@@ -370,15 +402,15 @@ export function threadRef(t: PrContext["threads"][number]): Sitter["threads"][nu
 }
 
 // What a run is about, in words: "CI", "a merge conflict", "2 comments".
-function whyOf(todo: Problem[], ctx: PrContext, me: string, since: string): string[] {
+function whyOf(todo: Problem[], ctx: PrContext, me: string, since: string, trust: Trust): string[] {
   const out: string[] = [];
   if (todo.some((p) => p.kind === "ci")) out.push("CI");
   if (todo.some((p) => p.kind === "conflict")) out.push("a merge conflict");
   if (todo.some((p) => p.kind === "feedback")) {
     const n =
-      openThreads(ctx, me).length +
-      ctx.comments.filter((c) => !c.bot && lc(c.author) !== lc(me) && c.at > since).length +
-      ctx.reviews.filter((r) => !r.bot && lc(r.author) !== lc(me) && r.body.trim() && (r.state === "changes_requested" || r.at > since))
+      openThreads(ctx, me, trust).length +
+      ctx.comments.filter((c) => trust(c) && lc(c.author) !== lc(me) && c.at > since).length +
+      ctx.reviews.filter((r) => trust(r) && lc(r.author) !== lc(me) && r.body.trim() && (r.state === "changes_requested" || r.at > since))
         .length;
     out.push(n ? plural(n, "comment") : "review comments");
   }
@@ -392,11 +424,12 @@ export function buildPrompt(p: PromptInput): string {
   const branch = item.head_ref ?? "";
   const ci = p.todo.some((x) => x.kind === "ci");
   const conflict = p.todo.some((x) => x.kind === "conflict");
-  const threads = openThreads(ctx, me);
+  // Only trusted feedback (see trustOf): an outsider's words never reach the agent.
+  const threads = openThreads(ctx, me, p.trust);
   const reviews = ctx.reviews.filter(
-    (r) => !r.bot && lc(r.author) !== lc(me) && r.body.trim() && (r.state === "changes_requested" || r.at > p.since),
+    (r) => p.trust(r) && lc(r.author) !== lc(me) && r.body.trim() && (r.state === "changes_requested" || r.at > p.since),
   );
-  const comments = ctx.comments.filter((c) => !c.bot && lc(c.author) !== lc(me) && c.at > p.since).slice(-10);
+  const comments = ctx.comments.filter((c) => p.trust(c) && lc(c.author) !== lc(me) && c.at > p.since).slice(-10);
   const cmds = [...p.commands.exact, ...p.commands.run];
   const task = [
     // Check names are chosen by whatever app posts them: they stay inside the fence below.
@@ -417,7 +450,12 @@ export function buildPrompt(p: PromptInput): string {
     fenced.push(
       `### Review thread ${t.id} on ${t.path}${t.line ? `:${t.line}` : ""}${t.outdated ? " (outdated: the code moved since)" : ""}`,
     );
-    for (const c of t.comments) fenced.push(`- ${c.author}${c.bot ? " (bot)" : ""}, ${c.at}: ${clip(c.body)}`);
+    for (const c of t.comments)
+      fenced.push(
+        lc(c.author) === lc(me) || p.trust(c)
+          ? `- ${c.author}${c.bot ? " (bot)" : ""}, ${c.at}: ${clip(c.body)}`
+          : `- [comment by ${c.author}, not a collaborator, left out]`,
+      );
     fenced.push("");
   }
   for (const r of reviews) fenced.push(`### Review by ${r.author} (${r.state.replace("_", " ")}), ${r.at}`, clip(r.body), "");
@@ -549,8 +587,22 @@ export class Babysitter {
     return this.desk.store.state(id).inflight_at ?? "";
   }
 
+  trust(): Trust {
+    return trustOf(this.desk.settings["inflight.trusted_bots"]);
+  }
+
+  problems(it: Item): Problem[] {
+    return problems(it, this.desk.me(), this.since(it.id), this.trust());
+  }
+
   todo(it: Item, s: Sitter): Problem[] {
-    return problems(it, this.desk.me(), this.since(it.id)).filter((p) => !s.tried.includes(p.key));
+    return this.problems(it).filter((p) => !s.tried.includes(p.key));
+  }
+
+  // When an outsider last left feedback you haven't dismissed, or "".
+  outside(it: Item, s: Sitter): string {
+    const at = outsideAt(it, this.desk.me(), this.since(it.id), this.trust());
+    return at > (s.outside_seen ?? "") ? at : "";
   }
 
   // Why no run can start for this PR now, or null. Checked before queueing; a missing clone shows up when it tries.
@@ -820,6 +872,7 @@ export class Babysitter {
 
     const me = desk.me();
     const since = this.since(id);
+    const trust = this.trust();
     const commands = repoCommands(dir);
     const session = randomUUID();
     const logFile = path.join(desk.home, "babysit", `${id.replaceAll(/[^\w.-]+/g, "_")}-${session}.jsonl`);
@@ -829,7 +882,7 @@ export class Babysitter {
       started_at: new Date().toISOString(),
       ended_at: null,
       head_oid: head,
-      why: whyOf(todo, ctx, me, since),
+      why: whyOf(todo, ctx, me, since, trust),
       outcome: "running",
       pushed_oid: null,
       summary: "",
@@ -840,10 +893,10 @@ export class Babysitter {
     this.update(id, (s) => {
       s.tried = [...s.tried, ...keys].slice(-50);
       if (todo.some((p) => p.kind === "ci")) s.ci_tries++;
-      s.threads = openThreads(ctx, me).flatMap((t) => threadRef(t) ?? []);
+      s.threads = openThreads(ctx, me, trust).flatMap((t) => threadRef(t) ?? []);
       s.runs = [...s.runs, run].slice(-KEEP_RUNS);
     });
-    const prompt = buildPrompt({ item: { ...it, head_oid: head }, me, since, todo, ctx, logs, commands });
+    const prompt = buildPrompt({ item: { ...it, head_oid: head }, me, since, todo, ctx, logs, commands, trust });
     const args = claudeArgs({
       session,
       name: `desk: ${id}`,
@@ -1020,7 +1073,7 @@ export class Babysitter {
     if (this.starting.has(id) && !this.notes.has(id)) return { state: "running", text: "getting ready", since: null };
     if (s.escalation) return { state: "waiting", text: `needs you: ${s.escalation.question}`, since: s.escalation.at };
     if (this.queue.includes(id) && !this.notes.has(id)) return { state: "queued", text: "waiting for a free agent", since: null };
-    const work = it.state === "open" ? problems(it, this.desk.me(), this.since(id)) : [];
+    const work = it.state === "open" ? this.problems(it) : [];
     // The agent's login, not the PR: the lane says so calmly, and it isn't back with you (Settings says it once).
     if (work.length && this.paused && Date.now() < this.paused.until) return { state: "waiting", text: this.paused.why, since: null };
     const note = work.length ? (this.notes.get(id) ?? this.blocker(it, s)) : null;
@@ -1030,13 +1083,14 @@ export class Babysitter {
   }
 
   // Why the PR is back with you, or null while the babysitter has it (or nothing's wrong).
-  needsYou(id: string, it: Item, s: Sitter, st: SitterStatus): string | null {
+  needsYou(it: Item, s: Sitter, st: SitterStatus): string | null {
     if (it.state !== "open") return null;
     if (s.escalation) return s.escalation.question;
     const unsent = s.drafts.filter((d) => !d.sent_at).length;
     if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
+    if (this.outside(it, s)) return "comments from outside contributors";
     if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
-    const work = problems(it, this.desk.me(), this.since(id));
+    const work = this.problems(it);
     const [first] = work;
     // Nobody will do it: it's yours.
     if (st.state === "blocked" && first) {

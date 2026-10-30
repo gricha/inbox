@@ -18,6 +18,7 @@ interface Conn<T> {
 }
 interface RawReview {
   author: Actor | null;
+  authorAssociation?: string;
   state: string;
   submittedAt: string | null;
   createdAt: string;
@@ -25,8 +26,13 @@ interface RawReview {
 }
 interface RawComment {
   author: Actor | null;
+  authorAssociation?: string;
   createdAt: string;
 }
+
+// Has a say on the repo: what a babysitter may act on. Anyone else can comment on a public PR.
+const COLLABORATORS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+export const collaborator = (association: string | undefined) => COLLABORATORS.has(association ?? "");
 
 export interface RawHit {
   __typename: "PullRequest" | "Issue";
@@ -123,6 +129,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     reviews.set(`${login(r.author)}|${r.state}|${at}`, {
       author: login(r.author),
       author_bot: isBot(r.author),
+      trusted: collaborator(r.authorAssociation),
       state: r.state.toLowerCase() as ReviewState,
       at,
       commit: r.commit?.oid ?? "",
@@ -172,13 +179,25 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
         }),
     ),
     reviews: byAt([...reviews.values()]),
-    comments: byAt(n.comments.nodes.map((c) => ({ author: login(c.author), author_bot: isBot(c.author), at: c.createdAt }))),
+    comments: byAt(
+      n.comments.nodes.map((c) => ({
+        author: login(c.author),
+        author_bot: isBot(c.author),
+        trusted: collaborator(c.authorAssociation),
+        at: c.createdAt,
+      })),
+    ),
     comments_total: n.comments.totalCount ?? 0,
     threads_total: n.reviewThreads?.totalCount ?? 0,
     threads_unresolved: threads.filter((t) => !t.isResolved).length,
     thread_last: byAt(
       threads.flatMap((t) =>
-        (t.comments?.nodes ?? []).map((c) => ({ author: login(c.author), author_bot: isBot(c.author), at: c.createdAt })),
+        (t.comments?.nodes ?? []).map((c) => ({
+          author: login(c.author),
+          author_bot: isBot(c.author),
+          trusted: collaborator(c.authorAssociation),
+          at: c.createdAt,
+        })),
       ),
     ),
     detail_at: now,

@@ -1286,6 +1286,7 @@ function laneRow(r: Rec): InflightRow {
     draft: !!s.draft,
     needs_you: needsYou(r),
     escalation: f.question,
+    outside_at: null,
     sitter,
     drafts: f.drafts.filter((d) => !d.sent_at),
     run: session

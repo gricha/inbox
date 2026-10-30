@@ -33,13 +33,14 @@ test("PR by someone else with a bot-added team request (review fragment)", () =>
   ]);
   // latestReviews fills in cedar's verdict that fell out of reviews(last: 20); birch is deduped.
   assert.deepEqual(it.reviews, [
-    { author: "cedar", author_bot: false, state: "changes_requested", at: "2026-03-01T13:00:00Z", commit: "" },
-    { author: "birch", author_bot: false, state: "approved", at: "2026-03-02T09:00:00Z", commit: "" },
-    { author: "lint-buddy", author_bot: true, state: "commented", at: "2026-03-02T10:00:00Z", commit: "" },
+    // trusted: a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); a CONTRIBUTOR isn't one.
+    { author: "cedar", author_bot: false, trusted: false, state: "changes_requested", at: "2026-03-01T13:00:00Z", commit: "" },
+    { author: "birch", author_bot: false, trusted: true, state: "approved", at: "2026-03-02T09:00:00Z", commit: "" },
+    { author: "lint-buddy", author_bot: true, trusted: false, state: "commented", at: "2026-03-02T10:00:00Z", commit: "" },
   ]);
   assert.deepEqual(it.comments, [
-    { author: "birch", author_bot: false, at: "2026-03-01T12:00:00Z" },
-    { author: "legacy-ci[bot]", author_bot: true, at: "2026-03-02T11:00:00Z" },
+    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T12:00:00Z" },
+    { author: "legacy-ci[bot]", author_bot: true, trusted: false, at: "2026-03-02T11:00:00Z" },
   ]);
   assert.equal(it.comments_total, 4);
   assert.equal(it.threads_total, 2);
@@ -61,14 +62,14 @@ test("your PR with red CI, a conflict and unresolved threads (mine fragment)", (
   assert.equal(it.threads_total, 3);
   assert.equal(it.threads_unresolved, 2);
   assert.deepEqual(it.thread_last, [
-    { author: "birch", author_bot: false, at: "2026-03-01T16:00:00Z" },
-    { author: "octo-dev", author_bot: false, at: "2026-03-01T17:00:00Z" },
-    { author: "octo-dev", author_bot: false, at: "2026-03-02T17:00:00Z" },
+    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z" },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z" },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z" },
   ]);
   assert.equal(it.head_oid, "bbbb111122223333444455556666777788889999");
   assert.equal(it.head_author, "octo-dev");
   assert.deepEqual(it.reviews, [
-    { author: "birch", author_bot: false, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" },
+    { author: "birch", author_bot: false, trusted: true, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" },
   ]);
 });
 
@@ -117,11 +118,11 @@ test("deleted accounts become ghost; null reviewers are dropped", () => {
   assert.deepEqual(it.request_events, [
     { at: "2025-12-01T09:00:00Z", actor: "ghost", actor_bot: false, reviewer: "maple", reviewer_type: "user" },
   ]);
-  assert.deepEqual(it.comments, [{ author: "ghost", author_bot: false, at: "2025-12-02T08:00:00Z" }]);
+  assert.deepEqual(it.comments, [{ author: "ghost", author_bot: false, trusted: false, at: "2025-12-02T08:00:00Z" }]);
   // A pending review has no submittedAt; it falls back to createdAt.
   assert.deepEqual(it.reviews, [
-    { author: "maple", author_bot: false, state: "pending", at: "2025-12-01T20:00:00Z", commit: "" },
-    { author: "ghost", author_bot: false, state: "dismissed", at: "2025-12-02T09:00:00Z", commit: "" },
+    { author: "maple", author_bot: false, trusted: false, state: "pending", at: "2025-12-01T20:00:00Z", commit: "" },
+    { author: "ghost", author_bot: false, trusted: false, state: "dismissed", at: "2025-12-02T09:00:00Z", commit: "" },
   ]);
 });
 

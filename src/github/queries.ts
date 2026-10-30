@@ -23,7 +23,7 @@ const COMMON = `
   repository { nameWithOwner }
   labels(first: 15) { nodes { name } }
   assignees(first: 10) { nodes { login } }
-  comments(last: 10) { totalCount nodes { author { __typename login } createdAt } }`;
+  comments(last: 10) { totalCount nodes { author { __typename login } authorAssociation createdAt } }`;
 
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
@@ -33,9 +33,9 @@ const PR = `${COMMON}
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
     nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }
   }
-  latestReviews(first: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
-  latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
-  reviews(last: 20) { nodes { author { __typename login } state submittedAt createdAt commit { oid } } }
+  latestReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
+  latestOpinionatedReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
+  reviews(last: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
   commits(last: 1) { nodes { commit { oid committedDate author { user { login } } statusCheckRollup { state } } } }`;
 
 const details = (pr: string) => `query($ids: [ID!]!) {
@@ -56,19 +56,20 @@ const CHECK = "__typename ... on CheckRun { name conclusion } ... on StatusConte
 // Failing check names are for the In-flight lane, so they're only asked of your own PRs too.
 export const DETAILS_MINE = details(`${PR}
   mergeable
-  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } createdAt } } } }
+  reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
   checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${CHECK} } } } } } }`);
 
+// authorAssociation (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, ...) says whose feedback a babysitter may act on.
 // What a babysitter needs to work on your PR: its review threads (with ids to reply to), reviews, comments and failing checks.
 export const PR_CONTEXT = `query($id: ID!) {
   ${RATE}
   node(id: $id) {
     ... on PullRequest {
       reviewThreads(first: 100) {
-        nodes { id isResolved isOutdated path line comments(first: 30) { nodes { author { __typename login } body createdAt url } } }
+        nodes { id isResolved isOutdated path line comments(first: 30) { nodes { author { __typename login } authorAssociation body createdAt url } } }
       }
-      reviews(last: 30) { nodes { author { __typename login } state body submittedAt createdAt } }
-      comments(last: 20) { nodes { author { __typename login } body createdAt } }
+      reviews(last: 30) { nodes { author { __typename login } authorAssociation state body submittedAt createdAt } }
+      comments(last: 20) { nodes { author { __typename login } authorAssociation body createdAt } }
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
         __typename
         ... on CheckRun { name conclusion databaseId detailsUrl title summary checkSuite { app { slug } } }
