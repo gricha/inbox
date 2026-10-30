@@ -6,6 +6,8 @@ import { homedir } from "node:os";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import type {
   Action,
+  ActivityEvent,
+  ActivityKind,
   AgentStatus,
   BoardConfig,
   BoardSummary,
@@ -214,6 +216,8 @@ interface Seed {
   fresh?: boolean;
   on: Partial<Record<string, Key[] | "filtered">>;
   st?: Partial<ItemState>;
+  resolved?: string; // the world dealt with it: "merged", "approved by dana", ...
+  log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
 }
 
 const SEEDS: Seed[] = [
@@ -231,6 +235,11 @@ const SEEDS: Seed[] = [
     comments: 4,
     fresh: true,
     on: { "work-review": ["direct", "close"], "work-mentions": ["newact", "closem"] },
+    log: [
+      ["pushed", "priya", 1.5, { oid: "c41d9e2" }],
+      ["mentioned", "", 1.2, { reason: "mention" }],
+      ["commented", "sam", 0.6, {}],
+    ],
   },
   {
     repo: "acme/worker",
@@ -421,6 +430,42 @@ const SEEDS: Seed[] = [
     ],
     review: "approved",
     on: { "work-review": ["approved"] },
+    resolved: "approved by dana",
+  },
+  {
+    repo: "acme/web",
+    n: 2284,
+    title: "Tighten the CSP on the embed iframe",
+    author: "li-wei",
+    age: 30,
+    wait: 28,
+    upd: 1,
+    by: "li-wei",
+    direct: true,
+    size: [24, 6, 2],
+    reviews: [["marco", "approved", 4]],
+    review: "approved",
+    on: { "work-review": ["direct"] },
+    resolved: "merged",
+    log: [
+      ["ci", "", 3.5, { from: "pending", to: "green" }],
+      ["merged", "li-wei", 1, {}],
+    ],
+  },
+  {
+    repo: "acme/worker",
+    n: 868,
+    title: "Drop the legacy cron runner",
+    author: "kofi",
+    age: 50,
+    wait: 48,
+    upd: 6,
+    by: "kofi",
+    team: "ml-team",
+    size: [12, 340, 9],
+    on: { "work-review": [] },
+    resolved: "no longer requested",
+    log: [["request_removed", "", 6, { reviewer: "ml-team", type: "team" }]],
   },
   {
     repo: "acme/api",
@@ -517,6 +562,13 @@ const SEEDS: Seed[] = [
     size: [180, 22, 6],
     on: { "work-mine": ["merge"] },
     st: { pinned: true },
+    log: [
+      ["pushed", ME, 5, { oid: "9f1c2e7" }],
+      ["ci", "", 4.6, { from: "pending", to: "red" }],
+      ["pushed", ME, 4.2, { oid: "a3d81b0" }],
+      ["ci", "", 3.9, { from: "red", to: "green" }],
+      ["commented", "marco", 3.2, {}],
+    ],
   },
   {
     repo: "acme/web",
@@ -907,7 +959,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     if (cap === undefined) continue;
     let used = 0;
     for (const { r, p } of rows) {
-      if (p.bucket !== from || status(r) !== "active") continue;
+      if (p.bucket !== from || status(r) !== "active" || r.seed.resolved) continue;
       if (r.state.pinned || (p.rule !== null && b.rules[p.rule]?.nocap)) continue;
       if (++used > cap) {
         p.bucket = to;
@@ -942,7 +994,7 @@ function cardOf(r: Rec, p: Placement): Card {
     author: s.author,
     author_bot: sig.author.bot,
     bucket: p.bucket,
-    why: p.why,
+    why: s.resolved ?? p.why,
     demoted: p.demoted,
     board: p.board,
     boards: config.boards.filter((b) => place(r, b)).map((b) => b.id),
@@ -960,9 +1012,11 @@ function cardOf(r: Rec, p: Placement): Card {
     status: status(r),
     snooze_until: r.state.snooze_until,
     verdict: briefs.get(r.id)?.verdict ?? null,
+    resolved: s.resolved ?? null,
   };
 }
 
+// Like src/desk.ts, a board view skips resolved items; the queue lists them under Resolved.
 function boardView(b: BoardConfig): BoardView {
   const view: BoardView = {
     board: { ...summary(b), queries: b.queries },
@@ -971,6 +1025,7 @@ function boardView(b: BoardConfig): BoardView {
     cleared: [],
   };
   for (const { r, p } of boardPlacements(b)) {
+    if (r.seed.resolved) continue;
     const card = cardOf(r, p);
     if (card.status !== "active") view.cleared.push(card);
     else if (p.bucket === "hide") view.hidden.push(card);
@@ -983,6 +1038,7 @@ function summary(b: BoardConfig): BoardSummary {
   const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared: 0 };
   let fresh = 0;
   for (const { r, p } of boardPlacements(b)) {
+    if (r.seed.resolved) continue;
     if (status(r) !== "active") counts.cleared++;
     else {
       counts[p.bucket]++;
@@ -996,7 +1052,7 @@ function focus(): FocusView {
   const best = new Map<string, Card>();
   for (const b of config.boards) {
     for (const { r, p } of boardPlacements(b)) {
-      if (status(r) !== "active" || (p.bucket !== "now" && p.bucket !== "today")) continue;
+      if (status(r) !== "active" || r.seed.resolved || (p.bucket !== "now" && p.bucket !== "today")) continue;
       const cur = best.get(r.id);
       if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(r.id, cardOf(r, p));
     }
@@ -1008,8 +1064,13 @@ function focus(): FocusView {
 function queue(): QueueView {
   const best = new Map<string, Card>();
   const cleared = new Map<string, Card>();
+  const resolved = new Map<string, Card>();
   for (const b of config.boards) {
     for (const { r, p } of boardPlacements(b)) {
+      if (r.seed.resolved) {
+        if (!resolved.has(r.id)) resolved.set(r.id, cardOf(r, p));
+        continue;
+      }
       if (status(r) !== "active") {
         if (!cleared.has(r.id)) cleared.set(r.id, cardOf(r, p));
         continue;
@@ -1024,7 +1085,47 @@ function queue(): QueueView {
     sections: { now: of("now"), today: of("today"), later: of("later"), fyi: of("fyi") },
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
+    resolved: [...resolved.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The event log: each seed's story (first seen, the ask, reviews, its `log`), numbered oldest first.
+
+function storyOf(r: Rec): Omit<ActivityEvent, "seq">[] {
+  const s = r.seed;
+  const ev = (kind: ActivityKind, actor: string, h: number, data: ActivityEvent["data"] = {}) => ({
+    at: iso(h),
+    source: "github",
+    item_id: r.id,
+    kind,
+    actor,
+    data,
+  });
+  const out = [ev("new", s.author, s.age, { kind: s.kind ?? "pr" })];
+  if (s.by && s.wait !== undefined) {
+    const ask = s.direct
+      ? { reviewer: ME, type: "user", codeowner: false }
+      : { reviewer: s.team ?? "", type: "team", codeowner: !!s.owner };
+    out.push(ev("review_requested", s.by, s.wait, ask));
+  }
+  for (const [a, state, h] of s.reviews ?? []) if (a !== ME) out.push(ev("reviewed", a, h, { state }));
+  for (const [kind, actor, h, data] of s.log ?? []) out.push(ev(kind, actor, h, data));
+  if (s.resolved) out.push(ev("resolved", "", s.upd ?? 1, { reason: s.resolved }));
+  return out;
+}
+
+const EVENTS: ActivityEvent[] = recs
+  .flatMap(storyOf)
+  .sort((a, b) => a.at.localeCompare(b.at))
+  .map((e, i) => Object.assign(e, { seq: i + 1 }));
+
+function activity(url: URL): { events: ActivityEvent[]; last_seq: number } {
+  const after = Number(url.searchParams.get("after") ?? 0);
+  const limit = Number(url.searchParams.get("limit") ?? 100);
+  const item = url.searchParams.get("item");
+  const events = EVENTS.filter((e) => e.seq > after && (!item || e.item_id === resolve(item).id)).slice(0, limit);
+  return { events, last_seq: events.at(-1)?.seq ?? EVENTS.length };
 }
 
 function overview(): Overview {
@@ -1036,6 +1137,9 @@ function overview(): Overview {
     syncing,
     sync_error: syncError,
     config_errors: [],
+    connectors: [
+      { id: "github", name: "GitHub", status: syncing ? "syncing" : syncError ? "error" : "ok", synced_at: syncedAt, error: syncError },
+    ],
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
     focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
     rate_limit: rateLimit(),
@@ -1138,6 +1242,9 @@ function detail(r: Rec): ItemDetail {
     brief,
     brief_stale: !!brief && brief.head_oid !== item.head_oid,
     analyzing: analyzing.has(r.id),
+    activity: EVENTS.filter((e) => e.item_id === r.id)
+      .toReversed()
+      .slice(0, 8),
   };
 }
 
@@ -1726,6 +1833,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     linked.add(`${driver} mcp`).add(`${driver} skill`);
     return agentStatus();
   }
+  if (route === "GET /api/activity") return activity(url);
   if (route === "GET /api/status") {
     const o = overview();
     return {

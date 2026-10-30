@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type {
+  ActivityPage,
   AgentStatus,
   BoardView,
   ConfigError,
@@ -13,6 +14,7 @@ import type {
   ItemDetail,
   Overview,
   PreviewResult,
+  QueueView,
   SettingsView,
 } from "../../src/types.ts";
 
@@ -201,4 +203,39 @@ test("agents: status for the selected driver, and connect", async () => {
   await call("PUT", "/api/settings", { set: { "agent.driver": "none" } });
   assert.deepEqual((await call<AgentStatus>("GET", "/api/agents")).data, { driver: "none", mcp: null, skill: null });
   await call("PUT", "/api/settings", { reset: ["agent.driver"] });
+});
+
+test("resolved items sit apart from the queue's groups and boards; items carry their recent activity", async () => {
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  assert.deepEqual(
+    q.resolved.map((c) => [c.id, c.why, c.resolved]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    [
+      ["acme/api#4093", "approved by dana", "approved by dana"],
+      ["acme/web#2284", "merged", "merged"],
+      ["acme/worker#868", "no longer requested", "no longer requested"],
+    ],
+  );
+  const elsewhere = new Set([...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared].map((c) => c.id));
+  assert.ok(!q.resolved.some((c) => elsewhere.has(c.id)));
+  const { data: wr } = await call<BoardView>("GET", "/api/boards/work-review");
+  assert.ok(![...Object.values(wr.sections).flat(), ...wr.hidden, ...wr.cleared].some((c) => c.resolved));
+
+  const { data: d } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("worker#875")}`);
+  assert.ok(d.activity.length >= 5);
+  assert.ok(
+    d.activity.every((e, i) => i === 0 || d.activity[i - 1]!.seq > e.seq),
+    "newest first",
+  );
+
+  const { data: page } = await call<ActivityPage>("GET", "/api/activity?after=0&limit=5");
+  assert.deepEqual(
+    page.events.map((e) => e.seq),
+    [1, 2, 3, 4, 5],
+  );
+  assert.equal(page.last_seq, 5);
+  const { data: o } = await call<Overview>("GET", "/api/overview");
+  assert.deepEqual(
+    o.connectors.map((c) => [c.id, c.name]),
+    [["github", "GitHub"]],
+  );
 });

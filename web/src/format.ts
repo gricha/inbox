@@ -1,4 +1,4 @@
-import type { Bucket, Card } from "../../src/types.ts";
+import type { ActivityEvent, Bucket, Card } from "../../src/types.ts";
 
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");
@@ -37,6 +37,45 @@ export function clearedText(c: Card): string {
   if (c.status === "done") return "done until someone else acts";
   if (c.status === "snoozed") return c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity";
   return "";
+}
+
+const REVIEWED: Record<string, string> = { approved: "approved", changes_requested: "requested changes", commented: "commented" };
+
+// One event in plain words, without its time: "alice approved", "CI went red". `me` reads as "you".
+export function eventText(e: ActivityEvent, me = ""): string {
+  const { data: d } = e;
+  const who = me && e.actor.toLowerCase() === me.toLowerCase() ? "you" : e.actor;
+  switch (e.kind) {
+    case "new":
+      return "first seen";
+    case "review_requested":
+      return `${who ? `${who} asked` : "asked"} ${d.type === "team" ? `@${String(d.reviewer)}` : "you"}`;
+    case "request_removed":
+      return d.type === "team" ? `request to @${String(d.reviewer)} removed` : "your request removed";
+    case "reviewed":
+      return `${who} ${REVIEWED[String(d.state)] ?? "reviewed"}`;
+    case "pushed":
+      return who ? `${who} pushed` : "new commits";
+    case "ci":
+      return d.to === "red" ? "CI went red" : d.to === "green" ? "CI went green" : "CI started";
+    case "commented":
+      return `${who} commented`;
+    case "merged":
+      return who ? `${who} merged it` : "merged";
+    case "closed":
+      return "closed";
+    case "reopened":
+      return "reopened";
+    case "mentioned":
+      return d.reason === "team_mention" ? "your team was mentioned" : "you were mentioned";
+    case "assigned":
+      return "assigned to you";
+    case "resolved":
+      return `resolved: ${String(d.reason)}`;
+    case "unresolved":
+      return `came back (was ${String(d.was)})`;
+  }
+  return e.kind;
 }
 
 export const BUCKET_LABEL: Record<Bucket, string> = { now: "Now", today: "Today", later: "Later", fyi: "FYI", hide: "Hidden" };

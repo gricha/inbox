@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { Card, QueueView } from "../../src/types.ts";
-import { age, ago, clearedText, shortId, shortRef } from "../src/format.ts";
+import type { ActivityEvent, Card, QueueView } from "../../src/types.ts";
+import { age, ago, clearedText, eventText, shortId, shortRef } from "../src/format.ts";
 import {
   acceleratorOf,
   authProblem,
@@ -48,6 +48,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     status: "active",
     snooze_until: null,
     verdict: null,
+    resolved: null,
     ...extra,
   };
 };
@@ -56,6 +57,7 @@ const queue = (): QueueView => ({
   sections: { now: [card("acme/api#1")], today: [card("acme/web#2", { author: "priya" })], later: [card("acme/api#3")], fyi: [] },
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],
+  resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
 });
 
 test("routes round-trip through the hash", () => {
@@ -130,9 +132,15 @@ test("sorted-away groups are skipped by j/k until opened; filtering opens groups
       ["today", true, 1],
       ["later", false, 1],
       ["fyi", false, 0],
+      ["resolved", false, 1],
       ["hidden", false, 1],
       ["cleared", false, 1],
     ],
+  );
+  assert.equal(groupsOf(queue(), DEFAULT_OPEN, "").find((g) => g.key === "resolved")?.variant, "resolved");
+  assert.deepEqual(
+    navigable(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, ""), new Set()).map((c) => c.id),
+    ["acme/api#1", "acme/web#2", "acme/api#6"],
   );
   assert.deepEqual(
     navigable(groups, new Set()).map((c) => c.id),
@@ -163,11 +171,60 @@ test("sorted-away groups are skipped by j/k until opened; filtering opens groups
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
 });
 
-test("removeCard drops an item from every active group but keeps cleared", () => {
+test("removeCard drops an item from every active group but keeps cleared and resolved", () => {
   const v = removeCard(removeCard(queue(), "acme/api#1"), "acme/api#4");
   assert.equal(v.sections.now.length, 0);
   assert.equal(v.hidden.length, 0);
   assert.equal(v.cleared.length, 1);
+  assert.equal(removeCard(queue(), "acme/api#6").resolved.length, 1);
+});
+
+test("events read as plain words", () => {
+  const e = (kind: ActivityEvent["kind"], actor = "", data: ActivityEvent["data"] = {}): ActivityEvent => ({
+    seq: 1,
+    at: "",
+    source: "github",
+    item_id: "acme/api#1",
+    kind,
+    actor,
+    data,
+  });
+  assert.deepEqual(
+    [
+      e("new", "dana"),
+      e("review_requested", "alice", { reviewer: "me", type: "user" }),
+      e("review_requested", "", { reviewer: "ml-team", type: "team" }),
+      e("request_removed", "", { reviewer: "ml-team", type: "team" }),
+      e("reviewed", "alice", { state: "approved" }),
+      e("reviewed", "bob", { state: "changes_requested" }),
+      e("pushed", "dana"),
+      e("ci", "", { from: "green", to: "red" }),
+      e("ci", "", { from: "red", to: "pending" }),
+      e("commented", "carol"),
+      e("merged", "dana"),
+      e("mentioned", "", { reason: "team_mention" }),
+      e("assigned"),
+      e("resolved", "alice", { reason: "approved by alice" }),
+      e("unresolved", "", { was: "approved by alice" }),
+    ].map((x) => eventText(x, "dana")),
+    [
+      "first seen",
+      "alice asked you",
+      "asked @ml-team",
+      "request to @ml-team removed",
+      "alice approved",
+      "bob requested changes",
+      "you pushed",
+      "CI went red",
+      "CI started",
+      "carol commented",
+      "you merged it",
+      "your team was mentioned",
+      "assigned to you",
+      "resolved: approved by alice",
+      "came back (was approved by alice)",
+    ],
+  );
 });
 
 const TOML = `poll_seconds = 60

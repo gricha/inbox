@@ -40,7 +40,7 @@ const CHORDS: Record<string, Route> = {
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
 };
-const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared" };
+const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
 const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
@@ -306,7 +306,8 @@ export function App() {
 
   async function act(c: Card, action: Action, until?: string) {
     setSnoozeFor(null);
-    const leaves = LEAVES.has(action) && c.status === "active";
+    // A resolved item stays under Resolved whatever you do to it.
+    const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
     if (leaves) {
       const i = flat.findIndex((x) => x.id === c.id);
       setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
@@ -527,6 +528,7 @@ export function App() {
 
   const ctx: RowCtx = {
     now,
+    me: overview?.me ?? "",
     selected,
     expanded,
     leaving,

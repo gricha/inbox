@@ -738,6 +738,7 @@ kbd {
 }
 
 .dim .ref-repo {
+  color: var(--pencil);
   opacity: 1;
 }
 
@@ -1103,6 +1104,14 @@ kbd {
 .reasons {
   margin: 6px 0 0;
   padding-left: 18px;
+}
+
+.events {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .actions {

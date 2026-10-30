@@ -7,6 +7,7 @@ import { Detail } from "./Detail.tsx";
 // Everything a row needs from the app; `run` takes the same keys as the keyboard (o e s m p c w i).
 export interface RowCtx {
   now: number;
+  me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
   leaving: Set<string>;
@@ -113,9 +114,9 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
                 ) : variant === "hidden" ? (
                   <span>Hidden by a rule. Open it to see which.</span>
                 ) : (
-                  !inRun && card.why && <span className="why">{card.why}</span>
+                  (!inRun || variant === "resolved") && card.why && <span className="why">{card.why}</span>
                 )}
-                {words}
+                {variant !== "resolved" && words}
               </span>
             )}
           </span>

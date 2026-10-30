@@ -12,7 +12,7 @@ const KEYS: [string[], string][] = [
   [["c"], "Copy a review prompt for Claude"],
   [["i"], "Ask Claude for a brief (30 to 90 seconds)"],
   [["w"], "Show the raw signals"],
-  [["g", "l"], "Open or close Later (g f FYI, g h hidden, g x cleared)"],
+  [["g", "l"], "Open or close Later (g f FYI, g d resolved, g h hidden, g x cleared)"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter"],
   [["r"], "Sync now"],

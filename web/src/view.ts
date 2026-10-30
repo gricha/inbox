@@ -3,8 +3,8 @@ import { shortRef } from "./format.ts";
 
 // One surface (the queue) plus Settings, whose sections include the rules editor.
 export type Route = { name: "queue" } | { name: "settings"; section: string };
-export type GroupKey = "now" | "today" | "later" | "fyi" | "hidden" | "cleared";
-export type Variant = "active" | "hidden" | "cleared";
+export type GroupKey = "now" | "today" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
+export type Variant = "active" | "hidden" | "cleared" | "resolved";
 
 export interface Group {
   key: GroupKey;
@@ -16,7 +16,7 @@ export interface Group {
   variant: Variant;
 }
 
-export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
+export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];
 
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
@@ -30,13 +30,22 @@ export const routeHash = (r: Route) => (r.name === "settings" ? `#/settings/${r.
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
-export const DEFAULT_OPEN: Record<GroupKey, boolean> = { now: true, today: true, later: false, fyi: false, hidden: false, cleared: false };
+export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
+  now: true,
+  today: true,
+  later: false,
+  fyi: false,
+  resolved: false,
+  hidden: false,
+  cleared: false,
+};
 
 const LABEL: Record<GroupKey, string> = {
   now: "Now",
   today: "Today",
   later: "Later",
   fyi: "FYI",
+  resolved: "Resolved",
   hidden: "Hidden by rules",
   cleared: "Cleared",
 };
@@ -56,6 +65,7 @@ export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>
     group("today", s.today),
     group("later", s.later),
     group("fyi", s.fyi),
+    group("resolved", view.resolved, "resolved"),
     group("hidden", view.hidden, "hidden"),
     group("cleared", view.cleared, "cleared"),
   ];
@@ -72,6 +82,7 @@ export function removeCard(v: QueueView, id: string): QueueView {
     sections: { now: drop(s.now), today: drop(s.today), later: drop(s.later), fyi: drop(s.fyi) },
     hidden: drop(v.hidden),
     cleared: v.cleared,
+    resolved: v.resolved,
   };
 }
 

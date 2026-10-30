@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
-import { age, BUCKET_LABEL, cls, when } from "../format.ts";
+import { age, BUCKET_LABEL, cls, eventText, when } from "../format.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
 const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
@@ -91,7 +91,13 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       {main && (
         <div className="why-block">
           <h4 className="d-head">Why it's here</h4>
+          {card.resolved && (
+            <p className="pl-head">
+              <b>Resolved</b>: {card.resolved}. It comes back on its own if that stops being true.
+            </p>
+          )}
           <p className="pl-head">
+            {card.resolved && "Otherwise "}
             <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board{main.why && <>: {main.why}</>}
           </p>
           {main.demoted && (
@@ -112,6 +118,18 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
               </div>
             ))}
           </details>
+        </div>
+      )}
+      {detail.activity.length > 0 && (
+        <div className="activity">
+          <h4 className="d-head">Recent activity</h4>
+          <ul className="events">
+            {detail.activity.map((e) => (
+              <li key={e.seq}>
+                {eventText(e, ctx.me)} <span className="quiet">· {age(e.at, ctx.now)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {pr && !busy && ctx.briefErrors[card.id] && (
