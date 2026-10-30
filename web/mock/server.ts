@@ -791,6 +791,7 @@ function signals(r: Rec): Signals {
   const [add, del, files] = pr ? (s.size ?? [0, 0, 0]) : [0, 0, 0];
   const reviews = s.reviews ?? [];
   const myReview = reviews.findLast(([a]) => a === ME);
+  const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested"; // that ask was removed
   return {
     item: {
       kind,
@@ -827,9 +828,9 @@ function signals(r: Rec): Signals {
       login: ME,
       author: mine,
       assignee: !!s.assignee,
-      requested: !!s.direct || !!s.team,
-      requested_direct: !!s.direct,
-      requested_team: s.direct ? "" : (s.team ?? ""),
+      requested: asked,
+      requested_direct: asked && !!s.direct,
+      requested_team: asked && !s.direct ? (s.team ?? "") : "",
       requested_codeowner: !!s.owner,
       requested_by: s.by ?? "",
       requested_by_bot: !!s.by && isBot(s.by),
