@@ -376,6 +376,7 @@ kbd {
   display: flex;
   flex: 0 1 380px;
   align-items: center;
+  min-width: 120px; /* gives way to the right side's links at narrow widths */
   gap: 8px;
   height: 32px;
   margin: 0 auto;
