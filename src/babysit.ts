@@ -75,7 +75,7 @@ const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 
 // Whose feedback reaches a babysitter: a collaborator on the repo (`trusted`: OWNER, MEMBER or COLLABORATOR), or a bot in
 // inflight.trusted_bots. Anyone can comment on a PR, and an agent that acts on it runs code as you.
-export interface Author {
+interface Author {
   author: string;
   trusted?: boolean; // absent: stored before the desk asked; neither trusted nor an outsider until the next refresh
   bot?: boolean;
