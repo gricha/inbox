@@ -1,5 +1,18 @@
-import type { ActivityEvent, Card, QueueView, ReviewFile, ReviewNote, SettingDef, SettingValue } from "../../src/types.ts";
-import { shortRef } from "./format.ts";
+import type {
+  ActivityEvent,
+  Card,
+  CoordinatorActed,
+  CoordinatorLogEntry,
+  CoordinatorStatus,
+  JudgeStatus,
+  JudgeStep,
+  QueueView,
+  ReviewFile,
+  ReviewNote,
+  SettingDef,
+  SettingValue,
+} from "../../src/types.ts";
+import { ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
 
 // One surface (the queue), a PR's review in its place, and Settings, whose sections include the rules editor.
 export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "settings"; section: string };
@@ -273,3 +286,74 @@ export function acceleratorOf(e: KeyLike, mac: boolean): string | null {
 
 // Errors that `gh auth login` fixes, e.g. "GitHub rejected the token (HTTP 401)".
 export const authProblem = (error: string) => /\b(401|token|bad credentials|unauthori[sz]ed|gh auth)\b/i.test(error);
+
+// ---------------------------------------------------------------- the policy judge and the coordinator
+
+const PAST: Record<string, string> = {
+  snooze: "snoozed",
+  done: "cleared",
+  mute: "muted",
+  unmute: "unmuted",
+  pin: "pinned",
+  unpin: "unpinned",
+  restore: "restored",
+};
+const past = (action: string | null) => PAST[action ?? ""] ?? action ?? "acted on";
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!?]$/.test(s) ? "" : "."}`;
+// "5m": how long until `at`.
+const until = (at: string, now: number) => ago(new Date(2 * now - Date.parse(at)).toISOString(), now).replace(/ ago$/, "");
+
+// The judge's step in a rule trace, after "policy": as src/judge.ts's judgeText says it to agents.
+export function judgeStepText(j: JudgeStep): string {
+  if (j.bucket === null) return j.pending ? "not judged yet, so the board default" : "no answer, so the board default";
+  const why = j.why || "it says nothing about this item";
+  return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (judged before the latest activity)" : ""}`;
+}
+
+// "snoozed 3 FYI items", "snoozed 2 items and muted 1": the top bar's line, after "Coordinator".
+export function actedText(a: CoordinatorActed): string {
+  const parts = Object.entries(a.counts).sort((x, y) => y[1] - x[1]);
+  const [first] = parts;
+  if (!first) return "";
+  const [bucket] = a.buckets;
+  const where = parts.length === 1 && bucket && bucket !== "hide" && a.buckets.every((b) => b === bucket) ? `${BUCKET_LABEL[bucket]} ` : "";
+  const head = `${past(first[0])} ${first[1]} ${where}${first[1] === 1 ? "item" : "items"}`;
+  const all = [head, ...parts.slice(1).map(([action, n]) => `${past(action)} ${n}`)];
+  return all.length === 1 ? head : `${all.slice(0, -1).join(", ")} and ${all.at(-1)!}`;
+}
+
+// One line of the coordinator's log.
+export function logText(e: CoordinatorLogEntry): string {
+  if (e.kind === "act") {
+    const what = `${sentence(past(e.action)).slice(0, -1)} ${e.item_id ? shortId(e.item_id) : "an item"}`;
+    return e.text ? `${what}: ${e.text}` : what;
+  }
+  return e.kind === "run" && e.run ? `Run ${e.run}: ${e.text.charAt(0).toLowerCase()}${e.text.slice(1)}` : e.text;
+}
+
+export function judgeStatusText(j: JudgeStatus, now: number): string {
+  if (j.state === "off") return `Nothing is judged: ${j.off_reason ?? "it's off"}.`;
+  const hour = `${j.spent} of ${j.max_per_hour} this hour.`;
+  if (j.state === "error")
+    return `The judge's last call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
+  const placed = `${count(j.judged, "item")} placed by the policy${j.waiting ? `, ${j.waiting} waiting` : ""}`;
+  return j.state === "running" ? `Judging now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
+}
+
+export function coordinatorText(s: CoordinatorStatus, now: number): string {
+  if (s.state === "off") return sentence(s.off_reason ?? "Off");
+  if (s.state === "running") return `Running, started ${ago(s.running_since ?? new Date(now).toISOString(), now)}.`;
+  if (s.state === "error") {
+    const when = s.last_run ? ` ${ago(s.last_run.started_at, now)}` : "";
+    return `Its last run failed${when}: ${sentence(s.error ?? "unknown error")}${s.next_at ? ` Next try in ${until(s.next_at, now)}.` : ""}`;
+  }
+  if (s.held) return "Waiting: you have it open in a terminal. It picks up the new events once you close it.";
+  if (!s.started) return "It starts its session after the first sync.";
+  const r = s.last_run;
+  const did = r && (r.kind === "intro" ? "its first" : `${count(r.events, "event")}, ${count(r.actions, "action")}`);
+  const last = r ? ` Last run ${ago(r.started_at, now)}: ${did}.` : "";
+  const head =
+    s.state === "waiting" ? `Waiting for things to settle${s.next_at ? `; next run in ${until(s.next_at, now)}` : ""}.` : "Idle.";
+  return `${head}${last}${s.policy_empty ? " It wakes on new activity once you've written a policy." : ""}`;
+}

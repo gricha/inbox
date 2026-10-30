@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, QueueView } from "../../src/types.ts";
+import type { ActivityEvent, Card, CoordinatorLogEntry, CoordinatorStatus, JudgeStatus, QueueView } from "../../src/types.ts";
 import { age, ago, clearedText, eventText, shortId, shortRef } from "../src/format.ts";
 import {
   acceleratorOf,
+  actedText,
   authProblem,
+  coordinatorText,
   DEFAULT_OPEN,
   draftOf,
   groupsOf,
+  judgeStatusText,
+  judgeStepText,
   lineOf,
+  logText,
   navigable,
   parseList,
   parseRoute,
@@ -337,4 +342,96 @@ test("lineOf finds rules written as an inline array", () => {
   assert.equal(lineOf(t, "boards[0].rules[1].when"), 7);
   assert.equal(lineOf(t, "boards[1].rules[0].bucket"), 13);
   assert.equal(lineOf(t, "boards[1].id"), 11);
+});
+
+test("the coordinator in plain words: the top bar's line, its log, its status", () => {
+  assert.equal(actedText({ counts: { snooze: 3 }, buckets: ["fyi", "fyi", "fyi"], at: "" }), "snoozed 3 FYI items");
+  assert.equal(actedText({ counts: { snooze: 1 }, buckets: ["later"], at: "" }), "snoozed 1 Later item");
+  assert.equal(actedText({ counts: { snooze: 2 }, buckets: ["fyi", "later"], at: "" }), "snoozed 2 items");
+  assert.equal(actedText({ counts: { mute: 1, snooze: 2 }, buckets: ["fyi", "fyi", "fyi"], at: "" }), "snoozed 2 items and muted 1");
+  assert.equal(actedText({ counts: { done: 1, mute: 1, snooze: 4 }, buckets: [], at: "" }), "snoozed 4 items, cleared 1 and muted 1");
+
+  const entry = (o: Partial<CoordinatorLogEntry>): CoordinatorLogEntry => ({
+    seq: 1,
+    at: "",
+    run: 3,
+    kind: "note",
+    text: "",
+    item_id: null,
+    action: null,
+    bucket: null,
+    undo_seq: null,
+    undone: false,
+    ...o,
+  });
+  assert.equal(logText(entry({ kind: "act", action: "snooze", item_id: "acme/api#12", text: "bot bump" })), "Snoozed api#12: bot bump");
+  assert.equal(logText(entry({ kind: "act", action: "done", item_id: "acme/api#12" })), "Cleared api#12");
+  assert.equal(logText(entry({ kind: "run", text: "Woke on 6 events" })), "Run 3: woke on 6 events");
+  assert.equal(logText(entry({ kind: "note", text: "Nothing needed you." })), "Nothing needed you.");
+
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const s: CoordinatorStatus = {
+    state: "idle",
+    off_reason: null,
+    session_id: "x",
+    started: true,
+    dir: "/h/coordinator",
+    command: "cd …",
+    running_since: null,
+    pending: 0,
+    next_at: null,
+    last_run: { n: 4, kind: "events", started_at: "2026-10-27T11:48:00Z", ms: 1, ok: true, events: 1, actions: 2, error: null },
+    error: null,
+    policy_empty: false,
+    held: false,
+  };
+  assert.equal(coordinatorText(s, now), "Idle. Last run 12m ago: 1 event, 2 actions.");
+  assert.equal(
+    coordinatorText({ ...s, policy_empty: true }, now),
+    "Idle. Last run 12m ago: 1 event, 2 actions. It wakes on new activity once you've written a policy.",
+  );
+  assert.equal(
+    coordinatorText({ ...s, state: "off", off_reason: "Coordinator needs Claude Code for now" }, now),
+    "Coordinator needs Claude Code for now.",
+  );
+  assert.equal(
+    coordinatorText(
+      { ...s, state: "error", error: "claude CLI isn't logged in. Run: claude auth login", next_at: "2026-10-27T12:05:00Z" },
+      now,
+    ),
+    "Its last run failed 12m ago: Claude CLI isn't logged in. Run: claude auth login. Next try in 5m.",
+  );
+  assert.equal(
+    coordinatorText({ ...s, state: "waiting", held: true }, now),
+    "Waiting: you have it open in a terminal. It picks up the new events once you close it.",
+  );
+  assert.equal(coordinatorText({ ...s, started: false, last_run: null }, now), "It starts its session after the first sync.");
+});
+
+test("the judge in plain words", () => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const j: JudgeStatus = {
+    state: "idle",
+    off_reason: null,
+    waiting: 2,
+    judged: 14,
+    spent: 20,
+    max_per_hour: 60,
+    last_at: null,
+    error: null,
+    retry_at: null,
+  };
+  assert.equal(judgeStatusText(j, now), "14 items placed by the policy, 2 waiting. 20 of 60 this hour.");
+  assert.equal(
+    judgeStatusText({ ...j, state: "off", off_reason: "there's no policy yet" }, now),
+    "Nothing is judged: there's no policy yet.",
+  );
+  assert.equal(
+    judgeStatusText({ ...j, state: "error", error: "claude CLI isn't logged in", retry_at: "2026-10-27T12:10:00Z" }, now),
+    "The judge's last call failed: Claude CLI isn't logged in. Next try in 10m.",
+  );
+  assert.equal(judgeStepText({ bucket: "today", why: "your library", pending: false }), "today, your library");
+  assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, it says nothing about this item");
+  assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not judged yet, so the board default");
+  assert.equal(judgeStepText({ bucket: "fyi", why: "bot", pending: true }), "fyi, bot (judged before the latest activity)");
 });

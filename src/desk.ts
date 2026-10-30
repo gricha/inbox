@@ -18,12 +18,16 @@ import type {
   ConfigDoc,
   ConfigError,
   Context,
+  CoordinatorView,
   FocusView,
   Item,
   ItemDetail,
   ItemState,
+  JudgeAnswer,
+  JudgeStep,
   Overview,
   Placement,
+  PolicyDoc,
   PreviewResult,
   QueueView,
   ReviewFile,
@@ -41,6 +45,8 @@ import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import type { AgentOpts, PrText } from "./review.ts";
 import * as agents from "./agents.ts";
+import { Judge, textHash } from "./judge.ts";
+import { Coordinator } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -99,7 +105,10 @@ export interface DeskOptions {
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
   writer?: GitHubWriter; // approve; without it approving is off
+  mcpUrl?: string; // the desk's own MCP endpoint, for the coordinator; without it the coordinator is off
 }
+
+const MAX_POLICY = 20_000; // it goes with every judge call
 
 export interface ReviewDeps {
   fetchPr(item: Item): Promise<PrText>;
@@ -123,6 +132,11 @@ export class Desk {
   log: (msg: string) => void;
   review: ReviewDeps | null;
   writer: GitHubWriter | null;
+  mcpUrl: string | null;
+  policyPath: string;
+  policy = { text: "", hash: textHash("") };
+  judge: Judge;
+  coordinator: Coordinator;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -152,14 +166,18 @@ export class Desk {
       });
     this.review = opts.review ?? null;
     this.writer = opts.writer ?? null;
+    this.mcpUrl = opts.mcpUrl ?? null;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
+    this.policyPath = path.join(this.home, "policy.md");
     this.settingsPath = settingsPath(this.home);
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
     this.ctx = this.store.get("context") as Context | null;
     this.gh = new GitHubConnector(this, opts.github);
     this.connectors = [this.gh];
+    this.judge = new Judge(this);
+    this.coordinator = new Coordinator(this);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -198,7 +216,12 @@ export class Desk {
       this.log(`wrote ${this.configPath}`);
     }
     this.migrateSettings();
+    this.readPolicy();
     this.reloadConfig();
+    fs.watchFile(this.policyPath, { interval: 2000 }, () => {
+      const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
+      if (text !== this.policy.text) this.policyChanged();
+    });
     fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
       const text = fs.existsSync(this.settingsPath) ? fs.readFileSync(this.settingsPath, "utf8") : "";
       if (text !== this.settingsText) this.reloadSettings();
@@ -211,14 +234,20 @@ export class Desk {
 
   start(): void {
     for (const c of this.connectors) c.start();
+    this.coordinator.wake();
   }
 
+  // Kills a judge call or coordinator run in progress.
   stop(): void {
+    if (this.stopped) return;
     this.stopped = true;
     for (const c of this.connectors) c.stop();
+    this.judge.stop();
+    this.coordinator.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
+    fs.unwatchFile(this.policyPath);
     this.store.close();
   }
 
@@ -248,7 +277,59 @@ export class Desk {
     if (loaded) this.loaded = loaded;
     else this.log(`config has ${errors.length} error(s); keeping the last good config`);
     this.changed();
+    this.judge.pump();
     if (sync && loaded) void this.sync();
+  }
+
+  // ---------------------------------------------------------------- policy
+
+  readPolicy(): void {
+    const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
+    this.policy = { text, hash: textHash(text) };
+  }
+
+  policyChanged(): void {
+    this.readPolicy();
+    this.changed();
+    this.judge.pump();
+    this.coordinator.wake();
+  }
+
+  getPolicy(): PolicyDoc {
+    return { path: this.policyPath, text: this.policy.text, hash: this.policy.hash, judge: this.judge.status() };
+  }
+
+  // `base` is the hash from GET: a stale one means it changed since (the coordinator, an editor) and nothing is written.
+  putPolicy(text: string, base?: string, agent?: string): { ok: true; hash: string } {
+    this.ownerAsked(agent, "the policy");
+    if (base !== undefined && base !== this.policy.hash)
+      throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
+    if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
+    const real = fs.existsSync(this.policyPath) ? fs.realpathSync(this.policyPath) : this.policyPath;
+    fs.writeFileSync(`${real}.tmp`, text);
+    fs.renameSync(`${real}.tmp`, real);
+    if (agent === "coordinator") this.coordinator.log(this.coordinator.running?.n ?? 0, "policy", "Updated the policy");
+    this.policyChanged();
+    return { ok: true, hash: this.policy.hash };
+  }
+
+  // ---------------------------------------------------------------- the coordinator
+
+  coordinatorView(): CoordinatorView {
+    return this.coordinator.view();
+  }
+
+  note(text: string): void {
+    const line = text.trim();
+    if (!line) throw new DeskError(400, "need { text }");
+    this.coordinator.note(line.slice(0, 500));
+    this.changed();
+  }
+
+  // A wake carries only GitHub text, so a policy or rules change then wasn't the owner asking.
+  ownerAsked(agent: string | undefined, what: string): void {
+    if (agent === "coordinator" && this.coordinator.running)
+      throw new DeskError(403, `${what} can change only when the owner asks you in a conversation, not on a wake`);
   }
 
   // ---------------------------------------------------------------- settings
@@ -278,6 +359,8 @@ export class Desk {
     else this.changed();
     if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
     this.pumpAi();
+    this.judge.pump();
+    this.coordinator.wake();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -285,7 +368,11 @@ export class Desk {
     if (this.store.get("settings_migrated") || !fs.existsSync(this.configPath)) return;
     const text = fs.readFileSync(this.configPath, "utf8");
     const m = migrateLegacy(text);
-    if (!m) return;
+    if (!m) {
+      // Nothing to move, so it's done: legacy keys saved later (desk_config save, an agent) only warn, never become settings.
+      if (parseConfig(text, this.settings).loaded) this.store.set("settings_migrated", this.now().toISOString());
+      return;
+    }
     if (this.settingsErrors.some((e) => e.path === "settings.json")) {
       this.log("settings.json can't be read; not moving settings out of config.toml until it's fixed");
       return;
@@ -383,7 +470,10 @@ export class Desk {
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
     this.store.pruneKv("pr:", kept);
+    this.store.pruneKv("judge:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
+    this.judge.pump();
+    this.coordinator.wake();
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips.
@@ -413,6 +503,7 @@ export class Desk {
     if (!events.length) return;
     this.store.addActivity(events.map((e) => ({ ...e, source })));
     for (const wake of this.waiters) wake();
+    this.coordinator.wake();
   }
 
   resolutionOf(item: Item): Resolution | null {
@@ -511,6 +602,15 @@ export class Desk {
     const recent = (e: Entry) => !!e.resolved?.at && e.resolved.at > keepSince;
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
+    // An answer for an older version of the item stays until a fresh one lands, so the queue doesn't jump back and forth.
+    const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
+    const judge = answers
+      ? (id: string): JudgeStep => {
+          const a = answers.get(id);
+          if (!a || a.policy !== this.policy.hash) return { bucket: null, why: "", pending: true };
+          return { bucket: a.bucket, why: a.why, pending: a.updated_at !== entries.get(id)?.item.updated_at };
+        }
+      : undefined;
     for (const board of loaded.boards) {
       const queries = this.gh.queriesFor(loaded, board);
       const ids = new Set<string>();
@@ -533,6 +633,7 @@ export class Desk {
           active: e.status === "active" && !e.resolved,
           kept: kept.has(e.item.id) || recent(e),
         })),
+        judge,
       );
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
@@ -633,6 +734,7 @@ export class Desk {
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
       },
       rate_limit: this.gh.api.rateLimit(),
+      coordinator: { state: this.coordinator.state(), acted: this.coordinator.acted() },
     };
   }
 
@@ -970,8 +1072,10 @@ export class Desk {
 
   // ---------------------------------------------------------------- actions
 
-  act(ref: string, action: Action, until?: string): { state: ItemState; undo_seq: number } {
+  // `by`: the agent behind it (the coordinator marks its calls) and its reason, kept in the coordinator's log.
+  act(ref: string, action: Action, until?: string, by?: { agent?: string; reason?: string }): { state: ItemState; undo_seq: number } {
     const id = this.resolve(ref);
+    const bucket = this.snapshot().best.get(id)?.bucket ?? null;
     if (action === "undo") {
       const ev = this.store.lastActionFor(id);
       if (!ev) throw new DeskError(404, `nothing to undo for ${id}`);
@@ -1030,6 +1134,8 @@ export class Desk {
     }
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
+    if (by?.agent === "coordinator" && seq)
+      this.coordinator.logAct({ item_id: id, action, bucket, undo_seq: seq }, (by.reason ?? "").trim().slice(0, 300));
     this.changed();
     const { snoozed_at: _, acked_at: __, ...state } = s;
     return { state, undo_seq: seq };
@@ -1050,7 +1156,8 @@ export class Desk {
   // ---------------------------------------------------------------- config
 
   getConfig(): ConfigDoc {
-    return { path: this.configPath, text: this.configText, errors: this.configErrors, warnings: this.configWarnings };
+    const text = this.configText;
+    return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings };
   }
 
   preview(text: string): PreviewResult {
@@ -1086,14 +1193,17 @@ export class Desk {
     };
   }
 
-  putConfig(text: string, base?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
-    if (base !== undefined && base !== this.configText)
+  // `base`: the text you started from, or its hash from GET /api/config.
+  putConfig(text: string, base?: string, agent?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
+    this.ownerAsked(agent, "the rules");
+    if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
       throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
     if (!loaded) return { ok: false, errors, warnings };
     const real = fs.realpathSync(this.configPath); // keep a symlinked config a symlink
     fs.writeFileSync(`${real}.tmp`, text);
     fs.renameSync(`${real}.tmp`, real);
+    if (agent === "coordinator") this.coordinator.log(this.coordinator.running?.n ?? 0, "config", "Saved the rules");
     this.reloadConfig(true);
     return { ok: true, errors: [], warnings };
   }

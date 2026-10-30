@@ -1,6 +1,6 @@
 // SQLite cache of GitHub items, your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Item, ItemState } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Bucket, CoordinatorLogEntry, Item, ItemState } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -53,6 +53,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
+      CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
     const cols = this.db
       .prepare("PRAGMA table_info(state)")
@@ -309,6 +310,38 @@ export class Store {
 
   lastSeq(): number {
     return (this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq as number | null) ?? 0;
+  }
+
+  // --- the coordinator's log: its runs, its actions (with their reasons) and its notes
+
+  addLog(e: Omit<CoordinatorLogEntry, "seq" | "undone">): void {
+    this.db
+      .prepare("INSERT INTO coordinator_log (at, run, kind, text, item_id, action, bucket, undo_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(e.at, e.run, e.kind, e.text, e.item_id, e.action, e.bucket, e.undo_seq);
+    this.db.prepare("DELETE FROM coordinator_log WHERE seq <= (SELECT MAX(seq) FROM coordinator_log) - 1000").run();
+  }
+
+  // Newest first; an action shows as undone once its undo-log entry is.
+  log(q: { limit: number; since?: string; kind?: string }): CoordinatorLogEntry[] {
+    const where = [q.since === undefined ? "1" : "c.at >= ?", q.kind === undefined ? "1" : "c.kind = ?"].join(" AND ");
+    const args = [q.since, q.kind, q.limit].filter((a): a is string | number => a !== undefined);
+    return this.db
+      .prepare(
+        `SELECT c.*, e.undone AS undone FROM coordinator_log c LEFT JOIN events e ON e.seq = c.undo_seq WHERE ${where} ORDER BY c.seq DESC LIMIT ?`,
+      )
+      .all(...args)
+      .map((r) => ({
+        seq: r.seq as number,
+        at: r.at as string,
+        run: r.run as number,
+        kind: r.kind as CoordinatorLogEntry["kind"],
+        text: r.text as string,
+        item_id: (r.item_id as string | null) ?? null,
+        action: (r.action as string | null) ?? null,
+        bucket: (r.bucket as Bucket | null) ?? null,
+        undo_seq: (r.undo_seq as number | null) ?? null,
+        undone: r.undone === 1,
+      }));
   }
 
   // --- key/value

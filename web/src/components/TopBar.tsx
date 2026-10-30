@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { ago, cls } from "../format.ts";
-import type { Route } from "../view.ts";
+import { age, ago, cls } from "../format.ts";
+import { actedText, type Route } from "../view.ts";
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
@@ -21,6 +21,8 @@ export function TopBar({
   filterRef,
   onSync,
   onHelp,
+  coordOpen,
+  onCoordinator,
   inert,
 }: {
   overview: Overview | null;
@@ -32,10 +34,13 @@ export function TopBar({
   filterRef: RefObject<HTMLInputElement | null>;
   onSync: () => void;
   onHelp: () => void;
+  coordOpen: boolean;
+  onCoordinator: () => void;
   inert?: boolean;
 }) {
   const inSettings = route.name === "settings";
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
+  const acted = route.name === "queue" ? o?.coordinator.acted : null;
   return (
     <header className="topbar" inert={inert}>
       <a className="wordmark" href="#/" title="Queue">
@@ -82,6 +87,17 @@ export function TopBar({
         </label>
       )}
       <div className="tb-right">
+        {acted && (
+          <button
+            type="button"
+            className={cls("coord-line", coordOpen && "on")}
+            aria-expanded={coordOpen}
+            title={coordOpen ? "Hide the coordinator's log" : "What the coordinator did"}
+            onClick={onCoordinator}
+          >
+            Coordinator<span className="cl-what"> {actedText(acted)}</span> · {age(acted.at, now)}
+          </button>
+        )}
         <button
           type="button"
           className={cls("sync", ((!!o?.sync_error && !o.syncing) || offline) && "err")}

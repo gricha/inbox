@@ -1,6 +1,15 @@
 // Loads and validates config.toml, and writes the first-run default.
 import { parse, TomlError } from "smol-toml";
-import { BUCKETS, type BoardConfig, type Bucket, type Config, type ConfigError, type Rule, type SpaceConfig } from "./types.ts";
+import {
+  BUCKETS,
+  type BoardConfig,
+  type Bucket,
+  type Config,
+  type ConfigError,
+  type Rule,
+  type RuleBucket,
+  type SpaceConfig,
+} from "./types.ts";
 import { compileBoard, type CompiledBoard } from "./rules.ts";
 import { DEFAULTS, LEGACY_TABLES, type Settings } from "./settings.ts";
 
@@ -76,6 +85,14 @@ export function parseConfig(
     }
     return v as Bucket;
   };
+  const ruleBucket = (v: unknown, path: string): RuleBucket => {
+    if (v === "judge") return v;
+    if (v !== undefined && !BUCKETS.includes(v as Bucket)) {
+      err(path, `must be one of ${BUCKETS.join(", ")}, or judge`);
+      return "later";
+    }
+    return bucket(v, path, "later");
+  };
 
   // Leftovers from before settings.json: their values are ignored, so they don't block the desk.
   const warnings: ConfigError[] = ["poll_seconds", ...LEGACY_TABLES]
@@ -120,7 +137,7 @@ export function parseConfig(
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
       return {
         when: when || "false",
-        bucket: bucket(rt.bucket, `${rp}.bucket`, "later"),
+        bucket: ruleBucket(rt.bucket, `${rp}.bucket`),
         why: str(rt.why, `${rp}.why`, ""),
         nocap: rt.nocap === true,
       };
@@ -183,6 +200,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
     `# Each [[boards]] table feeds the queue: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, later, fyi, hide.`,
+    `# With a policy (Settings → Policy), your agent places what no rule matched, and what a rule sends to "judge".`,
     `# \`caps\` limit Now and Today; overflow moves down a bucket with a note. Pinned and \`nocap\` items don't count.`,
     `# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().`,
     `# Fields (me.requested_direct, author.close, pr.ci, ...) are listed on the Rules page and by \`desk fields\`.`,

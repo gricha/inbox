@@ -4,6 +4,7 @@ import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
 import { DEFAULT_OPEN, groupsOf, navigable, parseRoute, removeCard, routeHash, type GroupKey, type Route } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
+import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
 import { Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
@@ -82,6 +83,7 @@ export function App() {
   const [settingsSeen, setSettingsSeen] = useState(route.name === "settings");
   const [loads, setLoads] = useState(0); // bumped on every refresh, so Rules can re-read a file changed on disk
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
+  const [coordOpen, setCoordOpen] = useState(false); // the coordinator's log, above the queue
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -507,6 +509,7 @@ export function App() {
       filterRef.current?.focus();
     } else if (k === "Escape") {
       if (expanded) setExpanded(null);
+      else if (coordOpen) setCoordOpen(false);
       else if (filter) setFilter("");
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
@@ -577,6 +580,10 @@ export function App() {
           onHelp={() => {
             setHelp(true);
           }}
+          coordOpen={coordOpen}
+          onCoordinator={() => {
+            setCoordOpen((o) => !o);
+          }}
           inert={help}
         />
         <main className="main" inert={help}>
@@ -617,6 +624,16 @@ export function App() {
                 Fix rules
               </a>
             </div>
+          )}
+          {route.name === "queue" && !broken && coordOpen && (
+            <CoordinatorLog
+              loads={loads}
+              now={now}
+              flash={flash}
+              onClose={() => {
+                setCoordOpen(false);
+              }}
+            />
           )}
           {route.name === "queue" && !broken && (
             <Queue view={view} overview={overview} groups={groups} ctx={ctx} filter={filter} toggle={toggleGroup} />

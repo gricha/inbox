@@ -11,6 +11,7 @@ import {
   askCodex,
   buildPrompt,
   claudeEnvelope,
+  claudeError,
   claudeSpawn,
   numberPatch,
   parseFiles,
@@ -134,6 +135,18 @@ test("claude's envelope: structured output, JSON in the result, and login errors
       e.cause === "401 OAuth access token has expired",
   );
   assert.throws(() => claudeEnvelope(JSON.stringify({ is_error: true, result: "Overloaded" })), /^Error: Overloaded$/);
+  // The real 401's JSON body shows as its message, not as JSON on a status line.
+  const real =
+    'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}';
+  assert.throws(
+    () => claudeEnvelope(JSON.stringify({ is_error: true, result: real })),
+    (e: Error) => e.cause === "401 OAuth token has expired.",
+  );
+  assert.equal(
+    claudeError("Not logged in · Please run /login").message,
+    "Claude Code isn't logged in. Run `claude auth login` in a terminal.",
+  );
+  assert.equal(claudeError("Overloaded").message, "Overloaded");
 });
 
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {
@@ -191,7 +204,7 @@ test(
       "codex",
       `out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; echo '{"summary":"from codex","notes":[]}' > "$out"`,
     );
-    assert.deepEqual(await askCodex("PROMPT", f.bin), { summary: "from codex", notes: [] });
+    assert.deepEqual(await askCodex("PROMPT", { command: f.bin }), { summary: "from codex", notes: [] });
     const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
     assert.equal(args[0], "exec");
     for (const a of ["--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--output-schema", "-o"])

@@ -1,10 +1,23 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
 import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
+import type {
+  AgentStatus,
+  CoordinatorView,
+  DesktopBridge,
+  GitHubStatus,
+  SettingDef,
+  SettingsView,
+  SettingType,
+  SettingValue,
+} from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, when } from "../format.ts";
+import { ago, cls, copyText, when } from "../format.ts";
+import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
-import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
+import { withCode } from "./Review.tsx";
+import { acceleratorOf, authProblem, coordinatorText, draftOf, valueOf } from "../view.ts";
+
+type Flash = (text: string, error?: boolean) => void;
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // Resolves to the value the server saved, or null when it was rejected (the row shows why).
@@ -354,6 +367,48 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
 
+// Under the coordinator switch: what it's doing, and the command that opens its session in a terminal.
+function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads: number; now: number; flash: Flash }) {
+  const [view, setView] = useState<CoordinatorView | null>(null);
+  useEffect(() => {
+    if (active) api.coordinator().then(setView, () => {});
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
+  }, [active, loads]);
+  if (!view) return null;
+  const s = view.status;
+  const command = s.command;
+  async function copy(text: string) {
+    try {
+      await copyText(text);
+      flash("Copied. Paste it into a terminal.");
+    } catch (e) {
+      flash(`Couldn't copy: ${message(e)}`, true);
+    }
+  }
+  return (
+    <div className="coord">
+      <p className={cls("s-live", s.state === "error" ? "t-bad" : "quiet")}>{withCode(coordinatorText(s, now))}</p>
+      {command && (
+        <>
+          <p className="s-live quiet">Session {s.session_id}. Talk to it in a terminal to shape the policy or the rules:</p>
+          <div className="coord-cmd">
+            <code>{command}</code>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                void copy(command);
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Keyed by the driver picked above it, so picking another agent starts fresh.
 function AgentLink({ active, loads }: { active: boolean; loads: number }) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
@@ -564,6 +619,7 @@ export function Settings({
             )}
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
+            {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
             {view && defs.length > 0 && (
               <div className="s-fields">
                 {defs.map((d) => (
@@ -575,6 +631,8 @@ export function Settings({
                     extra={
                       d.key === "agent.driver" ? (
                         <AgentLink key={String(view.values[d.key])} active={active} loads={loads} />
+                      ) : d.key === "coordinator.enabled" ? (
+                        <CoordinatorInfo active={active} loads={loads} now={now} flash={flash} />
                       ) : (
                         d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
                       )

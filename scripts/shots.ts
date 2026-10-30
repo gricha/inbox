@@ -196,9 +196,30 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
+  {
+    // The coordinator's line in the top bar, opened: its recent log above the queue.
+    name: "coordinator-log",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".coord-line").click();
+      await page.locator(".cl-list li").first().waitFor({ timeout: 5000 });
+    },
+  },
+  {
+    // A PR the policy judge placed: w opens it in place; its rule trace ends with the policy step.
+    name: "judged",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
+      await page.keyboard.press("w");
+      await page.locator(".trace-toggle summary").first().click();
+      await page.waitForTimeout(300);
+    },
+  },
   { name: "settings-github", go: at("#/settings/github") },
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
+  { name: "settings-policy", go: at("#/settings/policy") },
   { name: "settings-app", go: at("#/settings/app") },
   {
     // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.

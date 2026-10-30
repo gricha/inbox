@@ -450,7 +450,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
 }
 
 // A command in an agent's message (`claude auth login`) reads as code.
-function withCode(text: string) {
+export function withCode(text: string) {
   return text.split("`").map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part));
 }
 

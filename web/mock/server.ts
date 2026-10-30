@@ -19,6 +19,10 @@ import type {
   Ci,
   Config,
   ConfigError,
+  CoordinatorActed,
+  CoordinatorLogEntry,
+  CoordinatorStatus,
+  CoordinatorView,
   FieldDoc,
   FocusView,
   GitHubStatus,
@@ -29,6 +33,7 @@ import type {
   Mergeable,
   Overview,
   Placement,
+  PolicyDoc,
   PreviewResult,
   ReviewDecision,
   ReviewView,
@@ -220,6 +225,7 @@ interface Seed {
   st?: Partial<ItemState>;
   resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
+  judge?: [Bucket, string]; // the policy judge's answer, where no rule matched
 }
 
 const SEEDS: Seed[] = [
@@ -512,6 +518,7 @@ const SEEDS: Seed[] = [
     draft: true,
     size: [88, 0, 1],
     on: { "work-review": [] },
+    judge: ["fyi", "docs-only draft from your team"],
   },
   {
     repo: "acme/web",
@@ -733,6 +740,7 @@ const SEEDS: Seed[] = [
     team: "maintainers",
     size: [1880, 1210, 14],
     on: { "personal-review": [] },
+    judge: ["today", "the tokenizer you maintain"],
   },
   {
     repo: "me/notes-app",
@@ -950,12 +958,23 @@ function place(r: Rec, b: BoardConfig): Placement | null {
   const sig = signals(r);
   const trace: TraceStep[] = b.filter ? [{ index: -1, when: b.filter, matched: true }] : [];
   const truths = on === "filtered" ? [] : on.map((k) => W[k]);
+  // The gray zone, as in src/rules.ts: the seed's judge answer while there's a policy, else the board default.
+  const gray = (rule: number | null, why: string): Placement => {
+    const p: Placement = { board: b.id, bucket: b.default, rule_bucket: b.default, rule, why: render(why, sig), trace };
+    if (judgeOff()) return p;
+    const j = r.seed.judge;
+    return j
+      ? { ...p, bucket: j[0], rule_bucket: j[0], why: j[1], judge: { bucket: j[0], why: j[1], pending: false } }
+      : { ...p, judge: { bucket: b.default, why: "", pending: false } };
+  };
   for (const [i, rule] of b.rules.entries()) {
     const matched = truths.includes(rule.when);
     trace.push({ index: i, when: rule.when, matched });
-    if (matched) return { board: b.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: render(rule.why ?? "", sig), trace };
+    if (!matched) continue;
+    if (rule.bucket === "judge") return gray(i, rule.why ?? b.default_why);
+    return { board: b.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: render(rule.why ?? "", sig), trace };
   }
-  return { board: b.id, bucket: b.default, rule_bucket: b.default, rule: null, why: render(b.default_why, sig), trace };
+  return gray(null, b.default_why);
 }
 
 const waitingSince = (r: Rec) => iso(r.seed.wait ?? r.seed.age);
@@ -1166,6 +1185,7 @@ function overview(): Overview {
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
     focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
     rate_limit: rateLimit(),
+    coordinator: { state: coordinatorStatus().state, acted: acted() },
   };
 }
 
@@ -1610,7 +1630,7 @@ function validate(c: Config): ConfigError[] {
     b.rules.forEach((r, j) => {
       if (!r.when) errors.push({ path: `${p}.rules[${j}].when`, message: "rule needs a when" });
       else expr(`${p}.rules[${j}].when`, r.when);
-      bucket(`${p}.rules[${j}].bucket`, r.bucket);
+      if (r.bucket !== "judge") bucket(`${p}.rules[${j}].bucket`, r.bucket);
     });
   });
   return errors;
@@ -1821,6 +1841,106 @@ function agentStatus(): AgentStatus {
 }
 
 // ---------------------------------------------------------------------------
+// The policy and the coordinator: a policy in place, and a coordinator that snoozed three FYI items a few minutes ago.
+
+let policyText = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
+Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.
+Dependency bumps from bots stay out of the way unless CI is red.
+Mentions in threads I haven't replied to for a week are FYI.
+`;
+let policyRev = 1;
+const policyHash = () => `mock${policyRev}`;
+const setting = <K extends keyof typeof DEFAULTS>(k: K) => ({ ...DEFAULTS, ...overrides })[k];
+
+function judgeOff(): string | null {
+  if (!policyText.trim()) return "there's no policy yet";
+  if (!setting("policy.judge")) return "it's turned off";
+  if (setting("agent.driver") === "none") return "there's no agent: pick one under Agents";
+  return null;
+}
+
+function policyDoc(): PolicyDoc {
+  const off = judgeOff();
+  return {
+    path: `${homedir()}/.review-desk/policy.md (mock, in memory)`,
+    text: policyText,
+    hash: policyHash(),
+    judge: {
+      state: off ? "off" : "idle",
+      off_reason: off,
+      waiting: 0,
+      judged: off ? 0 : 23,
+      spent: off ? 0 : 7,
+      max_per_hour: setting("policy.max_per_hour"),
+      last_at: iso(0.3),
+      error: null,
+      retry_at: null,
+    },
+  };
+}
+
+const SESSION = "6f1c2a9e-4b7d-4e21-9a35-c0de5e55a1d0";
+const log: CoordinatorLogEntry[] = [];
+const note = (minutesAgo: number, run: number, kind: CoordinatorLogEntry["kind"], text: string, extra?: Partial<CoordinatorLogEntry>) =>
+  log.unshift({
+    seq: log.length + 1,
+    at: new Date(T0 - minutesAgo * 60_000).toISOString(),
+    run,
+    kind,
+    text,
+    item_id: null,
+    action: null,
+    bucket: null,
+    undo_seq: null,
+    undone: false,
+    ...extra,
+  });
+const undone = (e: CoordinatorLogEntry) => e.undo_seq !== null && !events.some((x) => x.seq === e.undo_seq);
+
+function coordinatorStatus(): CoordinatorStatus {
+  const driver = setting("agent.driver");
+  const off =
+    driver === "codex"
+      ? "Coordinator needs Claude Code for now"
+      : driver === "none"
+        ? "Pick Claude Code above to use it"
+        : !setting("coordinator.enabled")
+          ? "Off"
+          : null;
+  const dir = `${homedir()}/.review-desk/coordinator`;
+  return {
+    state: off ? "off" : "idle",
+    off_reason: off,
+    session_id: SESSION,
+    started: true,
+    dir,
+    command: `cd ${dir} && claude --resume ${SESSION} --mcp-config mcp.json --strict-mcp-config --tools '' --allowedTools mcp__review-desk`,
+    running_since: null,
+    pending: 0,
+    next_at: null,
+    last_run: { n: 14, kind: "events", started_at: iso(0.06), ms: 41_000, ok: true, events: 6, actions: 3, error: null },
+    error: null,
+    policy_empty: !policyText.trim(),
+    held: false,
+  };
+}
+
+function coordinatorView(): CoordinatorView {
+  return { status: coordinatorStatus(), log: log.map((e) => ({ ...e, undone: undone(e) })) };
+}
+
+// Its latest run with actions, as src/coordinator.ts works it out.
+function acted(): CoordinatorActed | null {
+  const acts = log.filter((e) => e.kind === "act" && !undone(e));
+  const [latest] = acts;
+  if (!latest) return null;
+  const mine = acts.filter((e) => e.run === latest.run);
+  const counts: Record<string, number> = {};
+  for (const e of mine) counts[e.action ?? "act"] = (counts[e.action ?? "act"] ?? 0) + 1;
+  return { counts, buckets: mine.flatMap((e) => (e.bucket ? [e.bucket] : [])), at: latest.at };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 
 class HttpError extends Error {
@@ -1932,6 +2052,22 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return putSettings((body.set ?? {}) as Record<string, unknown>, (body.reset ?? []) as string[]);
   }
   if (route === "GET /api/agents") return agentStatus();
+  if (route === "GET /api/policy") return policyDoc();
+  if (route === "PUT /api/policy") {
+    const body = await readBody(req);
+    if (body.base !== policyHash())
+      throw new HttpError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
+    policyText = textOf(body);
+    policyRev++;
+    bump();
+    return { ok: true, hash: policyHash() };
+  }
+  if (route === "GET /api/coordinator") return coordinatorView();
+  if (route === "POST /api/coordinator/note") {
+    note(0, 0, "note", textOf(await readBody(req)));
+    bump();
+    return { ok: true };
+  }
   if (route === "POST /api/agents/connect") {
     const { driver } = agentStatus();
     linked.add(`${driver} mcp`).add(`${driver} skill`);
@@ -1968,6 +2104,23 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     else send(res, { error: (e as Error).message }, 500);
   }
 }
+
+// The coordinator's history: a quiet run an hour ago, then three FYI items snoozed until tomorrow, each with its reason.
+note(26 * 60, 0, "policy", "Updated the policy");
+note(62, 13, "run", "Woke on 2 events");
+note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
+note(61, 13, "run", "Done in 18s");
+note(4, 14, "run", "Woke on 6 events");
+for (const [id, why] of [
+  ["acme/infra#540", "CODEOWNERS ping for a staging key rotation; FYI by your policy"],
+  ["acme/api#4101", "CODEOWNERS ping, nina already has two approvals coming"],
+  ["acme/web#2288", "a thread you haven't replied to in a week; FYI by your policy"],
+] as const) {
+  const { undo_seq } = act(resolve(id), "snooze", "tomorrow");
+  note(3, 14, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
+}
+note(3, 14, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left. Nothing else needed you.");
+note(3, 14, "run", "Done in 41s, 3 actions");
 
 const server = createServer((req, res) => {
   void handle(req, res);

@@ -107,7 +107,8 @@ export function Rules({
   // Window-level so ⌘S / ⌘↵ work wherever focus is on this page; a ref keeps the latest text.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
-    if (!(e.metaKey || e.ctrlKey)) return;
+    // The policy editor on the same page saves itself.
+    if (!(e.metaKey || e.ctrlKey) || document.activeElement?.closest("[data-own-save]")) return;
     if (e.key.toLowerCase() === "s") {
       e.preventDefault();
       if (!busy && dirty) void save();

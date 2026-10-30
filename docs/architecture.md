@@ -1,6 +1,6 @@
 # Architecture
 
-One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only (its one write is approving a PR when you press `a a` in its review), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
+One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process, or `desk serve` runs it headless. It polls GitHub read-only (its one write is approving a PR when you press `a a` in its review), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file (and what they leave open by a prose policy your agent judges), runs a coordinator agent session on new events, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
 GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src/connectors/github.ts
@@ -11,18 +11,22 @@ gh api (a PR's files) ──────────> src/review.ts ──> clau
 your approve key ──> src/github/write.ts ──(addPullRequestReview: APPROVE, the only write)──> GitHub
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
-settings.json ──> src/settings.ts ──┘                src/resolve.ts (resolved or not)
+settings.json ──> src/settings.ts ──┘    ▲           src/resolve.ts (resolved or not)
+policy.md ──> src/judge.ts ──────────────┘ the gray zone's answers (claude -p / codex exec, no tools)
                                                      │
                                   src/desk.ts (runs the connectors, views, actions, event log, notify)
-                                                     │
-                                  src/server.ts (Hono: /api/*, /mcp, web/dist, SSE)
+                                   │                 │ batches of events
+                                   │                 ▼
+                                   │   src/coordinator.ts ──> claude -p --resume <session> ──MCP (desk_*)──┐
+                                   ▼                                                                       │
+                                  src/server.ts (Hono: /api/*, /mcp, web/dist, SSE) <──────────────────────┘
                                    │           │            │
                      web/ (in electron/ or a browser)  src/cli.ts   src/mcp.ts
 ```
 
 Runtime: Node ≥ 22.18 (Electron 45 bundles Node 24), TypeScript run directly, in the packaged app too (type stripping: no enums, namespaces or parameter properties; relative imports end in `.ts`; type-only imports use `import type`). Tests: `node --test` in `test/`. No native modules.
 
-Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `desk.db`, `desk.log`. Port: `47823` (override `DESK_PORT`).
+Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `policy.md` (prose for the judge and the coordinator), `desk.db`, `desk.log`, and `coordinator/` (the coordinator's working directory and its `mcp.json`). Port: `47823` (override `DESK_PORT`).
 
 ## Concepts
 
@@ -30,7 +34,10 @@ Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces,
 - **Space**: a group of boards with a shared search scope, e.g. `Sentry` = `org:getsentry`, `Personal` = `-org:getsentry`.
 - **Board**: a source feeding the queue, not a tab. One or more GitHub searches (the space scope is appended), an optional `filter`, ordered `rules`, a `default` bucket, a `sort`, optional `caps`.
 - **Rule**: `{ when, bucket, why, nocap }`. The first rule whose `when` is true places the item. `why` is a template: `{author.login}` interpolates a signal.
-- **Bucket**: `now`, `today`, `later`, `fyi`, or `hide`. Hidden items are listed under the board with the rule that hid them; nothing disappears silently.
+- **Bucket**: `now`, `today`, `later`, `fyi`, or `hide`. Hidden items are listed under the board with the rule that hid them; nothing disappears silently. A rule may also say `judge`: the policy judge places the item (the board default until it does).
+- **Policy**: `policy.md`, prose the owner writes (Settings → Policy, or by asking the coordinator). Empty at first; while it's empty nothing is judged and the coordinator doesn't wake on events.
+- **Judge** (`src/judge.ts`): the gray zone, items no rule matched plus items a rule sent to `judge`, goes to `agent.driver` with the policy, 20 at a time, one call at a time, at most `policy.max_per_hour` items an hour. Like the AI review it runs with no tools, no MCP and an empty directory, with the items fenced. Answers (`{ bucket, why }`) are kept in kv `judge:<id>` per `updated_at` and policy hash; `classify()` takes them as a lookup, so caps still apply after. Until an item has one, or after a failure (which backs off 5 → 60 minutes, or until `policy.judge` is turned off and on), it sits at the board default. The trace ends with the judge's step.
+- **Coordinator** (`src/coordinator.ts`): a Claude Code session the desk wakes per debounced batch of events (`claude -p --resume <id>`, one run at a time, 10-minute timeout, killed on stop), with only the desk's MCP tools. It acts by the policy through `desk_act` with reasons and logs with `desk_note`; on request it edits the policy and the rules. Its state (session id, event cursor, last run, backoff) is kv `coordinator`; its log is the `coordinator_log` table. Its MCP config sends `X-Desk-Agent: coordinator`, which attributes actions to it in that log, and refuses its policy and rules saves while a wake is running (only the owner asks for those). Why `-p` and not `--bg`: [api.md](api.md#the-coordinator).
 - **Caps**: `caps = { now = 3, today = 6 }`. Overflow is demoted one bucket (now → today → later), keeping order. Pinned items and items matched by a `nocap` rule are exempt and don't count.
 - **Queue**: the one surface. Every item once, at its best placement across boards: Now, Today, then "sorted away" (later, FYI, resolved, hidden by rules, cleared). **Focus** is its Now + Today part (the CLI, MCP and status line use it).
 - **Connector**: a source of items and events (`src/connectors/connector.ts`): a full reconcile pass, a cheap change feed, and a diff of two snapshots of an item into events. GitHub is the only one so far; the desk runs whatever is in `Desk.connectors` and lists them in the overview.
@@ -101,7 +108,7 @@ Errors: retries 502/503/timeouts twice with backoff; on secondary rate limit or 
 
 ## Store (`src/store.ts`)
 
-`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id, kept)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)` (the undo log of your triage actions), `activity(seq PK, at, source, item_id, kind, actor, data JSON)` (the event log), `kv(key PK, value JSON)` (context, sync status, the notifications cursor, notified set; `review:<id>`, the AI review, and `pr:<id>`, the PR's files and description, each kept for one head commit and dropped with the item).
+`node:sqlite`, WAL. Tables: `items(id PK, node_id, data JSON, updated_at, detail_at, last_hit_at)`, `hits(query, item_id, kept)`, `queries(query PK, fetched_at, total, error)`, `state(id PK, …ItemState, snoozed_at, acked_at)`, `events(seq PK, at, item_id, action, before JSON, undone)` (the undo log of your triage actions), `activity(seq PK, at, source, item_id, kind, actor, data JSON)` (the event log), `kv(key PK, value JSON)` (context, sync status, the notifications cursor, notified set; `review:<id>`, the AI review, and `pr:<id>`, the PR's files and description, each kept for one head commit and dropped with the item; `judge:<id>`, the judge's answer, dropped with the item; `judge_spent`, the last hour's judged items; `coordinator`, its session and cursor), `coordinator_log(seq PK, at, run, kind, text, item_id, action, bucket, undo_seq)` (the coordinator's runs, actions with reasons, notes; the latest 1000).
 
 Done and snooze record `acked_at`, the latest activity you had seen; the item comes back when someone else acts after that. Timed snoozes also wake early on activity.
 
@@ -116,7 +123,7 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | GET    | `/api/focus`              |                                                        | `FocusView` (now + today)                                                                                                                                           |
 | GET    | `/api/boards/:id`         |                                                        | `BoardView`                                                                                                                                                         |
 | GET    | `/api/item`               | `?id=owner/repo#1` (short `repo#1` resolves if unique) | `ItemDetail`                                                                                                                                                        |
-| POST   | `/api/act`                | `{ id, action: Action, until? }`                       | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                  |
+| POST   | `/api/act`                | `{ id, action: Action, until?, reason? }`              | `{ ok: true, state: ItemState, undo_seq: number }`                                                                                                                  |
 | POST   | `/api/undo`               | `{ seq? }` (default: latest)                           | `{ ok: true, id }`                                                                                                                                                  |
 | GET    | `/api/review/:id`         | `:id` = `owner%2Frepo%23123`                           | `ReviewView`: facts, changed files (kept per commit), the AI review, whether you can approve                                                                        |
 | POST   | `/api/review/:id/ai`      | `{ force? }`                                           | `{ ok: true, ai: AiReview }` — the one for this commit unless `force`; otherwise runs the agent in `agent.driver` (a minute or two); 502 with the reason on failure |
@@ -124,7 +131,11 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | POST   | `/api/sync`               |                                                        | `{ ok: true }` (starts a sync now)                                                                                                                                  |
 | GET    | `/api/config`             |                                                        | `{ path, text, errors: ConfigError[] }`                                                                                                                             |
 | POST   | `/api/config/preview`     | `{ text }`                                             | `PreviewResult`                                                                                                                                                     |
-| PUT    | `/api/config`             | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`)                                                                            |
+| PUT    | `/api/config`             | `{ text, base? }`                                      | `{ ok, errors }` (saves only if valid, then syncs; 409 if the file changed since `base`, the text or its hash)                                                      |
+| GET    | `/api/policy`             |                                                        | `PolicyDoc`: `{ path, text, hash, judge }`                                                                                                                          |
+| PUT    | `/api/policy`             | `{ text, base? }`                                      | `{ ok, hash }` (writes policy.md; 409 if it changed since `base`, the hash)                                                                                         |
+| GET    | `/api/coordinator`        |                                                        | `CoordinatorView`: its status and log                                                                                                                               |
+| POST   | `/api/coordinator/note`   | `{ text }`                                             | `{ ok }` (a line in its log)                                                                                                                                        |
 | GET    | `/api/fields`             |                                                        | `FieldDoc[]`                                                                                                                                                        |
 | GET    | `/api/settings`           |                                                        | `SettingsView`: schema, values, what's overridden, GitHub status                                                                                                    |
 | PUT    | `/api/settings`           | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                                 |
@@ -171,13 +182,16 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_overview()` — counts per space/board, sync status.
 - `desk_list({ board?, buckets?, limit? })` — cards; `board` defaults to focus.
 - `desk_item({ ref })` — item facts, why, rule trace, hand-off prompt.
-- `desk_act({ ref, action, until? })` — local triage: done, snooze, mute, unmute, pin, unpin, restore. Returns an undo `seq`.
+- `desk_act({ ref, action, until?, reason? })` — local triage: done, snooze, mute, unmute, pin, unpin, restore. Returns an undo `seq`. The coordinator's go in its log with the reason.
 - `desk_undo({ seq? })` — undo that action (default: the latest from anyone).
 - `desk_brief({ ref })` — the PR's AI review: verdict, risk, summary, concerns, notes (a model call unless it's written already; kept per commit).
 - `desk_sync()`.
-- `desk_events({ after?, wait?, limit?, item? })` — the event log after `after`; with `wait` it returns when the next event lands (for the coordinator).
+- `desk_events({ after?, wait?, limit?, item? })` — the event log after `after`; with `wait` it returns when the next event lands.
+- `desk_policy({ action: get | set, text?, base? })` — the policy, fenced, with its hash and the judge's status; set saves it (base = that hash).
+- `desk_config({ action: get | preview | save, text?, base? })` — config.toml fenced with its hash; preview says what moves; save writes valid text (base = the hash).
+- `desk_note({ text })` — a line in the coordinator's log.
 
-Every tool result marks PR titles and bodies as untrusted data. No tool writes to GitHub: agents never approve.
+Every tool result marks PR titles and bodies as untrusted data; the policy and config come fenced too. No tool writes to GitHub: agents never approve.
 
 ## Web UI (`web/`)
 
