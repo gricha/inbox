@@ -193,7 +193,7 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   assert.equal(curl.status, 403, "not from curl, the CLI or an agent: only the desk's page approves");
   assert.match(((await curl.json()) as { error: string }).error, /review in the desk/);
   // One forged header isn't enough: the desk's page sends both.
-  for (const one of [{ "sec-fetch-site": "same-origin" }, { origin: "http://localhost:47823" }])
+  for (const one of [{ "sec-fetch-site": "same-origin" }, { origin: "http://localhost:47823" }] as Record<string, string>[])
     assert.equal((await post("/api/review/acme/api%237/approve", { head_oid: "h7" }, one)).status, 403, JSON.stringify(one));
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", {})).status, 400, "the commit you reviewed is required");
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", { head_oid: "h7", body: 5 })).status, 400);
@@ -212,8 +212,8 @@ test("DESK_DEV lets the Vite dev server's page in, on its usual ports or DESK_DE
       else process.env[k] = v;
   });
   const t = await setup();
-  const from = (app: ReturnType<typeof createApp>, origin: string) =>
-    app.request("http://127.0.0.1:47823/api/queue", { headers: { origin } }).then((r) => r.status);
+  const from = async (app: ReturnType<typeof createApp>, origin: string) =>
+    (await app.request("http://127.0.0.1:47823/api/queue", { headers: { origin } })).status;
   process.env.DESK_DEV = "1";
   process.env.DESK_DEV_PORT = "48531";
   const dev = createApp(t.desk, 47823);
