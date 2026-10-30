@@ -297,3 +297,24 @@ test("what agents may do to a PR in flight: its babysitter drafts and asks on it
   const its = t.desk.act("web#4", "unpin", undefined, { agent: "coordinator", reason: "noise" });
   assert.equal(t.desk.undo(its.undo_seq, "coordinator").action, "unpin");
 });
+
+test("approved and green stays in Now while a babysitter answers a later comment, so it notifies once", async (c) => {
+  const t = await setup([myPr(3, { ci: "green", review_decision: "approved", mergeable: "clean" })], {
+    settings: { ...OFF, "inflight.babysit": true, "notify.quiet": "" },
+  });
+  c.after(t.cleanup);
+  t.desk.mcpUrl = "http://127.0.0.1:9/mcp";
+  await t.desk.sync();
+  t.desk.act("web#3", "inflight");
+  t.desk.notifyNewNow();
+  for (let i = 0; i < 3; i++) {
+    t.desk.sitter.queue.push("acme/web#3"); // a reviewer commented: a run is queued, then runs
+    t.desk.changed();
+    assert.equal(t.desk.inflight().rows[0]?.needs_you, "approved and green: merge it");
+    t.desk.notifyNewNow();
+    t.desk.sitter.queue = [];
+    t.desk.changed();
+    t.desk.notifyNewNow();
+  }
+  assert.deepEqual(t.notes, ["web#3 · approved and green: merge it"]);
+});

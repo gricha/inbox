@@ -1094,6 +1094,9 @@ export class Babysitter {
     const unsent = s.drafts.filter((d) => !d.sent_at).length;
     if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
     if (this.outside(it, s)) return "comments from outside contributors";
+    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+    // Still mergeable while a run answers a later comment: leaving Now and coming back would notify again.
+    if (ready && (st.state === "running" || st.state === "queued")) return "approved and green: merge it";
     if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
     const work = this.problems(it);
     const [first] = work;
@@ -1115,8 +1118,7 @@ export class Babysitter {
     // Review comments a run failed on: nobody else will answer them.
     if (work.length && !this.todo(it, s).length && (last?.outcome === "failed" || last?.outcome === "timeout"))
       return `new review comments: the babysitter ${last.outcome === "failed" ? "failed" : "gave up"}`;
-    if (it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft)
-      return "approved and green: merge it";
+    if (ready) return "approved and green: merge it";
     return null;
   }
 
