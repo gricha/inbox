@@ -328,6 +328,55 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   t.cleanup();
 });
 
+test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in flight that needs you stays", async () => {
+  const days = (d: number) => hoursAgo(d * 24);
+  const t = await setup([
+    myPr(20631, { ci: "green", mergeable: "conflict", updated_at: days(143) }),
+    myPr(548, { ci: "green", mergeable: "conflict", updated_at: days(20) }),
+    myPr(7, { ci: "green", mergeable: "conflict" }),
+    myPr(8, { ci: "red", updated_at: days(30) }),
+    reviewAsk(1, { updated_at: days(30) }),
+  ]);
+  await t.desk.sync();
+  t.desk.act("web#8", "inflight");
+  t.desk.putSettings({ set: { "inflight.babysit": false } }); // so web#8 needs you: nobody else will fix its CI
+  const q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.later.filter((c) => c.demoted?.startsWith("quiet")).map((c) => [c.id, c.demoted]),
+    [
+      ["acme/web#20631", "quiet for 5 months"],
+      ["acme/web#548", "quiet for 3 weeks"],
+    ],
+  );
+  assert.deepEqual(
+    q.sections.now.map((c) => [c.id, c.why]),
+    [
+      ["acme/web#8", "in flight: babysitting is off"],
+      ["acme/api#1", "carol asked you directly"],
+    ],
+    "the ask came an hour ago, so it isn't quiet whatever updated_at says",
+  );
+  assert.deepEqual(
+    q.sections.today.map((c) => [c.id, c.next]),
+    [["acme/web#7", "merge conflict with main: d puts it in flight"]],
+  );
+  assert.equal(q.sections.now[0]?.next, "Enter opens it in In flight");
+
+  t.desk.putSettings({ set: { "queue.quiet_days": 0, "inflight.babysit": true } });
+  assert.deepEqual(
+    t.desk
+      .queue()
+      .sections.today.map((c) => c.id)
+      .sort(),
+    ["acme/web#20631", "acme/web#548", "acme/web#7"],
+  );
+  assert.equal(
+    t.desk.queue().sections.today.find((c) => c.id === "acme/web#7")?.next,
+    "merge conflict with main: d hands it to a babysitter",
+  );
+  t.cleanup();
+});
+
 test("synced_at is when the sync finished; hits keep its start time", async () => {
   const t = await setup([reviewAsk(1)]);
   const done = new Date(NOW.getTime() + 60_000);

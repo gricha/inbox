@@ -82,6 +82,61 @@ test("overview, focus and every board", async () => {
   assert.equal((await call("GET", "/api/boards/nope")).status, 404);
 });
 
+// Before the tests below act on cards, while the queue is as the mock starts.
+test("the queue's cards carry pre-flight in every state, your PRs say what's next, and Today folds", async () => {
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const top = [...q.sections.now, ...q.sections.today];
+  const of = (id: string) => top.find((c) => c.id === id)!;
+  assert.ok(
+    top.every((c) => c.preflight),
+    "every Now and Today card",
+  );
+  assert.ok([...q.sections.later, ...q.sections.fyi].every((c) => !c.preflight));
+  const ready = top.filter((c) => c.preflight?.state === "ready");
+  const theirs = top.filter((c) => c.kind === "pr" && c.author !== "me");
+  assert.ok(ready.length > theirs.length / 2, "most of other people's PRs are ready");
+  assert.ok(ready.every((c) => c.preflight!.summary && c.preflight!.verdict && c.preflight!.risk && c.preflight!.concerns!.length <= 2));
+  assert.deepEqual(
+    ["acme/web#2301", "acme/api#4099", "acme/ml-pipeline#307"].map((id) => of(id).preflight?.state),
+    ["running", "stale", "queued"],
+  );
+  assert.ok(of("acme/api#4099").preflight?.summary, "a stale one still has the older review to skim");
+  assert.ok(ready.some((c) => c.preflight!.risk === "high" && c.preflight!.concerns!.length === 2));
+  assert.ok(
+    ready.some((c) => c.preflight!.summary!.length > 400),
+    "one long summary",
+  );
+  assert.deepEqual([of("acme/worker#860").preflight, of("acme/worker#860").next], [{ state: "none" }, undefined], "an issue");
+  assert.equal(of("me/notes-app#12").preflight?.state, "none");
+  assert.equal(of("me/notes-app#12").next, "3 unresolved threads: d hands it to a babysitter");
+  assert.equal(of("acme/api#4110").next, "Enter opens In flight to answer it");
+  assert.equal(of("acme/worker#875").next, "approved and green: o opens it on GitHub to merge");
+
+  const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
+  assert.equal(quiet.demoted, "quiet for 3 weeks");
+  assert.ok(q.sections.today.length >= 8 && q.today_cards === 5, "Today folds");
+  assert.equal(q.ai_paused, null);
+  assert.equal((await call<FocusView>("GET", "/api/focus")).data.today_cards, 5);
+});
+
+test("AI reviews paused: the queue says so once, cards wait as paused, and resuming runs them again", async () => {
+  await call("POST", "/api/mock/ai-paused", { paused: true });
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  assert.equal(q.ai_paused, "Claude Code isn't logged in. Run `claude auth login` in a terminal.");
+  const state = (id: string) => [...q.sections.now, ...q.sections.today].find((c) => c.id === id)?.preflight?.state;
+  assert.deepEqual(["acme/web#2301", "acme/api#4099", "acme/ml-pipeline#307", "acme/api#4127"].map(state), [
+    "paused",
+    "paused",
+    "paused",
+    "ready",
+  ]);
+  assert.match((await call<SettingsView>("GET", "/api/settings")).data.paused.ai?.why ?? "", /^AI reviews are paused: Claude Code/);
+  await call("POST", "/api/mock/ai-paused", { paused: false });
+  const { data: back } = await call<QueueView>("GET", "/api/queue");
+  assert.equal(back.ai_paused, null);
+  assert.equal(back.sections.now.find((c) => c.id === "acme/web#2301")?.preflight?.state, "running");
+});
+
 test("item detail resolves short refs and explains placement", async () => {
   const { data: d } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("api#4127")}`);
   assert.equal(d.item.id, "acme/api#4127");

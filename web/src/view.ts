@@ -23,12 +23,16 @@ export type Variant = "active" | "hidden" | "cleared" | "resolved";
 export interface Group {
   key: GroupKey;
   label: string;
-  cards: Card[]; // after the filter
+  cards: Card[]; // after the filter, and the fold
   total: number; // before the filter
   open: boolean;
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
+  fold: number; // Today only: cards behind its "n more for today" line
 }
+
+// The cursor's stop on Today's "n more for today" line.
+export const FOLD = "fold:today";
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];
 
@@ -158,14 +162,25 @@ const LABEL: Record<GroupKey, string> = {
   cleared: "Cleared",
 };
 
-// While filtering, every group with a match opens so nothing that matches stays tucked away.
-export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>, filter: string): Group[] {
+// While filtering, every group with a match opens so nothing that matches stays tucked away, and Today doesn't fold.
+export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>, filter: string, unfolded = false): Group[] {
   if (!view) return [];
   const q = filter.trim();
   const group = (key: GroupKey, all: Card[], variant: Variant = "active"): Group => {
-    const cards = all.filter((c) => matches(c, q));
-    const forced = !!q && cards.length > 0 && !open[key];
-    return { key, label: LABEL[key], cards, total: all.length, open: open[key] || forced, forced, variant };
+    const matched = all.filter((c) => matches(c, q));
+    const forced = !!q && matched.length > 0 && !open[key];
+    const n = key === "today" && !q && !unfolded && view.today_cards > 0 ? view.today_cards : matched.length;
+    const cards = matched.slice(0, n);
+    return {
+      key,
+      label: LABEL[key],
+      cards,
+      total: all.length,
+      open: open[key] || forced,
+      forced,
+      variant,
+      fold: matched.length - cards.length,
+    };
   };
   const s = view.sections;
   return [
@@ -179,18 +194,29 @@ export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>
   ];
 }
 
-// The cards j/k move through, in screen order.
+// Your PR's next step, less what its why already says: under "merge conflict", "merge conflict with main: d hands it to a
+// babysitter" needs only its second half.
+export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
+  const [what = "", todo] = (card.next ?? "").split(/: (.*)/);
+  const why = card.why.toLowerCase();
+  return todo && why && (why.startsWith(what.toLowerCase()) || what.toLowerCase().startsWith(why)) ? todo : card.next;
+}
+
+// The cards on screen, in screen order.
 export const navigable = (groups: Group[], leaving: Set<string>) =>
   groups.flatMap((g) => (g.open ? g.cards : [])).filter((c) => !leaving.has(c.id));
+
+// What j/k move through: the cards on screen, and Today's "n more" line where it folds.
+export const stops = (groups: Group[], leaving: Set<string>): string[] =>
+  groups.flatMap((g) => (g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [FOLD] : [])] : []));
 
 export function removeCard(v: QueueView, id: string): QueueView {
   const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);
   const s = v.sections;
   return {
+    ...v,
     sections: { now: drop(s.now), today: drop(s.today), later: drop(s.later), fyi: drop(s.fyi) },
     hidden: drop(v.hidden),
-    cleared: v.cleared,
-    resolved: v.resolved,
   };
 }
 

@@ -407,9 +407,23 @@ export interface Card {
   status: Status;
   snooze_until: string | null;
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
+  preflight?: Preflight; // Now and Today cards only
+  next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: d hands it to a babysitter"
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
+}
+
+// The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
+// for an older head unless state is ready. stale: a new one is coming; off: review.auto_ai is off; none: an issue, or your PR.
+export interface Preflight {
+  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "none";
+  verdict?: "look" | "skim" | "skip";
+  risk?: "low" | "medium" | "high";
+  summary?: string;
+  concerns?: string[]; // at most 2
+  notes?: number; // notes on the changes, in the review view
+  at?: string; // when it was written
 }
 
 export interface BoardSummary {
@@ -453,6 +467,8 @@ export interface BoardView {
 
 export interface FocusView {
   sections: { now: Card[]; today: Card[] };
+  today_cards: number; // queue.today_cards: Today shows this many, the rest behind one line; 0 = all
+  ai_paused: string | null; // why AI reviews nobody asked for are paused (an expired login), said once instead of on every card
 }
 
 // Every item once, at its best placement across boards: the app's main surface.
@@ -461,6 +477,8 @@ export interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
+  today_cards: number; // as in FocusView
+  ai_paused: string | null;
 }
 
 // One changed file, from GitHub's pulls/{n}/files.

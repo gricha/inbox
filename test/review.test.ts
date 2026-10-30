@@ -498,6 +498,106 @@ test("with no agent (agent.driver none) nothing runs on its own, not even on ope
   t.cleanup();
 });
 
+// ---------------------------------------------------------------- pre-flight on the queue's cards
+
+test("every Now and Today card carries its pre-flight: running, queued, ready, stale; your PR says what's next instead", async () => {
+  const issue = makeItem({
+    number: 9,
+    kind: "issue",
+    author: "carol",
+    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+  });
+  const t = await setup([ask(1), ask(2), ask(3), mine(4), issue]);
+  await t.sync();
+  const pf = (id: string) => {
+    const q = t.desk.queue();
+    const c = [...q.sections.now, ...q.sections.today].find((x) => x.id === id)!;
+    return { ...c.preflight, next: c.next };
+  };
+  assert.deepEqual(t.f.started, ["acme/api#3", "acme/api#2"]);
+  assert.deepEqual(pf("acme/api#3"), { state: "running", next: undefined });
+  assert.deepEqual(pf("acme/api#1"), { state: "queued", next: undefined });
+  assert.deepEqual(pf("acme/web#4"), { state: "none", next: "CI failing: d hands it to a babysitter" });
+  assert.deepEqual(pf("acme/api#9"), { state: "none", next: undefined }, "an issue");
+
+  await t.f.release("acme/api#3");
+  assert.deepEqual(pf("acme/api#3"), {
+    state: "ready",
+    verdict: "skim",
+    risk: "low",
+    summary: "Review of acme/api#3",
+    concerns: [],
+    notes: 1,
+    at: NOW.toISOString(),
+    next: undefined,
+  });
+  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#3")?.verdict, "skim", "verdict stays for older clients");
+  await t.f.release("acme/api#2");
+  await t.f.release("acme/api#1");
+
+  // A push: the old review shows, marked stale, while the new one is written.
+  t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
+  await t.sync();
+  assert.deepEqual(t.f.started.slice(-1), ["acme/api#1"]);
+  assert.deepEqual([pf("acme/api#1").state, pf("acme/api#1").summary], ["stale", "Review of acme/api#1"]);
+  await t.f.release("acme/api#1");
+  assert.equal(pf("acme/api#1").state, "ready");
+
+  // Later and FYI cards don't carry one.
+  assert.ok([...t.desk.queue().sections.later, ...t.desk.queue().sections.fyi].every((c) => c.preflight === undefined));
+  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  t.gh.items.set("acme/api#2", { ...ask(2), head_oid: "h2b", updated_at: hoursAgo(0) });
+  await t.sync();
+  assert.equal(pf("acme/api#2").state, "off");
+  assert.equal(pf("acme/api#1").state, "ready", "one that's written stays ready");
+  t.cleanup();
+});
+
+test("while AI reviews are paused, the queue says so once and the cards wait as paused", async () => {
+  const t = await setup([ask(1), ask(2), ask(3)]);
+  t.f.setFail(LOGGED_OUT);
+  await t.sync();
+  for (const id of t.f.started.slice()) await t.f.release(id);
+  assert.ok(t.desk.aiPausedNow());
+  const q = t.desk.queue();
+  assert.equal(q.ai_paused, LOGGED_OUT);
+  assert.equal(t.desk.focus().ai_paused, LOGGED_OUT);
+  assert.deepEqual(
+    q.sections.now.map((c) => c.preflight?.state),
+    ["paused", "paused", "paused"],
+  );
+  assert.equal(t.desk.getSettings().paused.ai?.why, `AI reviews are paused: ${LOGGED_OUT}`, "Settings says it as before");
+
+  // Turning auto_ai off: nothing is paused any more, it's off.
+  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  assert.equal(t.desk.queue().ai_paused, null);
+  assert.equal(t.desk.queue().sections.now[0]?.preflight?.state, "off");
+  t.cleanup();
+});
+
+test("AI reviews run in the queue's order: Now, then Today from the top, so the cards on screen are ready first", async () => {
+  // Close collaborators (alice) asked through a team land in Today; the oldest ask sorts first.
+  const team = (n: number) =>
+    makeItem({
+      number: n,
+      author: "alice",
+      head_oid: `h${n}`,
+      review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }],
+      request_events: [{ at: hoursAgo(n), actor: "alice", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
+    });
+  const t = await setup([team(10), team(11), ask(1), team(12), team(13), ask(2), team(14)], { settings: { "queue.today_cards": 2 } });
+  await t.sync();
+  const q = t.desk.queue();
+  assert.equal(q.today_cards, 2);
+  assert.equal(t.desk.focus().today_cards, 2);
+  const order = [...q.sections.now, ...q.sections.today].map((c) => c.id);
+  assert.deepEqual(order, ["acme/api#2", "acme/api#1", "acme/api#14", "acme/api#13", "acme/api#12", "acme/api#11", "acme/api#10"]);
+  while (t.f.started.length < order.length || t.desk.generating.size)
+    await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
+  assert.deepEqual(t.f.started, order);
+  t.cleanup();
+});
+
 test("reviews are for PRs: an issue answers 400", async () => {
   const issue = makeItem({
     number: 9,

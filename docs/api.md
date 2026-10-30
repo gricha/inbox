@@ -29,7 +29,7 @@ Connecting copies the skill (and refreshes a copy that differs from the repo's),
 
 ### The AI review
 
-The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, and short notes anchored to lines of the diff. Claude Code runs as `claude -p --json-schema … --tools "" --restricted --strict-mcp-config` (`analyze.command` and `analyze.model` in Settings → AI review); Codex runs as `codex exec --output-schema … --sandbox read-only --ignore-user-config --ephemeral` with its shell, apps, plugins, browser, computer use, image viewer, sub-agents and web search switched off (`-c`); both get the prompt on stdin in an empty temporary directory, with the PR text fenced as untrusted. `none` turns the AI review off. Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to the agent settings (`agent.driver`, `analyze.*`, `review.auto_ai`) resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review, the judge, the coordinator or a babysitter) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
+The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, and short notes anchored to lines of the diff. Claude Code runs as `claude -p --json-schema … --tools "" --restricted --strict-mcp-config` (`analyze.command` and `analyze.model` in Settings → AI review); Codex runs as `codex exec --output-schema … --sandbox read-only --ignore-user-config --ephemeral` with its shell, apps, plugins, browser, computer use, image viewer, sub-agents and web search switched off (`-c`); both get the prompt on stdin in an empty temporary directory, with the PR text fenced as untrusted. `none` turns the AI review off. Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`ai_paused`), the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to the agent settings (`agent.driver`, `analyze.*`, `review.auto_ai`) resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review, the judge, the coordinator or a babysitter) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
 
 ### The policy and the judge
 
@@ -168,9 +168,22 @@ interface Card {
   status: "active" | "done" | "snoozed" | "muted";
   snooze_until: string | null;
   verdict: "look" | "skim" | "skip" | null; // from the AI review of the current commit
+  preflight?: Preflight; // Now and Today cards only
+  next?: string; // your own PR in Now or Today: "merge conflict with main: d hands it to a babysitter", "Enter opens In flight, y sends it"
   resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, marked in flight
+}
+
+// The AI review of a card's head, for skimming. The other fields come from the latest review, for an older head unless ready.
+interface Preflight {
+  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "none"; // stale: a new one is coming; off: review.auto_ai is off; none: an issue or your PR
+  verdict?: "look" | "skim" | "skip";
+  risk?: "low" | "medium" | "high";
+  summary?: string;
+  concerns?: string[]; // at most 2
+  notes?: number;
+  at?: string;
 }
 
 interface QueueView {
@@ -178,9 +191,11 @@ interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
+  today_cards: number; // queue.today_cards: Today shows this many, the rest behind one line; 0 = all
+  ai_paused: string | null; // why AI reviews nobody asked for are paused ("Claude Code isn't logged in. …"), once for the queue
 }
 // BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items.
-// FocusView is { sections: { now: Card[]; today: Card[] } }; resolved items are never in it.
+// FocusView is { sections: { now: Card[]; today: Card[] }, today_cards, ai_paused }; resolved items are never in it.
 
 interface Overview {
   me: string;
@@ -198,8 +213,8 @@ interface Overview {
 
 interface Placement {
   board: string;
-  bucket: Bucket; // after the judge and caps
-  rule_bucket: Bucket; // before caps
+  bucket: Bucket; // after the judge, quiet and caps
+  rule_bucket: Bucket; // before quiet and caps
   rule: number | null; // the matched rule, null = the board default
   why: string;
   demoted?: string;

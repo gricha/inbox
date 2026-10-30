@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, shortRef, SNOOZE } from "../format.ts";
-import type { Variant } from "../view.ts";
+import { nextText, type Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
 // Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i).
@@ -62,6 +62,8 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
     </>
   );
   const compact = !!inRun && variant === "active";
+  // Plain for now: what the AI review found, or for your own PR what's next, less what its why already says.
+  const context = card.preflight?.summary ?? nextText(card);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -119,6 +121,7 @@ export function CardRow({ card, variant, ctx, inRun }: { card: Card; variant: Va
                 {variant !== "resolved" && words}
               </span>
             )}
+            {context && <span className="meta context">{context}</span>}
           </span>
           <span className="age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
             {age(since, ctx.now)}

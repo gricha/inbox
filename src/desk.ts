@@ -33,6 +33,7 @@ import type {
   Overview,
   Placement,
   PolicyDoc,
+  Preflight,
   PreviewResult,
   QueueView,
   ReviewFile,
@@ -166,7 +167,7 @@ export class Desk {
   generating = new Map<string, Promise<AiReview>>();
   aiErrors = new Map<string, { head_oid: string; message: string; at: number }>();
   aiFailures = 0; // in a row, across PRs
-  aiPaused: { message: string; until: number } | null = null;
+  aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
   approving = new Set<string>();
   sending = new Set<string>(); // draft ids on their way to GitHub
@@ -391,7 +392,7 @@ export class Desk {
         this.aiErrors.delete(id);
         any = true;
       }
-    if (this.aiPaused && hit(this.aiPaused.message)) {
+    if (this.aiPaused && hit(this.aiPaused.why)) {
       this.aiPaused = null;
       this.aiFailures = 0;
       any = true;
@@ -469,7 +470,9 @@ export class Desk {
           .map(([org, items]) => ({ org, items, space: spaces.find((s) => s.scope.split(/\s+/).includes(`org:${org}`))?.name ?? null })),
       },
       paused: {
-        ai: this.aiPausedNow() ? { why: this.aiPaused!.message, until: new Date(this.aiPaused!.until).toISOString() } : null,
+        ai: this.aiPausedNow()
+          ? { why: `AI reviews are paused: ${this.aiPaused!.why}`, until: new Date(this.aiPaused!.until).toISOString() }
+          : null,
         babysitters:
           this.sitter.paused && Date.now() < this.sitter.paused.until
             ? { why: `Babysitters are paused: ${this.sitter.paused.why}`, until: new Date(this.sitter.paused.until).toISOString() }
@@ -699,6 +702,7 @@ export class Desk {
           kept: kept.has(e.item.id) || recent(e),
         })),
         judge,
+        this.settings["queue.quiet_days"],
       );
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
@@ -822,15 +826,76 @@ export class Desk {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
       seen.add(id);
-      out.push(this.card(snap.entries.get(id)!, snap.best.get(id)!, snap));
+      out.push(this.queueCard(snap.entries.get(id)!, snap.best.get(id)!, snap));
     }
     return out;
   }
 
+  // A Now or Today card carries what to skim before opening it: its AI review, or for your own PR what to do next.
+  queueCard(e: Entry, p: Placement, snap: Snapshot): Card {
+    const c = this.card(e, p, snap);
+    c.preflight = this.preflight(e, snap);
+    if (e.item.kind === "pr" && e.analysis.signals.me.author) c.next = this.nextStep(e);
+    return c;
+  }
+
+  // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
+  preflight(e: Entry, snap: Snapshot): Preflight {
+    const it = e.item;
+    if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return { state: "none" };
+    const ai = snap.reviews.get(it.id);
+    const got = ai
+      ? { verdict: ai.verdict, risk: ai.risk, summary: ai.summary, concerns: ai.concerns.slice(0, 2), notes: ai.notes.length, at: ai.at }
+      : {};
+    const state = (): Preflight["state"] => {
+      if (ai?.head_oid === it.head_oid) return "ready";
+      if (this.generating.has(it.id)) return ai ? "stale" : "running";
+      if (!this.autoAiOn()) return "off";
+      if (this.aiPausedNow()) return "paused";
+      return ai ? "stale" : "queued";
+    };
+    return { state: state(), ...got };
+  }
+
+  // Your own open PR: what's up with it, and the key that deals with it.
+  nextStep(e: Entry): string {
+    const it = e.item;
+    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+    if (e.inflight) {
+      const v = this.sitterView(it);
+      if (v.escalation) return "Enter opens In flight to answer it";
+      if (v.drafts.length) return `Enter opens In flight, y sends ${v.drafts.length === 1 ? "it" : "them"}`;
+      if (v.outside_at) return "Enter opens In flight to read them";
+      return ready ? "o opens it on GitHub to merge" : "Enter opens it in In flight";
+    }
+    if (ready) return "approved and green: o opens it on GitHub to merge";
+    const s = this.settings;
+    const hand = s["inflight.babysit"] && s["agent.driver"] === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
+    if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
+    if (it.ci === "red") return `CI failing: ${hand}`;
+    if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
+    const n = it.threads_unresolved;
+    if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
+    if (it.draft) return "a draft: mark it ready for review when it is";
+    return `waiting on review: ${hand}`;
+  }
+
+  // Said once on the queue, not on every card.
+  aiPausedWhy(): string | null {
+    return this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
+  }
+
   focus(): FocusView {
+    return {
+      sections: this.top(this.snapshot(), new Set()),
+      today_cards: this.settings["queue.today_cards"],
+      ai_paused: this.aiPausedWhy(),
+    };
+  }
+
+  // Now and Today in the order the queue shows them (and the AI reviews run): your in-flight PRs that need you, then each board's.
+  top(snap: Snapshot, seen: Set<string>): FocusView["sections"] {
     const loaded = this.requireConfig();
-    const snap = this.snapshot();
-    const seen = new Set<string>();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
     for (const bucket of ["now", "today"] as const) {
       for (const board of loaded.boards) {
@@ -838,11 +903,11 @@ export class Desk {
           const p = snap.best.get(id);
           if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
           seen.add(id);
-          sections[bucket].push(this.card(snap.entries.get(id)!, p, snap));
+          sections[bucket].push(this.queueCard(snap.entries.get(id)!, p, snap));
         }
       }
     }
-    return { sections };
+    return sections;
   }
 
   // The single surface: every item once, at its best placement across boards.
@@ -850,9 +915,9 @@ export class Desk {
     const loaded = this.requireConfig();
     const snap = this.snapshot();
     const seen = new Set<string>();
-    const sections: QueueView["sections"] = { now: this.needsCards(snap, seen), today: [], later: [], fyi: [] };
+    const sections: QueueView["sections"] = { ...this.top(snap, seen), later: [], fyi: [] };
     const hidden: Card[] = [];
-    for (const bucket of ["now", "today", "later", "fyi", "hide"] as const) {
+    for (const bucket of ["later", "fyi", "hide"] as const) {
       for (const board of loaded.boards) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
           const p = snap.best.get(id);
@@ -875,7 +940,14 @@ export class Desk {
         else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
     }
-    return { sections, hidden, cleared, resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")) };
+    return {
+      sections,
+      hidden,
+      cleared,
+      resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+      today_cards: this.settings["queue.today_cards"],
+      ai_paused: this.aiPausedWhy(),
+    };
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).
@@ -985,7 +1057,7 @@ export class Desk {
     const err = this.aiErrors.get(id);
     const own = err?.head_oid === e.item.head_oid ? err.message : null;
     // A PR the desk would have reviewed on its own says why it didn't.
-    const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? this.aiPaused!.message : null;
+    const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
     return {
       card: d.card,
       item: d.item,
@@ -1086,10 +1158,7 @@ export class Desk {
       this.log(`AI review of ${id} failed: ${message}${typeof cause === "string" ? ` (${cause})` : ""}`);
       if (++this.aiFailures >= AI_PAUSE_AFTER) {
         if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
-        this.aiPaused = {
-          message: `AI reviews are paused: ${message}`,
-          until: Date.now() + AI_RETRY,
-        };
+        this.aiPaused = { why: message, until: Date.now() + AI_RETRY };
       }
       throw err;
     }
@@ -1108,7 +1177,6 @@ export class Desk {
     return !(err && err.head_oid === it.head_oid && Date.now() - err.at < AI_RETRY);
   }
 
-  // Background AI reviews for what's in Now and Today, a couple at a time. After a failure it waits for the next sync.
   // AI reviews nobody asked for: on unless review.auto_ai is off or there's no agent to write them...
   autoAiOn(): boolean {
     return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none";
@@ -1119,11 +1187,13 @@ export class Desk {
     return this.autoAiOn() && !this.aiPausedNow();
   }
 
+  // Background AI reviews, a couple at a time, in the queue's order: Now, then Today from the top, so the cards on screen
+  // (Today's first queue.today_cards) are ready first. After a failure it waits for the next sync.
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi() || this.generating.size >= AI_AT_ONCE) return;
-    const f = this.focus();
     const snap = this.snapshot();
-    for (const c of [...f.sections.now, ...f.sections.today]) {
+    const top = this.top(snap, new Set());
+    for (const c of [...top.now, ...top.today]) {
       if (this.generating.size >= AI_AT_ONCE) return;
       const e = snap.entries.get(c.id);
       if (e && this.wantsAi(e, snap)) void this.generate(c.id).catch(() => {});

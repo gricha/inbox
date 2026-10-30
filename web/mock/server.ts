@@ -1,8 +1,10 @@
 // In-memory mock of the desk HTTP API for UI work. Run: node --disable-warning=ExperimentalWarning web/mock/server.ts
 // Rules aren't evaluated: each seed lists the `when` keys it satisfies per board, so reordering
 // rules, changing buckets, caps or defaults in the config editor really moves cards.
+// MOCK_AI_PAUSED=1 starts with AI reviews paused (an expired login); POST /api/mock/ai-paused { paused } flips it.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
+import { quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -37,6 +39,7 @@ import type {
   Overview,
   Placement,
   PolicyDoc,
+  Preflight,
   PreviewResult,
   ReviewDecision,
   ReviewView,
@@ -850,6 +853,19 @@ const SEEDS: Seed[] = [
     size: [30, 52, 4],
     on: { "personal-mine": [] },
   },
+  // Its rule says Today (a merge conflict), but nobody has touched it in three weeks: quiet, so it waits in Later.
+  {
+    repo: "acme/api",
+    n: 4040,
+    title: "Move rate limits into the gateway",
+    author: ME,
+    age: 24 * 34,
+    upd: 24 * 20,
+    review: "required",
+    mergeable: "conflict",
+    size: [210, 95, 7],
+    on: { "work-mine": ["conflict"] },
+  },
 ];
 
 interface Rec {
@@ -1072,6 +1088,16 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     return p ? [{ r, p }] : [];
   });
   rows.sort((x, y) => Number(y.r.state.pinned) - Number(x.r.state.pinned) || sortKey(b, x.r).localeCompare(sortKey(b, y.r)));
+  // As src/rules.ts: quiet items leave Now and Today for Later before caps count; a fresh ask is never quiet.
+  const quietHours = setting("queue.quiet_days") * 24;
+  for (const { r, p } of rows) {
+    if ((p.bucket !== "now" && p.bucket !== "today") || status(r) !== "active" || r.seed.resolved || laneOwned(r)) continue;
+    const sig = signals(r);
+    const asked = sig.me.requested && sig.me.requested_hours >= 0 && sig.me.requested_hours < quietHours;
+    if (!quietHours || r.state.pinned || asked || sig.item.updated_hours < quietHours) continue;
+    p.bucket = "later";
+    p.demoted = quietText(sig.item.updated_hours);
+  }
   for (const [from, to] of [
     ["now", "today"],
     ["today", "later"],
@@ -1182,7 +1208,12 @@ function focus(): FocusView {
   }
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   return {
-    sections: { now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")], today: cards.filter((c) => c.bucket === "today") },
+    sections: {
+      now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
+      today: cards.filter((c) => c.bucket === "today").map(top),
+    },
+    today_cards: setting("queue.today_cards"),
+    ai_paused: autoAiOn() ? aiPaused : null,
   };
 }
 
@@ -1208,11 +1239,60 @@ function queue(): QueueView {
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
   return {
-    sections: { now: [...needsCards(), ...of("now")], today: of("today"), later: of("later"), fyi: of("fyi") },
+    sections: { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") },
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+    today_cards: setting("queue.today_cards"),
+    ai_paused: autoAiOn() ? aiPaused : null,
   };
+}
+
+// As Desk.queueCard(): a Now or Today card, with its AI review or, for your own PR, what to do next.
+function top(c: Card): Card {
+  const r = recs.find((x) => x.id === c.id)!;
+  const mine = r.seed.author === ME && (r.seed.kind ?? "pr") === "pr";
+  return mine ? { ...c, preflight: preflightOf(r), next: nextOf(r) } : { ...c, preflight: preflightOf(r) };
+}
+
+// As Desk.preflight().
+function preflightOf(r: Rec): Preflight {
+  if ((r.seed.kind ?? "pr") !== "pr" || r.seed.author === ME || r.seed.resolved) return { state: "none" };
+  const ai = reviews.get(r.id);
+  const got = ai
+    ? { verdict: ai.verdict, risk: ai.risk, summary: ai.summary, concerns: ai.concerns.slice(0, 2), notes: ai.notes.length, at: ai.at }
+    : {};
+  const state = (): Preflight["state"] => {
+    if (ai?.head_oid === itemOf(r).head_oid) return "ready";
+    if (generating.has(r.id)) return ai ? "stale" : "running";
+    if (!autoAiOn()) return "off";
+    if (aiPaused) return "paused";
+    return ai ? "stale" : "queued";
+  };
+  return { state: state(), ...got };
+}
+
+// As Desk.nextStep().
+function nextOf(r: Rec): string {
+  const sig = signals(r);
+  const ready = sig.pr.review === "approved" && sig.pr.ci === "green" && sig.pr.mergeable === "clean" && !sig.item.draft;
+  if (laneOwned(r)) {
+    const f = flightOf(r);
+    const unsent = f.drafts.filter((d) => !d.sent_at).length;
+    if (f.question) return "Enter opens In flight to answer it";
+    if (unsent) return `Enter opens In flight, y sends ${unsent === 1 ? "it" : "them"}`;
+    return ready ? "o opens it on GitHub to merge" : "Enter opens it in In flight";
+  }
+  if (ready) return "approved and green: o opens it on GitHub to merge";
+  const hand =
+    setting("inflight.babysit") && setting("agent.driver") === "claude-code" ? "d hands it to a babysitter" : "d puts it in flight";
+  if (sig.pr.mergeable === "conflict") return `merge conflict with ${sig.pr.base}: ${hand}`;
+  if (sig.pr.ci === "red") return `CI failing: ${hand}`;
+  if (sig.pr.review === "changes_requested") return `changes requested: ${hand}`;
+  const n = sig.pr.unresolved_threads;
+  if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
+  if (sig.item.draft) return "a draft: mark it ready for review when it is";
+  return `waiting on review: ${hand}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1518,50 +1598,148 @@ const reviews = new Map<string, AiReview>();
 const generating = new Set<string>();
 const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
+const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
+const autoAiOn = () => setting("review.auto_ai") && setting("agent.driver") !== "none";
 
-// Two PRs start with their AI review written, as the background run would have left them.
+// What the agent wrote (or will write) for the other PRs in Now and Today, so every card has something real to skim.
+const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "concerns">> = {
+  "acme/api#4099": {
+    verdict: "look",
+    risk: "medium",
+    summary:
+      "Removes the v1 session-cookie middleware and moves the four routes that still used it onto token auth. Most of the diff deletes compatibility shims and their tests.",
+    concerns: ["/v1/export still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."],
+  },
+  "acme/web#2301": {
+    verdict: "look",
+    risk: "medium",
+    summary:
+      "Swaps the issue stream's flat list for a virtualized one that measures each row once, and moves keyboard selection and scroll restoration into a hook so they survive rows unmounting.",
+    concerns: [
+      "Rows measured before the web font loads keep the wrong height until a resize; nothing re-measures on document.fonts.ready.",
+      "Find in page can't reach rows that aren't rendered, which the old list allowed.",
+    ],
+  },
+  "oss/tinyhttp#212": {
+    verdict: "look",
+    risk: "medium",
+    summary:
+      "Accepts cleartext HTTP/2 when a client opens with the h2 preface, behind a new http2: 'prior-knowledge' option. HTTP/1.1 on the same port keeps working.",
+    concerns: ["The preface sniff waits for 24 bytes, so an HTTP/1 client that sends less sits out the 5 s sniff timeout."],
+  },
+  "acme/worker#882": {
+    verdict: "look",
+    risk: "medium",
+    summary:
+      "Retries dead-lettered jobs up to 5 times with full-jitter backoff capped at 10 minutes, and keeps the attempt count in a column so it survives a worker restart.",
+    concerns: ["Webhook jobs aren't idempotent: one that timed out after the request went out will deliver twice."],
+  },
+  "nadia/sentry-javascript-integrations#14402": {
+    verdict: "skim",
+    risk: "low",
+    summary: "Listens for unhandledrejection in edge runtimes and reports the reason as unhandled. Node keeps its own handler.",
+    concerns: [],
+  },
+  "oss/parsekit#77": {
+    verdict: "look",
+    risk: "high",
+    summary:
+      "Replaces the hand-written tokenizer with a generated state table and a short driver loop. Token positions now count UTF-16 code units instead of bytes.",
+    concerns: [
+      "Offsets after any non-ASCII character shift; tools that slice the source by byte offset will break without an error.",
+      "The 1,400-line table is checked in, but CI never regenerates it, so a grammar edit without rerunning the script ships a stale table.",
+    ],
+  },
+  "acme/worker#879": {
+    verdict: "look",
+    risk: "medium",
+    summary:
+      "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work, runs it and reports back with the token, so a worker that lost its lease can't overwrite a newer result. The old scheduler stays behind SCHEDULER_V2=false for a release and reads the same table, so a rollback needs no migration. Most of the 1,240 lines move existing code; about 300 are new, mainly the renewal loop and its tests.",
+    concerns: ["Both services run migrations on start, so two replicas starting together can race on the new lease_token column."],
+  },
+  "friends/garden-sensors#18": {
+    verdict: "skim",
+    risk: "low",
+    summary:
+      "Adds a two-point calibration per sensor (dry and wet readings) and maps raw readings to 0–100 % moisture. Uncalibrated sensors still report raw values.",
+    concerns: [],
+  },
+  "acme/api#4130": {
+    verdict: "skim",
+    risk: "medium",
+    summary:
+      "Tracks search latency and answers 503 with Retry-After while the rolling p95 stays over 800 ms for a minute, so a slow index sheds load instead of queueing it.",
+    concerns: ["The budget is per process: with 12 replicas one hot shard trips it on some and not others, so clients see flapping 503s."],
+  },
+  "acme/ml-pipeline#307": {
+    verdict: "skim",
+    risk: "low",
+    summary: "Adds a holdout evaluation for the reranker (NDCG@10 and MRR) and a nightly job that writes the scores to the metrics table.",
+    concerns: [],
+  },
+};
+// Two agents at once, as on the desk: one rewrites a review a push made stale, one writes a first review, and one waits.
+const STALE = "acme/api#4099";
+const RUNNING = "acme/web#2301";
+const QUEUED = "acme/ml-pipeline#307";
+
+function written(r: Rec, head: string): AiReview {
+  const sig = signals(r);
+  const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
+  const [f] = files;
+  return {
+    verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
+    risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
+    summary: `${r.seed.title}: swaps the legacy path for the new one and times it. No change to the public API.`,
+    concerns:
+      sig.pr.size > 200
+        ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
+        : [],
+    ...WRITTEN[r.id],
+    notes: f
+      ? [
+          {
+            path: f.path,
+            side: "new",
+            line: f.path.endsWith(".py") ? 16 : 12,
+            body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
+          },
+        ]
+      : [],
+    head_oid: head,
+    model: config.analyze.model,
+    at: new Date().toISOString(),
+  };
+}
+
+// As the background run would have left them: most of Now and Today written, one before the latest push.
 for (const r of recs) {
   const c = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
   if (c.ai) reviews.set(r.id, { ...c.ai, head_oid: itemOf(r).head_oid, model: "sonnet", at: iso(1) });
+  else if (WRITTEN[r.id] && r.id !== RUNNING && r.id !== QUEUED)
+    reviews.set(r.id, { ...written(r, r.id === STALE ? "8c1f0e2a" : itemOf(r).head_oid), at: iso(r.id === STALE ? 26 : 2) });
 }
 
-async function generate(r: Rec): Promise<AiReview> {
+const stops = new Map<string, (e: Error) => void>(); // fails a run in progress
+
+async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Promise<AiReview> {
   if (signals(r).item.kind !== "pr") throw new HttpError(400, "AI reviews are for pull requests");
   if (generating.has(r.id)) throw new HttpError(409, `already reviewing ${r.id}`);
   generating.add(r.id);
   aiErrors.delete(r.id);
   bump();
   try {
-    await new Promise((ok) => {
-      setTimeout(ok, Number(process.env.MOCK_AI_MS ?? 2500));
+    await new Promise((ok, fail) => {
+      const t = setTimeout(ok, ms);
+      stops.set(r.id, (e) => {
+        clearTimeout(t);
+        fail(e);
+      });
     });
     if (process.env.MOCK_ANALYZE_FAIL)
       throw new HttpError(502, 'claude command "claude" not found: set its full path under Settings → AI review → Claude command');
-    const sig = signals(r);
-    const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title);
-    const [f] = files;
-    const ai: AiReview = {
-      verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
-      risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
-      summary: `${r.seed.title}: swaps the legacy path for the new one and times it. No change to the public API.`,
-      concerns:
-        sig.pr.size > 200
-          ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
-          : [],
-      notes: f
-        ? [
-            {
-              path: f.path,
-              side: "new",
-              line: f.path.endsWith(".py") ? 16 : 12,
-              body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
-            },
-          ]
-        : [],
-      head_oid: itemOf(r).head_oid,
-      model: config.analyze.model,
-      at: new Date().toISOString(),
-    };
+    const ai = written(r, itemOf(r).head_oid);
     reviews.set(r.id, ai);
     return ai;
   } catch (e) {
@@ -1569,8 +1747,22 @@ async function generate(r: Rec): Promise<AiReview> {
     throw e;
   } finally {
     generating.delete(r.id);
+    stops.delete(r.id);
     bump();
   }
+}
+
+// Paused, as after an expired login: what was running failed on it. Resumed, as after `claude auth login`: those run again.
+function pauseAi(on: boolean) {
+  aiPaused = on ? LOGGED_OUT : null;
+  if (on) for (const stop of stops.values()) stop(new HttpError(502, LOGGED_OUT));
+  else
+    for (const [id, why] of aiErrors)
+      if (why === LOGGED_OUT) {
+        aiErrors.delete(id);
+        void generate(recs.find((r) => r.id === id)!).catch(() => {});
+      }
+  bump();
 }
 
 // Like the desk, opening an open PR with no AI review asks for one; a merged or closed one can't be approved.
@@ -1578,7 +1770,8 @@ function reviewView(r: Rec): ReviewView {
   const d = detail(r);
   if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
   const ended = r.seed.resolved === "merged" || r.seed.resolved === "closed";
-  if (!d.ai && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME && !ended) {
+  const wants = (!d.ai || d.ai_stale) && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME && !ended;
+  if (wants && autoAiOn() && !aiPaused) {
     void generate(r).catch(() => {});
     d.generating = true;
   }
@@ -1591,7 +1784,9 @@ function reviewView(r: Rec): ReviewView {
     files_error: null,
     ai: d.ai,
     ai_stale: d.ai_stale,
-    ai_error: generating.has(r.id) ? null : (aiErrors.get(r.id) ?? null),
+    ai_error: generating.has(r.id)
+      ? null
+      : (aiErrors.get(r.id) ?? (wants && autoAiOn() && aiPaused ? `AI reviews are paused: ${aiPaused}` : null)),
     generating: d.generating,
     approve: mine
       ? { ok: false, reason: "it's your PR" }
@@ -1633,6 +1828,8 @@ function sync() {
       r.fresh = true;
       r.pushes++;
       r.activity_at = new Date().toISOString();
+      // Its review is for the old commit now; the desk would write a new one.
+      if (reviews.has(r.id) && !generating.has(r.id) && autoAiOn() && !aiPaused) void generate(r).catch(() => {});
     }
     bump();
   }, 1200);
@@ -2015,7 +2212,13 @@ const settingsView = (): SettingsView => ({
   overridden: Object.keys(overrides),
   errors: [],
   github: github(),
-  paused: { ai: null, babysitters: null },
+  paused: {
+    ai:
+      autoAiOn() && aiPaused
+        ? { why: `AI reviews are paused: ${aiPaused}`, until: new Date(Date.now() + 30 * 60_000).toISOString() }
+        : null,
+    babysitters: null,
+  },
 });
 
 // Same contract as Desk.putSettings: nothing is written if any value is invalid.
@@ -2290,6 +2493,10 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ok: true, hash: policyHash() };
   }
   if (route === "GET /api/coordinator") return coordinatorView();
+  if (route === "POST /api/mock/ai-paused") {
+    pauseAi((await readBody(req)).paused !== false);
+    return { ok: true, ai_paused: aiPaused };
+  }
   if (route === "POST /api/coordinator/note") {
     note(0, 0, "note", textOf(await readBody(req)));
     bump();
@@ -2346,6 +2553,14 @@ for (const [id, why] of [
 }
 note(3, 14, "note", "Snoozed three FYI items until tomorrow: two CODEOWNERS pings and a thread you've left. Nothing else needed you.");
 note(3, 14, "run", "6 events, 3 actions · 41s");
+
+// Two reviews being written, for longer than a test run or a round of shots.
+if (!aiPaused)
+  for (const id of [STALE, RUNNING])
+    void generate(
+      recs.find((r) => r.id === id)!,
+      10 * 60_000,
+    ).catch(() => {});
 
 const server = createServer((req, res) => {
   void handle(req, res);

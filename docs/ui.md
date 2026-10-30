@@ -18,20 +18,25 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 ├───────────────────────────────────────────────────────────────┤
 │        Now 1                                                  │
 │        seer#8463    Read eval API keys from macOS Keychain 32d │
-│                     vaind asked you directly  +119 −9          │
+│                     vaind asked you directly  AI says look     │
+│                     Reads the eval keys from the Keychain …    │
 │        Today 8                                                │
-│                     6 PRs from azulus                         │
-│        seer#9073    Remove the sentry.get_dsn helper  +5 −45 22h│
+│        seer#9073    Remove the sentry.get_dsn helper      22h │
+│                     close collaborator  AI says skip          │
+│                     Deletes an unused helper and its tests.   │
 │        …                                                      │
-│        Sorted away   31 later   108 fyi (22 new)              │
-│        Your rules moved these out of the way.                 │
+│                     3 more for today                          │
+│        Sorted away   later   FYI   resolved                   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 - A 232px sidebar: GitHub (the queue, with its Now and Today count), In flight (with how many PRs are in flight, as its heading says; the ones that need you are in Now) and Settings, counts in pencil. The active item is a neutral filled pill; a review is under the page it was opened from. At 820px and below it hides; the top bar then names the page and carries a quiet "In flight 3" link.
 - One centred column, 920px wide, beside it. The ref column (`--ref-w`) lines up group heads and refs. Titles, run headers and the open detail share the second column.
 - Runs: three or more consecutive items with the same author and reason collapse under one header, with their facts on the title line.
-- Sorted away: later, FYI, resolved, hidden by rules, cleared. Each count opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`). While filtering, empty groups disappear and groups with matches open on their own, without changing what you'd saved.
+- The queue is Now and Today. Today shows its first `queue.today_cards` cards (5) and one line, "3 more for today", that opens the rest in place; j/k stop on it and Enter (or a click) opens it. Now never folds.
+- Each Now and Today card carries its pre-flight (`Card.preflight`): the AI review of its head, as a plain line under the facts (its summary). Your own PR carries what's next instead ("d hands it to a babysitter"), less what its why already says. While AI reviews are paused (an expired login), one line above Now says so, once.
+- An item nobody has touched for `queue.quiet_days` (14) leaves Now and Today for Later, with "quiet for 3 weeks" as its note.
+- Sorted away: later, FYI, resolved, hidden by rules, cleared, on one quiet line with no counts. Each name opens its group inline (`g l`, `g f`, `g d`, `g h`, `g x`); they're closed again on every load. While filtering, empty groups disappear, groups with matches open on their own, and Today doesn't fold.
 - Resolved rows are dimmed like cleared ones, carry no "new" dot, and show the reason ("merged", "you approved", "approved by alice", "no longer requested") where the why goes, and when it resolved where the wait time goes, newest first. Acting on one (done, snooze) keeps it under Resolved.
 - Enter (or a click) on a PR opens its review (below); on your PR in flight, which is only in Now because it needs you, it opens In flight at that PR. On an issue it opens the item in place: facts, one line of why (for a resolved item, the reason first and then where it would be otherwise), a collapsed rule trace, its recent activity (the last 8 events in plain words: "alice approved · 2h", "CI went red · 20m", your own as "you"), and one line of actions with their keys. `w` opens a PR in place too, with its rule trace and raw signals.
 - A row whose PR has an AI review of its current commit says so after its facts: "AI says look".
@@ -105,7 +110,7 @@ One surface. The window is the queue; a PR's review opens in its place and Esc b
 
 ## Keys
 
-`j/k` move · `Enter` review a PR, open an issue · `o` GitHub · `d` your PR in flight, or take it back · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` AI review · `w` rule trace and signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g i` in flight · `g l/f/d/h/x` sorted-away groups (the key after `g` is always the chord's, never the key's own action) · `?` help.
+`j/k` move (they stop on "n more for today") · `Enter` review a PR, open an issue, show the rest of Today · `o` GitHub · `d` your PR in flight, or take it back · `e` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` AI review · `w` rule trace and signals · `/` filter · `Esc` close, then clear the filter · `r` sync · `,` settings · `g r` rules · `g i` in flight · `g l/f/d/h/x` sorted-away groups (the key after `g` is always the chord's, never the key's own action) · `?` help.
 
 In a review: `n/p` next and previous file · `]/[` next and previous AI note · `a` then `a` approve · `d` your PR in flight, or take it back · `i` AI review again · `o` GitHub · `c` copy prompt · `Esc` back to where you opened it (the queue or In flight).
 

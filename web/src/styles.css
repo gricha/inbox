@@ -576,6 +576,42 @@ kbd {
   font-size: 13.5px;
 }
 
+/* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
+.ai-paused {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+/* Today's "n more for today": the cursor stops on it, Enter opens it in place. */
+.fold {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 8px 12px 9px calc(12px + var(--ref-w) + var(--gap));
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--pencil);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold:hover {
+  color: var(--ink);
+}
+
+.fold:focus-visible {
+  outline-offset: -2px;
+}
+
+.fold.sel {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+}
+
 .rows {
   display: grid;
 }
@@ -804,6 +840,10 @@ kbd {
 .meta.inline {
   flex: none;
   margin: 0 0 0 6px;
+}
+
+.meta.context {
+  display: block;
 }
 
 .fact-word {
@@ -2752,7 +2792,8 @@ kbd {
   }
 
   .run-head,
-  .detail {
+  .detail,
+  .fold {
     padding-left: 12px;
   }
 

@@ -10,6 +10,7 @@ import {
   coordinatorText,
   DEFAULT_OPEN,
   draftOf,
+  FOLD,
   groupsOf,
   judgeStatusText,
   judgeStepText,
@@ -17,11 +18,13 @@ import {
   lineOf,
   logText,
   navigable,
+  nextText,
   parseList,
   parseRoute,
   removeCard,
   resolvedHead,
   routeHash,
+  stops,
   valueOf,
   type KeyLike,
 } from "../src/view.ts";
@@ -67,6 +70,8 @@ const queue = (): QueueView => ({
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
+  today_cards: 5,
+  ai_paused: null,
 });
 
 test("routes round-trip through the hash", () => {
@@ -234,6 +239,50 @@ test("sorted-away groups are skipped by j/k until opened; filtering opens groups
     ["acme/web#2"],
   );
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
+});
+
+test("Today folds after today_cards: j/k stop on its line; unfolded, filtering, or 0 shows them all", () => {
+  const today = ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"].map((id) => card(id, { bucket: "today" }));
+  const v = { ...queue(), sections: { ...queue().sections, today }, today_cards: 2 };
+  const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "today")!;
+  const folded = groupsOf(v, DEFAULT_OPEN, "");
+  assert.deepEqual([t(folded).cards.map((c) => c.id), t(folded).fold, t(folded).total], [["acme/web#10", "acme/web#11"], 2, 4]);
+  assert.deepEqual(
+    navigable(folded, new Set()).map((c) => c.id),
+    ["acme/api#1", "acme/web#10", "acme/web#11"],
+  );
+  assert.deepEqual(stops(folded, new Set()), ["acme/api#1", "acme/web#10", "acme/web#11", FOLD]);
+  assert.deepEqual(
+    stops(groupsOf(v, { ...DEFAULT_OPEN, later: true }, ""), new Set()).slice(-2),
+    [FOLD, "acme/api#3"],
+    "then the next open group",
+  );
+
+  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", true)).cards.length, 4);
+  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", true)).fold, 0);
+  assert.ok(!stops(groupsOf(v, DEFAULT_OPEN, "", true), new Set()).includes(FOLD));
+  assert.equal(t(groupsOf({ ...v, today_cards: 0 }, DEFAULT_OPEN, "")).fold, 0);
+  assert.deepEqual(
+    t(groupsOf(v, DEFAULT_OPEN, "web#1")).cards.map((c) => c.id),
+    ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"],
+    "every match shows while filtering",
+  );
+});
+
+test("your PR's next step leaves out what its why already says", () => {
+  const next = "merge conflict with main: d hands it to a babysitter";
+  assert.equal(nextText({ why: "merge conflict", next }), "d hands it to a babysitter");
+  assert.equal(
+    nextText({ why: "approved and green: merge it", next: "approved and green: o opens it on GitHub to merge" }),
+    "o opens it on GitHub to merge",
+  );
+  assert.equal(nextText({ why: "close collaborator", next }), next);
+  assert.equal(nextText({ why: "", next }), next);
+  assert.equal(
+    nextText({ why: "in flight: reply ready to send", next: "Enter opens In flight, y sends it" }),
+    "Enter opens In flight, y sends it",
+  );
+  assert.equal(nextText({ why: "x", next: undefined }), undefined);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

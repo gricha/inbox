@@ -1,7 +1,8 @@
 import type { Card, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
+import { FOLD, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
+import { withCode } from "./Review.tsx";
 
 const EMPTY: Partial<Record<GroupKey, string>> = { now: "Nothing needs you right now.", today: "Nothing else for today." };
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
@@ -13,6 +14,8 @@ export function Queue({
   ctx,
   filter,
   toggle,
+  unfold,
+  selectFold,
 }: {
   view: QueueView | null;
   overview: Overview | null;
@@ -20,6 +23,8 @@ export function Queue({
   ctx: RowCtx;
   filter: string;
   toggle: (k: GroupKey) => void;
+  unfold: () => void;
+  selectFold: () => void;
 }) {
   if (!view) {
     const first = !!overview && !overview.synced_at;
@@ -37,6 +42,7 @@ export function Queue({
 
   return (
     <div className="queue">
+      {view.ai_paused && <p className="ai-paused">AI reviews are paused: {withCode(view.ai_paused)}</p>}
       {filtering && !top.length && <p className="group-empty">No matches in Now or Today.</p>}
       {top.map((g) => (
         <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
@@ -45,6 +51,17 @@ export function Queue({
             <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>
           </h2>
           {g.cards.length ? <Rows cards={g.cards} g={g} ctx={ctx} /> : <p className="group-empty">{EMPTY[g.key]}</p>}
+          {g.fold > 0 && (
+            <button
+              type="button"
+              className={cls("fold", ctx.selected === FOLD && "sel")}
+              data-id={FOLD}
+              onClick={unfold}
+              onFocus={selectFold}
+            >
+              {g.fold} more for today
+            </button>
+          )}
         </section>
       ))}
 
@@ -64,7 +81,7 @@ export function Queue({
                   toggle(g.key);
                 }}
               >
-                <span className="n">{filtering ? g.cards.length : g.total}</span> {g.label.toLowerCase()}
+                {g.key === "fyi" ? g.label : g.label.toLowerCase()}
               </button>
             ))}
           </div>

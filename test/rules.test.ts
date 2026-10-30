@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classify, compileBoard, type Entry } from "../src/rules.ts";
+import { classify, compileBoard, quietText, type Entry } from "../src/rules.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import type { BoardConfig, Item } from "../src/types.ts";
@@ -162,4 +162,51 @@ test("priority sorts within a bucket before the board sort", () => {
   assert.deepEqual(r.order.today, ["acme/api#2"]);
   assert.deepEqual(r.order.later, ["acme/api#1"]);
   assert.match(compileBoard(board({ priority: "author.nope" }), "boards[3]").errors[0]?.path ?? "", /boards\[3\]\.priority/);
+});
+
+test("quiet items leave Now and Today for Later, before caps; pinned items and a fresh ask stay", () => {
+  const { board: b } = compileBoard(
+    board({
+      caps: { today: 1 },
+      rules: [
+        { when: "item.number == 1", bucket: "now", why: "conflicts with main" },
+        { when: "true", bucket: "today", why: "today" },
+      ],
+    }),
+    "x",
+  );
+  const days = (d: number) => hoursAgo(d * 24);
+  const old = makeItem({ number: 1, author: "me", updated_at: days(143) });
+  const stale = makeItem({ number: 2, updated_at: days(20) });
+  const pinned = makeItem({ number: 3, updated_at: days(30) });
+  // GitHub's updatedAt can lag a fresh ask (a stored snapshot); the ask itself says it's new.
+  const asked = makeItem({
+    number: 4,
+    updated_at: days(40),
+    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+    request_events: [{ at: days(2), actor: "carol", actor_bot: false, reviewer: "me", reviewer_type: "user" }],
+  });
+  const fresh = makeItem({ number: 5, updated_at: days(13) });
+  const entries = [entry(old), entry(stale), entry(pinned, { pinned: true }), entry(asked), entry(fresh)];
+
+  const r = classify(b, entries, undefined, 14);
+  const p = (n: number) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([p(1).bucket, p(1).rule_bucket, p(1).demoted], ["later", "now", "quiet for 5 months"]);
+  assert.deepEqual([p(2).bucket, p(2).demoted], ["later", "quiet for 3 weeks"]);
+  assert.equal(r.order.now.length, 0);
+  // Quiet ones leave before the cap counts, so Today's one slot (the pinned one doesn't count) goes to the fresh ask.
+  assert.deepEqual(r.order.today, ["acme/api#3", "acme/api#4"]);
+  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today was full (1)"]);
+  assert.deepEqual(r.order.later, ["acme/api#5", "acme/api#1", "acme/api#2"]);
+
+  const off = classify(b, entries, undefined, 0);
+  assert.equal(off.placements.get("acme/api#1")!.bucket, "now", "0 turns it off");
+  assert.equal(off.placements.get("acme/api#1")!.demoted, undefined);
+});
+
+test("quiet for: days, then weeks, then months", () => {
+  assert.equal(quietText(7 * 24 + 5), "quiet for 7 days");
+  assert.equal(quietText(14 * 24), "quiet for 2 weeks");
+  assert.equal(quietText(20 * 24), "quiet for 3 weeks");
+  assert.equal(quietText(143 * 24), "quiet for 5 months");
 });

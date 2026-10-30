@@ -87,8 +87,15 @@ const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
   newest: (a, b) => b.created_at.localeCompare(a.created_at),
 };
 
-// Caps apply after the judge: a judged item counts like any other.
-export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup): BoardResult {
+// "quiet for 16 days", "quiet for 3 weeks", "quiet for 5 months"
+export function quietText(hours: number): string {
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `quiet for ${days} days`;
+  return days < 60 ? `quiet for ${Math.round(days / 7)} weeks` : `quiet for ${Math.round(days / 30)} months`;
+}
+
+// Quiet items (nobody touched them in `quietDays`, 0 = off) leave Now and Today for Later, then caps apply after the judge.
+export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup, quietDays = 0): BoardResult {
   const cfg = board.config;
   const placements = new Map<string, Placement>();
   const byBucket: Record<Bucket, Entry[]> = { now: [], today: [], later: [], fyi: [], hide: [] };
@@ -118,6 +125,24 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
     byBucket[b].sort(
       (x, y) => Number(y.pinned) - Number(x.pinned) || ruleOf(x) - ruleOf(y) || rank(y) - rank(x) || sort(x, y) || x.id.localeCompare(y.id),
     );
+  }
+
+  const quietHours = quietDays * 24;
+  // A review you were asked for in that time is never quiet, whatever GitHub's updatedAt says.
+  const quiet = (e: Entry) => {
+    const s = e.signals;
+    const asked = s.me.requested_hours >= 0 && s.me.requested_hours < quietHours;
+    return quietDays > 0 && !e.pinned && !asked && s.item.updated_hours >= quietHours;
+  };
+  for (const b of ["now", "today"] as const) {
+    const gone = byBucket[b].filter(quiet);
+    for (const e of gone) {
+      const p = placements.get(e.id)!;
+      p.bucket = "later";
+      p.demoted = quietText(e.signals.item.updated_hours);
+    }
+    byBucket[b] = byBucket[b].filter((e) => !gone.includes(e));
+    byBucket.later = [...byBucket.later, ...gone];
   }
 
   const exempt = (e: Entry) => {

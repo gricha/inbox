@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 
 const KEYS: [string[], string][] = [
   [["j", "k"], "Move down and up (or the arrow keys)"],
-  [["enter"], "Review the selected PR; an issue opens in place, and your PR in flight opens in In flight"],
+  [
+    ["enter"],
+    "Review the selected PR; an issue opens in place, your PR in flight opens in In flight, and “n more for today” shows the rest",
+  ],
   [["o"], "Open on GitHub"],
   [["d"], "Your own PR: you're done, babysitters take it from here (In flight). d again takes it back"],
   [["e"], "Done: it comes back when someone else acts. On a cleared item, restore it"],

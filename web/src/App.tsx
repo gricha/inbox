@@ -13,7 +13,7 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
-import { DEFAULT_OPEN, groupsOf, navigable, parseRoute, removeCard, routeHash, type GroupKey, type Route } from "./view.ts";
+import { DEFAULT_OPEN, FOLD, groupsOf, navigable, parseRoute, removeCard, routeHash, stops, type GroupKey, type Route } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
@@ -31,7 +31,6 @@ interface Toast {
   undo?: boolean;
 }
 
-const OPEN_KEY = "desk.groups";
 const LEAVES = new Set<Action>(["done", "snooze", "mute", "inflight"]);
 const VERB: Partial<Record<Action, string>> = {
   done: "Done",
@@ -67,15 +66,6 @@ if (desktop) {
   document.documentElement.dataset.platform = desktop.platform;
 }
 
-function loadOpen(): Record<GroupKey, boolean> {
-  try {
-    const saved = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}") as Partial<Record<GroupKey, boolean>>;
-    return { ...DEFAULT_OPEN, ...saved, now: true, today: true };
-  } catch {
-    return DEFAULT_OPEN;
-  }
-}
-
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -89,7 +79,9 @@ export function App() {
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState(loadOpen);
+  // Sorted-away groups open only when asked (g l, …), and close again on reload: the queue is Now and Today.
+  const [open, setOpen] = useState(DEFAULT_OPEN);
+  const [unfolded, setUnfolded] = useState(false); // Today's "n more for today"
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
   const [help, setHelp] = useState(false);
@@ -278,8 +270,9 @@ export function App() {
     };
   }, []);
 
-  const groups = useMemo(() => groupsOf(view, open, filter), [view, open, filter]);
+  const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
   const flat = useMemo(() => navigable(groups, leaving), [groups, leaving]);
+  const cursor = useMemo(() => stops(groups, leaving), [groups, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
@@ -290,7 +283,7 @@ export function App() {
 
   // Keep the selection by id across refreshes; if its card is gone, take whatever now sits at its old position.
   useEffect(() => {
-    if (!flat.length) return;
+    if (!flat.length || (selected === FOLD && cursor.includes(FOLD))) return;
     const i = flat.findIndex((c) => c.id === selected);
     if (i >= 0) {
       lastIndex.current = i;
@@ -300,7 +293,7 @@ export function App() {
     const next = flat[Math.min(lastIndex.current, flat.length - 1)];
     if (next) setSelected(next.id);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- tick re-checks once the undo hold has run out
-  }, [flat, selected, tick]);
+  }, [flat, cursor, selected, tick]);
 
   useEffect(() => {
     if (selected && route.name === "queue")
@@ -564,22 +557,23 @@ export function App() {
   }
 
   function move(d: number) {
-    if (!flat.length) return;
+    if (!cursor.length) return;
     // A clicked link or button keeps focus and would take the next Enter.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    const i = flat.findIndex((c) => c.id === selected);
-    const next = flat[i < 0 ? 0 : Math.max(0, Math.min(flat.length - 1, i + d))];
-    if (next) setSelected(next.id);
+    const i = cursor.indexOf(selected ?? "");
+    const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
+    if (next) setSelected(next);
+  }
+
+  // Today's "n more" line opens in place; the cursor goes on to the first card it showed.
+  function unfold() {
+    const first = view && view.today_cards > 0 ? view.sections.today[view.today_cards] : undefined;
+    setUnfolded(true);
+    if (first) setSelected(first.id);
   }
 
   function toggleGroup(k: GroupKey) {
-    setOpen((o) => {
-      const next = { ...o, [k]: !o[k] };
-      try {
-        localStorage.setItem(OPEN_KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -635,6 +629,9 @@ export function App() {
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
+    } else if (k === "Enter" && selected === FOLD) {
+      e.preventDefault();
+      unfold();
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
@@ -780,7 +777,18 @@ export function App() {
             />
           )}
           {route.name === "queue" && !broken && (
-            <Queue view={view} overview={overview} groups={groups} ctx={ctx} filter={filter} toggle={toggleGroup} />
+            <Queue
+              view={view}
+              overview={overview}
+              groups={groups}
+              ctx={ctx}
+              filter={filter}
+              toggle={toggleGroup}
+              unfold={unfold}
+              selectFold={() => {
+                setSelected(FOLD);
+              }}
+            />
           )}
           {route.name === "review" && !broken && (
             <Review

@@ -81,6 +81,7 @@ const CHECK_HIGHLIGHTS = `(() => {
 interface Shot {
   name: string;
   go: (page: Page) => Promise<void>;
+  after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
 }
 const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
@@ -98,8 +99,46 @@ const review =
       await page.waitForTimeout(250);
     }
   };
+// AI reviews paused, as after an expired login: a mock-only switch (web/mock/server.ts).
+const pauseAi = (paused: boolean) => async (page: Page) => {
+  await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
+  await page.locator(".ai-paused").waitFor({ state: paused ? "visible" : "detached", timeout: 5000 });
+};
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
+  {
+    // The cursor on Today's "n more for today" line, then Enter opens the rest in place.
+    name: "queue-fold",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".fold").focus();
+      await page.locator(".fold").scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "queue-today",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".fold").focus();
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(200);
+      await page.locator(".g-today").scrollIntoViewIfNeeded();
+    },
+    // The fold is per window: a reload folds Today again for the shots after this one.
+    after: async (page) => {
+      await page.reload();
+      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
+    // One line above the queue instead of a note on every card.
+    name: "queue-ai-paused",
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+    },
+    after: pauseAi(false),
+  },
   {
     // Enter on a PR opens its review; an issue still opens in place.
     name: "expanded",
@@ -128,7 +167,7 @@ const SHOTS: Shot[] = [
     name: "review-writing",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".row", { hasText: "Drop the legacy v1 auth middleware" }).locator(".row-main").focus();
+      await page.locator(".row", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
       await page.keyboard.press("Enter");
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
@@ -248,6 +287,7 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "settings-github", go: at("#/settings/github") },
+  { name: "settings-queue", go: at("#/settings/queue") },
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
   { name: "settings-policy", go: at("#/settings/policy") },
@@ -309,6 +349,7 @@ try {
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
         if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
         for (const p of await page.evaluate<string[]>(CHECK_HIGHLIGHTS)) failures.push(`${file}: ${p}`);
+        await shot.after?.(page);
       }
       await page.close();
     }
@@ -318,6 +359,8 @@ try {
     await zoom.locator(".queue h2").first().waitFor({ timeout: 15_000 });
     const marks = zoom.locator(HIGHLIGHTS);
     for (let i = 0; i < (await marks.count()); i++) {
+      // Cards with a line of context are taller: a long Now runs past the window.
+      await marks.nth(i).scrollIntoViewIfNeeded();
       const b = await marks.nth(i).boundingBox();
       if (!b) continue;
       const file = `${theme}-zoom-${i}.png`;

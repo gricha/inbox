@@ -25,7 +25,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 ## Use it
 
-- **The queue** is the whole app. **Now** is marked with a highlighter, **Today** is below it, and a single "Sorted away" line counts what the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested). Click a count to look inside.
+- **The queue** is the whole app: **Now**, marked with a highlighter, and **Today** below it, its first five cards and a line for the rest. Each card has its AI review's summary under it, or for your own PR what to do next. Anything nobody has touched for two weeks drops to Later. What the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), stays off the page behind one quiet "Sorted away" line.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
 - **In flight** (the sidebar, `g i`): your own PRs you've marked done with `d`, in plain words: CI, reviews, threads, conflicts, and what each babysitter is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). A drafted reply waits there for you to send (`y`); a question from a babysitter puts the PR in Now. Settings → In flight turns babysitting off, sets how many run at once, and where your clones are.
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, AI review, Hand-off prompts. Changes save as you go.
