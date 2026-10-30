@@ -761,7 +761,7 @@ export class Desk {
     }
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
-    if (this.settings["review.auto_ai"] && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
+    if (this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
     const d = this.item(id);
     const err = this.aiErrors.get(id);
     return {
@@ -869,10 +869,13 @@ export class Desk {
   }
 
   // Background AI reviews for what's in Now and Today, a couple at a time. After a failure it waits for the next sync.
+  // AI reviews nobody asked for: on unless review.auto_ai is off or there's no agent to write them.
+  autoAi(): boolean {
+    return !!this.review && this.settings["review.auto_ai"] && this.settings["agent.driver"] !== "none";
+  }
+
   pumpAi(): void {
-    if (!this.review || this.stopped || !this.loaded || !this.settings["review.auto_ai"] || this.settings["agent.driver"] === "none")
-      return;
-    if (this.generating.size >= AI_AT_ONCE) return;
+    if (this.stopped || !this.loaded || !this.autoAi() || this.generating.size >= AI_AT_ONCE) return;
     const f = this.focus();
     const snap = this.snapshot();
     for (const c of [...f.sections.now, ...f.sections.today]) {

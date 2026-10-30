@@ -621,6 +621,7 @@ export function App() {
           )}
           {route.name === "review" && !broken && (
             <Review
+              key={route.id} // a different PR starts fresh: first file, no note, nothing armed
               id={route.id}
               loads={loads}
               inert={help}

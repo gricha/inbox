@@ -387,6 +387,15 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   t.cleanup();
 });
 
+test("with no agent (agent.driver none) nothing runs on its own, not even on opening a PR", async () => {
+  const t = await setup([ask(1)], { settings: { "agent.driver": "none" } });
+  await t.sync();
+  assert.equal((await t.desk.reviewView("api#1")).generating, false);
+  await flush();
+  assert.equal(t.f.started.length, 0);
+  t.cleanup();
+});
+
 test("reviews are for PRs: an issue answers 400", async () => {
   const issue = makeItem({
     number: 9,

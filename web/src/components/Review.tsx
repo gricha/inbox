@@ -44,16 +44,18 @@ export function Review({
   flash: (text: string, error?: boolean, ms?: number) => void;
   onBack: () => void;
 }) {
-  const [view, setView] = useState<ReviewView | string | null>(null);
+  const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [fileIdx, setFileIdx] = useState(0);
   const [noteIdx, setNoteIdx] = useState<number | null>(null);
   const [armed, setArmed] = useState(0); // when `a` was pressed once
   const [busy, setBusy] = useState<"approve" | "ai" | null>(null);
+  const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
   const listRef = useRef<HTMLElement>(null);
   const v = typeof view === "object" ? view : null;
+  const canApprove = !!v?.approve.ok && approved !== v.card.id;
 
   useEffect(() => {
     if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
@@ -65,7 +67,7 @@ export function Review({
         if (n === seq.current) setView(r);
       } catch (e) {
         // Keep what's on screen if a refresh fails.
-        if (n === seq.current) setView((cur) => (cur && typeof cur === "object" && cur.card.id === id ? cur : message(e)));
+        if (n === seq.current) setView((cur) => (cur && typeof cur === "object" ? cur : message(e)));
       }
     })();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
@@ -162,8 +164,8 @@ export function Review({
 
   async function approve() {
     if (!v || busy === "approve") return;
-    if (!v.approve.ok) {
-      flash(`Can't approve: ${v.approve.reason ?? "not allowed"}`, true);
+    if (!canApprove) {
+      flash(`Can't approve: ${approved === v.card.id ? "you just did" : (v.approve.reason ?? "not allowed")}`, true);
       return;
     }
     if (!armed || Date.now() - armed > ARM_MS) {
@@ -175,6 +177,7 @@ export function Review({
     setBusy("approve");
     try {
       await api.approve(v.card.id);
+      setApproved(v.card.id);
       flash(`Approved ${shortRef(v.card)} on GitHub`);
     } catch (e) {
       flash(message(e), true);
@@ -210,6 +213,7 @@ export function Review({
     if (e.repeat && !["n", "p", "]", "["].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    if (armed && e.key !== "a" && e.key !== "Escape") setArmed(0); // any other key lets the approval lapse
     if (e.key === "Escape") {
       if (armed) setArmed(0);
       else onBack();
@@ -284,8 +288,8 @@ export function Review({
           k="a"
           label={busy === "approve" ? "Approving…" : armed ? "Press a again to approve" : "Approve"}
           run={run}
-          disabled={!view.approve.ok || busy === "approve"}
-          title={view.approve.reason ?? "Approve on GitHub: press a twice"}
+          disabled={!canApprove || busy === "approve"}
+          title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
           className={cls(armed > 0 && "armed")}
         />
         <KeyButton k="o" label="Open on GitHub" run={run} />
