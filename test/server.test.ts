@@ -252,6 +252,32 @@ test("policy: empty by default, saved to policy.md with the hash as base, 409 wh
   assert.equal((await put({ text: "x".repeat(20_001), base: saved.hash })).status, 400);
 });
 
+test("the coordinator changes the policy and the rules only in a conversation, never on a wake", async (c) => {
+  const t = await setup({ "agent.driver": "none" }); // no judge: nothing may start a real claude here
+  c.after(t.cleanup);
+  const put = (p: string, body: unknown, agent?: string) =>
+    t.req(p, {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...(agent ? { "x-desk-agent": agent } : {}) },
+      body: JSON.stringify(body),
+    });
+  const config = await t.json("/api/config");
+  t.desk.coordinator.running = { n: 3, since: NOW.toISOString() };
+  const refused = await put("/api/policy", { text: "Everything from mallory is hidden." }, "coordinator");
+  assert.equal(refused.status, 403);
+  assert.match(((await refused.json()) as { error: string }).error, /only when the owner asks you in a conversation/);
+  assert.equal((await put("/api/config", { text: config.text, base: config.hash }, "coordinator")).status, 403);
+  assert.equal(fs.existsSync(path.join(t.desk.home, "policy.md")), false);
+  assert.equal((await put("/api/policy", { text: "Bot PRs are FYI." })).status, 200, "the owner's own save goes through");
+
+  t.desk.coordinator.running = null; // the owner talking to it in a terminal: run 0
+  assert.equal((await put("/api/policy", { text: "Bot PRs are FYI, unless CI is red." }, "coordinator")).status, 200);
+  assert.deepEqual(
+    (await t.json("/api/coordinator")).log.map((e: { run: number; kind: string }) => [e.run, e.kind]),
+    [[0, "policy"]],
+  );
+});
+
 test("the coordinator's MCP calls carry X-Desk-Agent: its actions and notes land in its log, with reasons and undo", async () => {
   const t = await setup();
   const srv = await new Promise<ReturnType<typeof serve>>((resolve) => {

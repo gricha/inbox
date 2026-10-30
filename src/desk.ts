@@ -297,6 +297,7 @@ export class Desk {
 
   // `base` is the hash from GET: a stale one means it changed since (the coordinator, an editor) and nothing is written.
   putPolicy(text: string, base?: string, agent?: string): { ok: true; hash: string } {
+    this.ownerAsked(agent, "the policy");
     if (base !== undefined && base !== this.policy.hash)
       throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
     if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
@@ -319,6 +320,12 @@ export class Desk {
     if (!line) throw new DeskError(400, "need { text }");
     this.coordinator.note(line.slice(0, 500));
     this.changed();
+  }
+
+  // A wake carries only GitHub text, so a policy or rules change then wasn't the owner asking.
+  ownerAsked(agent: string | undefined, what: string): void {
+    if (agent === "coordinator" && this.coordinator.running)
+      throw new DeskError(403, `${what} can change only when the owner asks you in a conversation, not on a wake`);
   }
 
   // ---------------------------------------------------------------- settings
@@ -1147,6 +1154,7 @@ export class Desk {
 
   // `base`: the text you started from, or its hash from GET /api/config.
   putConfig(text: string, base?: string, agent?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
+    this.ownerAsked(agent, "the rules");
     if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
       throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
