@@ -147,6 +147,9 @@ test("claude's envelope: structured output, JSON in the result, and login errors
     "Claude Code isn't logged in. Run `claude auth login` in a terminal.",
   );
   assert.equal(claudeError("Overloaded").message, "Overloaded");
+  // A run that failed on login code isn't a login failure.
+  const work = "Tool use failed while fixing the OAuth callback in src/login.ts";
+  assert.equal(claudeError(work).message, work);
 });
 
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {

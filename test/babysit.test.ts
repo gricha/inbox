@@ -7,7 +7,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  authFailure,
   buildPrompt,
   claudeArgs,
   doneText,
@@ -22,6 +21,7 @@ import {
   worktreePath,
 } from "../src/babysit.ts";
 import type { PrContext } from "../src/github/index.ts";
+import { NOT_LOGGED_IN } from "../src/review.ts";
 import type { Item, SitterRun } from "../src/types.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo } from "./helpers/items.ts";
@@ -222,16 +222,6 @@ test("the repo's own test, lint and install commands, from its files", (c) => {
   });
 });
 
-test("an expired or missing claude login reads as one, whatever claude says", () => {
-  for (const m of [
-    "Failed to authenticate. API Error: 401 OAuth access token has expired",
-    "Invalid API key · Please run /login",
-    "Not logged in",
-  ])
-    assert.ok(authFailure(m), m);
-  for (const m of ["npm test failed", "gave up after 30m", "API Error: 529 Overloaded"]) assert.ok(!authFailure(m), m);
-});
-
 test("a draft's quote is the comment it answers as one plain line, without a bot's hidden markers", () => {
   const thread = (body: string) => ({
     id: "PRRT_1",
@@ -338,6 +328,14 @@ case "$(cat "$D/mode")" in
     ;;
   fail)
     echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Tool use failed"}'
+    exit 1
+    ;;
+  oauth)
+    echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"Tool use failed while fixing the OAuth callback in src/login.ts"}'
+    exit 1
+    ;;
+  api500)
+    echo '{"type":"result","subtype":"success","is_error":true,"api_error_status":500,"result":"API Error: 500 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"api_error\\",\\"message\\":\\"Internal server error\\"}}"}'
     exit 1
     ;;
   sleep)
@@ -546,13 +544,14 @@ test("an expired claude login fails one run with a clear status, then nothing re
   });
   assert.equal(s.w.count(), 1, "one attempt, no storm");
   const rows = new Map(s.desk.inflight().rows.map((r) => [r.card.id, r]));
-  assert.equal(s.record(a.id).runs.at(-1)?.summary, "claude isn't logged in (run claude auth login)");
+  assert.equal(s.record(a.id).runs.at(-1)?.summary, NOT_LOGGED_IN, "the same words as the judge's and the coordinator's");
   assert.deepEqual(s.record(a.id).tried, [], "it never got going, so it tries again after you log in");
+  // It's the agent's login, not the PRs: calm in the lane, and not back in Now one by one.
   for (const id of [a.id, b.id]) {
-    assert.equal(rows.get(id)?.sitter.text, "claude isn't logged in (run claude auth login)");
-    assert.equal(rows.get(id)?.needs_you, "CI failing: claude isn't logged in (run claude auth login)");
+    assert.deepEqual([rows.get(id)?.sitter.state, rows.get(id)?.sitter.text], ["waiting", NOT_LOGGED_IN]);
+    assert.equal(rows.get(id)?.needs_you, null);
   }
-  assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 2);
+  assert.equal(s.desk.queue().sections.now.filter((x) => x.inflight).length, 0);
   // Any other save keeps the pause; a new agent setting (say, the claude command or model) lifts it.
   s.desk.putSettings({ set: { "inflight.max_agents": 2 } });
   await new Promise((r) => {
@@ -561,6 +560,24 @@ test("an expired claude login fails one run with a clear status, then nothing re
   assert.equal(s.w.count(), 1);
   s.desk.putSettings({ set: { "analyze.model": "opus" } });
   await until("another attempt", () => s.w.count() >= 2);
+});
+
+test("a failed run says what claude said in plain words; only a real login failure pauses babysitters", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  const item = pr(23, s.w.head);
+  s.gh.items.set(item.id, item);
+  await s.desk.sync();
+  s.w.mode("api500");
+  s.desk.act("web#23", "inflight");
+  await until("the failure", () => s.record(item.id).runs.at(-1)?.outcome === "failed");
+  assert.equal(s.record(item.id).runs.at(-1)?.summary, "API Error: 500 Internal server error");
+  assert.equal(s.desk.sitter.paused, null);
+  s.desk.act("web#23", "takeback");
+  s.w.mode("oauth");
+  s.desk.act("web#23", "inflight");
+  await until("the second failure", () => s.w.count() === 2 && s.record(item.id).runs.at(-1)?.outcome === "failed");
+  assert.match(s.record(item.id).runs.at(-1)!.summary, /OAuth callback/);
+  assert.equal(s.desk.sitter.paused, null, "a run about login code isn't a login failure");
 });
 
 test("a run times out and is killed", posix, async (c) => {

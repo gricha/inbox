@@ -8,14 +8,13 @@ import path from "node:path";
 import type { Desk } from "./desk.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
-import { claudeSpawn } from "./review.ts";
+import { claudeError, claudeSpawn, NOT_LOGGED_IN } from "./review.ts";
 import type { ActivityEvent, Draft, Item, SitterRun, SitterStatus } from "./types.ts";
 
 const RUN_TIMEOUT = 30 * 60_000;
 const SETTLE = 3_000; // events land in bursts (a review and its comments, a push and its CI); start once they have
 const KILL_AFTER = 10_000; // SIGTERM, then SIGKILL for whatever ignored it
 const PAUSE = 15 * 60_000; // after the agent can't log in, no new runs for this long
-const NOT_LOGGED_IN = "claude isn't logged in (run claude auth login)";
 const MAX_CI_TRIES = 3; // runs on red CI before it's handed back to you
 const KEEP_RUNS = 5;
 const CLONE_CACHE = 10 * 60_000;
@@ -462,8 +461,6 @@ export function stepOf(line: Record<string, unknown>, cwd: string): string | nul
   return step;
 }
 
-export const authFailure = (msg: string) => /\b401\b|not logged in|\/login|authenticat|oauth/i.test(msg);
-
 // ---------------------------------------------------------------------------------------------------------------- the runner
 
 export interface SitterOptions {
@@ -858,7 +855,7 @@ export class Babysitter {
     const out = fs.openSync(run.log, "a");
     let buf = "";
     let stderr = "";
-    let result: { is_error?: boolean; result?: string } | null = null;
+    let result: { is_error?: boolean; result?: string; subtype?: string; api_error_status?: number } | null = null;
     let spawnError: string | null = null;
     let timedOut = false;
     const l: Live = { child, run, keys, aborted: null, closed: Promise.resolve() };
@@ -868,17 +865,19 @@ export class Babysitter {
         fs.closeSync(out);
         this.live.delete(id);
         resolve();
+        // The same reading of claude's errors as the judge's and the coordinator's: a 401 is the login, an API body its message.
+        const failed = result?.is_error
+          ? claudeError(result.result?.trim() ? result.result : (result.subtype ?? "claude failed"), result.api_error_status)
+          : null;
         const error = l.aborted
           ? null
           : timedOut
             ? `gave up after ${Math.round(this.timeout / 60_000)}m`
             : (spawnError ??
-              (result?.is_error
-                ? (result.result ?? "claude failed")
-                : result
-                  ? null
-                  : stderr.trim().split("\n").slice(-2).join(" ") || `claude exited with ${String(code)}`));
-        this.finish(id, run, keys, { error, aborted: l.aborted, timedOut, summary: result?.result ?? "" }, branch, dir);
+              failed?.message ??
+              (result ? null : stderr.trim().split("\n").slice(-2).join(" ") || `claude exited with ${String(code)}`));
+        const cause = typeof failed?.cause === "string" ? failed.cause : undefined;
+        this.finish(id, run, keys, { error, cause, aborted: l.aborted, timedOut, summary: result?.result ?? "" }, branch, dir);
       });
     });
     const timer = setTimeout(() => {
@@ -929,7 +928,7 @@ export class Babysitter {
     id: string,
     run: SitterRun,
     keys: string[],
-    r: { error: string | null; aborted?: string | null; timedOut?: boolean; summary?: string },
+    r: { error: string | null; cause?: string; aborted?: string | null; timedOut?: boolean; summary?: string },
     branch: string,
     dir: string,
   ): void {
@@ -956,9 +955,9 @@ export class Babysitter {
         }
       }
       if (this.stopped) return;
-      const auth = !!r.error && authFailure(r.error);
+      const auth = r.error === NOT_LOGGED_IN;
       const said = (r.summary ?? "").trim().split("\n").findLast(Boolean)?.slice(0, 300) ?? "";
-      const summary = r.aborted ?? (r.error ? (auth ? NOT_LOGGED_IN : r.error.replaceAll(/\s+/g, " ").slice(0, 300)) : said);
+      const summary = r.aborted ?? (r.error ? r.error.replaceAll(/\s+/g, " ").slice(0, 300) : said);
       if (auth) this.pause(NOT_LOGGED_IN);
       const s = this.update(id, (x) => {
         const rec = x.runs.find((y) => y.id === run.id);
@@ -976,9 +975,10 @@ export class Babysitter {
           };
       });
       desk.log(
-        `babysitter: ${id}: ${outcome}${pushed ? ` ${short(pushed)}` : ""}${summary ? `: ${summary}` : ""} (session ${run.id}, log ${run.log})`,
+        `babysitter: ${id}: ${outcome}${pushed ? ` ${short(pushed)}` : ""}${summary ? `: ${summary}` : ""}${r.cause ? ` (${r.cause})` : ""} (session ${run.id}, log ${run.log})`,
       );
       desk.changed();
+      if (!r.error && !r.aborted) desk.retryAgents(NOT_LOGGED_IN); // claude ran, so the login works
       if (pushed) void desk.sync();
       if (s.escalation || s.drafts.some((d) => !d.sent_at)) desk.notifyNewNow();
       this.consider(id);
@@ -996,6 +996,8 @@ export class Babysitter {
     if (s.escalation) return { state: "waiting", text: `needs you: ${s.escalation.question}`, since: s.escalation.at };
     if (this.queue.includes(id) && !this.notes.has(id)) return { state: "queued", text: "waiting for a free agent", since: null };
     const work = it.state === "open" ? problems(it, this.desk.me(), this.since(id)) : [];
+    // The agent's login, not the PR: the lane says so calmly, and it isn't back with you (Settings says it once).
+    if (work.length && this.paused && Date.now() < this.paused.until) return { state: "waiting", text: this.paused.why, since: null };
     const note = work.length ? (this.notes.get(id) ?? this.blocker(it, s)) : null;
     if (note) return { state: "blocked", text: note, since: null };
     if (last) return { state: "done", text: doneText(last), since: last.ended_at };
@@ -1008,7 +1010,7 @@ export class Babysitter {
     if (s.escalation) return s.escalation.question;
     const unsent = s.drafts.filter((d) => !d.sent_at).length;
     if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
-    if (st.state === "running" || st.state === "queued") return null;
+    if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
     const work = problems(it, this.desk.me(), this.since(id));
     const [first] = work;
     // Nobody will do it: it's yours.
