@@ -707,7 +707,7 @@ export class Desk {
     if (!fresh.length) return;
     const [only] = fresh;
     const body =
-      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new in Now: ${fresh.map(shortRef).join(", ")}`;
+      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new and urgent: ${fresh.map(shortRef).join(", ")}`;
     this.notifyFn("Review Desk", body);
   }
 
@@ -1018,7 +1018,7 @@ export class Desk {
     return `waiting on review: ${hand}`;
   }
 
-  // Said once above Now, not on every card: a failed login stops every agent, so it's Claude as a whole.
+  // Said once above the queue, not on every card: a failed login stops every agent, so it's Claude as a whole.
   paused(): Paused | null {
     const login = (why: string | null | undefined) => !!why?.endsWith(NOT_LOGGED_IN);
     const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
@@ -1030,8 +1030,7 @@ export class Desk {
   focus(): FocusView {
     return {
       sections: this.top(this.snapshot(), new Set()),
-      now_cards: this.settings["queue.now_cards"],
-      today_cards: this.settings["queue.today_cards"],
+      cards: this.settings["queue.cards"],
       paused: this.paused(),
     };
   }
@@ -1108,8 +1107,7 @@ export class Desk {
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-      now_cards: this.settings["queue.now_cards"],
-      today_cards: this.settings["queue.today_cards"],
+      cards: this.settings["queue.cards"],
       paused: this.paused(),
       babysitting: this.settings["inflight.babysit"],
     };

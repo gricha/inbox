@@ -24,7 +24,7 @@ export const DEFAULT_POLICY = `Less is more. Show me only what needs me; when un
 - Bot PRs (dependency bumps, autofix, release tooling): hide unless I'm asked by name.
 - PRs from people I work with often, where I wasn't asked: fyi, unless they touch my areas or I'm clearly the natural reviewer.
 - Where the AI pre-flight review says to skip it and nobody asked me by name: fyi.
-- My own PRs: now only when I'm the blocker (changes requested, required CI red, a question to me). Drafts, quiet ones and ones waiting on reviewers: later.
+- My own PRs: now only when I'm the blocker (changes requested, required CI red, a question to me). My drafts touched in the last two weeks: today, they're mine to finish. Older drafts, quiet ones and ones waiting on reviewers: later.
 - Mentions and assigned issues: today when someone asks me something or waits for my answer; fyi for drive-by mentions, release notes and bulk pings.
 - Anything nobody is waiting on that's been quiet for weeks: later.
 `;

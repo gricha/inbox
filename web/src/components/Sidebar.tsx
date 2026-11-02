@@ -38,7 +38,7 @@ export function Sidebar({
           href="#/"
           className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
-          title={view ? `${now} now, ${today} today` : undefined}
+          title={view ? `${now + today} in the queue${now ? `, ${now} urgent` : ""}` : undefined}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (route.name === "queue") {
@@ -50,7 +50,7 @@ export function Sidebar({
           <span className="side-name">GitHub</span>
           <span className="side-count">{view && now + today > 0 ? now + today : ""}</span>
         </a>
-        {/* All of them, as the lane's heading says; the ones that need you are in Now already. */}
+        {/* All of them, as the lane's heading says; the ones that need you are in the queue already. */}
         <a
           href="#/inflight"
           className={cls("side-item", onLane && "on")}

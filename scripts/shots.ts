@@ -17,6 +17,7 @@ const out = path.resolve(arg("--out") ?? path.join(root, ".shots"));
 const MOCK = Number(process.env.SHOTS_MOCK_PORT ?? 47830); // separate ports let two checkouts run shots at once
 const VITE = Number(process.env.SHOTS_VITE_PORT ?? 5190);
 const kids: ChildProcess[] = [];
+const failures: string[] = [];
 
 async function up(url: string, ms = 30_000): Promise<void> {
   for (const end = Date.now() + ms; Date.now() < end;) {
@@ -47,7 +48,7 @@ async function start(): Promise<string> {
 
 // Every highlighter mark: the ::before band must cover the text and nothing may clip it.
 // Page code is a string: this project's tsconfig has no DOM types, on purpose (the server mustn't touch them).
-const HIGHLIGHTS = ".b-now .ref-ink, .g-now > .group-head > span:first-child";
+const HIGHLIGHTS = ".b-now .ref-ink";
 const CHECK_HIGHLIGHTS = `(() => {
   const problems = [];
   const px = (v) => Number.parseFloat(v) || 0;
@@ -117,13 +118,41 @@ const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
   await page.reload();
   await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
 };
-// Now and Today fold after their first five: open them for a card that sits behind a line.
-const unfoldNow = async (page: Page) => {
-  for (const g of [".g-now", ".g-today"]) {
-    const fold = page.locator(`${g} .fold`);
-    if (await fold.isVisible()) await fold.click();
-  }
+// The queue folds after its first ten: open it for a card that sits behind the line.
+const unfold = async (page: Page) => {
+  const fold = page.locator(".g-queue .fold");
+  if (await fold.isVisible()) await fold.click();
   await page.waitForTimeout(200);
+};
+// The fold is per window: a reload folds the queue again for the shots after this one.
+const refold = async (page: Page) => {
+  await page.reload();
+  await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+};
+// Scrolled to the end, the last thing on the page ends near the window's bottom: no empty room to scroll into.
+const BOTTOM_ROOM = 160;
+const toBottom = (name: string) => async (page: Page) => {
+  await page.evaluate("scrollTo(0, document.documentElement.scrollHeight)");
+  await page.waitForTimeout(300);
+  const room = await page.evaluate<number | null>(`(() => {
+    if (document.documentElement.scrollHeight <= innerHeight + 1) return null; // nothing to scroll
+    const main = document.querySelector(".main");
+    const pinned = (el) => {
+      for (let p = el; p && p !== main; p = p.parentElement) if (["sticky", "fixed"].includes(getComputedStyle(p).position)) return true;
+      return false;
+    };
+    // What you can see: text, a field, a diff (its shadow root); an empty placeholder line isn't content.
+    const seen = (el) => el.textContent.trim() || el.shadowRoot || ["TEXTAREA", "INPUT", "SELECT", "IMG", "CANVAS"].includes(el.tagName);
+    let end = 0;
+    for (const el of main.querySelectorAll("*")) {
+      if (el.children.length || pinned(el) || !seen(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height) end = Math.max(end, r.bottom);
+    }
+    return Math.round(innerHeight - end);
+  })()`);
+  if (room !== null && room > BOTTOM_ROOM)
+    failures.push(`${name}: ${room}px of empty page below the last content when scrolled to the bottom`);
 };
 // A setting changed through the API, as Settings would; `after` puts it back.
 const setting = (key: string, value: unknown) => async (page: Page) => {
@@ -144,16 +173,19 @@ const SHOTS: Shot[] = [
     name: "queue-selected",
     go: async (page) => {
       await at("#/")(page);
+      await unfold(page);
       await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
       await page.waitForTimeout(200);
     },
+    after: refold,
   },
   {
-    // Nothing in Now: one line, with no highlighter.
+    // Nothing in the queue: one line, with no 0.
     name: "queue-empty",
     go: async (page) => {
       await queueAs((q) => {
         q.sections.now = [];
+        q.sections.today = [];
       })(page);
       await top(page);
     },
@@ -164,42 +196,34 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The cursor on Today's "n more for today" line, then Enter opens the rest in place.
+    // The cursor on the queue's "n more" line, then Enter opens the rest in place.
     name: "queue-fold",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".g-today .fold").focus();
-      await page.locator(".g-today .fold").scrollIntoViewIfNeeded();
+      await page.locator(".g-queue .fold").focus();
+      await page.locator(".g-queue .fold").scrollIntoViewIfNeeded();
     },
   },
   {
-    name: "queue-today",
+    name: "queue-unfolded",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".g-today .fold").focus();
+      await page.locator(".g-queue .fold").focus();
       await page.keyboard.press("Enter");
       await page.waitForTimeout(200);
-      await page.locator(".g-today").scrollIntoViewIfNeeded();
     },
-    // The fold is per window: a reload folds Today again for the shots after this one.
-    after: async (page) => {
-      await page.reload();
-      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
-    },
+    after: refold,
   },
   {
-    // A stack behind Today's line: three PRs from one author on one sheet, under one line that says why.
+    // A stack behind the queue's line: three PRs from one author on one sheet, under one line that says why.
     name: "queue-stack",
     go: async (page) => {
       await at("#/")(page);
-      await unfoldNow(page);
+      await unfold(page);
       await page.locator(".run", { hasText: "3 PRs from rosa" }).scrollIntoViewIfNeeded();
       await page.waitForTimeout(200);
     },
-    after: async (page) => {
-      await page.reload();
-      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
-    },
+    after: refold,
   },
   {
     // Tab from the selected card lands on its first key: the cursor's fill and ring, clear of the letters.
@@ -217,17 +241,25 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await top(page);
-      await page.locator(".g-now [data-id]").first().locator(".row-main").focus();
+      await page.locator(".g-queue [data-id]").first().locator(".row-main").focus();
       for (const k of ["j", "j"]) {
         await page.keyboard.press(k);
         await page.waitForTimeout(250);
       }
       const gaps = await page.evaluate<number[]>(`(() => {
-        const cards = [...document.querySelectorAll(".g-now .rows > [data-id]")].map((el) => el.getBoundingClientRect());
+        const cards = [...document.querySelectorAll(".g-queue .rows > [data-id]")].map((el) => el.getBoundingClientRect());
         return cards.slice(1).map((r, i) => Math.round(r.top - cards[i].bottom));
       })()`);
       if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2)
-        failures.push(`queue-jj: uneven gaps between Now's cards: ${gaps.join(", ")}px`);
+        failures.push(`queue-jj: uneven gaps between the queue's cards: ${gaps.join(", ")}px`);
+    },
+  },
+  {
+    // The end of the queue: its last cards, the fold line and the sorted-away line, then the window's edge.
+    name: "queue-bottom",
+    go: async (page) => {
+      await at("#/")(page);
+      await toBottom("queue-bottom")(page);
     },
   },
   {
@@ -246,12 +278,20 @@ const SHOTS: Shot[] = [
     name: "expanded",
     go: async (page) => {
       await at("#/")(page);
-      await unfoldNow(page);
+      await unfold(page);
       await page.locator(".row", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
     },
   },
   { name: "review", go: review("acme/api#4127") },
+  {
+    // The last file ends at the window's bottom: no empty room below it to scroll into.
+    name: "review-bottom",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      await toBottom("review-bottom")(page);
+    },
+  },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
   // n lands on requirements.txt: a file at the repo's root, with a long folder below it in the list.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
@@ -270,7 +310,7 @@ const SHOTS: Shot[] = [
     name: "review-writing",
     go: async (page) => {
       await at("#/")(page);
-      await unfoldNow(page);
+      await unfold(page);
       await page.locator(".row", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
       await page.keyboard.press("Enter");
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
@@ -353,6 +393,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    name: "inflight-bottom",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      await toBottom("inflight-bottom")(page);
+    },
+  },
+  {
     // Enter on a lane row: its review says what the lane says, and Esc goes back to the lane.
     name: "review-inflight",
     go: async (page) => {
@@ -383,8 +430,10 @@ const SHOTS: Shot[] = [
   {
     // A PR the policy judge placed: w opens it in place; its rule trace ends with the policy step.
     name: "judged",
+    after: refold,
     go: async (page) => {
       await at("#/")(page);
+      await unfold(page);
       await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
       await page.keyboard.press("w");
       await page.locator(".trace-toggle summary").first().click();
@@ -419,6 +468,14 @@ const SHOTS: Shot[] = [
   { name: "settings-app", go: at("#/settings/app") },
   { name: "settings-inflight", go: at("#/settings/inflight") },
   { name: "settings-review", go: at("#/settings/review") },
+  {
+    // Settings is one page: its end, Rules and Policy above it.
+    name: "settings-bottom",
+    go: async (page) => {
+      await at("#/settings/review")(page);
+      await toBottom("settings-bottom")(page);
+    },
+  },
   {
     // Paused after failures in a row: one line, its label in ink, said once.
     name: "settings-review-paused",
@@ -496,7 +553,6 @@ const SIZES = [
   { name: "mac", width: 1280, height: 820, mac: true },
 ];
 
-const failures: string[] = [];
 const files: string[] = [];
 try {
   const real = arg("--url");

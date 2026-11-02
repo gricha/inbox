@@ -42,10 +42,10 @@ export function Inflight({
           </h2>
           <p className="lane-intro">
             {view.babysitting ? (
-              "Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in Now only when it needs you."
+              "Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in the queue only when it needs you."
             ) : (
               <>
-                Your PRs marked done. <a href="#/settings/inflight">Babysitting is off</a>, so a PR is back in Now when CI fails or
+                Your PRs marked done. <a href="#/settings/inflight">Babysitting is off</a>, so a PR is back in the queue when CI fails or
                 reviewers ask for something.
               </>
             )}

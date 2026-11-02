@@ -123,6 +123,10 @@ export function quietText(hours: number): string {
   return days < 60 ? `quiet for ${Math.round(days / 7)} weeks` : `quiet for ${Math.round(days / 30)} months`;
 }
 
+// Over a board's cap, in the queue's words: it's one list, so "now" is urgency and "today" a place on it.
+export const capText = (from: "now" | "today", cap: number, board: string): string =>
+  from === "now" ? `${cap} from ${board} ${cap === 1 ? "is" : "are"} urgent already` : `the queue has ${cap} from ${board} already`;
+
 // Quiet items (nobody touched them in `quietDays`, 0 = off) leave Now and Today for Later, then caps apply after the judge.
 // Neither moves an item below a hard rule's floor.
 export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup, quietDays = 0): BoardResult {
@@ -192,8 +196,8 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
     for (const e of over) {
       const p = placements.get(e.id)!;
       p.bucket = to;
-      // Caps are per board, and Now across boards can hold more than one board's cap: the note says what this board gets.
-      p.demoted = e.ai === "skip" ? "the AI says skip it" : `${from.charAt(0).toUpperCase()}${from.slice(1)} takes ${cap} from ${cfg.name}`;
+      // Caps are per board, and the queue across boards can hold more than one board's cap: the note says what this board gets.
+      p.demoted = e.ai === "skip" ? "the AI says skip it" : capText(from, cap, cfg.name);
     }
     byBucket[from] = keep;
     byBucket[to] = [...over, ...byBucket[to]];

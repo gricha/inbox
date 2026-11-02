@@ -4,8 +4,6 @@ import { AWAY_BAR, foldOf, nextText, problems, runs, says, SORTED_AWAY, type Gro
 import { CardRow, withKeys, type RowCtx } from "./CardRow.tsx";
 import { withCode } from "./Review.tsx";
 
-const EMPTY: Partial<Record<GroupKey, string>> = { now: "Nothing needs you right now.", today: "Nothing else for today." };
-const MORE: Partial<Record<GroupKey, string>> = { now: "need you", today: "for today" };
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
 
 export function Queue({
@@ -37,7 +35,7 @@ export function Queue({
   }
   const filtering = !!filter.trim();
   // While filtering, empty groups take no space.
-  const top = groups.filter((g) => (g.key === "now" || g.key === "today") && (!filtering || g.cards.length));
+  const top = groups.filter((g) => g.key === "queue" && (!filtering || g.cards.length));
   const away = groups.filter((g) => SORTED_AWAY.includes(g.key) && (filtering ? g.cards.length : g.total));
   // The quiet line names later and resolved; the rest show up there only while open (g f, g h, g x, or the filter).
   const bar = away.filter((g) => AWAY_BAR.includes(g.key) || g.open);
@@ -50,16 +48,16 @@ export function Queue({
           <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
-      {filtering && !top.length && <p className="group-empty">No matches in Now or Today.</p>}
+      {filtering && !top.length && <p className="group-empty">No matches in the queue.</p>}
       {top.map((g) => (
-        // An empty group is one line: an empty Now has nothing urgent, so it carries no highlighter and no 0.
-        <section key={g.key} className={cls("group", `g-${g.key}`, !g.cards.length && "none")} aria-labelledby={`h-${g.key}`}>
+        // An empty queue is one line, with no 0.
+        <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
           <h2 id={`h-${g.key}`} className="group-head">
             <span>{g.label}</span>
             {g.cards.length ? (
               <span className="count">{filtering ? `${g.cards.length} of ${g.total}` : g.total}</span>
             ) : (
-              <span className="group-none">{EMPTY[g.key]}</span>
+              <span className="group-none">Nothing needs you right now.</span>
             )}
           </h2>
           {g.cards.length > 0 && <Rows cards={g.cards} g={g} ctx={ctx} folded={g.fold > 0} />}
@@ -79,7 +77,7 @@ export function Queue({
                 selectFold(g.key);
               }}
             >
-              {g.fold} more {MORE[g.key]}
+              {g.fold} more
             </button>
           )}
         </section>

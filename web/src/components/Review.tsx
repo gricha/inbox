@@ -121,7 +121,8 @@ export function Review({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const tops = [...document.querySelectorAll(".rv-file-sec")].map((el) => el.getBoundingClientRect().top);
-        if (tops.length && Date.now() - jumped.current > 400) setFileIdx(currentFile(tops, LINE));
+        const atEnd = scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+        if (tops.length && Date.now() - jumped.current > 400) setFileIdx(currentFile(tops, LINE, atEnd));
       });
     };
     window.addEventListener("scroll", onScroll, { passive: true });

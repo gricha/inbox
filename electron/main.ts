@@ -67,7 +67,7 @@ let quitting = false;
 let prefs: DesktopSettings = desktopSettings();
 let hotkey: { accelerator: string; ok: boolean; error?: string } = { accelerator: "", ok: true };
 let status: Status | null = null;
-let nowCards: Card[] = [];
+let queueCards: Card[] = []; // the queue's top: now, then today
 let loginApplied: boolean | null = null; // last applied, so a refused registration isn't retried on every update
 
 // A separate DESK_HOME (tests, a second desk) gets its own window state, logs and single-instance lock.
@@ -245,7 +245,7 @@ async function refresh(): Promise<void> {
   ]);
   if (settings) applySettings(desktopSettings(settings.values));
   status = s;
-  nowCards = focus?.sections.now ?? [];
+  queueCards = focus ? [...focus.sections.now, ...focus.sections.today] : [];
   updateTray();
   updateBadge();
 }
@@ -482,7 +482,7 @@ function updateTray(): void {
   tray.setToolTip(trayTooltip(status));
   if (mac) tray.setTitle(prefs.menu_bar_count ? trayTitle(status?.text ?? "") : "", { fontType: "monospacedDigit" });
   else tray.setImage(trayImage(now > 0));
-  const cards: MenuItemConstructorOptions[] = nowCards.slice(0, 5).map((c) => ({
+  const cards: MenuItemConstructorOptions[] = queueCards.slice(0, 5).map((c) => ({
     label: cardLabel(c),
     click: () => {
       if (isGitHubUrl(c.url)) void shell.openExternal(c.url);
@@ -496,7 +496,9 @@ function updateTray(): void {
         registerAccelerator: false,
         click: showWindow,
       },
-      ...(cards.length ? [{ type: "separator" as const }, { label: menuLabel(`NOW (${now})`), enabled: false }, ...cards] : []),
+      ...(cards.length
+        ? [{ type: "separator" as const }, { label: menuLabel(`Queue (${queueCards.length})`), enabled: false }, ...cards]
+        : []),
       { type: "separator" },
       { label: "Sync now", click: () => void fetch(`${api}/api/sync`, { method: "POST" }).catch(() => {}) },
       { label: "Settings…", click: openSettings },
@@ -515,5 +517,5 @@ function updateBadge(): void {
   const now = status?.now ?? 0;
   if (mac) app.dock?.setBadge(now ? String(now) : "");
   else if (linux) app.setBadgeCount(now);
-  else win?.setOverlayIcon(now ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, now ? `${now} now` : "");
+  else win?.setOverlayIcon(now ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, now ? `${now} urgent` : "");
 }

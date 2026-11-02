@@ -101,7 +101,7 @@ export function desktopSettings(values?: Record<string, unknown>): DesktopSettin
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
 export const trayTooltip = (s: { now: number; today: number } | null): string =>
-  s ? `Review Desk: ${s.now} now, ${s.today} today` : "Review Desk";
+  s ? `Review Desk: ${s.now + s.today} in the queue${s.now ? `, ${s.now} urgent` : ""}` : "Review Desk";
 
 // Menus read a single & as a mnemonic marker; cut first so && is never split.
 export function menuLabel(text: string, max = 60): string {

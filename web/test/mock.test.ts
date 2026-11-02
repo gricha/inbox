@@ -83,13 +83,13 @@ test("overview, focus and every board", async () => {
 });
 
 // Before the tests below act on cards, while the queue is as the mock starts.
-test("the queue's cards carry pre-flight in every state, your PRs say what's next, and Today folds", async () => {
+test("the queue's cards carry pre-flight in every state, your PRs say what's next, and the queue folds", async () => {
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const top = [...q.sections.now, ...q.sections.today];
   const of = (id: string) => top.find((c) => c.id === id)!;
   assert.ok(
     top.every((c) => c.preflight),
-    "every Now and Today card",
+    "every card in the queue",
   );
   assert.ok([...q.sections.later, ...q.sections.fyi].every((c) => !c.preflight));
   const ready = top.filter((c) => c.preflight?.state === "ready");
@@ -118,10 +118,9 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
 
   const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
   assert.equal(quiet.demoted, "quiet for 3 weeks");
-  assert.ok(q.sections.today.length >= 8 && q.today_cards === 5, "Today folds");
+  assert.ok(top.length > 12 && q.cards === 10, "the queue folds");
   assert.equal(q.paused, null);
-  assert.equal((await call<FocusView>("GET", "/api/focus")).data.today_cards, 5);
-  assert.equal(q.now_cards, 5);
+  assert.equal((await call<FocusView>("GET", "/api/focus")).data.cards, 10);
 });
 
 test("logged out: the queue says Claude is paused once, cards wait, every agent says why, and resuming runs them again", async () => {
@@ -164,7 +163,7 @@ test("item detail resolves short refs and explains placement", async () => {
   const review = d.placements.find((p) => p.board === "work-review")!;
   assert.equal(review.rule_bucket, "now");
   assert.equal(review.bucket, "today");
-  assert.match(review.demoted ?? "", /Now takes/);
+  assert.match(review.demoted ?? "", /are urgent already$/);
   assert.deepEqual(
     review.trace.map((t) => [t.index, t.matched]),
     [

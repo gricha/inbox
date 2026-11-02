@@ -57,7 +57,9 @@ test("hard = true: the first-run template sets it on asks by name, and it must b
   const hard = boards.flatMap((b) => b.rules.filter((r) => r.hard).map((r) => `${b.id}: ${r.when}`));
   assert.deepEqual(hard, [
     "acme-review: me.requested_direct && !me.requested_by_bot",
+    "acme-mine: item.draft && item.updated_hours < 336",
     "personal-review: me.requested_direct && !me.requested_by_bot",
+    "personal-mine: item.draft && item.updated_hours < 336",
   ]);
   const errors = (t: string) => parseConfig(t).errors.map((e) => `${e.path}: ${e.message}`);
   const rule = `why = "{me.requested_by} asked you directly", hard = true`;
@@ -157,7 +159,7 @@ test("a hard rule is a floor: Claude picks Now or Today, and caps and the quiet 
   assert.deepEqual(r.order.now, ["acme/api#3"]);
   assert.deepEqual(r.order.today.toSorted(), ["acme/api#1", "acme/api#2", "acme/api#5"], "Today's cap of one leaves hard ones be");
   assert.deepEqual(r.order.later.toSorted(), ["acme/api#4", "acme/api#6"]);
-  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "Today takes 1 from B"], "not hard: down to Later");
+  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "the queue has 1 from B already"], "not hard: down to Later");
 });
 
 test("caps apply after the judge", () => {
@@ -170,8 +172,8 @@ test("caps apply after the judge", () => {
   assert.deepEqual(
     demoted.map((p) => [p.bucket, p.rule_bucket, p.demoted]),
     [
-      ["today", "now", "Now takes 1 from B"],
-      ["today", "now", "Now takes 1 from B"],
+      ["today", "now", "1 from B is urgent already"],
+      ["today", "now", "1 from B is urgent already"],
     ],
   );
 });
@@ -720,10 +722,9 @@ test(
   "a config from before hard rules: its ask-by-name rule becomes hard once, so Claude and the coordinator can't clear it",
   posix,
   async (c) => {
-    const old = defaultConfigText({ workOrgs: ["acme"] }).replaceAll(
-      'asked you directly", hard = true',
-      'asked you directly", nocap = true',
-    );
+    const old = defaultConfigText({ workOrgs: ["acme"] })
+      .replaceAll('asked you directly", hard = true', 'asked you directly", nocap = true')
+      .replaceAll('finish it", hard = true', 'finish it"');
     const direct = makeItem({
       number: 1,
       author: "carol",

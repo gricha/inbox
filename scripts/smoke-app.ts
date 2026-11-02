@@ -47,7 +47,7 @@ try {
   const page = await app.firstWindow();
   step("window open; waiting for the desk (a fresh home reads your GitHub context first, ~30 s)");
   await page.waitForURL((u) => u.href.startsWith(deskUrl), { timeout: 120_000 });
-  await page.locator(".queue h2", { hasText: "Now" }).waitFor({ timeout: 30_000 });
+  await page.locator(".queue h2", { hasText: "Queue" }).waitFor({ timeout: 30_000 });
   assert.equal(await page.title(), "Review Desk");
   step("queue rendered");
 

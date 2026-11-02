@@ -25,11 +25,11 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 ## Use it
 
-- **The queue** is the whole app: **Now**, marked with a highlighter, and **Today** below it, its first five cards and a line for the rest. Each card has its AI review's summary under it, or for your own PR what to do next. Anything nobody has touched for two weeks drops to Later. What the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), stays off the page behind one quiet "Sorted away" line.
+- **The queue** is the whole app: one list, what's urgent first (its ref marked with a highlighter), its first ten cards and a line for the rest. Each card has its AI review's summary under it, or for your own PR what to do next. Anything nobody has touched for two weeks drops to Later. What the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), stays off the page behind one quiet "Sorted away" line.
 - Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
-- **In flight** (the sidebar, `g i`): your own PRs you've marked done with `d`, in plain words: CI, reviews, threads, conflicts, and what each babysitter is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). A drafted reply waits there for you to send (`y`); a question from a babysitter puts the PR in Now. Settings → In flight turns babysitting off, sets how many run at once, and where your clones are.
+- **In flight** (the sidebar, `g i`): your own PRs you've marked done with `d`, in plain words: CI, reviews, threads, conflicts, and what each babysitter is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). A drafted reply waits there for you to send (`y`); a question from a babysitter puts the PR back in the queue. Settings → In flight turns babysitting off, sets how many run at once, and where your clones are.
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, AI review, Hand-off prompts. Changes save as you go.
-- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in Now. All three can be changed in Settings → Desktop app.
+- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something urgent lands in the queue. All three can be changed in Settings → Desktop app.
 
 | Key       | Does                                                           |
 | --------- | -------------------------------------------------------------- |
@@ -106,7 +106,7 @@ desk connect codex      # Codex instead
 The CLI and the MCP tools talk to the running desk.
 
 ```bash
-desk ls                 # Now and Today in the terminal; `--all` for the rest
+desk ls                 # the queue in the terminal (now, then today); `--all` for the rest
 desk show seer#8463     # why it's there, with the rule trace
 desk done seer#8463     # also: snooze, mute, pin, restore, undo, sync, prompt, brief
 desk settings           # list settings; `desk settings set review.auto_ai false`

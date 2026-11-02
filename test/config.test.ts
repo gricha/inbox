@@ -82,7 +82,7 @@ test("a config written before hard rules gets its ask-by-name rule made hard, an
   assert.equal(migrateHard(now), null, "already hard");
   const edited = old.replace(`why = "{me.requested_by} asked you directly", nocap = true`, `why = "asked by name", nocap = true`);
   const rules = parseConfig(migrateHard(edited)!).loaded!.config.boards.flatMap((b) => b.rules);
-  assert.equal(rules.filter((r) => r.hard).length, 2, "its own why is kept");
+  assert.equal(rules.filter((r) => r.hard && r.bucket === "now").length, 2, "its own why is kept");
   assert.equal(rules.filter((r) => r.nocap).length, 2, "My PRs' changes requested stays nocap");
   assert.equal(
     migrateHard(old.replaceAll(`bucket = "now", why = "{me.requested_by}`, `bucket = "today", why = "{me.requested_by}`)),

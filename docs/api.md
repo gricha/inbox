@@ -170,7 +170,7 @@ interface Card {
   author_bot: boolean;
   bucket: "now" | "today" | "later" | "fyi" | "hide";
   why: string; // the hard rule's reason, Claude's, or the rule's until Claude answers, e.g. "vaind asked you directly"
-  demoted?: string; // e.g. "Now takes 3 from PRs to review"
+  demoted?: string; // over a board's cap: "3 from PRs to review are urgent already" (now to today), "the queue has 6 from PRs to review already" (today to later)
   board: string;
   boards: string[]; // every board it's on
   chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"
@@ -218,12 +218,11 @@ interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
-  now_cards: number; // queue.now_cards: Now shows this many (the weightiest first), the rest behind one line; 0 = all
-  today_cards: number; // queue.today_cards: the same for Today
-  paused: { who: "claude" | "ai"; why: string } | null; // said once above Now: claude, when the AI review, the judge or the coordinator can't log in; ai, when AI reviews nobody asked for keep failing otherwise
+  cards: number; // queue.cards: the queue is one list, now's cards then today's (each the weightiest first); it shows this many, the rest behind one line; 0 = all
+  paused: { who: "claude" | "ai"; why: string } | null; // said once above the queue: claude, when the AI review, the judge or the coordinator can't log in; ai, when AI reviews nobody asked for keep failing otherwise
 }
 // BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items.
-// FocusView is { sections: { now: Card[]; today: Card[] }, now_cards, today_cards, paused }; resolved items are never in it.
+// FocusView is { sections: { now: Card[]; today: Card[] }, cards, paused }; resolved items are never in it.
 
 interface Overview {
   me: string;
@@ -401,7 +400,7 @@ With `inflight.babysit` on (the default), the desk starts an agent for an in-fli
 
 ### Send
 
-A drafted reply shows under its PR in the lane: what it answers, then the reply, with Send (`y`) and Discard (`x`). In Now, the PR's card shows the reply too, and `y` sends it from there. Send posts it on GitHub as you: `addPullRequestReviewThreadReply` for a thread, `addComment` for the PR. It's one of the desk's three writes ([Security model](#security-model)).
+A drafted reply shows under its PR in the lane: what it answers, then the reply, with Send (`y`) and Discard (`x`). In the queue, the PR's card shows the reply too, and `y` sends it from there. Send posts it on GitHub as you: `addPullRequestReviewThreadReply` for a thread, `addComment` for the PR. It's one of the desk's three writes ([Security model](#security-model)).
 
 ## Events
 
