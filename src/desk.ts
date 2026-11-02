@@ -52,7 +52,7 @@ import { classify, placedBy, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, type PrText } from "./review.ts";
+import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
@@ -1008,6 +1008,13 @@ export class Desk {
           ...(ai.since && { since: ai.since }),
           concerns: ai.concerns.slice(0, 2),
           notes: ai.notes.length,
+          ...(ai.chunks && {
+            chunks: {
+              look: ai.chunks.ranked.filter((c) => c.level === "look").length,
+              skim: ai.chunks.ranked.filter((c) => c.level === "skim").length,
+              total: ai.chunks.total,
+            },
+          }),
           at: ai.at,
         }
       : {};
@@ -1249,6 +1256,7 @@ export class Desk {
       handoff_prompt: d.handoff_prompt,
       files,
       files_error: filesError,
+      order: reviewOrder(files, d.ai, d.ai_stale),
       ai: d.ai,
       ai_stale: d.ai_stale,
       ai_error: this.generating.has(id) ? null : (own ?? paused),
@@ -1334,7 +1342,9 @@ export class Desk {
       this.aiFailures = 0;
       if (this.aiPaused) this.log("AI reviews resume");
       this.aiPaused = null;
-      this.log(`AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes`);
+      this.log(
+        `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}`,
+      );
       this.retryAgents(NOT_LOGGED_IN);
       return ai;
     } catch (err) {

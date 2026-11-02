@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { GH_MISSING } from "./github/client.ts";
-import type { AiReview, Item, ReviewFile, ReviewNote, Signals } from "./types.ts";
+import type { AiReview, ChunkRanking, Item, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder, ReviewRest, Signals } from "./types.ts";
 
 const STATUSES = ["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"] as const;
 const MAX_DIFF = 80_000;
@@ -13,6 +13,8 @@ const MAX_FILE = 20_000;
 const MAX_BODY = 4_000;
 const MAX_NOTES = 12;
 const MAX_CONCERNS = 6;
+const MAX_CHUNKS = 20;
+const MAX_WHY = 80;
 const TIMEOUT = 300_000;
 // Lockfiles and snapshots eat the budget and say nothing a reviewer reads.
 const NOISE =
@@ -22,11 +24,24 @@ const NOISE =
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "since", "concerns", "notes", "verdict", "risk"],
+  required: ["summary", "since", "concerns", "chunks", "notes", "verdict", "risk"],
   properties: {
     summary: { type: "string" },
     since: { type: "string" },
     concerns: { type: "array", items: { type: "string" } },
+    chunks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "level", "why"],
+        properties: {
+          id: { type: "string" },
+          level: { type: "string", enum: ["look", "skim"] },
+          why: { type: "string" },
+        },
+      },
+    },
     notes: {
       type: "array",
       items: {
@@ -190,20 +205,77 @@ export function numberPatch(patch: string): string {
     .join("\n");
 }
 
-function diffText(files: ReviewFile[]): string {
+type Hunk = Omit<ReviewHunk, "level" | "rank" | "why" | "notes">;
+
+// h1, h2, … across the files in order: the ids the prompt shows, the ranking names and the review view orders by.
+function hunksOf(files: ReviewFile[]): Hunk[] {
+  const out: Hunk[] = [];
+  for (const [file, f] of files.entries()) {
+    const parts: string[][] = [];
+    for (const line of (f.patch ?? "").split("\n")) {
+      if (line.startsWith("@@")) parts.push([line]);
+      else parts.at(-1)?.push(line);
+    }
+    for (const [index, lines] of parts.entries()) {
+      const body = lines.slice(1);
+      out.push({
+        id: `h${out.length + 1}`,
+        path: f.path,
+        file,
+        index,
+        header: lines[0]!,
+        patch: lines.join("\n"),
+        additions: body.filter((l) => l.startsWith("+")).length,
+        deletions: body.filter((l) => l.startsWith("-")).length,
+      });
+    }
+  }
+  return out;
+}
+
+const perFile = (files: ReviewFile[], hunks: Hunk[]): Hunk[][] => {
+  const out = files.map((): Hunk[] => []);
+  for (const h of hunks) out[h.file]!.push(h);
+  return out;
+};
+
+// The diff as the prompt shows it, and which hunks that holds: not lockfiles, nor what's past the length budget.
+function promptDiff(files: ReviewFile[], ids: boolean): { text: string; hunks: Hunk[]; read: Set<string> } {
+  const hunks = hunksOf(files);
+  const byFile = perFile(files, hunks);
+  const read = new Set<string>();
   let left = MAX_DIFF;
-  return files
-    .map((f) => {
+  const text = files
+    .map((f, i) => {
       const head = `file: ${f.path} (${f.status}${f.previous_path ? ` from ${f.previous_path}` : ""}, +${f.additions} −${f.deletions})`;
       if (f.patch === null) return `${head}\n[no text diff: binary or too large]`;
       if (NOISE.test(f.path)) return `${head}\n[diff left out: lockfile or generated]`;
-      let body = numberPatch(f.patch);
-      if (body.length > MAX_FILE) body = `${body.slice(0, MAX_FILE)}\n[rest of this file's diff left out]`;
+      const parts: string[] = [];
+      const shown: string[] = [];
+      let size = 0;
+      for (const h of byFile[i]!) {
+        const t = `${ids ? `${h.id} ` : ""}${numberPatch(h.patch)}`;
+        if (size + t.length > MAX_FILE) {
+          // A file that is one huge hunk still shows its start.
+          if (!parts.length) {
+            parts.push(t.slice(0, MAX_FILE));
+            shown.push(h.id);
+          }
+          parts.push("[rest of this file's diff left out]");
+          break;
+        }
+        parts.push(t);
+        shown.push(h.id);
+        size += t.length + 1;
+      }
+      const body = parts.join("\n");
       if (body.length > left) return `${head}\n[diff left out: the PR is too long to read whole]`;
       left -= body.length;
+      for (const id of shown) read.add(id);
       return `${head}\n${body}`;
     })
     .join("\n\n");
+  return { text, hunks, read };
 }
 
 // ---------------------------------------------------------------- the prompt
@@ -226,6 +298,8 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
       ? `- since: ${s.me.login} reviewed it before, at ${pr.since.base.slice(0, 7)}. One sentence on what changed since then (the "since your review" diff), and whether that settles the concerns you'd raise.`
       : `- since: an empty string.`,
     `- concerns: the problems worth raising in the review: bugs, risky behaviour changes, missing error handling or tests, security. One specific sentence each, naming the file. Empty when nothing stands out; no style nits, no padding.`,
+    `- chunks: the hunks worth ${s.me.login}'s attention, most worth first, at most ${MAX_CHUNKS}. Each hunk's @@ line starts with its id (h1, h2, …). For each: id; level "look" (read it closely: logic, behaviour, data, security) or "skim" (glance at it); why in at most six words.` +
+      ` Leave out everything not worth reviewing: imports, renames, formatting, generated files, lockfiles, snapshots, tests that just mirror the code.${pr.since ? " They reviewed it before: rank what changed since then first." : ""} Empty when nothing is worth a look.`,
     `- notes: up to ${MAX_NOTES} short notes on the hunks worth explaining, each one or two sentences on what that change does and why it matters. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files.`,
     `  Anchor each note on the first line of the change it explains. Diff lines start with their line number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). Use side "new" with an n number; use side "old" with an o number only for a removal with nothing added. path is exactly as after "file:".`,
     `- verdict: "look" (review it closely), "skim" (glance at it) or "skip" (trivial, or not theirs to review).`,
@@ -243,9 +317,13 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
     body || "(none)",
     ``,
     `changed files (${pr.files.length}):`,
-    diffText(pr.files),
+    promptDiff(pr.files, true).text,
     ...(pr.since
-      ? [``, `since your review, from ${pr.since.base.slice(0, 7)} (${pr.since.files.length} files):`, diffText(pr.since.files)]
+      ? [
+          ``,
+          `since your review, from ${pr.since.base.slice(0, 7)} (${pr.since.files.length} files):`,
+          promptDiff(pr.since.files, false).text,
+        ]
       : []),
     `</pr-${tag}>`,
   ].join("\n");
@@ -383,6 +461,7 @@ export function parseReview(parsed: unknown, files: ReviewFile[]): Omit<AiReview
     notes.push({ path: p, ...at, body: body.slice(0, 600) });
   }
   const since = text(raw.since);
+  const chunks = parseChunks(raw.chunks, files);
   return {
     ...(since && { since }),
     verdict: (["look", "skim", "skip"] as const).find((v) => v === raw.verdict) ?? "skim",
@@ -390,5 +469,103 @@ export function parseReview(parsed: unknown, files: ReviewFile[]): Omit<AiReview
     summary,
     concerns: (Array.isArray(raw.concerns) ? raw.concerns.map(text).filter(Boolean) : []).slice(0, MAX_CONCERNS),
     notes: notes.slice(0, MAX_NOTES),
+    ...(chunks && { chunks }),
   };
+}
+
+// Only hunks the prompt showed can be ranked, each once; no list at all is no ranking, which isn't "nothing worth a look".
+function parseChunks(raw: unknown, files: ReviewFile[]): ChunkRanking | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const { hunks, read } = promptDiff(files, true);
+  const byId = new Map(hunks.map((h) => [h.id, h]));
+  const ranked: ChunkRanking["ranked"] = [];
+  for (const c of raw as Record<string, unknown>[]) {
+    const n = /^h?(\d+)$/i.exec(text(c?.id))?.[1];
+    const h = n ? byId.get(`h${Number(n)}`) : undefined;
+    const level = c?.level === "look" || c?.level === "skim" ? c.level : null;
+    if (!h || !level || !read.has(h.id) || ranked.some((r) => r.id === h.id)) continue;
+    ranked.push({ id: h.id, path: h.path, level, why: text(c.why).slice(0, MAX_WHY) });
+  }
+  const kept = ranked.slice(0, MAX_CHUNKS);
+  return {
+    ranked: [...kept.filter((c) => c.level === "look"), ...kept.filter((c) => c.level === "skim")],
+    unread: hunks.filter((h) => !read.has(h.id) && !NOISE.test(h.path)).map((h) => h.id),
+    capped: ranked.length >= MAX_CHUNKS,
+    total: hunks.length,
+  };
+}
+
+// ---------------------------------------------------------------- the order
+
+const anchorKey = (side: ReviewNote["side"], line: number) => `${side}:${line}`;
+
+// Every hunk once, in reading order: ranked, unread, then the rest by file; without a ranking for this commit, file by file.
+export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boolean): ReviewOrder {
+  const hunks = hunksOf(files);
+  const fresh = ai && !stale ? ai : null;
+  const byId = new Map(hunks.map((h) => [h.id, h]));
+  // Another diff than the one ranked (a retargeted base keeps the head): its ids would point at other code.
+  const ranking = fresh?.chunks?.ranked.every((c) => byId.get(c.id)?.path === c.path) ? fresh.chunks : null;
+
+  // A note on no hunk's lines is about the whole file.
+  const onHunk = new Map<string, { note: number; at: number }[]>();
+  const onFile = new Map<string, number[]>();
+  const lines = new Map(
+    hunks.map((h) => {
+      const m = new Map<string, number>();
+      for (const [at, l] of patchLines(h.patch).entries()) {
+        if (l.kind === "-") m.set(anchorKey("old", l.old), at);
+        else if (l.kind !== "@") m.set(anchorKey("new", l.new), at);
+      }
+      return [h.id, m];
+    }),
+  );
+  for (const [note, n] of (fresh?.notes ?? []).entries()) {
+    const h = n.line ? hunks.find((x) => x.path === n.path && lines.get(x.id)!.has(anchorKey(n.side, n.line))) : undefined;
+    if (h) onHunk.set(h.id, [...(onHunk.get(h.id) ?? []), { note, at: lines.get(h.id)!.get(anchorKey(n.side, n.line))! }]);
+    else onFile.set(n.path, [...(onFile.get(n.path) ?? []), note]);
+  }
+
+  const met = new Set<string>();
+  const order: number[] = [];
+  const take = (file: string, own: number[]) => {
+    const out = met.has(file) ? own : [...(onFile.get(file) ?? []), ...own];
+    met.add(file);
+    order.push(...out);
+    return out;
+  };
+  const view = (h: Hunk, level: ReviewHunk["level"], rank: number | null, why: string | null): ReviewHunk => ({
+    ...h,
+    level,
+    rank,
+    why,
+    notes: take(
+      h.path,
+      (onHunk.get(h.id) ?? []).toSorted((a, b) => a.at - b.at || a.note - b.note).map((x) => x.note),
+    ),
+  });
+
+  const ranked = new Set(ranking?.ranked.map((c) => c.id));
+  const unread = new Set(ranking?.unread);
+  const chunks = ranking
+    ? ranking.ranked.map((c, i) => view(byId.get(c.id)!, c.level, i + 1, c.why))
+    : hunks.map((h) => view(h, null, null, null));
+  const left = ranking ? hunks.filter((h) => unread.has(h.id) && !ranked.has(h.id)).map((h) => view(h, "unread", null, null)) : [];
+  const rest: ReviewRest[] = [];
+  const byFile = perFile(files, hunks);
+  for (const [i, f] of files.entries()) {
+    const own = byFile[i]!;
+    const skipped = ranking ? own.filter((h) => !ranked.has(h.id) && !unread.has(h.id)) : [];
+    if (own.length && !skipped.length) continue;
+    const why = !own.length
+      ? (f.status === "renamed" || f.status === "copied") && !f.additions && !f.deletions
+        ? "renamed without changes"
+        : "no text diff: binary or too large"
+      : NOISE.test(f.path)
+        ? "lockfile or generated"
+        : "not worth reviewing";
+    const hs = skipped.map((h) => view(h, "skip", null, null));
+    rest.push({ path: f.path, file: i, why, hunks: hs, notes: own.length ? [] : take(f.path, []) });
+  }
+  return { ranked: !!ranking, capped: ranking?.capped ?? false, chunks, unread: left, rest, notes: order };
 }

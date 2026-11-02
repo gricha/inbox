@@ -33,7 +33,9 @@ Every agent the desk runs (the AI review, the judge, the coordinator, babysitter
 
 ### The AI review
 
-The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, and short notes anchored to lines of the diff. Claude Code runs as `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` (`claude` from your PATH), and the review says which model wrote it, as Claude Code reports it (`modelUsage`); it gets the prompt on stdin in `~/.review-desk/agent/`, an empty directory the AI review, the judge and login checks share (Claude Code keeps a `~/.claude/projects` entry per directory, so the desk has one), with the PR text fenced as untrusted. When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`), and the review adds `since`: one sentence on what changed since you looked and whether it settles the concerns, which the card shows as its gist ("Since your review: …"). Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`paused`; when the cause is the login, which stops the judge and the coordinator too, it says Claude is paused, as it does when either of those fails on it first), the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review, the judge, the coordinator or a babysitter) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
+The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, short notes anchored to lines of the diff, and a ranking of the diff's hunks. Claude Code runs as `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` (`claude` from your PATH), and the review says which model wrote it, as Claude Code reports it (`modelUsage`); it gets the prompt on stdin in `~/.review-desk/agent/`, an empty directory the AI review, the judge and login checks share (Claude Code keeps a `~/.claude/projects` entry per directory, so the desk has one), with the PR text fenced as untrusted. When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`), and the review adds `since`: one sentence on what changed since you looked and whether it settles the concerns, which the card shows as its gist ("Since your review: …"). Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`paused`; when the cause is the login, which stops the judge and the coordinator too, it says Claude is paused, as it does when either of those fails on it first), the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review, the judge, the coordinator or a babysitter) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
+
+The ranking says which chunks are worth your attention and in what order. The prompt numbers every hunk `h1`, `h2`, … across the files in order (before its `@@` line; a lockfile's hunks keep their numbers but aren't shown, and the "since your review" diff has none), and Claude answers `chunks`: at most 20 hunk ids, most worth first, each with a level (`look` or `skim`) and a few words why; on a re-review, what changed since you looked comes first. Everything it leaves out is not worth reviewing (imports, renames, formatting, generated files, lockfiles, snapshots, tests that mirror the code). The desk keeps only ids the prompt showed, each once, puts looks before skims, and stores the ranking with the review (`chunks`: the ids with their paths, the hunks left out for length as `unread`, whether the list filled the cap, the total). `GET /api/review/:id` turns it into `order`: the chunks to read, ranked, then the unread ones, then the rest by file with why, each hunk with its own patch, level, rank, why and the notes that sit on it, and `order.notes`, the notes in that reading order. A review from before ranking, one for an older commit, or a ranking whose ids no longer name the same files keeps today's order: every hunk file by file (`ranked: false`). Ranking adds about 20 output tokens a chunk, so even a full list costs little: measured on 2026-11-02 on honojs/hono#5547 (5 files, 14 hunks, +63 −16), the whole review took 90 s and 7,133 output tokens (4,338 of them thinking), and its 7 ranked chunks were 0.5 KB of the 4.9 KB answer.
 
 ### The policy and the judge
 
@@ -125,7 +127,7 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }` with a 4x
 | GET         | `/api/item`                  | `?id=<ref>` (encode `#` as `%23`)                                 | `ItemDetail`                                                                                                                                                                                                                                                                                                                                   | ✓                  |
 | POST        | `/api/act`                   | `{ id: string, action: Action, until?: string, reason?: string }` | `{ ok: true, state: ItemState, undo_seq: number }` (`seen` and `undo` return `undo_seq: 0`). With `X-Desk-Agent: coordinator` the action and its `reason` go in the coordinator's log                                                                                                                                                          | ✓                  |
 | POST        | `/api/undo`                  | `{ seq?: number, agent?: true }` (default: the latest action)     | `{ ok: true, id: string, action: Action }`; 409 if a later action on the same item must be undone first, or for an agent (`agent`, or the coordinator's header) undoing an in-flight mark, or the coordinator undoing what it didn't do                                                                                                        | ✓                  |
-| GET         | `/api/review/:id`            | `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`)             | `ReviewView`: the PR's facts, its changed files, the AI review and whether you can approve; 400 for an issue. Opening it asks for the AI review when `review.auto_ai` is on and there's none for this commit                                                                                                                                   | ✓                  |
+| GET         | `/api/review/:id`            | `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`)             | `ReviewView`: the PR's facts, its changed files, the order to read its hunks in, the AI review and whether you can approve; 400 for an issue. Opening it asks for the AI review when `review.auto_ai` is on and there's none for this commit                                                                                                   | ✓                  |
 | POST        | `/api/review/:id/ai`         | `{ force?: boolean }`                                             | `{ ok: true, ai: AiReview }`: the one for this commit unless `force`; joins a run already going; 502 with the reason if the agent fails                                                                                                                                                                                                        | ✓                  |
 | POST        | `/api/review/:id/approve`    | `{ head_oid: string, body?: string }`                             | `{ ok: true, url: string }`: approves the PR on GitHub at `head_oid`, the commit the view showed (below), then refreshes that PR (it resolves as `you approved` within seconds) and runs a full sync; 409 for your own PR, a closed one, one you approved at this commit, or new commits since; 502 with GitHub's reason                       | ✓                  |
 | POST        | `/api/sync`                  |                                                                   | `{ ok: true }` (starts a sync now)                                                                                                                                                                                                                                                                                                             |                    |
@@ -210,6 +212,7 @@ interface Preflight {
   summary?: string;
   concerns?: string[]; // at most 2
   notes?: number;
+  chunks?: { look: number; skim: number; total: number }; // hunks ranked worth a look or a skim, of all in the diff; unset without a ranking
   at?: string;
 }
 
@@ -318,6 +321,7 @@ interface ReviewView {
   handoff_prompt: string;
   files: { path: string; previous_path: string | null; status: string; additions: number; deletions: number; patch: string | null }[];
   files_error: string | null; // the diff couldn't be fetched
+  order: ReviewOrder; // every hunk once, in the order to read them (below)
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
@@ -332,9 +336,41 @@ interface AiReview {
   summary: string;
   concerns: string[];
   notes: { path: string; line: number; side: "new" | "old"; body: string }[]; // line 0: about the whole file
+  chunks?: {
+    // absent on reviews written before ranking, or when Claude gave no list
+    ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // look, then skim, each most worth first; at most 20
+    unread: string[]; // hunks left out of the prompt because the PR was too long to read whole
+    capped: boolean; // Claude ranked as many as it may: more may be worth a look
+    total: number; // hunks in the diff
+  };
   head_oid: string; // the commit it read
   model: string; // as Claude Code reports it ("claude-opus-5[1m]"), else "claude-code"
   at: string;
+}
+
+// The desk's reading order for GET /api/review/:id: clients render it as is, without sorting or ranking anything.
+interface ReviewOrder {
+  ranked: boolean; // false: no ranking for this commit (none yet, written before ranking, or a newer push): chunks is every hunk, file by file
+  capped: boolean; // Claude ranked as many as it may: something in rest may still be worth a look
+  chunks: ReviewHunk[]; // read these, in this order: look, then skim, each most worth first
+  unread: ReviewHunk[]; // Claude didn't see these (the PR was too long to read whole), file by file
+  rest: { path: string; file: number; why: string; hunks: ReviewHunk[]; notes: number[] }[]; // not worth reviewing, by file; why: "not worth reviewing", "lockfile or generated", "no text diff: binary or too large", "renamed without changes"; notes: a file's own when it has no hunks
+  notes: number[]; // indices into ai.notes in reading order; empty when the review is for an older commit
+}
+
+interface ReviewHunk {
+  id: string; // h1, h2, … across the files in order, as the AI review's prompt numbers them
+  path: string;
+  file: number; // index in files
+  index: number; // its place among its file's hunks
+  header: string; // its @@ line
+  patch: string; // its own lines, the @@ line first: render it on its own
+  additions: number;
+  deletions: number;
+  level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking
+  rank: number | null; // 1 = read it first; look and skim only
+  why: string | null; // Claude's few words for look and skim
+  notes: number[]; // indices into ai.notes to show with it; the file's own notes (line 0) ride on its first hunk in the order
 }
 
 interface ActivityEvent {

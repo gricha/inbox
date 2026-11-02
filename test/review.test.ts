@@ -16,10 +16,12 @@ import {
   claudeError,
   claudeSpawn,
   CLAUDE_PAUSED,
+  generateReview,
   numberPatch,
   parseFiles,
   parseReview,
   probeLogin,
+  reviewOrder,
   type PrText,
 } from "../src/review.ts";
 import { analyze } from "../src/signals.ts";
@@ -284,6 +286,274 @@ test("a re-review gets the diff since your review and answers with a since line"
   assert.ok(!("since" in parseReview({ summary: "x", since: "" }, [])));
 });
 
+// ---------------------------------------------------------------- the ranking
+
+const PNG: ReviewFile = { path: "logo.png", previous_path: null, status: "added", additions: 0, deletions: 0, patch: null };
+const OTHER: ReviewFile = { ...FILE, path: "src/b.ts" };
+const aiOf = (o: Partial<AiReview>): AiReview => ({
+  verdict: "look",
+  risk: "medium",
+  summary: "x",
+  concerns: [],
+  notes: [],
+  head_oid: "abc",
+  model: "claude-opus-5[1m]",
+  at: NOW.toISOString(),
+  ...o,
+});
+const signalsOf = (item: Item) =>
+  analyze(item, makeContext(), parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config, NOW).signals;
+
+test("the prompt numbers hunks h1, h2, … across files for the ranking; a lockfile's keep their number unshown, the since diff has none", () => {
+  const item = makeItem({});
+  const later: ReviewFile = { ...FILE, path: "src/later.ts" };
+  const p = buildPrompt(
+    item,
+    signalsOf(item),
+    "",
+    { body: "", files: [FILE, LOCK, OTHER], since: { base: "abc1234def", files: [later] } },
+    "TAG",
+  );
+  assert.match(p, /^h1 @@ -10,3 \+10,4 @@ export function plan\(q: Query\) \{\nn10 {5}const rows/m);
+  assert.match(p, /^h2 @@ -40,1 \+41,1 @@$/m);
+  assert.ok(!/^h3 /m.test(p), "the lockfile's hunk is h3, left out");
+  assert.match(p, /file: src\/b\.ts \(modified, \+3 −2\)\nh4 @@ -10,3/);
+  assert.match(p, /^h5 @@ -40,1/m);
+  assert.equal(p.split("\n").filter((l) => l.startsWith("@@ ")).length, 2, "the since diff's hunks aren't rankable");
+  assert.match(p, /- chunks: the hunks worth me's attention, most worth first, at most 20\./);
+  assert.match(p, /rank what changed since then first/);
+  assert.doesNotMatch(buildPrompt(item, signalsOf(item), "", { body: "", files: [FILE] }, "TAG"), /changed since then first/);
+});
+
+test("parseReview ranks only hunks the prompt showed, each once, look before skim; unknown ids and bad levels are dropped", () => {
+  const files = [FILE, LOCK, OTHER];
+  const r = parseReview(
+    {
+      summary: "x",
+      chunks: [
+        { id: "h4", level: "skim", why: " Same change, other file. " },
+        { id: "H2", level: "look", why: "x".repeat(200) },
+        { id: "h99", level: "look", why: "no such hunk" },
+        { id: "h3", level: "look", why: "the lockfile: never shown" },
+        { id: "2", level: "skim", why: "a repeat" },
+        { id: "h1", level: "skip", why: "not a level it may rank" },
+        { id: "nonsense", level: "look", why: "" },
+        { id: 5, level: "look", why: "not a string" },
+        null,
+      ],
+    },
+    files,
+  );
+  assert.deepEqual(r.chunks, {
+    ranked: [
+      { id: "h2", path: "src/planner/plan.ts", level: "look", why: "x".repeat(80) },
+      { id: "h4", path: "src/b.ts", level: "skim", why: "Same change, other file." },
+    ],
+    unread: [],
+    capped: false,
+    total: 5,
+  });
+  assert.ok(!("chunks" in parseReview({ summary: "x" }, files)), "no list is no ranking");
+  assert.deepEqual(parseReview({ summary: "x", chunks: [] }, files).chunks, { ranked: [], unread: [], capped: false, total: 5 });
+});
+
+test("at most 20 chunks are ranked and a full list says so; hunks left out for length are unread, not ranked", () => {
+  const many: ReviewFile = {
+    ...FILE,
+    path: "src/many.ts",
+    patch: Array.from({ length: 25 }, (_, i) => `@@ -${i * 10 + 1},1 +${i * 10 + 1},1 @@\n-a${i}\n+b${i}`).join("\n"),
+  };
+  const all = Array.from({ length: 25 }, (_, i) => ({ id: `h${i + 1}`, level: i % 2 ? "look" : "skim", why: "" }));
+  const r = parseReview({ summary: "x", chunks: all }, [many]).chunks!;
+  const ids = (from: number) => Array.from({ length: 10 }, (_, i) => `h${from + 2 * i}`);
+  assert.deepEqual(
+    r.ranked.map((c) => c.id),
+    [...ids(2), ...ids(1)],
+    "Claude's first 20, looks first",
+  );
+  assert.equal(r.capped, true);
+  assert.equal(parseReview({ summary: "x", chunks: all.slice(0, 19) }, [many]).chunks!.capped, false);
+
+  // Six files of about 17 KB of numbered diff each: the prompt's 80 KB holds four.
+  const item = makeItem({});
+  const big = Array.from({ length: 6 }, (_, i): ReviewFile => ({
+    ...FILE,
+    path: `src/big${i}.ts`,
+    patch: `@@ -0,0 +1,1000 @@\n${"+0123456789\n".repeat(1000).trimEnd()}`,
+  }));
+  const files = [...big, LOCK];
+  const p = buildPrompt(item, signalsOf(item), "", { body: "", files }, "TAG");
+  const left = big.flatMap((f, i) =>
+    p.includes(`file: ${f.path} (modified, +3 −2)\n[diff left out: the PR is too long`) ? [`h${i + 1}`] : [],
+  );
+  assert.deepEqual(left, ["h5", "h6"]);
+  const ranked = parseReview(
+    {
+      summary: "x",
+      chunks: [
+        { id: "h6", level: "look", why: "never seen" },
+        { id: "h1", level: "look", why: "seen" },
+      ],
+    },
+    files,
+  );
+  assert.deepEqual(ranked.chunks, {
+    ranked: [{ id: "h1", path: "src/big0.ts", level: "look", why: "seen" }],
+    unread: ["h5", "h6"],
+    capped: false,
+    total: 7,
+  });
+});
+
+test(
+  "a fake claude ranks by the prompt's ids: generateReview keeps the hunks it can place",
+  { skip: process.platform === "win32" },
+  async () => {
+    const out = {
+      structured_output: {
+        summary: "Caps planner rows.",
+        since: "",
+        concerns: [],
+        chunks: [
+          { id: "h2", level: "look", why: "old() swapped for fresh()" },
+          { id: "h9", level: "look", why: "made up" },
+          { id: "h1", level: "skim", why: "caps rows" },
+        ],
+        notes: [],
+        verdict: "look",
+        risk: "low",
+      },
+      modelUsage: { "claude-opus-5[1m]": {} },
+    };
+    const f = fakeAgent("claude", `echo '${JSON.stringify(out)}'`);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const was = process.env.DESK_CLAUDE;
+    process.env.DESK_CLAUDE = f.bin;
+    try {
+      const item = makeItem({ head_oid: "c0ffee" });
+      const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE, LOCK] }, agentDir(home));
+      const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
+      const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { required: string[]; properties: Record<string, unknown> };
+      assert.ok(schema.required.includes("chunks") && "chunks" in schema.properties);
+      assert.match(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), /^h2 @@ -40,1 \+41,1 @@$/m);
+      assert.deepEqual(ai.chunks, {
+        ranked: [
+          { id: "h2", path: FILE.path, level: "look", why: "old() swapped for fresh()" },
+          { id: "h1", path: FILE.path, level: "skim", why: "caps rows" },
+        ],
+        unread: [],
+        capped: false,
+        total: 3,
+      });
+      assert.equal(ai.head_oid, "c0ffee");
+    } finally {
+      process.env.DESK_CLAUDE = was;
+      fs.rmSync(f.dir, { recursive: true });
+      fs.rmSync(home, { recursive: true });
+    }
+  },
+);
+
+test("the review order: ranked chunks across files, then unread, then the rest by file and why; notes follow their hunks", () => {
+  const renamed: ReviewFile = {
+    path: "src/new.ts",
+    previous_path: "src/old.ts",
+    status: "renamed",
+    additions: 0,
+    deletions: 0,
+    patch: null,
+  };
+  const files = [FILE, LOCK, OTHER, PNG, renamed];
+  const ai = aiOf({
+    chunks: {
+      ranked: [
+        { id: "h4", path: "src/b.ts", level: "look", why: "the fix" },
+        { id: "h1", path: "src/planner/plan.ts", level: "skim", why: "caps rows" },
+      ],
+      unread: ["h5"],
+      capped: false,
+      total: 5,
+    },
+    notes: [
+      { path: "src/b.ts", side: "new", line: 12, body: "on h4" },
+      { path: "src/planner/plan.ts", side: "new", line: 0, body: "the whole file" },
+      { path: "src/planner/plan.ts", side: "old", line: 40, body: "on h2" },
+      { path: "src/b.ts", side: "new", line: 10, body: "on h4, above the other" },
+      { path: "logo.png", side: "new", line: 0, body: "the image" },
+      { path: "gone.ts", side: "new", line: 1, body: "not in the diff" },
+    ],
+  });
+  const o = reviewOrder(files, ai, false);
+  assert.equal(o.ranked, true);
+  assert.equal(o.capped, false);
+  assert.deepEqual(
+    o.chunks.map((h) => [h.id, h.path, h.file, h.index, h.rank, h.level, h.why, h.notes]),
+    [
+      ["h4", "src/b.ts", 2, 0, 1, "look", "the fix", [3, 0]],
+      ["h1", "src/planner/plan.ts", 0, 0, 2, "skim", "caps rows", [1]],
+    ],
+  );
+  assert.deepEqual(o.chunks[0]!.patch, PATCH.split("\n").slice(0, 6).join("\n"));
+  assert.deepEqual([o.chunks[0]!.header, o.chunks[0]!.additions, o.chunks[0]!.deletions], [PATCH.split("\n")[0], 2, 1]);
+  assert.deepEqual(
+    o.unread.map((h) => [h.id, h.level, h.rank]),
+    [["h5", "unread", null]],
+  );
+  assert.deepEqual(
+    o.rest.map((r) => [r.path, r.file, r.why, r.hunks.map((h) => [h.id, h.level, h.notes]), r.notes]),
+    [
+      ["src/planner/plan.ts", 0, "not worth reviewing", [["h2", "skip", [2]]], []],
+      ["package-lock.json", 1, "lockfile or generated", [["h3", "skip", []]], []],
+      ["logo.png", 3, "no text diff: binary or too large", [], [4]],
+      ["src/new.ts", 4, "renamed without changes", [], []],
+    ],
+  );
+  assert.deepEqual(o.notes, [3, 0, 1, 2, 4], "] and [ follow the order");
+});
+
+test("without a ranking for this commit the order is today's: every hunk file by file; an older commit's notes aren't placed", () => {
+  const files = [FILE, LOCK, PNG];
+  const notes = [
+    { path: FILE.path, side: "new" as const, line: 41, body: "on h2" },
+    { path: FILE.path, side: "new" as const, line: 11, body: "on h1" },
+  ];
+  const old = reviewOrder(files, aiOf({ notes }), false);
+  assert.deepEqual(
+    [old.ranked, old.capped, old.chunks.map((h) => [h.id, h.level, h.rank, h.notes]), old.unread, old.notes],
+    [
+      false,
+      false,
+      [
+        ["h1", null, null, [1]],
+        ["h2", null, null, [0]],
+        ["h3", null, null, []],
+      ],
+      [],
+      [1, 0],
+    ],
+  );
+  assert.deepEqual(
+    old.rest.map((r) => [r.path, r.why]),
+    [["logo.png", "no text diff: binary or too large"]],
+  );
+  const ranked = aiOf({
+    notes,
+    chunks: { ranked: [{ id: "h2", path: FILE.path, level: "look", why: "w" }], unread: [], capped: false, total: 3 },
+  });
+  for (const o of [reviewOrder(files, ranked, true), reviewOrder(files, null, false)]) {
+    assert.equal(o.ranked, false);
+    assert.deepEqual(o.notes, []);
+    assert.deepEqual(
+      o.chunks.map((h) => h.id),
+      ["h1", "h2", "h3"],
+    );
+  }
+  // The same head with another diff (a retargeted base): ids that now name other files aren't trusted.
+  const moved = reviewOrder([OTHER, FILE], ranked, false);
+  assert.equal(moved.ranked, false);
+  assert.equal(reviewOrder(files, ranked, false).ranked, true);
+});
+
 // ---------------------------------------------------------------- the desk
 
 const ask = (n: number, o: Partial<Item> = {}) =>
@@ -311,7 +581,7 @@ function deferred() {
 }
 
 // Fake diffs, and a fake agent that holds each review until the test lets it go.
-function fakeDeps() {
+function fakeDeps(chunks?: unknown) {
   const fetched: string[] = [];
   const started: string[] = [];
   const gates = new Map<string, ReturnType<typeof deferred>>();
@@ -329,7 +599,7 @@ function fakeDeps() {
       if (fail) throw new Error(fail);
       const notes = [{ path: FILE.path, side: "new", line: 11, body: "Caps the rows." }];
       return {
-        ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes }, pr.files),
+        ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes, chunks }, pr.files),
         head_oid: item.head_oid,
         model: "claude-opus-5[1m]",
         at: NOW.toISOString(),
@@ -350,7 +620,7 @@ function fakeDeps() {
   };
 }
 
-async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Record<string, unknown> } = {}) {
+async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Record<string, unknown>; chunks?: unknown } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
   // No judge: these tests are about the AI review (test/judge.test.ts runs it).
   fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, ...opts.settings }));
@@ -361,7 +631,7 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
     if (q.includes("author:@me") && !q.includes("-author:@me")) return all.filter((i) => i.author === "me").map((i) => i.id);
     return [];
   });
-  const f = fakeDeps();
+  const f = fakeDeps(opts.chunks);
   const desk = new Desk({ home, github: gh, now: () => NOW, notify: () => {}, log: () => {}, review: f.deps, writer: opts.writer });
   await desk.init();
   // Waits out a sync already running (approve starts one), then runs a fresh one.
@@ -575,6 +845,35 @@ test("every Now and Today card carries its pre-flight: running, queued, ready, s
   await t.sync();
   assert.equal(pf("acme/api#2").state, "off");
   assert.equal(pf("acme/api#1").state, "ready", "one that's written stays ready");
+  t.cleanup();
+});
+
+test("the review view sends the desk's reading order, and the card counts what's worth a look", async () => {
+  const t = await setup([ask(1)], { chunks: [{ id: "h2", level: "look", why: "swaps old for fresh" }] });
+  await t.sync();
+  let v = await t.desk.reviewView("api#1");
+  assert.equal(v.order.ranked, false, "no review yet: today's order");
+  assert.deepEqual(
+    v.order.chunks.map((h) => h.id),
+    ["h1", "h2"],
+  );
+  await t.f.release("acme/api#1");
+  v = await t.desk.reviewView("api#1");
+  assert.deepEqual(
+    [v.order.ranked, v.order.chunks.map((h) => [h.id, h.rank, h.level, h.why]), v.order.rest.map((r) => r.hunks.map((h) => h.id))],
+    [true, [["h2", 1, "look", "swaps old for fresh"]], [["h1"]]],
+  );
+  assert.deepEqual(v.order.notes, [0]);
+  const card = t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")!;
+  assert.deepEqual(card.preflight?.chunks, { look: 1, skim: 0, total: 2 });
+
+  // An older review written before ranking keeps working: today's order, its notes in place, no counts on the card.
+  const { chunks: _, ...unranked } = t.desk.item("api#1").ai!;
+  t.desk.store.set("review:acme/api#1", unranked);
+  t.desk.changed();
+  v = await t.desk.reviewView("api#1");
+  assert.deepEqual([v.order.ranked, v.order.chunks.map((h) => h.id), v.order.notes], [false, ["h1", "h2"], [0]]);
+  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")!.preflight?.chunks, undefined);
   t.cleanup();
 });
 
