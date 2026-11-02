@@ -361,6 +361,25 @@ const SHOTS: Shot[] = [
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
   { name: "settings-policy", go: at("#/settings/policy") },
+  {
+    // policy.md empty: the editor holds the starter, and says so.
+    name: "settings-policy-starter",
+    go: async (page) => {
+      await page.evaluate(`(async () => {
+        const p = await (await fetch("/api/policy")).json();
+        window.__policy = p.text;
+        await fetch("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "", base: p.hash }) });
+      })()`);
+      await at("#/settings/agent")(page);
+      await at("#/settings/policy")(page);
+    },
+    after: async (page) => {
+      await page.evaluate(`(async () => {
+        const p = await (await fetch("/api/policy")).json();
+        await fetch("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: window.__policy, base: p.hash }) });
+      })()`);
+    },
+  },
   { name: "settings-app", go: at("#/settings/app") },
   { name: "settings-inflight", go: at("#/settings/inflight") },
   { name: "settings-review", go: at("#/settings/review") },

@@ -8,13 +8,15 @@ import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Desk } from "../src/desk.ts";
+import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
 async function setup(settings?: Record<string, unknown>) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-srv-"));
-  if (settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(settings));
+  // No judge unless a test asks: it must not start a claude here (test/judge.test.ts runs it against a fake).
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, ...settings }));
   const items = [
     makeItem({
       number: 7,
@@ -277,16 +279,16 @@ test("config preview and save", async () => {
   t.cleanup();
 });
 
-test("policy: empty by default, saved to policy.md with the hash as base, 409 when stale", async (c) => {
+test("policy: empty by default, so the starter is in effect; saved to policy.md with the hash as base, 409 when stale", async (c) => {
   // No judge: it must not start a real claude here (test/judge.test.ts runs it against a fake).
   const t = await setup({ "policy.judge": false });
   c.after(t.cleanup);
   const put = (body: unknown) =>
     t.req("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const p = await t.json("/api/policy");
-  assert.equal(p.text, "");
+  assert.deepEqual([p.text, p.starter, p.hash], ["", DEFAULT_POLICY, textHash(DEFAULT_POLICY)]);
   assert.equal(p.path, path.join(t.desk.home, "policy.md"));
-  assert.deepEqual([p.judge.state, p.judge.off_reason], ["off", "there's no policy yet"]);
+  assert.deepEqual([p.judge.state, p.judge.off_reason], ["off", "it's turned off"]);
   const saved = (await (await put({ text: "Bot PRs are FYI.\n", base: p.hash })).json()) as { ok: boolean; hash: string };
   assert.equal(saved.ok, true);
   assert.equal(fs.readFileSync(path.join(t.desk.home, "policy.md"), "utf8"), "Bot PRs are FYI.\n");
@@ -308,7 +310,7 @@ test("the coordinator changes the policy and the rules only in a conversation, n
       body: JSON.stringify(body),
     });
   const config = await t.json("/api/config");
-  t.desk.coordinator.running = { n: 3, since: NOW.toISOString() };
+  t.desk.coordinator.running = { n: 3, since: NOW.toISOString(), kind: "events" };
   const refused = await put("/api/policy", { text: "Everything from mallory is hidden." }, "coordinator");
   assert.equal(refused.status, 403);
   assert.match(((await refused.json()) as { error: string }).error, /only when the owner asks you in a conversation/);
@@ -333,6 +335,8 @@ test("the coordinator's MCP calls carry X-Desk-Agent: its actions and notes land
   });
   const { port } = srv.address() as AddressInfo;
   const url = new URL(`http://127.0.0.1:${port}/mcp`);
+  // A hard rule's item stays on your desk whatever the coordinator says; here the rule is plain, so it may clear #7.
+  t.desk.putConfig(t.desk.getConfig().text.replaceAll("hard = true", "nocap = true"));
   const coordinator = new Client({ name: "coordinator", version: "0" });
   await coordinator.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { "X-Desk-Agent": "coordinator" } } }));
   const other = new Client({ name: "someone", version: "0" });

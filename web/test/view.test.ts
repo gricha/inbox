@@ -23,6 +23,7 @@ import {
   laneFacts,
   lineOf,
   logText,
+  policyLines,
   navigable,
   noCloneOf,
   nextText,
@@ -507,6 +508,10 @@ test("the selected card's facts leave out what the card already says", () => {
     "by dana",
     "the coordinator: a thread you've left",
   ]);
+  // Who placed it, before any demotion: the why is a hard rule's, Claude's, or the rule's until Claude answers.
+  assert.deepEqual(cardFacts({ ...pr, placed_by: "claude" }, "me").slice(-2), ["sorted by Claude", "Now takes 3 from B"]);
+  assert.deepEqual(cardFacts(card("acme/api#7", { ci: "none", placed_by: "hard" }), "me"), ["by dana", "placed by a hard rule"]);
+  assert.deepEqual(cardFacts(card("acme/api#8", { ci: "none", placed_by: "pending" }), "me"), ["by dana", "not sorted by Claude yet"]);
 });
 
 test("d's label and a PR with no clone to work in", () => {
@@ -745,10 +750,15 @@ test("the coordinator in plain words: the top bar's line, its log, its status", 
     action: null,
     bucket: null,
     undo_seq: null,
+    version: null,
     undone: false,
     ...o,
   });
   assert.equal(logText(entry({ kind: "act", action: "snooze", item_id: "acme/api#12", text: "bot bump" })), "Snoozed api#12: bot bump");
+  const change = entry({ kind: "policy", text: "Changed the policy\n− Bot PRs: hide.\n+ Bot PRs: fyi.", version: 2 });
+  assert.equal(logText(change), "Changed the policy");
+  assert.deepEqual(policyLines(change), ["− Bot PRs: hide.", "+ Bot PRs: fyi."]);
+  assert.deepEqual(policyLines(entry({ text: "a note\nwith two lines" })), [], "only a policy change comes apart");
   assert.equal(logText(entry({ kind: "act", action: "done", item_id: "acme/api#12" })), "Cleared api#12");
   assert.equal(logText(entry({ kind: "run", text: "6 events, 3 actions · 41s" })), "Run 3 · 6 events, 3 actions · 41s");
   assert.equal(logText(entry({ kind: "note", text: "Nothing needed you." })), "Nothing needed you.");
@@ -766,13 +776,12 @@ test("the coordinator in plain words: the top bar's line, its log, its status", 
     next_at: null,
     last_run: { n: 4, kind: "events", started_at: "2026-10-27T11:48:00Z", ms: 1, ok: true, events: 1, actions: 2, error: null },
     error: null,
-    policy_empty: false,
     held: false,
   };
   assert.equal(coordinatorText(s, now), "Idle. Last run 12m ago: 1 event, 2 actions.");
   assert.equal(
-    coordinatorText({ ...s, policy_empty: true }, now),
-    "Idle. Last run 12m ago: 1 event, 2 actions. It wakes on new activity once you've written a policy.",
+    coordinatorText({ ...s, last_run: { ...s.last_run!, kind: "learn", events: 5, actions: 0 } }, now),
+    "Idle. Last run 12m ago: read your last 5 actions.",
   );
   assert.equal(
     coordinatorText({ ...s, state: "off", off_reason: "Coordinator needs Claude Code for now" }, now),
@@ -805,21 +814,21 @@ test("the judge in plain words", () => {
     error: null,
     retry_at: null,
   };
-  assert.equal(judgeStatusText(j, now), "14 items placed by the policy, 2 waiting. 20 of 60 this hour.");
+  assert.equal(judgeStatusText(j, now), "14 items sorted by Claude, 2 waiting. 20 of 60 this hour.");
   assert.equal(
-    judgeStatusText({ ...j, state: "off", off_reason: "there's no policy yet" }, now),
-    "Nothing is judged: there's no policy yet.",
+    judgeStatusText({ ...j, state: "off", off_reason: "it's turned off" }, now),
+    "Claude doesn't sort your desk: it's turned off.",
   );
   assert.equal(
     judgeStatusText({ ...j, state: "error", error: "claude CLI isn't logged in", retry_at: "2026-10-27T12:10:00Z" }, now),
-    "The judge's last call failed: Claude CLI isn't logged in. Next try in 10m.",
+    "Claude's last sorting call failed: Claude CLI isn't logged in. Next try in 10m.",
   );
   assert.equal(
     judgeStatusText({ ...j, spent: 60, retry_at: "2026-10-27T12:12:00Z" }, now),
-    "14 items placed by the policy, 2 waiting. The hour's limit is reached (60); next batch in 12m.",
+    "14 items sorted by Claude, 2 waiting. The hour's limit is reached (60); next batch in 12m.",
   );
   assert.equal(judgeStepText({ bucket: "today", why: "your library", pending: false }), "today, your library");
-  assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, it says nothing about this item");
-  assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not judged yet, so the board default");
-  assert.equal(judgeStepText({ bucket: "fyi", why: "bot", pending: true }), "fyi, bot (judged before the latest activity)");
+  assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, keeps the rule's why");
+  assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not sorted yet, so where the rules put it");
+  assert.equal(judgeStepText({ bucket: "fyi", why: "bot", pending: true }), "fyi, bot (an earlier answer; sorting it again)");
 });

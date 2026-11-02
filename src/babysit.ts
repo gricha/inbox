@@ -876,7 +876,7 @@ export class Babysitter {
     this.notes.delete(id);
     if (this.loggedOut) {
       // Anything but the login failing again (a timeout, say) lets the run try.
-      const still = await probeLogin().then(
+      const still = await probeLogin(desk.agentDir()).then(
         () => false,
         (e: unknown) => (e as Error).message === NOT_LOGGED_IN,
       );

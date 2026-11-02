@@ -287,6 +287,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, {
         path: "/home/you/.review-desk/policy.md",
         text: api.policy,
+        starter: "Less is more.",
         hash: api.policy ? "beef" : "e3b0",
         judge: {
           state: "idle",

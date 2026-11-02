@@ -568,7 +568,7 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
 const RULES = {
   id: "rules",
   title: "Rules",
-  help: "Which GitHub searches feed the queue, and the rules that decide where each item lands. Everything a rule doesn't send to Now or Today is sorted away for you.",
+  help: "Which GitHub searches feed the queue, and the rules that place each item. Claude then sorts it by your policy, with the rule's placement as its hint; a hard rule's placement is final.",
 };
 
 export function Settings({

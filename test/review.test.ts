@@ -1,12 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
+  agentDir,
   askClaude,
   buildPrompt,
   claudeEnvelope,
@@ -174,9 +177,29 @@ test("claude runs directly, except a Windows shim, which goes through cmd.exe fu
     assert.throws(() => claudeSpawn(bad, args, "win32"), /cmd\.exe/);
 });
 
+test("stopping a call to a claude that isn't there signals nothing else", { skip: process.platform === "win32" }, async () => {
+  // In its own process group: Node's own `signal` option would kill that whole group here (the spawn failed, so pid 0).
+  const code = `import { runCommand } from ${JSON.stringify(pathToFileURL(path.resolve("src/review.ts")).href)};
+const ac = new AbortController();
+const p = runCommand({ file: "/nonexistent/claude", args: [], shell: false }, { timeout: 5000, missing: "missing", signal: ac.signal });
+ac.abort();
+console.log(await p.catch((e) => e.message));`;
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--input-type=module", "-e", code], { detached: true });
+  let out = "";
+  child.stdout.on("data", (d: Buffer) => {
+    out += d.toString();
+  });
+  const [exit, signal] = await new Promise<[number | null, string | null]>((resolve) => {
+    child.on("close", (c, sig) => {
+      resolve([c, sig]);
+    });
+  });
+  assert.deepEqual([exit, signal, out.trim()], [0, null, "stopped"]);
+});
+
 test("a missing claude command says where to set its path", async () => {
   await assert.rejects(
-    askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude") }),
+    askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude"), dir: os.tmpdir() }),
     /not found: install Claude Code so claude runs from your PATH/,
   );
 });
@@ -191,14 +214,16 @@ function fakeAgent(name: string, script: string): { bin: string; dir: string } {
 }
 
 test(
-  "claude gets your own setup but no tools, no MCP, the schema, and the prompt on stdin in an empty directory",
+  "claude gets your own setup but no tools, no MCP, the schema, and the prompt on stdin in the desk's empty agent directory",
   { skip: process.platform === "win32" },
   async () => {
     const f = fakeAgent(
       "claude",
       `ls -A > "$(dirname "$0")/cwd-listing"; pwd >> "$(dirname "$0")/cwds"; echo '{"structured_output":{"summary":"ok"},"modelUsage":{"claude-opus-5[1m]":{}}}'`,
     );
-    assert.deepEqual(await askClaude("PROMPT", { command: f.bin }), { answer: { summary: "ok" }, model: "claude-opus-5[1m]" });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const dir = agentDir(home);
+    assert.deepEqual(await askClaude("PROMPT", { command: f.bin, dir }), { answer: { summary: "ok" }, model: "claude-opus-5[1m]" });
     const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
     for (const a of ["-p", "--strict-mcp-config", "--no-session-persistence", "--json-schema"]) assert.ok(args.includes(a), a);
     assert.equal(args[args.indexOf("--tools") + 1], "");
@@ -206,12 +231,17 @@ test(
     for (const a of ["--model", "--restricted", "--settings", "--bare", "--agents", "--system-prompt"]) assert.ok(!args.includes(a), a);
     assert.equal(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), "PROMPT");
     assert.equal(fs.readFileSync(path.join(f.dir, "cwd-listing"), "utf8"), "");
-    // The login check too, without its own model: and every call runs in one directory, so one ~/.claude/projects entry.
-    await probeLogin(f.bin);
+    // The login check too, without its own model. Every call, from every launch, runs in <home>/agent: one ~/.claude/projects entry.
+    await probeLogin(agentDir(home), f.bin);
     const probe = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
     assert.ok(probe.includes("--no-session-persistence") && !probe.includes("--model") && !probe.includes("--restricted"));
-    assert.equal(new Set(fs.readFileSync(path.join(f.dir, "cwds"), "utf8").trim().split("\n")).size, 1);
+    const cwds = new Set(fs.readFileSync(path.join(f.dir, "cwds"), "utf8").trim().split("\n"));
+    assert.deepEqual(
+      [...cwds].map((d) => fs.realpathSync(d)),
+      [fs.realpathSync(path.join(home, "agent"))],
+    );
     fs.rmSync(f.dir, { recursive: true });
+    fs.rmSync(home, { recursive: true });
   },
 );
 
@@ -321,7 +351,8 @@ function fakeDeps() {
 
 async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Record<string, unknown> } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
-  if (opts.settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(opts.settings));
+  // No judge: these tests are about the AI review (test/judge.test.ts runs it).
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, ...opts.settings }));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()];
     if (q.includes("review-requested:@me") && !q.includes("-review-requested"))

@@ -2,6 +2,7 @@ import type {
   Action,
   AgentStatus,
   AiReview,
+  ConfigDoc,
   ConfigError,
   CoordinatorView,
   FieldDoc,
@@ -66,7 +67,7 @@ export const api = {
   dismiss: (id: string, draft_id?: string) => call<{ ok: true }>("POST", `/api/inflight/${encodeURIComponent(id)}/dismiss`, { draft_id }),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
-  config: () => call<{ path: string; text: string; errors: ConfigError[]; warnings?: ConfigError[] }>("GET", "/api/config"),
+  config: () => call<ConfigDoc>("GET", "/api/config"),
   preview: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
   saveConfig: (text: string, base?: string) => call<{ ok: boolean; errors: ConfigError[] }>("PUT", "/api/config", { text, base }),
   fields: () => call<FieldDoc[]>("GET", "/api/fields"),
@@ -79,5 +80,7 @@ export const api = {
   policy: () => call<PolicyDoc>("GET", "/api/policy"),
   // 409 when `base` (the hash it was read at) is stale.
   savePolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
+  // The coordinator log's Undo on a policy change.
+  undoPolicy: (version: number) => call<{ ok: true; hash: string }>("POST", "/api/policy/undo", { version }),
   coordinator: () => call<CoordinatorView>("GET", "/api/coordinator"),
 };

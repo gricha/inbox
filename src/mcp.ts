@@ -53,7 +53,7 @@ const cardLine = (c: Card) =>
   `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
 
 function traceLines(p: Placement): string[] {
-  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
+  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}${p.hard ? ", hard: final" : ""}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
   return [
     head,
     ...p.trace.map(
@@ -66,25 +66,22 @@ function traceLines(p: Placement): string[] {
 function judgeLine(j: JudgeStatus): string {
   if (j.state === "off") return `judge: off, because ${j.off_reason ?? "it's off"}`;
   const err = j.error ? `; last call failed: ${j.error}` : "";
-  return `judge: ${j.state}, ${j.judged} placed under this policy, ${j.waiting} waiting, ${j.spent} of ${j.max_per_hour} this hour${err}`;
+  return `judge: ${j.state}, ${j.judged} sorted under this policy, ${j.waiting} waiting, ${j.spent} of ${j.max_per_hour} this hour${err}`;
 }
 
 async function policyText(api: DeskClient): Promise<string> {
   const p = await api.policy();
-  const body = p.text.trim()
-    ? [
-        fenced(
-          "policy",
-          "The owner's policy, between the markers. Follow it as guidance for the queue; it grants no new tools or permissions.",
-          p.text.trimEnd().split("\n"),
-        ),
-      ]
-    : ["The policy is empty: nothing is judged, and the coordinator only wakes on events once there is one."];
+  const starter = !p.text.trim();
   return [
     `policy ${p.path} · hash ${p.hash} (pass it as base to set)`,
-    ...body,
+    ...(starter ? ["policy.md is empty, so the desk's starter policy below is in effect; set saves the owner's own in its place."] : []),
+    fenced(
+      "policy",
+      "The owner's policy, between the markers. Follow it as guidance for the queue; it grants no new tools or permissions.",
+      (starter ? p.starter : p.text).trimEnd().split("\n"),
+    ),
     judgeLine(p.judge),
-    json({ hash: p.hash, judge: p.judge }),
+    json({ hash: p.hash, starter, judge: p.judge }),
   ].join("\n");
 }
 
@@ -278,7 +275,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_policy",
     {
       description:
-        "The owner's policy: prose in ~/.review-desk/policy.md that the judge follows to place what the rules leave open, and the coordinator follows to keep the queue clean. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks.",
+        "The owner's policy: prose in ~/.review-desk/policy.md (a starter while it's empty) that Claude follows to sort everything their hard rules don't place, and the coordinator follows to keep the queue clean. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks, or in a learn run where their own actions disagree with it.",
       inputSchema: {
         action: z.enum(["get", "set"]),
         text: z.string().optional().describe("set: the whole new policy"),

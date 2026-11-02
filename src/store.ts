@@ -69,6 +69,11 @@ export class Store {
       .all()
       .map((c) => c.name);
     if (!hitCols.includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
+    const logCols = this.db
+      .prepare("PRAGMA table_info(coordinator_log)")
+      .all()
+      .map((c) => c.name);
+    if (!logCols.includes("version")) this.db.exec("ALTER TABLE coordinator_log ADD COLUMN version INTEGER");
   }
 
   close(): void {
@@ -269,15 +274,15 @@ export class Store {
       seq === undefined
         ? this.db.prepare("SELECT * FROM events WHERE undone = 0 ORDER BY seq DESC LIMIT 1").get()
         : this.db.prepare("SELECT * FROM events WHERE seq = ? AND undone = 0").get(seq);
-    if (!r) return null;
-    return {
-      seq: r.seq as number,
-      at: r.at as string,
-      item_id: r.item_id as string,
-      action: r.action as string,
-      before: JSON.parse(r.before as string) as StateRow,
-      undone: false,
-    };
+    return r ? rowToAction(r) : null;
+  }
+
+  // Actions after `seq` and at or after `since` still in effect, oldest first.
+  actionsAfter(seq: number, since: string, limit: number): ActionEvent[] {
+    return this.db
+      .prepare("SELECT * FROM events WHERE seq > ? AND at >= ? AND undone = 0 ORDER BY seq ASC LIMIT ?")
+      .all(seq, since, limit)
+      .map(rowToAction);
   }
 
   hasLaterAction(itemId: string, seq: number): boolean {
@@ -328,8 +333,10 @@ export class Store {
 
   addLog(e: Omit<CoordinatorLogEntry, "seq" | "undone">): void {
     this.db
-      .prepare("INSERT INTO coordinator_log (at, run, kind, text, item_id, action, bucket, undo_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(e.at, e.run, e.kind, e.text, e.item_id, e.action, e.bucket, e.undo_seq);
+      .prepare(
+        "INSERT INTO coordinator_log (at, run, kind, text, item_id, action, bucket, undo_seq, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(e.at, e.run, e.kind, e.text, e.item_id, e.action, e.bucket, e.undo_seq, e.version);
     this.db.prepare("DELETE FROM coordinator_log WHERE seq <= (SELECT MAX(seq) FROM coordinator_log) - 1000").run();
   }
 
@@ -352,6 +359,7 @@ export class Store {
         action: (r.action as string | null) ?? null,
         bucket: (r.bucket as Bucket | null) ?? null,
         undo_seq: (r.undo_seq as number | null) ?? null,
+        version: (r.version as number | null) ?? null,
         undone: r.undone === 1,
       }));
   }
@@ -383,6 +391,17 @@ export class Store {
       .prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(key, JSON.stringify(value));
   }
+}
+
+function rowToAction(r: Record<string, unknown>): ActionEvent {
+  return {
+    seq: r.seq as number,
+    at: r.at as string,
+    item_id: r.item_id as string,
+    action: r.action as string,
+    before: JSON.parse(r.before as string) as StateRow,
+    undone: false,
+  };
 }
 
 function rowToState(r: Record<string, unknown>): StateRow {

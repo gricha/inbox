@@ -63,23 +63,33 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     trace.push({ index: -1, when: cfg.filter, ...r });
     if (!r.matched) return null;
   }
-  // The gray zone: the board default, unless the judge placed it. Its empty why (the policy says nothing) keeps the rules'.
-  const gray = (rule: number | null, why: string): Placement => {
-    const p: Placement = { board: cfg.id, bucket: cfg.default, rule_bucket: cfg.default, rule, why: renderTemplate(why, s), trace };
+  // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'.
+  const judged = (rule: number | null, bucket: Bucket, why: string): Placement => {
+    const p: Placement = { board: cfg.id, bucket, rule_bucket: bucket, rule, why: renderTemplate(why, s), trace };
     if (!judge) return p;
     const j = judge(e.id);
-    if (j.bucket === null) return { ...p, judge: j };
-    return { ...p, bucket: j.bucket, rule_bucket: j.bucket, why: j.why.trim() ? j.why : p.why, judge: j };
+    const hint = { bucket, why: p.why };
+    if (j.bucket === null) return { ...p, judge: j, hint };
+    return { ...p, bucket: j.bucket, rule_bucket: j.bucket, why: j.why.trim() ? j.why : p.why, judge: j, hint };
   };
   for (const [i, c] of board.rules.entries()) {
     const rule = cfg.rules[i]!; // board.rules is compiled 1:1 from cfg.rules
     const r = truthy(c, s);
     trace.push({ index: i, when: rule.when, ...r });
     if (!r.matched) continue;
-    if (rule.bucket === "judge") return gray(i, rule.why?.trim() ? rule.why : cfg.default_why);
-    return { board: cfg.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: renderTemplate(rule.why ?? "", s), trace };
+    if (rule.bucket === "judge") return judged(i, cfg.default, rule.why?.trim() ? rule.why : cfg.default_why);
+    if (!rule.hard) return judged(i, rule.bucket, rule.why ?? "");
+    return {
+      board: cfg.id,
+      bucket: rule.bucket,
+      rule_bucket: rule.bucket,
+      rule: i,
+      why: renderTemplate(rule.why ?? "", s),
+      trace,
+      hard: true,
+    };
   }
-  return gray(null, cfg.default_why);
+  return judged(null, cfg.default, cfg.default_why);
 }
 
 const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
@@ -96,6 +106,7 @@ export function quietText(hours: number): string {
 }
 
 // Quiet items (nobody touched them in `quietDays`, 0 = off) leave Now and Today for Later, then caps apply after the judge.
+// Neither moves what a hard rule placed.
 export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup, quietDays = 0): BoardResult {
   const cfg = board.config;
   const placements = new Map<string, Placement>();
@@ -133,7 +144,7 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   const quiet = (e: Entry) => {
     const s = e.signals;
     const asked = s.me.requested_hours >= 0 && s.me.requested_hours < quietHours;
-    return quietDays > 0 && !e.pinned && !asked && s.item.updated_hours >= quietHours;
+    return quietDays > 0 && !e.pinned && !asked && !placements.get(e.id)!.hard && s.item.updated_hours >= quietHours;
   };
   for (const b of ["now", "today"] as const) {
     const gone = byBucket[b].filter(quiet);
@@ -147,9 +158,9 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   }
 
   const exempt = (e: Entry) => {
-    if (e.pinned) return true;
-    const rule = placements.get(e.id)!.rule;
-    return rule !== null && cfg.rules[rule]?.nocap === true;
+    const p = placements.get(e.id)!;
+    if (e.pinned || p.hard) return true;
+    return p.rule !== null && cfg.rules[p.rule]?.nocap === true;
   };
   const demote = (from: "now" | "today", to: Bucket, cap: number | undefined) => {
     if (cap === undefined) return;

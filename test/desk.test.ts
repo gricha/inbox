@@ -358,7 +358,7 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
 });
 
 test("what the coordinator cleared says so, with its reason, until something else acts on it", async () => {
-  const t = await setup([reviewAsk(1), reviewAsk(2)]);
+  const t = await setup([teamPing(1), reviewAsk(2)]);
   await t.desk.sync();
   t.desk.act("api#1", "snooze", "tomorrow", { agent: "coordinator", reason: "a CODEOWNERS ping" });
   t.desk.act("api#2", "snooze", "tomorrow");

@@ -64,13 +64,13 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <p className="pl-head">
           {card.resolved && "Otherwise "}
           <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
-          {main.judge?.bucket && main.judge.why && " by your policy"}
+          {main.judge?.bucket && main.judge.why && ", sorted by Claude"}
           {main.why && main.why !== card.why && <>: {main.why}</>}
         </p>
       )}
       {main.demoted && (
         <p className="demote-note">
-          {main.judge?.bucket ? "Your policy" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
+          {main.judge?.bucket ? "Claude" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
           {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
         </p>
       )}
@@ -220,17 +220,20 @@ function PlacementView({ p }: { p: Placement }) {
           <li className={cls(!p.judge?.bucket && "hit")}>
             <span className={cls("tick", !p.judge?.bucket && "ok")}>→</span>
             <span className="idx">default</span>
-            <span>
-              {p.judge?.bucket
-                ? "no rule matched, so the policy decides"
-                : `no rule matched, so ${BUCKET_LABEL[p.rule_bucket].toLowerCase()}`}
-            </span>
+            <span>no rule matched, so {BUCKET_LABEL[p.hint?.bucket ?? p.rule_bucket].toLowerCase()}</span>
+          </li>
+        )}
+        {p.hard && (
+          <li className="hit">
+            <span className="tick ok">→</span>
+            <span className="idx">hard</span>
+            <span>a hard rule: final, Claude doesn't sort it</span>
           </li>
         )}
         {p.judge && (
           <li className={cls(p.judge.bucket && "hit")}>
             <span className={cls("tick", p.judge.bucket ? "ok" : "no")}>{p.judge.bucket ? "→" : "…"}</span>
-            <span className="idx">policy</span>
+            <span className="idx">Claude</span>
             <span>{judgeStepText(p.judge)}</span>
           </li>
         )}

@@ -2522,6 +2522,15 @@ kbd {
   color: var(--pencil);
 }
 
+/* A policy change's lines out and in, under its head: pencil, one per line. */
+.cl-diff {
+  display: grid;
+  gap: 1px;
+  margin-top: 3px;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
 .cl-undone {
   color: var(--pencil);
   font-size: 12.5px;
@@ -3388,4 +3397,21 @@ pre,
   padding: 0;
   list-style: none;
   color: var(--ink-2);
+}
+
+/* Rules → hard rules: the board, bucket and why, then the condition under it. */
+.hard-rules {
+  margin-top: 8px;
+}
+
+.hard-rules li {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.hard-rules code {
+  color: var(--pencil);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }

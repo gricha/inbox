@@ -195,6 +195,12 @@ export function createApp(desk: Desk, port: number): Hono {
     if (base !== undefined && typeof base !== "string") throw new DeskError(400, "base must be the hash from GET /api/policy");
     return c.json(desk.putPolicy(text, base, agentOf(c.req.header("x-desk-agent"))));
   });
+  // The coordinator log's Undo on a policy change: the text from before that version.
+  app.post("/api/policy/undo", async (c) => {
+    const { version } = await c.req.json<{ version?: unknown }>().catch((): { version?: unknown } => ({}));
+    if (typeof version !== "number" || !Number.isInteger(version)) throw new DeskError(400, "need { version }");
+    return c.json(desk.undoPolicy(version));
+  });
   app.get("/api/coordinator", (c) => c.json(desk.coordinatorView()));
   app.post("/api/coordinator/note", async (c) => {
     const { text } = await c.req.json<{ text?: unknown }>().catch((): { text?: unknown } => ({}));

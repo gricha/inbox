@@ -138,7 +138,7 @@ export interface Signals {
 // ---------------------------------------------------------------------------
 // Config (~/.review-desk/config.toml)
 
-// A rule's bucket, or "judge": hand the item to the policy judge (the board default until it answers).
+// A rule's bucket, or "judge": no hint of its own, so the board default until Claude answers.
 export type RuleBucket = Bucket | "judge";
 
 export interface Rule {
@@ -146,6 +146,7 @@ export interface Rule {
   bucket: RuleBucket;
   why?: string;
   nocap?: boolean; // matched items don't count toward caps and are never demoted
+  hard?: boolean; // final: Claude doesn't sort what it matches, and neither the quiet rule nor caps move it
 }
 
 export interface BoardConfig {
@@ -235,18 +236,19 @@ export interface AgentStatus {
   skill: { state: "installed" | "outdated" | "missing"; path: string; command: string } | null; // path: the installed SKILL.md
 }
 
-// GET /api/policy: ~/.review-desk/policy.md, prose the judge and the coordinator follow.
+// GET /api/policy: ~/.review-desk/policy.md, prose the judge and the coordinator follow. While it's empty they follow `starter`.
 export interface PolicyDoc {
   path: string;
-  text: string;
+  text: string; // the file's; empty means the starter is in use
+  starter: string;
   hash: string; // pass it back as `base` when saving
   judge: JudgeStatus;
 }
 
 export interface JudgeStatus {
   state: "off" | "idle" | "running" | "error";
-  off_reason: string | null; // why it's off: no policy, the setting, no agent
-  waiting: number; // gray-zone items without a fresh answer
+  off_reason: string | null; // why it's off: the setting
+  waiting: number; // items without a fresh answer
   judged: number; // items with an answer under this policy
   spent: number; // items sent in the last hour
   max_per_hour: number;
@@ -268,17 +270,16 @@ export interface CoordinatorStatus {
   next_at: string | null; // the next run starts at this time
   last_run: CoordinatorRun | null;
   error: string | null; // the last run's failure, until one succeeds
-  policy_empty: boolean; // it only wakes on events once there's a policy
   held: boolean; // you have it open in a terminal: runs wait until you close it
 }
 
 export interface CoordinatorRun {
   n: number;
-  kind: "intro" | "events";
+  kind: "intro" | "events" | "learn"; // learn: it read your own actions, to refine the policy
   started_at: string;
   ms: number;
   ok: boolean;
-  events: number;
+  events: number; // a learn run: your actions it read
   actions: number;
   error: string | null;
 }
@@ -288,11 +289,12 @@ export interface CoordinatorLogEntry {
   at: string;
   run: number; // 0: not during a run
   kind: "run" | "act" | "note" | "policy" | "config";
-  text: string; // an act's reason, a note, what a run did; untrusted when the coordinator wrote it
+  text: string; // an act's reason, a note, what a run did, a policy change's lines before and after; untrusted when the coordinator wrote it
   item_id: string | null;
   action: string | null; // an act's action: snooze, done, mute, ...
   bucket: Bucket | null; // where the item sat when it acted
   undo_seq: number | null; // an act's undo seq
+  version: number | null; // a policy change's version, while the desk keeps it: Undo puts back the text before it
   undone: boolean;
 }
 
@@ -355,14 +357,16 @@ export interface Placement {
   why: string;
   demoted?: string; // e.g. "Now takes 3 from PRs to review"
   trace: TraceStep[];
-  judge?: JudgeStep; // set in the gray zone (no rule matched, or a "judge" rule) while the policy judge is on
+  hard?: boolean; // a hard rule placed it: final
+  judge?: JudgeStep; // set on every other placement while the judge is on
+  hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers
 }
 
 // The policy judge's step in a placement.
 export interface JudgeStep {
-  bucket: Bucket | null; // its answer; null: none, so the board default
+  bucket: Bucket | null; // its answer; null: none, so where the rules put it
   why: string;
-  pending: boolean; // not judged under this policy since the item last changed (an older answer may still show)
+  pending: boolean; // not judged under this policy since the item last changed (an earlier answer may still show)
 }
 
 // Kept per item in kv `judge:<id>`: good for this updated_at under this policy.
@@ -420,6 +424,7 @@ export interface Card {
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
+  placed_by?: "hard" | "claude" | "pending"; // a hard rule, Claude, or the rules until Claude answers; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
 }
 
@@ -657,6 +662,7 @@ export interface ConfigDoc {
   hash: string; // PUT /api/config takes it (or the whole text) as `base`
   errors: ConfigError[];
   warnings?: ConfigError[]; // leftover pre-settings keys: ignored, not fatal
+  hard: { board: string; bucket: Bucket; when: string; why: string }[]; // the loaded config's hard rules, for the Rules page
 }
 
 export interface PreviewResult {

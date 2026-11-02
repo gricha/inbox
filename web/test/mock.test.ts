@@ -365,6 +365,14 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 3 });
   await call("POST", "/api/coordinator/note", { text: "from the test" });
   assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log[0]?.text, "from the test");
+
+  // What it learned from you is a policy change with its line in, and Undo puts the text from before back.
+  const learned = undone.log.find((e) => e.kind === "policy" && e.version !== null)!;
+  assert.match(learned.text, /^Changed the policy\n\+ /);
+  assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 200);
+  assert.doesNotMatch((await call<PolicyDoc>("GET", "/api/policy")).data.text, /Release notes/);
+  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log.find((e) => e.seq === learned.seq)?.undone, true);
+  assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 409);
 });
 
 test("in flight: the lane's states, needs-you cards at the top of Now, send and take back", async () => {

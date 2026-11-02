@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Bucket, ConfigError, FieldDoc, PreviewResult } from "../../../src/types.ts";
+import type { Bucket, ConfigDoc, ConfigError, FieldDoc, PreviewResult } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { BUCKET_LABEL, cls, shortId, tilde } from "../format.ts";
 import { lineOf } from "../view.ts";
@@ -26,6 +26,7 @@ export function Rules({
   const [text, setText] = useState("");
   const [errors, setErrors] = useState<ConfigError[]>([]);
   const [warnings, setWarnings] = useState<ConfigError[]>([]);
+  const [hard, setHard] = useState<ConfigDoc["hard"]>([]);
   const [preview, setPreview] = useState<{ text: string; result: PreviewResult } | null>(null);
   const [busy, setBusy] = useState<"" | "preview" | "save">("");
   const [fields, setFields] = useState<FieldDoc[]>([]);
@@ -48,6 +49,7 @@ export function Rules({
       }
       setErrors(c.errors);
       setWarnings(c.warnings ?? []);
+      setHard(c.hard);
       setLoadError("");
     } catch (e) {
       setLoadError(message(e));
@@ -294,6 +296,25 @@ export function Rules({
             </section>
           )}
 
+          {hard.length > 0 && (
+            <section className="side-block">
+              <h3 className="s-sub">Hard rules</h3>
+              <p className="muted small">Final: Claude doesn't sort what they match, and quiet days and caps don't move it.</p>
+              <ul className="plain hard-rules">
+                {hard.map((h, i) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- rules have no id; the list is redrawn whole
+                  <li key={i}>
+                    <span>
+                      {h.board} → {BUCKET_LABEL[h.bucket]}
+                      {h.why && `: ${h.why}`}
+                    </span>
+                    <code>{h.when}</code>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="side-block">
             <h3 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h3>
             {!preview ? (
@@ -431,6 +452,12 @@ export function Rules({
                 <dt>caps</dt>
                 <dd>
                   <code>caps = {"{ now = 3, today = 6 }"}</code>; <code>nocap = true</code> on a rule exempts it
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>hard</dt>
+                <dd>
+                  <code>hard = true</code> on a rule: final. Claude sorts everything else, with the rule's bucket as its hint
                 </dd>
               </div>
             </dl>

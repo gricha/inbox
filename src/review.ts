@@ -3,7 +3,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { GH_MISSING } from "./github/client.ts";
 import type { AiReview, Item, ReviewFile, ReviewNote, Signals } from "./types.ts";
@@ -74,11 +73,20 @@ export interface RunOpts {
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
 export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (opts.signal?.aborted) {
+      reject(new Error("stopped"));
+      return;
+    }
+    // Not execFile's own `signal`: aborting a spawn that failed (no pid) has it kill the desk's whole process group.
+    const stop = () => {
+      if (child.pid) child.kill();
+    };
     const child = execFile(
       s.file,
       s.args,
-      { cwd: opts.cwd, timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024, shell: s.shell, signal: opts.signal },
+      { cwd: opts.cwd, timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024, shell: s.shell },
       (err, stdout, stderr) => {
+        opts.signal?.removeEventListener("abort", stop);
         if (!err || (opts.stdoutOnError && stdout && !err.killed)) {
           resolve(stdout);
           return;
@@ -97,6 +105,7 @@ export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
         reject(new Error(missing ? opts.missing : (stderr || err.message).trim().split("\n").slice(-3).join(" ")));
       },
     );
+    opts.signal?.addEventListener("abort", stop);
     if (opts.input !== undefined) child.stdin!.end(opts.input);
   });
 }
@@ -247,23 +256,24 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
 // Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
 export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
-// The answer's shape, and a signal that kills the run (the desk stopping).
+// Where it runs, the answer's shape, and a signal that kills the run (the desk stopping).
 export interface AskOpts {
+  dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
   signal?: AbortSignal;
 }
 
 export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
 
-// One empty directory for this process's claude calls: claude keeps a ~/.claude/projects entry per directory it runs in.
-let claudeRoom = "";
-function claudeDir(): string {
-  if (!claudeRoom || !fs.existsSync(claudeRoom)) claudeRoom = fs.mkdtempSync(path.join(os.tmpdir(), "desk-claude-"));
-  return claudeRoom;
+// One empty directory under the desk's home for its tool-less claude calls, so they share one ~/.claude/projects entry.
+export function agentDir(home: string): string {
+  const dir = path.join(home, "agent");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 // No --restricted: with no tools and no MCP servers, your settings only bring your model, effort and plugins.
-export async function askClaude(prompt: string, opts: { command?: string } & AskOpts = {}): Promise<ClaudeAnswer> {
+export async function askClaude(prompt: string, opts: { command?: string } & AskOpts): Promise<ClaudeAnswer> {
   const command = opts.command ?? claudeCommand();
   const args = [
     "-p",
@@ -278,7 +288,7 @@ export async function askClaude(prompt: string, opts: { command?: string } & Ask
   ];
   const out = await runCommand(claudeSpawn(command, args), {
     input: prompt,
-    cwd: claudeDir(),
+    cwd: opts.dir,
     timeout: TIMEOUT,
     stdoutOnError: true,
     missing: claudeMissing(command),
@@ -291,11 +301,11 @@ export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth logi
 
 // Does the login work? A tiny call that leaves no session behind, before a run that would: a session run that fails on
 // the login still saves a session, which piles up in claude --resume. Throws claudeError's error when it doesn't.
-export async function probeLogin(command = claudeCommand(), signal?: AbortSignal): Promise<void> {
+export async function probeLogin(dir: string, command = claudeCommand(), signal?: AbortSignal): Promise<void> {
   const args = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
   const out = await runCommand(claudeSpawn(command, args), {
     input: "Reply with the word ok.",
-    cwd: claudeDir(),
+    cwd: dir,
     timeout: 60_000,
     stdoutOnError: true,
     missing: claudeMissing(command),
@@ -335,8 +345,8 @@ export function claudeEnvelope(out: string): ClaudeAnswer {
   };
 }
 
-export async function generateReview(item: Item, s: Signals, why: string, pr: PrText): Promise<AiReview> {
-  const { answer, model } = await askClaude(buildPrompt(item, s, why, pr));
+export async function generateReview(item: Item, s: Signals, why: string, pr: PrText, dir: string): Promise<AiReview> {
+  const { answer, model } = await askClaude(buildPrompt(item, s, why, pr), { dir });
   return { ...parseReview(answer, pr.files), head_oid: item.head_oid, model, at: new Date().toISOString() };
 }
 

@@ -1,4 +1,5 @@
-// Settings → Policy: ~/.review-desk/policy.md, prose the judge and the coordinator follow. Saved with ⌘S, like the rules.
+// Settings → Policy: ~/.review-desk/policy.md, prose Claude sorts by and the coordinator follows. Saved with ⌘S, like the rules.
+// While the file is empty the starter is in effect, so the editor shows it: editing it and saving makes it yours.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
@@ -8,10 +9,8 @@ import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
-const EXAMPLE = `For example:
-Dependency bumps from bots can be hidden unless CI is red.
-Anything touching billing is Today, whoever asked.
-Docs-only PRs from my teams can wait until Later.`;
+// What the editor starts from: the file, or the starter while it's empty.
+const shown = (d: PolicyDoc) => (d.text.trim() ? d.text : d.starter);
 
 export function Policy({
   active,
@@ -29,7 +28,8 @@ export function Policy({
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
-  const dirty = doc !== null && text !== doc.text;
+  const dirty = doc !== null && text !== shown(doc);
+  const starter = doc !== null && !doc.text.trim();
   const latest = useRef({ doc, text });
   latest.current = { doc, text };
 
@@ -38,10 +38,10 @@ export function Policy({
     try {
       const p = await api.policy();
       const { doc: d, text: t } = latest.current;
-      if (d !== null && t !== d.text) setDoc({ ...d, judge: p.judge });
+      if (d !== null && t !== shown(d)) setDoc({ ...d, judge: p.judge });
       else {
         setDoc(p);
-        setText(p.text);
+        setText(shown(p));
       }
       setLoadError("");
     } catch (e) {
@@ -60,7 +60,8 @@ export function Policy({
     try {
       const r = await api.savePolicy(text, doc.hash);
       setDoc({ ...doc, text, hash: r.hash });
-      flash(text.trim() ? "Policy saved. Claude Code places what your rules leave open by it." : "Policy cleared. Nothing is judged now.");
+      if (!text.trim()) setText(doc.starter);
+      flash(text.trim() ? "Policy saved. Claude sorts your desk by it." : "Policy cleared. Claude sorts by the starter policy again.");
     } catch (e) {
       if ((e as { status?: number }).status === 409) {
         // Changed under us (the coordinator, an editor): keep your edit, take the new file as the base.
@@ -106,7 +107,7 @@ export function Policy({
       <textarea
         className="editor prose"
         value={text}
-        placeholder={EXAMPLE}
+        placeholder="Empty: Claude sorts by the starter policy."
         aria-label="Policy"
         disabled={!doc}
         onChange={(e) => {
@@ -130,16 +131,18 @@ export function Policy({
           label="Revert"
           disabled={!dirty}
           run={() => {
-            if (doc) setText(doc.text);
+            if (doc) setText(shown(doc));
           }}
         />
         <span className="grow" />
         {dirty && <span className="unsaved">Unsaved changes</span>}
       </div>
+      {starter && <p className="s-live quiet">This is the starter policy. Claude sorts by it until you change it.</p>}
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       <p className="s-path quiet" title={doc?.path}>
-        <code>{doc ? tilde(doc.path) : "…"}</code>. The coordinator edits it too when you ask it to.
+        <code>{doc ? tilde(doc.path) : "…"}</code>
+        {starter ? " is empty" : ""}. The coordinator edits it too.
       </p>
     </div>
   );

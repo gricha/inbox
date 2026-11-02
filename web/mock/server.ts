@@ -4,6 +4,7 @@
 // MOCK_AI_PAUSED=1 starts with AI reviews paused (an expired login); POST /api/mock/ai-paused { paused } flips it.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
+import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
@@ -173,7 +174,7 @@ let config: Config = {
       name: "Review requests",
       queries: ["is:open is:pr review-requested:{me}"],
       rules: [
-        { when: W.direct, bucket: "now", why: "asked you directly" },
+        { when: W.direct, bucket: "now", why: "asked you directly", hard: true },
         { when: W.depbot, bucket: "hide", why: "dependency bump by a bot" },
         { when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
       ],
@@ -231,7 +232,7 @@ interface Seed {
   st?: Partial<ItemState>;
   resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
-  judge?: [Bucket, string]; // the policy judge's answer, where no rule matched
+  judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
   fly?: Flight; // your PR, in flight (with st.inflight_at): what its babysitter is up to
   checks?: string[]; // your PR: its failing checks' names
   optional?: string[]; // those of them the base branch doesn't require
@@ -359,6 +360,7 @@ const SEEDS: Seed[] = [
     size: [132, 20, 5],
     close: 9,
     on: { "work-review": ["close"] },
+    judge: ["today", "the search endpoint you own"],
   },
   {
     repo: "acme/worker",
@@ -377,6 +379,7 @@ const SEEDS: Seed[] = [
     reviews: [["priya", "commented", 20]],
     fresh: true,
     on: { "work-review": ["close", "owners"] },
+    judge: ["today", "your team's scheduler, and kofi waits on you"],
   },
   {
     repo: "acme/ml-pipeline",
@@ -774,6 +777,7 @@ const SEEDS: Seed[] = [
     size: [90, 15, 4],
     close: 4,
     on: { "personal-review": ["close"] },
+    judge: ["later", "asked of the maintainers team; nobody waits on you"],
   },
   {
     repo: "oss/tinyhttp",
@@ -1090,23 +1094,25 @@ function place(r: Rec, b: BoardConfig): Placement | null {
   const sig = signals(r);
   const trace: TraceStep[] = b.filter ? [{ index: -1, when: b.filter, matched: true }] : [];
   const truths = on === "filtered" ? [] : on.map((k) => W[k]);
-  // The gray zone, as in src/rules.ts: the seed's judge answer while there's a policy, else the board default.
-  const gray = (rule: number | null, why: string): Placement => {
-    const p: Placement = { board: b.id, bucket: b.default, rule_bucket: b.default, rule, why: render(why, sig), trace };
+  // As src/rules.ts: Claude sorts what no hard rule placed, with where the rules put it as its hint.
+  const judged = (rule: number | null, bucket: Bucket, why: string): Placement => {
+    const p: Placement = { board: b.id, bucket, rule_bucket: bucket, rule, why: render(why, sig), trace };
     if (judgeOff()) return p;
+    const hint = { bucket, why: p.why };
     const j = r.seed.judge;
     return j
-      ? { ...p, bucket: j[0], rule_bucket: j[0], why: j[1], judge: { bucket: j[0], why: j[1], pending: false } }
-      : { ...p, judge: { bucket: b.default, why: "", pending: false } };
+      ? { ...p, bucket: j[0], rule_bucket: j[0], why: j[1], judge: { bucket: j[0], why: j[1], pending: false }, hint }
+      : { ...p, judge: { bucket, why: "", pending: false }, hint };
   };
   for (const [i, rule] of b.rules.entries()) {
     const matched = truths.includes(rule.when);
     trace.push({ index: i, when: rule.when, matched });
     if (!matched) continue;
-    if (rule.bucket === "judge") return gray(i, rule.why ?? b.default_why);
-    return { board: b.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: render(rule.why ?? "", sig), trace };
+    if (rule.bucket === "judge") return judged(i, b.default, rule.why ?? b.default_why);
+    if (!rule.hard) return judged(i, rule.bucket, rule.why ?? "");
+    return { board: b.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: render(rule.why ?? "", sig), trace, hard: true };
   }
-  return gray(null, b.default_why);
+  return judged(null, b.default, b.default_why);
 }
 
 const waitingSince = (r: Rec) => iso(r.seed.wait ?? r.seed.age);
@@ -1130,7 +1136,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     if ((p.bucket !== "now" && p.bucket !== "today") || status(r) !== "active" || r.seed.resolved || laneOwned(r)) continue;
     const sig = signals(r);
     const asked = sig.me.requested && sig.me.requested_hours >= 0 && sig.me.requested_hours < quietHours;
-    if (!quietHours || r.state.pinned || asked || sig.item.updated_hours < quietHours) continue;
+    if (!quietHours || r.state.pinned || asked || p.hard || sig.item.updated_hours < quietHours) continue;
     p.bucket = "later";
     p.demoted = quietText(sig.item.updated_hours);
   }
@@ -1153,6 +1159,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
         !r.seed.resolved &&
         !laneOwned(r) &&
         !r.state.pinned &&
+        !p.hard &&
         !(p.rule !== null && b.rules[p.rule]?.nocap),
     );
     for (const { r, p } of counted.toSorted((x, y) => call(x.r) - call(y.r)).slice(cap)) {
@@ -1215,6 +1222,13 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
+    ...(inFlight(r)
+      ? {}
+      : p.hard
+        ? { placed_by: "hard" as const }
+        : p.judge
+          ? { placed_by: p.judge.bucket ? ("claude" as const) : ("pending" as const) }
+          : {}),
   };
 }
 
@@ -1997,6 +2011,7 @@ function toToml(c: Config): string {
       out.push("", "[[boards.rules]]", `when = ${tomlStr(r.when)}`, `bucket = ${tomlStr(r.bucket)}`);
       if (r.why) out.push(`why = ${tomlStr(r.why)}`);
       if (r.nocap) out.push("nocap = true");
+      if (r.hard) out.push("hard = true");
     }
   }
   return out.join("\n") + "\n";
@@ -2386,21 +2401,33 @@ function agentStatus(): AgentStatus {
 }
 
 // ---------------------------------------------------------------------------
-// The policy and the coordinator: a policy in place, and a coordinator that snoozed three FYI items a few minutes ago.
+// The policy and the coordinator: your policy, with a line the coordinator learned from you this morning, and a coordinator
+// that snoozed three FYI items a few minutes ago.
 
-let policyText = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
+const OWN_POLICY = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
 Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.
 Dependency bumps from bots stay out of the way unless CI is red.
 Mentions in threads I haven't replied to for a week are FYI.
 `;
+const LEARNED = "Release notes and changelog pings are FYI; I read them at release time.";
+let policyText = `${OWN_POLICY}${LEARNED}\n`;
 let policyRev = 1;
 const policyHash = () => `mock${policyRev}`;
+// As src/desk.ts keeps them: each change, with the text it replaced, so the coordinator log's Undo can put it back.
+const versions: { v: number; before: string; text: string; undone: boolean }[] = [
+  { v: 1, before: OWN_POLICY, text: policyText, undone: false },
+];
 const setting = <K extends keyof typeof DEFAULTS>(k: K) => ({ ...DEFAULTS, ...overrides })[k];
 
 function judgeOff(): string | null {
-  if (!policyText.trim()) return "there's no policy yet";
-  if (!setting("policy.judge")) return "it's turned off";
-  return null;
+  return setting("policy.judge") ? null : "it's turned off";
+}
+
+function savePolicy(text: string): void {
+  if (text !== policyText) versions.push({ v: (versions.at(-1)?.v ?? 0) + 1, before: policyText, text, undone: false });
+  policyText = text;
+  policyRev++;
+  bump();
 }
 
 function policyDoc(): PolicyDoc {
@@ -2408,6 +2435,7 @@ function policyDoc(): PolicyDoc {
   return {
     path: `${homedir()}/.review-desk/policy.md (mock, in memory)`,
     text: policyText,
+    starter: DEFAULT_POLICY,
     hash: policyHash(),
     judge: {
       state: off ? "off" : "idle",
@@ -2436,10 +2464,14 @@ const note = (minutesAgo: number, run: number, kind: CoordinatorLogEntry["kind"]
     action: null,
     bucket: null,
     undo_seq: null,
+    version: null,
     undone: false,
     ...extra,
   });
-const undone = (e: CoordinatorLogEntry) => e.undo_seq !== null && !events.some((x) => x.seq === e.undo_seq);
+const undone = (e: CoordinatorLogEntry) =>
+  e.kind === "policy"
+    ? !!versions.find((x) => x.v === e.version)?.undone
+    : e.undo_seq !== null && !events.some((x) => x.seq === e.undo_seq);
 
 function coordinatorStatus(): CoordinatorStatus {
   const off = setting("coordinator.enabled") ? null : "Off";
@@ -2454,9 +2486,8 @@ function coordinatorStatus(): CoordinatorStatus {
     running_since: null,
     pending: 0,
     next_at: null,
-    last_run: { n: 14, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
+    last_run: { n: 15, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
     error: null,
-    policy_empty: !policyText.trim(),
     held: false,
   };
 }
@@ -2575,7 +2606,12 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     sync();
     return { ok: true };
   }
-  if (route === "GET /api/config") return { path: `${homedir()}/.review-desk/config.toml (mock, in memory)`, text: configText, errors: [] };
+  if (route === "GET /api/config") {
+    const hard = config.boards.flatMap((b) =>
+      b.rules.flatMap((r) => (r.hard && r.bucket !== "judge" ? [{ board: b.name, bucket: r.bucket, when: r.when, why: r.why ?? "" }] : [])),
+    );
+    return { path: `${homedir()}/.review-desk/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard };
+  }
   if (route === "POST /api/config/preview") return preview(textOf(await readBody(req)));
   if (route === "PUT /api/config") {
     const text = textOf(await readBody(req));
@@ -2599,9 +2635,17 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     if (body.base !== policyHash())
       throw new HttpError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
-    policyText = textOf(body);
-    policyRev++;
-    bump();
+    savePolicy(textOf(body));
+    return { ok: true, hash: policyHash() };
+  }
+  if (route === "POST /api/policy/undo") {
+    const { version } = await readBody(req);
+    const ver = versions.find((x) => x.v === version);
+    if (!ver) throw new HttpError(404, "the desk no longer keeps that policy change");
+    if (ver.undone) throw new HttpError(409, "that policy change is undone already");
+    if (policyText !== ver.text) throw new HttpError(409, "the policy changed since; undo the later change first");
+    ver.undone = true;
+    savePolicy(ver.before);
     return { ok: true, hash: policyHash() };
   }
   if (route === "GET /api/coordinator") return coordinatorView();
@@ -2651,9 +2695,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-// The coordinator's history: three FYI items snoozed this morning, a quiet run an hour ago, then one Today item snoozed,
-// which is what the top bar says.
-note(26 * 60, 0, "policy", "Updated the policy");
+// The coordinator's history: three FYI items snoozed this morning, a learn run that refined the policy from what you did,
+// a quiet run an hour ago, then one Today item snoozed, which is what the top bar says.
+note(26 * 60, 0, "policy", "Changed the policy\n+ Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.");
 for (const [id, why] of [
   ["acme/infra#540", "CODEOWNERS ping for a staging key rotation; FYI by your policy"],
   ["acme/api#4101", "CODEOWNERS ping, nina already has two approvals coming"],
@@ -2664,19 +2708,22 @@ for (const [id, why] of [
 }
 note(5 * 60, 12, "note", "Snoozed 3 FYI items until tomorrow: 2 CODEOWNERS pings and a thread you've left.");
 note(5 * 60, 12, "run", "6 events, 3 actions · 41s");
-note(61, 13, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
-note(61, 13, "run", "2 events, 0 actions · 18s");
+note(2 * 60, 13, "policy", `Changed the policy\n+ ${LEARNED}`, { version: 1 });
+note(2 * 60, 13, "note", "You cleared 4 release-notes pings I kept in Today, so the policy sorts them to FYI now.");
+note(2 * 60, 13, "run", "Read your last 6 actions · 34s");
+note(61, 14, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
+note(61, 14, "run", "2 events, 0 actions · 18s");
 {
   const { undo_seq } = act(resolve("acme/ml-pipeline#311"), "snooze", "tomorrow");
-  note(3, 14, "act", "a CODEOWNERS ping to @ml-team; sam is a close collaborator, but nobody asked you by name", {
+  note(3, 15, "act", "a CODEOWNERS ping to @ml-team; sam is a close collaborator, but nobody asked you by name", {
     item_id: "acme/ml-pipeline#311",
     action: "snooze",
     bucket: "today",
     undo_seq,
   });
 }
-note(3, 14, "note", "Snoozed 1 Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
-note(3, 14, "run", "3 events, 1 action · 22s");
+note(3, 15, "note", "Snoozed 1 Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
+note(3, 15, "run", "3 events, 1 action · 22s");
 
 // Two reviews being written, for longer than a test run or a round of shots.
 if (!aiPaused)

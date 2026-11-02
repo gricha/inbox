@@ -131,15 +131,19 @@ export function parseConfig(
     const rules: Rule[] = rawRules.map((r, j) => {
       const rp = `${path}.rules[${j}]`;
       const rt = table(r, rp);
-      known(rt, rp, ["when", "bucket", "why", "nocap"]);
+      known(rt, rp, ["when", "bucket", "why", "nocap", "hard"]);
       const when = str(rt.when, `${rp}.when`, "");
       if (!when) err(`${rp}.when`, "is required");
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
+      if (rt.hard !== undefined && typeof rt.hard !== "boolean") err(`${rp}.hard`, "must be true or false");
+      const to = ruleBucket(rt.bucket, `${rp}.bucket`);
+      if (rt.hard === true && to === "judge") err(`${rp}.hard`, "a hard rule places the item itself; give it a bucket, not judge");
       return {
         when: when || "false",
-        bucket: ruleBucket(rt.bucket, `${rp}.bucket`),
+        bucket: to,
         why: str(rt.why, `${rp}.why`, ""),
         nocap: rt.nocap === true,
+        hard: rt.hard === true,
       };
     });
     const sort = str(t.sort, `${path}.sort`, "waiting");
@@ -199,9 +203,10 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
     `# Each [[boards]] table feeds the queue: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, later, fyi, hide.`,
-    `# With a policy (Settings → Policy), your agent places what no rule matched, and what a rule sends to "judge".`,
+    `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint; a rule with`,
+    `# \`hard = true\` is final: Claude doesn't sort what it matches, and neither quiet days nor caps move it.`,
     `# \`caps\` limit Now and Today; overflow moves down a bucket with a note. Pinned and \`nocap\` items don't count, and nor do`,
-    `# your PRs in flight that need you. Caps apply after the policy, so give every board one: a board without caps can fill Now.`,
+    `# your PRs in flight that need you. Caps apply after Claude, so give every board one: a board without caps can fill Now.`,
     `# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().`,
     `# Fields (me.requested_direct, author.close, pr.ci, ...) are listed on the Rules page and by \`desk fields\`.`,
     `# Within a bucket, cards sort by rule order (earlier rules first), then \`priority\`, then \`sort\`.`,
@@ -233,7 +238,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "later"`,
       `default_why = "review requested"`,
       `rules = [`,
-      `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", nocap = true },`,
+      `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },`,
       `  { when = "!me.requested && me.review_state == 'changes_requested'", bucket = "today", why = "new commits after you requested changes" },`,
       `  { when = "!me.requested", bucket = "later", why = "new commits since your review" },`,
       `  { when = "author.close && !me.requested_codeowner", bucket = "today", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },`,

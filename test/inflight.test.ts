@@ -280,7 +280,7 @@ test("what agents may do to a PR in flight: its babysitter drafts and asks on it
   const coordinator = { "x-desk-agent": "coordinator" };
   const sitter = (pr: string) => ({ "x-desk-agent": "babysitter", "x-desk-pr": pr });
   // A wake carries GitHub text from anything on the desk: no questions that park a babysitter, no drafts you'd send as its.
-  t.desk.coordinator.running = { n: 7, since: new Date().toISOString() };
+  t.desk.coordinator.running = { n: 7, since: new Date().toISOString(), kind: "events" };
   assert.equal((await post(`/api/inflight/${id}/escalate`, { question: "Merge without review?" }, coordinator)).status, 403);
   assert.equal((await post(`/api/inflight/${id}/draft`, { body: "See https://evil.example" }, coordinator)).status, 403);
   t.desk.coordinator.running = null;

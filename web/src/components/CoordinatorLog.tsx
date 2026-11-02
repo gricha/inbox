@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import type { CoordinatorLogEntry, CoordinatorView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { cls, shortId, sinceText } from "../format.ts";
-import { coordinatorText, logText } from "../view.ts";
+import { coordinatorText, logText, policyLines } from "../view.ts";
 import { Dots, KeyButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 
@@ -40,13 +40,19 @@ export function CoordinatorLog({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
   }, [load, loads]);
 
-  async function undo(seq: number) {
+  // An action by its undo seq, or a policy change by its version.
+  async function undo(e: CoordinatorLogEntry) {
     try {
-      const r = await api.undo(seq);
-      flash(`Undid ${r.action ?? "that"} on ${shortId(r.id)}`);
+      if (e.kind === "policy" && e.version !== null) {
+        await api.undoPolicy(e.version);
+        flash("Put the policy back as it was before that change");
+      } else {
+        const r = await api.undo(e.undo_seq!);
+        flash(`Undid ${r.action ?? "that"} on ${shortId(r.id)}`);
+      }
       await load();
-    } catch (e) {
-      flash(message(e), true);
+    } catch (err) {
+      flash(message(err), true);
     }
   }
 
@@ -84,16 +90,28 @@ function shownLog(log: CoordinatorLogEntry[]): CoordinatorLogEntry[] {
   return log.slice(0, SHOWN).filter((e) => !(e.kind === "note" && acts.get(e.run) === 1));
 }
 
-function Entry({ e, now, undo }: { e: CoordinatorLogEntry; now: number; undo: (seq: number) => Promise<void> }) {
+function Entry({ e, now, undo }: { e: CoordinatorLogEntry; now: number; undo: (e: CoordinatorLogEntry) => Promise<void> }) {
+  const diff = policyLines(e);
+  const undoable = (e.kind === "act" && e.undo_seq !== null) || (e.kind === "policy" && e.version !== null);
   return (
     <li className={cls(`cl-${e.kind}`, e.undone && "undone")}>
-      <span className="cl-text">{e.kind === "run" ? <Dots parts={logText(e).split(" · ")} /> : withCode(logText(e))}</span>
-      {e.kind === "act" && e.undo_seq !== null && !e.undone && (
+      <span className="cl-text">
+        {e.kind === "run" ? <Dots parts={logText(e).split(" · ")} /> : withCode(logText(e))}
+        {diff.length > 0 && (
+          <span className="cl-diff">
+            {diff.map((l, i) => (
+              // oxlint-disable-next-line react/no-array-index-key -- lines of one change, never reordered
+              <span key={i}>{l}</span>
+            ))}
+          </span>
+        )}
+      </span>
+      {undoable && !e.undone && (
         <button
           type="button"
           className="cl-undo"
           onClick={() => {
-            void undo(e.undo_seq!);
+            void undo(e);
           }}
         >
           Undo

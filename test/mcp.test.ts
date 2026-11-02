@@ -171,7 +171,8 @@ test("desk_policy: get fences the text and gives the hash; set needs that hash a
       r.text,
     );
   assert.ok(m, r.text);
-  assert.match(r.text, /judge: idle, 5 placed under this policy, 2 waiting, 7 of 60 this hour/);
+  assert.match(r.text, /judge: idle, 5 sorted under this policy, 2 waiting, 7 of 60 this hour/);
+  assert.doesNotMatch(r.text, /starter policy/);
   assert.equal(jsonBlock(r.text).hash, "beef");
 
   const missing = await call("desk_policy", { action: "set", text: "x" });
@@ -186,6 +187,16 @@ test("desk_policy: get fences the text and gives the hash; set needs that hash a
   });
   assert.deepEqual(lastCall().body, { text: "Mute dependabot.", base: "beef" });
   assert.equal(fake.policy, "Mute dependabot.");
+
+  // An empty policy.md: the starter is what's in effect, and it says so.
+  fake.policy = "";
+  const starter = await call("desk_policy", { action: "get" });
+  assert.match(
+    starter.text,
+    /\npolicy\.md is empty, so the desk's starter policy below is in effect; set saves the owner's own in its place\.\n/,
+  );
+  assert.match(starter.text, /\n<policy nonce="([0-9a-f]{8})">\nLess is more\.\n<\/policy nonce="\1">\n/);
+  assert.equal(jsonBlock(starter.text).starter, true);
 });
 
 test("desk_config: get, preview with moved titles fenced, save with the hash", async () => {

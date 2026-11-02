@@ -465,6 +465,7 @@ async function sitterDesk(c: TestContext, items: Item[], settings: Record<string
     settings: {
       "inflight.clone_roots": [path.join(w.root, "code")],
       "notify.enabled": false,
+      "policy.judge": false, // it would call this fake claude too
       ...settings,
     },
     desk: {

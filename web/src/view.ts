@@ -354,10 +354,16 @@ export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"
   return note ? { verdict: null, note } : null;
 }
 
+const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
+  hard: "placed by a hard rule",
+  claude: "sorted by Claude",
+  pending: "not sorted by Claude yet",
+};
+
 // The selected card's facts, in the review header's words, less what the card already says: its why, its problems and
 // size, which every card shows, and a sorted-away row's note.
 export function cardFacts(
-  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "cleared_by_coordinator">,
+  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "cleared_by_coordinator" | "placed_by">,
   me: string,
   away = false,
   inRun = false, // its stack's head names the author
@@ -376,6 +382,8 @@ export function cardFacts(
   if (risk && risk !== "high") out.push(`${risk} risk`);
   const notes = c.preflight?.state === "ready" ? (c.preflight.notes ?? 0) : 0;
   if (notes) out.push(`${notes} ${notes === 1 ? "note" : "notes"} on the changes`);
+  // Who placed it: its why is a hard rule's, Claude's, or a rule's until Claude answers.
+  if (c.placed_by) out.push(PLACED_BY[c.placed_by]);
   if (c.demoted && !away) out.push(c.demoted);
   // Why the coordinator put it away: e restores it, as with your own.
   if (c.cleared_by_coordinator) out.push(`the coordinator: ${c.cleared_by_coordinator}`);
@@ -549,11 +557,11 @@ const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!
 // "5m": how long until `at`.
 const until = (at: string, now: number) => ago(new Date(2 * now - Date.parse(at)).toISOString(), now).replace(/ ago$/, "");
 
-// The judge's step in a rule trace, after "policy": as src/judge.ts's judgeText says it to agents.
+// The judge's step in a rule trace, after "Claude": as src/judge.ts's judgeText says it to agents.
 export function judgeStepText(j: JudgeStep): string {
-  if (j.bucket === null) return j.pending ? "not judged yet, so the board default" : "no answer, so the board default";
-  const why = j.why || "it says nothing about this item";
-  return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (judged before the latest activity)" : ""}`;
+  if (j.bucket === null) return j.pending ? "not sorted yet, so where the rules put it" : "no answer, so where the rules put it";
+  const why = j.why || "keeps the rule's why";
+  return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
 }
 
 // "snoozed 3 FYI items", "snoozed 2 items and muted 1": the top bar's line, after "Coordinator".
@@ -568,24 +576,28 @@ export function actedText(a: CoordinatorActed): string {
   return all.length === 1 ? head : `${all.slice(0, -1).join(", ")} and ${all.at(-1)!}`;
 }
 
-// One line of the coordinator's log.
+// One line of the coordinator's log; a policy change's lines before and after come apart (policyLines).
 export function logText(e: CoordinatorLogEntry): string {
   if (e.kind === "act") {
     const what = `${sentence(past(e.action)).slice(0, -1)} ${e.item_id ? shortId(e.item_id) : "an item"}`;
     return e.text ? `${what}: ${e.text}` : what;
   }
+  if (e.kind === "policy") return e.text.split("\n")[0]!;
   return e.kind === "run" && e.run ? `Run ${e.run} · ${e.text.charAt(0).toLowerCase()}${e.text.slice(1)}` : e.text;
 }
 
+// A policy change's "− removed" and "+ added" lines.
+export const policyLines = (e: CoordinatorLogEntry) => (e.kind === "policy" ? e.text.split("\n").slice(1) : []);
+
 export function judgeStatusText(j: JudgeStatus, now: number): string {
-  if (j.state === "off") return `Nothing is judged: ${j.off_reason ?? "it's off"}.`;
+  if (j.state === "off") return `Claude doesn't sort your desk: ${j.off_reason ?? "it's off"}.`;
   const hour = `${j.spent} of ${j.max_per_hour} this hour.`;
   if (j.state === "error")
-    return `The judge's last call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
-  const placed = `${count(j.judged, "item")} placed by the policy${j.waiting ? `, ${j.waiting} waiting` : ""}`;
+    return `Claude's last sorting call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
+  const placed = `${count(j.judged, "item")} sorted by Claude${j.waiting ? `, ${j.waiting} waiting` : ""}`;
   if (j.state === "idle" && j.retry_at)
     return `${sentence(placed)} The hour's limit is reached (${j.max_per_hour}); next batch in ${until(j.retry_at, now)}.`;
-  return j.state === "running" ? `Judging now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
+  return j.state === "running" ? `Sorting now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
 }
 
 export function coordinatorText(s: CoordinatorStatus, now: number): string {
@@ -598,9 +610,15 @@ export function coordinatorText(s: CoordinatorStatus, now: number): string {
   if (s.held) return "Waiting: you have it open in a terminal. It picks up the new events once you close it.";
   if (!s.started) return "It starts its session after the first sync.";
   const r = s.last_run;
-  const did = r && (r.kind === "intro" ? "its first" : `${count(r.events, "event")}, ${count(r.actions, "action")}`);
+  const did =
+    r &&
+    (r.kind === "intro"
+      ? "its first"
+      : r.kind === "learn"
+        ? `read your last ${count(r.events, "action")}`
+        : `${count(r.events, "event")}, ${count(r.actions, "action")}`);
   const last = r ? ` Last run ${ago(r.started_at, now)}: ${did}.` : "";
   const head =
     s.state === "waiting" ? `Waiting for things to settle${s.next_at ? `; next run in ${until(s.next_at, now)}` : ""}.` : "Idle.";
-  return `${head}${last}${s.policy_empty ? " It wakes on new activity once you've written a policy." : ""}`;
+  return `${head}${last}`;
 }

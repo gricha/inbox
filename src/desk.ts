@@ -50,9 +50,9 @@ import { classify, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { NOT_LOGGED_IN, type PrText } from "./review.ts";
+import { agentDir, NOT_LOGGED_IN, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
-import { Judge, textHash } from "./judge.ts";
+import { DEFAULT_POLICY, Judge, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
 import {
   checkSetting,
@@ -127,10 +127,21 @@ export interface DeskOptions {
 }
 
 const MAX_POLICY = 20_000; // it goes with every judge call
+const POLICY_VERSIONS = 20;
+
+// A change to policy.md, kept in kv `policy_history` (the last 20): what it replaced, so Undo can put that back.
+interface PolicyVersion {
+  v: number;
+  at: string;
+  by: "owner" | "coordinator";
+  before: string;
+  text: string;
+  undone?: boolean;
+}
 
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Promise<PrText>;
-  generate(item: Item, s: Signals, why: string, pr: PrText): Promise<AiReview>;
+  generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Promise<AiReview>;
 }
 
 export class Desk {
@@ -152,7 +163,7 @@ export class Desk {
   writer: GitHubWriter | null;
   mcpUrl: string | null;
   policyPath: string;
-  policy = { text: "", hash: textHash("") };
+  policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
   coordinator: Coordinator;
 
@@ -291,6 +302,11 @@ export class Desk {
     return this.ctx?.me ?? "";
   }
 
+  // Where the tool-less agent calls run (the AI review, the judge, login checks).
+  agentDir(): string {
+    return agentDir(this.home);
+  }
+
   reloadConfig(sync = false): void {
     const text = fs.readFileSync(this.configPath, "utf8");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
@@ -308,30 +324,68 @@ export class Desk {
 
   readPolicy(): void {
     const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
-    this.policy = { text, hash: textHash(text) };
+    this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
   }
 
-  policyChanged(): void {
+  // What the judge and the coordinator follow: policy.md, or the starter while it's empty.
+  policyText(): string {
+    return this.policy.text.trim() ? this.policy.text : DEFAULT_POLICY;
+  }
+
+  // Re-reads policy.md; a change is kept as a version. Returns its number, or null when the text is the same.
+  policyChanged(by: PolicyVersion["by"] = "owner"): number | null {
+    const before = this.policy.text;
     this.readPolicy();
+    let v: number | null = null;
+    if (this.policy.text !== before) {
+      const history = this.policyHistory();
+      v = (history.at(-1)?.v ?? 0) + 1;
+      const kept: PolicyVersion = { v, at: this.now().toISOString(), by, before, text: this.policy.text };
+      this.store.set("policy_history", [...history, kept].slice(-POLICY_VERSIONS));
+    }
     this.changed();
     this.judge.pump();
     this.coordinator.wake();
+    return v;
+  }
+
+  policyHistory(): PolicyVersion[] {
+    return (this.store.get("policy_history") as PolicyVersion[] | null) ?? [];
   }
 
   getPolicy(): PolicyDoc {
-    return { path: this.policyPath, text: this.policy.text, hash: this.policy.hash, judge: this.judge.status() };
+    return { path: this.policyPath, text: this.policy.text, starter: DEFAULT_POLICY, hash: this.policy.hash, judge: this.judge.status() };
+  }
+
+  writePolicy(text: string): void {
+    const real = fs.existsSync(this.policyPath) ? fs.realpathSync(this.policyPath) : this.policyPath;
+    fs.writeFileSync(`${real}.tmp`, text);
+    fs.renameSync(`${real}.tmp`, real);
   }
 
   // `base` is the hash from GET: a stale one means it changed since (the coordinator, an editor) and nothing is written.
   putPolicy(text: string, base?: string, agent?: string): { ok: true; hash: string } {
-    this.ownerAsked(agent, "the policy");
+    this.ownerAsked(agent, "the policy", true);
     if (base !== undefined && base !== this.policy.hash)
       throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
     if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
-    const real = fs.existsSync(this.policyPath) ? fs.realpathSync(this.policyPath) : this.policyPath;
-    fs.writeFileSync(`${real}.tmp`, text);
-    fs.renameSync(`${real}.tmp`, real);
-    if (agent === "coordinator") this.coordinator.log(this.coordinator.running?.n ?? 0, "policy", "Updated the policy");
+    const before = this.policyText();
+    this.writePolicy(text);
+    const v = this.policyChanged(agent === "coordinator" ? "coordinator" : "owner");
+    if (agent === "coordinator" && v !== null) this.coordinator.policyChanged(before, this.policyText(), v);
+    return { ok: true, hash: this.policy.hash };
+  }
+
+  // The coordinator log's Undo on a policy change: puts back the text before it, while that change is still the latest.
+  undoPolicy(v: number): { ok: true; hash: string } {
+    const history = this.policyHistory();
+    const ver = history.find((h) => h.v === v);
+    if (!ver) throw new DeskError(404, "the desk no longer keeps that policy change");
+    if (ver.undone) throw new DeskError(409, "that policy change is undone already");
+    if (this.policy.text !== ver.text) throw new DeskError(409, "the policy changed since; undo the later change first");
+    ver.undone = true;
+    this.store.set("policy_history", history);
+    this.writePolicy(ver.before);
     this.policyChanged();
     return { ok: true, hash: this.policy.hash };
   }
@@ -349,10 +403,13 @@ export class Desk {
     this.changed();
   }
 
-  // A wake carries only GitHub text, so a policy or rules change then wasn't the owner asking.
-  ownerAsked(agent: string | undefined, what: string): void {
-    if (agent === "coordinator" && this.coordinator.running)
-      throw new DeskError(403, `${what} can change only when the owner asks you in a conversation, not on a wake`);
+  // A wake carries only GitHub text, so a policy or rules change then wasn't the owner asking. A learn run reads the owner's
+  // own actions and may refine the policy (`learnable`), never the rules: hard rules live there.
+  ownerAsked(agent: string | undefined, what: string, learnable = false): void {
+    const run = this.coordinator.running;
+    if (agent !== "coordinator" || !run || (learnable && run.kind === "learn")) return;
+    const not = run.kind === "learn" ? "a learn run refines only the policy" : "not on a wake";
+    throw new DeskError(403, `${what} can change only when the owner asks you in a conversation; ${not}`);
   }
 
   // ---------------------------------------------------------------- settings
@@ -677,13 +734,15 @@ export class Desk {
       const current = ai?.head_oid === e.item.head_oid ? ai : null;
       return current?.risk === "high" ? "look" : current?.verdict;
     };
-    // An answer for an older version of the item stays until a fresh one lands, so the queue doesn't jump back and forth.
+    // An answer for an older version of the item, or under an older policy, stays until a fresh one lands, so the queue
+    // doesn't jump back to the rules' placements each time the policy changes.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
     const judge = answers
       ? (id: string): JudgeStep => {
           const a = answers.get(id);
-          if (!a || a.policy !== this.policy.hash) return { bucket: null, why: "", pending: true };
-          return { bucket: a.bucket, why: a.why, pending: a.updated_at !== entries.get(id)?.item.updated_at };
+          if (!a) return { bucket: null, why: "", pending: true };
+          const stale = a.policy !== this.policy.hash || a.updated_at !== entries.get(id)?.item.updated_at;
+          return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
     for (const board of loaded.boards) {
@@ -782,6 +841,14 @@ export class Desk {
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
+      // Who placed it; your PR in flight is the lane's.
+      ...(e.inflight
+        ? {}
+        : p?.hard
+          ? { placed_by: "hard" as const }
+          : p?.judge
+            ? { placed_by: p.judge.bucket ? ("claude" as const) : ("pending" as const) }
+            : {}),
     };
   }
 
@@ -1223,7 +1290,7 @@ export class Desk {
     try {
       if (!this.review) throw new Error("AI review isn't available in this desk");
       const pr = await this.prText(id);
-      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr);
+      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
       this.aiErrors.delete(id);
@@ -1337,6 +1404,10 @@ export class Desk {
     // Its babysitter keeps working whatever its status, and a question it asks must stay in Now.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
       throw new DeskError(409, `${id} is in flight, so its babysitter has it; take it back (d) first`);
+    // Whatever policy it learned, what a hard rule placed stays on the owner's desk.
+    const clears = action === "done" || action === "snooze" || action === "mute";
+    if (by?.agent === "coordinator" && clears && [...this.snapshot().boards.values()].some((b) => b.result.placements.get(id)?.hard))
+      throw new DeskError(403, `a hard rule keeps ${id} on the owner's desk; the coordinator can't clear it`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = entry.analysis.activity_at;
     switch (action) {
@@ -1625,7 +1696,10 @@ export class Desk {
 
   getConfig(): ConfigDoc {
     const text = this.configText;
-    return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings };
+    const hard = (this.loaded?.config.boards ?? []).flatMap((b) =>
+      b.rules.flatMap((r) => (r.hard && r.bucket !== "judge" ? [{ board: b.name, bucket: r.bucket, when: r.when, why: r.why ?? "" }] : [])),
+    );
+    return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings, hard };
   }
 
   preview(text: string): PreviewResult {
