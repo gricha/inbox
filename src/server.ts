@@ -355,13 +355,14 @@ export async function startServer(
     url,
     desk,
     close: async () => {
-      desk.stop();
+      const agentsGone = desk.close(); // stops the desk at once; its agents may take a moment
       await new Promise<void>((r) => {
         server.close(() => {
           r();
         });
         (server as { closeAllConnections?: () => void }).closeAllConnections?.();
       });
+      await agentsGone;
     },
   };
 }
