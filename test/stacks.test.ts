@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildStacks, grouped, lineOf, oneLinePerStack, stackRef, stackView, toFetch, type Seat, type Stacks } from "../src/stacks.ts";
 import type { Bucket, Card, Item } from "../src/types.ts";
-import { myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
 // A PR on branch b<n> of acme/api, based on `on`: a branch, or the number of the PR below it.
@@ -370,4 +370,151 @@ test("a PR a probe finds that the desk stored before it kept branches is fetched
   t.gh.items.set(id(1), parent);
   await t.desk.sync();
   assert.deepEqual(t.desk.queue().sections.now[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
+});
+
+test("a ref counts the PR's own line: forks over a merged bottom are two PRs, not one 1/1 stack", () => {
+  const s = buildStacks([pr(1, "main", { state: "merged" }), pr(2, 1), pr(3, 1)]);
+  assert.deepEqual([stackRef(s, id(2)), stackRef(s, id(3))], [undefined, undefined]);
+  const later = { later: [card(2, "later", s), card(3, "later", s)] };
+  oneLinePerStack(later, ["later"], s);
+  assert.deepEqual(
+    later.later.map((c) => [c.id, c.stack]),
+    [
+      [id(2), undefined],
+      [id(3), undefined],
+    ],
+  );
+  assert.deepEqual(
+    stackView(s, id(3), seats({}))?.forks.map((m) => m.number),
+    [2],
+    "the chain still shows the other branch",
+  );
+
+  const open = buildStacks([pr(1, "main"), pr(2, 1), pr(3, 1)]);
+  assert.deepEqual(
+    [1, 2, 3].map((n) => stackRef(open, id(n))),
+    [
+      { id: id(1), pos: 1, size: 2 },
+      { id: id(1), pos: 2, size: 2 },
+      { id: id(1), pos: 2, size: 2 },
+    ],
+  );
+});
+
+test("desktop notifications go per PR: a member asked while a lower one is in Now is news at once, and once", async (tc) => {
+  const t = await setup([theirs(1, "main"), reviewAsk(2, { head_ref: "b2", base: "b1" }), theirs(3, 2)], {
+    settings: { "notify.quiet": "" },
+  });
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  t.gh.items.set(id(3), reviewAsk(3, { head_ref: "b3", base: "b2", updated_at: at(1) }));
+  await t.desk.sync();
+  assert.deepEqual(t.notes, ["api#3 · carol asked you directly"]);
+  t.desk.act(id(2), "done");
+  await t.desk.sync();
+  assert.deepEqual(t.notes, ["api#3 · carol asked you directly"], "#3 standing for the stack now isn't news again");
+});
+
+test("a member stored quietly is news once a board lists it: its events since the desk last logged any", async (tc) => {
+  const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1)]);
+  tc.after(t.cleanup);
+  let lag = false; // the search index hasn't caught up with #2's ask yet
+  const route = t.gh.route;
+  t.gh.route = (q) => route(q).filter((x) => !(lag && x === id(2)));
+  await t.desk.sync();
+  t.setNow(new Date(NOW.getTime() + 31 * 60_000));
+  t.gh.items.set(id(2), reviewAsk(2, { head_ref: "b2", base: "b1", updated_at: at(30) }));
+  lag = true;
+  await t.desk.sync();
+  const of2 = () =>
+    t.desk.store
+      .activity({ after: 0, limit: 100 })
+      .filter((e) => e.item_id === id(2))
+      .map((e) => e.kind);
+  assert.deepEqual(of2(), [], "the stale refresh stores the ask quietly");
+  lag = false;
+  t.setNow(new Date(NOW.getTime() + 33 * 60_000));
+  await t.desk.sync();
+  assert.deepEqual(of2(), ["new"]);
+  await t.desk.sync();
+  assert.deepEqual(of2(), ["new"], "once");
+
+  const [gh] = t.desk.connectors;
+  const said = t.desk.store.itemsById([id(2)]).get(id(2))!;
+  t.desk.ingest(gh!, [{ ...said, ci: "red", updated_at: at(40) }], true);
+  t.desk.ingest(gh!, [{ ...said, ci: "red", updated_at: at(41), draft: true }], true);
+  t.desk.ingest(gh!, [{ ...said, ci: "red", updated_at: at(42), draft: true }]);
+  assert.deepEqual(of2(), ["new", "ci"], "a change made while it was quiet is logged against what was last logged");
+});
+
+test("the feed takes a member stored quietly for one the desk doesn't hold: an ask on it starts a reconcile", async (tc) => {
+  const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1)]);
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  await t.desk.gh.poll();
+  t.gh.items.set(id(2), reviewAsk(2, { head_ref: "b2", base: "b1", updated_at: at(1) }));
+  t.gh.threads = [{ thread: "t1", item: id(2), reason: "review_requested", updated_at: at(1) }];
+  const searches = t.gh.searches.length;
+  await t.desk.gh.poll();
+  await idle(t.desk);
+  assert.ok(t.gh.searches.length > searches);
+  assert.deepEqual(
+    t.desk.store
+      .activity({ after: 0, limit: 100 })
+      .filter((e) => e.item_id === id(2))
+      .map((e) => e.kind),
+    ["new"],
+  );
+});
+
+test("off-board members of a stack the boards list aren't pruned with the items no search returns", async (tc) => {
+  const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1), theirs(3, 2), theirs(9, "main")]);
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.store.putItems([theirs(9, "main")], NOW.toISOString());
+  const day = 24 * 60 * 60_000;
+  t.setNow(new Date(NOW.getTime() + 14 * day - 10 * 60_000));
+  await t.desk.sync();
+  t.setNow(new Date(NOW.getTime() + 14 * day + 60_000));
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.item(id(1)).stack?.line.map((m) => m.number),
+    [1, 2, 3],
+  );
+  assert.equal(t.desk.store.itemsById([id(9)]).has(id(9)), false, "an item in no stack still goes");
+});
+
+test("QueueView.stacks has every stack a card in the view carries, cleared ones too", async (tc) => {
+  const t = await setup([reviewAsk(1, { head_ref: "b1" }), reviewAsk(2, { head_ref: "b2", base: "b1" })]);
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act(id(1), "mute");
+  t.desk.act(id(2), "mute");
+  const q = t.desk.queue();
+  assert.deepEqual(
+    q.cleared.map((c) => c.stack?.id),
+    [id(1), id(1)],
+  );
+  assert.deepEqual(Object.keys(q.stacks), [id(1)]);
+  assert.equal(q.stacks[id(1)]?.current, id(1));
+});
+
+test("probes for stacks go first: a busy board doesn't stop a chain filling in one pass", async (tc) => {
+  const plain = Array.from({ length: 130 }, (_, i) => reviewAsk(100 + i));
+  const t = await setup([...plain, theirs(1, "main"), reviewAsk(2, { head_ref: "b2", base: "b1" }), theirs(3, 2), theirs(4, 3)]);
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.item(id(2)).stack?.line.map((m) => m.number),
+    [1, 2, 3, 4],
+  );
+  assert.ok(t.gh.probeCalls.length <= 120, `${t.gh.probeCalls.length} probes`);
+  t.setNow(new Date(NOW.getTime() + 60_000));
+  await t.desk.sync();
+  t.setNow(new Date(NOW.getTime() + 120_000));
+  await t.desk.sync();
+  assert.ok(
+    plain.every((p) => t.gh.probeCalls.includes(`acme/api down ${p.head_ref}`)),
+    "the rest of the board's PRs are asked over the next passes",
+  );
 });

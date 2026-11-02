@@ -908,7 +908,30 @@ const SEEDS: Seed[] = [
     by: "rosa",
     size: [...size],
     close: 7,
+    head: `rosa/datepicker-${n - 309}`,
+    base: n === 310 ? "main" : `rosa/datepicker-${n - 310}`,
     on: { "personal-review": ["close"] },
+  })),
+  // A 2-PR stack you snoozed whole: both cards are in Cleared with their stack, and QueueView.stacks has it.
+  ...(
+    [
+      [4091, "Flags: a registry of who owns each feature flag", [140, 12, 5]],
+      [4092, "Flags: ping a flag's owner after 30 days at 100%", [96, 8, 3]],
+    ] as const
+  ).map(([n, title, size]): Seed => ({
+    repo: "acme/api",
+    n,
+    title,
+    author: "tomas",
+    age: 50,
+    wait: 48,
+    by: "tomas",
+    team: "backend",
+    size: [...size],
+    head: `tomas/flag-owners-${n - 4090}`,
+    base: n === 4091 ? "main" : "tomas/flag-owners-1",
+    on: { "work-review": [] },
+    st: { snooze_until: new Date(T0 + 20 * HOUR).toISOString() },
   })),
   // A stack of your own PRs, one per team, all red on the same checks.
   ...(
@@ -1074,6 +1097,18 @@ const SEEDS: Seed[] = [
     size: [96, 30, 3],
     head: "marco/leases-3",
     base: "marco/leases-2",
+    on: {},
+  },
+  // A live fork off Marco's bottom PR, asked of nobody: Stack.forks in his stack's chain; its own line is #890, #893 (2/2).
+  {
+    repo: "acme/worker",
+    n: 893,
+    title: "Queue: an admin page to inspect and break leases",
+    author: "marco",
+    age: 18,
+    size: [150, 4, 5],
+    head: "marco/leases-admin",
+    base: "marco/leases-1",
     on: {},
   },
 ];
@@ -1543,16 +1578,19 @@ function queue(): QueueView {
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
   const sections = { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") };
   const leads = oneLinePerStack(sections, ["now", "today", "later", "fyi"], stacks());
+  const hidden = of("hide");
+  const clearedCards = [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator);
+  const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
   return {
     sections,
-    hidden: of("hide"),
-    cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
-    resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+    hidden,
+    cleared: clearedCards,
+    resolved: resolvedCards,
     now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     babysitting: setting("inflight.babysit"),
-    stacks: stacksOf(leads),
+    stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
   };
 }
 

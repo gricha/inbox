@@ -445,7 +445,7 @@ export interface Card {
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
-  stack?: StackRef; // an open PR in a stack with two or more open
+  stack?: StackRef; // an open PR whose line has two or more open
 }
 
 // ---------------------------------------------------------------------------
@@ -568,7 +568,7 @@ export interface QueueView {
   today_cards: number;
   paused: Paused | null;
   babysitting: boolean; // inflight.babysit: d on your PR hands it to a babysitter, or only puts it in flight
-  stacks: Record<string, Stack>; // by id: each stack with a card in sections, which lists it once (current: that card)
+  stacks: Record<string, Stack>; // by id: each stack a card here carries (current: the card sections list it by, else its first card)
 }
 
 // One changed file, from GitHub's pulls/{n}/files.

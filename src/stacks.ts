@@ -15,7 +15,6 @@ interface Node {
 
 export interface Stacks {
   nodes: Map<string, Node>; // every PR in a stack of two or more; a closed PR with nothing open or merged above it isn't
-  open: Map<string, number>; // per stack (its bottom PR's id): its open PRs
 }
 
 // Where the desk has the PR on the queue, for a stack's members.
@@ -30,6 +29,7 @@ export interface Probe {
   repo: string;
   dir: "up" | "down"; // up: the PR whose head is `branch`; down: open PRs based on it
   branch: string;
+  stacked: boolean; // for a stack, or a PR based on another's branch; the rest only look for a stack
 }
 
 const lc = (s: string) => s.toLowerCase();
@@ -104,7 +104,6 @@ export function buildStacks(items: Item[]): Stacks {
     return f;
   };
   const nodes = new Map<string, Node>();
-  const open = new Map<string, number>();
   for (const it of prs) {
     if (parent.has(it.id) || !facts(it.id).alive) continue;
     const tree: Node[] = [];
@@ -123,9 +122,8 @@ export function buildStacks(items: Item[]): Stacks {
     walk(it.id, null, 0, true);
     if (tree.length < 2) continue;
     for (const n of tree) nodes.set(n.item.id, n);
-    open.set(it.id, tree.filter((n) => n.item.state === "open").length);
   }
-  return { nodes, open };
+  return { nodes };
 }
 
 // Bottom to top through `id`: the PRs below it, then up the main branch at each fork.
@@ -136,13 +134,13 @@ export function lineOf(s: Stacks, id: string): string[] {
   return line;
 }
 
-// An open PR's place among the open PRs of its line, in a stack with two or more open: the stack still to land. The merged
-// PRs below it are in the stack's chain, not in the count.
+// An open PR's place among the open PRs of its line, in a line with two or more open: the stack still to land. The merged
+// PRs below it are in the stack's chain, not in the count; open PRs on a fork's other branch aren't stacked on it.
 export function stackRef(s: Stacks, id: string): StackRef | undefined {
   const n = s.nodes.get(id);
-  if (n?.item.state !== "open" || (s.open.get(n.root) ?? 0) < 2) return undefined;
+  if (n?.item.state !== "open") return undefined;
   const line = lineOf(s, id).filter((x) => s.nodes.get(x)!.item.state === "open");
-  return { id: n.root, pos: line.indexOf(id) + 1, size: line.length };
+  return line.length < 2 ? undefined : { id: n.root, pos: line.indexOf(id) + 1, size: line.length };
 }
 
 // Lower in the stack: nearer the bottom, then on the main line before a fork's other branch.
@@ -250,12 +248,18 @@ export function grouped<T>(rows: T[], idOf: (row: T) => string, s: Stacks): T[] 
 
 // What to fetch for the stacks of the PRs on the boards (`listed`), which the desk may see only part of. Probes: up, the
 // PR whose branch a bottom PR is based on (or was, before the one below it merged); down, open PRs based on an open PR's
-// branch. Stale: members no board lists, still open as of a fetch before `before`.
-export function toFetch(items: Item[], s: Stacks, listed: Set<string>, before: string): { probes: Probe[]; stale: Item[] } {
+// branch. Stale: members no board lists, still open as of a fetch before `before`. Members: every PR in the stacks of
+// listed ones.
+export function toFetch(
+  items: Item[],
+  s: Stacks,
+  listed: Set<string>,
+  before: string,
+): { probes: Probe[]; stale: Item[]; members: string[] } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const roots = new Set([...listed].map((id) => s.nodes.get(id)?.root));
-  const ids = new Set(listed);
-  for (const [id, n] of s.nodes) if (roots.has(n.root)) ids.add(id);
+  const members = [...s.nodes.values()].filter((n) => roots.has(n.root)).map((n) => n.item.id);
+  const ids = new Set([...listed, ...members]);
   const mainOf = defaults(items);
   const probes = new Map<string, Probe>();
   const add = (p: Probe) => probes.set(probeKey(p), p);
@@ -265,11 +269,10 @@ export function toFetch(items: Item[], s: Stacks, listed: Set<string>, before: s
     if (!it || it.kind !== "pr" || it.state === "closed") continue;
     if (!listed.has(id) && it.state === "open" && it.detail_at < before) stale.push(it);
     const main = mainOf(it);
-    if (main && !s.nodes.get(id)?.parent) {
-      if (it.base && it.base !== main) add({ repo: it.repo, dir: "up", branch: it.base });
-      else if (it.retargeted && it.retargeted.from !== main) add({ repo: it.repo, dir: "up", branch: it.retargeted.from });
-    }
-    if (it.state === "open" && ownBranch(it)) add({ repo: it.repo, dir: "down", branch: it.head_ref! });
+    const under = main && !s.nodes.get(id)?.parent ? [it.base, it.retargeted?.from].find((b) => b && b !== main) : undefined;
+    if (under) add({ repo: it.repo, dir: "up", branch: under, stacked: true });
+    if (it.state === "open" && ownBranch(it))
+      add({ repo: it.repo, dir: "down", branch: it.head_ref!, stacked: !!under || s.nodes.has(id) });
   }
-  return { probes: [...probes.values()], stale };
+  return { probes: [...probes.values()], stale, members };
 }

@@ -192,7 +192,7 @@ function tally(keys: string[]): Record<string, number> {
   return out;
 }
 
-async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = [];
   let next = 0;
   let failed = false;

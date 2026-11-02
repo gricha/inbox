@@ -400,10 +400,25 @@ test("stacks: the queue lists each once with its chain, and a member no board li
         "acme/api#4152",
         { id: "acme/api#4150", pos: 1, size: 6, folded: ["acme/api#4154", "acme/api#4155", "acme/api#4156", "acme/api#4157"] },
       ],
+      ["oss/calendar-ui#310", { id: "oss/calendar-ui#310", pos: 1, size: 3, folded: ["oss/calendar-ui#311", "oss/calendar-ui#312"] }],
       ["acme/worker#890", { id: "acme/worker#890", pos: 1, size: 3, folded: ["acme/worker#891"] }],
     ],
   );
-  assert.deepEqual(Object.keys(q.stacks), ["acme/api#4150", "acme/worker#890"]);
+  assert.deepEqual(
+    q.cleared.filter((c) => c.stack).map((c) => [c.id, c.stack]),
+    [
+      ["acme/api#4091", { id: "acme/api#4091", pos: 1, size: 2 }],
+      ["acme/api#4092", { id: "acme/api#4091", pos: 2, size: 2 }],
+    ],
+    "a stack snoozed whole is in Cleared, every PR",
+  );
+  assert.deepEqual(Object.keys(q.stacks).toSorted(), ["acme/api#4091", "acme/api#4150", "acme/worker#890", "oss/calendar-ui#310"]);
+  assert.equal(q.stacks["acme/api#4091"]?.current, "acme/api#4091");
+  assert.deepEqual(
+    q.stacks["acme/worker#890"]?.forks.map((m) => [m.number, m.parent, m.bucket]),
+    [[893, "acme/worker#890", null]],
+    "a fork off the bottom, asked of nobody",
+  );
   const mine = q.stacks["acme/api#4150"]!;
   assert.deepEqual(
     [mine.current, mine.up, mine.down, mine.needs_you, mine.forks],
@@ -426,6 +441,11 @@ test("stacks: the queue lists each once with its chain, and a member no board li
   assert.deepEqual(
     [top.stack?.current, top.stack?.up, top.stack?.down, top.card.stack],
     ["acme/worker#892", null, "acme/worker#891", { id: "acme/worker#890", pos: 3, size: 3 }],
+  );
+  const { data: fork } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/worker#893")}`);
+  assert.deepEqual(
+    [fork.stack?.line.map((m) => m.number), fork.stack?.forks.map((m) => m.number), fork.stack?.down, fork.card.stack],
+    [[890, 893], [891, 892], "acme/worker#890", { id: "acme/worker#890", pos: 2, size: 2 }],
   );
 });
 

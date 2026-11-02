@@ -1,7 +1,7 @@
 // GitHub as a connector: board searches plus details (reconcile), the notifications feed, and the snapshot diff.
 import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
-import type { GitHub, SearchHit } from "../github/index.ts";
+import { pool, type GitHub, type SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
@@ -18,6 +18,7 @@ const MENTIONS = new Set(["mention", "team_mention"]);
 const BACKFILL = 40; // stored PRs a pass refetches for fields stacks need that they were stored without
 const PROBE_TTL = 30 * 60_000; // a stack probe isn't asked again before this; an off-board open member is refreshed after it
 const MAX_PROBES = 120; // stack probes a pass
+const RESERVE = 40; // of those, kept from probes that only look for a stack, for the rounds that follow a chain up
 const STACK_ROUNDS = 3; // probe, fetch, probe again: a chain a few PRs deep fills in one pass
 
 interface Feed {
@@ -205,7 +206,7 @@ export class GitHubConnector implements Connector {
       const meta = desk.store.itemMeta();
       const need = [...hits.values()].filter((h) => {
         const m = meta.get(h.id);
-        if (!m || m.updated_at !== h.updated_at) return true;
+        if (!m || m.quiet || m.updated_at !== h.updated_at) return true;
         const ttl = h.author.toLowerCase() === me ? 3 * 60_000 : 30 * 60_000;
         return now.getTime() - Date.parse(m.detail_at) > ttl;
       });
@@ -233,12 +234,12 @@ export class GitHubConnector implements Connector {
         desk.store.setHits(q, r.ids, r.total, iso, kept);
       }
       desk.store.touchItems([...hits.keys()], iso);
-      desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString());
       if (!desk.store.get("baseline_at")) desk.store.set("baseline_at", iso);
       const [firstError] = errors;
       if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
       desk.store.set("reconciled_at", iso);
-      const filled = await this.fillStacks(new Set(hits.keys()));
+      const { fetched: filled, members } = await this.fillStacks(new Set(hits.keys()));
+      desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
       this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
       desk.store.set("synced_at", this.syncedAt);
       this.error = errors.length ? `${errors.length} search(es) failed: ${errors[0]}` : null;
@@ -263,8 +264,9 @@ export class GitHubConnector implements Connector {
   }
 
   // Stack members no board search returns (the PR below a stack's bottom, PRs stacked on one on the desk) and stored ones
-  // gone stale, fetched read only and stored without events: they're context for a stack, not news. Returns how many.
-  async fillStacks(listed: Set<string>): Promise<number> {
+  // gone stale, fetched read only and stored without events: they're context for a stack, not news. Returns how many, and
+  // the members of the listed PRs' stacks.
+  async fillStacks(listed: Set<string>): Promise<{ fetched: number; members: Set<string> }> {
     const desk = this.desk;
     const at = desk.now();
     const asked = Object.fromEntries(
@@ -274,32 +276,36 @@ export class GitHubConnector implements Connector {
     );
     let budget = MAX_PROBES;
     let fetched = 0;
+    const members = new Set<string>();
     try {
       for (let round = 0; round < STACK_ROUNDS; round++) {
         const stored = desk.store.items();
         const before = new Date(at.getTime() - PROBE_TTL).toISOString();
-        const { probes, stale } = toFetch(stored, buildStacks(stored), listed, before);
-        const todo = probes.filter((p) => !asked[probeKey(p)]).slice(0, budget);
-        const old = round === 0 ? stale : [];
-        if (!todo.length && !old.length) break;
-        budget -= todo.length;
+        const got = toFetch(stored, buildStacks(stored), listed, before);
+        for (const id of got.members) members.add(id);
+        const due = got.probes.filter((p) => !asked[probeKey(p)]);
+        const stacked = due.filter((p) => p.stacked).slice(0, budget);
+        const scan = due.filter((p) => !p.stacked).slice(0, Math.max(0, budget - stacked.length - RESERVE));
+        const old = round === 0 ? got.stale : [];
+        if (!stacked.length && !scan.length && !old.length) break;
+        budget -= stacked.length + scan.length;
         const repos = new Map<string, Probe[]>();
-        for (const p of todo) {
+        for (const p of [...stacked, ...scan]) {
           asked[probeKey(p)] = at.toISOString();
           repos.set(p.repo, [...(repos.get(p.repo) ?? []), p]);
         }
-        const found: SearchHit[] = [];
-        for (const [repo, ps] of repos) {
+        const answers = await pool([...repos], 3, async ([repo, ps]) => {
           try {
-            found.push(...(await this.api.branchPrs(repo, ps)));
+            return await this.api.branchPrs(repo, ps);
           } catch (e) {
             if (isRateLimited(e)) throw e;
             desk.log(`stack probes in ${repo} failed: ${(e as Error).message}`);
+            return [];
           }
-        }
+        });
         const meta = desk.store.itemMeta();
         const want = new Map<string, SearchHit>();
-        for (const h of found) {
+        for (const h of answers.flat()) {
           const m = meta.get(h.id);
           if (!listed.has(h.id) && (m?.updated_at !== h.updated_at || m.lacks)) want.set(h.id, h);
         }
@@ -312,7 +318,7 @@ export class GitHubConnector implements Connector {
     } finally {
       desk.store.set("stack_probes", asked);
     }
-    return fetched;
+    return { fetched, members };
   }
 
   // One item's details now, outside the loops: after you approve it, so it resolves in seconds, not at the next pass.
@@ -346,7 +352,8 @@ export class GitHubConnector implements Connector {
       this.feed.interval = page.poll_interval;
       this.feedError = null;
       if (!page.modified) return;
-      const tracked = new Map([...desk.store.itemMeta()].map(([id, m]) => [id.toLowerCase(), { id, m }]));
+      // A stack's member stored quietly isn't the desk's until a board lists it, as if it weren't held.
+      const tracked = new Map([...desk.store.itemMeta()].filter(([, m]) => !m.quiet).map(([id, m]) => [id.toLowerCase(), { id, m }]));
       const refresh = new Map<string, SearchHit>();
       const mentions: NewEvent[] = [];
       const seen = { ...this.feed.seen };

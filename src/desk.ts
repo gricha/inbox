@@ -634,7 +634,7 @@ export class Desk {
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips. `quiet`:
-  // only stores them (a stack's members no board lists: context, not news).
+  // only stores them (a stack's members no board lists: context, not news); the next ingest that isn't logs what changed.
   ingest(from: Connector, all: Item[], quiet = false): void {
     const prev = this.store.itemsById(all.map((i) => i.id));
     // The feed and the full pass can fetch the same item at once; an older answer landing last would replay changes backwards.
@@ -642,12 +642,13 @@ export class Desk {
     if (!items.length) return;
     const now = this.now().toISOString();
     if (quiet) {
-      this.store.putItems(items, now);
+      this.store.putItems(items, now, true);
       return;
     }
+    const said = this.store.said(items.map((i) => i.id));
     const events: NewEvent[] = [];
     for (const next of items) {
-      const before = prev.get(next.id) ?? null;
+      const before = (said.has(next.id) ? said.get(next.id) : prev.get(next.id)) ?? null;
       events.push(...from.events(before, next));
       const was = before && this.resolutionOf(before);
       const is = this.resolutionOf(next);
@@ -715,10 +716,11 @@ export class Desk {
     }
   }
 
+  // Per PR, not the queue's one line per stack: each ask is news, and a member that comes to stand for its stack isn't.
   notifyNewNow(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
-    const now = this.focus().sections.now;
+    const now = this.top(this.snapshot(), new Set()).now;
     const prev = this.store.get("notified_now") as string[] | null;
     this.store.set(
       "notified_now",
@@ -1171,7 +1173,7 @@ export class Desk {
       today_cards: this.settings["queue.today_cards"],
       paused: this.paused(),
       babysitting: this.settings["inflight.babysit"],
-      stacks: this.stacksOf(leads, snap),
+      stacks: this.stacksOf([...leads, ...hidden, ...cleared, ...resolved], snap),
     };
   }
 
