@@ -500,7 +500,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
         {ai && (
           <span className="quiet">
             from {modelName(ai.model)}, {when(ai.at)}
-            {view.ai_stale ? ", before the latest commits" : ""}
+            {view.ai_stale ? ", on an earlier commit" : ""}
           </span>
         )}
       </h2>

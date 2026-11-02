@@ -443,8 +443,8 @@ test("a card's problems and size, in the review's and the lane's words", () => {
 
 test("a card's AI word: the verdict, marked when it's for an older commit, or why there's none yet", () => {
   assert.deepEqual(aiWord({ state: "ready", verdict: "look" }), { verdict: "look", note: "" });
-  assert.deepEqual(aiWord({ state: "stale", verdict: "skim" }), { verdict: "skim", note: "updating" });
-  assert.deepEqual(aiWord({ state: "paused", verdict: "look" }), { verdict: "look", note: "paused" });
+  assert.deepEqual(aiWord({ state: "stale", verdict: "skim" }), { verdict: "skim", note: "earlier commit" });
+  assert.deepEqual(aiWord({ state: "paused", verdict: "look" }), { verdict: "look", note: "earlier commit" });
   assert.deepEqual(aiWord({ state: "off", verdict: "skip" }), { verdict: "skip", note: "earlier commit" });
   assert.deepEqual(aiWord({ state: "running" }), { verdict: null, note: "AI review being written" });
   assert.deepEqual(aiWord({ state: "queued" }), { verdict: null, note: "AI review queued" });
@@ -467,6 +467,15 @@ test("the selected card's facts leave out what the card already says", () => {
   assert.ok(!cardFacts(pr, "me", false, true).includes("by dana"), "in a stack, its head names the author");
   assert.ok(says("conflicts with main", "merge conflict"));
   assert.ok(!says("asked you directly", "merge conflict"));
+  // A rule's why in its own words says the same problem: a sorted-away row shows it once.
+  assert.ok(says("merge conflict", "conflicts with main"));
+  assert.ok(says("red CI on main", "CI failing"));
+  assert.ok(says("CI failing", "CI went red"));
+  assert.ok(says("new commits after you requested changes", "changes requested"));
+  assert.ok(says("has 2 approvals", "approved"));
+  assert.ok(!says("CI failing", "CI passing"));
+  assert.ok(!says("waiting on reviewers", "optional check failing"));
+  assert.ok(!says("required by CODEOWNERS", "CI failing"));
   assert.deepEqual(cardFacts({ ...pr, why: "3 unresolved threads", author: "me", demoted: undefined }, "me"), [
     "medium risk",
     "5 notes on the changes",
