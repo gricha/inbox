@@ -308,6 +308,14 @@ export class Store {
     return r ? this.lastAction(r.seq as number) : null;
   }
 
+  // Who pinned it: the agent behind its latest pin still in effect, null for you.
+  pinnedBy(itemId: string): string | null {
+    const r = this.db
+      .prepare("SELECT agent FROM events WHERE item_id = ? AND action = 'pin' AND undone = 0 ORDER BY seq DESC LIMIT 1")
+      .get(itemId);
+    return (r?.agent as string | null | undefined) ?? null;
+  }
+
   markUndone(seq: number): void {
     this.db.prepare("UPDATE events SET undone = 1 WHERE seq = ?").run(seq);
   }

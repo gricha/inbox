@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultConfigText, migrateHard, parseConfig } from "../src/config.ts";
+import { defaultConfigText, migrateBotAsk, migrateHard, parseConfig } from "../src/config.ts";
 
 test("default configs parse cleanly", () => {
   for (const orgs of [["acme"], ["acme", "globex"], []]) {
@@ -82,11 +82,32 @@ test("a config written before hard rules gets its ask-by-name rule made hard, an
   assert.equal(migrateHard(now), null, "already hard");
   const edited = old.replace(`why = "{me.requested_by} asked you directly", nocap = true`, `why = "asked by name", nocap = true`);
   const rules = parseConfig(migrateHard(edited)!).loaded!.config.boards.flatMap((b) => b.rules);
-  assert.equal(rules.filter((r) => r.hard).length, 2, "its own why is kept");
+  assert.deepEqual(
+    rules.filter((r) => r.when === "me.requested_direct && !me.requested_by_bot").map((r) => [r.hard, r.why]),
+    [
+      [true, "asked by name"],
+      [true, "{me.requested_by} asked you directly"],
+    ],
+    "its own why is kept",
+  );
   assert.equal(rules.filter((r) => r.nocap).length, 2, "My PRs' changes requested stays nocap");
   assert.equal(
     migrateHard(old.replaceAll(`bucket = "now", why = "{me.requested_by}`, `bucket = "today", why = "{me.requested_by}`)),
     null,
     "a rule the owner changed is theirs",
   );
+});
+
+test("a config from before the bot-ask rule gets it right after the hard rule for a person's ask, once", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
+  const old = now.replaceAll(`  ${bot}\n`, "");
+  assert.notEqual(old, now);
+  assert.equal(migrateBotAsk(old), now);
+  assert.equal(migrateBotAsk(now), null, "already there");
+  assert.equal(migrateBotAsk(migrateHard(old.replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`))!), now);
+  const soft = old.replaceAll(`asked you directly", hard = true`, `asked you directly"`);
+  assert.equal(migrateBotAsk(soft), null, "a rule the owner made soft is theirs");
+  const last = old.replace(/(asked you directly", hard = true \}),/, "$1");
+  assert.deepEqual(parseConfig(migrateBotAsk(last)!).errors, [], "one without its trailing comma");
 });

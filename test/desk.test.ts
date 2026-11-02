@@ -34,17 +34,18 @@ test("sync fills boards, focus and status", async () => {
   assert.ok(review.board.queries.every((q) => q.endsWith("org:acme")));
   const mine = t.desk.board("acme-mine");
   assert.deepEqual(
-    mine.sections.now.map((c) => c.id),
+    mine.sections.today.map((c) => c.id),
     ["acme/web#3"],
   );
-  assert.ok(mine.sections.now[0]?.chips.includes("CI red"));
+  assert.ok(mine.sections.today[0]?.chips.includes("CI red"));
 
   const focus = t.desk.focus();
-  assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1", "acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk ●2");
+  assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
+  assert.deepEqual(focus.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
+  assert.equal(t.desk.status().text, "desk ●1 ◐1");
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
-  assert.equal(ov.focus.now, 2);
+  assert.equal(ov.focus.now, 1);
   assert.equal(ov.spaces[0]?.boards[0]?.counts.now, 1);
   t.cleanup();
 });
@@ -372,7 +373,8 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   await t.desk.sync();
   t.desk.act("web#4", "done");
   const q = t.desk.queue();
-  assert.deepEqual(q.sections.now.map((c) => c.id).sort(), ["acme/api#1", "acme/web#3"]);
+  assert.deepEqual(q.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
+  assert.deepEqual(q.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
   assert.deepEqual(
     q.sections.fyi.map((c) => c.id),
     ["acme/api#2"],

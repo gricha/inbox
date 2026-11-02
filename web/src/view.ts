@@ -363,6 +363,7 @@ export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"
 
 const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
   hard: "placed by a hard rule",
+  pin: "kept up by its pin",
   claude: "sorted by Claude",
   pending: "not sorted by Claude yet",
   unanswered: "Claude gave no answer",

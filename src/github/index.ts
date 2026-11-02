@@ -13,6 +13,7 @@ export interface SearchHit {
   updated_at: string;
   author: string;
   author_bot?: boolean;
+  title?: string; // untrusted
 }
 export interface NotificationThread {
   thread: string; // thread id
@@ -162,8 +163,10 @@ interface RawFiles {
   files: { nodes: { path: string }[] } | null;
 }
 interface TeamsData {
-  viewer: { organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
+  viewer: { name?: string | null; organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
 }
+
+const RECENT = 20; // your latest PRs' titles, for the judge
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
@@ -276,12 +279,15 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       if (!engaged.has(h.author)) engaged.set(h.author, new Set());
       engaged.get(h.author)!.add(h.node_id);
     }
+    const latest = authored.hits.toSorted((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, RECENT);
     return {
       me,
+      name: teams.viewer.name ?? "",
       teams: [...new Set(teams.viewer.organizations.nodes.flatMap((o) => o?.teams.nodes.map((t) => t.slug) ?? []))],
       affinity: Object.fromEntries([...engaged].map(([author, prs]) => [author, prs.size])),
       repo_prs: tally(authored.hits.map((h) => h.id.split("#")[0] ?? "")),
       orgs: tally(involved.hits.map((h) => h.id.split("/")[0] ?? "")),
+      recent: latest.map((h) => h.title ?? "").filter(Boolean),
     };
   }
 

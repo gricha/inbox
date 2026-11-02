@@ -46,7 +46,7 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import { defaultConfigText, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { defaultConfigText, migrateBotAsk, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -111,6 +111,7 @@ interface Snapshot {
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
   needs: Map<string, string>; // in-flight PRs back in Now: why they need you
+  pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
 }
 
 // In the lane rather than anywhere in the queue: in flight, and not snoozed, muted or done.
@@ -250,7 +251,7 @@ export class Desk {
       this.log(`wrote ${this.configPath}`);
     }
     this.migrateSettings();
-    this.migrateHard();
+    this.migrateRules();
     this.readPolicy();
     this.reloadConfig();
     fs.watchFile(this.policyPath, { interval: 2000 }, () => {
@@ -510,18 +511,31 @@ export class Desk {
     this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
   }
 
-  // Once: the direct-ask rule of a config written before hard rules becomes hard (migrateHard).
-  migrateHard(): void {
-    if (this.store.get("hard_migrated")) return;
-    const text = migrateHard(fs.readFileSync(this.configPath, "utf8"));
-    if (text !== null) {
+  // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), then a direct ask a
+  // bot added gets a hard rule too (migrateBotAsk).
+  migrateRules(): void {
+    const due = [
+      { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
+      { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
+    ].filter((m) => !this.store.get(m.key));
+    if (!due.length) return;
+    const before = fs.readFileSync(this.configPath, "utf8");
+    let text = before;
+    const did: string[] = [];
+    for (const m of due) {
+      const next = m.migrate(text);
+      if (next === null) continue;
+      text = next;
+      did.push(m.did);
+    }
+    if (text !== before) {
       const real = fs.realpathSync(this.configPath);
       fs.copyFileSync(real, `${real}.bak`);
       fs.writeFileSync(`${real}.tmp`, text);
       fs.renameSync(`${real}.tmp`, real);
-      this.log("made the rule for reviews asked of you by name hard (backup: config.toml.bak)");
+      this.log(`${did.join("; ")} (backup: config.toml.bak)`);
     }
-    this.store.set("hard_migrated", this.now().toISOString());
+    for (const m of due) this.store.set(m.key, this.now().toISOString());
   }
 
   getSettings(): SettingsView {
@@ -745,6 +759,9 @@ export class Desk {
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
     const reviews = this.store.prefixed<AiReview>("review:");
+    const pins = new Map<string, string>();
+    for (const e of entries.values())
+      if (e.state.pinned) pins.set(e.item.id, this.store.pinnedBy(e.item.id) === "coordinator" ? "the coordinator" : "them");
     // The AI's call on this commit: over a cap, the lightest gives up its slot first, so a close look keeps one.
     const call = (e: Entry) => {
       const ai = reviews.get(e.item.id);
@@ -759,7 +776,8 @@ export class Desk {
           const a = answers.get(id);
           if (!a) return { bucket: null, why: "", pending: true };
           const e = entries.get(id);
-          const stale = !e || a.policy !== this.policy.hash || a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id));
+          const stale =
+            !e || a.policy !== this.policy.hash || a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id), pins.get(id));
           return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
@@ -781,6 +799,8 @@ export class Desk {
           created_at: e.item.created_at,
           activity_at: e.analysis.activity_at,
           pinned: e.state.pinned,
+          // Your pin keeps it on your desk; the coordinator's is an opinion Claude weighs.
+          floor: pins.get(e.item.id) === "them" ? "today" : undefined,
           // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved && !e.inflight,
           kept: kept.has(e.item.id) || recent(e),
@@ -811,7 +831,7 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews, boards, best, needs };
+    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {

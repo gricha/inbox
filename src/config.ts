@@ -204,6 +204,17 @@ export function migrateHard(text: string): string | null {
   return next === text ? null : next;
 }
 
+const BOT_ASK = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true }`;
+
+// A review a bot asked of you by name (Junior adds them for people) gets a hard rule of its own, right after the hard rule
+// for a person's ask, as the first-run config writes both. Null when there's nothing to change.
+export function migrateBotAsk(text: string): string | null {
+  if (text.includes(BOT_ASK)) return null;
+  const rule = /^([ \t]*)(\{ when = "me\.requested_direct && !me\.requested_by_bot", bucket = "now", why = "[^"\n]*", hard = true \}),?$/gm;
+  const next = text.replaceAll(rule, (_, indent: string, head: string) => `${indent}${head},\n${indent}${BOT_ASK},`);
+  return next === text ? null : next;
+}
+
 // First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
 export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const orgs = opts.workOrgs;
@@ -249,13 +260,15 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default_why = "review requested"`,
       `rules = [`,
       `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },`,
+      `  ${BOT_ASK},`,
+      `  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },`,
       `  { when = "!me.requested && me.review_state == 'changes_requested'", bucket = "today", why = "new commits after you requested changes" },`,
       `  { when = "!me.requested", bucket = "later", why = "new commits since your review" },`,
-      `  { when = "author.close && !me.requested_codeowner", bucket = "today", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },`,
+      `  { when = "author.close", bucket = "later", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },`,
       `  { when = "repo.mine", bucket = "today", why = "your repo" },`,
-      `  { when = "author.bot", bucket = "fyi", why = "bot PR" },`,
+      `  { when = "author.bot && author.via == ''", bucket = "hide", why = "bot PR" },`,
       `  { when = "me.requested_by_bot", bucket = "later", why = "added by {me.requested_by} (bot)" },`,
-      `  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "today", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },`,
+      `  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "later", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },`,
       `  { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },`,
       `]`,
       ``,
@@ -266,12 +279,13 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `queries = ["is:pr is:open archived:false author:@me"]`,
       `sort = "updated"`,
       `caps = { now = 3, today = 6 }`,
-      `default = "fyi"`,
+      `default = "later"`,
       `default_why = "waiting on reviewers"`,
       `rules = [`,
       `  { when = "item.draft", bucket = "later", why = "draft" },`,
       `  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },`,
-      `  { when = "pr.ci == 'red'", bucket = "now", why = "CI failing" },`,
+      `  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },`,
+      `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },`,
       `  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },`,
       `  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },`,
       `  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },`,

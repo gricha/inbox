@@ -70,14 +70,14 @@ caps = { now = 3, today = 6 }      # overflow moves down a bucket, with a note
 default = "later"
 rules = [
   { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },
-  { when = "author.close", bucket = "today", why = "you engaged with {author.engaged_90d} of their PRs" },
-  { when = "me.requested_codeowner && pr.my_area", bucket = "today", why = "CODEOWNERS ping, in code you work on" },
+  { when = "author.close", bucket = "later", why = "you engaged with {author.engaged_90d} of their PRs" },
+  { when = "me.requested_codeowner && pr.my_area", bucket = "later", why = "CODEOWNERS ping, in code you work on" },
   { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },
 ]
 ```
 
 - **Expressions**: `&& || ! == != < <= > >= in matches`, plus `len() lower() contains() startswith() any(list, "glob*")`. Unknown fields are errors with a suggestion.
-- **Fields** (listed next to the editor and by `desk fields`): `item.*`, `pr.*` (ci, review, mergeable, size, threads, `my_area`: it changes code you work in), `me.*` (requested directly or via a team or CODEOWNERS, your review, `pushed_since_review`, `new_activity`), `author.*` (bot, `engaged_90d`, `close`), `repo.*`.
+- **Fields** (listed next to the editor and by `desk fields`): `item.*`, `pr.*` (ci, review, mergeable, size, threads, `stacked`, `my_area`: it changes code you work in), `me.*` (requested directly or via a team or CODEOWNERS, your review, `pushed_since_review`, `new_activity`), `author.*` (bot, `via`: who a bot's PR was opened for, `engaged_90d`, `close`), `repo.*`.
 - **Buckets**: `now`, `today`, `later`, `fyi`, `hide`. Hidden items stay visible under "Sorted away".
 - `{close_authors}` in a query expands to the people you review most.
 

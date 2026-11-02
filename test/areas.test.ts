@@ -10,29 +10,37 @@ const pr = (paths: string[], authored = false, repo = "getsentry/sentry", files 
   authored,
 });
 
-test("a path's directory, up to three levels", () => {
-  assert.equal(dirOf("src/sentry/auth/providers/saml2/views.py"), "src/sentry/auth/");
+test("a path's directory, up to four levels", () => {
+  assert.equal(dirOf("src/sentry/auth/providers/saml2/views.py"), "src/sentry/auth/providers/");
   assert.equal(dirOf("src/sentry/auth/helper.py"), "src/sentry/auth/");
   assert.equal(dirOf("static/app/index.tsx"), "static/app/");
   assert.equal(dirOf("src/index.ts"), "src/");
   assert.equal(dirOf("pyproject.toml"), "");
 });
 
-test("areas: your PRs count three reviews, once per directory, a lone review doesn't count, the heaviest first", () => {
+test("areas: your PRs count three reviews, once per directory, two reviews don't count, the heaviest first", () => {
   const areas = buildAreas([
     pr(["src/sentry/auth/helper.py", "src/sentry/auth/views.py", "tests/sentry/auth/test_helper.py"], true),
     pr(["src/sentry/auth/helper.py"]),
     pr(["src/sentry/seer/fetch.py"]),
     pr(["src/sentry/seer/fetch.py", "src/sentry/seer/models.py"]),
-    pr(["static/app/views/issues.tsx"]), // one review: not yours
+    pr(["src/sentry/seer/x.py"]),
+    pr(["static/app/views/issues.tsx"]),
+    pr(["static/app/views/list.tsx"]), // two reviews: not yours
     pr(["pyproject.toml", "CODEOWNERS"], true), // top-level files are no area
-    pr(["src/Thing.ts"], true, "Acme/Web"),
+    pr(["src/Thing.ts", "lib/core/a.ts"], true, "Acme/Web"), // nor is a top directory alone
   ]);
   assert.deepEqual(areas, {
-    "getsentry/sentry": { "src/sentry/auth/": 4, "tests/sentry/auth/": 3, "src/sentry/seer/": 2 },
-    "acme/web": { "src/": 3 },
+    "getsentry/sentry": { "src/sentry/auth/": 4, "src/sentry/seer/": 3, "tests/sentry/auth/": 3 },
+    "acme/web": { "lib/core/": 3 },
   });
-  assert.deepEqual(Object.keys(areas["getsentry/sentry"] ?? {}), ["src/sentry/auth/", "tests/sentry/auth/", "src/sentry/seer/"]);
+  assert.deepEqual(Object.keys(areas["getsentry/sentry"] ?? {}), ["src/sentry/auth/", "src/sentry/seer/", "tests/sentry/auth/"]);
+});
+
+test("areas: a directory under a tenth of your heaviest in the repo is where you passed through", () => {
+  const api = Array.from({ length: 14 }, () => pr(["src/sentry/api/endpoints/x.py"], true));
+  const areas = buildAreas([...api, pr(["src/sentry/replays/x.py"], true), pr(["src/sentry/users/x.py"], true, "acme/web")]);
+  assert.deepEqual(areas, { "getsentry/sentry": { "src/sentry/api/endpoints/": 42 }, "acme/web": { "src/sentry/users/": 3 } });
 });
 
 test("areas: mass changes are left out and each repo keeps its top 40", () => {
@@ -70,12 +78,13 @@ test("areasFor, areaFiles and touched: unknown until both your areas and the PR'
       "setup.cfg",
     ],
   });
-  assert.equal(areaFiles(item, ctx), 3);
+  assert.equal(areaFiles(item, ctx), 2);
   assert.deepEqual(touched(item, ctx), [
-    { dir: "src/sentry/auth/", files: 2, mine: true },
+    { dir: "src/sentry/auth/", files: 1, mine: true },
     { dir: "src/sentry/seer/", files: 1, mine: true },
     { dir: "static/app/views/", files: 3, mine: false },
     { dir: "/", files: 1, mine: false },
+    { dir: "src/sentry/auth/providers/", files: 1, mine: false },
   ]);
   assert.equal(areaFiles({ ...item, repo: "getsentry/relay" }, ctx), 0);
 

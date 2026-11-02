@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classify, compileBoard, quietText, type Entry } from "../src/rules.ts";
+import { classify, compileBoard, placedBy, quietText, type Entry } from "../src/rules.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
-import type { BoardConfig, Item } from "../src/types.ts";
+import type { BoardConfig, Bucket, Item } from "../src/types.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
@@ -139,7 +139,7 @@ test("sorts: waiting (oldest request first), updated, newest", () => {
   assert.deepEqual(mk("newest"), ["acme/api#1", "acme/api#2"]);
 });
 
-test("default review rules: bot asks fall below close collaborators", () => {
+test("default review rules: an ask by name is hard whoever added it; close collaborators' team pings hint Later", () => {
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const direct = makeItem({
     number: 1,
@@ -166,18 +166,59 @@ test("default review rules: bot asks fall below close collaborators", () => {
     [direct, botAskClose, botAsk, teamPing, closeTeamPing].map((it) => entry(it)),
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
-  assert.equal(b(1).bucket, "now");
-  assert.equal(b(1).why, "carol asked you directly");
-  assert.equal(b(2).bucket, "today");
-  assert.equal(b(3).bucket, "later");
-  assert.equal(b(3).why, "added by helper (bot)");
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).floor], ["now", "carol asked you directly", "today"]);
+  // A bot (Junior) adds asks by name for people: they reach your desk too.
+  assert.deepEqual([b(2).bucket, b(2).why, b(2).floor], ["today", "asked you by name (added by helper)", "today"]);
+  assert.deepEqual([b(3).bucket, b(3).why, b(3).hard], ["today", "asked you by name (added by helper)", true]);
   assert.equal(b(4).bucket, "fyi");
   assert.equal(b(4).why, "CODEOWNERS ping to @ml-team");
-  // A close collaborator's CODEOWNERS ping is still nobody asking you by name.
-  assert.deepEqual([b(5).bucket, b(5).why], ["fyi", "CODEOWNERS ping to @ml-team"]);
+  assert.deepEqual([b(5).bucket, b(5).why], ["later", "close collaborator: you engaged with 12 of their PRs in 90 days"]);
 });
 
-test("default review rules: a CODEOWNERS ping hints Today when it changes code you work on, and isn't hard", () => {
+test("default review rules: a bot's PR is hidden, but one it opened for a person isn't, and one it opened for you is yours", () => {
+  const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
+  const asked = { review_requests: [{ reviewer: "ml-team", type: "team" as const, codeowner: false }] };
+  const bot = { author: "sentry-junior", author_bot: true, ...asked };
+  const items = [
+    makeItem({ number: 1, author: "dependabot", author_bot: true, ...asked }),
+    makeItem({ number: 2, ...bot, via: "Michelle Tran" }),
+    makeItem({ number: 3, ...bot, via: "Me Myself" }),
+    makeItem({ number: 4, ...bot, via: "@me" }),
+  ];
+  const r = classify(
+    review,
+    items.map((it) => entry(it, {}, makeContext({ name: "Me Myself" }))),
+  );
+  const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([b(1).bucket, b(1).why], ["hide", "bot PR"]);
+  assert.deepEqual([b(2).bucket, b(2).why], ["later", "review requested"]);
+  assert.deepEqual([b(3).bucket, b(3).why], ["later", "your PR, opened through sentry-junior"]);
+  assert.deepEqual([b(4).bucket, b(4).why], ["later", "your PR, opened through sentry-junior"]);
+});
+
+test("default My PRs rules: stacked PRs and a red CI from the last hour's push wait in Later, like PRs waiting on reviewers", () => {
+  const mine = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-mine")!;
+  const own = { author: "me", default_branch: "main" };
+  const items = [
+    makeItem({ number: 1, ...own, base: "ref/acting-user", ci: "red", head_committed_at: hoursAgo(5) }),
+    makeItem({ number: 2, ...own, ci: "red", head_committed_at: hoursAgo(0.2), updated_at: hoursAgo(0.1) }),
+    makeItem({ number: 3, ...own, ci: "red", head_committed_at: hoursAgo(5) }),
+    makeItem({ number: 4, ...own, head_committed_at: hoursAgo(5) }),
+    makeItem({ number: 5, ...own, base: "ref/x", review_decision: "changes_requested" }),
+  ];
+  const r = classify(
+    mine,
+    items.map((it) => entry(it)),
+  );
+  const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([b(1).bucket, b(1).why], ["later", "stacked on ref/acting-user"]);
+  assert.deepEqual([b(2).bucket, b(2).why], ["later", "waiting on reviewers"], "CI red from the push 12 minutes ago");
+  assert.deepEqual([b(3).bucket, b(3).why], ["today", "CI failing"]);
+  assert.deepEqual([b(4).bucket, b(4).why], ["later", "waiting on reviewers"]);
+  assert.deepEqual([b(5).bucket, b(5).why], ["now", "changes requested"], "a person blocked on you, stacked or not");
+});
+
+test("default review rules: a CODEOWNERS ping hints Later when it changes code you work on, and isn't hard", () => {
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const areas = makeContext({ areas: { "acme/api": { "src/auth/": 6 } } });
   const ping = (number: number, paths?: string[]) =>
@@ -188,7 +229,7 @@ test("default review rules: a CODEOWNERS ping hints Today when it changes code y
     items.map((it) => entry(it, {}, areas)),
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
-  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["today", "CODEOWNERS ping to @ml-team, in code you work on", undefined]);
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["later", "CODEOWNERS ping to @ml-team, in code you work on", undefined]);
   assert.deepEqual([b(2).bucket, b(2).why], ["fyi", "CODEOWNERS ping to @ml-team"]);
   assert.equal(b(3).bucket, "fyi", "files not known yet: the fyi hint, until they are");
 });
@@ -205,6 +246,33 @@ test("priority sorts within a bucket before the board sort", () => {
   assert.deepEqual(r.order.today, ["acme/api#2"]);
   assert.deepEqual(r.order.later, ["acme/api#1"]);
   assert.match(compileBoard(board({ priority: "author.nope" }), "boards[3]").errors[0]?.path ?? "", /boards\[3\]\.priority/);
+});
+
+test("your pin keeps an item in Today or above, whatever the rules or Claude say", () => {
+  const { board: b } = compileBoard(
+    board({
+      rules: [
+        { when: "item.number == 1", bucket: "fyi", why: "a team ping" },
+        { when: "item.number == 2", bucket: "now", why: "asked you" },
+      ],
+    }),
+    "x",
+  );
+  const items = [makeItem({ number: 1 }), makeItem({ number: 2 }), makeItem({ number: 3 })];
+  const entries = items.map((it) => entry(it, it.number === 3 ? { pinned: true } : { pinned: true, floor: "today" }));
+  const answers: Record<number, Bucket | null> = { 1: "hide", 2: "later", 3: "fyi" };
+  const judged = classify(b, entries, (id) => ({ bucket: answers[Number(id.split("#")[1])]!, why: "", pending: false }));
+  const p = (n: number, r = judged) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual(
+    [p(1).bucket, p(1).why, p(1).hint?.bucket, p(1).hard, placedBy(p(1))],
+    ["today", "a team ping", "fyi", undefined, "pin"],
+  );
+  assert.deepEqual([p(2).bucket, placedBy(p(2))], ["today", "pin"], "Claude's later, kept up by the pin");
+  assert.deepEqual([p(3).bucket, placedBy(p(3))], ["fyi", "claude"], "pinned with no floor: the coordinator's pin");
+  const rules = classify(b, entries);
+  assert.deepEqual([p(1, rules).bucket, p(2, rules).bucket, placedBy(p(1, rules))], ["today", "now", undefined], "with the judge off too");
+  const unsorted = classify(b, entries, () => ({ bucket: null, why: "", pending: true }));
+  assert.deepEqual([p(1, unsorted).bucket, placedBy(p(1, unsorted)), placedBy(p(2, unsorted))], ["today", "pin", "pending"]);
 });
 
 test("quiet items leave Now and Today for Later, before caps; pinned items and a fresh ask stay", () => {

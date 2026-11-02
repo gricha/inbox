@@ -29,6 +29,7 @@ export const FIELDS: FieldDoc[] = [
   { path: "pr.approvals", type: "number", doc: "people whose latest review approves" },
   { path: "pr.unresolved_threads", type: "number", doc: "unresolved review threads" },
   { path: "pr.base", type: "string", doc: "base branch" },
+  { path: "pr.stacked", type: "boolean", doc: "its base isn't the repo's default branch: it's stacked on another PR" },
   { path: "pr.pushed_hours", type: "number", doc: "hours since the latest commit (-1 if unknown)" },
   {
     path: "pr.my_area_files",
@@ -37,7 +38,7 @@ export const FIELDS: FieldDoc[] = [
   },
   { path: "pr.my_area", type: "boolean", doc: "it changes code you work in (my_area_files >= 1)" },
   { path: "me.login", type: "string", doc: "your login" },
-  { path: "me.author", type: "boolean", doc: "you opened it" },
+  { path: "me.author", type: "boolean", doc: "you opened it, or a bot opened it for you (author.via)" },
   { path: "me.assignee", type: "boolean", doc: "you are assigned" },
   { path: "me.requested", type: "boolean", doc: "a review is requested from you or one of your teams" },
   { path: "me.requested_direct", type: "boolean", doc: "a review is requested from you by name" },
@@ -59,7 +60,12 @@ export const FIELDS: FieldDoc[] = [
   { path: "me.new_activity", type: "boolean", doc: "someone else acted after your latest action" },
   { path: "author.login", type: "string", doc: "author login" },
   { path: "author.bot", type: "boolean", doc: "author is a bot (GitHub App or listed in signals.bots)" },
-  { path: "author.me", type: "boolean", doc: "you are the author" },
+  {
+    path: "author.via",
+    type: "string",
+    doc: 'who a bot\'s PR says it was opened for (its "via …" line, "@login" or a name; untrusted), "" if none',
+  },
+  { path: "author.me", type: "boolean", doc: "you are the author, or a bot opened it for you" },
   { path: "author.engaged_90d", type: "number", doc: "this author's PRs you reviewed or commented on in the last 90 days" },
   { path: "author.close", type: "boolean", doc: "engaged_90d >= signals.close_collaborator_min" },
   { path: "repo.name", type: "string", doc: "owner/name" },
@@ -75,6 +81,8 @@ export interface Analysis {
 }
 
 const lc = (s: string) => s.toLowerCase();
+// "greg.pstrucha", "@gricha" and "Greg Pstrucha" compare by their letters.
+const letters = (s: string) => lc(s).replaceAll(/[^\p{L}]/gu, "");
 const latest = (times: (string | null | undefined)[]): string | null =>
   times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
 
@@ -134,6 +142,9 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const [owner = "", name = ""] = item.repo.split("/");
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
+  const via = authorBot ? (item.via ?? "") : "";
+  const viaMe = !!letters(via) && [ctx.me, ctx.name ?? ""].some((n) => letters(n) === letters(via));
+  const yours = isMe(author) || viaMe;
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
   const myAreaFiles = areaFiles(item, ctx);
 
@@ -167,13 +178,14 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       approvals,
       unresolved_threads: item.threads_unresolved,
       base: item.base,
+      stacked: !!item.default_branch && !!item.base && item.base !== item.default_branch,
       pushed_hours: hours(headAt),
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
     },
     me: {
       login: ctx.me,
-      author: isMe(author),
+      author: yours,
       assignee: item.assignees.some(isMe),
       requested,
       requested_direct: direct,
@@ -193,9 +205,10 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
     author: {
       login: author,
       bot: authorBot,
-      me: isMe(author),
+      via,
+      me: yours,
       engaged_90d: engaged,
-      close: !authorBot && !isMe(author) && engaged >= cfg.signals.close_collaborator_min,
+      close: !authorBot && !yours && engaged >= cfg.signals.close_collaborator_min,
     },
     repo: {
       name: item.repo,

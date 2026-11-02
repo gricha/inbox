@@ -499,7 +499,7 @@ test(
       [
         6,
         "Changed the policy",
-        "− Less is more. Show me only what needs me; when unsure, sort it away.",
+        "− Less is more. Show me what a person is waiting on me for; when unsure, sort it away.",
         "− and 6 more lines",
         "+ Bot PRs are FYI.",
       ],

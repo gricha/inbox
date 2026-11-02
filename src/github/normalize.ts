@@ -38,6 +38,7 @@ export interface RawHit {
   __typename: "PullRequest" | "Issue";
   id: string;
   number: number;
+  title?: string;
   updatedAt: string;
   repository: { nameWithOwner: string };
   author: Actor | null;
@@ -59,6 +60,7 @@ export interface RawNode extends RawHit {
   deletions?: number;
   changedFiles?: number;
   baseRefName?: string;
+  baseRepository?: { defaultBranchRef: { name: string } | null } | null;
   headRefName?: string;
   headRepository?: { nameWithOwner: string } | null;
   reviewDecision?: string | null;
@@ -121,6 +123,8 @@ const login = (a: Actor | null) => a?.login ?? "ghost";
 // GraphQL drops the [bot] suffix for apps, so __typename is the reliable signal.
 const isBot = (a: Actor | null) => a?.__typename === "Bot" || !!a?.login.endsWith("[bot]");
 const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => a.at.localeCompare(b.at));
+// An agent that opens PRs for people (Junior) ends its description with "via @login." or "via Some Name.": the last such line.
+const viaOf = (text: string) => [...text.matchAll(/^via (@?[^\n]{1,60}?)\.?[ \t]*$/gm)].at(-1)?.[1]?.trim() ?? "";
 const reviewer = (r: Reviewer) =>
   r.__typename === "Team" ? { reviewer: r.slug!, type: "team" as const } : { reviewer: r.login ?? "ghost", type: "user" as const };
 
@@ -132,6 +136,7 @@ export function toHit(n: RawHit): SearchHit {
     updated_at: n.updatedAt,
     author: login(n.author),
     author_bot: isBot(n.author),
+    ...(n.title !== undefined && { title: n.title }),
   };
 }
 
@@ -161,6 +166,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     repo: n.repository.nameWithOwner,
     number: n.number,
     author_bot: isBot(n.author),
+    via: isBot(n.author) ? viaOf(n.bodyText) : "",
     state: n.state.toLowerCase() as Item["state"],
     draft: n.isDraft ?? false,
     labels: n.labels.nodes.map((l) => l.name),
@@ -173,6 +179,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     deletions: n.deletions ?? 0,
     changed_files: n.changedFiles ?? 0,
     base: n.baseRefName ?? "",
+    default_branch: n.baseRepository?.defaultBranchRef?.name ?? "",
     ci,
     review_decision: DECISION[n.reviewDecision ?? ""] ?? "none",
     mergeable: MERGEABLE[n.mergeable ?? ""] ?? "unknown",
@@ -214,6 +221,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
           author_bot: isBot(c.author),
           trusted: collaborator(c.authorAssociation),
           at: c.createdAt,
+          resolved: t.isResolved,
         })),
       ),
     ),

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { compile } from "../src/expr.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
+import type { Item } from "../src/types.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
@@ -172,4 +173,25 @@ test("a CODEOWNERS ping that changes code you work in, one that doesn't, and one
   const rule = compile("me.requested_codeowner && pr.my_area_files == 0");
   if (!rule.ok) throw new Error(rule.error);
   assert.deepEqual([rule.eval(yours), rule.eval(elsewhere), rule.eval(unknown)], [false, true, false]);
+});
+
+test("a bot's PR opened for you is yours: by your login or your name, whatever the punctuation", () => {
+  const c = makeContext({ name: "Greg Pstrucha" });
+  const by = (via: string, author = "sentry-junior") => analyze(makeItem({ author, author_bot: true, via }), c, cfg, NOW).signals;
+  for (const via of ["greg.pstrucha", "@me", "Greg Pstrucha"]) {
+    const s = by(via);
+    assert.deepEqual([s.me.author, s.author.me, s.author.via, s.author.bot], [true, true, via, true], via);
+  }
+  assert.deepEqual([by("Michelle Tran").me.author, by("Michelle Tran").author.via], [false, "Michelle Tran"]);
+  assert.equal(by("").me.author, false);
+  assert.equal(by("...").me.author, false, "no letters is nobody");
+  const human = analyze(makeItem({ author: "carol", via: "greg.pstrucha" }), c, cfg, NOW).signals;
+  assert.deepEqual([human.me.author, human.author.via], [false, ""], "only a bot opens PRs for people");
+});
+
+test("stacked: a PR whose base isn't its repo's default branch; unknown until the default branch is", () => {
+  const s = (o: Partial<Item>) => analyze(makeItem(o), makeContext(), cfg, NOW).signals.pr.stacked;
+  assert.equal(s({ base: "ref/sa-narrow", default_branch: "master" }), true);
+  assert.equal(s({ base: "master", default_branch: "master" }), false);
+  assert.equal(s({ base: "ref/sa-narrow" }), false, "stored before the default branch was fetched");
 });

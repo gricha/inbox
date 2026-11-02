@@ -42,6 +42,7 @@
   "changedFiles": 1,
   "files": { "nodes": [{ "path": "deploy/release.yaml" }] },
   "baseRefName": "release-2",
+  "baseRepository": { "defaultBranchRef": { "name": "main" } },
   "reviewDecision": "CHANGES_REQUESTED",
   "mergeable": "CONFLICTING",
   "reviewRequests": {

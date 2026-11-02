@@ -614,11 +614,12 @@ test("any other failure pauses only AI reviews; a judge that can't log in pauses
 });
 
 test("AI reviews run in the queue's order: Now, then Today from the top, so the cards on screen are ready first", async () => {
-  // Close collaborators (alice) asked through a team land in Today; the oldest ask sorts first.
+  // Team asks in your own repo land in Today; the oldest ask sorts first.
   const team = (n: number) =>
     makeItem({
+      repo: "me/api",
       number: n,
-      author: "alice",
+      author: "carol",
       head_oid: `h${n}`,
       review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }],
       request_events: [{ at: hoursAgo(n), actor: "alice", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
@@ -629,7 +630,7 @@ test("AI reviews run in the queue's order: Now, then Today from the top, so the 
   assert.equal(q.today_cards, 2);
   assert.equal(t.desk.focus().today_cards, 2);
   const order = [...q.sections.now, ...q.sections.today].map((c) => c.id);
-  assert.deepEqual(order, ["acme/api#2", "acme/api#1", "acme/api#14", "acme/api#13", "acme/api#12", "acme/api#11", "acme/api#10"]);
+  assert.deepEqual(order, ["acme/api#2", "acme/api#1", "me/api#14", "me/api#13", "me/api#12", "me/api#11", "me/api#10"]);
   while (t.f.started.length < order.length || t.desk.generating.size)
     await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
   assert.deepEqual(t.f.started, order);

@@ -73,19 +73,32 @@ test("your PR with red CI, a conflict and unresolved threads (mine fragment)", (
   assert.equal(it.mergeable, "conflict");
   assert.equal(it.review_decision, "changes_requested");
   assert.equal(it.base, "release-2");
+  assert.equal(it.default_branch, "main");
   assert.deepEqual(it.assignees, ["octo-dev"]);
   assert.equal(it.threads_total, 3);
   assert.equal(it.threads_unresolved, 2);
   assert.deepEqual(it.thread_last, [
-    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z" },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z" },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z" },
+    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z", resolved: false },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z", resolved: true },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z", resolved: false },
   ]);
   assert.equal(it.head_oid, "bbbb111122223333444455556666777788889999");
   assert.equal(it.head_author, "octo-dev");
   assert.deepEqual(it.reviews, [
     { author: "birch", author_bot: false, trusted: true, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" },
   ]);
+});
+
+test("a bot's PR opened for a person says who, from its description's last via line, however long it is", () => {
+  const raw = fixture("pr-review");
+  const long = `${"Background. ".repeat(80)}\nIt goes via the queue.\n\nvia greg.pstrucha.\n\n--\nView Session`;
+  const bot = { ...raw, author: { __typename: "Bot", login: "sentry-junior" }, bodyText: long };
+  assert.equal(normalize(bot, NOW).via, "greg.pstrucha");
+  assert.equal(normalize({ ...bot, bodyText: "Fixes it.\n\nvia @joseph-sentry." }, NOW).via, "@joseph-sentry");
+  assert.equal(normalize({ ...bot, bodyText: "Fixes it.\nvia Michelle Tran." }, NOW).via, "Michelle Tran");
+  assert.equal(normalize({ ...bot, bodyText: "Bumps lodash." }, NOW).via, "", "no via line");
+  assert.equal(normalize({ ...raw, bodyText: long }, NOW).via, "", "only a bot's PR is opened for someone");
+  assert.equal(normalize(raw, NOW).default_branch, "", "not asked of this one");
 });
 
 test("issue gets zero values for PR-only fields", () => {

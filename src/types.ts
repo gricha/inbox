@@ -21,6 +21,7 @@ export interface Item {
   url: string;
   author: string; // login, "ghost" if deleted
   author_bot: boolean;
+  via?: string; // who a bot's PR says it was opened for (its last "via …" line: "@login" or a name), "" if none; absent on items stored before it was fetched
   state: "open" | "closed" | "merged";
   draft: boolean;
   labels: string[];
@@ -35,6 +36,7 @@ export interface Item {
   deletions: number;
   changed_files: number;
   base: string;
+  default_branch?: string; // the repo's default branch; absent on items stored before it was fetched
   ci: Ci;
   review_decision: ReviewDecision;
   mergeable: Mergeable; // only fetched for PRs you authored; "unknown" otherwise
@@ -54,17 +56,19 @@ export interface Item {
   comments_total: number;
   threads_total: number;
   threads_unresolved: number;
-  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string }[]; // last comment per review thread; PRs you authored only
+  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string; resolved?: boolean }[]; // last comment per review thread; PRs you authored only
   detail_at: string; // when details were last fetched
 }
 
 // Facts about you, refreshed daily.
 export interface Context {
   me: string;
+  name?: string; // your GitHub display name, "" if none
   teams: string[]; // team slugs you belong to, any org
   affinity: Record<string, number>; // author login -> PRs of theirs you reviewed or commented on, last 90 days
   repo_prs: Record<string, number>; // "owner/repo" -> PRs you opened there, last 90 days
   orgs: Record<string, number>; // org -> open items involving you (used to pick default spaces)
+  recent?: string[]; // the titles of your latest PRs (untrusted), most recently updated first
   refreshed_at: string;
   areas?: Areas; // the directories you work in; absent until first fetched
   areas_at?: string; // when areas were last fetched (refreshed daily, on their own)
@@ -107,6 +111,7 @@ export interface Signals {
     approvals: number;
     unresolved_threads: number;
     base: string;
+    stacked: boolean; // its base isn't the repo's default branch
     pushed_hours: number;
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
     my_area: boolean; // my_area_files >= 1
@@ -133,6 +138,7 @@ export interface Signals {
   author: {
     login: string;
     bot: boolean;
+    via: string; // who a bot's PR was opened for, "" if none
     me: boolean;
     engaged_90d: number;
     close: boolean; // engaged_90d >= signals.close_collaborator_min
@@ -367,7 +373,7 @@ export interface Placement {
   demoted?: string; // e.g. "Now takes 3 from PRs to review"
   trace: TraceStep[];
   hard?: boolean; // a hard rule matched it
-  floor?: Bucket; // ...so it never sorts below this, whatever Claude, quiet days or caps say
+  floor?: Bucket; // ...or you pinned it, so it never sorts below this, whatever Claude, quiet days or caps say
   judge?: JudgeStep; // set while the judge is on
   hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers
 }
@@ -434,7 +440,7 @@ export interface Card {
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
-  placed_by?: "hard" | "claude" | "pending" | "unanswered"; // a hard rule, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
+  placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
 }
 

@@ -53,7 +53,7 @@ const cardLine = (c: Card) =>
   `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
 
 function traceLines(p: Placement): string[] {
-  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}${p.floor ? `, hard: never below ${p.floor}` : ""}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
+  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}`}${p.floor ? `, ${p.hard ? "hard" : "pinned"}: never below ${p.floor}` : ""}]${p.demoted ? ` (${p.demoted})` : ""}`;
   return [
     head,
     ...p.trace.map(

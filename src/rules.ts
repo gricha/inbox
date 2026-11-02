@@ -31,6 +31,7 @@ export interface Entry {
   created_at: string;
   activity_at: string;
   pinned: boolean;
+  floor?: Bucket; // your pin keeps it at least here
   active: boolean; // not done, snoozed or muted; only active items count toward caps
   kept?: boolean; // gone from the board's searches but shown as resolved: the filter judged it while it was there
   ai?: "look" | "skim" | "skip"; // the AI review's call on its current commit (high risk is "look"); none yet: undefined
@@ -71,8 +72,10 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     if (!r.matched) return null;
   }
   // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'. Below a hard
-  // rule's floor, the floor holds with the rule's why.
-  const judged = (rule: number | null, bucket: Bucket, why: string, floor?: Bucket): Placement => {
+  // rule's floor, or your pin's, the floor holds with the rule's why.
+  const judged = (rule: number | null, ruled: Bucket, why: string, hard?: Bucket): Placement => {
+    const floor = e.floor ? atLeast(e.floor, hard) : hard;
+    const bucket = atLeast(ruled, floor);
     const p: Placement = {
       board: cfg.id,
       bucket,
@@ -80,11 +83,12 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
       rule,
       why: renderTemplate(why, s),
       trace,
-      ...(floor && { hard: true, floor }),
+      ...(hard && { hard: true }),
+      ...(floor && { floor }),
     };
     if (!judge) return p;
     const j = judge(e.id);
-    const hint = { bucket, why: p.why };
+    const hint = { bucket: ruled, why: p.why };
     if (j.bucket === null) return { ...p, judge: j, hint };
     const to = atLeast(j.bucket, floor);
     const own = to === j.bucket && j.why.trim() ? j.why : p.why;
@@ -101,11 +105,12 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
   return judged(null, cfg.default, cfg.default_why);
 }
 
-// Who placed it, for its card: Claude where it chose the bucket (a hard rule's floor may overrule it), else a hard rule, or
-// the rules while Claude hasn't answered (or gave no answer).
+// Who placed it, for its card: Claude where it chose the bucket (a hard rule's floor, or a pin's, may overrule it), else a
+// hard rule, a pin, or the rules while Claude hasn't answered (or gave no answer).
 export function placedBy(p: Placement): Card["placed_by"] {
   if (p.judge?.bucket && p.judge.bucket === p.rule_bucket) return "claude";
   if (p.hard) return "hard";
+  if (p.floor && p.judge && p.rule_bucket !== (p.judge.bucket ?? p.hint?.bucket)) return "pin";
   if (!p.judge) return undefined;
   return p.judge.pending ? "pending" : "unanswered";
 }

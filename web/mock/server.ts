@@ -1029,6 +1029,7 @@ function signals(r: Rec): Signals {
       approvals: reviews.filter(([, st]) => st === "approved").length,
       unresolved_threads: s.threads?.[0] ?? 0,
       base: pr ? "main" : "",
+      stacked: false,
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
@@ -1055,6 +1056,7 @@ function signals(r: Rec): Signals {
     author: {
       login: s.author,
       bot: isBot(s.author),
+      via: "",
       me: mine,
       engaged_90d: s.close ?? 0,
       close: (s.close ?? 0) >= config.signals.close_collaborator_min,

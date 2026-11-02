@@ -26,7 +26,7 @@ function fakeGitHub(handler: (b: Body) => object | Promise<object>) {
 }
 
 // A search backend over `total` synthetic PRs, cursor = offset.
-function searchPage(all: { id: string; number: number; repo: string; author: string }[], b: Body) {
+function searchPage(all: { id: string; number: number; repo: string; author: string; updated?: string }[], b: Body) {
   const start = b.variables.after ? Number(b.variables.after) : 0;
   const end = Math.min(start + b.variables.first, all.length, 1000);
   return {
@@ -39,7 +39,8 @@ function searchPage(all: { id: string; number: number; repo: string; author: str
           __typename: "PullRequest",
           id: n.id,
           number: n.number,
-          updatedAt: "2026-03-01T00:00:00Z",
+          title: `Change ${n.number} by ${n.author}`,
+          updatedAt: n.updated ?? "2026-03-01T00:00:00Z",
           repository: { nameWithOwner: n.repo },
           author: { login: n.author },
         })),
@@ -72,6 +73,7 @@ test("search paginates 100 per page until no next page", async () => {
     updated_at: "2026-03-01T00:00:00Z",
     author: "maple",
     author_bot: false,
+    title: "Change 1 by maple",
   });
   assert.equal(calls[0]?.variables.q, "is:pr is:open");
 });
@@ -165,12 +167,15 @@ test("details with no hits makes no calls", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async () => {
+test("context: your name, teams, affinity (distinct PRs per author), repo_prs, orgs, your latest PRs' titles", async () => {
   const shared = prs(3, "maple");
   const searches: Record<string, ReturnType<typeof prs>> = {
     "reviewed-by": [...shared, ...prs(2, "birch")],
     commenter: [...shared.slice(0, 2), ...prs(1, "cedar")], // overlaps with reviewed-by; counted once
-    "author:@me created": [...prs(4, "octo-dev", "acme/infra"), ...prs(1, "octo-dev", "solo/dotfiles")],
+    "author:@me created": [
+      ...prs(4, "octo-dev", "acme/infra").map((p) => Object.assign(p, { updated: `2026-03-0${p.number}T00:00:00Z` })),
+      ...prs(1, "octo-dev", "solo/dotfiles"),
+    ],
     involves: [...prs(3, "x", "acme/widgets"), ...prs(2, "x", "solo/dotfiles")],
   };
   const { gh, calls } = fakeGitHub((b) => {
@@ -180,6 +185,7 @@ test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async
           rateLimit: RL,
           // null = an org the token can't read (SAML), reported as FORBIDDEN with partial data.
           viewer: {
+            name: "Octo Dev",
             organizations: {
               nodes: [
                 { login: "acme", teams: { nodes: [{ slug: "platform-core" }, { slug: "infra" }] } },
@@ -208,6 +214,12 @@ test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async
   assert.deepEqual(ctx.affinity, { maple: 3, birch: 2, cedar: 1 });
   assert.deepEqual(ctx.repo_prs, { "acme/infra": 4, "solo/dotfiles": 1 });
   assert.deepEqual(ctx.orgs, { acme: 3, solo: 2 });
+  assert.equal(ctx.name, "Octo Dev");
+  assert.deepEqual(
+    ctx.recent,
+    ["Change 4 by octo-dev", "Change 3 by octo-dev", "Change 2 by octo-dev", "Change 1 by octo-dev", "Change 1 by octo-dev"],
+    "the latest updated first",
+  );
 
   const qs = new Set(calls.map((c) => c.variables.q).filter(Boolean));
   const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);

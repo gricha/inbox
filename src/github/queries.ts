@@ -11,8 +11,8 @@ export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       __typename
-      ... on PullRequest { id number updatedAt repository { nameWithOwner } author { __typename login } }
-      ... on Issue { id number updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on PullRequest { id number title updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on Issue { id number title updatedAt repository { nameWithOwner } author { __typename login } }
     }
   }
 }`;
@@ -38,7 +38,8 @@ const COMMON = `
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
 const PR = `${COMMON}
-  isDraft additions deletions changedFiles baseRefName headRefName headRepository { nameWithOwner } reviewDecision mergedBy { login }
+  isDraft additions deletions changedFiles baseRefName baseRepository { defaultBranchRef { name } } headRefName headRepository { nameWithOwner }
+  reviewDecision mergedBy { login }
   files(first: 50) { nodes { path } }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
@@ -105,5 +106,5 @@ export const PR_CONTEXT = `query($id: ID!) {
 
 export const TEAMS = `query($me: String!) {
   ${RATE}
-  viewer { organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }
+  viewer { name organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }
 }`;
