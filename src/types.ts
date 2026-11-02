@@ -515,6 +515,7 @@ export interface Preflight {
   since?: string; // what changed since your last review: a re-review's gist
   concerns?: string[]; // at most 2
   notes?: number; // notes on the changes, in the review view
+  chunks?: { look: number; skim: number; total: number }; // hunks Claude ranked worth a look or a skim, of all in the diff; unset when it didn't rank
   at?: string; // when it was written
 }
 
@@ -607,9 +608,53 @@ export interface AiReview {
   since?: string; // a re-review: what changed since your last review, and whether it settles the concerns
   concerns: string[];
   notes: ReviewNote[];
+  chunks?: ChunkRanking; // absent on reviews written before ranking, or when Claude didn't rank
   head_oid: string; // the commit it read; a newer push makes it stale
   model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
   at: string;
+}
+
+// Which hunks of the diff are worth your attention, as Claude ranked them. Ids are h1, h2, … across the files in order,
+// as the prompt numbered them; everything not ranked (or unread) is not worth reviewing.
+export interface ChunkRanking {
+  ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // in Claude's order, then any hunk it noted but didn't rank, as a skim
+  unread: string[]; // left out of the prompt because the PR, or the hunk's file, was too long to read whole: not judged either way
+  capped: boolean; // Claude ranked as many as it may (20): more may be worth a look
+  total: number; // hunks in the diff
+}
+
+// One hunk of the diff in GET /api/review/:id, with what the AI review made of it.
+export interface ReviewHunk {
+  id: string; // h1, h2, … across the files in order, as the AI review's prompt numbers them
+  path: string;
+  file: number; // index in ReviewView.files
+  index: number; // its place among its file's hunks
+  header: string; // its @@ line
+  patch: string; // its own lines, the @@ line first
+  additions: number;
+  deletions: number;
+  level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking for this commit
+  rank: number | null; // 1 = read it first; look and skim only
+  why: string | null; // look and skim: Claude's few words, or "has a note, though not ranked"; unread: which was too long, the PR or its file
+  notes: number[]; // indices into ai.notes to show with it, in reading order: the file's own notes (line 0) on its first hunk in the order
+}
+
+// The order the review view reads in, decided by the desk: what to look at across files, then the rest, folded.
+export interface ReviewOrder {
+  ranked: boolean; // false: no ranking for this commit (none yet, one written before ranking, or a newer push): `chunks` is every hunk, file by file
+  capped: boolean; // Claude ranked as many as it may: something in `rest` may still be worth a look
+  chunks: ReviewHunk[]; // read these, in this order: Claude's (most worth first; a re-review, what changed since you looked first), then hunks it noted but didn't rank
+  unread: ReviewHunk[]; // Claude didn't see these (the PR or their file was too long to read whole), file by file
+  rest: ReviewRest[]; // not worth reviewing, by file
+  notes: number[]; // ai.notes in reading order: what ] and [ step through; empty when the review is for an older commit
+}
+
+export interface ReviewRest {
+  path: string;
+  file: number; // index in ReviewView.files
+  why: string; // "not worth reviewing", "lockfile or generated", "no text diff: binary or too large", "renamed without changes"
+  hunks: ReviewHunk[]; // level "skip"; none for a file with no text diff
+  notes: number[]; // the file's own notes when it has no hunks to carry them
 }
 
 export interface ItemDetail {
@@ -631,8 +676,9 @@ export interface ReviewView {
   card: Card;
   item: Item;
   handoff_prompt: string;
-  files: ReviewFile[];
+  files: ReviewFile[]; // patch repeats order's hunks for today's review UI; it goes once that renders order
   files_error: string | null; // the diff couldn't be fetched
+  order: ReviewOrder; // every hunk once, in the order to read them
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused

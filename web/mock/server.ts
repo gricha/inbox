@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
-import { CLAUDE_PAUSED } from "../../src/review.ts";
+import { CLAUDE_PAUSED, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
@@ -24,6 +24,7 @@ import type {
   BoardView,
   Bucket,
   Card,
+  ChunkRanking,
   Ci,
   Config,
   ConfigError,
@@ -48,6 +49,8 @@ import type {
   Preflight,
   PreviewResult,
   ReviewDecision,
+  ReviewFile,
+  ReviewNote,
   ReviewView,
   ReviewState,
   SettingsView,
@@ -1654,6 +1657,13 @@ function preflightOf(r: Rec): Preflight {
         ...(ai.since && { since: ai.since }),
         concerns: ai.concerns.slice(0, 2),
         notes: ai.notes.length,
+        ...(ai.chunks && {
+          chunks: {
+            look: ai.chunks.ranked.filter((c) => c.level === "look").length,
+            skim: ai.chunks.ranked.filter((c) => c.level === "skim").length,
+            total: ai.chunks.total,
+          },
+        }),
         at: ai.at,
       }
     : {};
@@ -2116,10 +2126,38 @@ const STALE = "acme/api#4099";
 const RUNNING = "acme/web#2301";
 const QUEUED = "acme/ml-pipeline#307";
 
+// How Claude ranked a written review's hunks (each generic file is one hunk): the first file's change to look at, the
+// rest not worth reviewing. The scheduler split shows a capped ranking with unread files, the date picker's move nothing
+// worth a look, and garden-sensors a review written before ranking.
+function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRanking | undefined {
+  if (id === "friends/garden-sensors#18") return undefined;
+  const pick = (ranked: [number, "look" | "skim", string][]) =>
+    parseReview({ summary: "-", notes, chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })) }, files).chunks!;
+  if (id === "oss/calendar-ui#310") return pick([]);
+  if (id === "acme/worker#879") {
+    const moved = Array.from({ length: 19 }, (_, i): [number, "skim", string] => [i + 2, "skim", "moved from the scheduler"]);
+    return { ...pick([[1, "look", "lease renewal and fencing token"], ...moved]), unread: ["h27", "h28", "h29", "h30", "h31"] };
+  }
+  return pick([[1, "look", "calls the new path, with retries"]]);
+}
+
 function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   const [f] = files;
+  // The date picker's move has nothing to note: a note would bring its hunk back into the reading list.
+  const notes: ReviewNote[] =
+    f && r.id !== "oss/calendar-ui#310"
+      ? [
+          {
+            path: f.path,
+            side: "new",
+            line: f.path.endsWith(".py") ? 16 : 12,
+            body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
+          },
+        ]
+      : [];
+  const chunks = ranking(r.id, files, notes);
   return {
     verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
     risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
@@ -2129,16 +2167,8 @@ function written(r: Rec, head: string): AiReview {
         ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
         : [],
     ...WRITTEN[r.id],
-    notes: f
-      ? [
-          {
-            path: f.path,
-            side: "new",
-            line: f.path.endsWith(".py") ? 16 : 12,
-            body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
-          },
-        ]
-      : [],
+    notes,
+    ...(chunks && { chunks }),
     head_oid: head,
     model: MODEL,
     at: new Date().toISOString(),
@@ -2208,12 +2238,14 @@ function reviewView(r: Rec): ReviewView {
     d.generating = true;
   }
   const mine = d.card.author === ME;
+  const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   return {
     card: d.card,
     item: d.item,
     handoff_prompt: d.handoff_prompt,
-    files: canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size).files,
+    files,
     files_error: null,
+    order: reviewOrder(files, d.ai, d.ai_stale),
     ai: d.ai,
     ai_stale: d.ai_stale,
     ai_error: generating.has(r.id)
