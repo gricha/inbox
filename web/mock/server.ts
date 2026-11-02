@@ -7,7 +7,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
-import { quietText } from "../../src/rules.ts";
+import { CLAUDE_PAUSED } from "../../src/review.ts";
+import { floorOf, placedBy, quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -132,7 +133,7 @@ let config: Config = {
       queries: ["is:open is:pr review-requested:{me}", "is:open is:pr reviewed-by:{me} -author:{me}"],
       filter: "!author.bot",
       rules: [
-        { when: W.direct, bucket: "now", why: "asked you directly" },
+        { when: W.direct, bucket: "now", why: "asked you directly", hard: true },
         { when: W.pushed, bucket: "now", why: "pushed since your review" },
         { when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
         { when: W.bot, bucket: "later", why: "added by a bot" },
@@ -1139,23 +1140,30 @@ function place(r: Rec, b: BoardConfig): Placement | null {
   const sig = signals(r);
   const trace: TraceStep[] = b.filter ? [{ index: -1, when: b.filter, matched: true }] : [];
   const truths = on === "filtered" ? [] : on.map((k) => W[k]);
-  // As src/rules.ts: Claude sorts what no hard rule placed, with where the rules put it as its hint.
-  const judged = (rule: number | null, bucket: Bucket, why: string): Placement => {
-    const p: Placement = { board: b.id, bucket, rule_bucket: bucket, rule, why: render(why, sig), trace };
+  // As src/rules.ts: Claude sorts everything, with where the rules put it as its hint, never below a hard rule's floor.
+  const judged = (rule: number | null, bucket: Bucket, why: string, floor?: Bucket): Placement => {
+    const p: Placement = {
+      board: b.id,
+      bucket,
+      rule_bucket: bucket,
+      rule,
+      why: render(why, sig),
+      trace,
+      ...(floor && { hard: true, floor }),
+    };
     if (judgeOff()) return p;
     const hint = { bucket, why: p.why };
     const j = r.seed.judge;
-    return j
-      ? { ...p, bucket: j[0], rule_bucket: j[0], why: j[1], judge: { bucket: j[0], why: j[1], pending: false }, hint }
-      : { ...p, judge: { bucket, why: "", pending: false }, hint };
+    if (!j) return { ...p, judge: { bucket, why: "", pending: false }, hint };
+    const to = floor && RANK[floor] < RANK[j[0]] ? floor : j[0];
+    return { ...p, bucket: to, rule_bucket: to, why: to === j[0] ? j[1] : p.why, judge: { bucket: j[0], why: j[1], pending: false }, hint };
   };
   for (const [i, rule] of b.rules.entries()) {
     const matched = truths.includes(rule.when);
     trace.push({ index: i, when: rule.when, matched });
     if (!matched) continue;
     if (rule.bucket === "judge") return judged(i, b.default, rule.why ?? b.default_why);
-    if (!rule.hard) return judged(i, rule.bucket, rule.why ?? "");
-    return { board: b.id, bucket: rule.bucket, rule_bucket: rule.bucket, rule: i, why: render(rule.why ?? "", sig), trace, hard: true };
+    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined);
   }
   return judged(null, b.default, b.default_why);
 }
@@ -1181,8 +1189,9 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     if ((p.bucket !== "now" && p.bucket !== "today") || status(r) !== "active" || r.seed.resolved || laneOwned(r)) continue;
     const sig = signals(r);
     const asked = sig.me.requested && sig.me.requested_hours >= 0 && sig.me.requested_hours < quietHours;
-    if (!quietHours || r.state.pinned || asked || p.hard || sig.item.updated_hours < quietHours) continue;
-    p.bucket = "later";
+    const to = p.floor && RANK[p.floor] < RANK.later ? p.floor : "later";
+    if (!quietHours || r.state.pinned || asked || to === p.bucket || sig.item.updated_hours < quietHours) continue;
+    p.bucket = to;
     p.demoted = quietText(sig.item.updated_hours);
   }
   for (const [from, to] of [
@@ -1204,7 +1213,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
         !r.seed.resolved &&
         !laneOwned(r) &&
         !r.state.pinned &&
-        !p.hard &&
+        !(p.floor && RANK[to] > RANK[p.floor]) &&
         !(p.rule !== null && b.rules[p.rule]?.nocap),
     );
     for (const { r, p } of counted.toSorted((x, y) => call(x.r) - call(y.r)).slice(cap)) {
@@ -1267,13 +1276,7 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
-    ...(inFlight(r)
-      ? {}
-      : p.hard
-        ? { placed_by: "hard" as const }
-        : p.judge
-          ? { placed_by: p.judge.bucket ? ("claude" as const) : ("pending" as const) }
-          : {}),
+    ...(!inFlight(r) && placedBy(p) && { placed_by: placedBy(p) }),
   };
 }
 
@@ -1333,7 +1336,7 @@ function focus(): FocusView {
     },
     now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
-    ai_paused: autoAiOn() ? aiPaused : null,
+    paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
   };
 }
 
@@ -1372,7 +1375,7 @@ function queue(): QueueView {
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
     now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
-    ai_paused: autoAiOn() ? aiPaused : null,
+    paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     babysitting: setting("inflight.babysit"),
   };
 }
@@ -2722,7 +2725,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/coordinator") return coordinatorView();
   if (route === "POST /api/mock/ai-paused") {
     pauseAi((await readBody(req)).paused !== false);
-    return { ok: true, ai_paused: aiPaused };
+    return { ok: true, paused: aiPaused };
   }
   if (route === "POST /api/mock/agents-busy") {
     agentsBusy = (await readBody(req)).busy !== false;

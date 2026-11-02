@@ -52,7 +52,8 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   const asked = request(s);
   // Its activity, less the desk's own "first seen" and what the why already says ("assigned to you").
   const events = detail.activity.filter((e) => e.kind !== "new" && !says(card.why, eventText(e, ctx.me)));
-  // The why, the board and the trace, saying only what the card's own why doesn't.
+  // The why, the board and the trace, saying only what the card's own why doesn't. Claude's bucket, unless a hard rule's floor held.
+  const claude = !!main?.judge?.bucket && main.judge.bucket === main.rule_bucket;
   const why = main && (
     <div className="why-block">
       {card.resolved && (
@@ -60,17 +61,17 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
           <b>Resolved</b>: {card.resolved}. It comes back on its own if that stops being true.
         </p>
       )}
-      {(!!card.resolved || main.why !== card.why || !!main.judge?.bucket) && (
+      {(!!card.resolved || main.why !== card.why || claude) && (
         <p className="pl-head">
           {card.resolved && "Otherwise "}
           <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
-          {main.judge?.bucket && main.judge.why && ", sorted by Claude"}
+          {claude && main.judge?.why && ", sorted by Claude"}
           {main.why && main.why !== card.why && <>: {main.why}</>}
         </p>
       )}
       {main.demoted && (
         <p className="demote-note">
-          {main.judge?.bucket ? "Claude" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
+          {claude ? "Claude" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
           {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
         </p>
       )}
@@ -227,7 +228,7 @@ function PlacementView({ p }: { p: Placement }) {
           <li className="hit">
             <span className="tick ok">→</span>
             <span className="idx">hard</span>
-            <span>a hard rule: final, Claude doesn't sort it</span>
+            <span>a hard rule: never below {BUCKET_LABEL[p.floor ?? p.rule_bucket].toLowerCase()}</span>
           </li>
         )}
         {p.judge && (

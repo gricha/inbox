@@ -1,5 +1,5 @@
-// The judge: Claude sorts everything a hard rule didn't place, by the owner's prose policy, with where the rules put
-// each item as its hint. Like the AI review it runs with no tools, no MCP and an empty directory.
+// The judge: Claude sorts everything by the owner's prose policy, with where the rules put each item as its hint (and a
+// hard rule's floor). Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
@@ -69,13 +69,22 @@ export interface JudgeItem {
   signals: Signals;
   board: string; // the board's name
   hint: { bucket: Bucket; why: string }; // where the rules put it
+  floor?: Bucket; // a hard rule keeps it at least here
   answered: boolean; // it has an earlier answer, from before its latest activity or under an older policy
+  bucket: Bucket; // where it sits now: its earlier answer, else the hint
   ai: AiReview | null; // the AI's pre-flight review, maybe of an earlier commit
+  key: string; // judgeKey() as sent, kept with the answer
 }
 
-// What the judge knew beyond the item itself, so an item is sorted again once its files or its AI review arrive.
-export const seenKey = (item: Item, ai: AiReview | null | undefined) =>
-  `${item.paths ? "files" : ""}:${ai?.head_oid === item.head_oid ? ai.head_oid : ""}`;
+// What the judge reads of an item that can change: an answer holds until one of these does, so a bot's comment or a CI
+// rerun doesn't ask again. `activityAt` is others' latest activity, bots left out; the files and the AI review of its commit
+// count once they arrive.
+export function judgeKey(item: Item, activityAt: string, ai: AiReview | null | undefined): string {
+  const reviews = item.reviews.filter((r) => !r.author_bot).map((r) => [r.author, r.state]);
+  const facts = [activityAt, item.state, item.draft, item.head_oid, item.ci === "red", item.review_decision, item.mergeable];
+  const text = [item.title, item.labels, item.review_requests, reviews, !!item.paths, ai?.head_oid === item.head_oid];
+  return textHash(JSON.stringify([...facts, ...text]));
+}
 
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim();
@@ -84,6 +93,8 @@ const clip = (s: string, n: number) => {
   const cut = s.lastIndexOf(" ", n - 1);
   return `${s.slice(0, cut > n / 2 ? cut : n - 1)}…`;
 };
+// A directory is a PR author's path: one line, and short.
+const dirText = (dir: string) => clip(oneLine(dir), 80);
 const listed = (xs: string[]) => (xs.length > NAMES ? `${xs.slice(0, NAMES).join(", ")} and ${xs.length - NAMES} more` : xs.join(", "));
 const CALL = { look: "look closely", skim: "skim it", skip: "skip it" };
 const ago = (h: number) =>
@@ -141,7 +152,7 @@ function touches(it: Item, ctx: Context | null): string | null {
   if (!t?.length) return null;
   const n = it.paths!.length;
   const of = it.changed_files > n ? `its first ${n} files (${it.changed_files} in all)` : `${n} files`;
-  const list = t.slice(0, DIRS).map((x) => `${x.dir === "/" ? "top level" : x.dir} (${x.files}${x.mine ? ", theirs" : ""})`);
+  const list = t.slice(0, DIRS).map((x) => `${x.dir === "/" ? "top level" : dirText(x.dir)} (${x.files}${x.mine ? ", theirs" : ""})`);
   const more = t.length > DIRS ? `, ${t.length - DIRS} more` : "";
   return `in their areas: ${areaFiles(it, ctx)} of ${of}; touches ${list.join(", ")}${more}`;
 }
@@ -170,6 +181,7 @@ function describe(g: JudgeItem, ctx: Context | null): string[] {
     pr ? preflight(it, g.ai) : null,
     body ? `description: ${clip(body, BODY)}` : null,
     `hint: the rules would put it in ${hint.bucket} on the "${g.board}" board${hint.why ? ` (${hint.why})` : ""}`,
+    g.floor ? `a hard rule keeps it in ${g.floor} or above, so answer within that` : null,
   ].filter((f) => f !== null);
   return [
     `- id: ${it.id}`,
@@ -187,7 +199,7 @@ function areaLines(items: JudgeItem[], ctx: Context | null, me: string): string[
   return [
     `${me}'s areas: the directories of their own PRs and reviews in the last 90 days, most worked in first.`,
     ...repos.map((r) => {
-      const dirs = areasFor(ctx, r).map((a) => a.dir);
+      const dirs = areasFor(ctx, r).map((a) => dirText(a.dir));
       return `- ${r}: ${dirs.length ? dirs.slice(0, AREAS).join(", ") + (dirs.length > AREAS ? ", …" : "") : "none"}`;
     }),
     ``,
@@ -266,19 +278,20 @@ export class Judge {
     return ((this.desk.store.get("judge_spent") as number[] | null) ?? []).filter((t) => t > cutoff);
   }
 
-  // Items waiting for an answer: active, open, unresolved, not in flight (the lane has those, so an answer wouldn't
-  // show, and each babysitter push would ask again), and placed by no hard rule on any board. Never-answered ones first
-  // (a changed item keeps its old answer meanwhile), then those the rules put in Now or Today, then the latest activity.
+  // Items waiting for an answer: active, open, unresolved, and not in flight (the lane has those, so an answer wouldn't
+  // show, and each babysitter push would ask again). Never-answered ones first (a changed item keeps its old answer
+  // meanwhile), then those in Now or Today (by their earlier answer, else the rules), then the latest activity.
   queue(): JudgeItem[] {
     const desk = this.desk;
     if (!desk.loaded) return [];
     const snap = desk.snapshot();
     const names = new Map(desk.loaded.config.boards.map((b) => [b.id, b.name]));
     const out = new Map<string, JudgeItem>();
-    const hard = new Set<string>();
+    const floors = new Map<string, Bucket>();
     for (const [board, b] of snap.boards) {
       for (const [id, p] of b.result.placements) {
-        if (p.hard) hard.add(id);
+        const f = floors.get(id);
+        if (p.floor && (!f || RANK[p.floor] < RANK[f])) floors.set(id, p.floor);
         if (!p.judge?.pending || !p.hint) continue;
         const e = snap.entries.get(id)!;
         if (e.status !== "active" || e.resolved || e.inflight || e.item.state !== "open") continue;
@@ -291,17 +304,29 @@ export class Judge {
           board: names.get(board) ?? board,
           hint: p.hint,
           answered: !!p.judge.bucket,
+          bucket: p.judge.bucket ?? p.hint.bucket,
           ai: snap.reviews.get(id) ?? null,
+          key: judgeKey(e.item, e.analysis.activity_at, snap.reviews.get(id)),
         });
       }
     }
-    const later = (g: JudgeItem) => (g.hint.bucket === "now" || g.hint.bucket === "today" ? 0 : 1);
-    return [...out.values()]
-      .filter((g) => !hard.has(g.item.id))
-      .sort((a, b) => Number(a.answered) - Number(b.answered) || later(a) - later(b) || b.item.updated_at.localeCompare(a.item.updated_at));
+    for (const g of out.values()) g.floor = floors.get(g.item.id);
+    const later = (g: JudgeItem) => (g.bucket === "now" || g.bucket === "today" ? 0 : 1);
+    return [...out.values()].sort(
+      (a, b) => Number(a.answered) - Number(b.answered) || later(a) - later(b) || b.item.updated_at.localeCompare(a.item.updated_at),
+    );
   }
 
-  // One call at a time, up to 20 items, within policy.max_per_hour. After a failure it waits (BACKOFF).
+  // The next call's items: up to 20, within policy.max_per_hour. Sorting again what Claude already answered (after a policy
+  // edit, say) uses at most half the hour, so new items always have room.
+  next(queue: JudgeItem[], spent: number): JudgeItem[] {
+    const max = this.desk.settings["policy.max_per_hour"];
+    const batch: JudgeItem[] = [];
+    for (const g of queue) if (batch.length < Math.min(BATCH, (g.answered ? Math.ceil(max / 2) : max) - spent)) batch.push(g);
+    return batch;
+  }
+
+  // One call at a time. After a failure it waits (BACKOFF).
   pump(): void {
     const desk = this.desk;
     if (this.offReason()) {
@@ -318,12 +343,12 @@ export class Judge {
     const queue = this.queue();
     if (!queue.length) return;
     const spent = this.spent();
-    const room = desk.settings["policy.max_per_hour"] - spent.length;
-    if (room <= 0) {
+    const batch = this.next(queue, spent.length);
+    if (!batch.length) {
       this.arm(spent[0]! + HOUR - now);
       return;
     }
-    void this.run(queue.slice(0, Math.min(BATCH, room)));
+    void this.run(batch);
   }
 
   // Forgets the last failure and its backoff: the next pump calls now.
@@ -361,9 +386,8 @@ export class Judge {
       for (const g of batch) {
         const a = answers.get(g.item.id);
         const row: JudgeAnswer = {
-          updated_at: g.item.updated_at,
+          key: g.key,
           policy: policy.hash,
-          seen: seenKey(g.item, g.ai),
           bucket: a?.bucket ?? null,
           why: a?.why ?? "",
           at,
@@ -396,9 +420,12 @@ export class Judge {
     const off = this.offReason();
     let waiting = 0;
     let judged = 0;
+    let held = false; // items wait for the hour to free room
     const spent = this.spent();
     if (!off && desk.loaded) {
-      waiting = this.queue().length;
+      const queue = this.queue();
+      waiting = queue.length;
+      held = waiting > 0 && !this.next(queue, spent.length).length;
       for (const a of desk.store.prefixed<JudgeAnswer>("judge:").values()) if (a.policy === desk.policy.hash) judged++;
     }
     return {
@@ -413,7 +440,7 @@ export class Judge {
       retry_at:
         this.error && this.retryAt > Date.now()
           ? new Date(this.retryAt).toISOString()
-          : waiting && spent.length >= desk.settings["policy.max_per_hour"] && spent[0]
+          : held && spent[0]
             ? new Date(spent[0] + HOUR).toISOString()
             : null,
     };

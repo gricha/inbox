@@ -45,9 +45,9 @@ export function Queue({
 
   return (
     <div className="queue deck">
-      {view.ai_paused && (
+      {view.paused && (
         <p className="ai-paused">
-          <b>AI reviews are paused:</b> {withCode(view.ai_paused)}
+          <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
       {filtering && !top.length && <p className="group-empty">No matches in Now or Today.</p>}

@@ -21,7 +21,7 @@ import type {
   ReviewView,
   SettingsView,
 } from "../../src/types.ts";
-import { parseReview } from "../../src/review.ts";
+import { CLAUDE_PAUSED, parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -119,15 +119,16 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
   const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
   assert.equal(quiet.demoted, "quiet for 3 weeks");
   assert.ok(q.sections.today.length >= 8 && q.today_cards === 5, "Today folds");
-  assert.equal(q.ai_paused, null);
+  assert.equal(q.paused, null);
   assert.equal((await call<FocusView>("GET", "/api/focus")).data.today_cards, 5);
   assert.equal(q.now_cards, 5);
 });
 
-test("logged out: the queue says AI reviews are paused once, cards wait, every agent says why, and resuming runs them again", async () => {
+test("logged out: the queue says Claude is paused once, cards wait, every agent says why, and resuming runs them again", async () => {
   await call("POST", "/api/mock/ai-paused", { paused: true });
   const { data: q } = await call<QueueView>("GET", "/api/queue");
-  assert.equal(q.ai_paused, "Claude Code isn't logged in. Run `claude auth login` in a terminal.");
+  const loggedOut = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+  assert.deepEqual(q.paused, { who: "claude", why: CLAUDE_PAUSED });
   const state = (id: string) => [...q.sections.now, ...q.sections.today].find((c) => c.id === id)?.preflight?.state;
   assert.deepEqual(["acme/web#2301", "acme/api#4099", "acme/ml-pipeline#307", "acme/api#4127"].map(state), [
     "paused",
@@ -140,12 +141,12 @@ test("logged out: the queue says AI reviews are paused once, cards wait, every a
   assert.match(paused.babysitters?.why ?? "", /^Claude Code/);
   // The judge and the coordinator are the same Claude Code: each says it failed on the login, and when it tries again.
   const { judge } = (await call<PolicyDoc>("GET", "/api/policy")).data;
-  assert.deepEqual([judge.state, judge.error, !!judge.retry_at], ["error", q.ai_paused, true]);
+  assert.deepEqual([judge.state, judge.error, !!judge.retry_at], ["error", loggedOut, true]);
   const { status } = (await call<CoordinatorView>("GET", "/api/coordinator")).data;
-  assert.deepEqual([status.state, status.error, !!status.next_at], ["error", q.ai_paused, true]);
+  assert.deepEqual([status.state, status.error, !!status.next_at], ["error", loggedOut, true]);
   await call("POST", "/api/mock/ai-paused", { paused: false });
   const { data: back } = await call<QueueView>("GET", "/api/queue");
-  assert.equal(back.ai_paused, null);
+  assert.equal(back.paused, null);
   assert.equal((await call<PolicyDoc>("GET", "/api/policy")).data.judge.state, "idle");
   assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.status.state, "idle");
   // At work: the judge judging, the coordinator running.

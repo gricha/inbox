@@ -15,6 +15,7 @@ import {
   claudeEnvelope,
   claudeError,
   claudeSpawn,
+  CLAUDE_PAUSED,
   numberPatch,
   parseFiles,
   parseReview,
@@ -550,7 +551,12 @@ test("every Now and Today card carries its pre-flight: running, queued, ready, s
     at: NOW.toISOString(),
     next: undefined,
   });
-  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#3")?.verdict, "skim", "verdict stays for older clients");
+  const q = t.desk.queue();
+  assert.equal(
+    [...q.sections.now, ...q.sections.today].find((c) => c.id === "acme/api#3")?.verdict,
+    "skim",
+    "verdict stays for older clients",
+  );
   await t.f.release("acme/api#2");
   await t.f.release("acme/api#1");
 
@@ -579,8 +585,9 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
   for (const id of t.f.started.slice()) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow());
   const q = t.desk.queue();
-  assert.equal(q.ai_paused, LOGGED_OUT);
-  assert.equal(t.desk.focus().ai_paused, LOGGED_OUT);
+  const claude = { who: "claude", why: CLAUDE_PAUSED };
+  assert.deepEqual(q.paused, claude, "a failed login stops Claude as a whole");
+  assert.deepEqual(t.desk.focus().paused, claude);
   assert.deepEqual(
     q.sections.now.map((c) => c.preflight?.state),
     ["paused", "paused", "paused"],
@@ -589,8 +596,20 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
 
   // Turning auto_ai off: nothing is paused any more, it's off.
   t.desk.putSettings({ set: { "review.auto_ai": false } });
-  assert.equal(t.desk.queue().ai_paused, null);
+  assert.equal(t.desk.queue().paused, null);
   assert.equal(t.desk.queue().sections.now[0]?.preflight?.state, "off");
+  t.cleanup();
+});
+
+test("any other failure pauses only AI reviews; a judge that can't log in pauses Claude before any AI review fails", async () => {
+  const t = await setup([ask(1), ask(2), ask(3)]);
+  t.f.setFail("Claude timed out");
+  await t.sync();
+  for (const id of t.f.started.slice()) await t.f.release(id);
+  assert.deepEqual(t.desk.queue().paused, { who: "ai", why: "Claude timed out" });
+  t.desk.putSettings({ set: { "review.auto_ai": false, "policy.judge": true } });
+  t.desk.judge.error = LOGGED_OUT;
+  assert.deepEqual(t.desk.queue().paused, { who: "claude", why: CLAUDE_PAUSED });
   t.cleanup();
 });
 

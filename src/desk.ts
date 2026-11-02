@@ -13,6 +13,7 @@ import type {
   ActivityPage,
   AgentStatus,
   AiReview,
+  BoardConfig,
   BoardSummary,
   BoardView,
   Bucket,
@@ -32,6 +33,7 @@ import type {
   JudgeAnswer,
   JudgeStep,
   Overview,
+  Paused,
   Placement,
   PolicyDoc,
   Preflight,
@@ -44,15 +46,15 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import { defaultConfigText, parseConfig, type LoadedConfig } from "./config.ts";
-import { analyze, type Analysis } from "./signals.ts";
-import { classify, type BoardResult } from "./rules.ts";
+import { defaultConfigText, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { analyze, FIELDS, type Analysis } from "./signals.ts";
+import { classify, placedBy, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, NOT_LOGGED_IN, type PrText } from "./review.ts";
+import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
-import { DEFAULT_POLICY, Judge, seenKey, textHash } from "./judge.ts";
+import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
 import {
   checkSetting,
@@ -248,6 +250,7 @@ export class Desk {
       this.log(`wrote ${this.configPath}`);
     }
     this.migrateSettings();
+    this.migrateHard();
     this.readPolicy();
     this.reloadConfig();
     fs.watchFile(this.policyPath, { interval: 2000 }, () => {
@@ -507,6 +510,20 @@ export class Desk {
     this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
   }
 
+  // Once: the direct-ask rule of a config written before hard rules becomes hard (migrateHard).
+  migrateHard(): void {
+    if (this.store.get("hard_migrated")) return;
+    const text = migrateHard(fs.readFileSync(this.configPath, "utf8"));
+    if (text !== null) {
+      const real = fs.realpathSync(this.configPath);
+      fs.copyFileSync(real, `${real}.bak`);
+      fs.writeFileSync(`${real}.tmp`, text);
+      fs.renameSync(`${real}.tmp`, real);
+      this.log("made the rule for reviews asked of you by name hard (backup: config.toml.bak)");
+    }
+    this.store.set("hard_migrated", this.now().toISOString());
+  }
+
   getSettings(): SettingsView {
     const ctx = this.ctx;
     const spaces = this.loaded?.config.spaces ?? [];
@@ -734,15 +751,15 @@ export class Desk {
       const current = ai?.head_oid === e.item.head_oid ? ai : null;
       return current?.risk === "high" ? "look" : current?.verdict;
     };
-    // An answer for an older version of the item, under an older policy, or from before its files or AI review arrived,
-    // stays until a fresh one lands, so the queue doesn't jump back to the rules' placements each time the policy changes.
+    // An answer for what the item was (judgeKey: its activity, commit, reviews, files, AI review) or an older policy stays
+    // until a fresh one lands, so the queue doesn't jump back to the rules' placements each time the policy changes.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
     const judge = answers
       ? (id: string): JudgeStep => {
           const a = answers.get(id);
           if (!a) return { bucket: null, why: "", pending: true };
-          const it = entries.get(id)?.item;
-          const stale = !it || a.policy !== this.policy.hash || a.updated_at !== it.updated_at || a.seen !== seenKey(it, reviews.get(id));
+          const e = entries.get(id);
+          const stale = !e || a.policy !== this.policy.hash || a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id));
           return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
@@ -778,7 +795,8 @@ export class Desk {
         const e = entries.get(id)!;
         if (e.status !== "active" || e.resolved || e.inflight) continue;
         const cur = best.get(id);
-        if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(id, p);
+        // On a tie, a hard rule's placement speaks for the card.
+        if (!cur || RANK[p.bucket] < RANK[cur.bucket] || (p.bucket === cur.bucket && p.hard && !cur.hard)) best.set(id, p);
       }
     }
     // An in-flight PR comes back to Now only when it needs you, with the reason as its why.
@@ -810,6 +828,7 @@ export class Desk {
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
+    const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in flight is the lane's
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -842,14 +861,7 @@ export class Desk {
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
-      // Who placed it; your PR in flight is the lane's.
-      ...(e.inflight
-        ? {}
-        : p?.hard
-          ? { placed_by: "hard" as const }
-          : p?.judge
-            ? { placed_by: p.judge.bucket ? ("claude" as const) : ("pending" as const) }
-            : {}),
+      ...(by && { placed_by: by }),
     };
   }
 
@@ -1006,9 +1018,13 @@ export class Desk {
     return `waiting on review: ${hand}`;
   }
 
-  // Said once on the queue, not on every card.
-  aiPausedWhy(): string | null {
-    return this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
+  // Said once above Now, not on every card: a failed login stops every agent, so it's Claude as a whole.
+  paused(): Paused | null {
+    const login = (why: string | null | undefined) => !!why?.endsWith(NOT_LOGGED_IN);
+    const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
+    const co = this.coordinator.offReason() ? null : this.coordinator.load().error;
+    if (login(ai) || (!this.judge.offReason() && login(this.judge.error)) || login(co)) return { who: "claude", why: CLAUDE_PAUSED };
+    return ai ? { who: "ai", why: ai } : null;
   }
 
   focus(): FocusView {
@@ -1016,7 +1032,7 @@ export class Desk {
       sections: this.top(this.snapshot(), new Set()),
       now_cards: this.settings["queue.now_cards"],
       today_cards: this.settings["queue.today_cards"],
-      ai_paused: this.aiPausedWhy(),
+      paused: this.paused(),
     };
   }
 
@@ -1094,7 +1110,7 @@ export class Desk {
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
       now_cards: this.settings["queue.now_cards"],
       today_cards: this.settings["queue.today_cards"],
-      ai_paused: this.aiPausedWhy(),
+      paused: this.paused(),
       babysitting: this.settings["inflight.babysit"],
     };
   }
@@ -1405,8 +1421,11 @@ export class Desk {
     // Its babysitter keeps working whatever its status, and a question it asks must stay in Now.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
       throw new DeskError(409, `${id} is in flight, so its babysitter has it; take it back (d) first`);
-    // Whatever policy it learned, what a hard rule placed stays on the owner's desk.
+    // Whatever policy it learned, what a hard rule placed stays on the owner's desk. A mute never lapses, so it would outlast a
+    // later ask by name: what the coordinator clears comes back on new activity (done, snooze).
     const clears = action === "done" || action === "snooze" || action === "mute";
+    if (by?.agent === "coordinator" && action === "mute")
+      throw new DeskError(403, "the coordinator doesn't mute; mark it done or snooze it, so it comes back on new activity");
     if (by?.agent === "coordinator" && clears && [...this.snapshot().boards.values()].some((b) => b.result.placements.get(id)?.hard))
       throw new DeskError(403, `a hard rule keeps ${id} on the owner's desk; the coordinator can't clear it`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
@@ -1473,7 +1492,7 @@ export class Desk {
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
     this.store.putState(s);
-    const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
+    const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString(), by?.agent);
     if (by?.agent === "coordinator" && seq)
       this.coordinator.logAct({ item_id: id, action, bucket, undo_seq: seq }, (by.reason ?? "").trim().slice(0, 300));
     this.changed();
@@ -1490,13 +1509,16 @@ export class Desk {
     if (!ev) throw new DeskError(404, "nothing to undo");
     if (agent && (ev.action === "inflight" || ev.action === "takeback"))
       throw new DeskError(409, `only the user undoes ${ev.action === "inflight" ? "marking a PR in flight" : "taking a PR back"}`);
-    if (agent === "coordinator" && !this.store.log({ limit: 1000, kind: "act" }).some((r) => r.undo_seq === ev.seq))
+    if (agent === "coordinator" && ev.agent !== "coordinator")
       throw new DeskError(409, `that action on ${ev.item_id} wasn't yours; the coordinator undoes only its own (pass its seq)`);
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
     const cur = this.store.state(ev.item_id);
     const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
     this.store.putState(restored);
     this.store.markUndone(ev.seq);
+    // You took back what the coordinator did: its next learn run reads that as a lesson.
+    if (ev.agent === "coordinator" && (!agent || agent === "agent"))
+      this.store.logWrite(ev.item_id, `undo:${ev.action}`, this.now().toISOString());
     this.changed();
     if (restored.inflight_at !== cur.inflight_at) this.sitter.consider(ev.item_id, restored.inflight_at ? undefined : 0);
     const { snoozed_at: _, acked_at: __, ...state } = restored;
@@ -1695,10 +1717,24 @@ export class Desk {
 
   // ---------------------------------------------------------------- config
 
+  // The hard rules in plain words: a board named in two spaces says which, and a why's fields read as "someone" or "some".
   getConfig(): ConfigDoc {
     const text = this.configText;
-    const hard = (this.loaded?.config.boards ?? []).flatMap((b) =>
-      b.rules.flatMap((r) => (r.hard && r.bucket !== "judge" ? [{ board: b.name, bucket: r.bucket, when: r.when, why: r.why ?? "" }] : [])),
+    const cfg = this.loaded?.config;
+    const boards = cfg?.boards ?? [];
+    const label = (b: BoardConfig) =>
+      boards.filter((x) => x.name === b.name).length > 1
+        ? `${b.name} (${cfg!.spaces.find((x) => x.id === b.space)?.name ?? b.space})`
+        : b.name;
+    const plain = (why: string) =>
+      why.replaceAll(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, field: string) => {
+        const type = FIELDS.find((f) => f.path === field)?.type;
+        return type === "number" ? "some" : type === "string" ? "someone" : whole;
+      });
+    const hard = boards.flatMap((b) =>
+      b.rules.flatMap((r) =>
+        r.hard && r.bucket !== "judge" ? [{ board: label(b), bucket: r.bucket, when: r.when, why: plain(r.why ?? "") }] : [],
+      ),
     );
     return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings, hard };
   }

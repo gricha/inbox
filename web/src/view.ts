@@ -365,6 +365,7 @@ const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
   hard: "placed by a hard rule",
   claude: "sorted by Claude",
   pending: "not sorted by Claude yet",
+  unanswered: "Claude gave no answer",
 };
 
 // The selected card's facts, in the review header's words, less what the card already says: its why, its problems and

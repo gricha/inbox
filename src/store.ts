@@ -23,6 +23,7 @@ export interface ActionEvent {
   action: string;
   before: StateRow;
   undone: boolean;
+  agent: string | null; // the agent that acted (the coordinator, a babysitter); null: you, from the UI, the CLI or your own agent
 }
 
 export const emptyState = (id: string): StateRow => ({
@@ -74,6 +75,16 @@ export class Store {
       .all()
       .map((c) => c.name);
     if (!logCols.includes("version")) this.db.exec("ALTER TABLE coordinator_log ADD COLUMN version INTEGER");
+    const eventCols = this.db
+      .prepare("PRAGMA table_info(events)")
+      .all()
+      .map((c) => c.name);
+    if (!eventCols.includes("agent")) {
+      this.db.exec("ALTER TABLE events ADD COLUMN agent TEXT");
+      this.db.exec(
+        "UPDATE events SET agent = 'coordinator' WHERE seq IN (SELECT undo_seq FROM coordinator_log WHERE undo_seq IS NOT NULL)",
+      );
+    }
   }
 
   close(): void {
@@ -248,14 +259,15 @@ export class Store {
 
   // --- undo log
 
-  logAction(itemId: string, action: string, before: StateRow, at: string): number {
+  logAction(itemId: string, action: string, before: StateRow, at: string, agent?: string): number {
     const r = this.db
-      .prepare("INSERT INTO events (at, item_id, action, before) VALUES (?, ?, ?, ?)")
-      .run(at, itemId, action, JSON.stringify(before));
+      .prepare("INSERT INTO events (at, item_id, action, before, agent) VALUES (?, ?, ?, ?, ?)")
+      .run(at, itemId, action, JSON.stringify(before), agent ?? null);
     return Number(r.lastInsertRowid);
   }
 
-  // GitHub writes (approve) go in the same log, stored as undone: the desk can't take them back.
+  // What can't be undone goes in the same log, stored as undone: GitHub writes (approve), and your undo of a coordinator
+  // action ("undo:snooze"), which its learn runs read.
   logWrite(itemId: string, action: string, at: string): number {
     const r = this.db
       .prepare("INSERT INTO events (at, item_id, action, before, undone) VALUES (?, ?, ?, ?, 1)")
@@ -277,10 +289,12 @@ export class Store {
     return r ? rowToAction(r) : null;
   }
 
-  // Actions after `seq` and at or after `since` still in effect, oldest first.
-  actionsAfter(seq: number, since: string, limit: number): ActionEvent[] {
+  // Your own actions after `seq` and at or after `since`, oldest first: those still in effect, and your undos of the coordinator's.
+  ownerActions(seq: number, since: string, limit: number): ActionEvent[] {
     return this.db
-      .prepare("SELECT * FROM events WHERE seq > ? AND at >= ? AND undone = 0 ORDER BY seq ASC LIMIT ?")
+      .prepare(
+        "SELECT * FROM events WHERE seq > ? AND at >= ? AND agent IS NULL AND (undone = 0 OR action LIKE 'undo:%') ORDER BY seq ASC LIMIT ?",
+      )
       .all(seq, since, limit)
       .map(rowToAction);
   }
@@ -400,7 +414,8 @@ function rowToAction(r: Record<string, unknown>): ActionEvent {
     item_id: r.item_id as string,
     action: r.action as string,
     before: JSON.parse(r.before as string) as StateRow,
-    undone: false,
+    undone: r.undone === 1,
+    agent: (r.agent as string | null) ?? null,
   };
 }
 

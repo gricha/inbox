@@ -195,6 +195,15 @@ export function parseConfig(
 
 const toml = (s: string) => JSON.stringify(s);
 
+// Configs written before hard rules existed exempted a review asked of you by name from caps (nocap) instead: that rule,
+// and only as the first-run config wrote it, becomes hard. Null when there's nothing to change.
+export function migrateHard(text: string): string | null {
+  const rule =
+    /^(\s*\{ when = "me\.requested_direct && !me\.requested_by_bot", bucket = "now", why = "[^"\n]*")(, nocap = true)?( \},?)$/gm;
+  const next = text.replaceAll(rule, (_, head: string, _nocap: string | undefined, tail: string) => `${head}, hard = true${tail}`);
+  return next === text ? null : next;
+}
+
 // First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
 export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const orgs = opts.workOrgs;
@@ -203,8 +212,9 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
     `# Each [[boards]] table feeds the queue: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, later, fyi, hide.`,
-    `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint; a rule with`,
-    `# \`hard = true\` is final: Claude doesn't sort what it matches, and neither quiet days nor caps move it.`,
+    `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint. A rule with`,
+    `# \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever Claude, quiet`,
+    `# days or caps say, and the coordinator can't clear it.`,
     `# \`caps\` limit Now and Today; overflow moves down a bucket with a note. Pinned and \`nocap\` items don't count, and nor do`,
     `# your PRs in flight that need you. Caps apply after Claude, so give every board one: a board without caps can fill Now.`,
     `# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().`,

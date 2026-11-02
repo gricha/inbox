@@ -296,10 +296,18 @@ export function Rules({
             </section>
           )}
 
-          {hard.length > 0 && (
-            <section className="side-block">
-              <h3 className="s-sub">Hard rules</h3>
-              <p className="muted small">Final: Claude doesn't sort what they match, and quiet days and caps don't move it.</p>
+          <section className="side-block">
+            <h3 className="s-sub">Hard rules</h3>
+            {hard.length ? (
+              <p className="muted small">
+                What they match stays at least in their bucket (Today for Now), whatever Claude, quiet days or caps say.
+              </p>
+            ) : (
+              <p className="muted small">
+                None: Claude can sort anything off your desk. <code>hard = true</code> on a rule keeps what it matches there.
+              </p>
+            )}
+            {hard.length > 0 && (
               <ul className="plain hard-rules">
                 {hard.map((h, i) => (
                   // oxlint-disable-next-line react/no-array-index-key -- rules have no id; the list is redrawn whole
@@ -312,8 +320,8 @@ export function Rules({
                   </li>
                 ))}
               </ul>
-            </section>
-          )}
+            )}
+          </section>
 
           <section className="side-block">
             <h3 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h3>
@@ -457,7 +465,8 @@ export function Rules({
               <div className="fact">
                 <dt>hard</dt>
                 <dd>
-                  <code>hard = true</code> on a rule: final. Claude sorts everything else, with the rule's bucket as its hint
+                  <code>hard = true</code> on a rule: a floor. What it matches never sorts below its bucket (Today for Now); Claude sorts
+                  within it, and everything else with the rule's bucket as its hint
                 </dd>
               </div>
             </dl>

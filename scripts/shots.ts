@@ -83,6 +83,7 @@ interface Shot {
   name: string;
   go: (page: Page) => Promise<void>;
   after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
+  writes?: true; // changes the desk's settings, policy or state: only against the mock, never a real desk at --url
 }
 const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
@@ -211,8 +212,28 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // j j from the top: the cards stay one sheet's gap apart while the selection moves down, with no room left between them.
+    name: "queue-jj",
+    go: async (page) => {
+      await at("#/")(page);
+      await top(page);
+      await page.locator(".g-now [data-id]").first().locator(".row-main").focus();
+      for (const k of ["j", "j"]) {
+        await page.keyboard.press(k);
+        await page.waitForTimeout(250);
+      }
+      const gaps = await page.evaluate<number[]>(`(() => {
+        const cards = [...document.querySelectorAll(".g-now .rows > [data-id]")].map((el) => el.getBoundingClientRect());
+        return cards.slice(1).map((r, i) => Math.round(r.top - cards[i].bottom));
+      })()`);
+      if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2)
+        failures.push(`queue-jj: uneven gaps between Now's cards: ${gaps.join(", ")}px`);
+    },
+  },
+  {
     // One line above the queue instead of a note on every card.
     name: "queue-ai-paused",
+    writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
@@ -378,6 +399,7 @@ const SHOTS: Shot[] = [
   {
     // policy.md empty: the editor holds the starter, and says so.
     name: "settings-policy-starter",
+    writes: true,
     go: async (page) => {
       await page.evaluate(`(async () => {
         const p = await (await fetch("/api/policy")).json();
@@ -400,6 +422,7 @@ const SHOTS: Shot[] = [
   {
     // Paused after failures in a row: one line, its label in ink, said once.
     name: "settings-review-paused",
+    writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
@@ -412,6 +435,7 @@ const SHOTS: Shot[] = [
   {
     // Logged out, the coordinator and the judge stop too: each says so in its one line, in ink, with when it tries again.
     name: "settings-agent-paused",
+    writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
@@ -421,6 +445,7 @@ const SHOTS: Shot[] = [
   },
   {
     name: "settings-policy-paused",
+    writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
@@ -431,6 +456,7 @@ const SHOTS: Shot[] = [
   {
     // Babysitting off: the intro says so once, a PR that needs you has its problem as its why, nothing says "watching".
     name: "inflight-babysit-off",
+    writes: true,
     go: async (page) => {
       await setting("inflight.babysit", false)(page);
       await at("#/inflight")(page);
@@ -473,7 +499,9 @@ const SIZES = [
 const failures: string[] = [];
 const files: string[] = [];
 try {
-  const url = arg("--url") ?? (await start());
+  const real = arg("--url");
+  const url = real ?? (await start());
+  const shots = real ? SHOTS.filter((s) => !s.writes) : SHOTS;
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ channel: "chrome" });
@@ -495,7 +523,7 @@ try {
       });
       await page.goto(`${url}/#/`);
       await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
-      for (const shot of SHOTS) {
+      for (const shot of shots) {
         await page.keyboard.press("Escape");
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click

@@ -298,6 +298,8 @@ export async function askClaude(prompt: string, opts: { command?: string } & Ask
 }
 
 export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+// The queue's one line when it is: every agent stops on it, the judge and the coordinator too.
+export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
 
 // Does the login work? A tiny call that leaves no session behind, before a run that would: a session run that fails on
 // the login still saves a session, which piles up in claude --resume. Throws claudeError's error when it doesn't.

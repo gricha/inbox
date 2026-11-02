@@ -43,7 +43,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "policy",
     title: "Policy",
-    help: "How you want Claude to sort your desk, in your words. Until you write your own, a starter policy is in effect. The coordinator refines it from what you do (done, snooze, mute, pin), and its log shows each change with an Undo.",
+    help: "How you want Claude to sort your desk, in your words. The coordinator refines it from what you do (done, snooze, mute, pin), and its log shows each change with an Undo.",
   },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
@@ -150,10 +150,10 @@ export const SETTINGS = [
   {
     key: "policy.judge",
     section: "policy",
-    label: "Let Claude sort everything your hard rules don't decide",
+    label: "Let Claude sort everything on your desk",
     type: "boolean",
     default: true,
-    help: "Claude Code reads each item with your policy and decides what you should do with it: now, today, later, FYI (off your page) or hidden. Where your rules put it is its hint, and holds until it answers. Hard rules are final: Claude doesn't sort what they match.",
+    help: "Claude Code reads each item with your policy and decides what you should do with it: now, today, later, FYI (off your page) or hidden. Where your rules put it is its hint, and holds until it answers. A hard rule's bucket is a floor Claude can't sort below.",
   },
   {
     key: "policy.max_per_hour",

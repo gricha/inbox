@@ -155,7 +155,7 @@ export interface Rule {
   bucket: RuleBucket;
   why?: string;
   nocap?: boolean; // matched items don't count toward caps and are never demoted
-  hard?: boolean; // final: Claude doesn't sort what it matches, and neither the quiet rule nor caps move it
+  hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule), and the coordinator can't clear it
 }
 
 export interface BoardConfig {
@@ -366,8 +366,9 @@ export interface Placement {
   why: string;
   demoted?: string; // e.g. "Now takes 3 from PRs to review"
   trace: TraceStep[];
-  hard?: boolean; // a hard rule placed it: final
-  judge?: JudgeStep; // set on every other placement while the judge is on
+  hard?: boolean; // a hard rule matched it
+  floor?: Bucket; // ...so it never sorts below this, whatever Claude, quiet days or caps say
+  judge?: JudgeStep; // set while the judge is on
   hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers
 }
 
@@ -378,11 +379,10 @@ export interface JudgeStep {
   pending: boolean; // not judged under this policy since the item last changed (an earlier answer may still show)
 }
 
-// Kept per item in kv `judge:<id>`: good for this updated_at under this policy, with what else it saw.
+// Kept per item in kv `judge:<id>`: good while what the judge read of the item (judgeKey) and the policy stay the same.
 export interface JudgeAnswer {
-  updated_at: string;
+  key: string; // judgeKey()
   policy: string; // the policy's hash
-  seen?: string; // seenKey(): whether the PR's files were known, the AI review's commit; absent on answers from before it
   bucket: Bucket | null; // null: the agent gave no answer for it
   why: string;
   at: string;
@@ -434,7 +434,7 @@ export interface Card {
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, marked in flight
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
-  placed_by?: "hard" | "claude" | "pending"; // a hard rule, Claude, or the rules until Claude answers; unset with the judge off
+  placed_by?: "hard" | "claude" | "pending" | "unanswered"; // a hard rule, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
 }
 
@@ -494,7 +494,13 @@ export interface FocusView {
   sections: { now: Card[]; today: Card[] };
   now_cards: number; // queue.now_cards: Now shows this many, the rest behind one line; 0 = all
   today_cards: number; // queue.today_cards: Today shows this many, the rest behind one line; 0 = all
-  ai_paused: string | null; // why AI reviews nobody asked for are paused (an expired login), said once instead of on every card
+  paused: Paused | null; // said once above Now instead of on every card
+}
+
+// Claude stopped: its login failed (the AI review, the judge or the coordinator), or AI reviews nobody asked for keep failing.
+export interface Paused {
+  who: "claude" | "ai";
+  why: string;
 }
 
 // Every item once, at its best placement across boards: the app's main surface.
@@ -505,7 +511,7 @@ export interface QueueView {
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
   now_cards: number; // as in FocusView
   today_cards: number;
-  ai_paused: string | null;
+  paused: Paused | null;
   babysitting: boolean; // inflight.babysit: d on your PR hands it to a babysitter, or only puts it in flight
 }
 

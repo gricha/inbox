@@ -51,7 +51,7 @@ Done, snooze, mute, pin and in flight are local. Nothing is sent to GitHub.
 
 Rules give each item its first placement. Edit them in Settings → Rules: `⌘↵` previews which items would move, `⌘S` saves. They live in `~/.review-desk/config.toml`, and editing the file directly works too.
 
-A board is a source: one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. A rule with `hard = true` is final; everything else your own Claude Code then sorts by your policy (Settings → Policy, a starter until you write one), with the rule's bucket as its hint. Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement.
+A board is a source: one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. A rule with `hard = true` is a floor: what it matches never sorts below its bucket (Today for a Now rule). Your own Claude Code then sorts everything by your policy (Settings → Policy, a starter until you write one), with the rule's bucket as its hint. Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement.
 
 ```toml
 [[spaces]]

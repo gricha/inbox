@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultConfigText, parseConfig } from "../src/config.ts";
+import { defaultConfigText, migrateHard, parseConfig } from "../src/config.ts";
 
 test("default configs parse cleanly", () => {
   for (const orgs of [["acme"], ["acme", "globex"], []]) {
@@ -72,4 +72,21 @@ test("settings left in config.toml are ignored with a warning pointing to Settin
   assert.equal(warnings[0]?.message, '"poll_seconds" moved to Settings (settings.json); delete it here');
   assert.equal(loaded!.config.poll_seconds, 90);
   assert.deepEqual(loaded!.config.signals.bots, []);
+});
+
+test("a config written before hard rules gets its ask-by-name rule made hard, and nothing else", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const old = now.replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`);
+  assert.notEqual(old, now);
+  assert.equal(migrateHard(old), now);
+  assert.equal(migrateHard(now), null, "already hard");
+  const edited = old.replace(`why = "{me.requested_by} asked you directly", nocap = true`, `why = "asked by name", nocap = true`);
+  const rules = parseConfig(migrateHard(edited)!).loaded!.config.boards.flatMap((b) => b.rules);
+  assert.equal(rules.filter((r) => r.hard).length, 2, "its own why is kept");
+  assert.equal(rules.filter((r) => r.nocap).length, 2, "My PRs' changes requested stays nocap");
+  assert.equal(
+    migrateHard(old.replaceAll(`bucket = "now", why = "{me.requested_by}`, `bucket = "today", why = "{me.requested_by}`)),
+    null,
+    "a rule the owner changed is theirs",
+  );
 });

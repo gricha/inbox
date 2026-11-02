@@ -141,8 +141,7 @@ export function Policy({
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       <p className="s-path quiet" title={doc?.path}>
-        <code>{doc ? tilde(doc.path) : "…"}</code>
-        {starter ? " is empty" : ""}. The coordinator edits it too.
+        <code>{doc ? tilde(doc.path) : "…"}</code>. The coordinator edits it too.
       </p>
     </div>
   );

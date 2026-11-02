@@ -14,7 +14,7 @@ Review Desk is a desktop app on the user's machine that turns their GitHub revie
 
 Rules decide where each item lands. A board is one or more GitHub searches plus ordered rules; the first rule whose `when` is true sets the bucket and a `why` ("alice asked you directly"). Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket with a note.
 
-A rule with `hard = true` is final (asked to review by name, by default). Everything else is sorted by Claude with the **policy**: prose the user writes in `~/.review-desk/policy.md` (a built-in starter while it's empty), which their own Claude Code applies to each item (the "judge"), with where the rules put it as the hint. Until it has, the item sits where the rules put it. The rule trace shows the judge's step.
+A rule with `hard = true` is a floor (asked to review by name, by default): what it matches never sorts below its bucket (Today for a Now rule), and the coordinator can't clear it. Everything else is sorted by Claude with the **policy**: prose the user writes in `~/.review-desk/policy.md` (a built-in starter while it's empty), which their own Claude Code applies to each item (the "judge"), with where the rules put it as the hint. Until it has, the item sits where the rules put it. The rule trace shows the judge's step.
 
 A **coordinator** may be running: a Claude Code session the desk wakes on new activity, which keeps the queue clean by the policy and logs what it did. Every few hours it also reads what the user did by hand and refines the policy where their actions disagree with it.
 
@@ -123,7 +123,7 @@ The desk started you on one of the user's own PRs, in a git worktree of their cl
 ### "Change my policy" / "why did the policy put X there?"
 
 1. `desk_policy get`: the text (fenced; the starter while policy.md is empty, and it says so), its hash, and the judge's status (how many items it sorted, how many wait, this hour's count against `policy.max_per_hour`, its last error).
-2. For an item, `desk_item`: the trace ends with `Claude: <bucket>, <why>` (or `not sorted yet`). If the user wants it placed for sure, a hard rule (`hard = true`) is the precise fix; the policy is for judgment calls.
+2. For an item, `desk_item`: the trace ends with `Claude: <bucket>, <why>` (or `not sorted yet`). If the user wants it kept on their desk for sure, a hard rule (`hard = true`) is the precise fix; the policy is for judgment calls.
 3. To change it, write the whole new text in the user's voice, short and concrete ("Dependency bumps from bots are FYI unless CI is red."), show it, and on a yes `desk_policy set` with the hash. A new policy makes Claude sort everything again, a batch at a time.
 
 ## The coordinator role

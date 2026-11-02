@@ -226,7 +226,7 @@ async function show(x: Ctx): Promise<number> {
       x.out(`  ${mark} ${(t.index < 0 ? "filter" : `#${t.index}`).padEnd(6)} ${t.when}${t.error ? x.c.red(`  ${t.error}`) : ""}`);
     }
     if (p.rule === null) x.out(x.c.dim(`  → default`));
-    if (p.hard) x.out(x.c.dim(`  → hard rule: final, Claude doesn't sort it`));
+    if (p.floor) x.out(x.c.dim(`  → hard rule: never below ${p.floor}`));
     if (p.judge) x.out(`  → ${plain(judgeText(p.judge))}`);
   }
   return 0;

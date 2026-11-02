@@ -87,7 +87,7 @@ const queue = (): QueueView => ({
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
   now_cards: 5,
   today_cards: 5,
-  ai_paused: null,
+  paused: null,
   babysitting: true,
 });
 

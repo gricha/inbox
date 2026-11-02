@@ -71,26 +71,6 @@ const CHORDS: Record<string, Route> = {
 };
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
-const heldPx = (el: HTMLElement) => Number(el.dataset.held ?? 0);
-const hold = (el: HTMLElement, px: number) => {
-  el.dataset.held = String(heldPx(el) + px);
-  el.style.marginBottom = `${el.dataset.held}px`;
-};
-const unhold = (el: HTMLElement) => {
-  el.style.marginBottom = "";
-  delete el.dataset.held;
-};
-// Room a card kept goes once it's out of view, measured: the browser's scroll anchoring may already make up for it.
-const dropUnseen = () => {
-  const gone = [...document.querySelectorAll<HTMLElement>("[data-held]")].filter(
-    (el) => el.getBoundingClientRect().bottom + heldPx(el) <= 0,
-  );
-  if (!gone.length) return;
-  const seen = [...document.querySelectorAll("[data-id]")].find((el) => el.getBoundingClientRect().top >= 0);
-  const before = seen?.getBoundingClientRect().top ?? 0;
-  for (const el of gone) unhold(el);
-  window.scrollBy(0, (seen?.getBoundingClientRect().top ?? 0) - before);
-};
 const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 // The desktop app's window needs room for the macOS traffic lights and a draggable title bar.
@@ -143,7 +123,7 @@ export function App() {
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
   const lastIndex = useRef(0);
-  const landing = useRef<{ id: string; top: number; from: string | null } | null>(null); // where the card j/k moves to sat on screen
+  const landing = useRef<{ id: string; top: number } | null>(null); // where the card j/k moves to sat on screen
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
@@ -348,30 +328,14 @@ export function App() {
     // tick re-checks once the undo hold has run out.
   }, [flat, cursor, selected, tick]);
 
-  // The card j/k lands on stays put while the one it left closes above it (where the page can't scroll up that far, that card
-  // keeps the rest as room below it); then it's scrolled into view if it grew past it.
+  // The card j/k lands on stays put while the one it left closes above it; near the top, where the page can't scroll up that
+  // far, it moves up by the rest. Then it's scrolled into view if it grew past the window.
   useLayoutEffect(() => {
     const at = landing.current;
     landing.current = null;
-    const el = selected ? document.querySelector<HTMLElement>(`[data-id="${CSS.escape(selected)}"]`) : null;
-    if (el?.dataset.held) unhold(el);
-    if (!el || !at || at.id !== selected) return;
-    const short = Math.max(0, at.top - el.getBoundingClientRect().top - window.scrollY);
-    const left = at.from && !isFold(at.from) ? document.querySelector<HTMLElement>(`[data-id="${CSS.escape(at.from)}"]`) : null;
-    if (short && left) hold(left, short);
-    window.scrollBy(0, el.getBoundingClientRect().top - at.top);
-    dropUnseen();
+    const el = selected ? document.querySelector(`[data-id="${CSS.escape(selected)}"]`) : null;
+    if (el && at?.id === selected) window.scrollBy(0, el.getBoundingClientRect().top - at.top);
   }, [selected]);
-  useEffect(() => {
-    window.addEventListener("scroll", dropUnseen, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", dropUnseen);
-    };
-  }, []);
-  // Filtering moves the cards, and the room some kept with them.
-  useEffect(() => {
-    for (const el of document.querySelectorAll<HTMLElement>("[data-held]")) unhold(el);
-  }, [filter]);
 
   // The first card of a group brings its heading along (the queue's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
@@ -690,7 +654,7 @@ export function App() {
     const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
     if (!next) return;
     const top = document.querySelector(`[data-id="${CSS.escape(next)}"]`)?.getBoundingClientRect().top;
-    landing.current = top === undefined ? null : { id: next, top, from: selected };
+    landing.current = top === undefined ? null : { id: next, top };
     setSelected(next);
     focusRow(next);
   }

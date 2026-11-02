@@ -1,5 +1,5 @@
 // Places items on a board: filter, first matching rule, caps, sort.
-import type { BoardConfig, Bucket, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
+import type { BoardConfig, Bucket, Card, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
 
 export interface CompiledBoard {
@@ -54,6 +54,13 @@ function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
 // The policy judge's answer for an item, while judging is on.
 export type JudgeLookup = (id: string) => JudgeStep;
 
+const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
+
+// A hard rule's floor: Today for a Now rule, so Claude still picks Now or Today for what it matches.
+export const floorOf = (b: Bucket): Bucket => (b === "now" ? "today" : b);
+// `b`, or `floor` when that's more urgent.
+const atLeast = (b: Bucket, floor: Bucket | undefined): Bucket => (floor && RANK[floor] < RANK[b] ? floor : b);
+
 function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement | null {
   const trace: TraceStep[] = [];
   const cfg = board.config;
@@ -63,14 +70,25 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     trace.push({ index: -1, when: cfg.filter, ...r });
     if (!r.matched) return null;
   }
-  // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'.
-  const judged = (rule: number | null, bucket: Bucket, why: string): Placement => {
-    const p: Placement = { board: cfg.id, bucket, rule_bucket: bucket, rule, why: renderTemplate(why, s), trace };
+  // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'. Below a hard
+  // rule's floor, the floor holds with the rule's why.
+  const judged = (rule: number | null, bucket: Bucket, why: string, floor?: Bucket): Placement => {
+    const p: Placement = {
+      board: cfg.id,
+      bucket,
+      rule_bucket: bucket,
+      rule,
+      why: renderTemplate(why, s),
+      trace,
+      ...(floor && { hard: true, floor }),
+    };
     if (!judge) return p;
     const j = judge(e.id);
     const hint = { bucket, why: p.why };
     if (j.bucket === null) return { ...p, judge: j, hint };
-    return { ...p, bucket: j.bucket, rule_bucket: j.bucket, why: j.why.trim() ? j.why : p.why, judge: j, hint };
+    const to = atLeast(j.bucket, floor);
+    const own = to === j.bucket && j.why.trim() ? j.why : p.why;
+    return { ...p, bucket: to, rule_bucket: to, why: own, judge: j, hint };
   };
   for (const [i, c] of board.rules.entries()) {
     const rule = cfg.rules[i]!; // board.rules is compiled 1:1 from cfg.rules
@@ -78,18 +96,18 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     trace.push({ index: i, when: rule.when, ...r });
     if (!r.matched) continue;
     if (rule.bucket === "judge") return judged(i, cfg.default, rule.why?.trim() ? rule.why : cfg.default_why);
-    if (!rule.hard) return judged(i, rule.bucket, rule.why ?? "");
-    return {
-      board: cfg.id,
-      bucket: rule.bucket,
-      rule_bucket: rule.bucket,
-      rule: i,
-      why: renderTemplate(rule.why ?? "", s),
-      trace,
-      hard: true,
-    };
+    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined);
   }
   return judged(null, cfg.default, cfg.default_why);
+}
+
+// Who placed it, for its card: Claude where it chose the bucket (a hard rule's floor may overrule it), else a hard rule, or
+// the rules while Claude hasn't answered (or gave no answer).
+export function placedBy(p: Placement): Card["placed_by"] {
+  if (p.judge?.bucket && p.judge.bucket === p.rule_bucket) return "claude";
+  if (p.hard) return "hard";
+  if (!p.judge) return undefined;
+  return p.judge.pending ? "pending" : "unanswered";
 }
 
 const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
@@ -106,7 +124,7 @@ export function quietText(hours: number): string {
 }
 
 // Quiet items (nobody touched them in `quietDays`, 0 = off) leave Now and Today for Later, then caps apply after the judge.
-// Neither moves what a hard rule placed.
+// Neither moves an item below a hard rule's floor.
 export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup, quietDays = 0): BoardResult {
   const cfg = board.config;
   const placements = new Map<string, Placement>();
@@ -144,31 +162,32 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   const quiet = (e: Entry) => {
     const s = e.signals;
     const asked = s.me.requested_hours >= 0 && s.me.requested_hours < quietHours;
-    return quietDays > 0 && !e.pinned && !asked && !placements.get(e.id)!.hard && s.item.updated_hours >= quietHours;
+    return quietDays > 0 && !e.pinned && !asked && s.item.updated_hours >= quietHours;
   };
   for (const b of ["now", "today"] as const) {
-    const gone = byBucket[b].filter(quiet);
-    for (const e of gone) {
+    for (const e of byBucket[b].filter(quiet)) {
       const p = placements.get(e.id)!;
-      p.bucket = "later";
+      const to = atLeast("later", p.floor);
+      if (to === b) continue;
+      p.bucket = to;
       p.demoted = quietText(e.signals.item.updated_hours);
+      byBucket[b] = byBucket[b].filter((x) => x !== e);
+      byBucket[to].push(e);
     }
-    byBucket[b] = byBucket[b].filter((e) => !gone.includes(e));
-    byBucket.later = [...byBucket.later, ...gone];
   }
 
-  const exempt = (e: Entry) => {
+  const exempt = (e: Entry, to: Bucket) => {
     const p = placements.get(e.id)!;
-    if (e.pinned || p.hard) return true;
+    if (e.pinned || atLeast(to, p.floor) !== to) return true;
     return p.rule !== null && cfg.rules[p.rule]?.nocap === true;
   };
   const demote = (from: "now" | "today", to: Bucket, cap: number | undefined) => {
     if (cap === undefined) return;
-    const counts = byBucket[from].filter((e) => !exempt(e));
+    const counts = byBucket[from].filter((e) => !exempt(e, to));
     // Over the cap, the lightest call leaves first: a close look keeps its slot, then one not reviewed yet, skim, skip.
     const weight = (e: Entry) => (e.ai === "look" ? 0 : e.ai === undefined ? 1 : e.ai === "skim" ? 2 : 3);
     const kept = new Set(counts.length > cap ? counts.toSorted((x, y) => weight(x) - weight(y)).slice(0, cap) : counts);
-    const keep = byBucket[from].filter((e) => exempt(e) || kept.has(e));
+    const keep = byBucket[from].filter((e) => exempt(e, to) || kept.has(e));
     const over = byBucket[from].filter((e) => !keep.includes(e));
     for (const e of over) {
       const p = placements.get(e.id)!;

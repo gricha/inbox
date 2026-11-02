@@ -53,7 +53,7 @@ const cardLine = (c: Card) =>
   `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
 
 function traceLines(p: Placement): string[] {
-  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}${p.hard ? ", hard: final" : ""}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
+  const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}${p.floor ? `, hard: never below ${p.floor}` : ""}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
   return [
     head,
     ...p.trace.map(
@@ -255,7 +255,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_act",
     {
       description:
-        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore.",
+        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore. The coordinator doesn't mute.",
       inputSchema: {
         ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
         action: z.enum(ACTIONS),
@@ -275,7 +275,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_policy",
     {
       description:
-        "The owner's policy: prose in ~/.review-desk/policy.md (a starter while it's empty) that Claude follows to sort everything their hard rules don't place, and the coordinator follows to keep the queue clean. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks, or in a learn run where their own actions disagree with it.",
+        "The owner's policy: prose in ~/.review-desk/policy.md (a starter while it's empty) that Claude follows to sort everything, above their hard rules' floors, and the coordinator follows to keep the queue clean. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks, or in a learn run where their own actions disagree with it.",
       inputSchema: {
         action: z.enum(["get", "set"]),
         text: z.string().optional().describe("set: the whole new policy"),

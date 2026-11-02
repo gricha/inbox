@@ -568,7 +568,7 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
 const RULES = {
   id: "rules",
   title: "Rules",
-  help: "Which GitHub searches feed the queue, and the rules that place each item. Claude then sorts it by your policy, with the rule's placement as its hint; a hard rule's placement is final.",
+  help: "Which GitHub searches feed the queue, and the rules that place each item. Claude then sorts it by your policy, with the rule's placement as its hint; a hard rule's bucket is a floor.",
 };
 
 export function Settings({
