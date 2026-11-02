@@ -31,6 +31,7 @@ export interface Group {
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
   fold: number; // the queue: cards behind its "n more" line
+  foldLine: string; // ...and that line's words
 }
 
 // The cursor's stop on a group's "n more" line.
@@ -214,16 +215,25 @@ export function runs(cards: Card[]): { id: string; author: string; why: string; 
   return out;
 }
 
-// The fold takes whole stacks: a stack is either all above its line or all behind it (the first one always shows).
+// The fold takes whole stacks, each one card's worth since it reads as one block: the first always shows.
 function foldAt(cards: Card[], cap: number): number {
   let n = 0;
+  let slots = 0;
   for (const r of runs(cards)) {
     for (const size of r.cards.length < 3 ? r.cards.map(() => 1) : [r.cards.length]) {
-      if (n > 0 && n + size > cap) return n;
+      if (slots >= cap) return n;
       n += size;
+      slots += 1;
     }
   }
   return n;
+}
+
+// What the fold line hides that shouldn't wait: "13 more, 1 urgent, 1 pinned".
+export function foldText(behind: Card[]): string {
+  const urgent = behind.filter((c) => c.bucket === "now").length;
+  const pinned = behind.filter((c) => c.pinned && c.bucket !== "now").length;
+  return [`${behind.length} more`, urgent && `${urgent} urgent`, pinned && `${pinned} pinned`].filter(Boolean).join(", ");
 }
 
 // The queue is now's cards then today's, each the weightiest first, and folds after its first queue.cards. While
@@ -258,6 +268,7 @@ export function groupsOf(
       forced,
       variant,
       fold: matched.length - cards.length,
+      foldLine: foldText(matched.slice(n)),
     };
   };
   const s = view.sections;

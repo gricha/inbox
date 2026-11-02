@@ -7,8 +7,7 @@ description: Use when the user mentions Review Desk or their desk, asks what nee
 
 Review Desk is a desktop app on the user's machine that turns their GitHub review load (PRs to review, their own PRs, issues) into one queue:
 
-- **Now**: needs them now. Kept short on purpose.
-- **Today**: worth doing today.
+- **The queue**: one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
 - **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted).
 - **In flight**: the user's own open PRs they've marked done (`d` in the desk). Babysitter agents keep them moving (fix red CI, merge the base in on a conflict, draft replies to reviewers) and a PR comes back to Now only when it needs the user: a question, a reply ready to send, a problem nobody is fixing, or ready to merge.
 
@@ -63,8 +62,8 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 ### "What needs me?"
 
 1. `desk_list` (Focus), and `desk_overview` for the counts per board.
-2. Answer with Now first, then Today: ref, a short title, and the why. Then one line for what's sorted away, from the overview ("12 later, 30 FYI").
-3. Don't paste JSON. If Now is empty, say so plainly.
+2. Answer with the queue in order, urgent (`now`) first, as one list: ref, a short title, and the why. Then one line for what's sorted away, from the overview ("12 later, 30 FYI").
+3. Don't paste JSON. If nothing is urgent, say so plainly.
 
 ### "Why is X here?" (or "why isn't it in Now?")
 

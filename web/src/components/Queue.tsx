@@ -77,7 +77,7 @@ export function Queue({
                 selectFold(g.key);
               }}
             >
-              {g.fold} more
+              {g.foldLine}
             </button>
           )}
         </section>

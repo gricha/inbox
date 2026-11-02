@@ -41,7 +41,7 @@ test("sync fills boards, focus and status", async () => {
 
   const focus = t.desk.focus();
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1", "acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk ●2");
+  assert.equal(t.desk.status().text, "desk 2 ●2");
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 2);

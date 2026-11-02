@@ -234,7 +234,7 @@ test("status prints focus totals and boards", async () => {
 });
 
 test("status --short prints the status text, or 'desk offline' fast", async () => {
-  assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk ●1 ◐1 +1\n", err: "" });
+  assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk 2 ●1 +1\n", err: "" });
   await withPort(await unusedPort(), async () => {
     assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk offline\n", err: "" });
   });
@@ -475,7 +475,7 @@ test("bin/desk resolves through a symlink", { skip: process.platform === "win32"
   symlinkSync(BIN, link);
   const env = { ...process.env, DESK_PORT: String(fake.port) };
   const { stdout } = await execBin(link, ["status", "--short"], { env });
-  assert.equal(stdout, "desk ●1 ◐1 +1\n");
+  assert.equal(stdout, "desk 2 ●1 +1\n");
 
   const down = { ...process.env, DESK_PORT: String(await unusedPort()) };
   const t0 = Date.now();

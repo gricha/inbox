@@ -105,7 +105,7 @@ test("desktopSettings falls back to the defaults", () => {
 });
 
 test("tray title and tooltip", () => {
-  assert.equal(trayTitle("desk ●2 ◐5 +3"), "●2 ◐5 +3");
+  assert.equal(trayTitle("desk 7 ●2 +3"), "7 ●2 +3");
   assert.equal(trayTitle(""), "");
   assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the queue, 2 urgent");
   assert.equal(trayTooltip({ now: 0, today: 5 }), "Review Desk: 5 in the queue");

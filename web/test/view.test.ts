@@ -15,6 +15,7 @@ import {
   draftOf,
   firstClause,
   foldOf,
+  foldText,
   handLabel,
   groupsOf,
   judgeStatusText,
@@ -389,7 +390,7 @@ test("the queue is now's cards then today's, each the weightiest first, and fold
     "what a cap made not urgent comes first among today's",
   );
 
-  // A stack is all above the line or all behind it; the first one always shows whole.
+  // A stack is all above the line or all behind it, and one card's worth; the first one always shows whole.
   const stack = ["acme/web#40", "acme/web#41", "acme/web#42", "acme/web#43"].map((id) =>
     card(id, { author: "vaind", why: "close collaborator" }),
   );
@@ -397,21 +398,33 @@ test("the queue is now's cards then today's, each the weightiest first, and fold
     groupsOf({ ...queue(), sections: { ...queue().sections, now: [], today: list }, cards: cap }, DEFAULT_OPEN, "").find(
       (x) => x.key === "queue",
     )!;
-  assert.deepEqual(
-    [
-      stacked([card("acme/web#39", { author: "a39" }), ...stack], 3).cards.length,
-      stacked([card("acme/web#39", { author: "a39" }), ...stack], 3).fold,
-    ],
-    [1, 4],
-  );
-  assert.deepEqual([stacked(stack, 2).cards.length, stacked(stack, 2).fold], [4, 0]);
-  // A fold never hides just one card: the stack fills the slots and the one after it shows too.
-  const tail = stacked([...stack, card("acme/web#44", { author: "a44" })], 4);
+  const lead = card("acme/web#39", { author: "a39" });
+  assert.deepEqual([stacked([lead, ...stack], 1).cards.length, stacked([lead, ...stack], 1).fold], [1, 4]);
+  assert.deepEqual([stacked([lead, ...stack], 2).cards.length, stacked([lead, ...stack], 2).fold], [5, 0]);
+  assert.deepEqual([stacked(stack, 1).cards.length, stacked(stack, 1).fold], [4, 0]);
+  // A fold never hides just one card: the stack fills the slot and the one after it shows too.
+  const tail = stacked([...stack, card("acme/web#44", { author: "a44" })], 1);
   assert.deepEqual([tail.cards.length, tail.fold], [5, 0]);
+  // 18 of your drafts don't swallow the fold: they take one slot, and nine singles fill the rest.
+  const drafts = Array.from({ length: 18 }, (_, i) => card(`acme/web#${100 + i}`, { author: "me", why: "your draft: finish it" }));
+  const singles = Array.from({ length: 12 }, (_, i) => card(`acme/web#${200 + i}`, { author: `s${i}`, bucket: "today" }));
+  const long = stacked([lead, ...drafts, ...singles], 10);
+  assert.deepEqual([long.cards.length, long.fold, long.foldLine], [1 + 18 + 8, 4, "4 more"]);
   assert.deepEqual(
     runs(stack).map((r) => r.cards.length),
     [4],
   );
+});
+
+test("the fold line says what's behind it that shouldn't wait: urgent cards and pinned ones", () => {
+  const now = Array.from({ length: 11 }, (_, i) => card(`acme/api#${300 + i}`, { author: `n${i}` }));
+  const today = [
+    card("acme/web#400", { author: "t0", bucket: "today", pinned: true }),
+    card("acme/web#401", { author: "t1", bucket: "today" }),
+  ];
+  const g = groupsOf({ ...queue(), sections: { ...queue().sections, now, today } }, DEFAULT_OPEN, "").find((x) => x.key === "queue")!;
+  assert.deepEqual([g.cards.length, g.foldLine], [10, "3 more, 1 urgent, 1 pinned"]);
+  assert.equal(foldText([card("acme/web#402", { bucket: "today" }), card("acme/web#403", { bucket: "today" })]), "2 more");
 });
 
 test("your PR's next step leaves out what its why already says", () => {

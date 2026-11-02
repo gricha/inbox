@@ -97,7 +97,7 @@ export function desktopSettings(values?: Record<string, unknown>): DesktopSettin
 
 // ---------------------------------------------------------------- tray text
 
-// "desk ●2 ◐5 +3" -> "●2 ◐5 +3"
+// "desk 7 ●2 +3" -> "7 ●2 +3"
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
 export const trayTooltip = (s: { now: number; today: number } | null): string =>

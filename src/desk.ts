@@ -46,7 +46,7 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import { defaultConfigText, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { defaultConfigText, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -251,6 +251,7 @@ export class Desk {
     }
     this.migrateSettings();
     this.migrateHard();
+    this.migrateDrafts();
     this.readPolicy();
     this.reloadConfig();
     fs.watchFile(this.policyPath, { interval: 2000 }, () => {
@@ -522,6 +523,20 @@ export class Desk {
       this.log("made the rule for reviews asked of you by name hard (backup: config.toml.bak)");
     }
     this.store.set("hard_migrated", this.now().toISOString());
+  }
+
+  // Once: the first-run rule that sent all your drafts to later puts a draft you touched lately on the desk (migrateDrafts).
+  migrateDrafts(): void {
+    if (this.store.get("drafts_migrated")) return;
+    const text = migrateDrafts(fs.readFileSync(this.configPath, "utf8"));
+    if (text !== null) {
+      const real = fs.realpathSync(this.configPath);
+      fs.copyFileSync(real, `${real}.bak`);
+      fs.writeFileSync(`${real}.tmp`, text);
+      fs.renameSync(`${real}.tmp`, real);
+      this.log("put your drafts touched in the last 14 days on the desk (backup: config.toml.bak)");
+    }
+    this.store.set("drafts_migrated", this.now().toISOString());
   }
 
   getSettings(): SettingsView {
@@ -1789,7 +1804,7 @@ export class Desk {
 
   status(): { now: number; today: number; new: number; text: string } {
     const f = this.overview().focus;
-    const parts = [f.now ? `●${f.now}` : "", f.today ? `◐${f.today}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
+    const parts = [`${f.now + f.today}`, f.now ? `●${f.now}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
     return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
   }
 }
