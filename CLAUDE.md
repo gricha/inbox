@@ -30,7 +30,7 @@ Product principle: minimize surfaces (ideally one) and maximize automation. New 
 
 ```bash
 npm run app        # the desktop app from the repo
-npm run app:dev    # desktop app with hot reload (web) and restart on src/ or electron/ changes
+npm run app:dev    # the desktop app running from this checkout (below); restarts on electron/ changes
 npm run dev        # server --watch + Vite in a browser at :5173
 npm test           # node:test, no network
 npm run check      # everything CI runs: prettier, oxlint (type-aware), stylelint, tsc, knip, tests
@@ -38,6 +38,8 @@ npm run format     # prettier --write
 ```
 
 `DESK_HOME` and `DESK_PORT` point any of these at a scratch home and port; the default is `~/.review-desk` on 47823.
+
+Run from a checkout: Settings → Desktop app → Run from a checkout (`app.source`, or `DESK_SOURCE`) set to `~/code/review-desk` makes the packaged app run from that checkout, so a merge to main lands live without a restart (keep main startable). The app keeps its window, tray, hotkey and login item, and runs the desk from the checkout with `node --watch` (a change under `src/` restarts only the desk; the window stays on its view and reconnects) and the UI on a Vite dev server (a change under `web/` is hot reload). A change under `electron/` needs a rebuilt app (`npm run dist:mac`). A desk that fails to start shows its last lines in the window and starts again on the next change; both processes' output is in `~/.review-desk/live.log`.
 
 ## Rules
 

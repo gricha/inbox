@@ -560,6 +560,22 @@ kbd {
   font-weight: 600;
 }
 
+.notice.calm {
+  background: var(--wash);
+  color: var(--pencil);
+}
+
+/* The last lines a desk from a checkout printed before it stopped. */
+.notice-log {
+  max-height: 16em;
+  margin: 8px 0 0;
+  overflow: auto;
+  color: var(--ink-2);
+  font: 12px/1.45 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Queue -------------------------------------------------------------------- */
 
 .queue {

@@ -1,4 +1,6 @@
 // Pure helpers for the desktop app: no electron import, so node --test can load them.
+import fs from "node:fs";
+import path from "node:path";
 import { DEFAULTS } from "../src/settings.ts";
 
 // ---------------------------------------------------------------- PATH
@@ -77,12 +79,23 @@ export function parseSSE(buf: string): { events: SSEvent[]; rest: string } {
   return { events, rest };
 }
 
+// A desk's `event: notify`, which it sends to the app attached with ?notify=1 instead of notifying itself.
+export function parseNotice(data: string): { title: string; body: string } | null {
+  try {
+    const n = JSON.parse(data) as { title?: unknown; body?: unknown };
+    return typeof n.title === "string" && typeof n.body === "string" ? { title: n.title, body: n.body } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- settings
 
 export interface DesktopSettings {
   hotkey: string;
   open_at_login: boolean;
   menu_bar_count: boolean;
+  source: string;
 }
 
 // An older desk may not know the app.* settings; fall back to the defaults.
@@ -92,7 +105,58 @@ export function desktopSettings(values?: Record<string, unknown>): DesktopSettin
     hotkey: typeof v["app.hotkey"] === "string" ? v["app.hotkey"] : DEFAULTS["app.hotkey"],
     open_at_login: v["app.open_at_login"] === true,
     menu_bar_count: v["app.menu_bar_count"] !== false,
+    source: typeof v["app.source"] === "string" ? v["app.source"] : "",
   };
+}
+
+// ---------------------------------------------------------------- run from a checkout
+
+// The setting (or DESK_SOURCE) as an absolute folder; "" is off.
+export function sourceDir(value: string, homedir: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  return path.resolve(v === "~" || v.startsWith("~/") ? path.join(homedir, v.slice(1)) : v);
+}
+
+// Why the desk and its UI can't run from `dir`, or null when they can.
+export function checkoutProblem(dir: string, exists: (p: string) => boolean = fs.existsSync): string | null {
+  if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
+    return `${dir} isn't a Review Desk checkout`;
+  if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js"))) return `${dir} has no node_modules yet; run npm install there`;
+  return null;
+}
+
+// --watch-path, not node's own module tracking: a file that doesn't parse is watched too, so saving a fix restarts it.
+export const DESK_ARGS = [
+  "--watch",
+  "--watch-path=src",
+  "--watch-preserve-output",
+  "--disable-warning=ExperimentalWarning",
+  "src/cli.ts",
+  "serve",
+];
+export const viteArgs = (port: number): string[] => [
+  "node_modules/vite/bin/vite.js",
+  "--config",
+  "web/vite.config.ts",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  String(port),
+  "--strictPort",
+];
+
+// node --watch's own lines: a change is restarting the desk, or the desk exited and it waits for the next change.
+export function watchEvent(line: string): "restart" | "exit" | null {
+  if (line.startsWith("Restarting '")) return "restart";
+  if (/^(Failed|Completed) running '/.test(line)) return "exit";
+  return null;
+}
+
+// Both children get the desk's port and home; the desk lets in exactly the UI's origin, never DESK_DEV's localhost ports.
+export function sourceEnv(env: NodeJS.ProcessEnv, o: { port: number; home: string; ui: string }): NodeJS.ProcessEnv {
+  const { DESK_DEV: _dev, DESK_DEV_PORT: _devPort, DESK_SOURCE: _source, ...rest } = env;
+  return { ...rest, DESK_PORT: String(o.port), DESK_HOME: o.home, DESK_UI_ORIGIN: o.ui, DESK_API: `http://127.0.0.1:${o.port}` };
 }
 
 // ---------------------------------------------------------------- tray text
