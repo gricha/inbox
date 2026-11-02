@@ -327,6 +327,54 @@ test("a run that takes too long is stopped, and stopping the desk kills a run in
   });
 });
 
+test("a desk on a copy of another desk's desk.db starts a session of its own instead of resuming that desk's", posix, async (c) => {
+  const t = await setup(c);
+  await t.sync();
+  const theirs = t.co.status().session_id;
+  assert.equal(t.fake.calls(), 1);
+  t.desk.stop();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-coord-copy-"));
+  for (const f of ["desk.db", "desk.db-wal", "config.toml", "settings.json"])
+    if (fs.existsSync(path.join(t.home, f))) fs.copyFileSync(path.join(t.home, f), path.join(home, f));
+  const logs: string[] = [];
+  const copy = new Desk({
+    home,
+    github: t.gh,
+    now: () => NOW,
+    notify: () => {},
+    log: (m) => {
+      logs.push(m);
+    },
+    mcpUrl: MCP,
+  });
+  copy.coordinator.debounceMs = 0;
+  c.after(() => {
+    copy.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  await copy.init();
+  t.gh.items.set(ask(2).id, ask(2));
+  await copy.sync();
+  await new Promise((r) => {
+    setTimeout(r, 20);
+  });
+  while (copy.coordinator.current) await copy.coordinator.current;
+
+  assert.equal(t.fake.calls(), 2);
+  const args = t.fake.args(2);
+  const mine = copy.coordinator.status().session_id;
+  assert.ok(!args.includes("--resume"), `resumed ${args[args.indexOf("--resume") + 1]}`);
+  assert.notEqual(mine, theirs);
+  assert.equal(args[args.indexOf("--session-id") + 1], mine);
+  assert.equal(fs.realpathSync(t.fake.cwd(2)), fs.realpathSync(path.join(home, "coordinator")));
+  assert.ok(logs.some((l) => l.includes(`session ${theirs} isn't this desk's`)));
+
+  // One saved before sessions were bound to their desk isn't resumed either.
+  const legacy = { ...(copy.store.get("coordinator") as Record<string, unknown>), dir: undefined };
+  copy.store.set("coordinator", legacy);
+  assert.deepEqual([copy.coordinator.status().started, copy.coordinator.status().session_id === mine], [false, false]);
+});
+
 test("off: the setting, or no MCP server to wire it to", posix, async (c) => {
   const off = await setup(c, { settings: { "coordinator.enabled": false } });
   await off.sync();

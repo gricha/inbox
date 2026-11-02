@@ -1,9 +1,10 @@
 // A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own Claude Code writes from them.
 // The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { kill, OWN_GROUP, track } from "./children.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { AiReview, Item, ReviewFile, ReviewNote, Signals } from "./types.ts";
 
@@ -14,6 +15,7 @@ const MAX_BODY = 4_000;
 const MAX_NOTES = 12;
 const MAX_CONCERNS = 6;
 const TIMEOUT = 300_000;
+const MAX_OUTPUT = 64 * 1024 * 1024;
 // Lockfiles and snapshots eat the budget and say nothing a reviewer reads.
 const NOISE =
   /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.lock)$|\.(snap|min\.js|min\.css)$/;
@@ -71,42 +73,73 @@ export interface RunOpts {
 }
 
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
+// Not execFile: it can't start the process in a group of its own, and its timeout kills only the process itself.
 export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) {
       reject(new Error("stopped"));
       return;
     }
-    // Not execFile's own `signal`: aborting a spawn that failed (no pid) has it kill the desk's whole process group.
-    const stop = () => {
-      if (child.pid) child.kill();
+    const child = spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true });
+    track(child);
+    let stdout = "";
+    let stderr = "";
+    let failed: NodeJS.ErrnoException | null = null;
+    let why: "stopped" | "timeout" | "too much" | null = null;
+    const stop = (w: NonNullable<typeof why>) => {
+      if (why) return;
+      why = w;
+      kill(child);
     };
-    const child = execFile(
-      s.file,
-      s.args,
-      { cwd: opts.cwd, timeout: opts.timeout, maxBuffer: 64 * 1024 * 1024, shell: s.shell },
-      (err, stdout, stderr) => {
-        opts.signal?.removeEventListener("abort", stop);
-        if (!err || (opts.stdoutOnError && stdout && !err.killed)) {
-          resolve(stdout);
-          return;
-        }
-        if (opts.signal?.aborted) {
-          reject(new Error("stopped"));
-          return;
-        }
-        if (err.killed) {
-          reject(new Error(`no answer in ${Math.round(opts.timeout / 60_000)} minutes, so it was stopped`));
-          return;
-        }
-        // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
-        const missing =
-          err.code === "ENOENT" || (s.shell && (err.code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
-        reject(new Error(missing ? opts.missing : (stderr || err.message).trim().split("\n").slice(-3).join(" ")));
-      },
-    );
-    opts.signal?.addEventListener("abort", stop);
-    if (opts.input !== undefined) child.stdin!.end(opts.input);
+    const abort = () => {
+      stop("stopped");
+    };
+    const timer = setTimeout(() => {
+      stop("timeout");
+    }, opts.timeout);
+    timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
+    child.stdout.setEncoding("utf8").on("data", (d: string) => {
+      stdout += d;
+      if (stdout.length > MAX_OUTPUT) stop("too much");
+    });
+    child.stderr.setEncoding("utf8").on("data", (d: string) => {
+      stderr = (stderr + d).slice(-MAX_OUTPUT);
+    });
+    child.on("error", (e) => {
+      failed = e;
+    });
+    child.on("close", (code, sig) => {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", abort);
+      if (!failed && code === 0) {
+        resolve(stdout);
+        return;
+      }
+      if (opts.signal?.aborted) {
+        reject(new Error("stopped"));
+        return;
+      }
+      if (why === "timeout") {
+        reject(new Error(`no answer in ${Math.round(opts.timeout / 60_000)} minutes, so it was stopped`));
+        return;
+      }
+      if (why === "too much") {
+        reject(new Error(`${s.file} printed more than ${MAX_OUTPUT / 1024 / 1024} MB, so it was stopped`));
+        return;
+      }
+      if (!failed && opts.stdoutOnError && stdout) {
+        resolve(stdout);
+        return;
+      }
+      // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
+      const missing =
+        failed?.code === "ENOENT" || (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
+      const message = stderr || (failed?.message ?? `${s.file} exited with ${code ?? sig}`);
+      reject(new Error(missing ? opts.missing : message.trim().split("\n").slice(-3).join(" ")));
+    });
+    opts.signal?.addEventListener("abort", abort);
+    child.stdin.on("error", () => {}); // it exited before reading its input; close says why
+    child.stdin.end(opts.input);
   });
 }
 

@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { stopAll } from "./children.ts";
 import { answerable, autoMerging, Babysitter, threadRef, worktreePath, type Sitter, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
@@ -290,6 +291,12 @@ export class Desk {
     fs.unwatchFile(this.settingsPath);
     fs.unwatchFile(this.policyPath);
     this.store.close();
+  }
+
+  // stop(), and back once every agent process is gone: an AI review's too, and a SIGKILL for what ignores SIGTERM.
+  async close(): Promise<void> {
+    this.stop();
+    await stopAll();
   }
 
   onChange(fn: (rev: number) => void): () => void {
@@ -1346,6 +1353,7 @@ export class Desk {
     try {
       if (!this.review) throw new Error("AI review isn't available in this desk");
       const pr = await this.prText(id);
+      if (this.stopped) throw new Error("stopped"); // close() has stopped the agents already: don't start one it misses
       const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
@@ -1357,6 +1365,7 @@ export class Desk {
       this.retryAgents(NOT_LOGGED_IN);
       return ai;
     } catch (err) {
+      if (this.stopped) throw err; // killed with the desk
       const message = (err as Error).message;
       this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
       const cause = (err as Error).cause;
@@ -1580,7 +1589,7 @@ export class Desk {
     const s = this.sitter.record(it.id);
     const st = this.sitter.status(it.id, it, s);
     const run = s.runs.at(-1) ?? null;
-    const wt = s.worktree ?? worktreePath(this.home, it.id);
+    const wt = worktreePath(this.home, it.id); // not s.worktree: in a desk.db copied from another desk, it's that desk's
     const on = autoMerging(it, s);
     return {
       needs_you: this.sitter.needsYou(it, s, st),

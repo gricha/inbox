@@ -605,6 +605,20 @@ test("a merged PR's worktree goes; its record stays for the lane", posix, async 
   assert.deepEqual([row.state, row.needs_you, row.resume], ["merged", null, null]);
 });
 
+test("a desk on a copy of another desk's desk.db leaves that desk's worktrees alone", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  const item = pr(8, s.w.head);
+  const theirs = worktreePath(path.join(s.w.root, "their-home"), item.id);
+  fs.mkdirSync(theirs, { recursive: true });
+  s.desk.sitter.update(item.id, (x) => {
+    x.clone = s.w.clone;
+    x.worktree = theirs;
+  });
+  await s.desk.sitter.release(item.id, false);
+  assert.ok(fs.existsSync(theirs));
+  assert.equal(s.record(item.id).worktree, null);
+});
+
 test("at most inflight.max_agents runs at once; the desk's stop kills them", posix, async (c) => {
   const s = await sitterDesk(c, []);
   const items = [11, 12, 13].map((n) => pr(n, s.w.head));

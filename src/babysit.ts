@@ -6,6 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { kill as killGroup, OWN_GROUP, track } from "./children.ts";
 import type { Desk } from "./desk.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
@@ -694,25 +695,9 @@ export class Babysitter {
     }
   }
 
-  // A process group, so the agent's own children (test runners, git) stop with it.
+  // A test runner that ignores SIGTERM must not keep a run, or a take-back waiting on it, alive.
   kill(child: ChildProcess): void {
-    const signal = (sig: NodeJS.Signals) => {
-      try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, sig);
-        else child.kill(sig);
-      } catch {
-        child.kill(sig);
-      }
-    };
-    signal("SIGTERM");
-    // A test runner that ignores SIGTERM must not keep a run, or a take-back waiting on it, alive.
-    const hard = setTimeout(() => {
-      signal("SIGKILL");
-    }, this.killAfter);
-    hard.unref();
-    child.once("close", () => {
-      clearTimeout(hard);
-    });
+    killGroup(child, this.killAfter);
   }
 
   // A login pause lifts with an agent setting (Desk.retryAgents), not with any save.
@@ -802,7 +787,9 @@ export class Babysitter {
     }
     if (this.stopped) return;
     const s = this.record(id);
-    const wt = dir ?? s.worktree ?? (fs.existsSync(worktreePath(this.desk.home, id)) ? worktreePath(this.desk.home, id) : null);
+    const own = worktreePath(this.desk.home, id);
+    // Never the record's own path: a desk.db copied from another desk names that desk's worktree.
+    const wt = dir ?? (s.worktree === own || fs.existsSync(own) ? own : null);
     if (wt) {
       const clone = s.clone;
       await (clone ? this.serial(clone, () => removeWorktree(clone, wt)) : removeWorktree(null, wt));
@@ -963,10 +950,11 @@ export class Babysitter {
       cwd: dir,
       env,
       shell: s.shell,
-      detached: process.platform !== "win32",
+      detached: OWN_GROUP,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    track(child);
     const out = fs.openSync(run.log, "a");
     let buf = "";
     let stderr = "";
