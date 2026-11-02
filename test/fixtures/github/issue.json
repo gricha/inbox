@@ -7,6 +7,7 @@
   "state": "OPEN",
   "createdAt": "2026-02-10T08:00:00Z",
   "updatedAt": "2026-03-01T08:00:00Z",
+  "bodyText": "Steps:\n\n1. Open the widget list\n2.\tResize the window",
   "author": { "__typename": "User", "login": "birch" },
   "repository": { "nameWithOwner": "acme/widgets" },
   "labels": { "nodes": [{ "name": "bug" }] },

@@ -4,6 +4,7 @@
 // MOCK_AI_PAUSED=1 starts with AI reviews paused (an expired login); POST /api/mock/ai-paused { paused } flips it.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
+import { areaFiles } from "../../src/areas.ts";
 import { quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
@@ -12,6 +13,7 @@ import type {
   ActivityEvent,
   ActivityKind,
   AgentStatus,
+  Areas,
   AiReview,
   BoardConfig,
   BoardSummary,
@@ -54,6 +56,11 @@ import type {
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
+// The directories you work in, as the desk learns them from your PRs and reviews.
+const AREAS: Areas = {
+  "acme/api": { "src/planner/": 14, "test/planner/": 8, "src/routes/": 5 },
+  "acme/ml-pipeline": { "pipeline/": 11, "tests/": 4 },
+};
 const HOUR = 3_600_000;
 const T0 = Date.now();
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
@@ -204,6 +211,7 @@ interface Seed {
   repo: string;
   n: number;
   title: string;
+  body?: string; // its description, as Item.body keeps it
   author: string;
   kind?: "pr" | "issue";
   age: number; // hours since created
@@ -260,6 +268,7 @@ const SEEDS: Seed[] = [
     by: "priya",
     direct: true,
     size: [62, 7, 5], // matches its canned diff in diffs.ts
+    body: "Long queries now stream rows as the scan finds them and stop at a time budget (2 s by default, ?budget= overrides), returning what they have marked partial. The /v2/query route sets X-Partial-Results.",
     close: 9,
     comments: 4,
     fresh: true,
@@ -343,6 +352,7 @@ const SEEDS: Seed[] = [
     team: "ml-team",
     owner: true,
     size: [34, 4, 6], // matches its canned diff in diffs.ts
+    body: "The first request on each worker paid a 1.5 s tokenizer load. This caches it per process and warms it in the post-fork hook.",
     close: 12,
     on: { "work-review": ["close", "owners"] },
   },
@@ -364,6 +374,7 @@ const SEEDS: Seed[] = [
     repo: "acme/worker",
     n: 879,
     title: "Split the scheduler into lease and dispatch",
+    body: "The scheduler both leased jobs and dispatched them, so a slow dispatch held every lease. Leasing moves to its own loop; dispatch reads from a bounded channel. No behaviour change intended.",
     author: "kofi",
     age: 75,
     wait: 70,
@@ -396,6 +407,7 @@ const SEEDS: Seed[] = [
     repo: "acme/api",
     n: 4118,
     title: "Remove the deprecated /v0/events route",
+    body: "Nothing has called /v0/events in 90 days (access logs attached). Removes the route, its handler and tests.",
     author: "jordan",
     age: 14,
     wait: 14,
@@ -907,6 +919,7 @@ const SEEDS: Seed[] = [
 interface Rec {
   seed: Seed;
   id: string;
+  paths?: string[]; // a PR's changed files, from its canned diff
   state: ItemState;
   fresh: boolean;
   activity_at: string;
@@ -919,6 +932,12 @@ const recs: Rec[] = SEEDS.map((s) => {
   return {
     seed: s,
     id,
+    paths:
+      (s.kind ?? "pr") === "pr"
+        ? canned(id, s.repo, s.n, s.title, s.size)
+            .files.map((f) => f.path)
+            .slice(0, 50)
+        : undefined,
     fresh: !!s.fresh,
     activity_at: iso(s.upd ?? s.age),
     snoozed_at: iso(0),
@@ -953,6 +972,7 @@ function signals(r: Rec): Signals {
   const myReview = reviews.findLast(([a]) => a === ME);
   // Removing the ask, or your approval, clears it.
   const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
+  const myAreaFiles = areaFiles({ repo: s.repo, paths: r.paths }, { areas: AREAS });
   return {
     item: {
       kind,
@@ -984,6 +1004,8 @@ function signals(r: Rec): Signals {
       unresolved_threads: s.threads?.[0] ?? 0,
       base: pr ? "main" : "",
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
+      my_area_files: myAreaFiles,
+      my_area: myAreaFiles >= 1,
     },
     me: {
       login: ME,
@@ -1050,6 +1072,8 @@ function itemOf(r: Rec): Item {
     assignees: s.assignee ? [ME] : [],
     created_at: iso(s.age),
     updated_at: r.activity_at,
+    body: s.body ?? "",
+    ...(r.paths && { paths: r.paths }),
     additions: sig.pr.additions,
     deletions: sig.pr.deletions,
     changed_files: sig.pr.files,
@@ -2280,6 +2304,8 @@ const FIELDS: FieldDoc[] = (
     ["pr.unresolved_threads", "number", "unresolved review threads"],
     ["pr.base", "string", "base branch"],
     ["pr.pushed_hours", "number", "hours since the head commit"],
+    ["pr.my_area_files", "number", "of its changed files (the first 50), how many are in directories you work in, -1 if not known yet"],
+    ["pr.my_area", "boolean", "it changes code you work in (my_area_files >= 1)"],
     ["me.login", "string", "your login"],
     ["me.author", "boolean", "you opened it"],
     ["me.assignee", "boolean", "you're an assignee"],

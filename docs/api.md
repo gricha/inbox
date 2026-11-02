@@ -46,6 +46,20 @@ With a policy, the judge sends the gray zone to the same agent as the AI review,
 - Until an item has an answer, or if the call fails, it sits at the board's default. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on (once you've run `claude auth login`, say), or changing the agent settings, tries again now; desk.log keeps Claude's own words.
 - The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `policy: today, <why>`, or `policy: not judged yet, so the board default`.
 
+### Your areas
+
+What tells a CODEOWNERS ping that touches your code from one that doesn't. Every item carries `body`, the first 600 characters of its description with whitespace collapsed (untrusted GitHub text), and a PR carries `paths`, its first 50 changed files (`changed_files` counts all); items stored before the desk asked lack them, which means unknown. Your areas are the directories you work in, per repo: the directory of each changed file, up to three levels (`src/sentry/auth/`), from your PRs created or merged in the last 90 days (3 points per PR) and the PRs you reviewed (1 point), once per PR, leaving out PRs of more than 100 files (codemods, renames) and directories under 2 points, the top 40 per repo. They're fetched on the first sync and then daily, on their own (`areas` and `areas_at` in the context, kv `context`); a failed fetch keeps the last ones and tries again in about an hour.
+
+Rules read them as `pr.my_area_files` (how many of the PR's paths are in your areas there, -1 while either is unknown) and `pr.my_area` (at least one). For a prompt, `src/areas.ts` has:
+
+```ts
+areasFor(ctx: Context | null, repo: string): { dir: string; weight: number }[]; // your areas there, heaviest first; [] if none or unknown
+touched(item: Item, ctx: Context | null): { dir: string; files: number; mine: boolean }[] | null; // the PR's directories, yours first, then by files ("/" for top-level files); null while unknown
+areaFiles(item: Item, ctx: Context | null): number; // pr.my_area_files
+```
+
+so a judge line can read "touches your areas: src/sentry/auth/ (3 files); also static/app/views/ (12 files)".
+
 ### The coordinator
 
 A Claude Code session the desk runs for you, wired to the desk's MCP server and nothing else. It keeps the queue clean by your policy, and it's who you talk to when you want the policy or the rules changed. Settings → Agents → Coordinator (`coordinator.enabled`, on by default) shows what it's doing, its session id and the command that opens it in a terminal.

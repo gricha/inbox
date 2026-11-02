@@ -1,9 +1,10 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
-import type { Context, Item, ReviewState } from "../types.ts";
+import { buildAreas, type AreaPr } from "../areas.ts";
+import type { Areas, Context, Item, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
 import { checkFailed, checkName, collaborator, normalize, toHit, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
-import { DETAILS_REVIEW, detailsMine, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
+import { DETAILS_REVIEW, detailsMine, FILES_SEARCH, LIGHT_SEARCH, PR_CONTEXT, TEAMS, VIEWER } from "./queries.ts";
 
 export interface SearchHit {
   node_id: string;
@@ -47,6 +48,7 @@ export interface GitHub {
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
   details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
+  areas(): Promise<Areas>; // the directories of your PRs and reviews, last 90 days
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
   prContext(nodeId: string): Promise<PrContext>; // a PR's threads, reviews, comments and failing checks
@@ -151,7 +153,13 @@ function threadItem(t: RawThread): string | null {
 }
 
 interface SearchData {
-  search: { issueCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawHit | null)[] };
+  search: { issueCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ({ id?: string } | null)[] };
+}
+interface RawFiles {
+  id: string;
+  repository: { nameWithOwner: string };
+  changedFiles: number;
+  files: { nodes: { path: string }[] } | null;
 }
 interface TeamsData {
   viewer: { organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
@@ -187,23 +195,25 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
 export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHub {
   const client = createClient(opts);
 
-  async function search(q: string, max = 300) {
+  // A search's nodes, `per` a page, in whatever shape `doc` asks for.
+  async function pages(doc: string, q: string, max: number, per: number) {
     // Keyed by node id: cursors are offsets, so an item that moves between pages can come back twice.
-    const hits = new Map<string, SearchHit>();
+    const nodes = new Map<string, unknown>();
     let total = 0;
     let after: string | null = null;
-    while (hits.size < max) {
-      const { search: page }: SearchData = await client.query<SearchData>(LIGHT_SEARCH, {
-        q,
-        first: Math.min(100, max - hits.size),
-        after,
-      });
+    while (nodes.size < max) {
+      const { search: page }: SearchData = await client.query<SearchData>(doc, { q, first: Math.min(per, max - nodes.size), after });
       total = page.issueCount;
-      for (const n of page.nodes) if (n?.id) hits.set(n.id, toHit(n));
+      for (const n of page.nodes) if (n?.id) nodes.set(n.id, n);
       if (!page.pageInfo.hasNextPage || !page.pageInfo.endCursor) break;
       after = page.pageInfo.endCursor;
     }
-    return { hits: [...hits.values()], total };
+    return { nodes: [...nodes.values()], total };
+  }
+
+  async function search(q: string, max = 300) {
+    const { nodes, total } = await pages(LIGHT_SEARCH, q, max, 100);
+    return { hits: (nodes as RawHit[]).map(toHit), total };
   }
 
   async function details(hits: SearchHit[], me: string): Promise<Item[]> {
@@ -275,6 +285,23 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     };
   }
 
+  async function areas(): Promise<Areas> {
+    const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+    const prs = async (q: string, authored: boolean): Promise<AreaPr[]> =>
+      ((await pages(FILES_SEARCH, `is:pr ${q}`, 500, 50)).nodes as RawFiles[]).map((n) => ({
+        repo: n.repository.nameWithOwner,
+        files: n.changedFiles,
+        paths: n.files?.nodes.map((f) => f.path) ?? [],
+        authored,
+      }));
+    const found = await Promise.all([
+      prs(`author:@me created:>=${since}`, true),
+      prs(`author:@me merged:>=${since} created:<${since}`, true),
+      prs(`reviewed-by:@me -author:@me updated:>=${since}`, false),
+    ]);
+    return buildAreas(found.flat());
+  }
+
   async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
@@ -304,6 +331,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     search,
     details,
     context,
+    areas,
     notifications,
     prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
     rateLimit: () => client.rateLimit(),

@@ -49,6 +49,7 @@ export interface RawNode extends RawHit {
   state: string;
   createdAt: string;
   closedAt?: string | null;
+  bodyText: string;
   labels: Conn<{ name: string }>;
   assignees: Conn<{ login: string }>;
   comments: Conn<RawComment>;
@@ -62,6 +63,7 @@ export interface RawNode extends RawHit {
   headRepository?: { nameWithOwner: string } | null;
   reviewDecision?: string | null;
   mergedBy?: { login: string } | null;
+  files?: Conn<{ path: string }> | null;
   mergeable?: string;
   checks?: Conn<{ commit: { statusCheckRollup: { contexts: Conn<RawCheck | null> } | null } }>;
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
@@ -165,6 +167,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     assignees: n.assignees.nodes.map((a) => a.login),
     created_at: n.createdAt,
     closed_at: n.closedAt ?? null,
+    body: n.bodyText.replaceAll(/\s+/g, " ").trim().slice(0, 600),
     merged_by: n.mergedBy?.login ?? "",
     additions: n.additions ?? 0,
     deletions: n.deletions ?? 0,
@@ -178,6 +181,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_author: head?.author?.user?.login ?? "",
     head_ref: n.headRefName ?? "",
     head_repo: n.headRepository?.nameWithOwner ?? "",
+    ...(n.files && { paths: n.files.nodes.map((f) => f.path) }),
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),
     review_requests: (n.reviewRequests?.nodes ?? [])

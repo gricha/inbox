@@ -101,6 +101,7 @@ export interface GitHub {
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
   details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
   context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
+  areas(): Promise<Areas>; // the directories of your PRs and reviews, last 90 days
   // Threads updated since `since`, read or not (all=true); a 304 when If-Modified-Since says nothing changed.
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
@@ -109,6 +110,10 @@ export function createGitHub(opts?: { token?: string; fetch?: typeof fetch; log?
 ```
 
 Two loops in the connector: the **reconcile** (every board's searches, then details for what changed) on `github.poll_seconds`, and the **feed**, which polls notifications every `X-Poll-Interval` seconds (60 by default). A thread about an item the desk holds refreshes that item at once; one about an item it doesn't hold, for a review request, mention, team mention, assignment or your own item, starts a reconcile early. An item that leaves every search gets one detail refresh, so the desk learns it merged, closed or stopped asking you; a resolved one stays on its boards for 3 days (a `kept` hit, past the board filter) to show under Resolved, as does one that resolved in the last 3 days while a search still lists it (you approved it). After you approve a PR, the connector refreshes that one PR at once (`refresh()`), since the search index lags the approval. A rate limit pauses both loops.
+
+Both fragments carry `bodyText` (kept as `body`, 600 characters) and a PR's `files(first: 50){ nodes { path } }` (`paths`). Measured on 20 review-requested PRs (2026-11-02): cost 2 before and after, 5.5 s → 6.0 s, 39 KB → 124 KB (the full `bodyText`).
+
+Areas (daily, apart from the context; see api.md's "Your areas"): `search` with each PR's `changedFiles files(first: 50){ nodes { path } }`, 50 a page (100 took 9.5 s of GitHub's 10 s limit), up to 500 per query, over `is:pr author:@me created:>=<90d>`, `is:pr author:@me merged:>=<90d> created:<<90d>` and `is:pr reviewed-by:@me -author:@me updated:>=<90d>`. Measured (2026-11-02, ~510 PRs): 12 pages, cost 1 each, 12 points a day, 28 s, the slowest page 7 s; 17 repos, 6 KB in kv.
 
 Context (refreshed daily): teams via `viewer.organizations.teams(userLogins:[me])`; affinity from `is:pr reviewed-by:@me -author:@me updated:>=<90d>` and `is:pr commenter:@me -author:@me updated:>=<90d>` (distinct PRs per author, up to 1000 each); `repo_prs` from `is:pr author:@me created:>=<90d>`; `orgs` from `is:open involves:@me` counted by owner.
 

@@ -218,6 +218,46 @@ test("context: teams, affinity (distinct PRs per author), repo_prs, orgs", async
   assert.deepEqual(calls.find((c) => c.query.includes("organizations"))!.variables, { me: "octo-dev" });
 });
 
+test("areas: your PRs and reviews of the last 90 days with their paths, 50 a page", async () => {
+  const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  const pr = (i: number, repo: string, paths: string[], changedFiles = paths.length) => ({
+    id: `PR_${repo}_${i}`,
+    repository: { nameWithOwner: repo },
+    changedFiles,
+    files: { nodes: paths.map((path) => ({ path })) },
+  });
+  const searches: Record<string, ReturnType<typeof pr>[]> = {
+    [`is:pr author:@me created:>=${since}`]: [
+      ...Array.from({ length: 60 }, (_, i) => pr(i, "acme/api", ["src/auth/session.ts"])),
+      pr(99, "acme/api", ["src/billing/plan.ts"], 300), // a codemod: left out
+    ],
+    [`is:pr author:@me merged:>=${since} created:<${since}`]: [pr(1, "acme/web", ["app/views/list.tsx"])],
+    [`is:pr reviewed-by:@me -author:@me updated:>=${since}`]: [
+      pr(2, "acme/web", ["app/views/grid.tsx", "app/views/grid.test.tsx"]),
+      pr(3, "acme/web", ["lib/x.ts"]),
+    ],
+  };
+  const { gh, calls } = fakeGitHub((b) => {
+    const all = searches[b.variables.q];
+    assert.ok(all, b.variables.q);
+    const start = b.variables.after ? Number(b.variables.after) : 0;
+    const end = Math.min(start + b.variables.first, all.length);
+    return {
+      data: {
+        rateLimit: RL,
+        search: {
+          issueCount: all.length,
+          pageInfo: { hasNextPage: end < all.length, endCursor: String(end) },
+          nodes: all.slice(start, end),
+        },
+      },
+    };
+  });
+  assert.deepEqual(await gh.areas(), { "acme/api": { "src/auth/": 180 }, "acme/web": { "app/views/": 4 } });
+  assert.ok(calls.every((c) => c.query.includes("files(first: 50)") && c.variables.first <= 50));
+  assert.equal(calls.length, 4); // 61 of your PRs: two pages
+});
+
 test("viewer and rateLimit", async () => {
   const { gh } = fakeGitHub(() => ({ data: { rateLimit: { ...RL, remaining: 4321 }, viewer: { login: "octo-dev" } } }));
   assert.equal(gh.rateLimit(), null);

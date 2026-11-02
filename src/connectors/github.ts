@@ -111,7 +111,7 @@ export class GitHubConnector implements Connector {
     const me = desk.ctx?.me ?? (await this.api.viewer());
     try {
       const c = await this.api.context(me);
-      desk.ctx = { ...c, me, refreshed_at: desk.now().toISOString() };
+      desk.ctx = { ...desk.ctx, ...c, me, refreshed_at: desk.now().toISOString() };
       this.contextError = null;
     } catch (e) {
       this.contextError = (e as Error).message;
@@ -121,6 +121,19 @@ export class GitHubConnector implements Connector {
       desk.ctx = desk.ctx
         ? { ...desk.ctx, refreshed_at: retry }
         : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
+    }
+    desk.store.set("context", desk.ctx);
+  }
+
+  // Daily, apart from the context: a failure keeps the last areas and tries again in about an hour.
+  async refreshAreas(): Promise<void> {
+    const desk = this.desk;
+    try {
+      const areas = await this.api.areas();
+      if (desk.ctx) desk.ctx = { ...desk.ctx, areas, areas_at: desk.now().toISOString() };
+    } catch (e) {
+      desk.log(`areas refresh failed: ${(e as Error).message}`);
+      if (desk.ctx) desk.ctx = { ...desk.ctx, areas_at: new Date(desk.now().getTime() - 23 * HOUR).toISOString() };
     }
     desk.store.set("context", desk.ctx);
   }
@@ -165,6 +178,7 @@ export class GitHubConnector implements Connector {
       const now = desk.now();
       const iso = now.toISOString();
       if (!desk.ctx || now.getTime() - Date.parse(desk.ctx.refreshed_at) > 24 * HOUR) await this.refreshContext();
+      if (now.getTime() - (Date.parse(desk.ctx?.areas_at ?? "") || 0) > 24 * HOUR) await this.refreshAreas();
       const me = desk.me().toLowerCase();
       const loaded = desk.loaded;
       const queries = [...new Set(loaded.boards.flatMap((b) => this.queriesFor(loaded, b)))];
