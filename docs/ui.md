@@ -5,7 +5,7 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 ## Principles
 
 - **Only what needs you on the main page.** If it's on the main page, you need to act on it: one list, what the desk put in now and then today, in the desk's order (`src/desk.ts` orders it; the page only renders it, so the tray, MCP and notifications say the same). No now-vs-today split, no headings.
-- **One line per item.** The title (17px), then quietly its repo#number, its age on the right. No why, AI gist, concerns, verdict, chips, "sorted by Claude" or per-row keys: Enter opens the review (or an issue in place), where all that is, and the keys are in the help overlay (`?`).
+- **One line per item.** The title (17px), then quietly its repo#number (and a stack's place, "3/20"), its age on the right. No why, AI gist, concerns, verdict, chips, "sorted by Claude" or per-row keys: Enter opens the review (or an issue in place), where all that is, and the keys are in the help overlay (`?`).
 - **Merging is Claude's.** A PR you handed off (`m m`) never shows on the main page, whatever it needs from you (a question, a reply to Send, ready to merge, outsiders' comments): Merging lists those first and counts them on its sidebar entry. Only a PR Claude hands back comes back to the main page.
 - **Calm, informational.** No highlighter. Ink and pencil grey on the paper; colour only where it carries information: "CI failing" red, "changes requested" and "merge conflict" amber, the same words and colours in a review and in Merging. Sentence case, no chips or boxed badges, no all-caps, no monospace outside code. The selected row is a neutral fill, nothing more.
 - **Themes are per device.** Tokens live on `:root` in `web/src/styles.css`: the light set, the dark set under `prefers-color-scheme` (System), and `[data-theme]` sets for Light, Dark, Sand (warm paper) and Slate (blue-grey dark). Settings → Appearance picks one for this device (`web/src/theme.ts`, in localStorage, never a desk setting), and `index.html` applies it before the first paint. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only. Check every change in light and dark and each theme (`npm run shots`).
@@ -26,9 +26,10 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 ```
 
 - A 232px sidebar: GitHub (the main page, with how many need you), Later (no count: nothing there needs you), Merging (with how many wait on you there; the tooltip has how many are merging) and Settings. The active item is a neutral filled pill; a review is under the page it was opened from. At 820px and below it hides; the top bar then names the page and carries quiet "Later" and "Merging 2" links.
-- The main page and Later use the window's width, with the page's side padding; Merging keeps an 880px column, a review 1280px.
+- The main page, Later and a review use the window's width, with the page's side padding; Merging keeps an 880px column.
 - Every page ends near the window's bottom: below its last line there's only the room j/k leave under a row (84px), never empty paper to scroll into. `npm run shots` checks the queue, a review, Merging and Settings scrolled to the bottom.
 - The main page: its first `queue.cards` rows (10), then one pencil line, "11 more", which j/k stop on and Enter (or a click) opens in place; it folds only when two or more would go behind it. Empty, it's one line: "Nothing needs you right now." While Claude can't log in, one line above the rows says so once: "**Claude is paused:** Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`." (or "**AI reviews are paused:**" and why).
+- A stack of PRs is one line, the one the desk sends for it (the lowest member in the most urgent place), with its place among the stack's open PRs quietly after its repo#number: "api#4154 3/6". A row under Later in a stack says it the same way.
 - The desk's order: what Claude handed back; a close look or high risk on the current commit, then on an earlier one; what a cap made not urgent; your PR approved and green; the rest as the rules ordered them; someone else's PR with CI failing, which waits on its author; "Skip it" last. Now's before Today's, each in that order.
 - The quiet rule: an item nobody has touched for `queue.quiet_days` (14) leaves the main page for Later, before caps. A pinned item and a review you were asked for in that time stay.
 - Enter (or a click) on a PR opens its review (below). On an issue it opens the item in place under its row: why it's here ("Assigned to you"), one pencil line of facts (by, how you were asked, labels, comments, who placed it), where it sits and from which board, a collapsed rule trace, its recent activity (the last 8 events in plain words), and its keys under a hairline (esc Close, o, e, s, m). `w` opens any row in place with the full table of signals, its rule trace and its raw signals. The snooze menu (`s`) opens under the row.
@@ -43,35 +44,42 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 
 ## The review view
 
-`#/review/<id>`, Linear-style: the PR is read and approved in the desk, in the queue's place, with the sidebar still there. The column widens to 1280px.
+`#/review/<id>`, Linear-style: the PR is read and approved in the desk, in the queue's place, with the sidebar still there. The diff takes the page's width; a foldable sidebar on the right holds the stack, the files and recent activity.
 
 ```
-  api#4127  by priya                                       Recent activity
-  Stream partial results from the query planner            sam commented · 37m
-  asked you directly · CI passing · review required        you were mentioned · 1h
-  +62 −7 in 5 files                                        priya pushed · 2h
-                                                           2 more
-
-  AI review from Opus 5, 14:32
-  Look closely   medium risk
-  Adds a streaming scan (streamRows) and uses it in runPlan, so ...
-  ┃ src/routes/query.ts passes ?budget= through Number() unchecked ...
+  api#4154  3/6  by priya                                         Stack on main                N P
+  Planner: hash join stage                                        ● #4150 Planner: pull the cost…
+  asked you directly · CI passing · changes requested             ○ #4152 Planner: run the table…  ✓
+  +172 −32 in 3 files                                             ┃○ #4154 Planner: hash join st… ±┃
+                                                                  ◌ #4156 Planner: stream partia… ✗
+  (threads waiting on you)
+                                                                  3 files                      n p
+  AI review from Opus 5, 14:32                                    src/planner/plan.ts       • Look
+  Look closely   medium risk                                      src/routes/query.ts       • Look
+  Adds a streaming scan (streamRows) and uses it in runPlan, ...  docs/api/query.md           Skip
   5 notes on the changes below: ] next, [ previous.
+                                                                  Recent activity
+  a Approve   o Open on GitHub   c Copy prompt   i Redo AI review  sam commented · 37m
 
-  a Approve   o Open on GitHub   c Copy prompt   i Redo AI review
-
-  5 files          n p  │ src/planner/stream.ts                        new +24 −0
-  src/planner/stream.ts │ ┌───────────────────────────────────────────────────┐
-  src/planner/plan.ts   │ │  9 + // Yields rows in batches as the scan ...    │
-  ...                   │ │ 10 + export async function* streamRows(...)       │
-                        │ │    ┃ The core of the change: rows come out in ... │  an AI note, at its line
+  Look  src/planner/plan.ts  budget checked only between batches  +7 −3
+  ┌──────────────────────────────────────────────────────────────┐
+  │ 17 + export async function runPlan(q, budgetMs = ...)        │
+  │    ┃ The budget is only checked between batches, so ...      │  an AI note, at its line
+  └──────────────────────────────────────────────────────────────┘
+  Skim  src/planner/stream.ts  new batching generator         +24 −0
+  ...
+  Not worth reviewing · 2 files
 ```
 
-- Header: the ref, author ("by you" on yours), title, then one line: why it's on the desk (the row doesn't say; a fact it already says is left out), CI, the review state ("approved by marco"), a merge conflict (only while it's open), size. Your PR in Merging says why it waits on you, as Merging does ("**Merging:** reply ready to send", or just "merging" while Claude has it), adds Claude's line from Merging under it, in pencil, unless it only repeats the why (a question, no clone: then the "Set up a local clone" link), and the reply waiting for Send as a margin note, which `y` (twice) sends and `x` discards from here too. With a question, `c` answers it in a terminal and `x` dismisses it, as in Merging; Copy prompt and AI review aren't offered on a PR in Merging. Its keys go in Merging's order, `b` last. Esc and the top bar's back link ("‹ Queue", "‹ Later" or "‹ Merging") go back to the page it was opened from. Problems are coloured words, and pencil at regular weight once the PR is sorted away, resolved, or calm in Merging. A wrapped line starts with a fact, never a "·", and a fact that wraps carries on after its "·", not under it.
+- Header: the ref, a stack's place ("3/6", as on the main page), author ("by you" on yours), title, then one line: why it's on the desk (the row doesn't say; a fact it already says is left out), CI, the review state ("approved by marco"), a merge conflict (only while it's open), size. Your PR in Merging says why it waits on you, as Merging does ("**Merging:** reply ready to send", or just "merging" while Claude has it), adds Claude's line from Merging under it, in pencil, unless it only repeats the why (a question, no clone: then the "Set up a local clone" link), and the reply waiting for Send as a margin note, which `y` (twice) sends and `x` discards from here too. With a question, `c` answers it in a terminal and `x` dismisses it, as in Merging; Copy prompt and AI review aren't offered on a PR in Merging. Its keys go in Merging's order, `b` last. Esc and the top bar's back link ("‹ Queue", "‹ Later" or "‹ Merging") go back to the page it was opened from. Problems are coloured words, and pencil at regular weight once the PR is sorted away, resolved, or calm in Merging. A wrapped line starts with a fact, never a "·", and a fact that wraps carries on after its "·", not under it.
 - A resolved PR (Enter on a row under Resolved, or one you just approved) says so in one pencil line under the facts, "Resolved: merged by li-wei · 2h" (the reason, who merged or closed it, and how long ago, "just now" in the first minute), in place of the why.
-- Recent activity: the PR's latest events in the queue's words (never the desk's own "first seen"), newest first, three of them and the rest behind a quiet "n more", each with its time after the facts' "·". Above 1100px it's a column of its own beside the facts and the AI review, one event a line; narrower, it's one wrapped pencil line under the facts ("sam commented 37m · you were mentioned 1h · 2 more"), so the AI review and the diff stay near the top. A resolved PR leaves out its "resolved" event and the one that caused it (the merge, the approval, the removed request); the Resolved line says it.
+- Under the header, before the AI review, the threads waiting on you (`Conversation`, given the review).
 - The AI review: who wrote it, by the model's name ("from Opus 5"), verdict, risk (a pencil fact; only high is red and semibold), summary, concerns as margin notes (as in the diff), and how many notes sit in the code. While it's being written, a quiet line says so; a failure shows its reason in ink, not red (it's about the agent, not the PR), with a command in it set as code (`claude auth login`), and `i` tries again. When AI reviews are paused after failures in a row, a PR that wasn't tried says that. A merged or closed PR with none says "No AI review." (`i` still asks, though the key line leaves it out); your own PR, open or not, shows the section only once a review exists or is being written. A re-review adds "**Since your review:** …" under the summary. A review of an earlier commit stays, marked "on an earlier commit", and its notes aren't placed in the new code.
-- Files on the left (sticky, 300px from 1280px up; above the diff at 1100px and below), with a dot on files that have notes. A long folder gives way from its start ("…versions/0008_cache.py") but always shows "…/", so each file's name stays whole right after it, wrapping when it's longer than the list. The file you're reading follows the scroll and wears the cursor's fill and pencil ring; at the page's end, that's the last file.
+- The diff in the desk's reading order (`ReviewView.order`), the page's width: what Claude ranked first, a look before a skim, each a hunk under its file's name with its level ("Look" in ink, "Skim" a step quieter) and Claude's few words why; then what Claude didn't read ("Not read", and whether the PR or its file was too long); then one pencil line, "Not worth reviewing · 2 files" (and, when Claude ranked as many as it may, that some may still be worth a look), which `n` stops on and Enter (or a click) opens in place. A file's hunks next to each other at one level read as one. A review without a ranking (none yet, older, or for an earlier commit) keeps file order, and a file with no text diff says so in its header. `n`/`p` step through that order, `]`/`[` through the notes in it.
+- The sidebar (`f` folds and opens it, for this device, kept in localStorage; 280px beside the diff above 1100px, over the diff's right edge below it, where it starts folded):
+  - The stack, when the PR is in one: "Stack on main", then its PRs bottom first (the line through this PR; other branches at a fork under "Other branches"), each its glyph (○ open, ◌ draft, ● merged, × closed), number and title, and only what's news: CI failing ✗ in red, running ◔, changes requested ± in amber, approved ✓. The PR on screen wears the cursor's fill and ring; the words are in each one's tooltip. A click, or `N` (up) and `P` (down), opens the next one's review.
+  - The files, each once in reading order with its level (Look, Skim, Not read, Skip) and a dot when it has notes; a click goes to where reading reaches it. A long folder gives way from its start ("…versions/0008_cache.py") but always shows "…/", so each file's name stays whole right after it. The file you're reading follows the scroll and wears the cursor's fill and ring.
+  - Recent activity: the PR's latest events in the queue's words (never the desk's own "first seen"), newest first, three of them and the rest behind a quiet "n more", each with its time after a "·". A resolved PR leaves out its "resolved" event and the one that caused it (the merge, the approval, the removed request); the Resolved line says it.
 - Diffs: `@pierre/diffs`, unified, word-level changes, wrapped lines, Shiki highlighting in Pierre's light and dark themes (the one the device's theme is: System follows the computer, Sand is light, Slate dark), on `--sheet` in a hairline frame. Its CSS variables take the app's fonts (JetBrains Mono for code). Each file's name sticks under the top bar while you read it.
 - AI notes are margin notes under the line they explain: a thin rule, the note in the UI font. The one `]`/`[` landed on gets the cursor's fill and ring. Notes about a whole file sit above its diff.
 - Approve: `a` arms it (the key reads "**a** again to approve" in ink semibold, and a toast says "Press a again to approve"), a second `a` within 3 s sends it; anything else lets it lapse. The key shows only on someone else's open PR; it's disabled, with the reason as its tooltip, on one you already approved at this commit. It approves the commit on screen: if the desk has seen a newer push, it refuses. The approval is one of the desk's writes to GitHub, with Send on a drafted reply ([api.md](api.md#security-model)).
@@ -80,6 +88,7 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 
 `#/inflight`: your own open PRs you handed off with `m m`, and what Claude is doing on each. Its heading says how many and how many wait on you ("Merging 4 · 2 waiting on you"), and the sidebar entry carries that second count. One list, those waiting on you first, then the ones Claude is working on, then the quiet ones; merged and closed ones sit under Merged for 3 days, flat pencil rows like Resolved's.
 
+- A stack's rows sit together, bottom first, under one quiet line ("Stack on main · 6 open") when two or more of its PRs are here; each says its place after its ref ("2/6").
 - Each row: the title and its age, then the ref, why it waits on you (a real label in ink, "**Claude asks:** …"; otherwise regular ink, "Reply ready to send", "Comments from outside contributors", "Ready to merge") and the PR's state in plain words (CI passing, failing with up to two check names, or running; approved by, changes requested by, waiting on, people first and teams as a count; unresolved threads; merge conflict; auto-merge on); then what it waits on and Claude's own line ("fixing CI · 4m · npm test", "pushed a fix for 2 comments · abc1234"). With Claude off, the intro says so once and a PR has the problem itself as its why ("CI failing").
 - Calm: a row is ink and pencil grey while Claude has it, problems included. One waiting on you has its why in ink and its problems their colour. No highlighter.
 - A drafted reply sits under its row like an AI note in a review, a margin rule and no card. Send (`y`, twice) and Discard (`x`) are the selected row's keys; Send posts it on GitHub as you, and `y` in its review sends the same reply.
@@ -91,7 +100,7 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 
 `j/k` move (they stop on "n more") · `Enter` review a PR, open an issue, show the rest · `o` GitHub · `m m` hand your PR off for merge · `b` turn off the auto-merge `m` turned on · `e`/`d` done (restore on a cleared item) · `s` snooze, then 1–5 · `m` mute · `p` pin · `u` undo (only what this window did) · `c` copy prompt · `i` AI review · `w` rule trace and signals · `/` filter · `Esc` close, then clear the filter (on Later, back to the main page) · `r` sync · `,` settings · `g r` rules · `g m` Merging · `g l/f/d/h/x` Later with that group open (the key after `g` is always the chord's, never the key's own action) · `?` help, which lists them all.
 
-In a review: `n/p` next and previous file · `]/[` next and previous AI note · `a` then `a` approve · `m m` hand off, `b` back to desk · `y` then `y` send your PR's drafted reply, `x` discard it · `i` AI review again · `o` GitHub · `c` copy prompt · `Esc` back to where you opened it.
+In a review: `n/p` next and previous change, in reading order · `N/P` up and down the stack · `f` the sidebar · `]/[` next and previous AI note · `a` then `a` approve · `m m` hand off, `b` back to desk · `y` then `y` send your PR's drafted reply, `x` discard it · `i` AI review again · `o` GitHub · `c` copy prompt · `Esc` back to where you opened it.
 
 In Merging: `j/k` move · `Enter` review · `o` GitHub · `b` back to desk · `y` then `y` send the drafted reply · `x` dismiss the question (or outside comments), or discard the reply · `c` copy the resume command · `Esc` the main page. `e`, `s` and `m` don't apply there: Claude has it, so `b` brings it back first.
 

@@ -676,7 +676,7 @@ export interface ReviewView {
   card: Card;
   item: Item;
   handoff_prompt: string;
-  files: ReviewFile[]; // patch repeats order's hunks for today's review UI; it goes once that renders order
+  files: ReviewFile[]; // patch repeats order's hunks, which the review UI renders instead
   files_error: string | null; // the diff couldn't be fetched
   order: ReviewOrder; // every hunk once, in the order to read them
   ai: AiReview | null; // the latest, even if stale

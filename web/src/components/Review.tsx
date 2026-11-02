@@ -1,13 +1,37 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type {
+  ActivityEvent,
+  Card,
+  Draft,
+  InflightRow,
+  ReviewFile,
+  ReviewNote,
+  ReviewView,
+  Stack,
+  StackMember,
+} from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, noCloneOf, orderNotes, resolvedHead, says, sitterNews, sitterParts, splitPath, waitsOn } from "../view.ts";
+import {
+  currentFile,
+  filePatch,
+  noCloneOf,
+  onLines,
+  resolvedHead,
+  routeHash,
+  says,
+  sections,
+  sitterNews,
+  sitterParts,
+  splitPath,
+  waitsOn,
+  type Section,
+} from "../view.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
-import { CI, Dots, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
+import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -16,10 +40,23 @@ interface NoteMeta {
 
 const ARM_MS = 3000;
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
-const LINE = 96; // px below the window's top where "the file you're in" is read off
+const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
+const LEVEL: Partial<Record<NonNullable<Section["level"]>, string>> = { look: "Look", skim: "Skim", unread: "Not read" };
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
-const delta = (f: ReviewFile) => (f.patch === null && !f.additions && !f.deletions ? "binary" : `+${f.additions} −${f.deletions}`);
+const REST = "Not worth reviewing"; // the fold's line, which each file under it then doesn't repeat
+const NARROW = 1100; // px: below it the sidebar opens over the diff, so it starts folded
+const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded
+
+function sideSaved(): boolean {
+  try {
+    const v = localStorage.getItem(SIDE);
+    if (v) return v === "open";
+  } catch {
+    // storage off: the window's width decides
+  }
+  return innerWidth > NARROW;
+}
 
 // Pierre draws the diff in a shadow root; its light or dark follows the app's theme (diffTheme).
 const DIFF: FileDiffOptions<NoteMeta, undefined> = {
@@ -68,15 +105,16 @@ export function Review({
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
-  const [fileIdx, setFileIdx] = useState(0);
-  const [noteIdx, setNoteIdx] = useState<number | null>(null);
+  const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
+  const [noteIdx, setNoteIdx] = useState<number | null>(null); // a place in order.notes
+  const [restOpen, setRestOpen] = useState(false);
+  const [side, setSide] = useState(sideSaved);
   const [armed, setArmed] = useState(0); // when `a` was pressed once
   const [busy, setBusy] = useState<"approve" | "ai" | null>(null);
   const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
-  const listRef = useRef<HTMLElement>(null);
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
   // Your PR in Merging with a reply waiting: it's shown under the header, and y sends it from here too.
@@ -102,15 +140,14 @@ export function Review({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [id, loads]);
 
-  // Inline notes only when they were written for this commit: an older review's line numbers can point at the wrong code.
-  const notes = useMemo(() => (v?.ai && !v.ai_stale ? orderNotes(v.ai.notes, v.files) : []), [v]);
-  const notesByFile = useMemo(() => {
-    const m = new Map<string, { note: ReviewNote; index: number }[]>();
-    for (const [index, note] of notes.entries()) m.set(note.path, [...(m.get(note.path) ?? []), { note, index }]);
-    return m;
-  }, [notes]);
+  // The desk's reading order; its notes are only those written for this commit, in the order ] and [ step through.
+  const order = v?.order;
+  const { list, rest } = useMemo(() => (order ? sections(order) : { list: [], rest: 0 }), [order]);
+  const notes = order?.notes ?? [];
+  const folded = !!order?.ranked && rest < list.length && !restOpen;
+  const visible = folded ? list.slice(0, rest) : list;
 
-  // The file you're reading follows the scroll, except right after a key moved you: then it's the one the key picked.
+  // The section you're reading follows the scroll, except right after a key moved you: then it's the one the key picked.
   useEffect(() => {
     let frame = 0;
     const onScroll = () => {
@@ -118,7 +155,7 @@ export function Review({
       frame = requestAnimationFrame(() => {
         const tops = [...document.querySelectorAll(".rv-file-sec")].map((el) => el.getBoundingClientRect().top);
         const atEnd = scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
-        if (tops.length && Date.now() - jumped.current > 400) setFileIdx(currentFile(tops, LINE, atEnd));
+        if (tops.length && Date.now() - jumped.current > 400) setSecIdx(currentFile(tops, LINE, atEnd));
       });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -139,23 +176,36 @@ export function Review({
     };
   }, [armed]);
 
-  // A long file list scrolls on its own to keep the current file in sight; the page doesn't move.
+  // The sidebar scrolls on its own to keep the current file in sight; the page doesn't move.
   useEffect(() => {
-    const list = listRef.current;
-    const on = list?.querySelector<HTMLElement>(".rv-file.on");
-    if (!list || !on || list.scrollHeight <= list.clientHeight) return;
-    if (on.offsetTop < list.scrollTop) list.scrollTop = on.offsetTop - 8;
-    else if (on.offsetTop + on.offsetHeight > list.scrollTop + list.clientHeight)
-      list.scrollTop = on.offsetTop + on.offsetHeight - list.clientHeight + 8;
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reads the DOM the new fileIdx just rendered
-  }, [fileIdx]);
+    const box = document.querySelector<HTMLElement>(".rv-side");
+    const on = box?.querySelector<HTMLElement>(".rv-file.on");
+    if (!box || !on || box.scrollHeight <= box.clientHeight) return;
+    if (on.offsetTop < box.scrollTop) box.scrollTop = on.offsetTop - 8;
+    else if (on.offsetTop + on.offsetHeight > box.scrollTop + box.clientHeight)
+      box.scrollTop = on.offsetTop + on.offsetHeight - box.clientHeight + 8;
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reads the DOM the new secIdx just rendered
+  }, [secIdx]);
 
-  function goFile(i: number) {
-    if (!v?.files.length) return;
-    const n = Math.max(0, Math.min(v.files.length - 1, i));
+  // To a section, opening the rest when it's there; the scroll waits for the render that shows it.
+  function goTo(i: number, el = `#rv-s-${i}`, block: ScrollLogicalPosition = "start") {
     jumped.current = Date.now();
-    setFileIdx(n);
-    document.querySelector(`#rv-f-${n}`)?.scrollIntoView({ block: "start" });
+    if (i >= rest) setRestOpen(true);
+    setSecIdx(i);
+    requestAnimationFrame(() => {
+      document.querySelector(el)?.scrollIntoView({ block });
+    });
+  }
+
+  // n and p stop on the folded rest's line too, as j and k do on the queue's "n more"; Enter there opens it.
+  function goSec(i: number) {
+    const n = Math.max(0, Math.min(visible.length - (folded ? 0 : 1), i));
+    if (!folded || n < rest) goTo(n);
+    else {
+      jumped.current = Date.now();
+      setSecIdx(n);
+      document.querySelector(".rv-fold")?.scrollIntoView({ block: "center" });
+    }
   }
 
   function goNote(d: number) {
@@ -164,15 +214,24 @@ export function Review({
       return;
     }
     const n = noteIdx === null ? (d > 0 ? 0 : notes.length - 1) : (noteIdx + d + notes.length) % notes.length;
-    jumped.current = Date.now();
     setNoteIdx(n);
-    setFileIdx(
+    goTo(
       Math.max(
         0,
-        v.files.findIndex((f) => f.path === notes[n]?.path),
+        list.findIndex((x) => x.notes.includes(notes[n]!)),
       ),
+      `[data-note="${n}"]`,
+      "center",
     );
-    document.querySelector(`[data-note="${n}"]`)?.scrollIntoView({ block: "center" });
+  }
+
+  function toggleSide() {
+    setSide(!side);
+    try {
+      localStorage.setItem(SIDE, side ? "folded" : "open");
+    } catch {
+      // storage off: it holds until the window closes
+    }
   }
 
   async function askAi() {
@@ -227,8 +286,12 @@ export function Review({
   }
 
   function run(k: string) {
-    if (k === "n") goFile(fileIdx + 1);
-    else if (k === "p") goFile(fileIdx - 1);
+    if (k === "n") goSec(secIdx + 1);
+    else if (k === "p") goSec(secIdx - 1);
+    else if (k === "N" && v?.stack?.up) location.hash = routeHash({ name: "review", id: v.stack.up });
+    else if (k === "P" && v?.stack?.down) location.hash = routeHash({ name: "review", id: v.stack.down });
+    else if (k === "f") toggleSide();
+    else if (k === "Enter" && folded && secIdx >= rest) goTo(rest);
     else if (k === "]") goNote(1);
     else if (k === "[") goNote(-1);
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
@@ -252,7 +315,10 @@ export function Review({
       if (armed) setArmed(0);
       // Esc with Send or a hand-off armed never reaches here: App lets it lapse first.
       else onBack();
-    } else if ((draft || asking ? "npoci[]admbyx" : "npoci[]admb").includes(e.key) && e.key.length === 1) {
+    } else if (
+      ((draft || asking ? "npoci[]admbyxfNP" : "npoci[]admbfNP").includes(e.key) && e.key.length === 1) ||
+      (e.key === "Enter" && folded && secIdx >= rest)
+    ) {
       e.preventDefault();
       run(e.key);
     }
@@ -284,8 +350,6 @@ export function Review({
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
   const mine = item.state === "open" && isMine;
   const armedY = !!draft && armedDraft === draft.id;
-  const adds = files.reduce((n, f) => n + f.additions, 0);
-  const dels = files.reduce((n, f) => n + f.deletions, 0);
   const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
   const approvals = approvers.length;
   // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
@@ -307,6 +371,9 @@ export function Review({
   const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
   const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
+  const section = (x: Section, i: number) => (
+    <SectionView key={x.key} section={x} index={i} file={files[x.file]!} notes={view.ai?.notes ?? []} order={notes} current={noteIdx} />
+  );
   const open = item.state === "open";
   // What it waits on and what Claude is doing, as Merging says it.
   const waits = row && waitsOn(row);
@@ -315,179 +382,244 @@ export function Review({
     : [];
 
   return (
-    <div className="review">
-      <div className="rv-top">
-        {/* Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour. */}
-        <header
-          className={cls(
-            "rv-head",
-            `b-${card.inflight && row?.needs_you ? "now" : card.bucket}`,
-            (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
-          )}
-        >
-          <p className="rv-ref">
-            <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
-              <span className="ref-ink">
-                <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+    <div className={cls("review", side && "side-open")}>
+      <div className="rv-main">
+        <div className="rv-top">
+          {/* Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour. */}
+          <header
+            className={cls(
+              "rv-head",
+              `b-${card.inflight && row?.needs_you ? "now" : card.bucket}`,
+              (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
+            )}
+          >
+            <p className="rv-ref">
+              <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
+                <span className="ref-ink">
+                  <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+                </span>
+              </a>
+              {card.stack && (
+                <span className="rv-by" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
+                  {card.stack.pos}/{card.stack.size}
+                </span>
+              )}
+              <span className="rv-by">
+                by {isMine ? "you" : card.author}
+                {card.author_bot ? " (bot)" : ""}
               </span>
-            </a>
-            <span className="rv-by">
-              by {isMine ? "you" : card.author}
-              {card.author_bot ? " (bot)" : ""}
-            </span>
-          </p>
-          <h1 className="rv-title">{card.title}</h1>
-          <p className="rv-meta">
-            {why && (mine ? <Owed why={why} /> : <span className="why">{why}</span>)}
-            {shownFacts.map((f) => (
-              <span key={f.text} className={cls("fact-word", f.tone)}>
-                {f.text}
-              </span>
-            ))}
-          </p>
-          {resolved && (
-            <p className="rv-meta rv-resolved">
-              <span>{resolved.line}</span>
-              {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
             </p>
-          )}
-          {/* In Merging: the why above says why it needs you ("merging: …"); this is Claude's line under it, unless it only
-              repeats the why. With no clone, where to set one up. */}
-          {lane.length > 0 && (
-            <p className="rv-meta rv-lane">
-              {lane.map((p) => (
-                <span key={p}>{p}</span>
+            <h1 className="rv-title">{card.title}</h1>
+            <p className="rv-meta">
+              {why && (mine ? <Owed why={why} /> : <span className="why">{why}</span>)}
+              {shownFacts.map((f) => (
+                <span key={f.text} className={cls("fact-word", f.tone)}>
+                  {f.text}
+                </span>
               ))}
             </p>
-          )}
-          {row?.state === "open" && row.merge_note && (
-            <p className="rv-meta rv-lane">
-              <span>Merge it yourself when it's green: {row.merge_note}</span>
-            </p>
-          )}
-          {(row?.state === "open" || card.handed_back) && noCloneOf({ why: row?.needs_you ?? card.why, repo: card.repo }) && (
-            <p className="rv-meta rv-lane">
-              {/* In a span like every fact, so the line's gutter clips its "·", not the link's first letters. */}
-              <span>
-                <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
-              </span>
-            </p>
-          )}
-          {draft && (
-            <div className="draft rv-draft">
-              <p className="draft-to">
-                {draft.by === "agent" ? "Your agent's reply" : "Reply"} to {draft.to}
-                {draft.quote && <span className="draft-quote">: “{draft.quote}”</span>}
+            {resolved && (
+              <p className="rv-meta rv-resolved">
+                <span>{resolved.line}</span>
+                {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
               </p>
-              <p className="draft-body">{draft.body}</p>
-            </div>
+            )}
+            {/* In Merging: the why above says why it needs you ("merging: …"); this is Claude's line under it, unless it only
+              repeats the why. With no clone, where to set one up. */}
+            {lane.length > 0 && (
+              <p className="rv-meta rv-lane">
+                {lane.map((p) => (
+                  <span key={p}>{p}</span>
+                ))}
+              </p>
+            )}
+            {row?.state === "open" && row.merge_note && (
+              <p className="rv-meta rv-lane">
+                <span>Merge it yourself when it's green: {row.merge_note}</span>
+              </p>
+            )}
+            {(row?.state === "open" || card.handed_back) && noCloneOf({ why: row?.needs_you ?? card.why, repo: card.repo }) && (
+              <p className="rv-meta rv-lane">
+                {/* In a span like every fact, so the line's gutter clips its "·", not the link's first letters. */}
+                <span>
+                  <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
+                </span>
+              </p>
+            )}
+            {draft && (
+              <div className="draft rv-draft">
+                <p className="draft-to">
+                  {draft.by === "agent" ? "Your agent's reply" : "Reply"} to {draft.to}
+                  {draft.quote && <span className="draft-quote">: “{draft.quote}”</span>}
+                </p>
+                <p className="draft-body">{draft.body}</p>
+              </div>
+            )}
+          </header>
+          {/* The threads waiting on you go here: <Conversation view={view} />. */}
+          {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
+          {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
+            <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
           )}
-        </header>
-        {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
-        <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
-        {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
-        {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
-          <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
-        )}
-      </div>
-
-      {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, m or b last. */}
-      <div className="actions rv-actions">
-        {draft && (
-          <KeyButton
-            k="y"
-            label={armedY ? "again to send" : "Send"}
-            title="Post this reply on GitHub, as you: press y twice"
-            className={cls(armedY && "armed")}
-            run={run}
-          />
-        )}
-        {asking && row.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${row.resume}`} run={run} />}
-        {asking ? <KeyButton k="x" label="Dismiss the question" run={run} /> : draft && <KeyButton k="x" label="Discard" run={run} />}
-        {/* Only someone else's open PR is yours to approve. */}
-        {open && !isMine && (
-          <KeyButton
-            k="a"
-            label={busy === "approve" ? "Approving…" : armed ? "again to approve" : "Approve"}
-            run={run}
-            disabled={!canApprove || busy === "approve"}
-            title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-            className={cls(armed > 0 && "armed")}
-          />
-        )}
-        <KeyButton k="o" label="Open on GitHub" run={run} />
-        {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
-        {!flying && (open || view.ai) && (
-          <KeyButton
-            k="i"
-            label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
-            run={run}
-            disabled={view.generating || busy === "ai"}
-          />
-        )}
-        {mine && <HandKey card={card} run={run} armed={armedDraft} />}
-      </div>
-
-      {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
-      {files.length > 0 && (
-        <div className="rv-body">
-          <nav ref={listRef} className="rv-files" aria-label="Changed files">
-            <p className="rv-files-head">
-              <span>
-                {files.length} {files.length === 1 ? "file" : "files"}
-              </span>
-              <span className="rv-keys">
-                <kbd>n</kbd> <kbd>p</kbd>
-              </span>
-            </p>
-            <ol>
-              {files.map((f, i) => {
-                const [dir, name] = splitPath(f.path);
-                const n = notesByFile.get(f.path)?.length ?? 0;
-                return (
-                  <li key={f.path}>
-                    <button
-                      type="button"
-                      className={cls("rv-file", i === fileIdx && "on")}
-                      title={f.path}
-                      onClick={() => {
-                        goFile(i);
-                      }}
-                    >
-                      <span className="rv-fname">
-                        {dir && <ListDir path={dir} />}
-                        <span className="rv-base">{breakable(name)}</span>
-                      </span>
-                      {n > 0 && <span className="rv-nn" title={`${n} AI ${n === 1 ? "note" : "notes"}`} />}
-                      <span className="rv-delta">{delta(f)}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-            <p className="rv-files-foot">
-              <Dots
-                parts={[
-                  `+${adds} −${dels}`,
-                  ...(notes.length > 0
-                    ? [
-                        <span key="notes">
-                          {notes.length} {notes.length === 1 ? "note" : "notes"}, <kbd>]</kbd> <kbd>[</kbd>
-                        </span>,
-                      ]
-                    : []),
-                ]}
-              />
-            </p>
-          </nav>
-          <div className="rv-diffs">
-            {files.map((f, i) => (
-              <FileSection key={f.path} file={f} index={i} notes={notesByFile.get(f.path) ?? []} current={noteIdx} />
-            ))}
-          </div>
         </div>
+
+        {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, m or b last. */}
+        <div className="actions rv-actions">
+          {draft && (
+            <KeyButton
+              k="y"
+              label={armedY ? "again to send" : "Send"}
+              title="Post this reply on GitHub, as you: press y twice"
+              className={cls(armedY && "armed")}
+              run={run}
+            />
+          )}
+          {asking && row.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${row.resume}`} run={run} />}
+          {asking ? <KeyButton k="x" label="Dismiss the question" run={run} /> : draft && <KeyButton k="x" label="Discard" run={run} />}
+          {/* Only someone else's open PR is yours to approve. */}
+          {open && !isMine && (
+            <KeyButton
+              k="a"
+              label={busy === "approve" ? "Approving…" : armed ? "again to approve" : "Approve"}
+              run={run}
+              disabled={!canApprove || busy === "approve"}
+              title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
+              className={cls(armed > 0 && "armed")}
+            />
+          )}
+          <KeyButton k="o" label="Open on GitHub" run={run} />
+          {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
+          {!flying && (open || view.ai) && (
+            <KeyButton
+              k="i"
+              label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
+              run={run}
+              disabled={view.generating || busy === "ai"}
+            />
+          )}
+          {mine && <HandKey card={card} run={run} armed={armedDraft} />}
+        </div>
+
+        {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
+        {list.length > 0 && (
+          <div className="rv-diffs">
+            {visible.slice(0, rest).map(section)}
+            {order?.ranked && rest < list.length && (
+              <button
+                type="button"
+                className={cls("fold", "rv-fold", folded && secIdx >= rest && "sel")}
+                aria-expanded={!folded}
+                onClick={() => {
+                  if (folded) goTo(rest);
+                  else setRestOpen(false);
+                }}
+              >
+                {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
+                {order.capped && " · Claude ranked as many as it may, so some may still be worth a look"}
+              </button>
+            )}
+            {visible.slice(rest).map((x, i) => section(x, rest + i))}
+          </div>
+        )}
+      </div>
+      {side && (
+        <aside className="rv-side" aria-label="Stack, files and recent activity">
+          {view.stack && <StackList stack={view.stack} />}
+          {list.length > 0 && (
+            <nav className="rv-files" aria-label="Files in reading order">
+              <h2 className="rv-side-head">
+                <span>
+                  {files.length} {files.length === 1 ? "file" : "files"}
+                </span>
+                <span className="rv-keys">
+                  <kbd>n</kbd> <kbd>p</kbd>
+                </span>
+              </h2>
+              <ol>
+                {list.map((x, i) => {
+                  if (list.findIndex((y) => y.path === x.path) !== i) return null; // each file once, where reading reaches it
+                  const [dir, name] = splitPath(x.path);
+                  const on = list[secIdx]?.path === x.path && !(folded && secIdx >= rest);
+                  return (
+                    <li key={x.path}>
+                      <button
+                        type="button"
+                        className={cls("rv-file", on && "on")}
+                        title={x.path}
+                        onClick={() => {
+                          goTo(i);
+                        }}
+                      >
+                        <span className="rv-fname">
+                          {dir && <ListDir path={dir} />}
+                          <span className="rv-base">{breakable(name)}</span>
+                        </span>
+                        {list.some((y) => y.path === x.path && y.notes.length > 0) && <span className="rv-nn" title="AI notes" />}
+                        {x.level && <span className="rv-lvl">{x.level === "skip" ? "Skip" : LEVEL[x.level]}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
+          )}
+          {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
+          <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
+        </aside>
       )}
     </div>
+  );
+}
+
+const NODE: Record<StackMember["state"], string> = { open: "○", merged: "●", closed: "×" };
+
+// The stack bottom first, the PR on screen marked; each member's state as calm glyphs, words in its tooltip.
+function StackList({ stack }: { stack: Stack }) {
+  const member = (m: StackMember) => {
+    const state = m.state === "open" && m.draft ? "draft" : m.state;
+    const words = [`#${m.number} ${state}`, ...(m.state === "open" ? [`CI ${CI[m.ci]}`, REVIEW[m.review]] : [])].join(" · ");
+    return (
+      <li key={m.id}>
+        <a
+          className={cls("rv-member", m.current && "on", m.state !== "open" && "dim")}
+          href={routeHash({ name: "review", id: m.id })}
+          aria-current={m.current ? "page" : undefined}
+          title={`${words}\n${m.title}`}
+        >
+          <span className="rv-node" aria-hidden="true">
+            {state === "draft" ? "◌" : NODE[m.state]}
+          </span>
+          <span className="rv-mnum">#{m.number}</span>
+          <span className="rv-mtitle">{m.title}</span>
+          {/* Passing and waiting on a review are no news; what's wrong, running or approved is. */}
+          {m.state === "open" && (
+            <span className="rv-marks" aria-label={words}>
+              {m.ci === "red" && <span className="t-bad">✗</span>}
+              {m.ci === "pending" && <span>◔</span>}
+              {m.review === "changes_requested" && <span className="t-warn">±</span>}
+              {m.review === "approved" && <span>✓</span>}
+            </span>
+          )}
+        </a>
+      </li>
+    );
+  };
+  return (
+    <section className="rv-stack" aria-label="Stack">
+      <h2 className="rv-side-head">
+        <span>Stack on {stack.base}</span>
+        <span className="rv-keys" title="Up and down the stack">
+          <kbd>N</kbd> <kbd>P</kbd>
+        </span>
+      </h2>
+      <ol>{stack.line.map(member)}</ol>
+      {stack.forks.length > 0 && (
+        <>
+          <h3 className="rv-side-head">Other branches</h3>
+          <ol>{stack.forks.map(member)}</ol>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -647,52 +779,80 @@ function Dir({ path }: { path: string }) {
   );
 }
 
-function FileSection({
-  file,
+function SectionView({
+  section: x,
   index,
+  file,
   notes,
+  order,
   current,
 }: {
-  file: ReviewFile;
+  section: Section;
   index: number;
-  notes: { note: ReviewNote; index: number }[];
+  file: ReviewFile;
+  notes: ReviewNote[]; // the AI review's
+  order: number[]; // ReviewView.order.notes: a note's place in it is what ] and [ land on
   current: number | null;
 }) {
-  const fileDiff = useMemo(() => (file.patch === null ? null : (parsePatchFiles(filePatch(file), file.path)[0]?.files[0] ?? null)), [file]);
+  const fileDiff = useMemo(
+    () =>
+      x.hunks.length
+        ? (parsePatchFiles(filePatch({ ...file, patch: x.hunks.map((h) => h.patch).join("\n") }), x.key)[0]?.files[0] ?? null)
+        : null,
+    [x, file],
+  );
+  const mine = useMemo(
+    () =>
+      x.notes.flatMap((n) => {
+        const note = notes[n];
+        return note ? [{ note, index: order.indexOf(n), inline: onLines(x.hunks, note) }] : [];
+      }),
+    [x, notes, order],
+  );
   const annotations = useMemo(
     () =>
-      notes
-        .filter((n) => n.note.line > 0)
+      mine
+        .filter((n) => n.inline)
         .map((n): DiffLineAnnotation<NoteMeta> => ({
           side: n.note.side === "old" ? "deletions" : "additions",
           lineNumber: n.note.line,
           metadata: { index: n.index, body: n.note.body },
         })),
-    [notes],
+    [mine],
   );
-  const [dir, name] = splitPath(file.path);
+  const [dir, name] = splitPath(x.path);
   const status = STATUS[file.status];
+  const level = x.level && LEVEL[x.level];
+  const why = x.level === "skip" && says(REST, x.why ?? "") ? null : x.why;
+  const adds = x.hunks.reduce((n, h) => n + h.additions, 0);
+  const dels = x.hunks.reduce((n, h) => n + h.deletions, 0);
   return (
-    <section className="rv-file-sec" id={`rv-f-${index}`} aria-label={file.path}>
+    <section className="rv-file-sec" id={`rv-s-${index}`} aria-label={x.path}>
       <h3 className="rv-fhead">
+        {level && <span className={`rv-level l-${x.level}`}>{level}</span>}
         <span className="rv-fname">
           {dir && <Dir path={dir} />}
           <span className="rv-base">{name}</span>
         </span>
+        {why && (
+          <span className="rv-why" title={why}>
+            {why}
+          </span>
+        )}
         {status && (
           <span className="rv-fstatus">
             {status}
             {file.previous_path ? ` from ${file.previous_path}` : ""}
           </span>
         )}
-        <span className="rv-delta">{delta(file)}</span>
+        {x.hunks.length > 0 && <span className="rv-delta">{`+${adds} −${dels}`}</span>}
       </h3>
-      {notes
-        .filter((n) => n.note.line === 0)
+      {mine
+        .filter((n) => !n.inline)
         .map((n) => (
           <Note key={n.index} index={n.index} body={n.note.body} on={current === n.index} />
         ))}
-      {fileDiff ? (
+      {fileDiff && (
         <FileDiff<NoteMeta>
           className="rv-diff"
           fileDiff={fileDiff}
@@ -700,8 +860,6 @@ function FileSection({
           lineAnnotations={annotations}
           renderAnnotation={(a) => <Note index={a.metadata.index} body={a.metadata.body} on={current === a.metadata.index} />}
         />
-      ) : (
-        <p className="rv-nodiff">No text diff: a binary file, or too large for GitHub to show.</p>
       )}
     </section>
   );

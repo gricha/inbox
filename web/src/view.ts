@@ -9,7 +9,9 @@ import type {
   JudgeStep,
   QueueView,
   ReviewFile,
+  ReviewHunk,
   ReviewNote,
+  ReviewOrder,
   SettingDef,
   SettingValue,
 } from "../../src/types.ts";
@@ -138,14 +140,48 @@ export function filePatch(f: ReviewFile): string {
   return `diff --git a/${before} b/${f.path}\n${mode}--- ${from}\n+++ ${to}\n${f.patch ?? ""}\n`;
 }
 
-// Notes in reading order: by file as listed, a file's own notes first, then down the diff.
-export function orderNotes(notes: ReviewNote[], files: ReviewFile[]): ReviewNote[] {
-  const at = new Map(files.map((f, i) => [f.path, i]));
-  return notes
-    .filter((n) => at.has(n.path))
-    .map((n, i) => ({ n, i }))
-    .sort((a, b) => at.get(a.n.path)! - at.get(b.n.path)! || a.n.line - b.n.line || a.i - b.i)
-    .map((x) => x.n);
+// One stretch of the review: a file's hunks next to each other in the desk's order, at one level and for one reason.
+export interface Section {
+  key: string;
+  path: string;
+  file: number; // index in ReviewView.files
+  level: ReviewHunk["level"]; // skip: under a ranked review's fold; null: no ranking
+  why: string | null; // Claude's few words, why it wasn't read, or why the file isn't worth reviewing
+  hunks: ReviewHunk[]; // none for a file with no text diff
+  notes: number[]; // indices into ai.notes, in reading order
+}
+
+// The desk's reading order as sections: ranked, then unread, then from `rest` on, the files not worth reviewing.
+export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
+  const list: Section[] = [];
+  for (const h of [...o.chunks, ...o.unread]) {
+    const last = list.at(-1);
+    if (last?.path === h.path && last.level === h.level && last.why === h.why) {
+      last.hunks.push(h);
+      last.notes.push(...h.notes);
+    } else list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes] });
+  }
+  const rest = list.length;
+  for (const r of o.rest)
+    list.push({
+      key: `rest:${r.path}`,
+      path: r.path,
+      file: r.file,
+      level: o.ranked ? "skip" : null,
+      why: r.why,
+      hunks: r.hunks,
+      notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
+    });
+  return { list, rest };
+}
+
+// Whether a note sits on one of these hunks' lines; one that doesn't is about the whole file, above its diff.
+export function onLines(hunks: Pick<ReviewHunk, "header">[], n: Pick<ReviewNote, "side" | "line">): boolean {
+  return hunks.some((h) => {
+    const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.header);
+    const [from, count] = n.side === "old" ? [m?.[1], m?.[2]] : [m?.[3], m?.[4]];
+    return !!from && n.line >= Number(from) && n.line < Number(from) + Number(count ?? 1);
+  });
 }
 
 // "src/planner/" and "plan.ts", so the name can stay whole while the folder truncates.
@@ -170,8 +206,8 @@ export function resolvedHead(events: ActivityEvent[], resolved: string, me: stri
   return { line: `Resolved: ${resolved}${who}`, events: events.filter((e) => e !== cause && e.kind !== "resolved") };
 }
 
-// Which file the reader is in: the last one whose top has scrolled past the line under the top bar. At the page's end the
-// last files can't reach that line, so it's the last one.
+// Which section the reader is in: the last one whose top has scrolled past the line under the top bar. At the page's end
+// the last ones can't reach that line, so it's the last one.
 export function currentFile(tops: number[], line: number, atEnd = false): number {
   if (atEnd) return Math.max(0, tops.length - 1);
   let cur = 0;
@@ -267,10 +303,9 @@ export function cardFacts(
   c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "cleared_by_coordinator" | "placed_by">,
   me: string,
   away = false,
-  inRun = false, // its stack's head names the author
 ): string[] {
   const out: string[] = [];
-  if (c.author.toLowerCase() !== me.toLowerCase() && !inRun) out.push(`by ${c.author}`);
+  if (c.author.toLowerCase() !== me.toLowerCase()) out.push(`by ${c.author}`);
   // Nobody asked you by name: a why like "close collaborator" doesn't say so.
   if (c.team_ask && !c.why.includes("@")) out.push(c.team_ask);
   if (c.kind === "pr" && c.ci === "green" && !/\bgreen\b/i.test(c.why)) out.push("CI passing");
