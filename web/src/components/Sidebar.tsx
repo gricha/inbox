@@ -2,7 +2,7 @@ import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import type { Route } from "../view.ts";
 
-// Sources of work, one entry each (just GitHub for now), your PRs in flight, and Settings in the footer.
+// Sources of work, one entry each (just GitHub for now), your PRs in Merging, and Settings in the footer.
 export function Sidebar({
   route,
   from,
@@ -55,9 +55,9 @@ export function Sidebar({
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight ? `${flight.total} in flight, ${flight.needs_you} need you (g i)` : "Your PRs in flight (g i)"}
+          title={flight ? `${flight.total} merging, ${flight.needs_you} need you (g m)` : "Your PRs Claude is getting merged (g m)"}
         >
-          <span className="side-name">In flight</span>
+          <span className="side-name">Merging</span>
           <span className="side-count">{flight && flight.total > 0 ? flight.total : ""}</span>
         </a>
       </nav>

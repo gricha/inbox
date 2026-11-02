@@ -435,7 +435,7 @@ test("your PR's card carries who last spoke on it; nobody asked you by name says
   t.cleanup();
 });
 
-test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in flight that needs you stays", async () => {
+test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging that needs you stays", async () => {
   const days = (d: number) => hoursAgo(d * 24);
   const t = await setup([
     myPr(20631, { ci: "green", mergeable: "conflict", updated_at: days(143) }),
@@ -458,14 +458,14 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   assert.deepEqual(
     q.sections.now.map((c) => [c.id, c.why]),
     [
-      ["acme/web#8", "in flight: CI failing"],
+      ["acme/web#8", "merging: CI failing"],
       ["acme/api#1", "carol asked you directly"],
     ],
     "the ask came an hour ago, so it isn't quiet whatever updated_at says",
   );
   assert.deepEqual(
     q.sections.today.map((c) => [c.id, c.next]),
-    [["acme/web#7", "merge conflict with main: d puts it in flight"]],
+    [["acme/web#7", "merge conflict with main: m hands it off for merge"]],
   );
   assert.equal(q.sections.now[0]?.next, undefined, "its why says it, and Enter on its keys opens the lane");
 
@@ -479,7 +479,7 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   );
   assert.equal(
     t.desk.queue().sections.today.find((c) => c.id === "acme/web#7")?.next,
-    "merge conflict with main: d hands it to a babysitter",
+    "merge conflict with main: m hands it off for merge",
   );
   t.cleanup();
 });

@@ -244,12 +244,15 @@ interface Seed {
   resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
   judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
-  fly?: Flight; // your PR, in flight (with st.inflight_at): what its babysitter is up to
+  fly?: Flight; // your PR, in Merging (with st.inflight_at): what Claude is up to
+  automerge?: boolean; // your PR: GitHub's auto-merge is on
+  noauto?: boolean; // your PR: its repo doesn't allow auto-merge
+  back?: string; // your PR, handed back from Merging: Claude's reason
   checks?: string[]; // your PR: its failing checks' names
   optional?: string[]; // those of them the base branch doesn't require
 }
 
-// A canned babysitter state for the In-flight lane; the mock never runs one.
+// A canned Claude state for Merging; the mock never runs one.
 interface Flight {
   sitter?: SitterStatus; // default: watching
   needs?: string; // why it's back with you, besides a question or a draft
@@ -257,7 +260,7 @@ interface Flight {
   draft?: Pick<Draft, "to" | "quote" | "body">;
   failing?: string[];
   waiting?: string[];
-  step?: string; // what a running babysitter is doing
+  step?: string; // what Claude is running
   session?: string; // the latest run's Claude Code session
 }
 
@@ -615,6 +618,7 @@ const SEEDS: Seed[] = [
     fresh: true,
     on: { "work-mine": ["cr"] },
     st: { inflight_at: iso(26) },
+    automerge: true,
     fly: {
       sitter: { state: "done", text: "pushed a fix for 3 comments · 4be71c2", since: iso(0.4) },
       draft: {
@@ -658,6 +662,7 @@ const SEEDS: Seed[] = [
     size: [8, 3, 1],
     on: { "work-mine": ["red"] },
     st: { inflight_at: iso(3) },
+    noauto: true,
     fly: {
       sitter: { state: "running", text: "fixing CI", since: iso(4 / 60) },
       failing: ["test (20.x)"],
@@ -709,6 +714,7 @@ const SEEDS: Seed[] = [
     size: [45, 120, 9],
     on: { "work-mine": [] },
     st: { inflight_at: iso(28) },
+    automerge: true,
     // A CODEOWNERS-sized list of teams, so the lane's "waiting on" has to stay short.
     fly: {
       sitter: { state: "idle", text: "watching", since: null },
@@ -847,13 +853,10 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [70, 8, 3],
     on: { "personal-mine": ["red"] },
-    st: { inflight_at: iso(19) },
-    fly: {
-      sitter: { state: "blocked", text: "no local clone of oss/tinyhttp", since: null },
-      needs: "no local clone of oss/tinyhttp, so no babysitter",
-      failing: ["node 22", "lint"],
-      waiting: ["ana-k"],
-    },
+    // Claude had nowhere to work on it, so it's back on your desk; the auto-merge m turned on stays until you turn it off.
+    back: "no local clone of oss/tinyhttp",
+    automerge: true,
+    checks: ["node 22", "lint"],
   },
   {
     repo: "acme/worker",
@@ -1235,6 +1238,7 @@ function chips(r: Rec): string[] {
   if (sig.pr.review === "changes_requested") out.push("changes requested");
   if (sig.pr.review === "approved") out.push("approved");
   if (sig.pr.unresolved_threads) out.push(`${sig.pr.unresolved_threads} unresolved`);
+  if (r.seed.automerge && !r.seed.resolved) out.push("auto-merge on");
   if (sig.item.kind === "pr") out.push(`+${sig.pr.additions} −${sig.pr.deletions}`);
   return out;
 }
@@ -1276,7 +1280,8 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
-    ...(!inFlight(r) && placedBy(p) && { placed_by: placedBy(p) }),
+    ...(handedBack(r) && { handed_back: true }),
+    ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
   };
 }
 
@@ -1323,7 +1328,8 @@ function focus(): FocusView {
   const best = new Map<string, Card>();
   for (const b of config.boards) {
     for (const { r, p } of boardPlacements(b)) {
-      if (status(r) !== "active" || r.seed.resolved || laneOwned(r) || (p.bucket !== "now" && p.bucket !== "today")) continue;
+      if (status(r) !== "active" || r.seed.resolved || laneOwned(r) || handedBack(r) || (p.bucket !== "now" && p.bucket !== "today"))
+        continue;
       const cur = best.get(r.id);
       if (!cur || RANK[p.bucket] < RANK[cur.bucket]) best.set(r.id, cardOf(r, p));
     }
@@ -1357,7 +1363,7 @@ function queue(): QueueView {
         if (!resolved.has(r.id) && yours && (r.seed.upd ?? 1) <= 24) resolved.set(r.id, cardOf(r, p));
         continue;
       }
-      if (laneOwned(r)) continue; // the In-flight lane has it
+      if (laneOwned(r) || handedBack(r)) continue; // Merging has it, or it's at the top of Now
       if (status(r) !== "active") {
         if (!cleared.has(r.id)) cleared.set(r.id, cardOf(r, p));
         continue;
@@ -1403,7 +1409,7 @@ function top(c: Card): Card {
       const f = flightOf(r);
       const resume = laneRow(r).resume;
       if (f.question) Object.assign(out, { escalated: true }, resume && { resume });
-      // As Desk.neededSince(): when it started needing you, never before d.
+      // As Desk.neededSince(): when it started needing you, never before m.
       const at = f.question?.at ?? reply?.at ?? "";
       const from = r.state.inflight_at ?? out.waiting_since;
       out.waiting_since = at > from ? at : from;
@@ -1458,7 +1464,7 @@ function nextOf(r: Rec): string | undefined {
   const sig = signals(r);
   const ready = sig.pr.review === "approved" && sig.pr.ci === "green" && sig.pr.mergeable === "clean" && !sig.item.draft;
   if (laneOwned(r) || ready) return undefined;
-  const hand = setting("inflight.babysit") ? "d hands it to a babysitter" : "d puts it in flight";
+  const hand = "m hands it off for merge";
   if (sig.pr.mergeable === "conflict") return `merge conflict with ${sig.pr.base}: ${hand}`;
   if (sig.pr.ci === "red") return `CI failing: ${hand}`;
   if (sig.pr.review === "changes_requested") return `changes requested: ${hand}`;
@@ -1469,7 +1475,8 @@ function nextOf(r: Rec): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// In flight, like src/desk.ts: your open PRs marked done leave the buckets for the lane, and come back to Now when they need you.
+// Merging, like src/desk.ts: your open PRs handed off leave the buckets for Merging, and come back to Now when they need you,
+// or for good when Claude hands them back.
 
 const flights = new Map<string, { question: { question: string; at: string } | null; drafts: Draft[] }>();
 for (const r of recs) {
@@ -1489,14 +1496,15 @@ function flightOf(r: Rec) {
 
 const inFlight = (r: Rec) => !!r.state.inflight_at && r.seed.author === ME && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
 const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
+const handedBack = (r: Rec) => !!r.seed.back && !inFlight(r) && !r.seed.resolved && status(r) === "active";
 
 function needsYou(r: Rec): string | null {
   if (!laneOwned(r)) return null;
   const f = flightOf(r);
   const unsent = f.drafts.filter((d) => !d.sent_at).length;
-  if (f.question) return `babysitter asks: ${f.question.question}`;
+  if (f.question) return `Claude asks: ${f.question.question}`;
   if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
-  // As babysit.ts: with babysitting off, nobody works on it, so the problem itself is why it's back with you.
+  // As babysit.ts: with Claude off, nobody works on it, so the problem itself is why it's back with you.
   if (!setting("inflight.babysit")) {
     const sig = signals(r);
     if (sig.pr.ci === "red") return "CI failing";
@@ -1506,17 +1514,18 @@ function needsYou(r: Rec): string | null {
   return r.seed.fly?.needs ?? null;
 }
 
-// As Desk.compute(): among other people's asks, it says it's your PR in flight unless it already says who's asking.
+// As Desk.compute(): among other people's asks, it says it's your PR in Merging unless it already says who's asking.
 function needsWhy(r: Rec): string | null {
   const needs = needsYou(r);
-  return needs && !flightOf(r).question ? `in flight: ${needs}` : needs;
+  return needs && !flightOf(r).question ? `merging: ${needs}` : needs;
 }
 
-// As Desk.shownAt(): Now with its reason when it needs you, else calm, as in the lane.
+// As Desk.shownAt(): Now with its reason when it needs you, else calm, as in Merging; handed back, at the top of Now.
 function shownAt(r: Rec, p: Placement): Placement {
+  if (handedBack(r)) return { ...p, bucket: "now", why: `handed back: ${r.seed.back}` };
   if (!laneOwned(r)) return p;
   const why = needsWhy(r);
-  return why ? { ...p, bucket: "now", why } : { ...p, bucket: "fyi", why: "in flight" };
+  return why ? { ...p, bucket: "now", why } : { ...p, bucket: "fyi", why: "merging" };
 }
 
 function bestPlacement(r: Rec): Placement {
@@ -1528,7 +1537,7 @@ function bestPlacement(r: Rec): Placement {
   return best ?? { board: "", bucket: "later", rule_bucket: "later", rule: null, why: "", trace: [] };
 }
 
-const needsCards = () => recs.flatMap((r) => (needsYou(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
+const needsCards = () => recs.flatMap((r) => (needsYou(r) || handedBack(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
 
 function laneRow(r: Rec): InflightRow {
   const s = r.seed;
@@ -1536,7 +1545,7 @@ function laneRow(r: Rec): InflightRow {
   const sig = signals(r);
   const by = (st: ReviewState) => (s.reviews ?? []).filter(([a, x]) => x === st && a !== ME).map(([a]) => a);
   const off = !setting("inflight.babysit");
-  // Off, nothing watches it or works on it (the lane's intro says so once); a question already asked still waits.
+  // Off, nothing watches it or works on it (Merging's intro says so once); a question already asked still waits.
   const sitter: SitterStatus = f.question
     ? { state: "waiting", text: `needs you: ${f.question.question}`, since: f.question.at }
     : off
@@ -1577,6 +1586,8 @@ function laneRow(r: Rec): InflightRow {
         }
       : null,
     resume: session && !s.resolved ? `cd ~/.review-desk/worktrees/${owner}/${name}-${s.n} && claude --resume ${session}` : null,
+    auto_merge: !!s.automerge && !s.resolved,
+    merge_note: !s.automerge && !s.resolved && s.noauto ? "the repo doesn't allow auto-merge" : null,
   };
 }
 
@@ -1589,7 +1600,7 @@ function inflight(): InflightView {
   };
 }
 
-// Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves the lane.
+// Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves Merging.
 function laneAction(r: Rec, what: string, draftId: string | undefined): unknown {
   const f = flightOf(r);
   if (what === "send") {
@@ -1662,7 +1673,7 @@ function overview(): Overview {
     ],
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
     focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
-    inflight: { total: recs.filter(inFlight).length, needs_you: needsCards().length },
+    inflight: { total: recs.filter(inFlight).length, needs_you: recs.filter((r) => needsYou(r)).length },
     rate_limit: rateLimit(),
     coordinator: { state: coordinatorStatus().state, acted: acted() },
   };
@@ -1716,11 +1727,12 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
   else if (action === "seen") st.seen_at = now;
   else if (action === "inflight") {
     if (r.seed.author !== ME || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
-      throw new HttpError(409, `only your own open PRs go in flight; ${r.id} isn't one`);
-    if (st.inflight_at) throw new HttpError(409, `${r.id} is already in flight`);
+      throw new HttpError(409, `only your own open PRs are handed off for merge; ${r.id} isn't one`);
+    if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
     st.inflight_at = now;
+    r.seed.back = undefined;
   } else if (action === "takeback") {
-    if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in flight`);
+    if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in Merging`);
     st.inflight_at = null;
   } else throw new HttpError(400, `unknown action: ${action as string}`);
   const fresh = r.fresh;
@@ -2667,6 +2679,20 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     }
   }
   if (route === "GET /api/inflight") return inflight();
+  // m and b: auto-merge goes on with a hand-off and off with Back to desk, as far as the mock pretends.
+  const hand = /^\/api\/inflight\/(.+)\/(handoff|back)$/.exec(url.pathname);
+  if (hand && req.method === "POST") {
+    const r = resolve(decodeURIComponent(hand[1]!));
+    const { state } = act(r, hand[2] === "handoff" ? "inflight" : "takeback");
+    const had = !!r.seed.automerge;
+    const why = !setting("inflight.auto_merge")
+      ? "auto-merge is off in Settings"
+      : r.seed.noauto
+        ? "the repo doesn't allow auto-merge"
+        : null;
+    r.seed.automerge = hand[2] === "handoff" ? had || !why : false;
+    return hand[2] === "handoff" ? { ok: true, state, auto_merge: { on: !had && !why, why } } : { ok: true, state, auto_merge_off: had };
+  }
   const lane = /^\/api\/inflight\/(.+)\/(send|dismiss)$/.exec(url.pathname);
   if (lane && req.method === "POST") {
     const { draft_id } = await readBody(req);

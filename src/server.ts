@@ -40,7 +40,7 @@ const byOf = (c: { req: { header(name: string): string | undefined } }) => ({
   pr: c.req.header("x-desk-pr"),
 });
 
-// The desk's own page, for its GitHub writes (approve, Send): a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, Send, m and b): a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -130,7 +130,7 @@ export function createApp(desk: Desk, port: number): Hono {
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
   });
-  // In flight: your own PRs that babysitters keep moving.
+  // Merging: your own PRs you handed off, which Claude (their babysitters) gets merged.
   app.get("/api/inflight", (c) => {
     ready();
     return c.json(desk.inflight());
@@ -142,7 +142,7 @@ export function createApp(desk: Desk, port: number): Hono {
     if (typeof v !== "string" || (!optional && !v)) throw new DeskError(400, `${name} must be a string`);
     return v;
   };
-  // desk_draft_reply and desk_escalate: local only, so agents may call them.
+  // desk_draft_reply and desk_escalate (with hand_back too): local only, so agents may call them.
   app.post("/api/inflight/:id{.+}/draft", async (c) => {
     ready();
     const b = await fields(c);
@@ -151,7 +151,9 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/inflight/:id{.+}/escalate", async (c) => {
     ready();
-    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str((await fields(c)).question, "question")!, byOf(c)) });
+    const b = await fields(c);
+    if (b.hand_back !== undefined && typeof b.hand_back !== "boolean") throw new DeskError(400, "hand_back must be true or false");
+    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str(b.question, "question")!, byOf(c), b.hand_back === true) });
   });
   app.post("/api/inflight/:id{.+}/dismiss", async (c) => {
     ready();
@@ -163,6 +165,17 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
     return c.json({ ok: true, ...(await desk.sendDraft(c.req.param("id"), str((await fields(c)).draft_id, "draft_id")!)) });
+  });
+  // m and b turn GitHub's auto-merge on and off with the hand-off, so they too come from the desk's own window only.
+  app.post("/api/inflight/:id{.+}/handoff", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "hand a PR off for merge from the desk's window, by you (m)");
+    return c.json({ ok: true, ...(await desk.handOff(c.req.param("id"))) });
+  });
+  app.post("/api/inflight/:id{.+}/back", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "bring a PR back to the desk from the desk's window, by you (b)");
+    return c.json({ ok: true, ...(await desk.backToDesk(c.req.param("id"))) });
   });
   app.post("/api/undo", async (c) => {
     ready();
@@ -286,7 +299,7 @@ export async function startServer(
     home?: string;
     notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
     log?: (msg: string) => void;
-    writer?: GitHubWriter; // a stand-in for live checks that must not approve or send anything
+    writer?: GitHubWriter; // a stand-in for live checks that must not write to GitHub
   } = {},
 ): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);

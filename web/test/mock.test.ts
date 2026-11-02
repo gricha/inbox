@@ -75,7 +75,7 @@ test("overview, focus and every board", async () => {
     assert.equal(v.cleared.length, b.counts.cleared);
     assert.ok(cards.every((c) => c.board === b.id && c.boards.includes(b.id)));
   }
-  assert.ok(total >= 25, `~30 cards (less your PRs in flight), got ${total}`);
+  assert.ok(total >= 25, `~30 cards (less your PRs in Merging), got ${total}`);
   // Filtered items aren't on the board (src/rules.ts), not under "hidden".
   const { data: wr } = await call<BoardView>("GET", "/api/boards/work-review");
   assert.ok(![...Object.values(wr.sections).flat(), ...wr.hidden].some((c) => c.id === "acme/web#2279"));
@@ -108,7 +108,7 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
   );
   assert.deepEqual([of("acme/worker#860").preflight, of("acme/worker#860").next], [{ state: "none" }, undefined], "an issue");
   assert.equal(of("me/notes-app#12").preflight?.state, "none");
-  assert.equal(of("me/notes-app#12").next, "3 unresolved threads: d hands it to a babysitter");
+  assert.equal(of("me/notes-app#12").next, "3 unresolved threads: m hands it off for merge");
   // Enter and o are on every card's keys, so a next step that would only name them is left out.
   assert.equal(of("acme/api#4110").next, undefined);
   assert.equal(of("acme/worker#875").next, undefined);
@@ -390,32 +390,32 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 409);
 });
 
-test("in flight: the lane's states, needs-you cards at the top of Now, send and take back", async () => {
+test("Merging: its states, needs-you and handed-back cards at the top of Now, send, hand off and back to desk", async () => {
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");
   const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
   assert.deepEqual(
     lane.rows.map((r) => [r.card.id, r.needs_you !== null, r.sitter.state]),
     [
       ["acme/api#4122", true, "done"],
-      ["oss/tinyhttp#205", true, "blocked"],
       ["acme/api#4110", true, "waiting"],
       ["acme/web#2295", false, "running"],
       ["acme/api#4105", false, "idle"],
       ["acme/worker#871", false, "done"],
     ],
   );
-  assert.equal(row("oss/tinyhttp#205").sitter.text, "no local clone of oss/tinyhttp");
   assert.equal(row("acme/worker#871").state, "merged");
+  assert.deepEqual([row("acme/api#4105").auto_merge, row("acme/web#2295").merge_note], [true, "the repo doesn't allow auto-merge"]);
   const { data: q } = await call<QueueView>("GET", "/api/queue");
-  const now = q.sections.now.filter((c) => c.inflight).map((c) => [c.id, c.why]);
+  const now = q.sections.now.filter((c) => c.inflight || c.handed_back).map((c) => [c.id, c.why]);
   assert.deepEqual(now.slice(0, 3), [
-    ["acme/api#4122", "in flight: reply ready to send"],
-    ["acme/api#4110", `babysitter asks: ${row("acme/api#4110").escalation!.question}`],
-    ["oss/tinyhttp#205", "in flight: no local clone of oss/tinyhttp, so no babysitter"],
+    ["acme/api#4122", "merging: reply ready to send"],
+    ["acme/api#4110", `Claude asks: ${row("acme/api#4110").escalation!.question}`],
+    ["oss/tinyhttp#205", "handed back: no local clone of oss/tinyhttp"],
   ]);
-  assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "the babysitter has it");
+  assert.ok(q.sections.now.find((c) => c.id === "oss/tinyhttp#205")?.chips.includes("auto-merge on"), "auto-merge still on");
+  assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "Claude has it");
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.inflight, { total: 5, needs_you: 3 });
+  assert.deepEqual(o.inflight, { total: 4, needs_you: 2 });
 
   const id = encodeURIComponent("acme/api#4122");
   const draft = row("acme/api#4122").drafts[0]!;
@@ -424,13 +424,15 @@ test("in flight: the lane's states, needs-you cards at the top of Now, send and 
   const { data: sent } = await call<InflightView>("GET", "/api/inflight");
   assert.equal(sent.rows.find((r) => r.card.id === "acme/api#4122")?.needs_you, null);
 
-  assert.equal((await call("POST", "/api/act", { id: "acme/api#4127", action: "inflight" })).status, 409, "not your PR");
-  const { data: back } = await call<{ undo_seq: number }>("POST", "/api/act", { id: "acme/web#2295", action: "takeback" });
+  assert.equal((await call("POST", `/api/inflight/${encodeURIComponent("acme/api#4127")}/handoff`)).status, 409, "not your PR");
+  const web = encodeURIComponent("acme/web#2295");
+  assert.equal((await call("POST", `/api/inflight/${web}/back`)).status, 200);
   const { data: q2 } = await call<QueueView>("GET", "/api/queue");
   assert.ok(
     Object.values(q2.sections)
       .flat()
       .some((c) => c.id === "acme/web#2295" && !c.inflight),
   );
-  await call("POST", "/api/undo", { seq: back.undo_seq });
+  const { data: again } = await call<{ auto_merge: { on: boolean; why: string } }>("POST", `/api/inflight/${web}/handoff`);
+  assert.deepEqual(again.auto_merge, { on: false, why: "the repo doesn't allow auto-merge" });
 });

@@ -102,7 +102,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string, reason?: string) =>
       call<ActResult>("POST", "/api/act", { id, action, until, reason }),
-    // `agent`: an agent asks (desk_undo), so the desk keeps your in-flight marks out of its reach.
+    // `agent`: an agent asks (desk_undo), so the desk keeps your hand-offs out of its reach.
     undo: (seq?: number, agent?: boolean) =>
       call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", agent ? { seq, agent } : { seq }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
@@ -119,11 +119,11 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
     status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
     aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${q(id)}/ai`, { force }, 360_000),
-    // Local only: a draft waits for you to send it from the In-flight lane, and no client can send it.
+    // Local only: a draft waits for you to send it from Merging, and no client can send it.
     draftReply: (id: string, body: string, thread_id?: string) =>
       call<{ ok: true; draft: Draft }>("POST", `/api/inflight/${q(id)}/draft`, { body, thread_id }),
-    escalate: (id: string, question: string) =>
-      call<{ ok: true; question: string }>("POST", `/api/inflight/${q(id)}/escalate`, { question }),
+    escalate: (id: string, question: string, hand_back?: boolean) =>
+      call<{ ok: true; question: string }>("POST", `/api/inflight/${q(id)}/escalate`, { question, hand_back }),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));

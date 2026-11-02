@@ -332,19 +332,28 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
     },
   },
-  // Your PRs in flight: a reply to send, a question, no local clone, CI being fixed, one waiting on reviewers, one landed.
+  // Merging: a reply to send, a question, CI being fixed where the repo has no auto-merge, one waiting with auto-merge on,
+  // one merged.
   { name: "inflight", go: at("#/inflight") },
   {
     name: "inflight-question",
     go: async (page) => {
       await at("#/inflight")(page);
       await page.keyboard.press("j");
-      await page.keyboard.press("j");
       await page.waitForTimeout(200);
     },
   },
   {
-    // Merged and closed ones under Landed, below the fold at every size.
+    // Claude handed it back (no local clone): at the top of Now with its reason, auto-merge still on, m to hand it off again.
+    name: "handed-back",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator('.row[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Merged and closed ones under Merged, below the fold at every size.
     name: "inflight-landed",
     go: async (page) => {
       await at("#/inflight")(page);
@@ -353,7 +362,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Enter on a lane row: its review says what the lane says, and Esc goes back to the lane.
+    // Enter on a Merging row: its review says what Merging says, and Esc goes back there.
     name: "review-inflight",
     go: async (page) => {
       await at("#/inflight")(page);
@@ -454,7 +463,7 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Babysitting off: the intro says so once, a PR that needs you has its problem as its why, nothing says "watching".
+    // Claude off: the intro says so once, a PR that needs you has its problem as its why, nothing says "watching".
     name: "inflight-babysit-off",
     writes: true,
     go: async (page) => {

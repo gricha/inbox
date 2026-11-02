@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
-import { cardFacts, handLabel, judgeStepText, says } from "../view.ts";
+import { cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
@@ -131,10 +131,10 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <div className="actions card-keys">
           <KeyButton k="esc" label="Close" run={run} />
           <KeyButton k="o" label="Open on GitHub" run={run} />
-          {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
+          {mine && <HandKey card={card} run={run} />}
           <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
           <KeyButton k="s" label="Snooze" run={run} />
-          <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
+          {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
         </div>
       </div>
     );
@@ -190,12 +190,12 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       {why}
       {activity}
       <div className="actions card-keys">
-        {pr && <KeyButton k="enter" label={card.inflight ? "Show in flight" : "Review"} run={run} />}
+        {pr && <KeyButton k="enter" label={card.inflight ? "Show in Merging" : "Review"} run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
-        {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
+        {mine && <HandKey card={card} run={run} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
-        <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />
+        {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
         <KeyButton k="p" label={card.pinned ? "Unpin" : "Pin"} run={run} />
         <KeyButton k="c" label="Copy prompt" run={run} />
         <KeyButton k="w" label={ctx.showSignals ? "Hide signals" : "Signals"} run={run} />
@@ -252,6 +252,20 @@ export function Dots({ parts, className }: { parts: ReactNode[]; className?: str
         <span key={i}>{p}</span>
       ))}
     </span>
+  );
+}
+
+// Your own open PR: m hands it off for merge, b brings it back from Merging. The same on a card, an opened item and a review.
+export function HandKey({ card, run }: { card: Pick<Card, "inflight">; run: (k: string) => void }) {
+  return card.inflight ? (
+    <KeyButton k="b" label="Back to desk" title="Claude stops, and auto-merge goes off if the desk turned it on" run={run} />
+  ) : (
+    <KeyButton
+      k="m"
+      label="Hand off for merge"
+      title="You're done: Claude gets it merged, and GitHub's auto-merge goes on where the repo allows it"
+      run={run}
+    />
   );
 }
 

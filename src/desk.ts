@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { answerable, Babysitter, threadRef, worktreePath, type SitterOptions } from "./babysit.ts";
+import { answerable, autoMerging, Babysitter, threadRef, worktreePath, type Sitter, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -78,7 +78,7 @@ const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same co
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
-const LANDED = 3 * 24 * HOUR; // an in-flight PR that merged or closed stays in the lane this long
+const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_DRAFT = 5_000;
 const MAX_QUESTION = 300;
@@ -100,7 +100,7 @@ interface Entry {
   status: Status;
   isNew: boolean;
   resolved: Resolution | null;
-  inflight: boolean; // your open PR, marked in flight: the lane has it, not the queue's buckets
+  inflight: boolean; // your open PR, handed off for merge: Merging has it, not the queue's buckets
 }
 
 interface Snapshot {
@@ -110,10 +110,10 @@ interface Snapshot {
   reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
-  needs: Map<string, string>; // in-flight PRs back in Now: why they need you
+  needs: Map<string, string>; // PRs in Merging that need you, and ones Claude handed back: why, at the top of Now
 }
 
-// In the lane rather than anywhere in the queue: in flight, and not snoozed, muted or done.
+// In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
 
 export interface DeskOptions {
@@ -123,7 +123,7 @@ export interface DeskOptions {
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
-  writer?: GitHubWriter; // approve and send; without it both are off
+  writer?: GitHubWriter; // approve, send and auto-merge; without it they're off
   mcpUrl?: string; // the desk's own MCP endpoint, for the coordinator; without it the coordinator is off
   babysit?: SitterOptions;
 }
@@ -799,14 +799,22 @@ export class Desk {
         if (!cur || RANK[p.bucket] < RANK[cur.bucket] || (p.bucket === cur.bucket && p.hard && !cur.hard)) best.set(id, p);
       }
     }
-    // An in-flight PR comes back to Now only when it needs you, with the reason as its why.
+    // A PR in Merging comes back to Now only when it needs you, with the reason as its why; one Claude handed back is on your
+    // desk again, at the top, until you deal with it (done, or m again).
     const needs = new Map<string, string>();
+    const sitters = this.store.prefixed<Partial<Sitter>>("sitter:");
     for (const e of entries.values()) {
-      if (!laneOwned(e)) continue;
-      const v = this.sitterView(e.item);
-      if (!v.needs_you) continue;
-      // Among other people's asks, say it's your PR in flight, unless it already says who's asking.
-      const why = v.escalation && v.escalation.by !== "desk" ? v.needs_you : `in flight: ${v.needs_you}`;
+      let why: string;
+      if (laneOwned(e)) {
+        const v = this.sitterView(e.item);
+        if (!v.needs_you) continue;
+        // Among other people's asks, say it's your PR in Merging, unless it already says who's asking.
+        why = v.escalation && v.escalation.by !== "desk" ? v.needs_you : `merging: ${v.needs_you}`;
+      } else {
+        const back = sitters.get(e.item.id)?.handback;
+        if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
+        why = `handed back: ${back.reason}`;
+      }
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
@@ -825,10 +833,11 @@ export class Desk {
     if (it.review_decision === "changes_requested") chips.push("changes requested");
     if (it.review_decision === "approved") chips.push("approved");
     if (it.threads_unresolved > 0) chips.push(`${it.threads_unresolved} unresolved`);
+    if (it.auto_merge && it.state === "open") chips.push("auto-merge on");
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
-    const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in flight is the lane's
+    const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is Claude's
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -861,6 +870,7 @@ export class Desk {
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
+      ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
       ...(by && { placed_by: by }),
     };
   }
@@ -906,13 +916,16 @@ export class Desk {
         today: focus.sections.today.length,
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
       },
-      inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length, needs_you: snap.needs.size },
+      inflight: {
+        total: [...snap.entries.values()].filter((e) => e.inflight).length,
+        needs_you: [...snap.needs.keys()].filter((id) => snap.entries.get(id)?.inflight).length,
+      },
       rate_limit: this.gh.api.rateLimit(),
       coordinator: { state: this.coordinator.state(), acted: this.coordinator.acted() },
     };
   }
 
-  // Your in-flight PRs that need you, at the top of Now.
+  // Your PRs in Merging that need you, and those Claude handed back, at the top of Now.
   needsCards(snap: Snapshot, seen: Set<string>): Card[] {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
@@ -965,7 +978,7 @@ export class Desk {
     return c;
   }
 
-  // When your PR in flight started needing you: its question or reply, else the latest conflict or red CI; never before d.
+  // When your PR in Merging started needing you: its question or reply, else the latest conflict or red CI; never before m.
   neededSince(e: Entry, v: Pick<InflightRow, "escalation" | "drafts">): string {
     const raised = this.store
       .activity({ after: 0, limit: 20, item: e.item.id, latest: true })
@@ -1002,13 +1015,12 @@ export class Desk {
   }
 
   // Your own open PR: what's up with it, and the key that deals with it. Nothing when its why and the card's keys say it all
-  // (in flight: Enter opens it in the lane; approved and green: o merges it on GitHub).
+  // (in Merging: Enter opens it there; approved and green: o merges it on GitHub).
   nextStep(e: Entry): string | undefined {
     const it = e.item;
     const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
     if (e.inflight || ready) return undefined;
-    const s = this.settings;
-    const hand = s["inflight.babysit"] ? "d hands it to a babysitter" : "d puts it in flight";
+    const hand = "m hands it off for merge";
     if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
     if (it.ci === "red") return `CI failing: ${hand}`;
     if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
@@ -1036,7 +1048,7 @@ export class Desk {
     };
   }
 
-  // Now and Today in the order the queue shows them (and the AI reviews run): your in-flight PRs that need you, then each board's.
+  // Now and Today in the order the queue shows them (and the AI reviews run): your PRs that need you from Merging, then each board's.
   top(snap: Snapshot, seen: Set<string>): FocusView["sections"] {
     const loaded = this.requireConfig();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
@@ -1088,7 +1100,7 @@ export class Desk {
         if (seen.has(id)) continue;
         seen.add(id);
         const e = snap.entries.get(id)!;
-        if (laneOwned(e)) continue; // the In-flight lane shows it
+        if (laneOwned(e)) continue; // Merging shows it
         if (e.resolved) {
           const p = this.placementOf(id, snap);
           if (yours(e, p)) resolved.push(this.card(e, p, snap));
@@ -1121,11 +1133,11 @@ export class Desk {
     return all.sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
   }
 
-  // Where an item's card says it is: its best placement; a PR in flight that doesn't need you is calm, as in the lane,
-  // whatever its boards would say ("CI failing" is its babysitter's to fix).
+  // Where an item's card says it is: its best placement; a PR in Merging that doesn't need you is calm, as in Merging,
+  // whatever its boards would say ("CI failing" is Claude's to fix).
   shownAt(e: Entry, snap: Snapshot): Placement | null {
     const p = snap.best.get(e.item.id) ?? this.placementOf(e.item.id, snap);
-    return p && laneOwned(e) && !snap.needs.has(e.item.id) ? { ...p, bucket: "fyi", why: "in flight" } : p;
+    return p && laneOwned(e) && !snap.needs.has(e.item.id) ? { ...p, bucket: "fyi", why: "merging" } : p;
   }
 
   board(id: string): BoardView {
@@ -1418,9 +1430,9 @@ export class Desk {
     const before = this.store.state(id);
     const s: StateRow = { ...before };
     const entry = this.snapshot().entries.get(id)!;
-    // Its babysitter keeps working whatever its status, and a question it asks must stay in Now.
+    // Claude keeps working whatever its status, and a question it asks must stay in Now.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
-      throw new DeskError(409, `${id} is in flight, so its babysitter has it; take it back (d) first`);
+      throw new DeskError(409, `${id} is in Merging, so Claude has it; bring it back to the desk (b) first`);
     // Whatever policy it learned, what a hard rule placed stays on the owner's desk. A mute never lapses, so it would outlast a
     // later ask by name: what the coordinator clears comes back on new activity (done, snooze).
     const clears = action === "done" || action === "snooze" || action === "mute";
@@ -1428,6 +1440,8 @@ export class Desk {
       throw new DeskError(403, "the coordinator doesn't mute; mark it done or snooze it, so it comes back on new activity");
     if (by?.agent === "coordinator" && clears && [...this.snapshot().boards.values()].some((b) => b.result.placements.get(id)?.hard))
       throw new DeskError(403, `a hard rule keeps ${id} on the owner's desk; the coordinator can't clear it`);
+    if (by?.agent === "coordinator" && clears && !entry.inflight && this.snapshot().needs.has(id))
+      throw new DeskError(403, `Claude handed ${id} back to the owner; the coordinator can't clear it`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = entry.analysis.activity_at;
     switch (action) {
@@ -1474,18 +1488,18 @@ export class Desk {
         s.muted = false;
         break;
       case "inflight": {
-        // "I'm done": only your own open PR, and babysitters take it from here.
+        // Handed off for merge: only your own open PR, and Claude takes it from here.
         if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
-          throw new DeskError(409, `only your own open PRs go in flight; ${id} isn't one`);
-        if (s.inflight_at) throw new DeskError(409, `${id} is already in flight`);
+          throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
+        if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
         s.inflight_at = now.toISOString();
-        // The lane has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
+        // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
-        this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was in flight
+        this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was handed off
         break;
       }
       case "takeback":
-        if (!s.inflight_at) throw new DeskError(409, `${id} isn't in flight`);
+        if (!s.inflight_at) throw new DeskError(409, `${id} isn't in Merging`);
         s.inflight_at = null;
         break;
       default:
@@ -1496,19 +1510,22 @@ export class Desk {
     if (by?.agent === "coordinator" && seq)
       this.coordinator.logAct({ item_id: id, action, bucket, undo_seq: seq }, (by.reason ?? "").trim().slice(0, 300));
     this.changed();
-    // Taking a PR back stops its babysitter at once; marking one waits a moment, so an undo right after costs nothing.
+    // Back to desk stops Claude at once; a hand-off waits a moment, so an undo right after costs nothing.
     if (action === "inflight" || action === "takeback") this.sitter.consider(id, action === "takeback" ? 0 : undefined);
     const { snoozed_at: _, acked_at: __, ...state } = s;
     return { state, undo_seq: seq };
   }
 
-  // `agent`: who asks, when it isn't you. In-flight marks are yours (undoing one restarts or stops a babysitter), and the
-  // coordinator, woken by GitHub text, undoes only what it did itself.
+  // `agent`: who asks, when it isn't you. Hand-offs are yours (undoing one restarts or stops Claude), and the coordinator,
+  // woken by GitHub text, undoes only what it did itself.
   undo(seq?: number, agent?: string): { id: string; state: ItemState; action: Action } {
     const ev = this.store.lastAction(seq);
     if (!ev) throw new DeskError(404, "nothing to undo");
     if (agent && (ev.action === "inflight" || ev.action === "takeback"))
-      throw new DeskError(409, `only the user undoes ${ev.action === "inflight" ? "marking a PR in flight" : "taking a PR back"}`);
+      throw new DeskError(
+        409,
+        `only the user undoes ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"}`,
+      );
     if (agent === "coordinator" && ev.agent !== "coordinator")
       throw new DeskError(409, `that action on ${ev.item_id} wasn't yours; the coordinator undoes only its own (pass its seq)`);
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
@@ -1525,14 +1542,17 @@ export class Desk {
     return { id: ev.item_id, state, action: ev.action as Action };
   }
 
-  // ---------------------------------------------------------------- in flight
+  // ---------------------------------------------------------------- merging (in flight)
 
-  // The babysitter's side of one PR: its status, drafts, question, and why it's back with you.
-  sitterView(it: Item): Pick<InflightRow, "needs_you" | "escalation" | "outside_at" | "sitter" | "drafts" | "run" | "resume"> {
+  // Claude's side of one PR: its status, drafts, question, why it needs you, and whether GitHub merges it by itself.
+  sitterView(
+    it: Item,
+  ): Pick<InflightRow, "needs_you" | "escalation" | "outside_at" | "sitter" | "drafts" | "run" | "resume" | "auto_merge" | "merge_note"> {
     const s = this.sitter.record(it.id);
     const st = this.sitter.status(it.id, it, s);
     const run = s.runs.at(-1) ?? null;
     const wt = s.worktree ?? worktreePath(this.home, it.id);
+    const on = autoMerging(it, s);
     return {
       needs_you: this.sitter.needsYou(it, s, st),
       escalation: s.escalation,
@@ -1541,10 +1561,14 @@ export class Desk {
       drafts: s.drafts.filter((d) => !d.sent_at),
       run,
       resume: run && fs.existsSync(wt) ? `cd ${shellQuote(wt)} && claude --resume ${run.id}` : null,
+      auto_merge: on,
+      // The desk turned it on, and GitHub has it off since (someone turned it off, or a push did).
+      merge_note:
+        on || it.state !== "open" ? null : (s.auto_merge?.why ?? (s.auto_merge?.on ? "auto-merge was turned off on GitHub" : null)),
     };
   }
 
-  // GET /api/inflight: your in-flight PRs, open ones first (those that need you on top), then any that landed in the last 3 days.
+  // GET /api/inflight: your PRs in Merging, open ones first (those that need you on top), then any that merged or closed in the last 3 days.
   inflight(): InflightView {
     this.requireConfig();
     const snap = this.snapshot();
@@ -1590,17 +1614,17 @@ export class Desk {
     return { rows, babysitting: this.settings["inflight.babysit"] };
   }
 
-  // Your own open PR in flight, for what agents and the lane may do to it.
+  // Your own open PR in Merging, for what agents and Merging's keys may do to it.
   inflightEntry(ref: string): Entry {
     const e = this.pr(ref);
-    if (!e.inflight) throw new DeskError(409, `${e.item.id} isn't one of your open PRs in flight`);
+    if (!e.inflight) throw new DeskError(409, `${e.item.id} isn't one of your open PRs in Merging`);
     return e;
   }
 
-  // What an agent may say about your PR in flight: its own babysitter may (one PR each); the coordinator, woken by GitHub
+  // What an agent may say about your PR in Merging: its own babysitter may (one PR each); the coordinator, woken by GitHub
   // text about anything on the desk, may not.
   agentMay(id: string, by: { agent?: string; pr?: string } | undefined, what: string): Draft["by"] {
-    if (by?.agent === "coordinator") throw new DeskError(403, `the coordinator doesn't ${what} on PRs in flight; their babysitters do`);
+    if (by?.agent === "coordinator") throw new DeskError(403, `the coordinator doesn't ${what} on PRs in Merging; their babysitters do`);
     if (by?.agent === "babysitter" && by.pr !== id) throw new DeskError(403, `a babysitter can ${what} only on its own PR, ${by.pr}`);
     return by?.agent === "babysitter" ? "babysitter" : "agent";
   }
@@ -1650,13 +1674,18 @@ export class Desk {
   }
 
   // desk_escalate: a decision that's yours. The PR goes to Now with the question as its why; its babysitter waits.
-  escalate(ref: string, question: string, by?: { agent?: string; pr?: string }): { question: string } {
+  // With `handBack`, it can't realistically be merged: the PR leaves Merging for your desk with the line as its why.
+  escalate(ref: string, question: string, by?: { agent?: string; pr?: string }, handBack = false): { question: string } {
     const e = this.inflightEntry(ref);
-    const author = this.agentMay(e.item.id, by, "ask you questions");
+    const author = this.agentMay(e.item.id, by, handBack ? "hand PRs back" : "ask you questions");
     // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
     const q = question.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
-    if (!q) throw new DeskError(400, "the question is empty");
+    if (!q) throw new DeskError(400, handBack ? "the reason is empty" : "the question is empty");
     const clipped = q.length > MAX_QUESTION ? `${q.slice(0, MAX_QUESTION - 1)}…` : q;
+    if (handBack) {
+      this.handBack(e.item.id, clipped, author ?? "agent");
+      return { question: clipped };
+    }
     this.sitter.update(e.item.id, (s) => {
       s.escalation = { question: clipped, at: this.now().toISOString(), by: author };
     });
@@ -1666,7 +1695,7 @@ export class Desk {
     return { question: clipped };
   }
 
-  // The lane's x: drop a draft, or the question (and the babysitter looks at the PR again), or else outsiders' comments you've read.
+  // Merging's x: drop a draft, or the question (and Claude looks at the PR again), or else outsiders' comments you've read.
   dismiss(ref: string, draftId?: string): void {
     const e = this.pr(ref);
     const id = e.item.id;
@@ -1684,7 +1713,7 @@ export class Desk {
     this.sitter.consider(id, 0);
   }
 
-  // POST /api/inflight/:id/send: a drafted reply, posted to GitHub on your keypress. One of the desk's three writes.
+  // POST /api/inflight/:id/send: a drafted reply, posted to GitHub on your keypress. One of the desk's GitHub writes.
   async sendDraft(ref: string, draftId: string): Promise<{ url: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
@@ -1713,6 +1742,93 @@ export class Desk {
     this.changed();
     void this.sync();
     return { url };
+  }
+
+  // POST /api/inflight/:id/handoff: m on your own open PR. Claude gets it merged, and GitHub's auto-merge goes on where the
+  // repo allows it, a draft marked ready first: GitHub writes, so only on your keypress in the desk's window.
+  async handOff(ref: string): Promise<{ state: ItemState; auto_merge: NonNullable<Sitter["auto_merge"]> }> {
+    const id = this.pr(ref).item.id;
+    const { state } = this.act(id, "inflight");
+    let it = this.snapshot().entries.get(id)!.item;
+    if (it.auto_merge_allowed === undefined) {
+      await this.gh.refresh(id); // stored before the desk asked
+      it = this.store.itemsById([id]).get(id) ?? it;
+    }
+    const auto = await this.autoMergeOn(it);
+    this.sitter.update(id, (s) => {
+      s.auto_merge = auto;
+    });
+    this.changed();
+    return { state, auto_merge: auto };
+  }
+
+  async autoMergeOn(it: Item): Promise<NonNullable<Sitter["auto_merge"]>> {
+    const at = this.now().toISOString();
+    const no = (why: string | null) => ({ on: false, why, at });
+    if (!this.settings["inflight.auto_merge"]) return no("auto-merge is off in Settings");
+    if (it.auto_merge) return no(null); // on already: not the desk's to turn off
+    if (it.auto_merge_allowed === undefined) return no("the desk couldn't read whether the repo allows auto-merge");
+    if (!it.auto_merge_allowed) return no("the repo doesn't allow auto-merge");
+    if (!this.writer) return no("auto-merge isn't available in this desk");
+    try {
+      if (it.draft) {
+        await this.writer.ready(it.node_id);
+        this.store.logWrite(it.id, "ready", at);
+        this.log(`marked ${it.id} ready for review on GitHub`);
+      }
+      await this.writer.autoMerge(it.node_id, it.merge_method ?? "MERGE");
+    } catch (err) {
+      this.log(`couldn't turn on auto-merge for ${it.id}: ${(err as Error).message}`);
+      return no(`GitHub didn't turn auto-merge on: ${(err as Error).message}`);
+    } finally {
+      void this.gh.refresh(it.id);
+    }
+    this.store.logWrite(it.id, "auto_merge", at);
+    this.log(`turned on auto-merge for ${it.id} (${it.merge_method ?? "MERGE"})`);
+    return { on: true, why: null, at };
+  }
+
+  // POST /api/inflight/:id/back: Back to desk. Claude stops, and auto-merge goes off if the desk turned it on.
+  async backToDesk(ref: string): Promise<{ state: ItemState; auto_merge_off: boolean; error?: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const auto = this.sitter.record(id).auto_merge;
+    const { state } = this.act(id, "takeback");
+    if (!auto?.on || !this.writer || e.item.state !== "open") return { state, auto_merge_off: false };
+    const at = this.now().toISOString();
+    try {
+      await this.writer.autoMergeOff(e.item.node_id);
+    } catch (err) {
+      this.log(`couldn't turn off auto-merge for ${id}: ${(err as Error).message}`);
+      return { state, auto_merge_off: false, error: `GitHub didn't turn auto-merge off: ${(err as Error).message}` };
+    } finally {
+      void this.gh.refresh(id);
+    }
+    this.store.logWrite(id, "auto_merge_off", at);
+    this.log(`turned off auto-merge for ${id}`);
+    this.sitter.update(id, (s) => {
+      s.auto_merge = { on: false, why: "you turned it off with Back to desk", at };
+    });
+    this.changed();
+    return { state, auto_merge_off: true };
+  }
+
+  // Claude can't realistically get it merged: the PR leaves Merging for your desk with the reason as its why. Nothing goes
+  // to GitHub, so auto-merge stays as it is (the card says so).
+  handBack(id: string, reason: string, by: NonNullable<Sitter["handback"]>["by"]): void {
+    const before = this.store.state(id);
+    if (!before.inflight_at) return;
+    const at = this.now().toISOString();
+    this.store.putState({ ...before, inflight_at: null });
+    this.store.logAction(id, "takeback", before, at, by);
+    this.sitter.update(id, (s) => {
+      s.handback = { reason, at, by };
+      s.escalation = null;
+    });
+    this.log(`${by === "agent" ? "an agent" : "babysitter"}: handed ${id} back: ${reason}`);
+    this.changed();
+    this.sitter.consider(id, 0);
+    this.notifyNewNow();
   }
 
   // ---------------------------------------------------------------- config

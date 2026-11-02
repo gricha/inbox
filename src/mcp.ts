@@ -50,7 +50,7 @@ const compact = (c: Card) => ({
 });
 
 const cardLine = (c: Card) =>
-  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
+  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (merging)" : ""}`;
 
 function traceLines(p: Placement): string[] {
   const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}${p.floor ? `, hard: never below ${p.floor}` : ""}`}]${p.demoted ? ` (${p.demoted})` : ""}`;
@@ -113,7 +113,7 @@ async function overviewText(api: DeskClient): Promise<string> {
     `me: ${o.me} · synced: ${o.synced_at ?? "never"}${o.syncing ? " (syncing)" : ""}${o.sync_error ? ` · sync error: ${o.sync_error}` : ""}`,
     `sources: ${o.connectors.map((c) => `${c.name} ${c.status}`).join(", ")}`,
     `focus: ${o.focus.now} now, ${o.focus.today} today, ${o.focus.new} new`,
-    `in flight: ${o.inflight.total} of your PRs, ${o.inflight.needs_you} need you`,
+    `merging: ${o.inflight.total} of your PRs, ${o.inflight.needs_you} need you`,
   ];
   for (const s of o.spaces) {
     lines.push(`${s.name} (${s.id})`);
@@ -161,8 +161,8 @@ async function listText(api: DeskClient, board: string | undefined, buckets: Lis
 async function itemText(api: DeskClient, ref: string): Promise<string> {
   const d = await api.item(ref);
   const c = d.card;
-  // In flight: the user's own PR, which its babysitter has; desk_act's done, snooze and mute don't apply.
-  const flight = c.inflight ? " · in flight: the user's PR, its babysitter has it" : "";
+  // Merging: the user's own PR, which Claude (its babysitter) has; desk_act's done, snooze and mute don't apply.
+  const flight = c.inflight ? " · merging: the user's PR, handed off for merge; its babysitter has it" : "";
   const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}\n${c.url}`;
   return (
     head +
@@ -353,7 +353,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_undo",
     {
       description:
-        "Undo a local triage action. Pass the seq that desk_act returned; without it, undoes the most recent action from anyone (UI, CLI or agent). Marking a PR in flight and taking it back are the user's to undo, and the coordinator undoes only its own actions.",
+        "Undo a local triage action. Pass the seq that desk_act returned; without it, undoes the most recent action from anyone (UI, CLI or agent). Handing a PR off for merge and bringing it back are the user's to undo, and the coordinator undoes only its own actions.",
       inputSchema: { seq: z.number().int().positive().optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -386,7 +386,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_draft_reply",
     {
       description:
-        "Draft a reply on one of the user's own PRs that's in flight (marked done in the desk): to a review thread (thread_id, the thread's node id) or, without it, a comment on the PR. Nothing is posted: the draft waits in the desk's In-flight lane until the user sends it. A new draft for the same thread replaces the old one.",
+        "Draft a reply on one of the user's own PRs in Merging (handed off for merge in the desk): to a review thread (thread_id, the thread's node id) or, without it, a comment on the PR. Nothing is posted: the draft waits in the desk's Merging tab until the user sends it. A new draft for the same thread replaces the old one.",
       inputSchema: {
         ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
         thread_id: z.string().optional().describe("The review thread's node id (PRRT_…); omit for a comment on the PR"),
@@ -405,17 +405,20 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_escalate",
     {
       description:
-        "Hand a decision on one of the user's in-flight PRs back to them: the PR shows 'needs you: <question>' and goes to Now with the question as its why. Use it for anything that's theirs to decide (scope or API changes, disagreeing with a reviewer, a failure you can't explain), then stop working on the PR.",
+        "Hand a decision on one of the user's PRs in Merging back to them: the PR goes to Now with the question as its why, and stays in Merging. Use it for anything that's theirs to decide and lets you carry on once they answer (scope or API changes, disagreeing with a reviewer, a failure you can't explain), then stop working on the PR. With hand_back: true, the PR can't realistically be merged by you (a reviewer wants a redesign, it needs a product decision, CI you can't fix): it leaves Merging and goes back to the user's desk with `question` as the reason.",
       inputSchema: {
         ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
-        question: z.string().min(1).max(300).describe("One short question, one line"),
+        question: z.string().min(1).max(300).describe("One short question, one line; with hand_back, why you're handing it back"),
+        hand_back: z.boolean().optional().describe("true: give the PR back to the user's desk; you stop working on it"),
       },
       annotations: local,
     },
-    ({ ref, question }) =>
+    ({ ref, question, hand_back }) =>
       run(async () => {
-        const r = await api.escalate(ref, question);
-        return `${ref} is back with the user, in Now: "${oneLine(r.question)}"`;
+        const r = await api.escalate(ref, question, hand_back);
+        return hand_back
+          ? `${ref} is back on the user's desk, out of Merging: "${oneLine(r.question)}"`
+          : `${ref} is back with the user, in Now: "${oneLine(r.question)}"`;
       }),
   );
 

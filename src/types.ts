@@ -46,6 +46,9 @@ export interface Item {
   paths?: string[]; // PR only: its changed files' paths, the first 50 (changed_files counts all); absent on items stored before it was fetched
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
+  auto_merge?: boolean; // GitHub's auto-merge is on for it; PRs you authored only
+  auto_merge_allowed?: boolean; // the repo allows auto-merge; PRs you authored only
+  merge_method?: "MERGE" | "SQUASH" | "REBASE"; // the repo's default merge method for you; PRs you authored only
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
   // trusted: the author is a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); absent on items stored before the desk asked
@@ -342,7 +345,7 @@ export interface ItemState {
   muted: boolean;
   pinned: boolean;
   seen_at: string | null;
-  inflight_at: string | null; // your own PR, marked done with d: babysitters take it from here
+  inflight_at: string | null; // your own PR, handed off for merge with m: Claude (its babysitter) takes it from here
 }
 
 export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
@@ -422,17 +425,18 @@ export interface Card {
   snooze_until: string | null;
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
-  next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: d hands it to a babysitter"
+  next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"
   checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
   checks_optional?: string[]; // those of them its base branch doesn't require
-  reply?: Draft; // your PR in flight: the first reply waiting for Send (y sends it from the queue too)
-  escalated?: boolean; // your PR in flight: its babysitter (or the desk) asked you something; x dismisses it from the queue
-  resume?: string; // ...and the command that opens the babysitter's session, which c copies from the queue
+  reply?: Draft; // your PR in Merging: the first reply waiting for Send (y sends it from the queue too)
+  escalated?: boolean; // your PR in Merging: Claude (or the desk) asked you something; x dismisses it from the queue
+  resume?: string; // ...and the command that opens Claude's session, which c copies from the queue
+  handed_back?: boolean; // your PR, back from Merging because Claude can't get it merged; its why says why
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
-  inflight: boolean; // your PR, marked in flight
+  inflight: boolean; // your PR, in Merging
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "claude" | "pending" | "unanswered"; // a hard rule, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
@@ -469,7 +473,7 @@ export interface Overview {
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number };
-  inflight: { total: number; needs_you: number }; // your open in-flight PRs, and how many need you
+  inflight: { total: number; needs_you: number }; // your open PRs in Merging, and how many need you
   rate_limit: { remaining: number; reset_at: string } | null;
   coordinator: { state: CoordinatorStatus["state"]; acted: CoordinatorActed | null };
 }
@@ -512,7 +516,7 @@ export interface QueueView {
   now_cards: number; // as in FocusView
   today_cards: number;
   paused: Paused | null;
-  babysitting: boolean; // inflight.babysit: d on your PR hands it to a babysitter, or only puts it in flight
+  babysitting: boolean; // inflight.babysit: Claude works on your PRs in Merging, or they only wait there
 }
 
 // One changed file, from GitHub's pulls/{n}/files.
@@ -610,9 +614,9 @@ export interface ActivityPage {
 }
 
 // ---------------------------------------------------------------------------
-// In flight: your own PRs you marked done (d). Babysitter agents keep them moving (GET /api/inflight).
+// Merging: your own PRs you handed off (m). Claude (a babysitter agent each) gets them merged (GET /api/inflight).
 
-// A reply an agent drafted (desk_draft_reply). You send it from the In-flight lane; nothing else posts it.
+// A reply an agent drafted (desk_draft_reply). You send it from Merging; nothing else posts it.
 export interface Draft {
   id: string;
   thread_id: string | null; // the review thread it answers (a GraphQL node id); null: a comment on the PR
@@ -657,18 +661,20 @@ export interface InflightRow {
   threads_unresolved: number;
   mergeable: Mergeable;
   draft: boolean; // a draft PR
-  needs_you: string | null; // why it's back with you: the question, "reply ready to send", "approved and green: merge it", ...
+  needs_you: string | null; // why it needs you: the question, "reply ready to send", "ready to merge", ...
   escalation: { question: string; at: string; by?: "babysitter" | "agent" | "desk" } | null; // from desk_escalate, or the desk's own check
   outside_at: string | null; // feedback from someone who isn't a collaborator, not dismissed yet: yours to read, never an agent's
   sitter: SitterStatus;
   drafts: Draft[]; // unsent replies
   run: SitterRun | null; // the latest run
   resume: string | null; // a shell command that opens the latest run's session in Claude Code
+  auto_merge: boolean; // GitHub's auto-merge is on: it merges once it's approved and green
+  merge_note: string | null; // why auto-merge isn't on ("the repo doesn't allow auto-merge"): you merge it
 }
 
 export interface InflightView {
   rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days
-  babysitting: boolean; // inflight.babysit: off, the lane says so once instead of on every row
+  babysitting: boolean; // inflight.babysit: off, Merging says so once instead of on every row
 }
 
 // GET /api/config

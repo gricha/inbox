@@ -16,7 +16,7 @@ import type {
 } from "../../src/types.ts";
 import { age as ageOf, ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
 
-// One surface (the queue), a PR's review in its place, your in-flight PRs, and Settings, whose sections include the rules editor.
+// One surface (the queue), a PR's review in its place, your PRs in Merging, and Settings, whose sections include the rules editor.
 export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "inflight" } | { name: "settings"; section: string };
 export type GroupKey = "now" | "today" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
 export type Variant = "active" | "hidden" | "cleared" | "resolved";
@@ -62,7 +62,7 @@ export function routeHash(r: Route): string {
   return r.name === "inflight" ? "#/inflight" : "#/";
 }
 
-// ---------------------------------------------------------------- in flight
+// ---------------------------------------------------------------- merging (in flight)
 
 // Check names can be long ("tacos-gha / TACOS Unlock (terragrunt/regions/…)"): two at most, each clipped.
 export function checkNames(names: string[]): string {
@@ -80,10 +80,11 @@ export function waitingText(names: string[]): string {
   return people.length ? `${people.join(", ")} and ${tail}` : tail;
 }
 
-// An in-flight PR's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
+// A PR in Merging's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
 // Tones as in the queue and the review: CI failing is bad, changes requested and a merge conflict are warnings.
 export function laneFacts(
-  r: Pick<InflightRow, "ci" | "failing" | "approved_by" | "changes_by" | "waiting_on" | "threads_unresolved" | "mergeable" | "draft">,
+  r: Pick<InflightRow, "ci" | "failing" | "approved_by" | "changes_by" | "waiting_on" | "threads_unresolved" | "mergeable" | "draft"> &
+    Partial<Pick<InflightRow, "auto_merge">>,
 ): { text: string; tone: "" | "bad" | "warn" }[] {
   const out: { text: string; tone: "" | "bad" | "warn" }[] = [];
   const add = (text: string, tone: "" | "bad" | "warn" = "") => out.push({ text, tone });
@@ -97,14 +98,28 @@ export function laneFacts(
   if (r.waiting_on.length) add(`waiting on ${waitingText(r.waiting_on)}`);
   if (r.threads_unresolved) add(`${r.threads_unresolved} unresolved ${r.threads_unresolved === 1 ? "thread" : "threads"}`);
   if (r.mergeable === "conflict") add("merge conflict", "warn");
+  if (r.auto_merge) add("auto-merge on");
   return out;
 }
 
-// Whether the babysitter's line says more than why the PR needs you ("babysitter asks: …", "no local clone of …" say it).
+// What a PR in Merging waits on while Claude has nothing to do on it; what needs you (a reply, a question) says itself.
+export function waitsOn(
+  r: Pick<InflightRow, "state" | "needs_you" | "sitter" | "ci" | "approved_by" | "changes_by" | "mergeable" | "draft" | "auto_merge">,
+): string | null {
+  if (r.state !== "open" || r.needs_you || r.sitter.state === "running" || r.sitter.state === "queued") return null;
+  if (r.ci === "pending") return "waits on CI";
+  if (r.changes_by.length) return "waits on a second look";
+  if (!r.approved_by.length) return "waits on a review";
+  if (r.draft) return "waits on ready for review";
+  if (r.ci === "green" && r.mergeable === "clean" && r.auto_merge) return "waits on GitHub to merge it";
+  return null;
+}
+
+// Whether Claude's line says more than why the PR needs you ("Claude asks: …" says it).
 export const sitterNews = (r: Pick<InflightRow, "state" | "needs_you" | "sitter">) =>
   r.state === "open" && !!r.sitter.text && (!r.needs_you || r.sitter.state === "done" || r.sitter.state === "running");
 
-// What a PR's babysitter is doing, in the lane's words: "fixing CI", "4m", "npm test"; "pushed a fix for 2 comments", "abc1234".
+// What Claude is doing on a PR, in Merging's words: "fixing CI", "4m", "npm test"; "pushed a fix for 2 comments", "abc1234".
 export function sitterParts(r: Pick<InflightRow, "sitter" | "run">, now: number): string[] {
   const s = r.sitter;
   const [text = "", ...more] = s.text.split(" · ");
@@ -188,14 +203,14 @@ const mineOf = (c: Pick<Card, "kind" | "author" | "resolved">, me: string) =>
   c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
 
 // How much a card wants you first, lowest first: your PR one key from done that only you can answer (a reply to send, a
-// question); a close look or high risk on the current commit, then one on an older commit; an item a cap pushed out of Now;
-// your PR approved and green; the rest (your stuck PR in flight among them); someone else's PR with CI failing, which waits
-// on its author; the AI's "skip it".
+// question) or one Claude handed back; a close look or high risk on the current commit, then one on an older commit; an item
+// a cap pushed out of Now; your PR approved and green; the rest (your stuck PR in Merging among them); someone else's PR with
+// CI failing, which waits on its author; the AI's "skip it".
 function weight(c: Card, me: string): number {
   const p = c.preflight;
   const mine = mineOf(c, me);
   if (p?.verdict === "skip") return 7;
-  if (mine && c.inflight && (!!c.reply || !!c.escalated)) return 0;
+  if (mine && ((c.inflight && (!!c.reply || !!c.escalated)) || !!c.handed_back)) return 0;
   if (!mine && c.kind === "pr" && c.ci === "red") return 6;
   if (p?.risk === "high" || p?.verdict === "look") return p.state === "ready" ? 1 : 2;
   if (c.demoted) return 3;
@@ -275,22 +290,18 @@ export function groupsOf(
   ];
 }
 
-// Your PR's next step, less what its why already says: under "merge conflict", "merge conflict with main: d hands it to a
-// babysitter" needs only its second half.
+// Your PR's next step, less what its why already says: under "merge conflict", "merge conflict with main: m hands it off for
+// merge" needs only its second half.
 export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
   const [what = "", todo] = (card.next ?? "").split(/: (.*)/);
   const why = card.why.toLowerCase();
   return todo && why && (why.startsWith(what.toLowerCase()) || what.toLowerCase().startsWith(why)) ? todo : card.next;
 }
 
-// d's label on your PR, the same on a card, an opened item and a review.
-export const handLabel = (c: Pick<Card, "inflight">, babysitting: boolean) =>
-  c.inflight ? "Take back" : babysitting ? "Hand to a babysitter" : "Put in flight";
-
-// Your PR in flight with no local clone for a babysitter to work in: the repo to clone.
+// Your PR with no local clone for Claude to work in: the repo to clone.
 export const noCloneOf = (c: Pick<Card, "why" | "repo">) => (/\bno local clone of /.test(c.why) ? c.repo : undefined);
 
-// "d hands it to a babysitter" split so its keys can be set apart: odd indexes are keys.
+// "m hands it off for merge" split so its keys can be set apart: odd indexes are keys.
 export const keyParts = (text: string): string[] => text.split(/(?<=^|, )(enter|[a-z])(?= (?:opens|sends|hands|puts) )/);
 
 // Whole sentences (or, with clauses, the parts around a ";") up to about max characters, and always the first: a card's

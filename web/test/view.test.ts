@@ -14,13 +14,13 @@ import {
   draftOf,
   firstClause,
   foldOf,
-  handLabel,
   groupsOf,
   judgeStatusText,
   judgeStepText,
   keepUnits,
   keyParts,
   laneFacts,
+  waitsOn,
   lineOf,
   logText,
   policyLines,
@@ -163,6 +163,30 @@ test("an in-flight row's status in plain words", () => {
   assert.equal(waitingText(teams), "5 teams");
   assert.equal(waitingText(["a", "b", "c", "@t"]), "a, b and 2 more");
   assert.equal(waitingText(["a", "@t"]), "a, @t");
+  assert.equal(laneFacts({ ...row, auto_merge: true }).at(-1)?.text, "auto-merge on");
+});
+
+test("what a PR in Merging waits on, while Claude has nothing to do on it and nothing needs you", () => {
+  const idle = { state: "idle" as const, text: "watching", since: null };
+  const r = {
+    state: "open" as const,
+    needs_you: null,
+    sitter: idle,
+    ci: "green" as const,
+    approved_by: ["marco"],
+    changes_by: [],
+    mergeable: "clean" as const,
+    draft: false,
+    auto_merge: true,
+  };
+  assert.equal(waitsOn(r), "waits on GitHub to merge it");
+  assert.equal(waitsOn({ ...r, auto_merge: false }), null, "ready to merge says itself");
+  assert.equal(waitsOn({ ...r, ci: "pending" }), "waits on CI");
+  assert.equal(waitsOn({ ...r, approved_by: [] }), "waits on a review");
+  assert.equal(waitsOn({ ...r, changes_by: ["dana"] }), "waits on a second look");
+  assert.equal(waitsOn({ ...r, approved_by: [], sitter: { ...idle, state: "running" } }), null, "Claude's line says what it's doing");
+  assert.equal(waitsOn({ ...r, approved_by: [], needs_you: "reply ready to send" }), null);
+  assert.equal(waitsOn({ ...r, state: "merged" }), null);
 });
 
 test("settings fields: text to value and back", () => {
@@ -309,11 +333,11 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
     card("acme/api#20", { author: "a20", preflight: skip }),
     card("acme/api#21", { author: "a21", preflight: { state: "ready", verdict: "skim" } }),
     card("acme/api#22", { author: "a22", preflight: look }),
-    card("acme/api#25", { author: "me", inflight: true, why: "in flight: no local clone of oss/tinyhttp, so no babysitter" }),
+    card("acme/api#25", { author: "me", inflight: true, why: "merging: CI failing; Claude couldn't fix it" }),
     card("acme/api#23", {
       author: "me",
       inflight: true,
-      why: "in flight: reply ready to send",
+      why: "merging: reply ready to send",
       reply: { id: "d1", thread_id: null, to: "dana", quote: "", body: "Kept it.", at: "", sent_at: null, url: null },
     }),
     card("acme/api#24", { author: "a24", preflight: { state: "ready", verdict: "skim", risk: "high" } }),
@@ -321,7 +345,7 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
   const v = { ...queue(), sections: { ...queue().sections, now }, now_cards: 3 };
   const g = groupsOf(v, DEFAULT_OPEN, "", {}, "me").find((x) => x.key === "now")!;
   // Your reply to send first, then a close look and high risk; skip last; otherwise as the rules ordered them. Your PR in
-  // flight that no key can finish (no clone) is one of the rest.
+  // Merging that no key can finish is one of the rest.
   assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#23", "acme/api#22", "acme/api#24"], 3]);
   assert.deepEqual(
     groupsOf(v, DEFAULT_OPEN, "", { now: true }, "me")
@@ -391,9 +415,23 @@ test("Now and Today put the weightiest first and fold after now_cards and today_
   );
 });
 
+test("a PR Claude handed back sits above ordinary items in Now", () => {
+  const now = [
+    card("acme/api#30", { author: "a30", preflight: { state: "ready", verdict: "look" } }),
+    card("acme/api#31", { author: "me", handed_back: true, why: "handed back: Dana wants the cache redesigned" }),
+  ];
+  const v = { ...queue(), sections: { ...queue().sections, now } };
+  assert.deepEqual(
+    groupsOf(v, DEFAULT_OPEN, "", {}, "me")
+      .find((x) => x.key === "now")!
+      .cards.map((c) => c.id),
+    ["acme/api#31", "acme/api#30"],
+  );
+});
+
 test("your PR's next step leaves out what its why already says", () => {
-  const next = "merge conflict with main: d hands it to a babysitter";
-  assert.equal(nextText({ why: "merge conflict", next }), "d hands it to a babysitter");
+  const next = "merge conflict with main: m hands it off for merge";
+  assert.equal(nextText({ why: "merge conflict", next }), "m hands it off for merge");
   assert.equal(
     nextText({ why: "approved and green: merge it", next: "approved and green: o opens it on GitHub to merge" }),
     "o opens it on GitHub to merge",
@@ -404,8 +442,8 @@ test("your PR's next step leaves out what its why already says", () => {
 });
 
 test("a card's next step sets its keys apart", () => {
-  assert.deepEqual(keyParts("enter opens In flight, y sends it"), ["", "enter", " opens In flight, ", "y", " sends it"]);
-  assert.deepEqual(keyParts("d hands it to a babysitter"), ["", "d", " hands it to a babysitter"]);
+  assert.deepEqual(keyParts("enter opens Merging, y sends it"), ["", "enter", " opens Merging, ", "y", " sends it"]);
+  assert.deepEqual(keyParts("m hands it off for merge"), ["", "m", " hands it off for merge"]);
   assert.deepEqual(keyParts("a draft: mark it ready for review when it is"), ["a draft: mark it ready for review when it is"]);
 });
 
@@ -523,12 +561,9 @@ test("the selected card's facts leave out what the card already says", () => {
   assert.deepEqual(cardFacts(card("acme/api#8", { ci: "none", placed_by: "pending" }), "me"), ["by dana", "not sorted by Claude yet"]);
 });
 
-test("d's label and a PR with no clone to work in", () => {
-  assert.equal(handLabel({ inflight: false }, true), "Hand to a babysitter");
-  assert.equal(handLabel({ inflight: false }, false), "Put in flight");
-  assert.equal(handLabel({ inflight: true }, true), "Take back");
-  assert.equal(noCloneOf({ why: "in flight: no local clone of oss/tinyhttp, so no babysitter", repo: "oss/tinyhttp" }), "oss/tinyhttp");
-  assert.equal(noCloneOf({ why: "in flight: reply ready to send", repo: "oss/tinyhttp" }), undefined);
+test("a PR with no clone for Claude to work in", () => {
+  assert.equal(noCloneOf({ why: "handed back: no local clone of oss/tinyhttp", repo: "oss/tinyhttp" }), "oss/tinyhttp");
+  assert.equal(noCloneOf({ why: "merging: reply ready to send", repo: "oss/tinyhttp" }), undefined);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

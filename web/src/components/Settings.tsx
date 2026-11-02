@@ -662,7 +662,7 @@ export function Settings({
             {view && (x.id === "review" || x.id === "inflight") && (
               <PausedLine
                 p={view.paused[x.id === "review" ? "ai" : "babysitters"]}
-                label={x.id === "review" ? "AI reviews are paused:" : "Babysitters are paused:"}
+                label={x.id === "review" ? "AI reviews are paused:" : "Claude is paused here:"}
                 now={now}
               />
             )}

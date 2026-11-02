@@ -216,7 +216,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever Claude, quiet`,
     `# days or caps say, and the coordinator can't clear it.`,
     `# \`caps\` limit Now and Today; overflow moves down a bucket with a note. Pinned and \`nocap\` items don't count, and nor do`,
-    `# your PRs in flight that need you. Caps apply after Claude, so give every board one: a board without caps can fill Now.`,
+    `# your PRs in Merging that need you. Caps apply after Claude, so give every board one: a board without caps can fill Now.`,
     `# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().`,
     `# Fields (me.requested_direct, author.close, pr.ci, ...) are listed on the Rules page and by \`desk fields\`.`,
     `# Within a bucket, cards sort by rule order (earlier rules first), then \`priority\`, then \`sort\`.`,

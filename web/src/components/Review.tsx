@@ -4,20 +4,9 @@ import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre
 import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import {
-  currentFile,
-  filePatch,
-  handLabel,
-  noCloneOf,
-  orderNotes,
-  resolvedHead,
-  says,
-  sitterNews,
-  sitterParts,
-  splitPath,
-} from "../view.ts";
+import { currentFile, filePatch, noCloneOf, orderNotes, resolvedHead, says, sitterNews, sitterParts, splitPath, waitsOn } from "../view.ts";
 import { Owed } from "./CardRow.tsx";
-import { CI, Dots, KeyButton, REVIEW } from "./Detail.tsx";
+import { CI, Dots, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -48,11 +37,10 @@ export function Review({
   id,
   loads,
   me,
-  babysitting,
   now,
   inert,
   flash,
-  onInflight,
+  onCard,
   row,
   armed: armedDraft,
   onLane,
@@ -60,15 +48,14 @@ export function Review({
 }: {
   id: string;
   loads: number; // bumped on every refresh, so the review follows the server's updates
-  me: string; // your login: d is for your own PRs
-  babysitting: boolean; // d hands your PR to a babysitter, or only puts it in flight
+  me: string; // your login: m and b are for your own PRs
   now: number;
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
-  onInflight: (c: Card) => void; // d: in flight, or take it back
-  row: InflightRow | null; // your PR in flight: its lane line goes under the facts, as in the lane
+  onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
+  row: InflightRow | null; // your PR in Merging: Claude's line goes under the facts, as in Merging
   armed: string | null; // the draft a first y armed
-  onLane: (row: InflightRow, key: string, draft?: Draft) => void; // y sends its reply, x discards it, as in the lane
+  onLane: (row: InflightRow, key: string, draft?: Draft) => void; // y sends its reply, x discards it, as in Merging
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
@@ -83,11 +70,11 @@ export function Review({
   const listRef = useRef<HTMLElement>(null);
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
-  // Your PR in flight with a reply waiting: it's shown under the header, and y sends it from here too.
+  // Your PR in Merging with a reply waiting: it's shown under the header, and y sends it from here too.
   const draft = row?.state === "open" ? row.drafts[0] : undefined;
-  // ...or with a question from its babysitter: c answers it in a terminal and x dismisses it, as in the lane.
+  // ...or with a question from Claude: c answers it in a terminal and x dismisses it, as in Merging.
   const asking = row?.state === "open" && !!row.escalation;
-  // A PR in flight is its babysitter's: no prompt to copy or AI review to ask for.
+  // A PR in Merging is Claude's: no prompt to copy or AI review to ask for.
   const flying = !!row && row.state === "open";
 
   useEffect(() => {
@@ -241,7 +228,7 @@ export function Review({
     else if (k === "c" && !flying) void copyPrompt();
     else if (k === "i" && !flying) void askAi();
     else if (k === "a") void approve();
-    else if (k === "d" && v) onInflight(v.card);
+    else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "esc") onBack();
   }
 
@@ -255,7 +242,7 @@ export function Review({
       if (armed) setArmed(0);
       // An armed Send lapses on Esc (App drops it); only an unarmed Esc goes back.
       else if (!draft || armedDraft !== draft.id) onBack();
-    } else if ((draft || asking ? "npoci[]adyx" : "npoci[]ad").includes(e.key) && e.key.length === 1) {
+    } else if ((draft || asking ? "npoci[]admbyx" : "npoci[]admb").includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
     }
@@ -311,6 +298,11 @@ export function Review({
   const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
   const open = item.state === "open";
+  // What it waits on and what Claude is doing, as Merging says it.
+  const waits = row && waitsOn(row);
+  const lane = row
+    ? [waits ?? "", ...(sitterNews(row) && !(waits && row.sitter.state === "idle") ? sitterParts(row, now) : [])].filter(Boolean)
+    : [];
 
   return (
     <div className="review">
@@ -349,16 +341,21 @@ export function Review({
               {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
             </p>
           )}
-          {/* In flight: the why above says why it needs you ("in flight: …"); this is the lane's babysitter line under it, unless
-              it only repeats the why. With no clone, where to set one up. */}
-          {row && sitterNews(row) && (
+          {/* In Merging: the why above says why it needs you ("merging: …"); this is Claude's line under it, unless it only
+              repeats the why. With no clone, where to set one up. */}
+          {lane.length > 0 && (
             <p className="rv-meta rv-lane">
-              {sitterParts(row, now).map((p) => (
+              {lane.map((p) => (
                 <span key={p}>{p}</span>
               ))}
             </p>
           )}
-          {row?.state === "open" && noCloneOf({ why: row.needs_you ?? "", repo: card.repo }) && (
+          {row?.state === "open" && row.merge_note && (
+            <p className="rv-meta rv-lane">
+              <span>Merge it yourself when it's green: {row.merge_note}</span>
+            </p>
+          )}
+          {(row?.state === "open" || card.handed_back) && noCloneOf({ why: row?.needs_you ?? card.why, repo: card.repo }) && (
             <p className="rv-meta rv-lane">
               <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
             </p>
@@ -381,7 +378,7 @@ export function Review({
         )}
       </div>
 
-      {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, d last. */}
+      {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, m or b last. */}
       <div className="actions rv-actions">
         {draft && (
           <KeyButton
@@ -415,16 +412,7 @@ export function Review({
             disabled={view.generating || busy === "ai"}
           />
         )}
-        {mine && (
-          <KeyButton
-            k="d"
-            label={handLabel(card, babysitting)}
-            title={
-              card.inflight ? "Back to you: babysitters stop" : "You're done: babysitters keep CI green and draft replies until it merges"
-            }
-            run={run}
-          />
-        )}
+        {mine && <HandKey card={card} run={run} />}
       </div>
 
       {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
