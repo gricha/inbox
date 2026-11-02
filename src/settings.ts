@@ -203,7 +203,7 @@ export const SETTINGS = [
     label: "Let Claude work on them",
     type: "boolean",
     default: true,
-    help: "Only PRs you handed off with m. Off: they still leave the queue, and come back to it when CI fails or reviewers ask for something.",
+    help: "Only PRs you handed off with m twice. Off: they wait for you in Merging when CI fails or reviewers ask for something.",
   },
   {
     key: "inflight.auto_merge",
@@ -232,7 +232,7 @@ export const SETTINGS = [
     pattern: "^[\\w.-]+(\\[bot\\])?$",
     pattern_hint: "a GitHub login",
     placeholder: "cursor[bot]",
-    help: "Claude acts on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in the queue; their words never reach an agent.",
+    help: "Claude acts on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments wait for you in Merging; their words never reach an agent.",
   },
   {
     key: "inflight.repos",

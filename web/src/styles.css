@@ -658,23 +658,20 @@ kbd {
 
 .queue {
   display: grid;
-  gap: 30px;
+  gap: 10px;
 }
 
-/* The queue and Later use the window's width. */
-.col:has(.queue:not(.lane)) {
+/* The queue, Later and Merging use the window's width. */
+.col:has(.queue) {
   --col-w: 100%;
 }
 
 /* minmax(0, 1fr): a long unwrapped row truncates instead of widening the page. */
-.queue:not(.lane),
+.queue,
 .later .group,
+.lane .group,
 .lines {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.queue:not(.lane) {
-  gap: 10px;
 }
 
 .queue-empty {
@@ -736,6 +733,8 @@ kbd {
 }
 
 .line-ref,
+.line-num,
+.line-stack,
 .line-note,
 .line-age {
   color: var(--pencil);
@@ -744,12 +743,26 @@ kbd {
   white-space: nowrap;
 }
 
+/* The title is what you read: a long repo name is cut short (its title attribute has it whole), the number never. */
 .line-ref {
+  flex: none;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right after its repo, as one "repo#number". */
+.line-num {
+  flex: none;
+  margin-left: -14px;
+}
+
+.line-stack {
   flex: none;
 }
 
 .line-note {
-  flex: 0 100 auto;
+  flex: 0 10000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1290,48 +1303,51 @@ kbd {
 }
 
 /* Merging --------------------------------------------------------------------
-   Your PRs Claude is getting merged. Grey while Claude has one; one waiting on you has its why in ink and its problems their colour. */
+   Your PRs Claude is getting merged, one line each like the main page's. Pencil while Claude has one; one waiting on you
+   has its why in ink and a problem in its colour. */
 
-.lane-intro {
-  margin: -2px 0 10px;
-  padding: 0 18px;
-  color: var(--pencil);
-  font-size: 13px;
+/* Said once, above the rows, like "Claude is paused". */
+.lane-note {
+  margin: 0 0 6px;
+  padding: 0 12px;
+  color: var(--ink-2);
+  font-size: 14px;
 }
 
-/* Merged sits one group gap below the open rows, as Sorted away does below the queue. */
-.lane .group-head.sub {
-  margin-top: 0;
+.lane-note a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
 }
 
-/* A calm row's state is pencil, problems included; one that needs you has its why in ink and its problems coloured. */
-.lane-row:not(.waits) .meta .fact-word {
-  color: var(--pencil);
+.lane .group {
+  display: grid;
+  gap: 4px;
+  margin-top: 20px;
+}
+
+/* The why stays one line: the row's note gives way at its end. */
+.lane .line-note .why.owed {
+  white-space: nowrap;
+}
+
+/* The selected row's reply and keys, under its title. */
+.lane-more {
+  padding: 2px 12px 10px;
+}
+
+.lane-why {
+  margin: 4px 0 8px;
+  font-size: 14px;
 }
 
 .lane-link {
-  margin: -6px 18px 12px;
-  font-size: 13px;
+  margin: 4px 0 8px;
+  font-size: 14px;
 }
 
 .lane-link a {
   color: var(--pencil);
-}
-
-/* Merged reads like Resolved: a flat row on the paper, its title regular and pencil. */
-.lane .dim.card {
-  background: none;
-  box-shadow: none;
-}
-
-.lane .dim .title {
-  color: var(--pencil);
-  font-weight: 400;
-}
-
-.gist.sitter {
-  color: var(--pencil);
-  font-size: 13px;
 }
 
 /* A reply waiting for Send: what it answers, then the reply, like an AI note in a review: a margin rule, no card. */
@@ -1342,6 +1358,11 @@ kbd {
   padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule-strong);
   font-size: 13px;
+}
+
+.lane-more .draft {
+  margin: 6px 0 10px;
+  font-size: 14px;
 }
 
 .draft-to {

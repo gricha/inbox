@@ -201,8 +201,9 @@ const LABEL: Record<GroupKey, string> = {
   cleared: "Cleared",
 };
 
-// The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
-// group with a match opens so nothing that matches stays tucked away, and nothing folds.
+// The queue is now's items then today's, in the desk's order, and folds after its first queue.cards; a stack's other PRs
+// wait behind the fold too, its first standing for it. While filtering, every group with a match opens so nothing that
+// matches stays tucked away, and nothing folds.
 export function groupsOf(
   view: QueueView | null,
   open: Record<GroupKey, boolean>,
@@ -214,17 +215,19 @@ export function groupsOf(
   const group = (key: GroupKey, all: Card[], variant: Variant = "active", cap?: number): Group => {
     const matched = all.filter((c) => matches(c, q));
     const forced = !!q && matched.length > 0 && !open[key];
+    const folds = cap !== undefined && !q && !unfolded[key];
+    const shown = folds ? matched.filter((c) => !c.stack || c.stack.head === c.id) : matched;
     // A fold that would hide one item costs more than the item: it folds only when two or more would go behind it.
-    const n = cap && !q && !unfolded[key] && matched.length - cap >= 2 ? cap : matched.length;
+    const n = folds && cap && shown.length - cap >= 2 ? cap : shown.length;
     return {
       key,
       label: LABEL[key],
-      cards: matched.slice(0, n),
+      cards: shown.slice(0, n),
       total: all.length,
       open: open[key] || forced,
       forced,
       variant,
-      fold: matched.length - n,
+      fold: matched.length - Math.min(n, shown.length),
     };
   };
   const s = view.sections;

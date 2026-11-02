@@ -43,7 +43,7 @@ test("sync fills boards, focus and status", async () => {
   const focus = t.desk.focus();
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
   assert.deepEqual(focus.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk 2 ●1");
+  assert.equal(t.desk.status().text, "desk 2");
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 1);
@@ -186,6 +186,27 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
   t.desk.notifyNew();
   assert.equal(t.notes.length, 1, "your pin put it there");
+  t.cleanup();
+});
+
+test("your own new drafts never notify, and a stack of three or more on the queue is marked with the one that stands for it", async () => {
+  const t = await setup([reviewAsk(1)], { settings: { "notify.quiet": "", "policy.judge": false } });
+  await t.desk.sync();
+  // Four drafts, each based on the one before, and two that make a stack of only two.
+  const stack = [10, 11, 12, 13].map((n) => myPr(n, { draft: true, ci: "none", head_ref: `s${n}`, base: n === 10 ? "main" : `s${n - 1}` }));
+  const pair = [20, 21].map((n) => myPr(n, { draft: true, ci: "none", head_ref: `p${n}`, base: n === 20 ? "main" : "p20" }));
+  for (const p of [...stack, ...pair]) t.gh.items.set(p.id, p);
+  await t.desk.sync();
+  const cards = [...t.desk.focus().sections.now, ...t.desk.focus().sections.today];
+  assert.equal(cards.filter((c) => c.draft).length, 6);
+  assert.deepEqual(t.notes, [], "you just opened them");
+  const inStack = cards.filter((c) => c.stack);
+  assert.deepEqual(inStack.map((c) => c.id).sort(), stack.map((p) => p.id).sort());
+  const head = inStack[0]!.id;
+  assert.ok(inStack.every((c) => c.stack?.head === head && c.stack.n === 4));
+  t.gh.items.set("acme/api#31", reviewAsk(31));
+  await t.desk.sync();
+  assert.deepEqual(t.notes, ["api#31 · carol asked you directly"]);
   t.cleanup();
 });
 
@@ -561,7 +582,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
     )
     .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
     .replaceAll(
-      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
+      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it" },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "item.draft", bucket = "later", why = "draft" },`,
     );
   fs.writeFileSync(config, old);
@@ -572,7 +593,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
   assert.equal(fs.readFileSync(config, "utf8"), now);
   assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
   assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
-  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated"]) {
+  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "drafts_soft_migrated"]) {
     assert.ok(desk.store.get(k), k);
     desk.store.set(k, null);
   }

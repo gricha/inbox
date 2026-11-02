@@ -313,7 +313,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case "PUT /api/settings":
       return reply(200, putSettings(api, body));
     case "GET /api/status":
-      return reply(200, { now: 1, today: 1, new: 1, text: "desk 2 ●1 +1" });
+      return reply(200, { now: 1, today: 1, new: 1, text: "desk 2 +1" });
     case "GET /api/activity": {
       const after = Number(url.searchParams.get("after") ?? 0);
       const events = EVENTS.filter((e) => e.seq > after);

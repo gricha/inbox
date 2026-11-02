@@ -58,10 +58,8 @@ test("hard = true: the first-run template sets it on asks by name, a person's or
   assert.deepEqual(hard, [
     "acme-review: me.requested_direct && !me.requested_by_bot -> now",
     "acme-review: me.requested_direct -> today",
-    "acme-mine: item.draft && item.updated_hours < 336 -> today",
     "personal-review: me.requested_direct && !me.requested_by_bot -> now",
     "personal-review: me.requested_direct -> today",
-    "personal-mine: item.draft && item.updated_hours < 336 -> today",
   ]);
   const errors = (t: string) => parseConfig(t).errors.map((e) => `${e.path}: ${e.message}`);
   const rule = `why = "{me.requested_by} asked you directly", hard = true`;
@@ -196,11 +194,11 @@ test("the prompt is triage: it fences item text, carries the policy, and gives e
   assert.match(p, /^You triage what reaches me's review desk: for each GitHub item below, decide what me should do with it\./);
   assert.match(p, /- fyi: someone else has it, or nobody needs them\. It's kept off their page\./);
   assert.match(p, /- now: a person is blocked on them today: .* CI on their own PR is never now\./);
-  assert.match(p, /- today: .*their own draft touched in the last two weeks\)\./);
+  assert.match(p, /- today: a person is waiting on them, or it's theirs to finish \(approved and green and ready to merge\)\./);
   assert.match(p, /Less is more: when unsure, sort it away\./);
   assert.match(
     p,
-    /When the policy's lines disagree, a line that sorts an item away for who made it or its state \(bots, drafts other than their own recent ones, stacked PRs, someone else asked by name, a teammate reviewing\) beats a line that promotes it for what it touches\. Being asked by name, their own pin and a hard rule's floor beat both\./,
+    /When the policy's lines disagree, a line that sorts an item away for who made it or its state \(bots, drafts, stacked PRs, someone else asked by name, a teammate reviewing\) beats a line that promotes it for what it touches\. Being asked by name, their own pin and a hard rule's floor beat both\./,
   );
   assert.match(p, /That a PR touches a directory they've worked in is weak evidence on its own\./);
   assert.match(

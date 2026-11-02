@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, SNOOZE } from "../format.ts";
 import type { Variant } from "../view.ts";
@@ -41,19 +41,6 @@ export function Owed({ why, tone }: { why: string; tone?: string | undefined }) 
   );
 }
 
-// Facts with a list in them ("CI failing: node 22, lint") wrap only between its items.
-// A piece too long for a narrow row (a long check name) may still wrap inside.
-export const atCommas = (text: string) =>
-  text.split(", ").map((part, i, all) => (
-    <Fragment key={part}>
-      {i > 0 && " "}
-      <span className={cls(part.length <= 32 && "nowrap")}>
-        {part}
-        {i < all.length - 1 && ","}
-      </span>
-    </Fragment>
-  ));
-
 // What a row under Later says after its ref: why it's there. The queue's rows say nothing more: being there is the why.
 function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);
@@ -63,7 +50,20 @@ function noteOf(card: Card, variant: Variant): string {
 }
 
 // One line: the title, quietly its repo#number, its age on the right. Enter opens an issue (or `w` any item) in place under it.
-export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
+// `stacked`: the main page shows one line per stack, and this many of it wait behind the fold.
+export function CardRow({
+  card,
+  variant,
+  ctx,
+  why,
+  stacked = 0,
+}: {
+  card: Card;
+  variant: Variant;
+  ctx: RowCtx;
+  why?: boolean;
+  stacked?: number;
+}) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
@@ -90,9 +90,16 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         }}
       >
         <span className="line-title">{card.title}</span>
+        {/* A long repo name gives way before the title; the number never does. */}
         <span className="line-ref" title={`${card.repo}#${card.number}`}>
-          {card.repo.split("/")[1]}#{card.number}
+          {card.repo.split("/")[1]}
         </span>
+        <span className="line-num">#{card.number}</span>
+        {stacked > 0 && (
+          <span className="line-stack" title={`${stacked} more of this stack, behind the fold`}>
+            +{stacked} stacked
+          </span>
+        )}
         {note && <span className="line-note">{note}</span>}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}

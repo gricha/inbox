@@ -317,6 +317,22 @@ test("the queue is now's items then today's in the desk's order, and folds after
   );
 });
 
+test("a stack on the queue is one line: its other PRs wait behind the fold, and show when it opens or you filter", () => {
+  const stack = { head: "acme/web#20", n: 4 };
+  const today = ["acme/web#20", "acme/api#3", "acme/web#21", "acme/web#22", "acme/web#23"].map((id) =>
+    card(id, { bucket: "today", ...(id.startsWith("acme/web") && { stack }) }),
+  );
+  const v = { ...queue(), sections: { ...queue().sections, now: [], today }, cards: 10 };
+  const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "queue")!;
+  const folded = t(groupsOf(v, DEFAULT_OPEN, ""));
+  assert.deepEqual([folded.cards.map((c) => c.id), folded.fold], [["acme/web#20", "acme/api#3"], 3]);
+  assert.deepEqual(
+    t(groupsOf(v, DEFAULT_OPEN, "", { queue: true })).cards.map((c) => c.id),
+    today.map((c) => c.id),
+  );
+  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "web#2")).cards.length, 4);
+});
+
 test("the selected card's facts leave out what the card already says", () => {
   const pr = card("acme/api#1", {
     chips: ["CI red", "conflict", "3 unresolved", "+62 −7"],

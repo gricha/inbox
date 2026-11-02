@@ -47,7 +47,15 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import {
+  defaultConfigText,
+  migrateBotAsk,
+  migrateDrafts,
+  migrateDraftsSoft,
+  migrateHard,
+  parseConfig,
+  type LoadedConfig,
+} from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -535,13 +543,14 @@ export class Desk {
   }
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
-  // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched
-  // lately on the desk (migrateDrafts).
+  // added gets a hard rule too (migrateBotAsk), the old rule sending all your drafts to later suggests a draft you touched
+  // lately for the desk (migrateDrafts), and that rule, written hard before, becomes soft (migrateDraftsSoft).
   migrateRules(): void {
     const due = [
       { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
       { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
-      { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
+      { key: "drafts_migrated", migrate: migrateDrafts, did: "let your policy put drafts touched in the last 14 days on the desk" },
+      { key: "drafts_soft_migrated", migrate: migrateDraftsSoft, did: "made the rule for your recent drafts soft, so your policy decides" },
     ].filter((m) => !this.store.get(m.key));
     if (!due.length) return;
     const before = fs.readFileSync(this.configPath, "utf8");
@@ -732,13 +741,15 @@ export class Desk {
     }
   }
 
-  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin), and newly waiting in Merging.
+  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin, nor your own draft: you just
+  // opened it), and newly waiting in Merging.
   notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
     const { now, today } = this.focus().sections;
+    const me = this.me().toLowerCase();
     const queued = [...now, ...today]
-      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin")
+      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin" && !(c.draft && c.author.toLowerCase() === me))
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     const snap = this.snapshot();
     const waiting = [...snap.waiting].map(([id, why]) => ({ id, ref: shortRef(snap.entries.get(id)!.item), why }));
@@ -1098,7 +1109,10 @@ export class Desk {
         }
       }
     }
-    return { now: queueOrder(sections.now, this.me()), today: queueOrder(sections.today, this.me()) };
+    const now = queueOrder(sections.now, this.me());
+    const today = queueOrder(sections.today, this.me());
+    markStacks([...now, ...today], snap.entries);
+    return { now, today };
   }
 
   // The single surface: every item once, at its best placement across boards.
@@ -1787,13 +1801,11 @@ export class Desk {
   async handOff(ref: string): Promise<{ state: ItemState; auto_merge: NonNullable<Sitter["auto_merge"]> }> {
     const id = this.pr(ref).item.id;
     const { state } = this.act(id, "inflight");
-    let it = this.snapshot().entries.get(id)!.item;
+    // Auto-merge you turned on on GitHub since the last sync isn't the desk's to claim, or b's to turn off.
+    await this.gh.refresh(id);
+    const it = this.store.itemsById([id]).get(id) ?? this.snapshot().entries.get(id)!.item;
     const kept = this.sitter.record(id).auto_merge;
     if (kept?.on && autoMerging(it, { auto_merge: kept })) return { state, auto_merge: kept };
-    if (it.auto_merge_allowed === undefined) {
-      await this.gh.refresh(id); // stored before the desk asked
-      it = this.store.itemsById([id]).get(id) ?? it;
-    }
     const auto = await this.autoMergeOn(it, state.inflight_at!);
     this.sitter.update(id, (s) => {
       s.auto_merge = auto;
@@ -1962,8 +1974,38 @@ export class Desk {
 
   status(): { now: number; today: number; new: number; text: string } {
     const f = this.overview().focus;
-    const parts = [`${f.now + f.today}`, f.now ? `●${f.now}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
+    const parts = [`${f.now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
     return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
+  }
+}
+
+// A stack (one author's PRs, each based on the one before) with three or more on the queue reads as one line on the main
+// page: the first in the queue's order stands for it.
+function markStacks(cards: Card[], entries: Map<string, Entry>): void {
+  const byBranch = new Map<string, Item>();
+  for (const { item: it } of entries.values())
+    if (it.kind === "pr" && it.state === "open" && it.head_ref && (!it.head_repo || it.head_repo === it.repo))
+      byBranch.set(`${it.repo}\0${it.head_ref}`, it);
+  const rootOf = (it: Item) => {
+    const seen = new Set([it.id]);
+    let cur = it;
+    for (;;) {
+      const up = byBranch.get(`${cur.repo}\0${cur.base}`);
+      if (!up || up.author !== cur.author || seen.has(up.id)) return cur.id;
+      seen.add(up.id);
+      cur = up;
+    }
+  };
+  const stacks = new Map<string, Card[]>();
+  for (const c of cards) {
+    const it = entries.get(c.id)?.item;
+    if (it?.kind !== "pr") continue;
+    const root = rootOf(it);
+    stacks.set(root, [...(stacks.get(root) ?? []), c]);
+  }
+  for (const list of stacks.values()) {
+    const [head] = list;
+    if (head && list.length >= 3) for (const c of list) c.stack = { head: head.id, n: list.length };
   }
 }
 

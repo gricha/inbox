@@ -1,10 +1,10 @@
 import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { laneFacts, sitterNews, sitterParts, waitsOn } from "../view.ts";
-import { atCommas, Owed } from "./CardRow.tsx";
-import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
+import { Owed } from "./CardRow.tsx";
+import { BACK_TITLE, KeyButton } from "./Detail.tsx";
 
-// Merging: your PRs handed off for merge, what Claude is doing on each and what it waits on, and what's back with you.
+// Merging: your PRs handed off for merge, one line each like the main page's, those waiting on you first.
 export function Inflight({
   view,
   now,
@@ -25,48 +25,30 @@ export function Inflight({
   if (!view) return <p className="quiet-note">Loading…</p>;
   const open = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
-  const waiting = open.filter((r) => r.needs_you).length;
   const rows = (list: InflightRow[]) => (
-    <div className="rows cards">
+    <div className="lines">
       {list.map((r) => (
         <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} sending={sending} armed={armed} select={select} run={run} />
       ))}
     </div>
   );
   return (
-    <div className="queue deck lane">
+    <div className="queue lane">
+      {open.length > 0 && !view.babysitting && (
+        <p className="lane-note">
+          <a href="#/settings/inflight">Claude is off:</a> a PR waits on you here when CI fails or reviewers ask for something.
+        </p>
+      )}
       {open.length ? (
-        <section className="group" aria-labelledby="h-inflight">
-          <h2 id="h-inflight" className="group-head">
-            <span>Merging</span>
-            <span className="count">
-              {open.length}
-              {waiting > 0 && ` · ${waiting} waiting on you`}
-            </span>
-          </h2>
-          <p className="lane-intro">
-            {view.babysitting ? (
-              "Claude is getting these merged: it fixes CI and drafts replies. What waits on you is listed first; what it can't get merged goes back to your queue."
-            ) : (
-              <>
-                Your PRs handed off for merge. <a href="#/settings/inflight">Claude is off</a>, so a PR waits on you here when CI fails or
-                reviewers ask for something.
-              </>
-            )}
-          </p>
-          {rows(open)}
-        </section>
+        rows(open)
       ) : (
-        <h2 className="group-head">
-          <span>Merging</span>
-          <span className="group-none">
-            Nothing yet: press <kbd>m</kbd> on one of your PRs when you're done with it.
-          </span>
-        </h2>
+        <p className="queue-empty">
+          Nothing in Merging yet: press <kbd>m</kbd> twice on one of your PRs when you're done with it.
+        </p>
       )}
       {landed.length > 0 && (
         <section className="group" aria-labelledby="h-landed">
-          <h3 id="h-landed" className="group-head sub">
+          <h3 id="h-landed" className="group-head">
             <span>Merged</span>
             <span className="count">{landed.length}</span>
           </h3>
@@ -77,8 +59,26 @@ export function Inflight({
   );
 }
 
-// A row is a queue card: the title and its age; the ref, why it needs you and the PR's state; what it waits on and Claude's
-// line; who merges it when auto-merge isn't on; a drafted reply as a margin note; the selected row's keys under a hairline.
+// What a row says after its ref, in one phrase: why it waits on you (its label in ink, a problem in its colour), else what
+// Claude is doing or what it waits on.
+function Phrase({ row: r }: { row: InflightRow }) {
+  if (r.state !== "open") return r.state;
+  const needs = r.needs_you;
+  if (needs) {
+    // With Claude off the problem itself is the why ("CI failing"); its fact says it in full.
+    const fact = laneFacts(r).find((f) => f.text === needs || f.text.startsWith(`${needs}: `));
+    if (!fact) return <Owed why={needs} />;
+    return (
+      <span className="why owed">
+        <span className={cls(fact.tone && `t-${fact.tone}`)}>{fact.text.charAt(0).toUpperCase() + fact.text.slice(1)}</span>
+      </span>
+    );
+  }
+  if (sitterNews(r)) return sitterParts(r, 0)[0] ?? "merging";
+  return waitsOn(r) ?? (r.merge_note ? "merge it yourself when it's green" : "merging");
+}
+
+// One line: the title, quietly its ref, one phrase, its age. Selected, its drafted reply and its keys open under it.
 function Row({
   row: r,
   now,
@@ -98,88 +98,66 @@ function Row({
 }) {
   const c = r.card;
   const live = r.state === "open";
-  const needs = live ? r.needs_you : null;
-  const waits = waitsOn(r);
-  // Idle, what it waits on says more than "watching".
-  const sitter = sitterNews(r) && !(waits && r.sitter.state === "idle");
-  // A missing clone is fixed in Settings: say where.
-  const noClone = !!needs && needs.startsWith("no local clone");
   const keys = (k: string) => {
     run(r, k);
   };
   const since = c.resolved_at ?? c.waiting_since;
   const draft = live ? r.drafts[0] : undefined;
-  const facts = live ? laneFacts(r) : [];
-  // With Claude off the problem itself is the why ("CI failing"); its fact says it in full, so the why goes.
-  const said = !!needs && facts.some((f) => f.text === needs || f.text.startsWith(`${needs}: `));
+  // A missing clone is fixed in Settings: say where.
+  const noClone = live && !!r.needs_you?.startsWith("no local clone");
   return (
-    <div className={cls("row", "card", "lane-row", needs && "waits", on && "sel", !live && "dim")} data-id={c.id}>
-      <div className="row-line">
-        <button
-          type="button"
-          className="row-main"
-          onClick={() => {
-            select(c.id);
-          }}
-          onDoubleClick={() => {
-            run(r, "enter");
-          }}
-          onFocus={() => {
-            select(c.id);
-          }}
-        >
-          <span className="title-line">
-            <span className="title">{c.title}</span>
-          </span>
-          {/* The queue's measure: how long it's been waiting, or when it landed. */}
-          <span className="age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
-            {age(since, now)}
-          </span>
-          <span className="card-line">
-            <span className="meta">
-              <span className="ref" title={`${c.repo}#${c.number}`}>
-                <span className="ref-ink">
-                  <span className="ref-repo">{c.repo.split("/")[1]}</span>#{c.number}
-                </span>
-              </span>
-              {/* Why it waits on you, its label in ink. */}
-              {needs && !said && <Owed why={needs} />}
-              {live ? (
-                facts.map((f) => (
-                  <span key={f.text} className={cls("fact-word", needs && f.tone && `t-${f.tone}`)}>
-                    {atCommas(f.text)}
-                  </span>
-                ))
-              ) : (
-                <span>{r.state}</span>
-              )}
-            </span>
-          </span>
-          {(!!waits || sitter) && (
-            <Dots className="gist sitter" parts={[waits ?? "", ...(sitter ? sitterParts(r, now) : [])].filter(Boolean)} />
-          )}
-          {live && r.merge_note && <span className="gist sitter">Merge it yourself when it's green: {r.merge_note}</span>}
-        </button>
-      </div>
-      {noClone && (
-        <p className="lane-link">
-          <a href="#/settings/inflight">Set up local clones</a>
-        </p>
-      )}
-      {/* A drafted reply is a margin note; the selected row's keys send or discard the first. */}
-      {live &&
-        r.drafts.map((d) => (
-          <div key={d.id} className="draft">
-            <p className="draft-to">
-              {/* Not Claude's own: another agent over MCP drafted it, so say so before you send it as you. */}
-              {d.by === "agent" ? "Your agent's reply" : "Reply"} to {d.to}
-              {d.quote && <span className="draft-quote">: “{d.quote}”</span>}
-            </p>
-            <p className="draft-body">{d.body}</p>
-          </div>
-        ))}
+    <div className={cls("line", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
+      <button
+        type="button"
+        className="row-main line-main"
+        onClick={() => {
+          select(c.id);
+        }}
+        onDoubleClick={() => {
+          run(r, "enter");
+        }}
+        onFocus={() => {
+          select(c.id);
+        }}
+      >
+        <span className="line-title">{c.title}</span>
+        {/* A long repo name gives way before the title; the number never does. */}
+        <span className="line-ref" title={`${c.repo}#${c.number}`}>
+          {c.repo.split("/")[1]}
+        </span>
+        <span className="line-num">#{c.number}</span>
+        <span className="line-note">
+          <Phrase row={r} />
+        </span>
+        <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
+          {age(since, now)}
+        </span>
+      </button>
       {on && (
-        <div className="more">
+        <div className="lane-more">
+          {/* The row cuts a long question short: here it's whole. */}
+          {live && r.escalation && r.needs_you && (
+            <p className="lane-why">
+              <Owed why={r.needs_you} />
+            </p>
+          )}
+          {noClone && (
+            <p className="lane-link">
+              <a href="#/settings/inflight">Set up local clones</a>
+            </p>
+          )}
+          {/* A drafted reply is a margin note: read it before y sends it as you. */}
+          {live &&
+            r.drafts.map((d) => (
+              <div key={d.id} className="draft">
+                <p className="draft-to">
+                  {/* Not Claude's own: another agent over MCP drafted it, so say so before you send it as you. */}
+                  {d.by === "agent" ? "Your agent's reply" : "Reply"} to {d.to}
+                  {d.quote && <span className="draft-quote">: “{d.quote}”</span>}
+                </p>
+                <p className="draft-body">{d.body}</p>
+              </div>
+            ))}
           {/* One order on every surface: what finishes it (y Send, c Answer), then x, enter and o, b last. */}
           <div className="actions card-keys">
             {draft && (

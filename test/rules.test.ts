@@ -234,24 +234,28 @@ test("default review rules: a CODEOWNERS ping hints Later when it changes code y
   assert.equal(b(3).bucket, "fyi", "files not known yet: the fyi hint, until they are");
 });
 
-test("default My PRs rules: your draft touched in two weeks is on the desk by a hard rule; an older one waits in Later", () => {
+test("default My PRs rules: your draft touched in two weeks hints the desk, an older one Later, and your policy decides", () => {
   const mine = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-mine")!;
   const draft = (number: number, hours: number) =>
     makeItem({ number, author: "me", draft: true, ci: "red", created_at: hoursAgo(24 * 40), updated_at: hoursAgo(hours) });
-  // Claude would sort them all away; the hard rule keeps the fresh ones on the desk anyway.
-  const away = () => ({ bucket: "fyi" as const, why: "a draft", pending: false });
-  const fresh = [1, 2, 3, 4, 5, 6, 7].map((n) => draft(n, 30 + n));
-  const r = classify(
+  const items = [1, 2, 3].map((n) => draft(n, 30 + n)).concat(draft(8, 24 * 20));
+  const rules = classify(
     mine,
-    [...fresh, draft(8, 24 * 20)].map((it) => entry(it)),
+    items.map((it) => entry(it)),
+  );
+  const b = (n: number) => rules.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["today", "your draft: finish it", undefined]);
+  assert.deepEqual([b(8).bucket, b(8).why], ["later", "draft, quiet for 2+ weeks"]);
+  // A policy that sends drafts to later moves them: no hard rule keeps them up.
+  const away = () => ({ bucket: "later" as const, why: "a draft", pending: false });
+  const judged = classify(
+    mine,
+    items.map((it) => entry(it)),
     away,
     14,
   );
-  const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
-  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["today", "your draft: finish it", true]);
-  assert.equal(r.order.today.length, 7, "over the board's cap of 6, all of them");
-  assert.deepEqual([b(8).bucket, b(8).rule_bucket, b(8).hard], ["fyi", "fyi", undefined]);
-  assert.equal(r.placements.get("acme/api#8")!.hint?.why, "draft, quiet for 2+ weeks");
+  assert.deepEqual(judged.order.today, []);
+  assert.equal(judged.placements.get("acme/api#1")!.hint?.why, "your draft: finish it");
 });
 
 test("priority sorts within a bucket before the board sort", () => {
@@ -356,9 +360,11 @@ test("the queue's order within Now or Today: handed back, close looks, then the 
     card(7, { demoted: "3 from PRs to review are urgent already" }),
     card(8, { preflight: { state: "ready", verdict: "skim", risk: "high" } }),
     card(9, { author: "me", handed_back: true, why: "handed back: Dana wants a redesign" }),
+    // An AI review you asked for on your own PR says skip: handed back, it still comes first.
+    card(10, { author: "me", handed_back: true, preflight: { state: "ready", verdict: "skip" } }),
   ];
   assert.deepEqual(
     queueOrder(cards, "me").map((c) => c.id.split("#")[1]),
-    ["9", "4", "8", "3", "7", "5", "2", "6", "1"],
+    ["9", "10", "4", "8", "3", "7", "5", "2", "6", "1"],
   );
 });

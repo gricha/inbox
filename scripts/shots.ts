@@ -184,6 +184,23 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A stack of four on the queue is one line, the rest behind the fold.
+    name: "queue-stack",
+    go: async (page) => {
+      await queueAs((q) => {
+        const list = q.sections.now.slice(2, 6);
+        const head = list[0]?.id ?? "";
+        for (const c of list) c.stack = { head, n: list.length };
+      })(page);
+      await top(page);
+    },
+    after: async (page) => {
+      await page.unroute("**/api/queue");
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
     // The cursor on the queue's "n more" line, then Enter opens the rest in place.
     name: "queue-fold",
     go: async (page) => {
@@ -519,6 +536,15 @@ const SHOTS: Shot[] = [
       go: async (page) => {
         await pickTheme(id)(page);
         await review("acme/api#4127")(page);
+      },
+      after: systemTheme,
+    },
+    {
+      name: `theme-${id}-inflight`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await at("#/inflight")(page);
+        await page.keyboard.press("j");
       },
       after: systemTheme,
     },

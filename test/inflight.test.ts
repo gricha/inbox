@@ -106,7 +106,7 @@ test("whatever a PR in Merging waits on you for, it stays there: never in the qu
   const q = t.desk.queue();
   const shown = [q.sections, t.desk.focus().sections].flatMap((x) => Object.values(x).flat());
   assert.deepEqual([...new Set([...shown, ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id))], ["acme/api#1"]);
-  assert.equal(t.desk.status().text, "desk 1 ●1");
+  assert.equal(t.desk.status().text, "desk 1");
   assert.deepEqual(t.desk.overview().inflight, { total: 4, needs_you: 3 });
   assert.deepEqual(
     t.desk.inflight().rows.map((r) => !!r.needs_you),
@@ -416,6 +416,7 @@ test("nothing is written when the repo doesn't allow auto-merge, it's on already
       myPr(5, { ci: "pending", ...allows }),
       myPr(6, { ci: "pending", ...allows }),
       myPr(7, { ci: "pending" }),
+      myPr(8, { ci: "pending", ...allows }),
     ],
     { settings: OFF, desk: { writer: w.writer } },
   );
@@ -425,6 +426,11 @@ test("nothing is written when the repo doesn't allow auto-merge, it's on already
   assert.deepEqual(no.auto_merge, { on: false, why: "the repo doesn't allow auto-merge", at: no.auto_merge.at });
   const already = await t.desk.handOff("web#4");
   assert.deepEqual([already.auto_merge.on, already.auto_merge.why], [false, null]);
+  // You turned it on on GitHub after the last sync: m reads that first, so it's never the desk's to claim (or b's to undo).
+  const eight = t.gh.items.get("acme/web#8")!;
+  t.gh.items.set(eight.id, { ...eight, auto_merge: true });
+  const yours = await t.desk.handOff("web#8");
+  assert.deepEqual([yours.auto_merge.on, yours.auto_merge.why], [false, null]);
   assert.deepEqual(w.calls, []);
   const rows = () => new Map(t.desk.inflight().rows.map((r) => [r.card.id, r]));
   // Nobody merges #3 for you: ready to merge, it waits on you. #4 GitHub merges.
@@ -480,9 +486,13 @@ test("m and b are the desk window's: no agent, CLI or MCP route reaches the auto
     assert.equal((await post(`/api/inflight/${id}/${route}`, { "x-desk-agent": "babysitter", "x-desk-pr": "acme/web#3" })).status, 403);
     assert.equal((await post(`/api/inflight/${id}/${route}`, { origin: "http://localhost:47823", "sec-fetch-site": "none" })).status, 403);
   }
-  // Marking it in Merging another way writes nothing.
-  assert.equal((await post("/api/act", {}, { id: "acme/web#3", action: "inflight" })).status, 200);
-  assert.equal((await post("/api/act", {}, { id: "acme/web#3", action: "takeback" })).status, 200);
+  // Nor can an agent move it into or out of Merging through /api/act.
+  for (const action of ["inflight", "takeback"]) {
+    const r = await post("/api/act", { "x-desk-agent": "coordinator" }, { id: "acme/web#3", action });
+    assert.equal(r.status, 400);
+    assert.match(((await r.json()) as { error: string }).error, /m twice, or bring it back with b, in the desk/);
+  }
+  assert.equal(t.desk.inflight().rows.length, 0);
   assert.equal(w.calls.length, 0);
   const desk = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
   assert.equal((await post(`/api/inflight/${id}/handoff`, desk)).status, 200);

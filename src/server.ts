@@ -109,6 +109,9 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     const body = await c.req.json<{ id?: string; action?: Action; until?: string; reason?: unknown }>();
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
+    // Hand-offs go only through /handoff and /back, which only the desk's own window reaches.
+    if (body.action === "inflight" || body.action === "takeback")
+      throw new DeskError(400, "hand a PR off with m twice, or bring it back with b, in the desk");
     const reason = typeof body.reason === "string" ? body.reason : undefined;
     return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, { agent: agentOf(c.req.header("x-desk-agent")), reason }) });
   });

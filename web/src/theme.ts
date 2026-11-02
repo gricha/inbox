@@ -1,4 +1,7 @@
-// The theme is this device's, kept in its browser storage (not a desk setting); index.html applies it before the first paint.
+import type { DesktopBridge } from "../../src/types.ts";
+
+// The theme is this device's (not a desk setting): the desktop app keeps it, a browser keeps it in its storage, and
+// index.html applies it before the first paint.
 export const THEMES = [
   { id: "system", label: "System", diff: "system" },
   { id: "light", label: "Light", diff: "light" },
@@ -9,15 +12,21 @@ export const THEMES = [
 export type ThemeId = (typeof THEMES)[number]["id"];
 const KEY = "desk.theme"; // index.html reads it too
 
-const known = (t: string | null | undefined): t is ThemeId => THEMES.some((x) => x.id === t);
+const known = (t: unknown): t is ThemeId => THEMES.some((x) => x.id === t);
+const desktop = () => (window as Window & { desktop?: DesktopBridge }).desktop;
 
-export function savedTheme(): ThemeId {
+function stored(): ThemeId | null {
   try {
     const t = localStorage.getItem(KEY);
-    return known(t) ? t : "system";
+    return known(t) ? t : null;
   } catch {
-    return "system";
+    return null;
   }
+}
+
+export function savedTheme(): ThemeId {
+  const app = desktop()?.theme;
+  return known(app) ? app : (stored() ?? "system");
 }
 
 export function applyTheme(id: ThemeId): void {
@@ -29,6 +38,16 @@ export function applyTheme(id: ThemeId): void {
   } catch {
     // storage off (a private window): the theme holds until the window closes
   }
+  desktop()
+    ?.setTheme?.(id)
+    .catch(() => {});
+}
+
+// A theme picked before the app kept it lives in this origin's storage only: hand it to the app once.
+export function adoptTheme(): void {
+  const d = desktop();
+  const t = stored();
+  if (d?.setTheme && d.theme === null && t) d.setTheme(t).catch(() => {});
 }
 
 // The diff's own light or dark, following the theme on screen.

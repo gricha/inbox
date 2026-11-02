@@ -178,11 +178,25 @@ export function sourceEnv(env: NodeJS.ProcessEnv, o: { port: number; home: strin
 
 // ---------------------------------------------------------------- tray text
 
-// "desk 7 ●2 +3" -> "7 ●2 +3"
+// The UI's --paper and --pencil per theme (web/src/styles.css), for the window before the UI paints.
+const THEME_COLORS: Record<string, { paper: string; pencil: string }> = {
+  light: { paper: "#f7f7f5", pencil: "#62676f" },
+  dark: { paper: "#151618", pencil: "#9599a1" },
+  sand: { paper: "#f3eee5", pencil: "#73685a" },
+  slate: { paper: "#1b2028", pencil: "#8e98a5" },
+};
+
+export const isTheme = (t: unknown): t is string => t === "system" || (typeof t === "string" && Object.hasOwn(THEME_COLORS, t));
+
+// This device's theme's colours; System (or none picked yet) follows the OS.
+export const themeColors = (theme: string | null, osDark: boolean): { paper: string; pencil: string } =>
+  (theme && Object.hasOwn(THEME_COLORS, theme) ? THEME_COLORS[theme] : undefined) ?? THEME_COLORS[osDark ? "dark" : "light"]!;
+
+// "desk 7 +3" -> "7 +3"
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
 export const trayTooltip = (s: { now: number; today: number } | null): string =>
-  s ? `Review Desk: ${s.now + s.today} in the queue${s.now ? `, ${s.now} urgent` : ""}` : "Review Desk";
+  s ? `Review Desk: ${s.now + s.today} in the queue` : "Review Desk";
 
 // Menus read a single & as a mnemonic marker; cut first so && is never split.
 export function menuLabel(text: string, max = 60): string {

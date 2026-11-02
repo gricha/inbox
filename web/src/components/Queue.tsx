@@ -1,10 +1,14 @@
-import type { Overview, QueueView } from "../../../src/types.ts";
+import type { Card, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import { foldOf, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { withCode } from "./Review.tsx";
 
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
+
+// How many of the stack a row stands for wait behind the fold.
+const stackedBehind = (c: Card, shown: Card[]) =>
+  c.stack?.head === c.id ? c.stack.n - shown.filter((x) => x.stack?.head === c.id).length : 0;
 
 // The main page: only what needs you, one line each, in the desk's order.
 export function Queue({
@@ -43,7 +47,7 @@ export function Queue({
       {g && g.cards.length > 0 ? (
         <div className="lines" aria-label="Needs you">
           {g.cards.map((c) => (
-            <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
+            <CardRow key={c.id} card={c} variant="active" ctx={ctx} stacked={stackedBehind(c, g.cards)} />
           ))}
         </div>
       ) : (

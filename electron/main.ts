@@ -37,6 +37,7 @@ import {
   isGitHubUrl,
   isHttpsUrl,
   isHttpUrl,
+  isTheme,
   menuLabel,
   mergePath,
   parseNotice,
@@ -46,6 +47,7 @@ import {
   restoreBounds,
   SHELL_PATH_COMMAND,
   sourceDir,
+  themeColors,
   trayTitle,
   trayTooltip,
   type Bounds,
@@ -86,6 +88,7 @@ let hotkey: { accelerator: string; ok: boolean; error?: string } = { accelerator
 let status: Status | null = null;
 let queueCards: Card[] = []; // the queue's top: now, then today
 let loginApplied: boolean | null = null; // last applied, so a refused registration isn't retried on every update
+let theme: string | null = null; // this device's, as Settings → Appearance picked it; kept here, since the UI's origin can change
 
 // A separate DESK_HOME (tests, a second desk) gets its own window state, logs and single-instance lock.
 if (process.env.DESK_HOME) {
@@ -147,6 +150,22 @@ async function main(): Promise<void> {
   ipcMain.handle("desktop:status", (e) => {
     if (!isAppUrl(e.senderFrame?.url ?? "", origins)) throw new Error("not allowed");
     return { hotkey, open_at_login: loginItemEnabled(), source: sourceStatus() };
+  });
+  theme = readTheme();
+  // The preload reads it before the page's first paint.
+  ipcMain.on("desktop:theme", (e) => {
+    e.returnValue = theme;
+  });
+  ipcMain.handle("desktop:set-theme", (e, t: unknown) => {
+    if (!isAppUrl(e.senderFrame?.url ?? "", origins)) throw new Error("not allowed");
+    if (!isTheme(t)) throw new Error("no such theme");
+    theme = t;
+    try {
+      fs.writeFileSync(themeFile(), JSON.stringify({ theme: t }));
+    } catch (err) {
+      log(`saving the theme: ${(err as Error).message}`);
+    }
+    win?.setBackgroundColor(paper());
   });
   Menu.setApplicationMenu(appMenu());
   createTray();
@@ -397,12 +416,22 @@ function setLoginItem(on: boolean): void {
 // ---------------------------------------------------------------- window
 
 const stateFile = () => path.join(app.getPath("userData"), "window.json");
+const themeFile = () => path.join(app.getPath("userData"), "theme.json");
 
-// The UI's --paper, so the window doesn't flash the other theme while it loads.
-const paper = () => (nativeTheme.shouldUseDarkColors ? "#151618" : "#f6f6f4");
+function readTheme(): string | null {
+  try {
+    const t = (JSON.parse(fs.readFileSync(themeFile(), "utf8")) as { theme?: unknown }).theme;
+    return isTheme(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+// The UI's --paper, so the window doesn't flash another theme while it loads.
+const paper = () => themeColors(theme, nativeTheme.shouldUseDarkColors).paper;
 
 const startPage = (text: string) => {
-  const ink = nativeTheme.shouldUseDarkColors ? "#9599a1" : "#676c74";
+  const ink = themeColors(theme, nativeTheme.shouldUseDarkColors).pencil;
   const body = text.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
   const page = `<title>Review Desk</title><body style="margin:0;display:grid;place-items:center;height:100vh;background:${paper()};color:${ink};font:14px system-ui;-webkit-app-region:drag"><p style="max-width:32em;text-align:center">${body}</p></body>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(page)}`;
@@ -551,12 +580,14 @@ function createTray(): void {
   updateTray();
 }
 
+// The queue's count, as the sidebar shows it: one list, no urgent split.
+const queued = () => (status?.now ?? 0) + (status?.today ?? 0);
+
 function updateTray(): void {
   if (!tray) return;
-  const now = status?.now ?? 0;
   tray.setToolTip(trayTooltip(status));
   if (mac) tray.setTitle(prefs.menu_bar_count ? trayTitle(status?.text ?? "") : "", { fontType: "monospacedDigit" });
-  else tray.setImage(trayImage(now > 0));
+  else tray.setImage(trayImage(queued() > 0));
   const cards: MenuItemConstructorOptions[] = queueCards.slice(0, 5).map((c) => ({
     label: cardLabel(c),
     click: () => {
@@ -589,8 +620,8 @@ function updateTray(): void {
 }
 
 function updateBadge(): void {
-  const now = status?.now ?? 0;
-  if (mac) app.dock?.setBadge(now ? String(now) : "");
-  else if (linux) app.setBadgeCount(now);
-  else win?.setOverlayIcon(now ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, now ? `${now} urgent` : "");
+  const n = queued();
+  if (mac) app.dock?.setBadge(n ? String(n) : "");
+  else if (linux) app.setBadgeCount(n);
+  else win?.setOverlayIcon(n ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, n ? `${n} in the queue` : "");
 }

@@ -5,6 +5,7 @@
 // while it's still up starts a copy, and the desk couldn't time it out, stop it or read its errors.)
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Desk } from "./desk.ts";
 import { claudeCommand, claudeError, claudeMissing, claudeSpawn, NOT_LOGGED_IN, probeLogin, runCommand } from "./review.ts";
@@ -70,7 +71,7 @@ export const SYSTEM_PROMPT = [
   "When the owner asks, change the policy with desk_policy set, and the rules with desk_config, but save rules only after showing them desk_config preview and hearing yes.",
 ].join(" ");
 
-const INTRO = `The desk started you. You coordinate {me}'s Review Desk: their GitHub review queue (Now, Today, and what's sorted away).
+const INTRO = `The desk started you. You coordinate {me}'s Review Desk: their GitHub review queue (what needs them, and what's sorted away).
 
 How this works:
 - The desk wakes you with a short message when new activity lands: review requests, reviews, comments, mentions, CI going red. Between wakes nothing runs.
@@ -100,6 +101,21 @@ interface State {
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ");
 const dirOf = (home: string) => path.resolve(home, "coordinator");
+// Claude Code keeps a session's transcript under its config dir, in a folder named for the session's working directory.
+const transcript = (dir: string, session: string) =>
+  path.join(
+    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
+    "projects",
+    dir.replaceAll(/[^a-zA-Z0-9]/g, "-"),
+    `${session}.jsonl`,
+  );
+const madeIn = (dir: string, session: string) => {
+  let real = dir;
+  try {
+    real = fs.realpathSync(dir);
+  } catch {}
+  return [dir, real].some((d) => fs.existsSync(transcript(d, session)));
+};
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -180,6 +196,11 @@ export class Coordinator {
       learned_seq: 0,
       ...saved,
     };
+    // Saved before sessions were bound: this desk's own if Claude Code has its transcript in this desk's directory.
+    if (saved && !saved.dir && st.started_at && madeIn(dir, st.session_id)) {
+      st.dir = dir;
+      this.desk.store.set("coordinator", st);
+    }
     // A desk.db copied from another desk (or from before sessions were bound) holds that desk's session: resuming it writes into it.
     if (saved && st.dir !== dir) {
       if (st.started_at)

@@ -332,6 +332,10 @@ export interface CoordinatorActed {
 export interface DesktopBridge {
   platform: string; // process.platform
   version: string;
+  // This device's theme, kept by the app (the UI's origin, and so its localStorage, changes when it runs from a checkout);
+  // null until picked in this app, absent from an older app.
+  theme?: string | null;
+  setTheme?(id: string): Promise<void>;
   // source: absent from an app older than Run from a checkout.
   status(): Promise<{ hotkey: { accelerator: string; ok: boolean; error?: string }; open_at_login: boolean; source?: SourceStatus | null }>;
 }
@@ -454,6 +458,7 @@ export interface Card {
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
+  stack?: { head: string; n: number }; // in a stack of 3+ PRs on the queue (one author's, each based on the last): the one that stands for it, and how many
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is

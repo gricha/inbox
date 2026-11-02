@@ -154,7 +154,7 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | PUT    | `/api/settings`              | `{ set?: {key: value}, reset?: [key] }`                | `{ ok, errors, settings }` (writes nothing if any value is invalid)                                                                                          |
 | GET    | `/api/agents`                |                                                        | `AgentStatus`: whether Claude Code has the MCP tools and the skill, and the commands                                                                         |
 | POST   | `/api/agents/connect`        |                                                        | `AgentStatus` after copying the skill and registering the MCP server (`src/agents.ts`); 502 with the command if the agent's CLI fails                        |
-| GET    | `/api/status`                |                                                        | `{ now, today, new, text }` (`text` e.g. `desk 7 ●2 +3`: the queue, urgent, new; `""` when 0/0)                                                              |
+| GET    | `/api/status`                |                                                        | `{ now, today, new, text }` (`text` e.g. `desk 7 +3`: the queue, new; `""` when 0/0)                                                                         |
 | GET    | `/api/inflight`              |                                                        | `InflightView`: your PRs in flight, their status in plain words, the babysitter's state, drafts and question                                                 |
 | POST   | `/api/inflight/:id/draft`    | `{ body, thread_id? }`                                 | `{ ok, draft }` — `desk_draft_reply`: a reply waiting in the lane for you to send                                                                            |
 | POST   | `/api/inflight/:id/escalate` | `{ question }`                                         | `{ ok, question }` — `desk_escalate`: the PR waits on you in Merging with the question as its why                                                            |
@@ -209,7 +209,7 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_config({ action: get | preview | save, text?, base? })` — config.toml fenced with its hash; preview says what moves; save writes valid text (base = the hash).
 - `desk_note({ text })` — a line in the coordinator's log.
 - `desk_draft_reply({ ref, thread_id?, body })` — a reply on your own in-flight PR, kept as a draft you send from the lane.
-- `desk_escalate({ ref, question })` — hands a decision on your in-flight PR back to you, in Now.
+- `desk_escalate({ ref, question })` — hands a decision on your in-flight PR back to you; it waits on you in Merging.
 
 Every tool result marks PR titles and bodies as untrusted data; the policy and config come fenced too. No tool writes to GitHub: agents never approve or post.
 

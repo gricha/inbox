@@ -13,6 +13,9 @@ import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
 const posix = { skip: process.platform === "win32" };
 const MCP = "http://127.0.0.1:47999/mcp";
+// Where Claude Code would keep its transcripts: never the real ~/.claude.
+const CLAUDE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "desk-claude-config-"));
+process.env.CLAUDE_CONFIG_DIR = CLAUDE_DIR;
 
 // A fake claude. `agents --json` prints the file `open` (default []). A judge call (--json-schema) sorts every item to fyi,
 // uncounted, or fails like a run. Each run records its args, stdin, cwd and pid, waits while `hold` exists, and answers like
@@ -369,10 +372,17 @@ test("a desk on a copy of another desk's desk.db starts a session of its own ins
   assert.equal(fs.realpathSync(t.fake.cwd(2)), fs.realpathSync(path.join(home, "coordinator")));
   assert.ok(logs.some((l) => l.includes(`session ${theirs} isn't this desk's`)));
 
-  // One saved before sessions were bound to their desk isn't resumed either.
+  // One saved before sessions were bound to their desk isn't resumed either, unless Claude Code has its transcript here.
   const legacy = { ...(copy.store.get("coordinator") as Record<string, unknown>), dir: undefined };
   copy.store.set("coordinator", legacy);
   assert.deepEqual([copy.coordinator.status().started, copy.coordinator.status().session_id === mine], [false, false]);
+  const kept = copy.coordinator.status().session_id;
+  copy.store.set("coordinator", { ...legacy, session_id: kept, dir: undefined });
+  const project = path.join(CLAUDE_DIR, "projects", fs.realpathSync(path.join(home, "coordinator")).replaceAll(/[^a-zA-Z0-9]/g, "-"));
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, `${kept}.jsonl`), "{}\n");
+  assert.deepEqual([copy.coordinator.status().started, copy.coordinator.status().session_id], [true, kept]);
+  assert.equal((copy.store.get("coordinator") as { dir: string }).dir, path.resolve(home, "coordinator"));
 });
 
 test("off: the setting, or no MCP server to wire it to", posix, async (c) => {
