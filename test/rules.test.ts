@@ -9,8 +9,8 @@ import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
 const ctx = makeContext();
 
-const entry = (item: Item, o: Partial<Entry> = {}): Entry => {
-  const a = analyze(item, ctx, cfg, NOW);
+const entry = (item: Item, o: Partial<Entry> = {}, c = ctx): Entry => {
+  const a = analyze(item, c, cfg, NOW);
   return {
     id: item.id,
     signals: a.signals,
@@ -175,6 +175,22 @@ test("default review rules: bot asks fall below close collaborators", () => {
   assert.equal(b(4).why, "CODEOWNERS ping to @ml-team");
   // A close collaborator's CODEOWNERS ping is still nobody asking you by name.
   assert.deepEqual([b(5).bucket, b(5).why], ["fyi", "CODEOWNERS ping to @ml-team"]);
+});
+
+test("default review rules: a CODEOWNERS ping hints Today when it changes code you work on, and isn't hard", () => {
+  const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
+  const areas = makeContext({ areas: { "acme/api": { "src/auth/": 6 } } });
+  const ping = (number: number, paths?: string[]) =>
+    makeItem({ number, author: "carol", paths, review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+  const items = [ping(1, ["src/auth/token.ts", "web/x.ts"]), ping(2, ["web/x.ts"]), ping(3)];
+  const r = classify(
+    review,
+    items.map((it) => entry(it, {}, areas)),
+  );
+  const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["today", "CODEOWNERS ping to @ml-team, in code you work on", undefined]);
+  assert.deepEqual([b(2).bucket, b(2).why], ["fyi", "CODEOWNERS ping to @ml-team"]);
+  assert.equal(b(3).bucket, "fyi", "files not known yet: the fyi hint, until they are");
 });
 
 test("priority sorts within a bucket before the board sort", () => {

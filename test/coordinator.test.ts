@@ -493,7 +493,7 @@ test(
         6,
         "Changed the policy",
         "− Less is more. Show me only what needs me; when unsure, sort it away.",
-        "− and 5 more lines",
+        "− and 6 more lines",
         "+ Bot PRs are FYI.",
       ],
       "a short before and after: three lines each at most",

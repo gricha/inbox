@@ -49,9 +49,9 @@ Done, snooze, mute, pin and in flight are local. Nothing is sent to GitHub.
 
 ## Rules
 
-Rules decide where each item lands. Edit them in Settings → Rules: `⌘↵` previews which items would move, `⌘S` saves. They live in `~/.review-desk/config.toml`, and editing the file directly works too.
+Rules give each item its first placement. Edit them in Settings → Rules: `⌘↵` previews which items would move, `⌘S` saves. They live in `~/.review-desk/config.toml`, and editing the file directly works too.
 
-A board is a source: one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement.
+A board is a source: one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. A rule with `hard = true` is final; everything else your own Claude Code then sorts by your policy (Settings → Policy, a starter until you write one), with the rule's bucket as its hint. Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement.
 
 ```toml
 [[spaces]]
@@ -69,8 +69,9 @@ priority = "author.engaged_90d"    # within a bucket: people you work with most 
 caps = { now = 3, today = 6 }      # overflow moves down a bucket, with a note
 default = "later"
 rules = [
-  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly" },
+  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },
   { when = "author.close", bucket = "today", why = "you engaged with {author.engaged_90d} of their PRs" },
+  { when = "me.requested_codeowner && pr.my_area", bucket = "today", why = "CODEOWNERS ping, in code you work on" },
   { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },
 ]
 ```

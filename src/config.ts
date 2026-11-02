@@ -245,6 +245,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `  { when = "repo.mine", bucket = "today", why = "your repo" },`,
       `  { when = "author.bot", bucket = "fyi", why = "bot PR" },`,
       `  { when = "me.requested_by_bot", bucket = "later", why = "added by {me.requested_by} (bot)" },`,
+      `  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "today", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },`,
       `  { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },`,
       `]`,
       ``,

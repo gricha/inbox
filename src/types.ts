@@ -378,10 +378,11 @@ export interface JudgeStep {
   pending: boolean; // not judged under this policy since the item last changed (an earlier answer may still show)
 }
 
-// Kept per item in kv `judge:<id>`: good for this updated_at under this policy.
+// Kept per item in kv `judge:<id>`: good for this updated_at under this policy, with what else it saw.
 export interface JudgeAnswer {
   updated_at: string;
   policy: string; // the policy's hash
+  seen?: string; // seenKey(): whether the PR's files were known, the AI review's commit; absent on answers from before it
   bucket: Bucket | null; // null: the agent gave no answer for it
   why: string;
   at: string;

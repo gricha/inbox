@@ -52,7 +52,7 @@ import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import { agentDir, NOT_LOGGED_IN, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
-import { DEFAULT_POLICY, Judge, textHash } from "./judge.ts";
+import { DEFAULT_POLICY, Judge, seenKey, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
 import {
   checkSetting,
@@ -734,14 +734,15 @@ export class Desk {
       const current = ai?.head_oid === e.item.head_oid ? ai : null;
       return current?.risk === "high" ? "look" : current?.verdict;
     };
-    // An answer for an older version of the item, or under an older policy, stays until a fresh one lands, so the queue
-    // doesn't jump back to the rules' placements each time the policy changes.
+    // An answer for an older version of the item, under an older policy, or from before its files or AI review arrived,
+    // stays until a fresh one lands, so the queue doesn't jump back to the rules' placements each time the policy changes.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
     const judge = answers
       ? (id: string): JudgeStep => {
           const a = answers.get(id);
           if (!a) return { bucket: null, why: "", pending: true };
-          const stale = a.policy !== this.policy.hash || a.updated_at !== entries.get(id)?.item.updated_at;
+          const it = entries.get(id)?.item;
+          const stale = !it || a.policy !== this.policy.hash || a.updated_at !== it.updated_at || a.seen !== seenKey(it, reviews.get(id));
           return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
