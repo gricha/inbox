@@ -28,6 +28,7 @@ export interface Item {
   created_at: string;
   updated_at: string;
   closed_at?: string | null; // merged or closed; absent on items stored before it was fetched
+  body?: string; // the description's first 600 characters, whitespace collapsed (untrusted); absent on items stored before it was fetched
   merged_by?: string; // login, "" if unknown
   // PR-only facts; zero values for issues.
   additions: number;
@@ -42,6 +43,7 @@ export interface Item {
   head_author: string; // login of the head commit's author, "" if unknown
   head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
   head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
+  paths?: string[]; // PR only: its changed files' paths, the first 50 (changed_files counts all); absent on items stored before it was fetched
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
@@ -64,7 +66,12 @@ export interface Context {
   repo_prs: Record<string, number>; // "owner/repo" -> PRs you opened there, last 90 days
   orgs: Record<string, number>; // org -> open items involving you (used to pick default spaces)
   refreshed_at: string;
+  areas?: Areas; // the directories you work in; absent until first fetched
+  areas_at?: string; // when areas were last fetched (refreshed daily, on their own)
 }
+
+// "owner/repo" (lowercase) -> directory you work in ("src/sentry/auth/") -> weight, from your PRs and reviews in the last 90 days.
+export type Areas = Record<string, Record<string, number>>;
 
 // ---------------------------------------------------------------------------
 // Rule signals: what `when`, `filter` and `why` templates can reference.
@@ -101,6 +108,8 @@ export interface Signals {
     unresolved_threads: number;
     base: string;
     pushed_hours: number;
+    my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
+    my_area: boolean; // my_area_files >= 1
   };
   me: {
     login: string;

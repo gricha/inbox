@@ -1,4 +1,5 @@
 // Turns a GitHub item plus facts about you into the signals rules can test.
+import { areaFiles } from "./areas.ts";
 import type { Config, Context, FieldDoc, Item, ReviewState, Signals } from "./types.ts";
 
 export const FIELDS: FieldDoc[] = [
@@ -29,6 +30,12 @@ export const FIELDS: FieldDoc[] = [
   { path: "pr.unresolved_threads", type: "number", doc: "unresolved review threads" },
   { path: "pr.base", type: "string", doc: "base branch" },
   { path: "pr.pushed_hours", type: "number", doc: "hours since the latest commit (-1 if unknown)" },
+  {
+    path: "pr.my_area_files",
+    type: "number",
+    doc: "how many of its changed files (the first 50) are in directories you work in, from your PRs and reviews there in 90 days (-1 if not known yet)",
+  },
+  { path: "pr.my_area", type: "boolean", doc: "it changes code you work in (my_area_files >= 1)" },
   { path: "me.login", type: "string", doc: "your login" },
   { path: "me.author", type: "boolean", doc: "you opened it" },
   { path: "me.assignee", type: "boolean", doc: "you are assigned" },
@@ -128,6 +135,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
+  const myAreaFiles = areaFiles(item, ctx);
 
   const signals: Signals = {
     item: {
@@ -160,6 +168,8 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       unresolved_threads: item.threads_unresolved,
       base: item.base,
       pushed_hours: hours(headAt),
+      my_area_files: myAreaFiles,
+      my_area: myAreaFiles >= 1,
     },
     me: {
       login: ctx.me,

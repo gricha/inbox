@@ -7,6 +7,7 @@
   "state": "OPEN",
   "createdAt": "2026-03-01T09:00:00Z",
   "updatedAt": "2026-03-02T15:30:00Z",
+  "bodyText": "Adds a resize observer to the widget grid.\n\n## Why\n\nThe list re-measured every row on resize.  Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. Measured on a 2,000-row list. ",
   "author": {
     "__typename": "User",
     "login": "maple"
@@ -49,6 +50,14 @@
   "additions": 120,
   "deletions": 30,
   "changedFiles": 4,
+  "files": {
+    "nodes": [
+      { "path": "src/widgets/grid/resize.ts" },
+      { "path": "src/widgets/grid/list.ts" },
+      { "path": "test/widgets/grid.test.ts" },
+      { "path": "package.json" }
+    ]
+  },
   "baseRefName": "main",
   "reviewDecision": "REVIEW_REQUIRED",
   "reviewRequests": {

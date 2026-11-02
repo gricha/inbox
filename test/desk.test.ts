@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
+import type { Context } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
@@ -172,6 +173,34 @@ test("close_authors expands within GitHub's 256-char query limit", async () => {
   assert.match(q, /author:collaborator-0 author:collaborator-1/);
   t.desk.ctx!.affinity = {};
   assert.equal(t.desk.gh.expandQuery("is:pr {close_authors}", ""), null);
+  t.cleanup();
+});
+
+test("your areas: fetched on the first sync, then daily; a failure keeps them and retries in about an hour", async () => {
+  const t = await setup([]);
+  const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
+  t.gh.found = { "acme/api": { "src/auth/": 6 } };
+  await t.desk.sync();
+  await t.desk.sync();
+  assert.equal(t.gh.areaCalls, 1);
+  assert.deepEqual(t.desk.ctx?.areas, { "acme/api": { "src/auth/": 6 } });
+
+  // The daily context refresh keeps them; the failed areas fetch does too.
+  t.setNow(later(25));
+  t.gh.found = new Error("GitHub HTTP 502");
+  await t.desk.sync();
+  assert.equal(t.gh.areaCalls, 2);
+  assert.equal(t.desk.ctx?.refreshed_at, later(25).toISOString());
+  assert.deepEqual(t.desk.ctx?.areas, { "acme/api": { "src/auth/": 6 } });
+  t.setNow(later(25.5));
+  await t.desk.sync();
+  assert.equal(t.gh.areaCalls, 2);
+
+  t.setNow(later(26.1));
+  t.gh.found = { "acme/api": { "src/auth/": 9 } };
+  await t.desk.sync();
+  assert.equal(t.gh.areaCalls, 3);
+  assert.deepEqual((t.desk.store.get("context") as Context).areas, { "acme/api": { "src/auth/": 9 } });
   t.cleanup();
 });
 

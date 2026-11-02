@@ -76,7 +76,7 @@ rules = [
 ```
 
 - **Expressions**: `&& || ! == != < <= > >= in matches`, plus `len() lower() contains() startswith() any(list, "glob*")`. Unknown fields are errors with a suggestion.
-- **Fields** (listed next to the editor and by `desk fields`): `item.*`, `pr.*` (ci, review, mergeable, size, threads), `me.*` (requested directly or via a team or CODEOWNERS, your review, `pushed_since_review`, `new_activity`), `author.*` (bot, `engaged_90d`, `close`), `repo.*`.
+- **Fields** (listed next to the editor and by `desk fields`): `item.*`, `pr.*` (ci, review, mergeable, size, threads, `my_area`: it changes code you work in), `me.*` (requested directly or via a team or CODEOWNERS, your review, `pushed_since_review`, `new_activity`), `author.*` (bot, `engaged_90d`, `close`), `repo.*`.
 - **Buckets**: `now`, `today`, `later`, `fyi`, `hide`. Hidden items stay visible under "Sorted away".
 - `{close_authors}` in a query expands to the people you review most.
 

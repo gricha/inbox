@@ -17,8 +17,18 @@ export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
   }
 }`;
 
+// Where you work: each PR's changed paths. 50 a page: 100 took 9.5 s of GitHub's 10 s limit, 50 up to 7 s (2026-11-02).
+export const FILES_SEARCH = `query($q: String!, $first: Int!, $after: String) {
+  ${RATE}
+  search(query: $q, type: ISSUE, first: $first, after: $after) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on PullRequest { id repository { nameWithOwner } changedFiles files(first: 50) { nodes { path } } } }
+  }
+}`;
+
 const COMMON = `
-  id number title url state createdAt updatedAt closedAt
+  id number title url state createdAt updatedAt closedAt bodyText
   author { __typename login }
   repository { nameWithOwner }
   labels(first: 15) { nodes { name } }
@@ -29,6 +39,7 @@ const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on B
 
 const PR = `${COMMON}
   isDraft additions deletions changedFiles baseRefName headRefName headRepository { nameWithOwner } reviewDecision mergedBy { login }
+  files(first: 50) { nodes { path } }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
     nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }

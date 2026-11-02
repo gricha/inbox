@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { compile } from "../src/expr.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
@@ -156,4 +157,19 @@ test("requests you made yourself are not someone else's activity", () => {
   );
   assert.equal(a.others_at, null);
   assert.equal(a.signals.me.new_activity, false);
+});
+
+test("a CODEOWNERS ping that changes code you work in, one that doesn't, and one not known yet", () => {
+  const withAreas = makeContext({ areas: { "acme/api": { "src/auth/": 6 } } });
+  const ping = { author: "carol", review_requests: [{ reviewer: "ml-team", type: "team" as const, codeowner: true }] };
+  const at = (paths?: string[]) => analyze(makeItem({ ...ping, ...(paths && { paths }) }), withAreas, cfg, NOW).signals;
+  const yours = at(["src/auth/session.ts", "src/auth/token.ts", "docs/auth.md"]);
+  const elsewhere = at(["src/billing/plan.ts"]);
+  const unknown = at();
+  assert.deepEqual([yours.pr.my_area_files, yours.pr.my_area], [2, true]);
+  assert.deepEqual([elsewhere.pr.my_area_files, elsewhere.pr.my_area], [0, false]);
+  assert.deepEqual([unknown.pr.my_area_files, unknown.pr.my_area], [-1, false]);
+  const rule = compile("me.requested_codeowner && pr.my_area_files == 0");
+  if (!rule.ok) throw new Error(rule.error);
+  assert.deepEqual([rule.eval(yours), rule.eval(elsewhere), rule.eval(unknown)], [false, true, false]);
 });

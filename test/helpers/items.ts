@@ -1,4 +1,4 @@
-import type { Context, Item } from "../../src/types.ts";
+import type { Areas, Context, Item } from "../../src/types.ts";
 import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
@@ -98,6 +98,15 @@ export class FakeGitHub implements GitHub {
   context() {
     const { refreshed_at: _, ...rest } = this.ctx;
     return Promise.resolve(rest);
+  }
+
+  // What areas() finds next: a test sets the directories, or an Error to fail the fetch.
+  found: Areas | Error = {};
+  areaCalls = 0;
+
+  areas() {
+    this.areaCalls++;
+    return this.found instanceof Error ? Promise.reject(this.found) : Promise.resolve(this.found);
   }
 
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {

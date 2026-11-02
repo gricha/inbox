@@ -49,6 +49,21 @@ test("PR by someone else with a bot-added team request (review fragment)", () =>
   assert.equal(it.detail_at, NOW);
 });
 
+test("the description's first 600 characters, whitespace collapsed, and a PR's changed paths", () => {
+  const pr = normalize(fixture("pr-review"), NOW);
+  assert.equal(pr.body?.length, 600);
+  assert.ok(pr.body?.startsWith("Adds a resize observer to the widget grid. ## Why The list re-measured every row on resize. Measured on"));
+  assert.deepEqual(pr.paths, ["src/widgets/grid/resize.ts", "src/widgets/grid/list.ts", "test/widgets/grid.test.ts", "package.json"]);
+  assert.deepEqual(normalize(fixture("pr-mine"), NOW).paths, ["deploy/release.yaml"]);
+  const issue = normalize(fixture("issue"), NOW);
+  assert.equal(issue.body, "Steps: 1. Open the widget list 2. Resize the window");
+  assert.equal(issue.paths, undefined);
+  // GitHub gives no files for some PRs: unknown, not none.
+  const ghost = normalize(fixture("pr-ghost"), NOW);
+  assert.equal(ghost.body, "");
+  assert.equal("paths" in ghost, false);
+});
+
 test("your PR with red CI, a conflict and unresolved threads (mine fragment)", () => {
   const it = normalize(fixture("pr-mine"), NOW);
   assert.equal(it.id, "acme/infra#77");
