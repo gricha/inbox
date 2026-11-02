@@ -182,6 +182,20 @@ test("review decision and mergeable mappings", () => {
   assert.equal(normalize(n, NOW).state, "closed");
 });
 
+test("your PR's auto-merge and its repo's merge settings, only when asked", () => {
+  const n = fixture("pr-mine");
+  const none = normalize(n, NOW);
+  assert.deepEqual([none.auto_merge, none.auto_merge_allowed, none.merge_method], [undefined, undefined, undefined]);
+  n.autoMergeRequest = null;
+  n.repository = { ...n.repository, autoMergeAllowed: true, viewerDefaultMergeMethod: "SQUASH" };
+  const off = normalize(n, NOW);
+  assert.deepEqual([off.auto_merge, off.auto_merge_allowed, off.merge_method], [false, true, "SQUASH"]);
+  n.autoMergeRequest = { enabledAt: NOW };
+  n.repository = { ...n.repository, autoMergeAllowed: false, viewerDefaultMergeMethod: "FAST_FORWARD" };
+  const on = normalize(n, NOW);
+  assert.deepEqual([on.auto_merge, on.auto_merge_allowed, on.merge_method], [true, false, undefined]);
+});
+
 test("toHit builds the light search hit", () => {
   const hit = toHit({
     __typename: "Issue",

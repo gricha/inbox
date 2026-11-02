@@ -16,6 +16,7 @@ import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
 import {
   DEFAULT_OPEN,
   groupsOf,
+  handArm,
   isFold,
   navigable,
   noCloneOf,
@@ -43,7 +44,7 @@ interface Toast {
   undo?: boolean;
 }
 
-const LEAVES = new Set<Action>(["done", "snooze", "mute", "inflight"]);
+const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
 const VERB: Partial<Record<Action, string>> = {
   done: "Done",
   mute: "Muted",
@@ -51,8 +52,6 @@ const VERB: Partial<Record<Action, string>> = {
   pin: "Pinned",
   unpin: "Unpinned",
   restore: "Restored",
-  inflight: "In flight",
-  takeback: "Took back",
 };
 const sleep = (ms: number) =>
   new Promise((r) => {
@@ -62,11 +61,12 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
-const ARM_MS = 3000; // a first y arms Send, a second one within this sends: a reply on GitHub can't be taken back with a key
+const ARM_MS = 3000; // a first y (or m) arms Send (or a hand-off), a second one within this goes: GitHub writes a key can't take back
 const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
+  m: { name: "inflight" },
   i: { name: "inflight" },
 };
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
@@ -107,7 +107,7 @@ export function App() {
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
-  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed
+  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed, or handArm(card) for m
   const [reviewFrom, setReviewFrom] = useState<"queue" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
@@ -167,7 +167,7 @@ export function App() {
         // Always: the sidebar shows the queue's counts on every page.
         api.queue(),
         exp ? api.item(exp).catch((e: unknown) => message(e)) : null,
-        // A review of your PR in flight shows its lane line too.
+        // A review of your PR in Merging shows its Merging line too.
         r.name === "inflight" || r.name === "review" ? api.inflight() : null,
       ]);
       if (n !== loadSeq.current) return;
@@ -480,12 +480,12 @@ export function App() {
     }
     setSelected(c.id);
     setSnoozeFor(null);
-    // With no clone for a babysitter to work in, the next step is setting one up.
+    // With no clone for Claude to work in, the next step is setting one up.
     if (c.inflight && noCloneOf(c)) {
       go({ name: "settings", section: "inflight" });
       return;
     }
-    // An in-flight PR is in the queue for what its babysitter left you (a reply to send, a question): that's in the lane.
+    // A PR in Merging is in the queue for what Claude left you (a reply to send, a question): that's in Merging.
     if (c.inflight) setLaneSel(c.id);
     go(c.inflight ? { name: "inflight" } : { name: "review", id: c.id });
     void seen(c);
@@ -506,14 +506,72 @@ export function App() {
     }
   }
 
-  // d: your own open PR goes in flight (you're done; agents get it merged), or comes back.
-  function inflight(c: Card) {
-    const mine = c.kind === "pr" && !c.resolved && c.author.toLowerCase() === (overview?.me ?? "").toLowerCase();
-    if (!mine) {
-      flash("Only your own open PRs go in flight", true);
+  // m arms a hand-off (the toast says what it writes); a second m within 3 s hands it off, any other key lets it lapse.
+  function handOffArmed(c: Card) {
+    const id = handArm(c.id);
+    if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
+      setArmed({ id, at: Date.now() });
+      flash(
+        `Press m again to hand off ${shortRef(c)} for merge${c.draft ? ": it marks the draft ready for review and turns on auto-merge" : ""}`,
+        false,
+        false,
+        ARM_MS,
+      );
       return;
     }
-    void act(c, c.inflight ? "takeback" : "inflight");
+    setArmed(null);
+    void handOff(c);
+  }
+
+  // m m: your own open PR goes to Merging (you're done; Claude gets it merged, and GitHub's auto-merge goes on where the repo
+  // allows it, a draft marked ready first). Not undone with u: b brings it back, and turns auto-merge off again.
+  async function handOff(c: Card) {
+    setSnoozeFor(null);
+    const i = flat.findIndex((x) => x.id === c.id);
+    if (i >= 0) {
+      setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
+      if (expanded === c.id) setExpanded(null);
+      setLeaving((s) => new Set(s).add(c.id));
+    }
+    try {
+      const { auto_merge: a } = await api.handOff(c.id);
+      undoSeq.current = null;
+      setView((v) => v && removeCard(v, c.id));
+      const merge = a.on
+        ? c.draft
+          ? "Marked ready for review, and auto-merge is on."
+          : "Auto-merge is on."
+        : a.why
+          ? `${a.why.charAt(0).toUpperCase()}${a.why.slice(1)}: merge it yourself when it's green.`
+          : "Auto-merge was on already.";
+      flash(`Handed off for merge: ${shortRef(c)}. ${merge}`, false, false, 8000);
+    } catch (e) {
+      flash(message(e), true);
+    } finally {
+      setLeaving((s) => {
+        const next = new Set(s);
+        next.delete(c.id);
+        return next;
+      });
+      refresh(0);
+    }
+  }
+
+  // b: your PR leaves Merging for your desk; Claude stops. Out of Merging, it turns off the auto-merge m turned on.
+  async function back(c: Card) {
+    if (!c.inflight && !c.desk_auto_merge) {
+      flash(`${shortRef(c)} isn't in Merging`);
+      return;
+    }
+    try {
+      const r = await api.back(c.id);
+      undoSeq.current = null;
+      const head = c.inflight ? `Back on your desk: ${shortRef(c)}` : `${shortRef(c)} is on your desk`;
+      flash(r.error ? `${head}. ${r.error}` : `${head}${r.auto_merge_off ? ". Auto-merge is off again." : ""}`, !!r.error);
+    } catch (e) {
+      flash(message(e), true);
+    }
+    refresh(0);
   }
 
   // y arms Send (the key line and a toast say so); a second y within 3 s sends it, any other key lets it lapse.
@@ -557,13 +615,13 @@ export function App() {
     refresh(0);
   }
 
-  // The lane's keys: enter review, o GitHub, d take back, y send a reply, x discard it (or the question), c copy the resume command.
+  // Merging's keys: enter review, o GitHub, b back to desk, y send a reply, x discard it (or the question), c copy the resume command.
   function laneRun(r: InflightRow, k: string, d?: Draft) {
     const c = r.card;
     setLaneSel(c.id);
     if (k === "enter") go({ name: "review", id: c.id });
     else if (k === "o") window.open(c.url, "_blank", "noopener,noreferrer");
-    else if (k === "d" && r.state === "open") void act(c, "takeback");
+    else if (k === "b" && r.state === "open") void back(c);
     else if (k === "y") {
       const draft = d ?? r.drafts[0];
       if (draft) sendArmed(c.id, draft);
@@ -590,12 +648,12 @@ export function App() {
 
   async function copyCommand(resume: string | null) {
     if (!resume) {
-      flash("No babysitter session to open yet");
+      flash("No session of Claude's to open yet");
       return;
     }
     try {
       await copyText(resume);
-      flash("Copied: paste it in a terminal to open the babysitter's session");
+      flash("Copied: paste it in a terminal to open Claude's session");
     } catch (e) {
       flash(`Couldn't copy: ${message(e)}`, true);
     }
@@ -613,18 +671,20 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "esc") setExpanded(null);
-    else if (k === "d") inflight(c);
-    else if (c.inflight && ["e", "s", "m"].includes(k)) flash(`${shortRef(c)} is in flight, so its babysitter has it. d takes it back.`);
+    else if (c.inflight && ["e", "d", "s", "m"].includes(k))
+      flash(`${shortRef(c)} is in Merging, so Claude has it. b brings it back to the desk.`);
+    else if (k === "b") void back(c);
+    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOffArmed(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);
-    } else if (k === "e") void act(c, c.status === "active" ? "done" : "restore");
+    } else if (k === "e" || k === "d") void act(c, c.status === "active" ? "done" : "restore");
     else if (k === "s") {
       setSelected(c.id);
       setSnoozeFor(c.id);
     } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
-    // On your PR in flight with a question, c and x are the lane's: answer it in the babysitter's session, or dismiss it.
+    // On your PR in Merging with a question, c and x are Merging's: answer it in Claude's session, or dismiss it.
     else if (k === "c" && c.inflight && c.escalated) void copyCommand(c.resume ?? null);
     else if (k === "x" && c.inflight && c.escalated) void dismissQuestion(c);
     else if (k === "c") void copy(c);
@@ -685,11 +745,8 @@ export function App() {
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
-    // Any other key lets an armed Send lapse; Esc only does that.
-    if (armed && k !== "y" && !["Shift", "Meta", "Control", "Alt"].includes(k)) {
-      setArmed(null);
-      if (k === "Escape") return;
-    }
+    // Any other key lets an armed Send or hand-off lapse (Esc does only that, in onChord).
+    if (armed && k !== (armed.id.startsWith(handArm("")) ? "m" : "y") && !["Shift", "Meta", "Control", "Alt"].includes(k)) setArmed(null);
     if (help) {
       if (k === "Escape" || k === "?") setHelp(false);
       return;
@@ -720,7 +777,7 @@ export function App() {
       else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
         e.preventDefault();
         moveLane(k === "j" || k === "ArrowDown" ? 1 : -1);
-      } else if (laneCur && (k === "Enter" || (k.length === 1 && "odyxc".includes(k)))) {
+      } else if (laneCur && (k === "Enter" || (k.length === 1 && "obyxc".includes(k)))) {
         e.preventDefault();
         laneRun(laneCur, k === "Enter" ? "enter" : k);
       }
@@ -740,14 +797,21 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oesmpcwidyx".includes(k)) {
+    } else if (current && k.length === 1 && "oedsmbpcwiyx".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
   };
-  // The key after g is the chord's, whatever it means on its own (i in a review, x and d in the lane), so it never falls
+  // The key after g is the chord's, whatever it means on its own (i in a review, x and b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
+    // Esc with Send or a hand-off armed only lets it lapse; here, so the review never reads it as "go back".
+    if (armed && e.key === "Escape") {
+      setArmed(null);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (!gAt.current || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
@@ -785,7 +849,6 @@ export function App() {
     selected,
     expanded,
     armed: armed?.id ?? null,
-    babysitting: view?.babysitting ?? true,
     leaving,
     snoozeFor,
     showSignals,
@@ -900,11 +963,10 @@ export function App() {
               id={route.id}
               loads={loads}
               me={overview?.me ?? ""}
-              babysitting={view?.babysitting ?? true}
               now={now}
               inert={help}
               flash={reviewFlash}
-              onInflight={inflight}
+              onCard={run}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               armed={armed?.id ?? null}
               onLane={laneRun}

@@ -1,10 +1,10 @@
 import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { laneFacts, sitterNews, sitterParts } from "../view.ts";
+import { laneFacts, sitterNews, sitterParts, waitsOn } from "../view.ts";
 import { atCommas, Owed } from "./CardRow.tsx";
-import { Dots, KeyButton } from "./Detail.tsx";
+import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
 
-// The In-flight lane: your PRs marked done, what each babysitter is doing, and what's back with you.
+// Merging: your PRs handed off for merge, what Claude is doing on each and what it waits on, and what's back with you.
 export function Inflight({
   view,
   now,
@@ -20,7 +20,7 @@ export function Inflight({
   sending: string | null; // the draft on its way to GitHub
   armed: string | null; // the draft a first y armed
   select: (id: string) => void;
-  run: (row: InflightRow, key: string, draft?: Draft) => void; // the lane's keys: enter o d y x c
+  run: (row: InflightRow, key: string, draft?: Draft) => void; // Merging's keys: enter o b y x c
 }) {
   if (!view) return <p className="quiet-note">Loading…</p>;
   const open = view.rows.filter((r) => r.state === "open");
@@ -37,16 +37,16 @@ export function Inflight({
       {open.length ? (
         <section className="group" aria-labelledby="h-inflight">
           <h2 id="h-inflight" className="group-head">
-            <span>In flight</span>
+            <span>Merging</span>
             <span className="count">{open.length}</span>
           </h2>
           <p className="lane-intro">
             {view.babysitting ? (
-              "Your PRs marked done. Babysitters fix CI and draft replies; a PR is back in the queue only when it needs you."
+              "Claude is getting these merged: it fixes CI and drafts replies, and a PR is back in the queue only when it needs you. What it can't get merged goes back to your desk."
             ) : (
               <>
-                Your PRs marked done. <a href="#/settings/inflight">Babysitting is off</a>, so a PR is back in the queue when CI fails or
-                reviewers ask for something.
+                Your PRs handed off for merge. <a href="#/settings/inflight">Claude is off</a>, so a PR is back in the queue when CI fails
+                or reviewers ask for something.
               </>
             )}
           </p>
@@ -54,16 +54,16 @@ export function Inflight({
         </section>
       ) : (
         <h2 className="group-head">
-          <span>In flight</span>
+          <span>Merging</span>
           <span className="group-none">
-            Nothing yet: press <kbd>d</kbd> on one of your PRs when you're done with it.
+            Nothing yet: press <kbd>m</kbd> on one of your PRs when you're done with it.
           </span>
         </h2>
       )}
       {landed.length > 0 && (
         <section className="group" aria-labelledby="h-landed">
           <h3 id="h-landed" className="group-head sub">
-            <span>Landed</span>
+            <span>Merged</span>
             <span className="count">{landed.length}</span>
           </h3>
           {rows(landed)}
@@ -73,8 +73,8 @@ export function Inflight({
   );
 }
 
-// A lane row is a queue card: the title and its age; the ref, why it's back with you and the PR's state; the babysitter's
-// line; a drafted reply as a margin note; the selected row's keys under a hairline.
+// A row is a queue card: the title and its age; the ref, why it needs you and the PR's state; what it waits on and Claude's
+// line; who merges it when auto-merge isn't on; a drafted reply as a margin note; the selected row's keys under a hairline.
 function Row({
   row: r,
   now,
@@ -95,7 +95,9 @@ function Row({
   const c = r.card;
   const live = r.state === "open";
   const needs = live ? r.needs_you : null;
-  const sitter = sitterNews(r);
+  const waits = waitsOn(r);
+  // Idle, what it waits on says more than "watching".
+  const sitter = sitterNews(r) && !(waits && r.sitter.state === "idle");
   // A missing clone is fixed in Settings: say where.
   const noClone = !!needs && needs.startsWith("no local clone");
   const keys = (k: string) => {
@@ -104,7 +106,7 @@ function Row({
   const since = c.resolved_at ?? c.waiting_since;
   const draft = live ? r.drafts[0] : undefined;
   const facts = live ? laneFacts(r) : [];
-  // With babysitting off the problem itself is the why ("CI failing"); its fact says it in full, so the why goes.
+  // With Claude off the problem itself is the why ("CI failing"); its fact says it in full, so the why goes.
   const said = !!needs && facts.some((f) => f.text === needs || f.text.startsWith(`${needs}: `));
   return (
     <div className={cls("row", "card", "lane-row", needs && "b-now", on && "sel", !live && "dim")} data-id={c.id}>
@@ -149,7 +151,10 @@ function Row({
               )}
             </span>
           </span>
-          {sitter && <Dots className="gist sitter" parts={sitterParts(r, now)} />}
+          {(!!waits || sitter) && (
+            <Dots className="gist sitter" parts={[waits ?? "", ...(sitter ? sitterParts(r, now) : [])].filter(Boolean)} />
+          )}
+          {live && r.merge_note && <span className="gist sitter">Merge it yourself when it's green: {r.merge_note}</span>}
         </button>
       </div>
       {noClone && (
@@ -162,7 +167,7 @@ function Row({
         r.drafts.map((d) => (
           <div key={d.id} className="draft">
             <p className="draft-to">
-              {/* Not its babysitter's: another agent over MCP drafted it, so say so before you send it as you. */}
+              {/* Not Claude's own: another agent over MCP drafted it, so say so before you send it as you. */}
               {d.by === "agent" ? "Your agent's reply" : "Reply"} to {d.to}
               {d.quote && <span className="draft-quote">: “{d.quote}”</span>}
             </p>
@@ -171,7 +176,7 @@ function Row({
         ))}
       {on && (
         <div className="more">
-          {/* One order on every surface: what finishes it (y Send, c Answer), then x, enter and o, d last. */}
+          {/* One order on every surface: what finishes it (y Send, c Answer), then x, enter and o, b last. */}
           <div className="actions card-keys">
             {draft && (
               <KeyButton
@@ -202,7 +207,7 @@ function Row({
             <KeyButton k="enter" label="Review" run={keys} />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {r.resume && !(live && r.escalation) && <KeyButton k="c" label="Copy resume command" title={`Copies ${r.resume}`} run={keys} />}
-            {live && <KeyButton k="d" label="Take back" run={keys} />}
+            {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
           </div>
         </div>
       )}

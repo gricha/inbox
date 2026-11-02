@@ -537,7 +537,7 @@ test("every Now and Today card carries its pre-flight: running, queued, ready, s
   assert.deepEqual(t.f.started, ["acme/api#3", "acme/api#2"]);
   assert.deepEqual(pf("acme/api#3"), { state: "running", next: undefined });
   assert.deepEqual(pf("acme/api#1"), { state: "queued", next: undefined });
-  assert.deepEqual(pf("acme/web#4"), { state: "none", next: "CI failing: d hands it to a babysitter" });
+  assert.deepEqual(pf("acme/web#4"), { state: "none", next: "CI failing: m hands it off for merge" });
   assert.deepEqual(pf("acme/api#9"), { state: "none", next: undefined }, "an issue");
 
   await t.f.release("acme/api#3");
@@ -666,6 +666,9 @@ function fakeWriter(landed = () => {}) {
     },
     reply: () => Promise.reject(new Error("approve tests don't reply")),
     comment: () => Promise.reject(new Error("approve tests don't comment")),
+    ready: () => Promise.reject(new Error("approve tests don't hand off")),
+    autoMerge: () => Promise.reject(new Error("approve tests don't hand off")),
+    autoMergeOff: () => Promise.reject(new Error("approve tests don't hand off")),
   };
   return {
     writer,

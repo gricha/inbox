@@ -1,5 +1,6 @@
-// Babysitters: for your in-flight PRs that need work, a Claude Code session in a worktree of your local clone fixes CI,
-// merges the base in on a conflict, and drafts replies to reviewers. It pushes only to the PR's own branch and posts nothing.
+// Babysitters ("Claude" to you): for your PRs in Merging that need work, a Claude Code session in a worktree of your local
+// clone fixes CI, merges the base in on a conflict, and drafts replies to reviewers. It pushes only to the PR's own branch
+// and posts nothing; when the PR can't realistically be merged, it (or the desk) hands it back to your desk.
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -52,6 +53,8 @@ export interface Sitter {
   drafts: Draft[];
   threads: { id: string; to: string; quote: string }[]; // the PR's open review threads as last read: what a draft may answer
   outside_seen: string | null; // you dismissed feedback from outside contributors up to here
+  auto_merge: { on: boolean; why: string | null; at: string } | null; // what m did: on, the desk turned it on; why, why not
+  handback: { reason: string; at: string; by: "babysitter" | "agent" | "desk" } | null; // why it left Merging for your desk
 }
 
 const emptySitter = (): Sitter => ({
@@ -64,7 +67,13 @@ const emptySitter = (): Sitter => ({
   drafts: [],
   threads: [],
   outside_seen: null,
+  auto_merge: null,
+  handback: null,
 });
+
+// GitHub's auto-merge is on, as last read; or the desk turned it on since then.
+export const autoMerging = (it: Item, s: Pick<Sitter, "auto_merge">) =>
+  !!it.auto_merge || (!!s.auto_merge?.on && it.detail_at <= s.auto_merge.at);
 
 export interface Problem {
   key: string;
@@ -372,7 +381,7 @@ const and = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1
 export interface PromptInput {
   item: Item;
   me: string;
-  since: string; // when you marked it in flight
+  since: string; // when you handed it off for merge
   todo: Problem[];
   ctx: PrContext;
   logs: Map<string, string>; // check name → log excerpt
@@ -468,8 +477,8 @@ export function buildPrompt(p: PromptInput): string {
   for (const c of comments) fenced.push(`### Comment by ${c.author}, ${c.at}`, clip(c.body), "");
 
   return [
-    `You are babysitting a pull request for ${me}: ${item.url} ("${item.id}"), branch ${branch} into ${item.base}.`,
-    `${me} has marked it done. Your job is to get it merged without them: fix what's failing, answer reviewers through drafts, and hand back only decisions that are theirs to make.`,
+    `You are getting a pull request merged for ${me}: ${item.url} ("${item.id}"), branch ${branch} into ${item.base}.`,
+    `${me} has handed it off to you. Your goal is the PR merged without them: CI green, conflicts with ${item.base} resolved, reviewers' feedback addressed, and replies drafted for ${me} to send. ${item.auto_merge ? "GitHub's auto-merge is on, so it merges by itself once it's approved and green." : `${me} merges it once it's approved and green.`}`,
     `You're in a git worktree of their local clone, detached at the PR's latest pushed commit, ${short(item.head_oid)}.`,
     ``,
     `What needs doing:`,
@@ -482,7 +491,8 @@ export function buildPrompt(p: PromptInput): string {
     `  If the push is rejected because the branch moved, run git fetch origin ${branch}, then git merge origin/${branch}, and push again.`,
     `- For a conflict with ${item.base}: git fetch origin ${item.base}, then git merge origin/${item.base}, resolve, run the tests, commit and push. If resolving it means choosing between two behaviours, don't guess: escalate.`,
     `- Reply to reviewers only with the desk_draft_reply tool: ref "${item.id}", thread_id from the thread's heading below (leave it out for a comment on the PR). ${me} reads each draft and sends it. Keep replies short and specific: what you changed, in which commit, or why not.`,
-    `- When something is ${me}'s call (changing scope or an API, disagreeing with a reviewer, a failure you can't explain, anything risky or irreversible), call desk_escalate with ref "${item.id}" and one short question, then stop.`,
+    `- When something is ${me}'s call and their answer lets you carry on (changing scope or an API, disagreeing with a reviewer, a failure you can't explain, anything risky or irreversible), call desk_escalate with ref "${item.id}" and one short question, then stop.`,
+    `- When you can't realistically get it merged (a reviewer wants a redesign or a different approach, it needs a product decision, CI fails in a way you can't fix), call desk_escalate with ref "${item.id}", hand_back: true and one short line saying why, then stop. It goes back to ${me}'s desk with your reason.`,
     `You can't post to GitHub or use gh, and you don't need to.`,
     ``,
     `How to work:`,
@@ -516,7 +526,7 @@ export function stepOf(line: Record<string, unknown>, cwd: string): string | nul
     else if ((b.name === "Edit" || b.name === "Write") && file) step = `edit ${file}`;
     else if (b.name === "Read" && file) step = `read ${file}`;
     else if (b.name?.endsWith("desk_draft_reply")) step = "drafting a reply";
-    else if (b.name?.endsWith("desk_escalate")) step = "asking you";
+    else if (b.name?.endsWith("desk_escalate")) step = input.hand_back === true ? "handing it back" : "asking you";
     else if (b.name) step = lc(b.name);
   }
   return step;
@@ -534,7 +544,7 @@ interface Live {
   child: ChildProcess;
   run: SitterRun;
   keys: string[];
-  aborted: string | null; // why the desk stopped it: "taken back", "merged"
+  aborted: string | null; // why the desk stopped it: "back on your desk", "merged or closed"
   closed: Promise<void>;
 }
 
@@ -618,11 +628,16 @@ export class Babysitter {
     if (!st["inflight.babysit"]) return "babysitting is off";
     if (this.paused && Date.now() < this.paused.until) return this.paused.why;
     if (s.escalation) return "waiting for your answer";
-    if (it.head_repo && lc(it.head_repo) !== lc(it.repo)) return `the branch is in a fork (${it.head_repo})`;
-    if (!it.head_ref) return "the desk doesn't know the PR's branch yet";
-    if (!safeRef(it.head_ref) || (it.base && !safeRef(it.base))) return "its branch name has characters the desk won't pass to git";
-    if (it.ci === "red" && s.ci_tries >= MAX_CI_TRIES) return `CI still failing after ${MAX_CI_TRIES} tries`;
     if (!this.desk.mcpUrl) return "the desk's MCP address isn't known";
+    return this.stuck(it, s) ?? (it.head_ref ? null : "the desk doesn't know the PR's branch yet");
+  }
+
+  // What no run will get past: the PR goes back to your desk with this as its why.
+  stuck(it: Item, s: Sitter): string | null {
+    if (it.head_repo && lc(it.head_repo) !== lc(it.repo)) return `the branch is in a fork (${it.head_repo})`;
+    if (it.head_ref && (!safeRef(it.head_ref) || (it.base && !safeRef(it.base))))
+      return "its branch name has characters the desk won't pass to git";
+    if (it.ci === "red" && s.ci_tries >= MAX_CI_TRIES) return `CI still failing after ${MAX_CI_TRIES} tries`;
     return null;
   }
 
@@ -749,7 +764,10 @@ export class Babysitter {
       });
     if (this.live.has(id) || this.starting.has(id) || this.queue.includes(id)) return;
     const s = this.record(id);
-    if (!this.todo(it, s).length || this.blocker(it, s)) return;
+    if (!this.todo(it, s).length) return;
+    const blocked = this.blocker(it, s);
+    if (blocked && blocked === this.stuck(it, s)) this.desk.handBack(id, blocked, "desk");
+    if (blocked) return;
     this.queue.push(id);
     this.desk.changed();
     this.pump();
@@ -769,8 +787,8 @@ export class Babysitter {
     }
   }
 
-  // Stops a run and removes the worktree: taken back, merged or closed. The record stays, so undoing a take-back
-  // brings back its drafts and question; marking the PR again with d starts it afresh.
+  // Stops a run and removes the worktree: back on your desk, merged or closed. The record stays, so undoing Back to desk
+  // brings back its drafts and question; handing the PR off again with m starts it afresh.
   async release(id: string, takenBack: boolean, dir?: string): Promise<void> {
     clearTimeout(this.timers.get(id));
     this.timers.delete(id);
@@ -778,7 +796,7 @@ export class Babysitter {
     this.notes.delete(id);
     const l = this.live.get(id);
     if (l) {
-      l.aborted = takenBack ? "taken back" : "merged or closed";
+      l.aborted = takenBack ? (this.record(id).handback ? "handed back" : "back on your desk") : "merged or closed";
       this.kill(l.child);
       await l.closed;
     }
@@ -843,8 +861,8 @@ export class Babysitter {
     const found = await this.findClone(it.repo);
     if (this.stopped) return;
     if ("problem" in found) {
-      this.notes.set(id, found.problem);
       desk.log(`babysitter: can't take ${id}: ${found.problem}`);
+      desk.handBack(id, found.problem, "desk");
       return;
     }
     const dir = worktreePath(desk.home, id);
@@ -1067,7 +1085,7 @@ export class Babysitter {
         // Defence in depth: the push rule allows no --force, but if the branch lost the commit the run started from, say so.
         if (rewritten && !x.escalation)
           x.escalation = {
-            question: `${branch} no longer contains ${short(run.head_oid)}, where the babysitter started. Check the branch.`,
+            question: `${branch} no longer contains ${short(run.head_oid)}, where Claude started. Check the branch.`,
             at: new Date().toISOString(),
             by: "desk",
           };
@@ -1103,45 +1121,45 @@ export class Babysitter {
     return { state: "idle", text: it.state !== "open" ? it.state : this.desk.settings["inflight.babysit"] ? "watching" : "", since: null };
   }
 
-  // Why the PR is back with you, or null while the babysitter has it (or nothing's wrong).
+  // Why the PR needs you while it's in Merging, or null while Claude has it (or nothing's wrong).
   needsYou(it: Item, s: Sitter, st: SitterStatus): string | null {
     if (it.state !== "open") return null;
     // Who's asking: the queue shows it next to other people's asks, where a bare question reads like a reviewer's.
     if (s.escalation)
       return s.escalation.by === "desk"
         ? s.escalation.question
-        : `${s.escalation.by === "agent" ? "your agent" : "babysitter"} asks: ${s.escalation.question}`;
+        : `${s.escalation.by === "agent" ? "your agent" : "Claude"} asks: ${s.escalation.question}`;
     const unsent = s.drafts.filter((d) => !d.sent_at).length;
     if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
     if (this.outside(it, s)) return "comments from outside contributors";
-    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+    // With auto-merge on, GitHub merges it; otherwise the merge button is yours.
+    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft && !autoMerging(it, s);
     // Still mergeable while a run answers a later comment: leaving Now and coming back would notify again.
-    if (ready && (st.state === "running" || st.state === "queued")) return "approved and green: merge it";
+    if (ready && (st.state === "running" || st.state === "queued")) return "ready to merge";
     if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
     const work = this.problems(it);
     const [first] = work;
     // Nobody will do it: it's yours. Its facts say what's wrong (CI failing, a merge conflict); this says why it's yours.
     if (st.state === "blocked" && first) {
-      // Off, the lane says so once; the why is the problem itself.
+      // Off, Merging says so once; the why is the problem itself.
       if (st.text === "babysitting is off")
         return first.kind === "ci" ? "CI failing" : first.kind === "conflict" ? "merge conflict" : "new review comments";
-      if (st.text.startsWith("CI still")) return st.text;
-      return first.kind === "feedback" ? `new review comments: ${st.text}` : `${st.text}, so no babysitter`;
+      return first.kind === "feedback" ? `new review comments: ${st.text}` : `${st.text}, so Claude can't work on it`;
     }
     // Tried and still broken. Comments a run answered are on the reviewers now.
     const broken = it.ci === "red" ? "CI failing" : it.mergeable === "conflict" ? "merge conflict" : null;
     const last = s.runs.at(-1);
     if (last?.outcome === "pushed" && it.head_oid === last.head_oid) return null; // the desk hasn't seen the fix land yet
     if (broken && !this.todo(it, s).some((p) => p.kind !== "feedback")) {
-      if (last?.outcome === "failed") return `${broken}: the babysitter failed`;
-      if (last?.outcome === "timeout") return `${broken}: the babysitter gave up`;
-      return `${broken}; the babysitter couldn't fix it`;
+      if (last?.outcome === "failed") return `${broken}: Claude's run failed`;
+      if (last?.outcome === "timeout") return `${broken}: Claude gave up`;
+      return `${broken}; Claude couldn't fix it`;
     }
     if (broken) return null; // a run is about to start
     // Review comments a run failed on: nobody else will answer them.
     if (work.length && !this.todo(it, s).length && (last?.outcome === "failed" || last?.outcome === "timeout"))
-      return `new review comments: the babysitter ${last.outcome === "failed" ? "failed" : "gave up"}`;
-    if (ready) return "approved and green: merge it";
+      return `new review comments: Claude ${last.outcome === "failed" ? "failed" : "gave up"}`;
+    if (ready) return "ready to merge";
     return null;
   }
 

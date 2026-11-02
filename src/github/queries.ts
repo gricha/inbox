@@ -67,12 +67,14 @@ export const DETAILS_REVIEW = details(`${PR}
 const check = (id: string) =>
   `__typename ... on CheckRun { name status conclusion isRequired(pullRequestId: ${id}) } ... on StatusContext { context state isRequired(pullRequestId: ${id}) }`;
 
-// Failing check names are for the In-flight lane and your cards, so they're only asked of your own PRs too.
+// Failing check names are for Merging and your cards, so they're only asked of your own PRs too, as is what auto-merge needs.
 export function detailsMine(n: number): string {
   const one = (i: number) => `n${i}: node(id: $id${i}) {
     __typename
     ... on PullRequest { ${PR}
       mergeable
+      autoMergeRequest { enabledAt }
+      repository { autoMergeAllowed viewerDefaultMergeMethod }
       reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
       checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${check(`$id${i}`)} } } } } } }
     }

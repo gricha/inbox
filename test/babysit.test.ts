@@ -256,7 +256,24 @@ test("the prompt fences GitHub text with a random tag and lists what to fix, wit
   assert.ok(p.indexOf("test (3.12)") > fence, "the first mention is inside the fence");
   assert.match(p, /Push with exactly: git push origin HEAD:refs\/heads\/fix\/retry/);
   assert.match(p, /desk_escalate with ref "acme\/web#3"/);
+  // The goal is the PR merged; what it can't get merged it hands back.
+  assert.match(p, /Your goal is the PR merged without them: CI green, conflicts with main resolved/);
+  assert.match(p, /me merges it once it's approved and green\./);
+  assert.match(p, /desk_escalate with ref "acme\/web#3", hand_back: true and one short line saying why/);
   assert.ok(p.trimEnd().endsWith("</github-t4g>"));
+  assert.match(
+    buildPrompt({
+      item: { ...item, auto_merge: true },
+      me: "me",
+      since: "",
+      todo: [],
+      ctx: EMPTY,
+      logs: new Map(),
+      commands: { run: [], exact: [] },
+      trust: trustOf([]),
+    }),
+    /GitHub's auto-merge is on, so it merges by itself once it's approved and green\./,
+  );
   assert.notEqual(
     buildPrompt({
       item,
@@ -537,7 +554,7 @@ test("a run fixes red CI in a worktree of your clone and pushes to the PR's own 
   assert.equal(gitIn(wt, "rev-parse", "HEAD"), remoteHead);
 });
 
-test("taking a PR back stops its run and removes the worktree; undo brings back its draft, and d again starts afresh", posix, async (c) => {
+test("Back to desk stops its run and removes the worktree; undo brings back its draft, and m again starts afresh", posix, async (c) => {
   const s = await sitterDesk(c, []);
   const item = pr(6, s.w.head);
   s.gh.items.set(item.id, item);
@@ -554,14 +571,14 @@ test("taking a PR back stops its run and removes the worktree; undo brings back 
   assert.ok(!gitIn(s.w.clone, "worktree", "list").includes(wt));
   assert.equal(s.desk.inflight().rows.length, 0);
   assert.deepEqual(s.record(item.id).tried, [], "a stopped run didn't finish trying");
-  // A stray d, then u: the draft is still there, and the babysitter picks up where it was.
+  // A stray b, then u: the draft is still there, and Claude picks up where it was.
   s.desk.undo(back.undo_seq);
   assert.deepEqual(
     s.desk.inflight().rows[0]?.drafts.map((d) => d.body),
     ["Fixed the retry test."],
   );
   await until("another run", () => s.w.count() === 2);
-  // Taken back and marked again with d: nothing from last time.
+  // Back on the desk and handed off again: nothing from last time.
   s.desk.act("web#6", "takeback");
   await until("the second run to stop", () => s.desk.sitter.live.size === 0 && !fs.existsSync(wt));
   s.w.mode("ok");
@@ -687,40 +704,59 @@ test("a run times out and is killed", posix, async (c) => {
   w0.desk.act("web#31", "inflight");
   await until("the timeout", () => w0.record(item.id).runs.at(-1)?.outcome === "timeout");
   assert.match(w0.record(item.id).runs.at(-1)!.summary, /gave up after/);
-  assert.equal(w0.desk.inflight().rows[0]?.needs_you, "CI failing: the babysitter gave up");
+  assert.equal(w0.desk.inflight().rows[0]?.needs_you, "CI failing: Claude gave up");
 });
 
-test("no clone, a fork, or babysitting off: the lane says why, and the PR is yours again", posix, async (c) => {
+test("no clone or a fork: Claude hands the PR back to your desk with the reason; with Claude off it stays in Merging", posix, async (c) => {
   const s = await sitterDesk(c, [], { "inflight.clone_roots": [] });
   const a = pr(41, s.w.head);
   const b = pr(42, s.w.head, { head_repo: "me/web" });
-  for (const it of [a, b]) s.gh.items.set(it.id, it);
+  const d = pr(43, s.w.head);
+  for (const it of [a, b, d]) s.gh.items.set(it.id, it);
   await s.desk.sync();
   s.w.mode("push");
   s.desk.act("web#41", "inflight");
   s.desk.act("web#42", "inflight");
-  await until(
-    "the clone lookup",
-    () => s.desk.inflight().rows.find((r) => r.card.id === a.id)?.sitter.text === "no local clone of acme/web",
+  await until("both to go back", () => !s.desk.store.state(a.id).inflight_at && !s.desk.store.state(b.id).inflight_at);
+  assert.deepEqual(
+    [s.record(a.id).handback?.reason, s.record(b.id).handback?.reason],
+    ["no local clone of acme/web", "the branch is in a fork (me/web)"],
   );
-  const rows = new Map(s.desk.inflight().rows.map((r) => [r.card.id, r]));
-  assert.equal(rows.get(a.id)?.needs_you, "no local clone of acme/web, so no babysitter", "the facts already say CI is failing");
-  assert.equal(rows.get(b.id)?.sitter.text, "the branch is in a fork (me/web)");
+  const now = new Map(s.desk.queue().sections.now.map((x) => [x.id, x.why]));
+  assert.equal(now.get(a.id), "handed back: no local clone of acme/web");
+  assert.equal(now.get(b.id), "handed back: the branch is in a fork (me/web)");
+  assert.equal(s.desk.inflight().rows.length, 0);
   assert.equal(s.w.count(), 0);
-  s.desk.putSettings({ set: { "inflight.babysit": false } });
-  // Off, the why is the problem itself; the lane's head says babysitting is off.
-  assert.equal(new Map(s.desk.inflight().rows.map((r) => [r.card.id, r])).get(a.id)?.needs_you, "CI failing");
+  // Off, nobody works on it, so nothing hands it back: the why is the problem itself, and Merging says Claude is off.
+  s.desk.putSettings({ set: { "inflight.babysit": false, "inflight.repos": [`acme/web = ${s.w.root}`] } });
+  s.desk.act("web#43", "inflight");
+  assert.equal(s.desk.inflight().rows[0]?.needs_you, "CI failing");
   assert.equal(s.desk.inflight().babysitting, false);
-  // inflight.repos names the clone directly, and checks its origin.
-  s.desk.putSettings({ set: { "inflight.babysit": true, "inflight.repos": [`acme/web = ${s.w.root}`] } });
-  await until(
-    "the check",
-    () =>
-      s.desk
-        .inflight()
-        .rows.find((r) => r.card.id === a.id)
-        ?.sitter.text.includes("isn't a git clone") ?? false,
-  );
+  // inflight.repos names the clone directly, and checks its origin: a wrong one is a reason too.
+  s.desk.putSettings({ set: { "inflight.babysit": true } });
+  await until("the check", () => s.record(d.id).handback?.reason.includes("isn't a git clone") ?? false);
+});
+
+test("CI still red after 3 tries goes back to your desk; a question waits in Merging instead", posix, async (c) => {
+  const s = await sitterDesk(c, []);
+  const item = pr(44, s.w.head);
+  s.gh.items.set(item.id, item);
+  await s.desk.sync();
+  s.desk.act("web#44", "inflight");
+  s.desk.escalate("web#44", "Is the flaky test ours?", { agent: "babysitter", pr: item.id });
+  s.desk.sitter.update(item.id, (x) => {
+    x.ci_tries = 3;
+  });
+  s.desk.sitter.check(item.id);
+  assert.ok(s.desk.store.state(item.id).inflight_at, "waiting for your answer, not stuck");
+  s.desk.dismiss("web#44");
+  s.desk.sitter.check(item.id);
+  assert.equal(s.desk.store.state(item.id).inflight_at, null);
+  assert.deepEqual(s.record(item.id).handback && [s.record(item.id).handback!.reason, s.record(item.id).handback!.by], [
+    "CI still failing after 3 tries",
+    "desk",
+  ]);
+  assert.equal(s.w.count(), 0);
 });
 
 test("a PR answered by reviewers gets a run for their comments, with the thread ids", posix, async (c) => {
@@ -860,7 +896,7 @@ test("a run that fails on review comments hands them back to you", posix, async 
   s.w.mode("fail");
   s.desk.act("web#71", "inflight");
   await until("the failure", () => s.record(item.id).runs.at(-1)?.outcome === "failed");
-  await until("the lane to say so", () => s.desk.inflight().rows[0]?.needs_you === "new review comments: the babysitter failed");
+  await until("the lane to say so", () => s.desk.inflight().rows[0]?.needs_you === "new review comments: Claude failed");
   assert.equal(s.desk.inflight().rows[0]?.sitter.text, "failed: Tool use failed");
   assert.equal(s.w.count(), 1, "not retried on the same comments");
 });

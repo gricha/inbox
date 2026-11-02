@@ -1439,8 +1439,8 @@ kbd {
   letter-spacing: 0;
 }
 
-/* In flight ------------------------------------------------------------------
-   Your PRs the babysitters have. Grey unless one needs you: then its ref gets the highlighter and its problems their colour. */
+/* Merging --------------------------------------------------------------------
+   Your PRs Claude is getting merged. Grey unless one needs you: then its ref gets the highlighter and its problems their colour. */
 
 .lane-intro {
   margin: -2px 0 10px;
@@ -1449,7 +1449,7 @@ kbd {
   font-size: 13px;
 }
 
-/* Landed sits one group gap below the open rows, as Sorted away does below the queue. */
+/* Merged sits one group gap below the open rows, as Sorted away does below the queue. */
 .lane .group-head.sub {
   margin-top: 0;
 }
@@ -1468,7 +1468,7 @@ kbd {
   color: var(--pencil);
 }
 
-/* Landed reads like Resolved: a flat row on the paper, its title regular and pencil. */
+/* Merged reads like Resolved: a flat row on the paper, its title regular and pencil. */
 .lane .dim.card {
   background: none;
   box-shadow: none;
@@ -2385,7 +2385,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* Below 820px, where the sidebar's In flight entry is hidden: the same, in pencil. */
+/* Below 820px, where the sidebar's Merging entry is hidden: the same, in pencil. */
 .tb-flight {
   display: inline-flex;
   align-items: center;
@@ -2829,7 +2829,7 @@ kbd {
   color: var(--pencil);
 }
 
-/* A PR in flight: its babysitter's line, in pencil as in the lane. */
+/* A PR in Merging: Claude's line, in pencil as there. */
 .rv-lane {
   color: var(--pencil);
 }

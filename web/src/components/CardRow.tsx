@@ -6,7 +6,6 @@ import {
   cardFacts,
   checkNames,
   firstClause,
-  handLabel,
   keepUnits,
   keyParts,
   nextText,
@@ -17,17 +16,16 @@ import {
   sizeOf,
   type Variant,
 } from "../view.ts";
-import { Detail, Dots, KeyButton } from "./Detail.tsx";
+import { Detail, Dots, HandKey, KeyButton } from "./Detail.tsx";
 import { VERDICT } from "./Review.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e s m p c w i y).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i y).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
   armed: string | null; // the draft a first y armed: a second y sends it
-  babysitting: boolean; // d hands your PR to a babysitter, or only puts it in flight
   leaving: Set<string>;
   snoozeFor: string | null;
   showSignals: boolean;
@@ -49,7 +47,7 @@ function PinGlyph() {
   );
 }
 
-// Your own PR's why is what you owe ("babysitter asks: …"): a real "label:" leads in ink, the rest is regular, and the
+// Your own PR's why is what you owe ("Claude asks: …"): a real "label:" leads in ink, the rest is regular, and the
 // problem it names takes its colour.
 export function Owed({ why, tone }: { why: string; tone?: string | undefined }) {
   const [head = "", tail] = why.split(/: (.*)/s);
@@ -67,13 +65,13 @@ export function Owed({ why, tone }: { why: string; tone?: string | undefined }) 
   );
 }
 
-// Keys in a line of text ("d hands it to a babysitter") set apart.
+// Keys in a line of text ("m hands it off for merge") set apart.
 export const withKeys = (text: string) => keyParts(text).map((part, i) => (i % 2 ? <b key={part}>{part}</b> : part));
 
 // A card: its title; ref, why, problems, size and the AI's call; the AI's gist (or your PR's next step, or an issue's latest
 // event); a close look's concern. Compact (your PRs in a stack): the title and the ref line only.
-// A babysitter's question needs you, not its PR's problems (its babysitter has those): they stay in the lane.
-const asks = (why: string) => /^(babysitter|your agent) asks: /.test(why);
+// Claude's question needs you, not its PR's problems (Claude has those): they stay in Merging.
+const asks = (why: string) => /^(Claude|your agent) asks: /.test(why);
 // An issue's why that only says something happened: its latest event says what.
 const onlyNews = (why: string) => /^new (activity|replies|comments)\b/i.test(why);
 
@@ -110,20 +108,20 @@ export function CardRow({
   const shown = sel ? concerns : p?.verdict === "look" || p?.risk === "high" ? concerns.slice(0, 1).map((c) => opening(c, 0, false)) : [];
   // Your red PR says what failed; a check its base branch doesn't require is only a fact.
   const required = (card.checks_failed ?? []).filter((n) => !card.checks_optional?.includes(n));
-  // In flight, what failed goes with the problem word, as in the lane ("CI failing: node 22, lint"); otherwise the third line
+  // In Merging, what failed goes with the problem word, as there ("CI failing: node 22, lint"); otherwise the third line
   // says it with the key that deals with it.
   const named = mine && card.inflight && card.ci === "red" && required.length ? `CI failing: ${checkNames(required)}` : "";
   const failing = mine && !card.inflight && card.ci === "red" && required.length ? `${checkNames(required)} failing` : "";
   const optional = mine && card.ci !== "red" && card.checks_optional?.length ? "optional check failing" : "";
   // An issue's latest event, or who last spoke on your PR: context the why doesn't give.
   const event = variant === "active" && (card.kind === "issue" || (mine && !card.inflight)) ? card.last_event : undefined;
-  // In flight with no clone to work in: the problem is the why, and the link under the card says where to set one up.
-  const noClone = mine && card.inflight ? noCloneOf(card) : undefined;
+  // No clone for Claude to work in: the why says so, and the link under the card says where to set one up.
+  const noClone = mine && (card.inflight || card.handed_back) ? noCloneOf(card) : undefined;
   const why =
     event && card.kind === "issue" && onlyNews(card.why)
       ? (card.involved ?? "")
-      : noClone
-        ? `no babysitter${named ? `: ${named}` : ""}`
+      : noClone && card.inflight
+        ? `Claude can't work on it${named ? `: ${named}` : ""}`
         : named && card.why.endsWith("CI failing")
           ? `${card.why}: ${checkNames(required)}`
           : card.why;
@@ -203,6 +201,10 @@ export function CardRow({
                   </span>
                 ))}
               {compact && failing && <span className="fact-word">{atCommas(failing)}</span>}
+              {/* Out of Merging, GitHub may still merge it on its own. */}
+              {mine && !card.inflight && card.chips.includes("auto-merge on") && (
+                <span className="fact-word nowrap">auto-merge still on</span>
+              )}
               {optional && <span className="fact-word nowrap">{optional}</span>}
               {/* The verdict on the right already says skip it. */}
               {away && card.demoted && !(ai?.verdict === "skip" && card.demoted === "the AI says skip it") && <span>{card.demoted}</span>}
@@ -283,8 +285,9 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
   };
   const facts = cardFacts(card, ctx.me, away, inRun);
   const armed = !!card.reply && ctx.armed === card.reply.id;
-  const github = <KeyButton k="o" label={card.why.startsWith("approved and green") ? "Merge on GitHub" : "Open on GitHub"} run={run} />;
-  // In flight, the key that finishes it comes first (Send, or Answer), then x, enter and o, and d last, as in the lane.
+  const merge = card.why.startsWith("approved and green") || card.why.endsWith("ready to merge");
+  const github = <KeyButton k="o" label={merge ? "Merge on GitHub" : "Open on GitHub"} run={run} />;
+  // In Merging, the key that finishes it comes first (Send, or Answer), then x, enter and o, and b last, as there.
   if (mine && card.inflight)
     return (
       <div className="more">
@@ -301,9 +304,9 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
           )}
           {card.escalated && card.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${card.resume}`} run={run} />}
           {card.escalated && <KeyButton k="x" label="Dismiss the question" run={run} />}
-          <KeyButton k="enter" label={noCloneOf(card) ? "Set up a local clone" : "Show in flight"} run={run} />
+          <KeyButton k="enter" label={noCloneOf(card) ? "Set up a local clone" : "Show in Merging"} run={run} />
           {github}
-          <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />
+          <HandKey card={card} run={run} armed={ctx.armed} />
         </div>
       </div>
     );
@@ -312,13 +315,13 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
       <Facts facts={facts} />
       <div className="actions card-keys">
         {/* Approved and green, merging is the next step: o says so, first. */}
-        {card.why.startsWith("approved and green") && github}
+        {merge && github}
         <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : "Review"} run={run} />
-        {!card.why.startsWith("approved and green") && github}
-        {mine && <KeyButton k="d" label={handLabel(card, ctx.babysitting)} run={run} />}
+        {!merge && github}
+        {mine && <HandKey card={card} run={run} armed={ctx.armed} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
-        <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />
+        {!mine && <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />}
       </div>
     </div>
   );

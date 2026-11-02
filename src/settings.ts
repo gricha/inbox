@@ -28,7 +28,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "github",
     title: "GitHub",
-    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR or send a drafted reply.",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR, send a drafted reply, or hand your PR off for merge and back.",
   },
   {
     id: "queue",
@@ -49,8 +49,8 @@ export const SECTIONS: SettingsSection[] = [
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
   {
     id: "inflight",
-    title: "In flight",
-    help: "Your own PRs you've marked done with d. A babysitter (Claude Code, in a worktree of your local clone) fixes red CI, merges the base in on a conflict, and drafts replies to reviewers for you to send. It pushes only to the PR's own branch, never force-pushes, and never posts to GitHub.",
+    title: "Merging",
+    help: "Your own PRs you've handed off with m. Claude (your Claude Code, in a worktree of your local clone) gets each one merged: it fixes red CI, merges the base in on a conflict, and drafts replies to reviewers for you to send. It pushes only to the PR's own branch, never force-pushes, and never posts to GitHub. When it can't get a PR merged, it hands it back to your desk with the reason.",
   },
   {
     id: "review",
@@ -117,7 +117,7 @@ export const SETTINGS = [
     default: 14,
     min: 0,
     max: 365,
-    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, a review you were asked for in that time, and your PRs in flight that need you stay. 0 keeps everything.",
+    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, a review you were asked for in that time, and your PRs in Merging that need you stay. 0 keeps everything.",
   },
   {
     key: "queue.cards",
@@ -184,10 +184,18 @@ export const SETTINGS = [
   {
     key: "inflight.babysit",
     section: "inflight",
-    label: "Babysit PRs in flight",
+    label: "Let Claude work on them",
     type: "boolean",
     default: true,
-    help: "Only PRs you marked with d. Off: they still leave the queue, and come back to it when CI fails or reviewers ask for something.",
+    help: "Only PRs you handed off with m. Off: they still leave the queue, and come back to it when CI fails or reviewers ask for something.",
+  },
+  {
+    key: "inflight.auto_merge",
+    section: "inflight",
+    label: "Turn on GitHub's auto-merge",
+    type: "boolean",
+    default: true,
+    help: "On m, where the repo allows it: a draft is marked ready for review, and auto-merge goes on with your default merge method, so GitHub merges it once it's approved and green. Back to desk turns it off again. Off: merge it yourself.",
   },
   {
     key: "inflight.max_agents",
@@ -202,13 +210,13 @@ export const SETTINGS = [
   {
     key: "inflight.trusted_bots",
     section: "inflight",
-    label: "Bots whose comments babysitters act on",
+    label: "Bots whose comments Claude acts on",
     type: "list",
     default: [],
     pattern: "^[\\w.-]+(\\[bot\\])?$",
     pattern_hint: "a GitHub login",
     placeholder: "cursor[bot]",
-    help: "Babysitters act on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in the queue; their words never reach an agent.",
+    help: "Claude acts on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in the queue; their words never reach an agent.",
   },
   {
     key: "inflight.repos",

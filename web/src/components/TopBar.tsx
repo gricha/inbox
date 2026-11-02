@@ -57,18 +57,18 @@ export function TopBar({
         <span>Review Desk</span>
       </a>
       {inSettings || route.name === "inflight" ? (
-        <span className="crumb">{inSettings ? "Settings" : "In flight"}</span>
+        <span className="crumb">{inSettings ? "Settings" : "Merging"}</span>
       ) : route.name === "review" ? (
         <a
           className="back"
           href={from === "inflight" ? "#/inflight" : "#/"}
-          title={`Back to ${from === "inflight" ? "In flight" : "the queue"} (esc)`}
+          title={`Back to ${from === "inflight" ? "Merging" : "the queue"} (esc)`}
         >
           <kbd>esc</kbd>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>{from === "inflight" ? "In flight" : "Queue"}</span>
+          <span>{from === "inflight" ? "Merging" : "Queue"}</span>
         </a>
       ) : (
         <label className="search">
@@ -130,10 +130,10 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 820px the sidebar is gone: In flight is reachable from here. */}
+        {/* Below 820px the sidebar is gone: Merging is reachable from here. */}
         {!!o?.inflight.total && route.name !== "inflight" && (
-          <a className="tb-flight" href="#/inflight" title={`${o.inflight.needs_you} need you (g i)`}>
-            In flight {o.inflight.total}
+          <a className="tb-flight" href="#/inflight" title={`${o.inflight.needs_you} need you (g m)`}>
+            Merging {o.inflight.total}
           </a>
         )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
