@@ -178,6 +178,7 @@ export class Desk {
   ctx: Context | null = null;
   rev = 0;
   listeners = new Set<(rev: number) => void>();
+  notifyListeners = new Set<(title: string, body: string) => void>();
   waiters = new Set<() => void>(); // long-polls on the event log
   snap: Snapshot | null = null;
   stopped = false;
@@ -295,6 +296,19 @@ export class Desk {
     return () => {
       this.listeners.delete(fn);
     };
+  }
+
+  // A desktop app attached to this desk (GET /api/events?notify=1) shows the notifications; with none, the desk does.
+  onNotify(fn: (title: string, body: string) => void): () => void {
+    this.notifyListeners.add(fn);
+    return () => {
+      this.notifyListeners.delete(fn);
+    };
+  }
+
+  notify(title: string, body: string): void {
+    if (!this.notifyListeners.size) this.notifyFn(title, body);
+    for (const fn of this.notifyListeners) fn(title, body);
   }
 
   changed(): void {
@@ -725,7 +739,7 @@ export class Desk {
     const [only] = fresh;
     const body =
       fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new and urgent: ${fresh.map(shortRef).join(", ")}`;
-    this.notifyFn("Review Desk", body);
+    this.notify("Review Desk", body);
   }
 
   // ---------------------------------------------------------------- classification

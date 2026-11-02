@@ -139,7 +139,7 @@ There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-de
 ## Develop
 
 ```bash
-npm run app:dev     # the app with hot reload; restarts on src/ or electron/ changes
+npm run app:dev     # the app running from this checkout: src/ restarts the desk, web/ hot-reloads, electron/ restarts the app
 npm run dev         # server + Vite in a browser at :5173
 npm test            # node:test, no network
 npm run check       # format, lint (type-aware), CSS lint, types, dead code, tests: what CI runs

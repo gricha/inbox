@@ -166,6 +166,19 @@ test("notifies only for new NOW entries after the first sync", async () => {
   t.cleanup();
 });
 
+test("a desktop app attached to the desk takes its notifications over while it's connected", async () => {
+  const t = await setup([reviewAsk(1)]);
+  const app: string[] = [];
+  const off = t.desk.onNotify((_title, body) => {
+    app.push(body);
+  });
+  t.desk.notify("Review Desk", "one");
+  off();
+  t.desk.notify("Review Desk", "two");
+  assert.deepEqual([app, t.notes], [["one"], ["two"]]);
+  t.cleanup();
+});
+
 test("close_authors expands within GitHub's 256-char query limit", async () => {
   const t = await setup([]);
   t.desk.ctx!.affinity = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`collaborator-${i}`, 50 - i]));

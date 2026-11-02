@@ -33,7 +33,7 @@ const step = (msg: string) => {
   console.log(`• ${msg}`);
 };
 const env = { ...process.env, DESK_HOME: home, DESK_PORT: port } as Record<string, string>;
-delete env.DESK_UI;
+delete env.DESK_SOURCE;
 delete env.DESK_DEV;
 
 step(`launching ${bin ?? "the app from the repo"} (home ${home}, port ${port})`);

@@ -1,5 +1,5 @@
 // The desktop app: a window, tray and global hotkey around the desk. It attaches to a desk already
-// running on the port (desk serve, launchd) or runs one in-process.
+// running on the port (desk serve, launchd), runs one from a checkout (electron/source.ts), or runs one in-process.
 import {
   app,
   BrowserWindow,
@@ -22,30 +22,36 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
-import type { Card, FocusView, SettingsView } from "../src/types.ts";
+import { readSettings, settingsPath } from "../src/settings.ts";
+import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.ts";
 import {
   backoff,
   cardLabel,
+  checkoutProblem,
   desktopEntry,
   desktopSettings,
   envVar,
   fallbackDirs,
+  findNode,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
   isHttpUrl,
   menuLabel,
   mergePath,
+  parseNotice,
   parseShellPath,
   parseSSE,
   probeHealth,
   restoreBounds,
   SHELL_PATH_COMMAND,
+  sourceDir,
   trayTitle,
   trayTooltip,
   type Bounds,
   type DesktopSettings,
 } from "./lib.ts";
+import { reap, startSource, type Source } from "./source.ts";
 
 const mac = process.platform === "darwin";
 const linux = process.platform === "linux";
@@ -53,8 +59,16 @@ const port = Number(envVar("DESK_PORT") ?? DEFAULT_PORT);
 const home = envVar("DESK_HOME") ?? path.join(os.homedir(), ".review-desk");
 const api = `http://127.0.0.1:${port}`; // the main process's own calls; no IPv6 guess for "localhost"
 const deskUrl = `http://localhost:${port}`;
-const uiUrl = envVar("DESK_UI") ?? deskUrl; // DESK_UI = the Vite dev server (npm run app:dev)
-const origins = [deskUrl, api, new URL(uiUrl).origin];
+let uiUrl = deskUrl;
+const origins = [deskUrl, api];
+// Settings → Desktop app → Run from a checkout as it was at launch; DESK_SOURCE (npm run app:dev) wins over it.
+const envSource = envVar("DESK_SOURCE");
+const launchSource = desktopSettings(readSettings(settingsPath(home)).overrides).source;
+const sourceWanted = sourceDir(envSource ?? launchSource, os.homedir());
+// Set once the login shell's PATH is in: the desk from a checkout needs its node.
+let node: string | null = null;
+let sourceProblem: string | null = null;
+let fromSource = "";
 const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
 type Status = { now: number; today: number; new: number; text: string };
@@ -63,7 +77,10 @@ type Server = Awaited<ReturnType<typeof startServer>>;
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let server: Server | null = null; // set when this process runs the desk
+let source: Source | null = null; // set when the desk and UI run from a checkout
 let quitting = false;
+let closing = false;
+let relaunching = false;
 let prefs: DesktopSettings = desktopSettings();
 let hotkey: { accelerator: string; ok: boolean; error?: string } = { accelerator: "", ok: true };
 let status: Status | null = null;
@@ -103,18 +120,22 @@ async function main(): Promise<void> {
   });
   app.on("will-quit", (e) => {
     globalShortcut.unregisterAll();
-    if (!server) return;
+    if (!server && !source) return;
     e.preventDefault();
-    const s = server;
-    server = null;
+    if (closing) return;
+    closing = true;
     // A second app.quit() after preventing will-quit is ignored (Electron 45); the windows are closed by now anyway.
-    s.close()
-      .catch((err: Error) => {
+    void Promise.all([
+      server?.close().catch((err: Error) => {
         log(`closing the desk: ${err.message}`);
-      })
-      .finally(() => {
-        app.exit(0);
-      });
+      }),
+      source?.stop(),
+    ]).finally(() => {
+      app.exit(0);
+    });
+  });
+  process.on("exit", () => {
+    source?.kill();
   });
   app.on("activate", showWindow);
 
@@ -125,17 +146,35 @@ async function main(): Promise<void> {
   secureSession();
   ipcMain.handle("desktop:status", (e) => {
     if (!isAppUrl(e.senderFrame?.url ?? "", origins)) throw new Error("not allowed");
-    return { hotkey, open_at_login: loginItemEnabled() };
+    return { hotkey, open_at_login: loginItemEnabled(), source: sourceStatus() };
   });
   Menu.setApplicationMenu(appMenu());
   createTray();
   createWindow();
   await pathReady;
+  node = findNode(process.env.PATH ?? "");
+  sourceProblem = sourceWanted ? checkoutProblem(sourceWanted, node) : null;
+  fromSource = sourceProblem ? "" : sourceWanted;
+  if (sourceProblem) log(`not running from a checkout: ${sourceProblem}`);
+  await reap(home, log);
   if (!(await connect())) return;
+  // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
+  void watch();
+  await loadUi();
+}
+
+async function loadUi(): Promise<void> {
+  if (source) {
+    const s = source;
+    const slow = setTimeout(() => {
+      void win?.loadURL(startPage(`Starting the UI from ${fromSource}… its output is in ${s.status().log}`));
+    }, 20_000);
+    await s.uiReady();
+    clearTimeout(slow);
+  }
   await win?.loadURL(uiUrl).catch((e: Error) => {
     log(`loading ${uiUrl}: ${e.message}`);
   });
-  void watch();
 }
 
 // ---------------------------------------------------------------- PATH
@@ -161,7 +200,7 @@ async function connect(): Promise<boolean> {
   for (;;) {
     const probe = await probeHealth(api);
     if (probe.kind === "desk") {
-      log(`attached to the desk on ${deskUrl}`);
+      log(`attached to the desk on ${deskUrl}${fromSource ? `; ${fromSource} runs once that desk stops` : ""}`);
       return true;
     }
     if (probe.kind === "other") {
@@ -171,6 +210,14 @@ async function connect(): Promise<boolean> {
       );
       app.quit();
       return false;
+    }
+    // A desk from source that fails shows that in the window and waits for a fix; never an in-process desk in its place.
+    if (fromSource && node) {
+      source = await startSource({ dir: fromSource, node, port, home, log });
+      uiUrl = source.ui;
+      origins.push(source.ui);
+      log(`running the desk on ${deskUrl} and the UI on ${source.ui} from ${fromSource}`);
+      return true;
     }
     try {
       log(`starting a desk on ${deskUrl}`);
@@ -195,30 +242,52 @@ async function connect(): Promise<boolean> {
   }
 }
 
-// Follows /api/events: refreshes the tray on each update, and takes over when an attached desk goes away.
+// Follows /api/events: refreshes the tray on each update, shows a desk's notifications when it isn't in this process, and
+// takes over when an attached desk goes away. A desk from source restarting is just a reconnect.
 async function watch(): Promise<void> {
   // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- the before-quit handler sets quitting while this loop awaits
   for (let attempt = 0; !quitting;) {
     try {
-      const res = await fetch(`${api}/api/events`);
+      const res = await fetch(`${api}/api/events${server ? "" : "?notify=1"}`);
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       attempt = 0;
       let buf = "";
       for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
         const { events, rest } = parseSSE(buf + chunk);
         buf = rest;
+        for (const e of events) {
+          const n = e.event === "notify" ? parseNotice(e.data) : null;
+          if (n) notify(n.title, n.body);
+        }
         if (events.some((e) => e.event === "update")) refreshSoon();
       }
     } catch {}
     if (quitting) return;
-    if (!server && (await deskGone())) {
-      log("the desk went away; starting one here");
+    if (!server && !source && (await deskGone())) {
+      log(fromSource ? "the desk went away; running it from source" : "the desk went away; starting one here");
       if (!(await connect())) return;
-      win?.webContents.reload();
+      if (source) await loadUi();
+      else win?.webContents.reload();
       continue;
     }
-    await sleep(backoff(attempt++));
+    await sleep(source ? 1000 : backoff(attempt++));
   }
+}
+
+function sourceStatus(): SourceStatus | null {
+  if (!sourceWanted) return null;
+  if (sourceProblem) return { dir: sourceWanted, state: "invalid", detail: sourceProblem };
+  return source?.status() ?? { dir: sourceWanted, state: "attached" };
+}
+
+// Switching Run from a checkout takes a restart. It compares settings.json, which the next launch reads, so it can't loop.
+function checkSource(): void {
+  if (envSource !== undefined || relaunching) return;
+  if (desktopSettings(readSettings(settingsPath(home)).overrides).source === launchSource) return;
+  relaunching = true;
+  log("Run from a checkout changed; restarting the app");
+  app.relaunch({ args: process.argv.slice(1).filter((a) => a !== "--hidden") });
+  app.quit();
 }
 
 async function deskGone(): Promise<boolean> {
@@ -279,6 +348,7 @@ const shown = new Set<Notification>(); // a collected Notification loses its cli
 
 function applySettings(next: DesktopSettings): void {
   if (next.hotkey !== hotkey.accelerator) registerHotkey(next.hotkey);
+  if (next.source !== prefs.source) checkSource();
   if (next.open_at_login !== loginApplied) {
     loginApplied = next.open_at_login;
     if (next.open_at_login !== loginItemEnabled()) setLoginItem(next.open_at_login);
@@ -331,13 +401,19 @@ const stateFile = () => path.join(app.getPath("userData"), "window.json");
 // The UI's --paper, so the window doesn't flash the other theme while it loads.
 const paper = () => (nativeTheme.shouldUseDarkColors ? "#151618" : "#f6f6f4");
 
+const startPage = (text: string) => {
+  const ink = nativeTheme.shouldUseDarkColors ? "#9599a1" : "#676c74";
+  const body = text.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+  const page = `<title>Review Desk</title><body style="margin:0;display:grid;place-items:center;height:100vh;background:${paper()};color:${ink};font:14px system-ui;-webkit-app-region:drag"><p style="max-width:32em;text-align:center">${body}</p></body>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(page)}`;
+};
+
 function createWindow(): void {
   let saved: Partial<Bounds> | null = null;
   try {
     // restoreBounds type-checks each field.
     saved = JSON.parse(fs.readFileSync(stateFile(), "utf8")) as Partial<Bounds> | null;
   } catch {}
-  const dark = nativeTheme.shouldUseDarkColors;
   const bg = paper();
   const w = new BrowserWindow({
     ...restoreBounds(
@@ -396,8 +472,7 @@ function createWindow(): void {
     if (isHttpsUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
-  const page = `<title>Review Desk</title><body style="margin:0;display:grid;place-items:center;height:100vh;background:${bg};color:${dark ? "#9599a1" : "#676c74"};font:14px system-ui;-webkit-app-region:drag">Starting Review Desk…</body>`;
-  void w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+  void w.loadURL(startPage("Starting Review Desk…"));
 }
 
 function showWindow(): void {

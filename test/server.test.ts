@@ -228,6 +228,52 @@ test("DESK_DEV lets the Vite dev server's page in, on its usual ports or DESK_DE
   t.cleanup();
 });
 
+test("DESK_UI_ORIGIN lets in exactly the desktop app's Vite page, approve included", async (c) => {
+  const prev = process.env.DESK_UI_ORIGIN;
+  c.after(() => {
+    if (prev === undefined) delete process.env.DESK_UI_ORIGIN;
+    else process.env.DESK_UI_ORIGIN = prev;
+  });
+  const t = await setup();
+  process.env.DESK_UI_ORIGIN = "http://127.0.0.1:48555";
+  const app = createApp(t.desk, 47823);
+  const approve = async (origin: string) =>
+    (
+      await app.request("http://127.0.0.1:47823/api/review/acme/api%237/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json", "sec-fetch-site": "same-origin", origin },
+        body: JSON.stringify({ head_oid: "h7" }),
+      })
+    ).status;
+  // 409: past the origin checks, refused only because this desk has no write client.
+  assert.deepEqual(
+    [await approve("http://127.0.0.1:48555"), await approve("http://localhost:48555"), await approve("http://localhost:5173")],
+    [409, 403, 403],
+  );
+  t.cleanup();
+});
+
+test("an app attached with /api/events?notify=1 gets the desk's notifications", async (c) => {
+  const t = await setup();
+  c.mock.timers.enable({ apis: ["setTimeout"] }); // the streams' 25 s keepalive must not hold the test open
+  const own: string[] = [];
+  t.desk.notifyFn = (_title, body) => {
+    own.push(body);
+  };
+  const open = async (p: string) => (await t.req(p)).body!.pipeThrough(new TextDecoderStream()).getReader();
+  const ui = await open("/api/events");
+  t.desk.notify("Review Desk", "with only the UI's stream");
+  const app = await open("/api/events?notify=1");
+  let text = "";
+  while (!text.includes("event: update")) text += (await app.read()).value ?? "";
+  t.desk.notify("Review Desk", "acme/api#7 · asks you");
+  while (!text.includes("event: notify")) text += (await app.read()).value ?? "";
+  assert.match(text, /event: notify\ndata: {"title":"Review Desk","body":"acme\/api#7 · asks you"}\n/);
+  assert.deepEqual(own, ["with only the UI's stream"], "the desk notifies itself only while no app listens");
+  await Promise.all([ui.cancel(), app.cancel()]);
+  t.cleanup();
+});
+
 test("errors: unknown board/item, bad action", async () => {
   const t = await setup();
   assert.equal((await t.req("/api/boards/nope")).status, 404);

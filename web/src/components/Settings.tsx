@@ -15,6 +15,7 @@ import { ago, cls, copyText, tilde, when } from "../format.ts";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
+import { SourceLine } from "./Source.tsx";
 import { acceleratorOf, authProblem, coordinatorText, draftOf, valueOf } from "../view.ts";
 
 type Flash = (text: string, error?: boolean) => void;
@@ -680,6 +681,8 @@ export function Settings({
                     extra={
                       d.key === "coordinator.enabled" ? (
                         <CoordinatorInfo active={active} loads={loads} now={now} flash={flash} />
+                      ) : d.key === "app.source" ? (
+                        live && <SourceLine s={live.source ?? null} />
                       ) : (
                         d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
                       )

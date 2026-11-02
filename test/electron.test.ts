@@ -2,25 +2,36 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   backoff,
   cardLabel,
+  checkoutProblem,
+  DESK_ARGS,
   desktopEntry,
   desktopSettings,
   envVar,
+  findNode,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
   isHttpUrl,
   menuLabel,
   mergePath,
+  parseNotice,
   parseShellPath,
   parseSSE,
   probeHealth,
   restoreBounds,
   SHELL_PATH_COMMAND,
+  sourceDir,
+  sourceEnv,
   trayTitle,
   trayTooltip,
+  viteArgs,
+  watchEvent,
 } from "../electron/lib.ts";
 
 test("parseShellPath ignores rc-file noise around the markers", () => {
@@ -96,11 +107,91 @@ test("parseSSE returns complete events and keeps the tail", () => {
 });
 
 test("desktopSettings falls back to the defaults", () => {
-  assert.deepEqual(desktopSettings(), { hotkey: "Control+Alt+D", open_at_login: false, menu_bar_count: true });
-  assert.deepEqual(desktopSettings({ "app.hotkey": "", "app.open_at_login": true, "app.menu_bar_count": false }), {
-    hotkey: "",
-    open_at_login: true,
-    menu_bar_count: false,
+  assert.deepEqual(desktopSettings(), { hotkey: "Control+Alt+D", open_at_login: false, menu_bar_count: true, source: "" });
+  assert.deepEqual(
+    desktopSettings({ "app.hotkey": "", "app.open_at_login": true, "app.menu_bar_count": false, "app.source": "~/code/review-desk" }),
+    { hotkey: "", open_at_login: true, menu_bar_count: false, source: "~/code/review-desk" },
+  );
+});
+
+test("parseNotice reads a desk's notify event and ignores anything else", () => {
+  assert.deepEqual(parseNotice('{"title":"Review Desk","body":"api#7 · asks you"}'), { title: "Review Desk", body: "api#7 · asks you" });
+  for (const bad of ["", "null", '{"title":1,"body":"x"}', '{"title":"t"}', "{"]) assert.equal(parseNotice(bad), null, bad);
+});
+
+test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => {
+  assert.equal(sourceDir("", "/Users/me"), "");
+  assert.equal(sourceDir("  ", "/Users/me"), "");
+  assert.equal(sourceDir("~", "/Users/me"), path.resolve("/Users/me"));
+  assert.equal(sourceDir(" ~/code/review-desk/ ", "/Users/me"), path.resolve("/Users/me/code/review-desk"));
+  assert.equal(sourceDir("/opt/desk", "/Users/me"), path.resolve("/opt/desk"));
+  assert.equal(sourceDir("~other/desk", "/Users/me"), path.resolve("~other/desk"), "only ~ and ~/ mean your home");
+});
+
+test("checkoutProblem: a Review Desk clone with its packages installed", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
+  try {
+    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /isn't a Review Desk checkout/);
+    for (const f of ["src/cli.ts", "web/vite.config.ts"]) {
+      fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      fs.writeFileSync(path.join(dir, f), "");
+    }
+    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /run npm install there/);
+    fs.mkdirSync(path.join(dir, "node_modules/vite/bin"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "node_modules/vite/bin/vite.js"), "");
+    assert.match(
+      checkoutProblem(dir, null) ?? "",
+      /find node on your login shell/,
+      "without node it runs in-process, never a stuck window",
+    );
+    assert.equal(checkoutProblem(dir, "/bin/node"), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findNode: the first node on PATH, absolute dirs only", () => {
+  const exe = process.platform === "win32" ? "node.exe" : "node";
+  const has = new Set([path.join("/b", exe), path.join("/c", exe)]);
+  const isFile = (p: string) => has.has(p);
+  assert.equal(findNode(["/a", "/b", "/c"].join(path.delimiter), path.delimiter, isFile), path.join("/b", exe));
+  assert.equal(
+    findNode(["", "b"].join(path.delimiter), path.delimiter, () => true),
+    null,
+    "a relative PATH entry isn't trusted",
+  );
+  assert.equal(findNode(path.dirname(process.execPath)), process.execPath, "finds a real one");
+});
+
+test("the desk runs under node --watch on all of src/, Vite on one exact port", () => {
+  assert.deepEqual(DESK_ARGS.slice(0, 2), ["--watch", "--watch-path=src"]);
+  assert.deepEqual(DESK_ARGS.slice(-2), ["src/cli.ts", "serve"]);
+  assert.equal(
+    viteArgs(48123).join(" "),
+    "node_modules/vite/bin/vite.js --config web/vite.config.ts --host 127.0.0.1 --port 48123 --strictPort",
+  );
+});
+
+test("watchEvent reads node --watch's own lines", () => {
+  assert.equal(watchEvent("Restarting 'src/cli.ts'"), "restart");
+  assert.equal(watchEvent("Failed running 'src/cli.ts'. Waiting for file changes before restarting..."), "exit");
+  assert.equal(watchEvent("Completed running 'src/cli.ts'. Waiting for file changes before restarting..."), "exit");
+  assert.equal(watchEvent("2026-11-02T20:32:52.577Z Review Desk on http://localhost:48601"), null);
+  assert.equal(watchEvent("  Restarting 'src/cli.ts'"), null, "the desk's own output doesn't count");
+});
+
+test("sourceEnv: the desk's port and home, exactly the UI's origin, and no DESK_DEV", () => {
+  const env = sourceEnv(
+    { PATH: "/usr/bin", DESK_DEV: "1", DESK_DEV_PORT: "5174", DESK_SOURCE: "/x", DESK_PORT: "1", DESK_CLAUDE: "/fake" },
+    { port: 48601, home: "/tmp/h", ui: "http://127.0.0.1:48602" },
+  );
+  assert.deepEqual(env, {
+    PATH: "/usr/bin",
+    DESK_CLAUDE: "/fake",
+    DESK_PORT: "48601",
+    DESK_HOME: "/tmp/h",
+    DESK_UI_ORIGIN: "http://127.0.0.1:48602",
+    DESK_API: "http://127.0.0.1:48601",
   });
 });
 

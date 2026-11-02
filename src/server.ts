@@ -54,6 +54,8 @@ export function createApp(desk: Desk, port: number): Hono {
       origins.add(`http://localhost:${p}`);
       origins.add(`http://127.0.0.1:${p}`);
     }
+  // The desktop app running from a checkout serves the UI from its own Vite server, on exactly this origin.
+  if (process.env.DESK_UI_ORIGIN) origins.add(process.env.DESK_UI_ORIGIN);
 
   // Only this machine's browser and tools: blocks DNS rebinding (Host) and cross-site requests (Origin).
   app.use("*", async (c, next) => {
@@ -248,13 +250,21 @@ export function createApp(desk: Desk, port: number): Hono {
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const off = desk.onChange((rev) => void stream.writeSSE({ event: "update", data: JSON.stringify({ rev }) }));
-      stream.onAbort(off);
+      const offNotify =
+        c.req.query("notify") === "1"
+          ? desk.onNotify((title, body) => void stream.writeSSE({ event: "notify", data: JSON.stringify({ title, body }) }))
+          : () => {};
+      stream.onAbort(() => {
+        off();
+        offNotify();
+      });
       await stream.writeSSE({ event: "update", data: JSON.stringify({ rev: desk.rev }) });
       while (!stream.aborted) {
         await stream.sleep(25_000);
         if (!stream.aborted) await stream.write(": ping\n\n");
       }
       off();
+      offNotify();
     }),
   );
 

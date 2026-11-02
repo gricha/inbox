@@ -332,7 +332,17 @@ export interface CoordinatorActed {
 export interface DesktopBridge {
   platform: string; // process.platform
   version: string;
-  status(): Promise<{ hotkey: { accelerator: string; ok: boolean; error?: string }; open_at_login: boolean }>;
+  // source: absent from an app older than Run from a checkout.
+  status(): Promise<{ hotkey: { accelerator: string; ok: boolean; error?: string }; open_at_login: boolean; source?: SourceStatus | null }>;
+}
+
+// The desktop app running the desk and its UI from a checkout (Settings → Desktop app → Run from a checkout).
+export interface SourceStatus {
+  dir: string;
+  // running: the desk process is up or restarting; attached: a desk already ran on the port, so the app uses that one
+  state: "running" | "failed" | "attached" | "invalid";
+  detail?: string; // failed: the desk's last lines of output; invalid: why the folder can't run
+  log?: string; // where both processes' output goes
 }
 
 export interface ConfigError {

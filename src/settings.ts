@@ -182,6 +182,15 @@ export const SETTINGS = [
   { key: "app.open_at_login", section: "app", label: "Open at login", type: "boolean", default: false, desktop: true },
   { key: "app.menu_bar_count", section: "app", label: "Show counts in the menu bar", type: "boolean", default: true, desktop: true },
   {
+    key: "app.source",
+    section: "app",
+    label: "Run from a checkout",
+    type: "string",
+    default: "",
+    desktop: true,
+    help: "A Review Desk clone, npm install done. The app runs the desk and its UI from it and picks up changes as they land. Empty runs the app's own copy. Changing it restarts the app.",
+  },
+  {
     key: "inflight.babysit",
     section: "inflight",
     label: "Let Claude work on them",

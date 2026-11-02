@@ -35,6 +35,7 @@ import { Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { SourceNotice, useSourceDown } from "./components/Source.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 
 interface Toast {
@@ -118,6 +119,7 @@ export function App() {
   expandedRef.current = expanded;
   const downRef = useRef(down);
   downRef.current = down;
+  const sourceDown = useSourceDown(down === UNREACHABLE);
   const loadSeq = useRef(0);
   const refreshTimer = useRef(0);
   const toastTimer = useRef(0);
@@ -265,16 +267,21 @@ export function App() {
     // Bumping epoch is how a dead stream gets reopened.
   }, [refresh, epoch]);
 
+  // A desk from a checkout is back within a second or two of a change.
+  const quick = sourceDown?.state === "running";
   useEffect(() => {
     const t = down
-      ? setInterval(() => {
-          void load();
-        }, 5000)
+      ? setInterval(
+          () => {
+            void load();
+          },
+          quick ? 1000 : 5000,
+        )
       : undefined;
     return () => {
       clearInterval(t);
     };
-  }, [down, load]);
+  }, [down, load, quick]);
 
   useEffect(() => {
     const t = armed
@@ -895,7 +902,8 @@ export function App() {
           inert={help}
         />
         <main className="main" inert={help}>
-          {down && !broken && (
+          {sourceDown && <SourceNotice s={sourceDown} />}
+          {down && !broken && !sourceDown && (
             <div className={cls("notice", down === UNREACHABLE ? "err" : "warn")} role="alert">
               {down === UNREACHABLE ? (
                 <span>
