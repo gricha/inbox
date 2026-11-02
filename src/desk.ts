@@ -1590,7 +1590,7 @@ export class Desk {
     const s = this.sitter.record(it.id);
     const st = this.sitter.status(it.id, it, s);
     const run = s.runs.at(-1) ?? null;
-    const wt = s.worktree ?? worktreePath(this.home, it.id);
+    const wt = worktreePath(this.home, it.id); // not s.worktree: in a desk.db copied from another desk, it's that desk's
     const on = autoMerging(it, s);
     return {
       needs_you: this.sitter.needsYou(it, s, st),

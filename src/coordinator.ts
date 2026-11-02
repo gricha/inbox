@@ -85,6 +85,7 @@ Now call desk_policy and desk_overview, then reply in two or three sentences: wh
 
 interface State {
   session_id: string;
+  dir: string | null; // the coordinator directory of the desk that made the session
   started_at: string | null; // its first run made the session
   cursor: number | null; // the last event seq it has seen (or skipped)
   runs: number;
@@ -98,6 +99,7 @@ interface State {
 
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ");
+const dirOf = (home: string) => path.resolve(home, "coordinator");
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -163,8 +165,10 @@ export class Coordinator {
 
   load(): State {
     const saved = this.desk.store.get("coordinator") as Partial<State> | null;
-    return {
+    const dir = dirOf(this.desk.home);
+    const st: State = {
       session_id: randomUUID(),
+      dir: saved ? null : dir, // saved before sessions were bound: unknown
       started_at: null,
       cursor: null,
       runs: 0,
@@ -176,6 +180,16 @@ export class Coordinator {
       learned_seq: 0,
       ...saved,
     };
+    // A desk.db copied from another desk (or from before sessions were bound) holds that desk's session: resuming it writes into it.
+    if (saved && st.dir !== dir) {
+      if (st.started_at)
+        this.desk.log(
+          `coordinator: session ${st.session_id} isn't this desk's (made in ${st.dir ?? "an unrecorded directory"}); starting a new one`,
+        );
+      Object.assign(st, { session_id: randomUUID(), started_at: null, dir });
+      this.desk.store.set("coordinator", st);
+    }
+    return st;
   }
 
   save(patch: Partial<State>): State {
@@ -192,7 +206,7 @@ export class Coordinator {
   }
 
   dir(): string {
-    const dir = path.join(this.desk.home, "coordinator");
+    const dir = dirOf(this.desk.home);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -585,7 +599,7 @@ export class Coordinator {
   status(): CoordinatorStatus {
     const st = this.load();
     const off = this.offReason();
-    const dir = path.join(this.desk.home, "coordinator");
+    const dir = dirOf(this.desk.home);
     const cmd = claudeCommand();
     return {
       state: this.state(),

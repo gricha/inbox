@@ -802,7 +802,9 @@ export class Babysitter {
     }
     if (this.stopped) return;
     const s = this.record(id);
-    const wt = dir ?? s.worktree ?? (fs.existsSync(worktreePath(this.desk.home, id)) ? worktreePath(this.desk.home, id) : null);
+    const own = worktreePath(this.desk.home, id);
+    // Never the record's own path: a desk.db copied from another desk names that desk's worktree.
+    const wt = dir ?? (s.worktree === own || fs.existsSync(own) ? own : null);
     if (wt) {
       const clone = s.clone;
       await (clone ? this.serial(clone, () => removeWorktree(clone, wt)) : removeWorktree(null, wt));
