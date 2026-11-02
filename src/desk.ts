@@ -57,6 +57,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, type PrText } from "./review.ts
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Coordinator } from "./coordinator.ts";
+import { Conversations, owesReply } from "./conversation.ts";
 import {
   checkSetting,
   effective,
@@ -172,6 +173,7 @@ export class Desk {
   policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
   coordinator: Coordinator;
+  convos: Conversations;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -216,6 +218,7 @@ export class Desk {
     this.connectors = [this.gh];
     this.judge = new Judge(this);
     this.coordinator = new Coordinator(this);
+    this.convos = new Conversations(this);
     this.sitter = new Babysitter(this, opts.babysit);
   }
 
@@ -285,6 +288,7 @@ export class Desk {
     this.sitter.stop();
     for (const c of this.connectors) c.stop();
     this.judge.stop();
+    this.convos.stop();
     this.coordinator.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
@@ -650,7 +654,12 @@ export class Desk {
     this.store.pruneKv("pr:", kept);
     this.store.pruneKv("judge:", kept);
     this.store.pruneKv("sitter:", kept);
+    this.store.pruneKv("take:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
+    if (this.loaded) {
+      const top = this.top(this.snapshot(), new Set());
+      void this.convos.warm([...top.now, ...top.today].filter((c) => c.cta).map((c) => c.id));
+    }
     this.judge.pump();
     this.coordinator.wake();
   }
@@ -1005,6 +1014,7 @@ export class Desk {
         .activity({ after: 0, limit: 20, item: it.id, latest: true })
         .find((x) => x.kind === "commented" || x.kind === "reviewed");
       if (said) c.last_event = said;
+      if (this.replyOnly(e)) c.cta = "Reply";
     }
     if (it.kind === "issue") {
       const recent = this.store.activity({ after: 0, limit: 20, item: it.id, latest: true });
@@ -1065,6 +1075,14 @@ export class Desk {
     if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
     if (it.draft) return "a draft: mark it ready for review when it is";
     return `waiting on review: ${hand}`;
+  }
+
+  // Your own open PR whose only action is answering someone: nothing to fix, nothing to merge yet.
+  replyOnly(e: Entry): boolean {
+    const it = e.item;
+    if (it.state !== "open" || e.inflight || it.draft || it.ci === "red" || it.mergeable === "conflict") return false;
+    if (it.review_decision === "changes_requested" || (it.review_decision === "approved" && it.ci === "green")) return false;
+    return owesReply(it, this.me());
   }
 
   // Said once above the queue, not on every card: a failed login stops every agent, so it's Claude as a whole.
@@ -1256,6 +1274,7 @@ export class Desk {
     const id = this.pr(ref).item.id;
     let files: ReviewFile[] = [];
     let filesError: string | null = null;
+    const talk = this.convos.view(id);
     try {
       files = (await this.prText(id)).files;
     } catch (err) {
@@ -1281,6 +1300,7 @@ export class Desk {
       generating: this.generating.has(id),
       approve: this.canApprove(e),
       activity: d.activity,
+      ...(await talk),
     };
   }
 
@@ -1779,6 +1799,38 @@ export class Desk {
     this.log(`sent a ${d.thread_id ? "reply" : "comment"} on ${id} to ${d.to}${url ? ` (${url})` : ""}`);
     this.changed();
     void this.sync();
+    return { url };
+  }
+
+  // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your keypress. One of the desk's GitHub writes.
+  async reply(ref: string, convoId: string, body: string): Promise<{ url: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const text = body.trim();
+    if (e.item.state !== "open") throw new DeskError(409, `can't reply on ${id}: it's ${e.item.state}`);
+    if (!text) throw new DeskError(400, "the reply is empty");
+    if (text.length > MAX_DRAFT) throw new DeskError(400, `keep a reply under ${MAX_DRAFT} characters`);
+    if (!this.writer) throw new DeskError(409, "replying isn't available in this desk");
+    const list = await this.convos.list(id).catch((err: unknown) => {
+      throw new DeskError(502, `couldn't read the PR's conversations: ${(err as Error).message}`);
+    });
+    const c = list.find((x) => x.id === convoId);
+    if (!c) throw new DeskError(404, `no conversation "${convoId}" on ${id}`);
+    if (this.sending.has(convoId)) throw new DeskError(409, "already sending that reply");
+    this.sending.add(convoId);
+    let url: string;
+    try {
+      ({ url } = c.kind === "thread" ? await this.writer.reply(c.id, text) : await this.writer.comment(e.item.node_id, text));
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't take the reply: ${(err as Error).message}`);
+    } finally {
+      this.sending.delete(convoId);
+    }
+    this.store.logWrite(id, c.kind === "thread" ? "reply" : "comment", this.now().toISOString());
+    this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
+    this.convos.forget(id);
+    this.changed();
+    void this.gh.refresh(id).then(() => this.sync());
     return { url };
   }
 

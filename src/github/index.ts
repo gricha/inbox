@@ -28,7 +28,17 @@ export interface NotificationPage {
   poll_interval: number; // seconds GitHub asks clients to wait (X-Poll-Interval)
   date: string | null; // GitHub's clock
 }
-// A PR's conversation and failing checks, for a babysitter's prompt. Every text field is untrusted GitHub text.
+// One comment, review or reply; id and url are GitHub's for it.
+interface Said {
+  id: string;
+  author: string;
+  bot: boolean;
+  trusted: boolean; // a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); only their words reach a babysitter
+  body: string;
+  at: string;
+  url: string;
+}
+// A PR's conversation and failing checks, for a babysitter's prompt and the review's conversation. Every text field is untrusted GitHub text.
 export interface PrContext {
   threads: {
     id: string; // the review thread's node id: what a reply goes to
@@ -36,11 +46,12 @@ export interface PrContext {
     outdated: boolean;
     path: string;
     line: number | null;
-    comments: { author: string; bot: boolean; trusted: boolean; body: string; at: string }[];
+    hunk: string; // the diff the thread started on
+    comments: Said[];
   }[];
-  // trusted: a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); only their words reach a babysitter.
-  reviews: { author: string; bot: boolean; trusted: boolean; state: ReviewState; body: string; at: string }[];
-  comments: { author: string; bot: boolean; trusted: boolean; body: string; at: string }[]; // on the PR itself
+  reviews: (Said & { state: ReviewState })[];
+  comments: Said[]; // on the PR itself
+  commits: { oid: string; headline: string; at: string }[]; // the latest 20, oldest first
   checks: { name: string; job_id: number | null; app: string; url: string; summary: string }[]; // the failing ones
 }
 
@@ -63,6 +74,7 @@ interface Author {
 interface Assoc {
   authorAssociation?: string;
 }
+type RawSaid = { id: string; author: Author | null; body: string; createdAt: string; url: string } & Assoc;
 interface RawPrContext {
   node: {
     reviewThreads?: {
@@ -72,13 +84,13 @@ interface RawPrContext {
         isOutdated: boolean;
         path: string;
         line: number | null;
-        comments: { nodes: ({ author: Author | null; body: string; createdAt: string } & Assoc)[] };
+        hunk?: { nodes: { diffHunk: string }[] };
+        comments: { nodes: RawSaid[] };
       }[];
     };
-    reviews?: {
-      nodes: ({ author: Author | null; state: string; body: string; submittedAt: string | null; createdAt: string } & Assoc)[];
-    };
-    comments?: { nodes: ({ author: Author | null; body: string; createdAt: string } & Assoc)[] };
+    reviews?: { nodes: (RawSaid & { state: string; submittedAt: string | null })[] };
+    comments?: { nodes: RawSaid[] };
+    history?: { nodes: { commit: { abbreviatedOid: string; messageHeadline: string; committedDate: string } }[] };
     commits?: {
       nodes: {
         commit: {
@@ -104,10 +116,14 @@ interface RawPrContext {
   } | null;
 }
 
-const who = (a: Author | null, assoc: Assoc) => ({
-  author: a?.login ?? "ghost",
-  bot: a?.__typename === "Bot" || !!a?.login.endsWith("[bot]"),
-  trusted: collaborator(assoc.authorAssociation),
+const said = (c: RawSaid, at = c.createdAt) => ({
+  id: c.id,
+  author: c.author?.login ?? "ghost",
+  bot: c.author?.__typename === "Bot" || !!c.author?.login.endsWith("[bot]"),
+  trusted: collaborator(c.authorAssociation),
+  body: c.body,
+  at,
+  url: c.url,
 });
 
 function parsePrContext(data: RawPrContext): PrContext {
@@ -120,12 +136,18 @@ function parsePrContext(data: RawPrContext): PrContext {
       outdated: t.isOutdated,
       path: t.path,
       line: t.line,
-      comments: t.comments.nodes.map((c) => Object.assign(who(c.author, c), { body: c.body, at: c.createdAt })),
+      hunk: t.hunk?.nodes[0]?.diffHunk ?? "",
+      comments: t.comments.nodes.map((c) => said(c)),
     })),
     reviews: (n?.reviews?.nodes ?? []).map((r) =>
-      Object.assign(who(r.author, r), { state: r.state.toLowerCase() as ReviewState, body: r.body, at: r.submittedAt ?? r.createdAt }),
+      Object.assign(said(r, r.submittedAt ?? r.createdAt), { state: r.state.toLowerCase() as ReviewState }),
     ),
-    comments: (n?.comments?.nodes ?? []).map((c) => Object.assign(who(c.author, c), { body: c.body, at: c.createdAt })),
+    comments: (n?.comments?.nodes ?? []).map((c) => said(c)),
+    commits: (n?.history?.nodes ?? []).map(({ commit: c }) => ({
+      oid: c.abbreviatedOid,
+      headline: c.messageHeadline,
+      at: c.committedDate,
+    })),
     checks: checks
       .filter((c) => c !== null && checkFailed(c))
       .map((c) => ({

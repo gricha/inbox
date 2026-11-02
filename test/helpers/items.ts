@@ -131,7 +131,7 @@ export class FakeGitHub implements GitHub {
 
   prContext(nodeId: string): Promise<PrContext> {
     this.contextCalls.push(nodeId);
-    return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], checks: [] });
+    return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [], checks: [] });
   }
 
   rateLimit() {

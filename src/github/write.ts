@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve or post.
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
-// reply and comment send a reply an agent drafted on your own PR in Merging, when you press Send.
+// reply and comment send a reply an agent drafted on your own PR in Merging, or your reply in a PR's review, when you press Send.
 // ready, auto_merge and auto_merge_off: m hands your own PR off for merge (a draft is marked ready first, as auto-merge
 // needs), and Back to desk turns off what m turned on.
 export const ALLOWED = {

@@ -761,6 +761,21 @@ kbd {
   padding-left: 12px;
 }
 
+/* The row's one call to action, before its age. */
+.line-cta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.line-cta + .line-age {
+  margin-left: 0;
+}
+
 .dim .line-title {
   color: var(--ink-2);
   font-weight: 400;
@@ -2760,6 +2775,131 @@ kbd {
   border-left: 2px solid var(--rule-strong);
   color: var(--ink-2);
   font-size: 13.5px;
+}
+
+/* What reviewers said: each one waiting on you is a margin note with Claude's read and a reply box; the rest fold into one line. */
+.rv-convo {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  max-width: 780px;
+  padding: 0 12px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.rv-convo .d-head {
+  margin: 0;
+}
+
+.cv {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid var(--rule-strong);
+}
+
+.cv-who,
+.cv-quiet summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+.cv-who > span + span::before,
+.cv-quiet summary > span + span::before {
+  margin-right: 6px;
+  color: var(--faint);
+  content: "·";
+}
+
+.cv-author {
+  color: var(--ink-2);
+  font-weight: 550;
+}
+
+.cv-gist {
+  color: var(--ink);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.cv-take b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cv-said summary {
+  color: var(--pencil);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cv-comments {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.cv-body {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cv-reply {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 13.5px/1.5 var(--sans);
+  resize: vertical;
+}
+
+.cv-reply:focus {
+  border-color: var(--pencil);
+  outline: none;
+}
+
+.cv-reply::placeholder {
+  color: var(--pencil);
+}
+
+.cv-quiet {
+  width: 100%;
+  min-width: 0;
+}
+
+.cv-quiet summary {
+  flex-wrap: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cv-quiet summary > * {
+  flex: none;
+  white-space: nowrap;
+}
+
+.cv-quiet summary > .cv-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-quiet .cv-comments {
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
 }
 
 /* Armed, a second press sends it: said in ink, since amber is for problems. */

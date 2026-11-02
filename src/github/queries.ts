@@ -87,16 +87,21 @@ export function detailsMine(n: number): string {
 }
 
 // authorAssociation (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, ...) says whose feedback a babysitter may act on.
-// What a babysitter needs to work on your PR: its review threads (with ids to reply to), reviews, comments and failing checks.
+// A PR's conversation: its review threads (with ids to reply to), reviews, comments, recent commits and failing checks.
 export const PR_CONTEXT = `query($id: ID!) {
   ${RATE}
   node(id: $id) {
     ... on PullRequest {
       reviewThreads(first: 100) {
-        nodes { id isResolved isOutdated path line comments(first: 30) { nodes { author { __typename login } authorAssociation body createdAt url } } }
+        nodes {
+          id isResolved isOutdated path line
+          hunk: comments(first: 1) { nodes { diffHunk } }
+          comments(first: 30) { nodes { id author { __typename login } authorAssociation body createdAt url } }
+        }
       }
-      reviews(last: 30) { nodes { author { __typename login } authorAssociation state body submittedAt createdAt } }
-      comments(last: 20) { nodes { author { __typename login } authorAssociation body createdAt } }
+      reviews(last: 30) { nodes { id author { __typename login } authorAssociation state body submittedAt createdAt url } }
+      comments(last: 20) { nodes { id author { __typename login } authorAssociation body createdAt url } }
+      history: commits(last: 20) { nodes { commit { abbreviatedOid messageHeadline committedDate } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
         __typename
         ... on CheckRun { name conclusion databaseId detailsUrl title summary checkSuite { app { slug } } }

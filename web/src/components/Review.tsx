@@ -8,6 +8,7 @@ import { currentFile, filePatch, noCloneOf, orderNotes, resolvedHead, says, sitt
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, Dots, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
+import { Conversation } from "./Conversation.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -390,6 +391,7 @@ export function Review({
           <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
         )}
       </div>
+      <Conversation view={view} now={now} flash={flash} />
 
       {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, m or b last. */}
       <div className="actions rv-actions">

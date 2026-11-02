@@ -241,6 +241,28 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
+  // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
+  {
+    name: "review-conversation",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      await page.locator(".rv-convo .rv-more").click();
+      await page.locator(".cv-said").first().locator("summary").click();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    name: "review-conversation-fold",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      // The review before it is the same PR, still mounted with its fold open.
+      const fold = page.locator(".rv-convo .rv-more");
+      if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+      await page.locator(".cv-quiet").last().locator("summary").click();
+      await page.evaluate(`document.querySelector(".rv-convo .rv-more").scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+  },
   // n lands on requirements.txt: a file at the repo's root, with a long folder below it in the list.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
   {

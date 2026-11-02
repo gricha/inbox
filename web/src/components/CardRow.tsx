@@ -62,7 +62,7 @@ function noteOf(card: Card, variant: Variant): string {
   return card.demoted ?? card.why;
 }
 
-// One line: the title, quietly its repo#number, its age on the right. Enter opens an issue (or `w` any item) in place under it.
+// One line: the title, quietly its repo#number, the action when the desk names one, its age on the right. Enter opens an issue (or `w` any item) in place under it.
 export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
@@ -94,6 +94,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
           {card.repo.split("/")[1]}#{card.number}
         </span>
         {note && <span className="line-note">{note}</span>}
+        {card.cta && <span className="line-cta">{card.cta}</span>}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}
         </span>

@@ -40,7 +40,7 @@ const byOf = (c: { req: { header(name: string): string | undefined } }) => ({
   pr: c.req.header("x-desk-pr"),
 });
 
-// The desk's own page, for its GitHub writes (approve, Send, m and b): a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, Send, a reply, m and b): a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -131,6 +131,14 @@ export function createApp(desk: Desk, port: number): Hono {
     if (typeof head_oid !== "string" || !head_oid) throw new DeskError(400, "need { head_oid }: the commit you reviewed");
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
+  });
+  // Posts your reply to one of the PR's conversations, from the desk's own window only.
+  app.post("/api/review/:id{.+}/reply", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
+    const b = await c.req.json<{ id?: unknown; body?: unknown }>().catch((): { id?: unknown; body?: unknown } => ({}));
+    if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") throw new DeskError(400, "need { id, body }");
+    return c.json({ ok: true, ...(await desk.reply(c.req.param("id"), b.id, b.body)) });
   });
   // Merging: your own PRs you handed off, which Claude (their babysitters) gets merged.
   app.get("/api/inflight", (c) => {

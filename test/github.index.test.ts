@@ -330,7 +330,7 @@ test("notifications: a 304 means nothing changed and costs one call", async () =
   assert.deepEqual([r.modified, r.threads, r.poll_interval, n], [false, [], 60, 1]);
 });
 
-test("prContext: a PR's threads with ids, reviews, comments and only its failing checks, in one query", async () => {
+test("prContext: a PR's threads with ids and the code they're on, reviews, comments, recent commits and only its failing checks, in one query", async () => {
   const who = (login: string, bot = false) => ({ __typename: bot ? "Bot" : "User", login });
   const { gh, calls } = fakeGitHub(() => ({
     data: {
@@ -344,8 +344,18 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
               isOutdated: true,
               path: "src/a.ts",
               line: null,
+              hunk: { nodes: [{ diffHunk: "@@ -1 +1 @@\n-a\n+b" }] },
               comments: {
-                nodes: [{ author: who("dana"), authorAssociation: "MEMBER", body: "Retry?", createdAt: "2026-03-01T10:00:00Z" }],
+                nodes: [
+                  {
+                    id: "PRRC_1",
+                    author: who("dana"),
+                    authorAssociation: "MEMBER",
+                    body: "Retry?",
+                    createdAt: "2026-03-01T10:00:00Z",
+                    url: "https://github.com/acme/api/pull/1#discussion_r1",
+                  },
+                ],
               },
             },
           ],
@@ -353,6 +363,8 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
         reviews: {
           nodes: [
             {
+              id: "PRR_1",
+              url: "https://github.com/acme/api/pull/1#pullrequestreview-1",
               author: who("dana"),
               authorAssociation: "MEMBER",
               state: "CHANGES_REQUESTED",
@@ -362,7 +374,12 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
             },
           ],
         },
-        comments: { nodes: [{ author: null, authorAssociation: "NONE", body: "+1", createdAt: "2026-03-01T11:00:00Z" }] },
+        comments: {
+          nodes: [{ id: "IC_1", url: "", author: null, authorAssociation: "NONE", body: "+1", createdAt: "2026-03-01T11:00:00Z" }],
+        },
+        history: {
+          nodes: [{ commit: { abbreviatedOid: "abc1234", messageHeadline: "Retry 502s", committedDate: "2026-03-01T12:00:00Z" } }],
+        },
         commits: {
           nodes: [
             {
@@ -405,13 +422,36 @@ test("prContext: a PR's threads with ids, reviews, comments and only its failing
       outdated: true,
       path: "src/a.ts",
       line: null,
-      comments: [{ author: "dana", bot: false, trusted: true, body: "Retry?", at: "2026-03-01T10:00:00Z" }],
+      hunk: "@@ -1 +1 @@\n-a\n+b",
+      comments: [
+        {
+          id: "PRRC_1",
+          author: "dana",
+          bot: false,
+          trusted: true,
+          body: "Retry?",
+          at: "2026-03-01T10:00:00Z",
+          url: "https://github.com/acme/api/pull/1#discussion_r1",
+        },
+      ],
     },
   ]);
   assert.deepEqual(ctx.reviews, [
-    { author: "dana", bot: false, trusted: true, state: "changes_requested", body: "See inline", at: "2026-03-01T10:00:00Z" },
+    {
+      id: "PRR_1",
+      author: "dana",
+      bot: false,
+      trusted: true,
+      state: "changes_requested",
+      body: "See inline",
+      at: "2026-03-01T10:00:00Z",
+      url: "https://github.com/acme/api/pull/1#pullrequestreview-1",
+    },
   ]);
-  assert.deepEqual(ctx.comments, [{ author: "ghost", bot: false, trusted: false, body: "+1", at: "2026-03-01T11:00:00Z" }]);
+  assert.deepEqual(ctx.comments, [
+    { id: "IC_1", author: "ghost", bot: false, trusted: false, body: "+1", at: "2026-03-01T11:00:00Z", url: "" },
+  ]);
+  assert.deepEqual(ctx.commits, [{ oid: "abc1234", headline: "Retry 502s", at: "2026-03-01T12:00:00Z" }]);
   assert.deepEqual(ctx.checks, [
     { name: "test", job_id: 7, app: "github-actions", url: "https://x/7", summary: "1 failed" },
     { name: "ci/legacy", job_id: null, app: "", url: "https://y", summary: "boom" },

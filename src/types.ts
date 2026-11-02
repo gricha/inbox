@@ -454,6 +454,7 @@ export interface Card {
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
+  cta?: string; // the row's one call to action: "Reply" on your PR whose only action is answering someone
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
@@ -588,6 +589,34 @@ export interface ReviewView {
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
+  conversation: Conversation[]; // what reviewers said, those waiting on you first
+  conversation_error: string | null; // it couldn't be fetched
+  reading: boolean; // Claude is reading the ones waiting on you
+  reading_error: string | null; // its last try on this PR failed
+}
+
+// One conversation on a PR: a review thread, a comment on the PR, or a review's body. Every text is untrusted GitHub text.
+export interface Conversation {
+  id: string; // a review thread's node id (what a reply goes to), else the comment's or review's
+  kind: "thread" | "comment" | "review"; // a reply to a comment or review is a comment on the PR
+  path: string | null; // a review thread's file; null: on the PR
+  line: number | null;
+  outdated: boolean; // the code it's on changed since
+  resolved: boolean;
+  state: ReviewState | null; // a review's
+  comments: { id: string; author: string; bot: boolean; body: string; at: string; url: string }[]; // oldest first
+  waiting_on_you: boolean;
+  url: string;
+  take: Take | null; // Claude's pre-filter, of its latest comment; only for one waiting on you
+}
+
+// Claude's read of a conversation waiting on you, written by your own Claude Code. Untrusted: it read GitHub text.
+export interface Take {
+  gist: string; // what they want, one line
+  take: string; // Claude's call and why: "Valid concern: …", "A nit: …", "Already addressed: …", "Only you can answer: …"
+  reply: string; // a suggested reply, in your voice
+  comment_id: string; // the latest comment it read; a newer one asks again
+  at: string;
 }
 
 // ---------------------------------------------------------------------------
