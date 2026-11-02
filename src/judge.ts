@@ -331,8 +331,8 @@ export class Judge {
     return ((this.desk.store.get("judge_spent") as number[] | null) ?? []).filter((t) => t > cutoff);
   }
 
-  // Items waiting for an answer: active, open, unresolved, and not in flight (the lane has those, so an answer wouldn't
-  // show, and each babysitter push would ask again). Never-answered ones first (a changed item keeps its old answer
+  // Items waiting for an answer: active, open, unresolved, and not in flight (Merging has those, so an answer wouldn't
+  // show, and each push there would ask again). Never-answered ones first (a changed item keeps its old answer
   // meanwhile), then those in Now or Today (by their earlier answer, else the rules), then the latest activity.
   queue(): JudgeItem[] {
     const desk = this.desk;

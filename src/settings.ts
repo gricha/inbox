@@ -28,7 +28,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "github",
     title: "GitHub",
-    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR, send a drafted reply, or hand your PR off for merge and back.",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR or mark your own draft ready for review.",
   },
   {
     id: "queue",
@@ -38,20 +38,15 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "agent",
     title: "Agents",
-    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill.",
+    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill, which the coordinator (README → Coordinator) works with.",
   },
   {
     id: "policy",
     title: "Policy",
-    help: "How you want Claude to sort your desk, in your words. The coordinator refines it from what you do (done, snooze, mute, pin), and its log shows each change with an Undo.",
+    help: "How you want Claude to sort your desk, in your words. An agent with the desk's tools can change it when you ask.",
   },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
-  {
-    id: "inflight",
-    title: "Merging",
-    help: "Your own PRs you've handed off with m. Claude (your Claude Code, in a worktree of your local clone) gets each one merged: it fixes red CI, merges the base in on a conflict, and drafts replies to reviewers for you to send. It pushes only to the PR's own branch, never force-pushes, and never posts to GitHub. When it can't get a PR merged, it hands it back to your desk with the reason.",
-  },
   {
     id: "review",
     title: "AI review",
@@ -130,14 +125,6 @@ export const SETTINGS = [
     help: "Items, in the desk's order; the rest sit behind one line you can open. 0 shows them all.",
   },
   {
-    key: "coordinator.enabled",
-    section: "agent",
-    label: "Coordinator",
-    type: "boolean",
-    default: true,
-    help: "A Claude Code session the desk wakes when something happens. It keeps the queue clean by your policy with local, undoable actions, and edits the policy and rules when you ask it to. Every few hours it also reads what you did by hand and refines the policy where your actions disagree with it. It never writes to GitHub.",
-  },
-  {
     key: "policy.judge",
     section: "policy",
     label: "Let Claude sort everything on your desk",
@@ -161,7 +148,7 @@ export const SETTINGS = [
     label: "Notify me when something new needs me",
     type: "boolean",
     default: true,
-    help: "A new item on the queue, once Claude or a hard rule placed it, and a PR in Merging that starts waiting on you.",
+    help: "A new item on the queue, once Claude or a hard rule placed it, a PR the coordinator handed back included.",
   },
   {
     key: "notify.quiet",
@@ -196,64 +183,6 @@ export const SETTINGS = [
     default: "",
     desktop: true,
     help: "A Review Desk clone, npm install done. The app runs the desk and its UI from it and picks up changes as they land. Empty runs the app's own copy. Changing it restarts the app.",
-  },
-  {
-    key: "inflight.babysit",
-    section: "inflight",
-    label: "Let Claude work on them",
-    type: "boolean",
-    default: true,
-    help: "Only PRs you handed off with m. Off: they still leave the queue, and come back to it when CI fails or reviewers ask for something.",
-  },
-  {
-    key: "inflight.auto_merge",
-    section: "inflight",
-    label: "Turn on GitHub's auto-merge",
-    type: "boolean",
-    default: true,
-    help: "On m, where the repo allows it: a draft is marked ready for review, and auto-merge goes on with your default merge method, so GitHub merges it once it's approved and green. Back to desk turns it off again. Off: merge it yourself.",
-  },
-  {
-    key: "inflight.max_agents",
-    section: "inflight",
-    label: "Agents at once",
-    type: "number",
-    default: 2,
-    min: 1,
-    max: 5,
-    help: "One per PR at most.",
-  },
-  {
-    key: "inflight.trusted_bots",
-    section: "inflight",
-    label: "Bots whose comments Claude acts on",
-    type: "list",
-    default: [],
-    pattern: "^[\\w.-]+(\\[bot\\])?$",
-    pattern_hint: "a GitHub login",
-    placeholder: "cursor[bot]",
-    help: "Claude acts on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in the queue; their words never reach an agent.",
-  },
-  {
-    key: "inflight.repos",
-    section: "inflight",
-    label: "Local clones",
-    type: "list",
-    default: [],
-    pattern: "^[\\w.-]+/[\\w.-]+\\s*=\\s*\\S.*$",
-    pattern_hint: "owner/repo = /path/to/clone",
-    placeholder: "getsentry/sentry = ~/code/sentry",
-    help: "Where a repo is cloned, one per line. Repos not listed are found under the folders below.",
-  },
-  {
-    key: "inflight.clone_roots",
-    section: "inflight",
-    label: "Look for clones in",
-    type: "list",
-    default: ["~/code"],
-    pattern: "^\\S.*$",
-    pattern_hint: "a folder",
-    help: "Folders searched two levels deep for a clone whose origin is the PR's repo.",
   },
   {
     key: "review.auto_ai",
@@ -306,7 +235,20 @@ export function checkSetting(key: string, value: unknown): string | null {
 }
 
 // Settings that no longer exist: ignored when read, and gone from the file on the next save.
-const REMOVED = new Set(["analyze.model", "analyze.command", "agent.driver", "queue.now_cards", "queue.today_cards"]);
+const REMOVED = new Set([
+  "analyze.model",
+  "analyze.command",
+  "agent.driver",
+  "queue.now_cards",
+  "queue.today_cards",
+  "coordinator.enabled",
+  "inflight.babysit",
+  "inflight.auto_merge",
+  "inflight.max_agents",
+  "inflight.trusted_bots",
+  "inflight.repos",
+  "inflight.clone_roots",
+]);
 
 // Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
 export function readSettings(file: string): {

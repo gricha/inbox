@@ -1,6 +1,6 @@
 // SQLite cache of GitHub items, your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Bucket, CoordinatorLogEntry, Item, ItemState } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Item, ItemState } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -23,7 +23,7 @@ export interface ActionEvent {
   action: string;
   before: StateRow;
   undone: boolean;
-  agent: string | null; // the agent that acted (the coordinator, a babysitter); null: you, from the UI, the CLI or your own agent
+  agent: string | null; // an agent's hand-back, or the old desk-run coordinator's; null: you, from the UI, the CLI or your own agent
 }
 
 export const emptyState = (id: string): StateRow => ({
@@ -55,6 +55,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
+      -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
       CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
     const cols = new Set(
@@ -70,11 +71,6 @@ export class Store {
       .all()
       .map((c) => c.name);
     if (!hitCols.includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
-    const logCols = this.db
-      .prepare("PRAGMA table_info(coordinator_log)")
-      .all()
-      .map((c) => c.name);
-    if (!logCols.includes("version")) this.db.exec("ALTER TABLE coordinator_log ADD COLUMN version INTEGER");
     const eventCols = this.db
       .prepare("PRAGMA table_info(events)")
       .all()
@@ -266,19 +262,12 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
-  // What can't be undone goes in the same log, stored as undone: GitHub writes (approve), and your undo of a coordinator
-  // action ("undo:snooze"), which its learn runs read.
+  // What can't be undone goes in the same log, stored as undone: GitHub writes (approve, ready).
   logWrite(itemId: string, action: string, at: string): number {
     const r = this.db
       .prepare("INSERT INTO events (at, item_id, action, before, undone) VALUES (?, ?, ?, ?, 1)")
       .run(at, itemId, action, JSON.stringify(this.state(itemId)));
     return Number(r.lastInsertRowid);
-  }
-
-  // The item's latest action still in effect: whose it was is in the coordinator's log, by its undo seq.
-  lastActionSeq(itemId: string): number | null {
-    const r = this.db.prepare("SELECT MAX(seq) AS seq FROM events WHERE item_id = ? AND undone = 0").get(itemId);
-    return (r?.seq as number | null) ?? null;
   }
 
   lastAction(seq?: number): ActionEvent | null {
@@ -287,16 +276,6 @@ export class Store {
         ? this.db.prepare("SELECT * FROM events WHERE undone = 0 ORDER BY seq DESC LIMIT 1").get()
         : this.db.prepare("SELECT * FROM events WHERE seq = ? AND undone = 0").get(seq);
     return r ? rowToAction(r) : null;
-  }
-
-  // Your own actions after `seq` and at or after `since`, oldest first: those still in effect, and your undos of the coordinator's.
-  ownerActions(seq: number, since: string, limit: number): ActionEvent[] {
-    return this.db
-      .prepare(
-        "SELECT * FROM events WHERE seq > ? AND at >= ? AND agent IS NULL AND (undone = 0 OR action LIKE 'undo:%') ORDER BY seq ASC LIMIT ?",
-      )
-      .all(seq, since, limit)
-      .map(rowToAction);
   }
 
   hasLaterAction(itemId: string, seq: number): boolean {
@@ -349,41 +328,6 @@ export class Store {
 
   lastSeq(): number {
     return (this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq as number | null) ?? 0;
-  }
-
-  // --- the coordinator's log: its runs, its actions (with their reasons) and its notes
-
-  addLog(e: Omit<CoordinatorLogEntry, "seq" | "undone">): void {
-    this.db
-      .prepare(
-        "INSERT INTO coordinator_log (at, run, kind, text, item_id, action, bucket, undo_seq, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(e.at, e.run, e.kind, e.text, e.item_id, e.action, e.bucket, e.undo_seq, e.version);
-    this.db.prepare("DELETE FROM coordinator_log WHERE seq <= (SELECT MAX(seq) FROM coordinator_log) - 1000").run();
-  }
-
-  // Newest first; an action shows as undone once its undo-log entry is.
-  log(q: { limit: number; since?: string; kind?: string }): CoordinatorLogEntry[] {
-    const where = [q.since === undefined ? "1" : "c.at >= ?", q.kind === undefined ? "1" : "c.kind = ?"].join(" AND ");
-    const args = [q.since, q.kind, q.limit].filter((a): a is string | number => a !== undefined);
-    return this.db
-      .prepare(
-        `SELECT c.*, e.undone AS undone FROM coordinator_log c LEFT JOIN events e ON e.seq = c.undo_seq WHERE ${where} ORDER BY c.seq DESC LIMIT ?`,
-      )
-      .all(...args)
-      .map((r) => ({
-        seq: r.seq as number,
-        at: r.at as string,
-        run: r.run as number,
-        kind: r.kind as CoordinatorLogEntry["kind"],
-        text: r.text as string,
-        item_id: (r.item_id as string | null) ?? null,
-        action: (r.action as string | null) ?? null,
-        bucket: (r.bucket as Bucket | null) ?? null,
-        undo_seq: (r.undo_seq as number | null) ?? null,
-        version: (r.version as number | null) ?? null,
-        undone: r.undone === 1,
-      }));
   }
 
   // --- key/value

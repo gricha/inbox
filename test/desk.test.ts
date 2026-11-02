@@ -424,18 +424,6 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   t.cleanup();
 });
 
-test("what the coordinator cleared says so, with its reason, until something else acts on it", async () => {
-  const t = await setup([teamPing(1), reviewAsk(2)]);
-  await t.desk.sync();
-  t.desk.act("api#1", "snooze", "tomorrow", { agent: "coordinator", reason: "a CODEOWNERS ping" });
-  t.desk.act("api#2", "snooze", "tomorrow");
-  const by = () => Object.fromEntries(t.desk.queue().cleared.map((c) => [c.id, c.cleared_by_coordinator]));
-  assert.deepEqual(by(), { "acme/api#1": "a CODEOWNERS ping", "acme/api#2": undefined });
-  t.desk.act("api#1", "mute");
-  assert.equal(by()["acme/api#1"], undefined, "your own action since is the one in effect");
-  t.cleanup();
-});
-
 test("Resolved lists the last day's items that were in Now or Today or asked of you; a team ping resolves silently", async () => {
   const t = await setup([reviewAsk(1), teamPing(2)]);
   await t.desk.sync();
@@ -473,7 +461,7 @@ test("your PR's card carries who last spoke on it; nobody asked you by name says
   t.cleanup();
 });
 
-test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging waits on you there", async () => {
+test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging stays there", async () => {
   const days = (d: number) => hoursAgo(d * 24);
   const t = await setup([
     myPr(20631, { ci: "green", mergeable: "conflict", updated_at: days(143) }),
@@ -484,7 +472,6 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   ]);
   await t.desk.sync();
   t.desk.act("web#8", "inflight");
-  t.desk.putSettings({ set: { "inflight.babysit": false } }); // so web#8 needs you: nobody else will fix its CI
   const q = t.desk.queue();
   assert.deepEqual(
     q.sections.later.filter((c) => c.demoted?.startsWith("quiet")).map((c) => [c.id, c.demoted]),
@@ -502,9 +489,9 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
     q.sections.today.map((c) => [c.id, c.next]),
     [["acme/web#7", "merge conflict with main: m hands it off for merge"]],
   );
-  assert.deepEqual([t.desk.inflight().rows[0]?.needs_you, t.desk.overview().inflight.needs_you], ["CI failing", 1]);
+  assert.deepEqual([t.desk.inflight().rows[0]?.waits_on, t.desk.overview().inflight.total], ["waits on a CI fix", 1]);
 
-  t.desk.putSettings({ set: { "queue.quiet_days": 0, "inflight.babysit": true } });
+  t.desk.putSettings({ set: { "queue.quiet_days": 0 } });
   assert.deepEqual(
     t.desk
       .queue()

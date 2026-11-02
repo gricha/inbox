@@ -164,7 +164,7 @@ export interface Rule {
   bucket: RuleBucket;
   why?: string;
   nocap?: boolean; // matched items don't count toward caps and are never demoted
-  hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule), and the coordinator can't clear it
+  hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule)
 }
 
 export interface BoardConfig {
@@ -244,7 +244,7 @@ export interface SettingsView {
   errors: ConfigError[]; // settings.json problems; bad entries fall back to defaults
   github: GitHubStatus;
   // Paused after failures in a row (an expired login): why, and when it tries again. Shown once in Settings, not per PR.
-  paused: { ai: { why: string; until: string } | null; babysitters: { why: string; until: string } | null };
+  paused: { ai: { why: string; until: string } | null };
 }
 
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Review Desk skill. null for an agent the desk doesn't know.
@@ -254,7 +254,7 @@ export interface AgentStatus {
   skill: { state: "installed" | "outdated" | "missing"; path: string; command: string } | null; // path: the installed SKILL.md
 }
 
-// GET /api/policy: ~/.review-desk/policy.md, prose the judge and the coordinator follow. While it's empty they follow `starter`.
+// GET /api/policy: ~/.review-desk/policy.md, prose the judge follows. While it's empty it follows `starter`.
 export interface PolicyDoc {
   path: string;
   text: string; // the file's; empty means the starter is in use
@@ -273,59 +273,6 @@ export interface JudgeStatus {
   last_at: string | null; // the last call that finished
   error: string | null; // the last call's failure, until one succeeds
   retry_at: string | null; // after a failure, or with the hour's limit reached and items waiting: no call before this
-}
-
-// GET /api/coordinator: the Claude Code session the desk wakes on new events.
-export interface CoordinatorStatus {
-  state: "off" | "idle" | "waiting" | "running" | "error";
-  off_reason: string | null; // e.g. "Coordinator needs Claude Code for now"
-  session_id: string;
-  started: boolean; // its first run made the session
-  dir: string; // its working directory (Claude Code keeps sessions per directory)
-  command: string | null; // talk to it in a terminal; null until it's started
-  running_since: string | null;
-  pending: number; // events waiting for the next run
-  next_at: string | null; // the next run starts at this time
-  last_run: CoordinatorRun | null;
-  error: string | null; // the last run's failure, until one succeeds
-  held: boolean; // you have it open in a terminal: runs wait until you close it
-}
-
-export interface CoordinatorRun {
-  n: number;
-  kind: "intro" | "events" | "learn"; // learn: it read your own actions, to refine the policy
-  started_at: string;
-  ms: number;
-  ok: boolean;
-  events: number; // a learn run: your actions it read
-  actions: number;
-  error: string | null;
-}
-
-export interface CoordinatorLogEntry {
-  seq: number;
-  at: string;
-  run: number; // 0: not during a run
-  kind: "run" | "act" | "note" | "policy" | "config";
-  text: string; // an act's reason, a note, what a run did, a policy change's lines before and after; untrusted when the coordinator wrote it
-  item_id: string | null;
-  action: string | null; // an act's action: snooze, done, mute, ...
-  bucket: Bucket | null; // where the item sat when it acted
-  undo_seq: number | null; // an act's undo seq
-  version: number | null; // a policy change's version, while the desk keeps it: Undo puts back the text before it
-  undone: boolean;
-}
-
-export interface CoordinatorView {
-  status: CoordinatorStatus;
-  log: CoordinatorLogEntry[]; // newest first
-}
-
-// What the coordinator did in its latest run with actions, for the queue's top bar; null when nothing recent.
-export interface CoordinatorActed {
-  counts: Record<string, number>; // per action, e.g. { snooze: 3, mute: 1 }, undone ones left out
-  buckets: Bucket[]; // where those items sat when it acted
-  at: string; // its last action
 }
 
 // window.desktop: set by the desktop app's preload; undefined in a browser.
@@ -361,7 +308,7 @@ export interface ItemState {
   muted: boolean;
   pinned: boolean;
   seen_at: string | null;
-  inflight_at: string | null; // your own PR, handed off for merge with m: Claude (its babysitter) takes it from here
+  inflight_at: string | null; // your own PR, handed off for merge with m: the coordinator takes it from here
 }
 
 export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
@@ -444,14 +391,13 @@ export interface Card {
   next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"
   checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
   checks_optional?: string[]; // those of them its base branch doesn't require
-  handed_back?: boolean; // your PR, back from Merging because Claude can't get it merged; its why says why
-  desk_auto_merge?: boolean; // your open PR out of Merging with the auto-merge m turned on still on: b turns it off
+  handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged; its why says why
+  cta?: "ready"; // the row's one call to action: "ready" is Ready for review on your own open draft (a a)
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
-  cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
 }
@@ -487,9 +433,8 @@ export interface Overview {
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number };
-  inflight: { total: number; needs_you: number }; // your open PRs in Merging, and how many need you
+  inflight: { total: number }; // your open PRs in Merging
   rate_limit: { remaining: number; reset_at: string } | null;
-  coordinator: { state: CoordinatorStatus["state"]; acted: CoordinatorActed | null };
 }
 
 // A source of items and events: GitHub today.
@@ -514,7 +459,7 @@ export interface FocusView {
   paused: Paused | null; // said once above the queue instead of on every card
 }
 
-// Claude stopped: its login failed (the AI review, the judge or the coordinator), or AI reviews nobody asked for keep failing.
+// Claude stopped: its login failed (the AI review or the judge), or AI reviews nobody asked for keep failing.
 export interface Paused {
   who: "claude" | "ai";
   why: string;
@@ -528,7 +473,6 @@ export interface QueueView {
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
   cards: number; // as in FocusView
   paused: Paused | null;
-  babysitting: boolean; // inflight.babysit: Claude works on your PRs in Merging, or they only wait there
 }
 
 // One changed file, from GitHub's pulls/{n}/files.
@@ -626,45 +570,14 @@ export interface ActivityPage {
 }
 
 // ---------------------------------------------------------------------------
-// Merging: your own PRs you handed off (m). Claude (a babysitter agent each) gets them merged (GET /api/inflight).
-
-// A reply an agent drafted (desk_draft_reply). You send it from Merging; nothing else posts it.
-export interface Draft {
-  id: string;
-  thread_id: string | null; // the review thread it answers (a GraphQL node id); null: a comment on the PR
-  to: string; // what it answers: "dana on src/api.ts:12", "the PR"
-  quote: string; // the start of the comment it answers; untrusted GitHub text
-  body: string; // untrusted: an agent wrote it from GitHub text
-  at: string;
-  sent_at: string | null;
-  url: string | null; // the posted comment, once sent
-  by?: "babysitter" | "agent"; // who drafted it: the PR's babysitter, or another agent over MCP
-}
-
-// One babysitter run: a Claude Code session in the PR's worktree.
-export interface SitterRun {
-  id: string; // also the Claude Code session id
-  started_at: string;
-  ended_at: string | null;
-  head_oid: string; // the commit it started from
-  why: string[]; // what it was asked to deal with: "CI", "a merge conflict", "2 comments"
-  outcome: "running" | "pushed" | "committed" | "nothing" | "failed" | "timeout" | "stopped";
-  pushed_oid: string | null;
-  summary: string; // the agent's last line, or why it failed
-  step: string; // what it was doing last: "npm test", "edit src/api.ts"
-  log: string; // the transcript (stream-json), under the desk's home
-}
-
-export interface SitterStatus {
-  state: "running" | "queued" | "done" | "waiting" | "blocked" | "idle";
-  text: string; // plain words: "fixing CI", "pushed a fix for 2 comments · abc1234", "no local clone of acme/api"
-  since: string | null; // when that started or happened
-}
+// Merging: your own PRs you handed off (m), which the coordinator gets merged (GET /api/inflight).
 
 export interface InflightRow {
   card: Card;
   state: Item["state"];
   base: string;
+  stacked: boolean; // its base isn't the repo's default branch: it sits on another PR
+  merge_method: Item["merge_method"] | null; // the repo's default merge method for you, when the desk knows it
   ci: Ci;
   failing: string[]; // failing check names
   approved_by: string[];
@@ -673,20 +586,12 @@ export interface InflightRow {
   threads_unresolved: number;
   mergeable: Mergeable;
   draft: boolean; // a draft PR
-  needs_you: string | null; // why it needs you: the question, "reply ready to send", "ready to merge", ...
-  escalation: { question: string; at: string; by?: "babysitter" | "agent" | "desk" } | null; // from desk_escalate, or the desk's own check
-  outside_at: string | null; // feedback from someone who isn't a collaborator, not dismissed yet: yours to read, never an agent's
-  sitter: SitterStatus;
-  drafts: Draft[]; // unsent replies
-  run: SitterRun | null; // the latest run
-  resume: string | null; // a shell command that opens the latest run's session in Claude Code
-  auto_merge: boolean; // GitHub's auto-merge is on: it merges once it's approved and green
-  merge_note: string | null; // why auto-merge isn't on ("the repo doesn't allow auto-merge"): you merge it
+  waits_on: string | null; // what it waits on, in Merging's words: "waits on CI", "ready to merge"; null once merged or closed
+  note: { text: string; at: string } | null; // the coordinator's latest desk_note on it; untrusted, an agent wrote it
 }
 
 export interface InflightView {
   rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days
-  babysitting: boolean; // inflight.babysit: off, Merging says so once instead of on every row
 }
 
 // GET /api/config

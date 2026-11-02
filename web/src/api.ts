@@ -4,7 +4,6 @@ import type {
   AiReview,
   ConfigDoc,
   ConfigError,
-  CoordinatorView,
   FieldDoc,
   InflightView,
   ItemDetail,
@@ -57,19 +56,11 @@ export const api = {
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
   review: (id: string) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
-  // The calls that write to GitHub: the review view's approve key, Send on a drafted reply, and m and b on your own PR
-  // (GitHub's auto-merge on and off).
+  // The calls that write to GitHub: the review view's approve key, and Ready for review on your own draft.
   approve: (id: string, head_oid: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
-  sendDraft: (id: string, draft_id: string) =>
-    call<{ ok: true; url: string }>("POST", `/api/inflight/${encodeURIComponent(id)}/send`, { draft_id }),
-  handOff: (id: string) =>
-    call<{ ok: true; auto_merge: { on: boolean; why: string | null } }>("POST", `/api/inflight/${encodeURIComponent(id)}/handoff`, {}),
-  back: (id: string) =>
-    call<{ ok: true; auto_merge_off: boolean; error?: string }>("POST", `/api/inflight/${encodeURIComponent(id)}/back`, {}),
+  ready: (id: string) => call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, {}),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
-  // Drops a draft, or with no draft_id the question Claude asked.
-  dismiss: (id: string, draft_id?: string) => call<{ ok: true }>("POST", `/api/inflight/${encodeURIComponent(id)}/dismiss`, { draft_id }),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   config: () => call<ConfigDoc>("GET", "/api/config"),
@@ -85,7 +76,4 @@ export const api = {
   policy: () => call<PolicyDoc>("GET", "/api/policy"),
   // 409 when `base` (the hash it was read at) is stale.
   savePolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
-  // The coordinator log's Undo on a policy change.
-  undoPolicy: (version: number) => call<{ ok: true; hash: string }>("POST", "/api/policy/undo", { version }),
-  coordinator: () => call<CoordinatorView>("GET", "/api/coordinator"),
 };

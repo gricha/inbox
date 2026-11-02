@@ -1,16 +1,16 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, SNOOZE } from "../format.ts";
-import type { Variant } from "../view.ts";
+import { armOf, type Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
-  armed: string | null; // what a first m armed: a second one hands it off
+  armed: string | null; // what a first m or a armed (armOf): a second one hands it off, or marks it ready
   leaving: Set<string>;
   snoozeFor: string | null;
   showSignals: boolean;
@@ -23,7 +23,7 @@ export interface RowCtx {
   closeSnooze: () => void;
 }
 
-// Your own PR's why is what you owe ("Claude asks: …"): a real "label:" leads in ink, the rest is regular, and the
+// Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
 // problem it names takes its colour.
 export function Owed({ why, tone }: { why: string; tone?: string | undefined }) {
   const [head = "", tail] = why.split(/: (.*)/s);
@@ -41,19 +41,6 @@ export function Owed({ why, tone }: { why: string; tone?: string | undefined }) 
   );
 }
 
-// Facts with a list in them ("CI failing: node 22, lint") wrap only between its items.
-// A piece too long for a narrow row (a long check name) may still wrap inside.
-export const atCommas = (text: string) =>
-  text.split(", ").map((part, i, all) => (
-    <Fragment key={part}>
-      {i > 0 && " "}
-      <span className={cls(part.length <= 32 && "nowrap")}>
-        {part}
-        {i < all.length - 1 && ","}
-      </span>
-    </Fragment>
-  ));
-
 // What a row under Later says after its ref: why it's there. The queue's rows say nothing more: being there is the why.
 function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);
@@ -62,11 +49,13 @@ function noteOf(card: Card, variant: Variant): string {
   return card.demoted ?? card.why;
 }
 
-// One line: the title, quietly its repo#number, its age on the right. Enter opens an issue (or `w` any item) in place under it.
+// One line: the title, quietly its repo#number, its one call to action, its age on the right. Enter opens an issue (or `w`
+// any item) in place under it.
 export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
+  const armed = ctx.armed === armOf("a", card.id);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -94,6 +83,11 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
           {card.repo.split("/")[1]}#{card.number}
         </span>
         {note && <span className="line-note">{note}</span>}
+        {card.cta === "ready" && !why && (
+          <span className={cls("line-cta", armed && "armed")} title="Mark it ready for review on GitHub: press a twice">
+            <kbd>a</kbd> {armed ? "again to mark ready" : "Ready for review"}
+          </span>
+        )}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}
         </span>

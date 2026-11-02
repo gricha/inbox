@@ -1,8 +1,8 @@
 // In-memory mock of the desk HTTP API for UI work. Run: node --disable-warning=ExperimentalWarning web/mock/server.ts
 // Rules aren't evaluated: each seed lists the `when` keys it satisfies per board, so reordering
 // rules, changing buckets, caps or defaults in the config editor really moves cards.
-// MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews, the judge, the coordinator and babysitters paused);
-// POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge and coordinator to work.
+// MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
+// POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
@@ -26,11 +26,6 @@ import type {
   Ci,
   Config,
   ConfigError,
-  CoordinatorActed,
-  CoordinatorLogEntry,
-  CoordinatorStatus,
-  CoordinatorView,
-  Draft,
   FieldDoc,
   FocusView,
   GitHubStatus,
@@ -52,7 +47,6 @@ import type {
   SettingsView,
   SettingValue,
   Signals,
-  SitterStatus,
   Status,
   TraceStep,
 } from "../../src/types.ts";
@@ -244,25 +238,18 @@ interface Seed {
   resolved?: string; // the world dealt with it: "merged", "you approved", "approved by dana", ...
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
   judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
-  fly?: Flight; // your PR, in Merging (with st.inflight_at): what Claude is up to
+  fly?: Flight; // your PR, in Merging (with st.inflight_at)
   automerge?: boolean; // your PR: GitHub's auto-merge is on
-  deskauto?: boolean; // ...because m turned it on, so b turns it off
-  noauto?: boolean; // your PR: its repo doesn't allow auto-merge
-  back?: string; // your PR, handed back from Merging: Claude's reason
+  back?: string; // your PR, handed back from Merging: the coordinator's reason
   checks?: string[]; // your PR: its failing checks' names
   optional?: string[]; // those of them the base branch doesn't require
 }
 
-// A canned Claude state for Merging; the mock never runs one.
+// A PR in Merging: its failing checks, who it waits on, and the coordinator's latest desk_note (hours ago).
 interface Flight {
-  sitter?: SitterStatus; // default: watching
-  needs?: string; // why it's back with you, besides a question or a draft
-  question?: [string, number]; // from desk_escalate, hours ago
-  draft?: Pick<Draft, "to" | "quote" | "body">;
   failing?: string[];
   waiting?: string[];
-  step?: string; // what Claude is running
-  session?: string; // the latest run's Claude Code session
+  note?: [string, number];
 }
 
 const SEEDS: Seed[] = [
@@ -620,15 +607,7 @@ const SEEDS: Seed[] = [
     on: { "work-mine": ["cr"] },
     st: { inflight_at: iso(26) },
     automerge: true,
-    fly: {
-      sitter: { state: "done", text: "pushed a fix for 3 comments · 4be71c2", since: iso(0.4) },
-      draft: {
-        to: "dana on src/export/audit.ts:88",
-        quote: "Should the cursor be opaque? Clients will start parsing row ids if we hand them out.",
-        body: "Kept it as the row id: the API docs promise a stable, sortable cursor, and the CLI's --resume flag reads it. 4be71c2 adds a test that pins the format, so changing it later is a deliberate break.",
-      },
-      session: "6f1d2c9a-41e7-4b8e-9c55-0a3f7d2e8b14",
-    },
+    fly: { note: ["Pushed 4be71c2 for dana's 3 comments: the cursor stays the row id, with a test pinning its format", 0.4] },
   },
   {
     repo: "acme/worker",
@@ -663,13 +642,10 @@ const SEEDS: Seed[] = [
     size: [8, 3, 1],
     on: { "work-mine": ["red"] },
     st: { inflight_at: iso(3) },
-    noauto: true,
     fly: {
-      sitter: { state: "running", text: "fixing CI", since: iso(4 / 60) },
       failing: ["test (20.x)"],
       waiting: ["marco"],
-      step: "npm test -- timezone",
-      session: "0b8e4f3a-9d21-4c6e-8a77-5e1c2b9d4f60",
+      note: ["Fixing test (20.x): it assumed UTC; running npm test -- timezone", 4 / 60],
     },
   },
   {
@@ -684,11 +660,7 @@ const SEEDS: Seed[] = [
     size: [380, 290, 11],
     on: { "work-mine": ["conflict"] },
     st: { inflight_at: iso(40) },
-    fly: {
-      question: ["main now runs cleanup hourly. Keep this PR's nightly schedule, or switch to hourly?", 1.2],
-      waiting: ["@backend"],
-      session: "a2c94e7b-3f15-4d08-b6e1-7c9d0f4a2e35",
-    },
+    fly: { waiting: ["@backend"], note: ["Merging main in: its cleanup schedule conflicts with this one", 1.2] },
   },
   {
     repo: "acme/ml-pipeline",
@@ -704,6 +676,21 @@ const SEEDS: Seed[] = [
     on: { "work-mine": ["idle"] },
   },
   {
+    // Your draft, touched today: its row's one call to action is Ready for review.
+    repo: "acme/web",
+    n: 2303,
+    title: "Show the export's progress in the toolbar",
+    author: ME,
+    age: 30,
+    upd: 3,
+    ci: "green",
+    draft: true,
+    mergeable: "clean",
+    size: [96, 12, 4],
+    on: { "work-mine": [] },
+    judge: ["today", "your draft, touched today: yours to finish"],
+  },
+  {
     repo: "acme/api",
     n: 4105,
     title: "Speed up fixture loading in tests",
@@ -717,10 +704,7 @@ const SEEDS: Seed[] = [
     st: { inflight_at: iso(28) },
     automerge: true,
     // A CODEOWNERS-sized list of teams, so the lane's "waiting on" has to stay short.
-    fly: {
-      sitter: { state: "idle", text: "watching", since: null },
-      waiting: ["sam", "@backend", "@issue-detection-backend", "@issues-feed", "@security", "@owners-auth"],
-    },
+    fly: { waiting: ["sam", "@backend", "@issue-detection-backend", "@issues-feed", "@security", "@owners-auth"] },
   },
   {
     repo: "acme/worker",
@@ -854,10 +838,8 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [70, 8, 3],
     on: { "personal-mine": ["red"] },
-    // Claude had nowhere to work on it, so it's back on your desk; the auto-merge m turned on stays until you turn it off.
-    back: "no local clone of oss/tinyhttp",
-    automerge: true,
-    deskauto: true,
+    // The coordinator couldn't fix it, so it's back on your desk.
+    back: "the keep-alive test times out on Node 22 only; it needs a decision on the default",
     checks: ["node 22", "lint"],
   },
   {
@@ -874,10 +856,7 @@ const SEEDS: Seed[] = [
     on: { "work-mine": [] },
     resolved: "merged",
     st: { inflight_at: iso(48) },
-    fly: {
-      sitter: { state: "done", text: "pushed a fix for CI · 1f3c9a0", since: iso(30) },
-      session: "c71e0d4b-8a26-4f93-b1d5-3e6a9c8f0b27",
-    },
+    fly: { note: ["Fixed CI in 1f3c9a0, then merged it", 20] },
     log: [["merged", ME, 20, {}]],
   },
   {
@@ -1285,16 +1264,9 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
-    ...(!inFlight(r) && s.deskauto && s.automerge && !s.resolved && { desk_auto_merge: true }),
+    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
   };
-}
-
-// As Desk.queue(): a cleared item the coordinator put away, its latest action still in effect, says so and why.
-function byCoordinator(c: Card): Card {
-  const a = log.find((e) => e.kind === "act" && e.item_id === c.id && !undone(e));
-  const last = events.findLast((x) => x.id === c.id);
-  return a && last && a.undo_seq === last.seq ? { ...c, cleared_by_coordinator: a.text } : c;
 }
 
 // Like src/desk.ts, a board view skips resolved items; the queue lists them under Resolved.
@@ -1386,11 +1358,10 @@ function queue(): QueueView {
       fyi: of("fyi"),
     },
     hidden: of("hide"),
-    cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
+    cleared: [...cleared.values()].filter((c) => !best.has(c.id)),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
     cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
-    babysitting: setting("inflight.babysit"),
   };
 }
 
@@ -1472,55 +1443,20 @@ function nextOf(r: Rec): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Merging, like src/desk.ts: your open PRs handed off leave the buckets for Merging, and come back to Now when they need you,
-// or for good when Claude hands them back.
+// Merging, like src/desk.ts: your open PRs handed off leave the buckets for Merging, and come back to Now only when the
+// coordinator hands them back.
 
-const flights = new Map<string, { question: { question: string; at: string } | null; drafts: Draft[] }>();
-for (const r of recs) {
-  const f = r.seed.fly;
-  if (!f) continue;
-  flights.set(r.id, {
-    question: f.question ? { question: f.question[0], at: iso(f.question[1]) } : null,
-    drafts: f.draft ? [{ id: `d${r.seed.n}`, thread_id: `PRRT_mock${r.seed.n}`, ...f.draft, at: iso(0.4), sent_at: null, url: null }] : [],
-  });
-}
-
-function flightOf(r: Rec) {
-  let f = flights.get(r.id);
-  if (!f) flights.set(r.id, (f = { question: null, drafts: [] }));
-  return f;
-}
+const notes = new Map<string, { text: string; at: string }>();
+for (const r of recs) if (r.seed.fly?.note) notes.set(r.id, { text: r.seed.fly.note[0], at: iso(r.seed.fly.note[1]) });
 
 const inFlight = (r: Rec) => !!r.state.inflight_at && r.seed.author === ME && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
 const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
 const handedBack = (r: Rec) => !!r.seed.back && !inFlight(r) && !r.seed.resolved && status(r) === "active";
 
-function needsYou(r: Rec): string | null {
-  if (!laneOwned(r)) return null;
-  const f = flightOf(r);
-  const unsent = f.drafts.filter((d) => !d.sent_at).length;
-  if (f.question) return `Claude asks: ${f.question.question}`;
-  if (unsent) return unsent === 1 ? "reply ready to send" : `${unsent} replies ready to send`;
-  // As babysit.ts: with Claude off, nobody works on it, so the problem itself is why it's back with you.
-  if (!setting("inflight.babysit")) {
-    const sig = signals(r);
-    if (sig.pr.ci === "red") return "CI failing";
-    if (sig.pr.mergeable === "conflict") return "merge conflict";
-    return sig.pr.review === "changes_requested" ? "new review comments" : null;
-  }
-  return r.seed.fly?.needs ?? null;
-}
-
-// As Desk.compute(): it says it's your PR in Merging unless it already says who's asking.
-function needsWhy(r: Rec): string | null {
-  const needs = needsYou(r);
-  return needs && !flightOf(r).question ? `merging: ${needs}` : needs;
-}
-
-// As Desk.shownAt(): in Merging, Merging's (with why it waits on you, if it does); handed back, at the top of Now.
+// As Desk.shownAt(): in Merging, Merging's; handed back, at the top of Now.
 function shownAt(r: Rec, p: Placement): Placement {
   if (handedBack(r)) return { ...p, bucket: "now", why: `handed back: ${r.seed.back}` };
-  return laneOwned(r) ? { ...p, bucket: "fyi", why: needsWhy(r) ?? "merging" } : p;
+  return laneOwned(r) ? { ...p, bucket: "fyi", why: "merging" } : p;
 }
 
 function bestPlacement(r: Rec): Placement {
@@ -1534,25 +1470,31 @@ function bestPlacement(r: Rec): Placement {
 
 const needsCards = () => recs.flatMap((r) => (handedBack(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
 
+// As waitsOn() in src/desk.ts.
+function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | null {
+  const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
+  const threads = r.threads_unresolved;
+  if (r.state !== "open") return null;
+  if (r.draft) return "waits on ready for review";
+  if (r.ci === "red") return "waits on a CI fix";
+  if (r.mergeable === "conflict") return "waits on a merge conflict fix";
+  if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
+  if (r.ci === "pending") return "waits on CI";
+  if (threads) return `waits on ${threads} unresolved ${threads === 1 ? "thread" : "threads"}`;
+  if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
+  if (r.stacked) return `waits on ${r.base} to merge first`;
+  return "ready to merge";
+}
+
 function laneRow(r: Rec): InflightRow {
   const s = r.seed;
-  const f = flightOf(r);
   const sig = signals(r);
   const by = (st: ReviewState) => (s.reviews ?? []).filter(([a, x]) => x === st && a !== ME).map(([a]) => a);
-  const off = !setting("inflight.babysit");
-  // Off, nothing watches it or works on it (Merging's intro says so once); a question already asked still waits.
-  const sitter: SitterStatus = f.question
-    ? { state: "waiting", text: `needs you: ${f.question.question}`, since: f.question.at }
-    : off
-      ? { state: "idle", text: "", since: null }
-      : (s.fly?.sitter ?? { state: "idle", text: "watching", since: null });
-  const session = off ? undefined : s.fly?.session;
-  const running = sitter.state === "running";
-  const [owner = "", name = ""] = s.repo.split("/");
-  return {
-    card: cardOf(r, shownAt(r, bestPlacement(r))),
-    state: s.resolved === "merged" ? "merged" : s.resolved === "closed" ? "closed" : "open",
+  const row = {
+    state: s.resolved === "merged" ? ("merged" as const) : s.resolved === "closed" ? ("closed" as const) : ("open" as const),
     base: sig.pr.base,
+    stacked: sig.pr.stacked,
+    merge_method: "SQUASH" as const,
     ci: sig.pr.ci,
     failing: s.fly?.failing ?? [],
     approved_by: by("approved"),
@@ -1561,58 +1503,14 @@ function laneRow(r: Rec): InflightRow {
     threads_unresolved: sig.pr.unresolved_threads,
     mergeable: sig.pr.mergeable,
     draft: !!s.draft,
-    needs_you: needsYou(r),
-    escalation: f.question,
-    outside_at: null,
-    sitter,
-    drafts: f.drafts.filter((d) => !d.sent_at),
-    run: session
-      ? {
-          id: session,
-          started_at: sitter.since ?? iso(1),
-          ended_at: running ? null : (sitter.since ?? iso(1)),
-          head_oid: itemOf(r).head_oid,
-          why: [],
-          outcome: running ? "running" : "pushed",
-          pushed_oid: null,
-          summary: "",
-          step: s.fly?.step ?? "",
-          log: "",
-        }
-      : null,
-    resume: session && !s.resolved ? `cd ~/.review-desk/worktrees/${owner}/${name}-${s.n} && claude --resume ${session}` : null,
-    auto_merge: !!s.automerge && !s.resolved,
-    merge_note: !s.automerge && !s.resolved && s.noauto ? "the repo doesn't allow auto-merge" : null,
   };
+  return { card: cardOf(r, shownAt(r, bestPlacement(r))), ...row, waits_on: waitsOn(row), note: notes.get(r.id) ?? null };
 }
 
 function inflight(): InflightView {
   const rows = recs.filter((r) => r.state.inflight_at && r.seed.author === ME).map(laneRow);
-  const rank = (x: InflightRow) => (x.state !== "open" ? 3 : x.needs_you ? 0 : x.sitter.state === "running" ? 1 : 2);
-  return {
-    rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)),
-    babysitting: setting("inflight.babysit"),
-  };
-}
-
-// Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves Merging.
-function laneAction(r: Rec, what: string, draftId: string | undefined): unknown {
-  const f = flightOf(r);
-  if (what === "send") {
-    const d = f.drafts.find((x) => x.id === draftId && !x.sent_at);
-    if (!d) throw new HttpError(404, `no draft ${String(draftId)} on ${r.id}`);
-    d.sent_at = new Date().toISOString();
-    d.url = `${urlOf(r.seed)}#discussion_mock`;
-    bump();
-    return { ok: true, url: d.url };
-  }
-  if (draftId !== undefined) {
-    if (!f.drafts.some((x) => x.id === draftId)) throw new HttpError(404, `no draft ${draftId} on ${r.id}`);
-    f.drafts = f.drafts.filter((x) => x.id !== draftId);
-  } else if (f.question) f.question = null;
-  else throw new HttpError(404, `nothing to dismiss on ${r.id}`);
-  bump();
-  return { ok: true };
+  const rank = (x: InflightRow) => Number(x.state !== "open");
+  return { rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1668,9 +1566,8 @@ function overview(): Overview {
     ],
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
     focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
-    inflight: { total: recs.filter(inFlight).length, needs_you: recs.filter((r) => needsYou(r)).length },
+    inflight: { total: recs.filter(inFlight).length },
     rate_limit: rateLimit(),
-    coordinator: { state: coordinatorStatus().state, acted: acted() },
   };
 }
 
@@ -1795,7 +1692,7 @@ const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
 const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
-let agentsBusy = false; // the judge and the coordinator at work: POST /api/mock/agents-busy { busy }
+let agentsBusy = false; // the judge at work: POST /api/mock/agents-busy { busy }
 const retryAt = () => new Date(Date.now() + 26 * 60_000).toISOString();
 const autoAiOn = () => setting("review.auto_ai");
 
@@ -2433,7 +2330,6 @@ const settingsView = (): SettingsView => ({
   github: github(),
   paused: {
     ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
-    babysitters: aiPaused && setting("inflight.babysit") ? { why: aiPaused, until: retryAt() } : null,
   },
 });
 
@@ -2478,22 +2374,16 @@ function agentStatus(): AgentStatus {
 }
 
 // ---------------------------------------------------------------------------
-// The policy and the coordinator: your policy, with a line the coordinator learned from you this morning, and a coordinator
-// that snoozed three FYI items a few minutes ago.
+// The policy: your own.
 
-const OWN_POLICY = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
+let policyText = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
 Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.
 Dependency bumps from bots stay out of the way unless CI is red.
 Mentions in threads I haven't replied to for a week are FYI.
+Release notes and changelog pings are FYI; I read them at release time.
 `;
-const LEARNED = "Release notes and changelog pings are FYI; I read them at release time.";
-let policyText = `${OWN_POLICY}${LEARNED}\n`;
 let policyRev = 1;
 const policyHash = () => `mock${policyRev}`;
-// As src/desk.ts keeps them: each change, with the text it replaced, so the coordinator log's Undo can put it back.
-const versions: { v: number; before: string; text: string; undone: boolean }[] = [
-  { v: 1, before: OWN_POLICY, text: policyText, undone: false },
-];
 const setting = <K extends keyof typeof DEFAULTS>(k: K) => ({ ...DEFAULTS, ...overrides })[k];
 
 function judgeOff(): string | null {
@@ -2501,7 +2391,6 @@ function judgeOff(): string | null {
 }
 
 function savePolicy(text: string): void {
-  if (text !== policyText) versions.push({ v: (versions.at(-1)?.v ?? 0) + 1, before: policyText, text, undone: false });
   policyText = text;
   policyRev++;
   bump();
@@ -2527,65 +2416,6 @@ function policyDoc(): PolicyDoc {
       retry_at: !off && aiPaused ? retryAt() : null,
     },
   };
-}
-
-const SESSION = "6f1c2a9e-4b7d-4e21-9a35-c0de5e55a1d0";
-const log: CoordinatorLogEntry[] = [];
-const note = (minutesAgo: number, run: number, kind: CoordinatorLogEntry["kind"], text: string, extra?: Partial<CoordinatorLogEntry>) =>
-  log.unshift({
-    seq: log.length + 1,
-    at: new Date(T0 - minutesAgo * 60_000).toISOString(),
-    run,
-    kind,
-    text,
-    item_id: null,
-    action: null,
-    bucket: null,
-    undo_seq: null,
-    version: null,
-    undone: false,
-    ...extra,
-  });
-const undone = (e: CoordinatorLogEntry) =>
-  e.kind === "policy"
-    ? !!versions.find((x) => x.v === e.version)?.undone
-    : e.undo_seq !== null && !events.some((x) => x.seq === e.undo_seq);
-
-function coordinatorStatus(): CoordinatorStatus {
-  const off = setting("coordinator.enabled") ? null : "Off";
-  const dir = `${homedir()}/.review-desk/coordinator`;
-  const failed = !off && aiPaused;
-  return {
-    state: off ? "off" : failed ? "error" : agentsBusy ? "running" : "idle",
-    off_reason: off,
-    session_id: SESSION,
-    started: true,
-    dir,
-    command: `cd ${dir} && claude --resume ${SESSION} --mcp-config mcp.json`,
-    running_since: agentsBusy ? iso(20 / 3600) : null,
-    pending: agentsBusy ? 2 : 0,
-    next_at: failed ? retryAt() : null,
-    last_run: failed
-      ? { n: 16, kind: "events", started_at: iso(4 / 60), ms: 3_000, ok: false, events: 2, actions: 0, error: aiPaused }
-      : { n: 15, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
-    error: failed ? aiPaused : null,
-    held: false,
-  };
-}
-
-function coordinatorView(): CoordinatorView {
-  return { status: coordinatorStatus(), log: log.map((e) => ({ ...e, undone: undone(e) })) };
-}
-
-// Its latest run with actions, as src/coordinator.ts works it out.
-function acted(): CoordinatorActed | null {
-  const acts = log.filter((e) => e.kind === "act" && !undone(e));
-  const [latest] = acts;
-  if (!latest) return null;
-  const mine = acts.filter((e) => e.run === latest.run);
-  const counts: Record<string, number> = {};
-  for (const e of mine) counts[e.action ?? "act"] = (counts[e.action ?? "act"] ?? 0) + 1;
-  return { counts, buckets: mine.flatMap((e) => (e.bucket ? [e.bucket] : [])), at: latest.at };
 }
 
 // ---------------------------------------------------------------------------
@@ -2641,6 +2471,15 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
   }
+  // Ready for review on your own draft: the mock only remembers it.
+  const ready = /^\/api\/review\/(.+)\/ready$/.exec(url.pathname);
+  if (ready && req.method === "POST") {
+    const r = resolve(decodeURIComponent(ready[1]!));
+    if (r.seed.author !== ME || !r.seed.draft || r.seed.resolved) throw new HttpError(409, `${r.id} isn't an open draft of yours`);
+    r.seed.draft = false;
+    bump();
+    return { ok: true };
+  }
   const review = /^\/api\/review\/(.+?)(\/ai|\/approve)?$/.exec(url.pathname);
   if (review) {
     const r = resolve(decodeURIComponent(review[1]!));
@@ -2674,29 +2513,6 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     }
   }
   if (route === "GET /api/inflight") return inflight();
-  // m and b: auto-merge goes on with a hand-off and off with Back to desk, as far as the mock pretends.
-  const hand = /^\/api\/inflight\/(.+)\/(handoff|back)$/.exec(url.pathname);
-  if (hand && req.method === "POST") {
-    const r = resolve(decodeURIComponent(hand[1]!));
-    // Out of Merging, b only turns off the auto-merge m turned on.
-    const outside = hand[2] === "back" && !r.state.inflight_at && r.seed.deskauto && r.seed.automerge;
-    const state = outside ? r.state : act(r, hand[2] === "handoff" ? "inflight" : "takeback").state;
-    const had = !!r.seed.automerge;
-    const why = !setting("inflight.auto_merge")
-      ? "auto-merge is off in Settings"
-      : r.seed.noauto
-        ? "the repo doesn't allow auto-merge"
-        : null;
-    r.seed.deskauto = hand[2] === "handoff" && (!!r.seed.deskauto || (!had && !why));
-    r.seed.automerge = hand[2] === "handoff" ? had || !why : false;
-    if (outside) bump();
-    return hand[2] === "handoff" ? { ok: true, state, auto_merge: { on: !had && !why, why } } : { ok: true, state, auto_merge_off: had };
-  }
-  const lane = /^\/api\/inflight\/(.+)\/(send|dismiss)$/.exec(url.pathname);
-  if (lane && req.method === "POST") {
-    const { draft_id } = await readBody(req);
-    return laneAction(resolve(decodeURIComponent(lane[1]!)), lane[2]!, typeof draft_id === "string" ? draft_id : undefined);
-  }
   if (route === "POST /api/undo") {
     const body = await readBody(req);
     return { ok: true, id: undo(body.seq as number | undefined) };
@@ -2737,28 +2553,12 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     savePolicy(textOf(body));
     return { ok: true, hash: policyHash() };
   }
-  if (route === "POST /api/policy/undo") {
-    const { version } = await readBody(req);
-    const ver = versions.find((x) => x.v === version);
-    if (!ver) throw new HttpError(404, "the desk no longer keeps that policy change");
-    if (ver.undone) throw new HttpError(409, "that policy change is undone already");
-    if (policyText !== ver.text) throw new HttpError(409, "the policy changed since; undo the later change first");
-    ver.undone = true;
-    savePolicy(ver.before);
-    return { ok: true, hash: policyHash() };
-  }
-  if (route === "GET /api/coordinator") return coordinatorView();
   if (route === "POST /api/mock/ai-paused") {
     pauseAi((await readBody(req)).paused !== false);
     return { ok: true, paused: aiPaused };
   }
   if (route === "POST /api/mock/agents-busy") {
     agentsBusy = (await readBody(req)).busy !== false;
-    bump();
-    return { ok: true };
-  }
-  if (route === "POST /api/coordinator/note") {
-    note(0, 0, "note", textOf(await readBody(req)));
     bump();
     return { ok: true };
   }
@@ -2799,35 +2599,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-// The coordinator's history: three FYI items snoozed this morning, a learn run that refined the policy from what you did,
-// a quiet run an hour ago, then one Today item snoozed, which is what the top bar says.
-note(26 * 60, 0, "policy", "Changed the policy\n+ Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.");
-for (const [id, why] of [
-  ["acme/infra#540", "CODEOWNERS ping for a staging key rotation; FYI by your policy"],
-  ["acme/api#4101", "CODEOWNERS ping, nina already has two approvals coming"],
-  ["acme/web#2288", "a thread you haven't replied to in a week; FYI by your policy"],
-] as const) {
-  const { undo_seq } = act(resolve(id), "snooze", "tomorrow");
-  note(5 * 60, 12, "act", why, { item_id: id, action: "snooze", bucket: "fyi", undo_seq });
-}
-note(5 * 60, 12, "note", "Snoozed 3 FYI items until tomorrow: 2 CODEOWNERS pings and a thread you've left.");
-note(5 * 60, 12, "run", "6 events, 3 actions · 41s");
-note(2 * 60, 13, "policy", `Changed the policy\n+ ${LEARNED}`, { version: 1 });
-note(2 * 60, 13, "note", "You cleared 4 release-notes pings I kept in the queue, so the policy sorts them to FYI now.");
-note(2 * 60, 13, "run", "Read your last 6 actions · 34s");
-note(61, 14, "note", "Nothing to do: the new review request on api#4127 already sits at the top of the queue.");
-note(61, 14, "run", "2 events, 0 actions · 18s");
-{
-  const { undo_seq } = act(resolve("acme/ml-pipeline#311"), "snooze", "tomorrow");
-  note(3, 15, "act", "a CODEOWNERS ping to @ml-team; sam is a close collaborator, but nobody asked you by name", {
-    item_id: "acme/ml-pipeline#311",
-    action: "snooze",
-    bucket: "today",
-    undo_seq,
-  });
-}
-note(3, 15, "note", "Snoozed 1 Today item until tomorrow: a CODEOWNERS ping, not a review anyone asked you for.");
-note(3, 15, "run", "3 events, 1 action · 22s");
+// What you snoozed this morning, so Later → Cleared has something in it.
+for (const id of ["acme/infra#540", "acme/api#4101", "acme/web#2288", "acme/ml-pipeline#311"]) act(resolve(id), "snooze", "tomorrow");
 
 // Two reviews being written, for longer than a test run or a round of shots.
 if (!aiPaused)

@@ -20,7 +20,7 @@ export const myPr = (n: number, o: Partial<Item> = {}) =>
   makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
 
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
-// `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer, babysitter hooks).
+// `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer).
 export async function setup(items: Item[], extra: { settings?: Record<string, unknown>; desk?: Partial<DeskOptions> } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   if (extra.settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(extra.settings));

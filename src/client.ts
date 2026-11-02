@@ -7,9 +7,9 @@ import type {
   BoardView,
   ConfigDoc,
   ConfigError,
-  Draft,
   FieldDoc,
   FocusView,
+  InflightView,
   ItemDetail,
   ItemState,
   Overview,
@@ -100,8 +100,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     queue: () => call<QueueView>("GET", "/api/queue"),
     board: (id: string) => call<BoardView>("GET", `/api/boards/${q(id)}`),
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
-    act: (id: string, action: Action, until?: string, reason?: string) =>
-      call<ActResult>("POST", "/api/act", { id, action, until, reason }),
+    act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
     // `agent`: an agent asks (desk_undo), so the desk keeps your hand-offs out of its reach.
     undo: (seq?: number, agent?: boolean) =>
       call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", agent ? { seq, agent } : { seq }),
@@ -112,18 +111,16 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text, base }),
     policy: () => call<PolicyDoc>("GET", "/api/policy"),
     putPolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
-    note: (text: string) => call<{ ok: true }>("POST", "/api/coordinator/note", { text }),
     fields: () => call<FieldDoc[]>("GET", "/api/fields"),
     settings: () => call<SettingsView>("GET", "/api/settings"),
     putSettings: (patch: SettingsPatch) =>
       call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
     status: (timeoutMs?: number) => call<StatusInfo>("GET", "/api/status", undefined, timeoutMs),
     aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${q(id)}/ai`, { force }, 360_000),
-    // Local only: a draft waits for you to send it from Merging, and no client can send it.
-    draftReply: (id: string, body: string, thread_id?: string) =>
-      call<{ ok: true; draft: Draft }>("POST", `/api/inflight/${q(id)}/draft`, { body, thread_id }),
-    escalate: (id: string, question: string, hand_back?: boolean) =>
-      call<{ ok: true; question: string }>("POST", `/api/inflight/${q(id)}/escalate`, { question, hand_back }),
+    // Merging, for the coordinator: your handed-off PRs, a status line on one, and handing one back. All local.
+    inflight: () => call<InflightView>("GET", "/api/inflight"),
+    note: (id: string, text: string) => call<{ ok: true; text: string }>("POST", `/api/inflight/${q(id)}/note`, { text }),
+    handBack: (id: string, why: string) => call<{ ok: true; reason: string }>("POST", `/api/inflight/${q(id)}/handback`, { why }),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));

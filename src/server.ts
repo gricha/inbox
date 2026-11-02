@@ -32,15 +32,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Which agent a call came from, as the MCP configs the desk writes say: the coordinator's actions go in its log, and what
-// they say about a PR in flight is attributed. It also takes some things away (see Desk.draftReply, undo); it grants nothing.
-const agentOf = (header: string | undefined) => (header === "coordinator" || header === "babysitter" ? header : undefined);
-const byOf = (c: { req: { header(name: string): string | undefined } }) => ({
-  agent: agentOf(c.req.header("x-desk-agent")),
-  pr: c.req.header("x-desk-pr"),
-});
-
-// The desk's own page, for its GitHub writes (approve, Send, m and b): a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, ready for review): a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -107,10 +99,9 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/act", async (c) => {
     ready();
-    const body = await c.req.json<{ id?: string; action?: Action; until?: string; reason?: unknown }>();
+    const body = await c.req.json<{ id?: string; action?: Action; until?: string }>();
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
-    const reason = typeof body.reason === "string" ? body.reason : undefined;
-    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, { agent: agentOf(c.req.header("x-desk-agent")), reason }) });
+    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until) });
   });
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
@@ -132,57 +123,36 @@ export function createApp(desk: Desk, port: number): Hono {
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
   });
-  // Merging: your own PRs you handed off, which Claude (their babysitters) gets merged.
+  // Your own draft's Ready for review, from the desk's own window only.
+  app.post("/api/review/:id{.+}/ready", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a a)");
+    await desk.markReady(c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  // Merging: your own PRs you handed off (m m, b through /api/act), which the coordinator gets merged.
   app.get("/api/inflight", (c) => {
     ready();
     return c.json(desk.inflight());
   });
-  const fields = (c: { req: { json<T>(): Promise<T> } }) =>
-    c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
-  const str = (v: unknown, name: string, optional = false): string | undefined => {
-    if (v === undefined && optional) return undefined;
-    if (typeof v !== "string" || (!optional && !v)) throw new DeskError(400, `${name} must be a string`);
+  const line = async (c: { req: { json<T>(): Promise<T> } }, key: string) => {
+    const v = (await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({})))[key];
+    if (typeof v !== "string") throw new DeskError(400, `need { ${key} }`);
     return v;
   };
-  // desk_draft_reply and desk_escalate (with hand_back too): local only, so agents may call them.
-  app.post("/api/inflight/:id{.+}/draft", async (c) => {
+  // desk_note and desk_hand_back: local only, so agents may call them.
+  app.post("/api/inflight/:id{.+}/note", async (c) => {
     ready();
-    const b = await fields(c);
-    const draft = await desk.draftReply(c.req.param("id"), str(b.thread_id, "thread_id", true) ?? null, str(b.body, "body")!, byOf(c));
-    return c.json({ ok: true, draft });
+    return c.json({ ok: true, ...desk.note(c.req.param("id"), await line(c, "text")) });
   });
-  app.post("/api/inflight/:id{.+}/escalate", async (c) => {
+  app.post("/api/inflight/:id{.+}/handback", async (c) => {
     ready();
-    const b = await fields(c);
-    if (b.hand_back !== undefined && typeof b.hand_back !== "boolean") throw new DeskError(400, "hand_back must be true or false");
-    return c.json({ ok: true, ...desk.escalate(c.req.param("id"), str(b.question, "question")!, byOf(c), b.hand_back === true) });
-  });
-  app.post("/api/inflight/:id{.+}/dismiss", async (c) => {
-    ready();
-    desk.dismiss(c.req.param("id"), str((await fields(c)).draft_id, "draft_id", true));
-    return c.json({ ok: true });
-  });
-  // Posts a drafted reply to GitHub, from the desk's own window only.
-  app.post("/api/inflight/:id{.+}/send", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
-    return c.json({ ok: true, ...(await desk.sendDraft(c.req.param("id"), str((await fields(c)).draft_id, "draft_id")!)) });
-  });
-  // m and b turn GitHub's auto-merge on and off with the hand-off, so they too come from the desk's own window only.
-  app.post("/api/inflight/:id{.+}/handoff", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "hand a PR off for merge from the desk's window, by you (m)");
-    return c.json({ ok: true, ...(await desk.handOff(c.req.param("id"))) });
-  });
-  app.post("/api/inflight/:id{.+}/back", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "bring a PR back to the desk from the desk's window, by you (b)");
-    return c.json({ ok: true, ...(await desk.backToDesk(c.req.param("id"))) });
+    return c.json({ ok: true, ...desk.handBack(c.req.param("id"), await line(c, "why")) });
   });
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number; agent?: unknown }>().catch((): { seq?: number; agent?: unknown } => ({}));
-    const { id, action } = desk.undo(body.seq, agentOf(c.req.header("x-desk-agent")) ?? (body.agent === true ? "agent" : undefined));
+    const { id, action } = desk.undo(body.seq, body.agent === true ? "agent" : undefined);
     return c.json({ ok: true, id, action });
   });
   app.post("/api/sync", (c) => {
@@ -201,26 +171,14 @@ export function createApp(desk: Desk, port: number): Hono {
   app.put("/api/config", async (c) => {
     ready();
     const { text, base } = await c.req.json<{ text: string; base?: string }>();
-    return c.json(desk.putConfig(text ?? "", base, agentOf(c.req.header("x-desk-agent"))));
+    return c.json(desk.putConfig(text ?? "", base));
   });
   app.get("/api/policy", (c) => c.json(desk.getPolicy()));
   app.put("/api/policy", async (c) => {
     const { text, base } = await c.req.json<{ text?: unknown; base?: unknown }>();
     if (typeof text !== "string") throw new DeskError(400, "need { text }");
     if (base !== undefined && typeof base !== "string") throw new DeskError(400, "base must be the hash from GET /api/policy");
-    return c.json(desk.putPolicy(text, base, agentOf(c.req.header("x-desk-agent"))));
-  });
-  // The coordinator log's Undo on a policy change: the text from before that version.
-  app.post("/api/policy/undo", async (c) => {
-    const { version } = await c.req.json<{ version?: unknown }>().catch((): { version?: unknown } => ({}));
-    if (typeof version !== "number" || !Number.isInteger(version)) throw new DeskError(400, "need { version }");
-    return c.json(desk.undoPolicy(version));
-  });
-  app.get("/api/coordinator", (c) => c.json(desk.coordinatorView()));
-  app.post("/api/coordinator/note", async (c) => {
-    const { text } = await c.req.json<{ text?: unknown }>().catch((): { text?: unknown } => ({}));
-    desk.note(typeof text === "string" ? text : "");
-    return c.json({ ok: true });
+    return c.json(desk.putPolicy(text, base));
   });
   app.get("/api/fields", (c) => c.json(FIELDS));
   app.get("/api/settings", (c) => c.json(desk.getSettings()));
@@ -269,15 +227,8 @@ export function createApp(desk: Desk, port: number): Hono {
   );
 
   // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
-  // The coordinator's MCP config sends X-Desk-Agent, which goes along so its actions are logged as its own.
   app.post("/mcp", async (c) => {
-    const { agent, pr } = byOf(c);
-    const api = createClient((p, init) => {
-      const headers = new Headers(init.headers);
-      if (agent) headers.set("x-desk-agent", agent);
-      if (pr) headers.set("x-desk-pr", pr);
-      return app.request(p, { ...init, headers });
-    });
+    const api = createClient((p, init) => app.request(p, init));
     const transport = new WebStandardStreamableHTTPServerTransport();
     await createMcpServer(api).connect(transport);
     return transport.handleRequest(c.req.raw);
@@ -326,7 +277,6 @@ export async function startServer(
     notify: opts.notify,
     review: { fetchPr, generate: generateReview },
     writer: opts.writer ?? createWriter({ log }),
-    mcpUrl: `http://127.0.0.1:${port}/mcp`,
   });
   const app = createApp(desk, port);
   const url = `http://localhost:${port}`;

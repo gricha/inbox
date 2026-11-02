@@ -1,12 +1,12 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m` hands it off for merge: Claude fixes red CI, merges the base in on a conflict and drafts replies to reviewers, GitHub's auto-merge merges it once it's approved and green, and it comes back to the queue only when Claude can't get it merged (what it needs from you meanwhile waits in Merging). Approving, sending a reply you've read, and turning auto-merge on and off with `m` and `b` are the only things the desk writes to GitHub; Claude pushes to your PR's own branch.
+A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m m` hands it off for merge: the coordinator, one Claude Code session in your Claude app's sidebar, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to the queue only when it can't. Approving someone's PR and marking your own draft ready for review are the only things the desk writes to GitHub.
 
 Runs on macOS, Linux and Windows.
 
 ## Start
 
-You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI is only needed for the agents (AI reviews, the judge, the coordinator, Claude on your PRs in Merging): they're all your own Claude Code.
+You need Node 22.18 or newer (`node -v`) and a logged-in GitHub CLI (`gh auth status`). The `claude` CLI is only needed for the agents (AI reviews and the judge): they're your own Claude Code, as is the coordinator you start yourself (below).
 
 ```bash
 cd ~/code/review-desk && npm install
@@ -25,17 +25,18 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 ## Use it
 
-- **The queue** is the main page: only what you must act on, one ordered list, one line each (the title, its repo#number, its age), its first ten and a line for the rest. Enter on a PR opens its review (the AI summary, concerns and why it's here are there); an issue opens in place. Anything nobody has touched for two weeks drops to Later.
+- **The queue** is the main page: only what you must act on, one ordered list, one line each (the title, its repo#number, its age, and at most one call to action), its first ten and a line for the rest. Your own draft's call to action is Ready for review: `a` twice marks it ready on GitHub. Enter on a PR opens its review (the AI summary, concerns and why it's here are there); an issue opens in place. Anything nobody has touched for two weeks drops to Later.
 - **Later** (the sidebar, `g l`): what the rules and Claude sorted away (later, FYI, hidden), what you cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), each row with why it's there.
-- **Merging** (the sidebar, `g m`): your own PRs you've handed off with `m`, the ones Claude is getting merged, in plain words: CI, reviews, threads, conflicts, what each waits on, and what Claude is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). What waits on you (a drafted reply to send with `y`, a question, ready to merge, outsiders' comments) is listed first there and counted on its sidebar entry; it never goes to the queue. `b` brings one back to your desk, and Claude hands one back itself, with its reason at the top of the queue, when it can't realistically get it merged (a reviewer wants a redesign, CI it can't fix, no local clone). Settings → Merging turns Claude or auto-merge off, sets how many run at once, and where your clones are.
+- **Merging** (the sidebar, `g m`): your own PRs you've handed off with `m m`, the ones the coordinator is getting merged: each with what it waits on ("waits on a CI fix", "ready to merge") and the coordinator's latest note and its age. Merged ones sit under Merged for 3 days. `b` brings one back to your desk, and the coordinator hands one back itself, with its reason at the top of the queue, when it can't realistically get it merged.
 - **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Appearance (this device's theme: System, Light, Dark, Sand, Slate), Desktop app, AI review, Hand-off prompts. Changes save as you go.
-- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in the queue (once Claude or a hard rule placed it) or a PR in Merging starts waiting on you. All three can be changed in Settings → Desktop app.
+- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in the queue (once Claude or a hard rule placed it, a hand-back included). All three can be changed in Settings → Desktop app.
 
 | Key       | Does                                                           |
 | --------- | -------------------------------------------------------------- |
 | `j` / `k` | move                                                           |
 | `Enter`   | review a PR (diff, AI notes, approve); an issue opens in place |
 | `o`       | open on GitHub                                                 |
+| `a` `a`   | the row's call to action: your draft, ready for review         |
 | `m` `m`   | your own PR: hand off for merge; `b` brings it back to desk    |
 | `e` / `d` | done: hidden until someone else comments, reviews or pushes    |
 | `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
@@ -87,7 +88,7 @@ The first run writes a starting config: one space for the org with most of your 
 
 Every agent the desk runs is your own Claude Code. Settings → Agents connects it to the desk in two parts, and **Connect** there does whatever is missing (if you also work in Codex, `desk connect codex` gives it the same):
 
-- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
+- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`, `desk_policy`, `desk_config`, and the coordinator's `desk_merging`, `desk_note`, `desk_hand_back`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
 - **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK).
 
 | Agent       | MCP tools                                                                             | Skill                                     |
@@ -119,9 +120,24 @@ Clients that only speak stdio can run `desk mcp` instead. Routes, tools, connect
 
 There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-desktop/review-desk](integrations/claude-desktop/review-desk). Install it with `claude plugin marketplace add ~/code/review-desk`, then `claude plugin install review-desk@review-desk`.
 
+## Coordinator
+
+The coordinator is one ordinary Claude Code session you keep in your Claude app's sidebar (Code tab), so you can watch how it works. It gets the PRs you hand off with `m m` merged: it works in a git worktree of your local clone, fixes CI, addresses review comments from the repo's members, merges the base in on a conflict, and merges the PR with the repo's merge method once it's approved, green and conflict-free. It never posts comments or replies as you: when a reviewer needs your answer, or it can't finish, it hands the PR back to the top of your queue with one line why. Its latest note on each PR shows in Merging. The desk itself runs no agent on your PRs and writes nothing to GitHub on a hand-off.
+
+It needs the desk's MCP tools and skill (Settings → Agents → Connect). Start a new session in the folder that holds your clones, so its worktrees sit inside it:
+
+- Working directory: `~/code`
+- Message:
+
+```
+/loop You are my Review Desk coordinator. Follow the "Coordinator" section of the review-desk skill: each tick, read my handed-off PRs (desk_merging) and the desk's events since your last tick, get each PR merged or hand it back, note progress with desk_note, then schedule your next tick.
+```
+
+`/loop` with no interval lets it pace itself: about 5 minutes while something is in Merging, 20 to 30 when nothing is. It runs with your own Claude Code permissions, so allow or approve `git`, `gh pr merge` and your test commands as you like. Pin it in the sidebar; stop it like any session.
+
 ## Never
 
-- Its writes to GitHub are approving a PR, when you press `a` twice in its review; sending a reply Claude drafted on your own PR, when you press Send; and, on your own PR, marking a draft ready and turning on auto-merge when you press `m`, and turning it off again when you press `b`. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it, and Claude handing a PR back writes nothing. Claude pushes commits to your PR's own branch, never with force, from a worktree of your clone. Everything else is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
+- Its writes to GitHub are approving a PR, when you press `a` twice in its review, and marking your own draft ready for review, when you press `a` twice on its row or in its review. They go through `src/github/write.ts`, whose allowlist holds only those two mutations; agents can't reach it, and `m`, `b` and a hand-back write nothing. The coordinator is your own Claude Code session: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
 - It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools.
 
