@@ -255,10 +255,11 @@ function promptDiff(files: ReviewFile[], ids: boolean): { text: string; hunks: H
       let size = 0;
       for (const h of byFile[i]!) {
         const t = `${ids ? `${h.id} ` : ""}${numberPatch(h.patch)}`;
-        if (size + t.length > MAX_FILE) {
-          // A file that is one huge hunk still shows its start.
-          if (!parts.length) {
-            parts.push(t.slice(0, MAX_FILE));
+        const room = MAX_FILE - size;
+        if (t.length > room) {
+          // The hunk that crosses the budget shows its start, and counts as read when its @@ line fits.
+          if (room >= t.split("\n", 1)[0]!.length) {
+            parts.push(t.slice(0, room));
             shown.push(h.id);
           }
           parts.push("[rest of this file's diff left out]");
@@ -298,8 +299,8 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
       ? `- since: ${s.me.login} reviewed it before, at ${pr.since.base.slice(0, 7)}. One sentence on what changed since then (the "since your review" diff), and whether that settles the concerns you'd raise.`
       : `- since: an empty string.`,
     `- concerns: the problems worth raising in the review: bugs, risky behaviour changes, missing error handling or tests, security. One specific sentence each, naming the file. Empty when nothing stands out; no style nits, no padding.`,
-    `- chunks: the hunks worth ${s.me.login}'s attention, most worth first, at most ${MAX_CHUNKS}. Each hunk's @@ line starts with its id (h1, h2, …). For each: id; level "look" (read it closely: logic, behaviour, data, security) or "skim" (glance at it); why in at most six words.` +
-      ` Leave out everything not worth reviewing: imports, renames, formatting, generated files, lockfiles, snapshots, tests that just mirror the code.${pr.since ? " They reviewed it before: rank what changed since then first." : ""} Empty when nothing is worth a look.`,
+    `- chunks: the hunks worth ${s.me.login}'s attention, in the order to read them, at most ${MAX_CHUNKS}: ${pr.since ? "they reviewed it before, so what changed since then first, then the rest, most worth first" : "most worth first, looks before skims"}. Each hunk's @@ line starts with its id (h1, h2, …). For each: id; level "look" (read it closely: logic, behaviour, data, security) or "skim" (glance at it); why in at most six words.` +
+      ` Leave out everything not worth reviewing: imports, renames, formatting, generated files, lockfiles, snapshots, tests that just mirror the code. Empty when nothing is worth a look.`,
     `- notes: up to ${MAX_NOTES} short notes on the hunks worth explaining, each one or two sentences on what that change does and why it matters. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files.`,
     `  Anchor each note on the first line of the change it explains. Diff lines start with their line number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). Use side "new" with an n number; use side "old" with an o number only for a removal with nothing added. path is exactly as after "file:".`,
     `- verdict: "look" (review it closely), "skim" (glance at it) or "skip" (trivial, or not theirs to review).`,
@@ -461,20 +462,23 @@ export function parseReview(parsed: unknown, files: ReviewFile[]): Omit<AiReview
     notes.push({ path: p, ...at, body: body.slice(0, 600) });
   }
   const since = text(raw.since);
-  const chunks = parseChunks(raw.chunks, files);
+  const kept = notes.slice(0, MAX_NOTES);
+  const chunks = parseChunks(raw.chunks, files, kept);
   return {
     ...(since && { since }),
     verdict: (["look", "skim", "skip"] as const).find((v) => v === raw.verdict) ?? "skim",
     risk: (["low", "medium", "high"] as const).find((r) => r === raw.risk) ?? "medium",
     summary,
     concerns: (Array.isArray(raw.concerns) ? raw.concerns.map(text).filter(Boolean) : []).slice(0, MAX_CONCERNS),
-    notes: notes.slice(0, MAX_NOTES),
+    notes: kept,
     ...(chunks && { chunks }),
   };
 }
 
-// Only hunks the prompt showed can be ranked, each once; no list at all is no ranking, which isn't "nothing worth a look".
-function parseChunks(raw: unknown, files: ReviewFile[]): ChunkRanking | undefined {
+export const NOTED_WHY = "has a note, though not ranked";
+
+// Only hunks the prompt showed can be ranked, each once, in Claude's order; no list at all is no ranking, which isn't "nothing worth a look".
+function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[]): ChunkRanking | undefined {
   if (!Array.isArray(raw)) return undefined;
   const { hunks, read } = promptDiff(files, true);
   const byId = new Map(hunks.map((h) => [h.id, h]));
@@ -487,29 +491,30 @@ function parseChunks(raw: unknown, files: ReviewFile[]): ChunkRanking | undefine
     ranked.push({ id: h.id, path: h.path, level, why: text(c.why).slice(0, MAX_WHY) });
   }
   const kept = ranked.slice(0, MAX_CHUNKS);
+  // A hunk Claude wrote a note on stays in the reading list: leaving it out of the ranking (a slip, or PR text) can't fold it.
+  const ids = new Set(kept.map((c) => c.id));
+  const paths = new Set(kept.map((c) => c.path));
+  const noted = new Set<string>();
+  for (const [i, spot] of noteSpots(hunks, notes).entries()) {
+    const p = notes[i]!.path;
+    const h = spot?.hunk ?? (paths.has(p) ? undefined : hunks.find((x) => x.path === p && read.has(x.id)));
+    if (h && read.has(h.id) && !ids.has(h.id)) noted.add(h.id);
+  }
   return {
-    ranked: [...kept.filter((c) => c.level === "look"), ...kept.filter((c) => c.level === "skim")],
+    ranked: [
+      ...kept,
+      ...hunks.filter((h) => noted.has(h.id)).map((h) => ({ id: h.id, path: h.path, level: "skim" as const, why: NOTED_WHY })),
+    ],
     unread: hunks.filter((h) => !read.has(h.id) && !NOISE.test(h.path)).map((h) => h.id),
     capped: ranked.length >= MAX_CHUNKS,
     total: hunks.length,
   };
 }
 
-// ---------------------------------------------------------------- the order
-
 const anchorKey = (side: ReviewNote["side"], line: number) => `${side}:${line}`;
 
-// Every hunk once, in reading order: ranked, unread, then the rest by file; without a ranking for this commit, file by file.
-export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boolean): ReviewOrder {
-  const hunks = hunksOf(files);
-  const fresh = ai && !stale ? ai : null;
-  const byId = new Map(hunks.map((h) => [h.id, h]));
-  // Another diff than the one ranked (a retargeted base keeps the head): its ids would point at other code.
-  const ranking = fresh?.chunks?.ranked.every((c) => byId.get(c.id)?.path === c.path) ? fresh.chunks : null;
-
-  // A note on no hunk's lines is about the whole file.
-  const onHunk = new Map<string, { note: number; at: number }[]>();
-  const onFile = new Map<string, number[]>();
+// The hunk each note sits on and its line's place in it; null for a note on none of their lines, which is about the whole file.
+function noteSpots(hunks: Hunk[], notes: ReviewNote[]): ({ hunk: Hunk; at: number } | null)[] {
   const lines = new Map(
     hunks.map((h) => {
       const m = new Map<string, number>();
@@ -520,10 +525,30 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
       return [h.id, m];
     }),
   );
-  for (const [note, n] of (fresh?.notes ?? []).entries()) {
-    const h = n.line ? hunks.find((x) => x.path === n.path && lines.get(x.id)!.has(anchorKey(n.side, n.line))) : undefined;
-    if (h) onHunk.set(h.id, [...(onHunk.get(h.id) ?? []), { note, at: lines.get(h.id)!.get(anchorKey(n.side, n.line))! }]);
-    else onFile.set(n.path, [...(onFile.get(n.path) ?? []), note]);
+  return notes.map((n) => {
+    const key = anchorKey(n.side, n.line);
+    const hunk = n.line ? hunks.find((x) => x.path === n.path && lines.get(x.id)!.has(key)) : undefined;
+    return hunk ? { hunk, at: lines.get(hunk.id)!.get(key)! } : null;
+  });
+}
+
+// ---------------------------------------------------------------- the order
+
+// Every hunk once, in reading order: ranked, unread, then the rest by file; without a ranking for this commit, file by file.
+export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boolean): ReviewOrder {
+  const hunks = hunksOf(files);
+  const fresh = ai && !stale ? ai : null;
+  const byId = new Map(hunks.map((h) => [h.id, h]));
+  // Another diff than the one ranked (a retargeted base keeps the head): its ids would point at other code.
+  const ranking = fresh?.chunks?.ranked.every((c) => byId.get(c.id)?.path === c.path) ? fresh.chunks : null;
+
+  const onHunk = new Map<string, { note: number; at: number }[]>();
+  const onFile = new Map<string, number[]>();
+  const notes = fresh?.notes ?? [];
+  for (const [note, spot] of noteSpots(hunks, notes).entries()) {
+    const p = notes[note]!.path;
+    if (spot) onHunk.set(spot.hunk.id, [...(onHunk.get(spot.hunk.id) ?? []), { note, at: spot.at }]);
+    else onFile.set(p, [...(onFile.get(p) ?? []), note]);
   }
 
   const met = new Set<string>();
@@ -550,7 +575,10 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
   const chunks = ranking
     ? ranking.ranked.map((c, i) => view(byId.get(c.id)!, c.level, i + 1, c.why))
     : hunks.map((h) => view(h, null, null, null));
-  const left = ranking ? hunks.filter((h) => unread.has(h.id) && !ranked.has(h.id)).map((h) => view(h, "unread", null, null)) : [];
+  // A file Claude read the start of was cut at its own budget; one it saw none of, at the PR's.
+  const unreadWhy = (h: Hunk) =>
+    hunks.some((x) => x.file === h.file && !unread.has(x.id)) ? "its file was too long to read whole" : "the PR was too long to read whole";
+  const left = ranking ? hunks.filter((h) => unread.has(h.id) && !ranked.has(h.id)).map((h) => view(h, "unread", null, unreadWhy(h))) : [];
   const rest: ReviewRest[] = [];
   const byFile = perFile(files, hunks);
   for (const [i, f] of files.entries()) {

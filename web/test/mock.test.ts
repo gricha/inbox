@@ -21,7 +21,7 @@ import type {
   ReviewView,
   SettingsView,
 } from "../../src/types.ts";
-import { CLAUDE_PAUSED, parseReview } from "../../src/review.ts";
+import { CLAUDE_PAUSED, NOTED_WHY, parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -358,17 +358,19 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
     const raw = x.ai!.chunks!.ranked.map(({ id, level, why }) => ({ id, level, why }));
     assert.deepEqual(parseReview({ ...x.ai, chunks: raw }, x.files).chunks, x.ai!.chunks);
   }
+  // The test file's note keeps it in the reading list, after what Claude ranked.
   assert.deepEqual(
-    v.order.chunks.map((h) => [h.rank, h.level, h.path]),
+    v.order.chunks.map((h) => [h.rank, h.level, h.path, h.why === NOTED_WHY]),
     [
-      [1, "look", "src/planner/plan.ts"],
-      [2, "look", "src/routes/query.ts"],
-      [3, "skim", "src/planner/stream.ts"],
+      [1, "look", "src/planner/plan.ts", false],
+      [2, "look", "src/routes/query.ts", false],
+      [3, "skim", "src/planner/stream.ts", false],
+      [4, "skim", "test/planner/stream.test.ts", true],
     ],
   );
   assert.deepEqual(
     v.order.rest.map((r) => r.path),
-    ["src/planner/plan.ts", "test/planner/stream.test.ts", "docs/api/query.md"],
+    ["src/planner/plan.ts", "docs/api/query.md"],
   );
   assert.equal(new Set(v.order.notes).size, v.ai!.notes.length, "every note once");
   assert.ok(py.order.rest.some((r) => r.why.startsWith("no text diff") && !r.hunks.length));

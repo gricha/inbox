@@ -555,10 +555,10 @@ export interface AiReview {
 }
 
 // Which hunks of the diff are worth your attention, as Claude ranked them. Ids are h1, h2, … across the files in order,
-// as the prompt numbered them; everything not ranked is not worth reviewing.
+// as the prompt numbered them; everything not ranked (or unread) is not worth reviewing.
 export interface ChunkRanking {
-  ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // look, then skim, each most worth first
-  unread: string[]; // left out of the prompt because the PR was too long to read whole: not judged either way
+  ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // in Claude's order, then any hunk it noted but didn't rank, as a skim
+  unread: string[]; // left out of the prompt because the PR, or the hunk's file, was too long to read whole: not judged either way
   capped: boolean; // Claude ranked as many as it may (20): more may be worth a look
   total: number; // hunks in the diff
 }
@@ -575,7 +575,7 @@ export interface ReviewHunk {
   deletions: number;
   level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking for this commit
   rank: number | null; // 1 = read it first; look and skim only
-  why: string | null; // Claude's few words for look and skim
+  why: string | null; // look and skim: Claude's few words, or "has a note, though not ranked"; unread: which was too long, the PR or its file
   notes: number[]; // indices into ai.notes to show with it, in reading order: the file's own notes (line 0) on its first hunk in the order
 }
 
@@ -583,8 +583,8 @@ export interface ReviewHunk {
 export interface ReviewOrder {
   ranked: boolean; // false: no ranking for this commit (none yet, one written before ranking, or a newer push): `chunks` is every hunk, file by file
   capped: boolean; // Claude ranked as many as it may: something in `rest` may still be worth a look
-  chunks: ReviewHunk[]; // read these, in this order: look, then skim, each most worth first
-  unread: ReviewHunk[]; // Claude didn't see these (the PR was too long to read whole), file by file
+  chunks: ReviewHunk[]; // read these, in this order: Claude's (most worth first; a re-review, what changed since you looked first), then hunks it noted but didn't rank
+  unread: ReviewHunk[]; // Claude didn't see these (the PR or their file was too long to read whole), file by file
   rest: ReviewRest[]; // not worth reviewing, by file
   notes: number[]; // ai.notes in reading order: what ] and [ step through; empty when the review is for an older commit
 }
@@ -615,7 +615,7 @@ export interface ReviewView {
   card: Card;
   item: Item;
   handoff_prompt: string;
-  files: ReviewFile[];
+  files: ReviewFile[]; // patch repeats order's hunks for today's review UI; it goes once that renders order
   files_error: string | null; // the diff couldn't be fetched
   order: ReviewOrder; // every hunk once, in the order to read them
   ai: AiReview | null; // the latest, even if stale

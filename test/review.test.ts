@@ -17,6 +17,7 @@ import {
   claudeSpawn,
   CLAUDE_PAUSED,
   generateReview,
+  NOTED_WHY,
   numberPatch,
   parseFiles,
   parseReview,
@@ -320,12 +321,16 @@ test("the prompt numbers hunks h1, h2, … across files for the ranking; a lockf
   assert.match(p, /file: src\/b\.ts \(modified, \+3 −2\)\nh4 @@ -10,3/);
   assert.match(p, /^h5 @@ -40,1/m);
   assert.equal(p.split("\n").filter((l) => l.startsWith("@@ ")).length, 2, "the since diff's hunks aren't rankable");
-  assert.match(p, /- chunks: the hunks worth me's attention, most worth first, at most 20\./);
-  assert.match(p, /rank what changed since then first/);
-  assert.doesNotMatch(buildPrompt(item, signalsOf(item), "", { body: "", files: [FILE] }, "TAG"), /changed since then first/);
+  assert.match(
+    p,
+    /- chunks: the hunks worth me's attention, in the order to read them, at most 20: they reviewed it before, so what changed since then first,/,
+  );
+  const first = buildPrompt(item, signalsOf(item), "", { body: "", files: [FILE] }, "TAG");
+  assert.match(first, /at most 20: most worth first, looks before skims\./);
+  assert.doesNotMatch(first, /changed since then first/);
 });
 
-test("parseReview ranks only hunks the prompt showed, each once, look before skim; unknown ids and bad levels are dropped", () => {
+test("parseReview ranks only hunks the prompt showed, each once, in Claude's order; unknown ids and bad levels are dropped", () => {
   const files = [FILE, LOCK, OTHER];
   const r = parseReview(
     {
@@ -346,8 +351,8 @@ test("parseReview ranks only hunks the prompt showed, each once, look before ski
   );
   assert.deepEqual(r.chunks, {
     ranked: [
-      { id: "h2", path: "src/planner/plan.ts", level: "look", why: "x".repeat(80) },
       { id: "h4", path: "src/b.ts", level: "skim", why: "Same change, other file." },
+      { id: "h2", path: "src/planner/plan.ts", level: "look", why: "x".repeat(80) },
     ],
     unread: [],
     capped: false,
@@ -365,11 +370,10 @@ test("at most 20 chunks are ranked and a full list says so; hunks left out for l
   };
   const all = Array.from({ length: 25 }, (_, i) => ({ id: `h${i + 1}`, level: i % 2 ? "look" : "skim", why: "" }));
   const r = parseReview({ summary: "x", chunks: all }, [many]).chunks!;
-  const ids = (from: number) => Array.from({ length: 10 }, (_, i) => `h${from + 2 * i}`);
   assert.deepEqual(
     r.ranked.map((c) => c.id),
-    [...ids(2), ...ids(1)],
-    "Claude's first 20, looks first",
+    all.slice(0, 20).map((c) => c.id),
+    "Claude's first 20, in its order",
   );
   assert.equal(r.capped, true);
   assert.equal(parseReview({ summary: "x", chunks: all.slice(0, 19) }, [many]).chunks!.capped, false);
@@ -403,6 +407,98 @@ test("at most 20 chunks are ranked and a full list says so; hunks left out for l
     capped: false,
     total: 7,
   });
+  assert.deepEqual(
+    reviewOrder(files, aiOf({ chunks: ranked.chunks }), false).unread.map((h) => [h.id, h.why]),
+    [
+      ["h5", "the PR was too long to read whole"],
+      ["h6", "the PR was too long to read whole"],
+    ],
+  );
+});
+
+test("a hunk Claude wrote a note on but didn't rank stays in the reading list, as a skim after Claude's own", () => {
+  const files = [FILE, LOCK, OTHER];
+  const note = (p: string, line: number, side: "new" | "old" = "new") => ({ path: p, side, line, body: "b" });
+  const r = parseReview(
+    {
+      summary: "x",
+      chunks: [{ id: "h4", level: "look", why: "the fix" }],
+      notes: [note(OTHER.path, 12), note(FILE.path, 40, "old"), note(LOCK.path, 1), note(OTHER.path, 0)],
+    },
+    files,
+  );
+  assert.deepEqual(r.chunks!.ranked, [
+    { id: "h4", path: "src/b.ts", level: "look", why: "the fix" },
+    { id: "h2", path: "src/planner/plan.ts", level: "skim", why: NOTED_WHY },
+  ]);
+  const o = reviewOrder(files, aiOf({ notes: r.notes, chunks: r.chunks }), false);
+  assert.deepEqual(
+    o.chunks.map((h) => [h.id, h.rank, h.level, h.notes]),
+    [
+      ["h4", 1, "look", [3, 0]],
+      ["h2", 2, "skim", [1]],
+    ],
+  );
+  assert.deepEqual(
+    o.rest.map((x) => [x.path, x.why, x.hunks.map((h) => h.id)]),
+    [
+      ["src/planner/plan.ts", "not worth reviewing", ["h1"]],
+      ["package-lock.json", "lockfile or generated", ["h3"]],
+      ["src/b.ts", "not worth reviewing", ["h5"]],
+    ],
+  );
+
+  // A note on no line of a file nothing was ranked in brings in the file's first hunk, which then carries it.
+  const whole = parseReview({ summary: "x", chunks: [], notes: [note(FILE.path, 0)] }, files);
+  assert.deepEqual(
+    whole.chunks!.ranked.map((c) => [c.id, c.level, c.why]),
+    [["h1", "skim", NOTED_WHY]],
+  );
+  assert.deepEqual(
+    reviewOrder(files, aiOf({ notes: whole.notes, chunks: whole.chunks }), false).chunks.map((h) => [h.id, h.notes]),
+    [["h1", [0]]],
+  );
+});
+
+test("a hunk that crosses a file's 20 KB shows its start and counts as read; the hunks after it are unread, for the file's length", () => {
+  const item = makeItem({});
+  const body = Array.from({ length: 500 }, (_, i) => `+  const v${i} = compute(${i}); // a line of the new function`).join("\n");
+  const file: ReviewFile = {
+    ...FILE,
+    path: "src/auth.ts",
+    patch: `@@ -1,2 +1,3 @@\n import a;\n+import b;\n import c;\n@@ -40,2 +41,502 @@ export function login() {\n   x();\n${body}\n   y();\n@@ -90,1 +590,1 @@\n-old();\n+fresh();`,
+  };
+  const p = buildPrompt(item, signalsOf(item), "", { body: "", files: [file] }, "TAG");
+  assert.match(p, /^h2 @@ -40,2 \+41,502 @@ export function login\(\) \{\nn41 {5}x\(\);\nn42 \+ {3}const v0 = compute\(0\);/m);
+  const seen = p.split("\n").filter((l) => /compute\(\d+\)/.test(l)).length;
+  assert.ok(seen > 250 && seen < 500, `the start of the big hunk, cut at the file's budget (${seen} lines)`);
+  assert.match(p, /\n\[rest of this file's diff left out\]\n/);
+  assert.doesNotMatch(p, /^h3 /m);
+  const r = parseReview(
+    {
+      summary: "x",
+      chunks: [
+        { id: "h2", level: "look", why: "the new login" },
+        { id: "h3", level: "look", why: "never shown" },
+      ],
+    },
+    [file],
+  );
+  assert.deepEqual(r.chunks, {
+    ranked: [{ id: "h2", path: "src/auth.ts", level: "look", why: "the new login" }],
+    unread: ["h3"],
+    capped: false,
+    total: 3,
+  });
+  assert.deepEqual(
+    reviewOrder([file], aiOf({ chunks: r.chunks }), false).unread.map((h) => [h.id, h.why]),
+    [["h3", "its file was too long to read whole"]],
+  );
+
+  // No room left for the next hunk's @@ line: it isn't shown, so it isn't read.
+  const head = `h1 ${numberPatch("@@ -0,0 +1,1 @@\n+")}`;
+  const tight: ReviewFile = { ...FILE, patch: `@@ -0,0 +1,1 @@\n+${"a".repeat(19_995 - head.length)}\n@@ -5,1 +5,1 @@\n-a\n+b` };
+  assert.deepEqual(parseReview({ summary: "x", chunks: [] }, [tight]).chunks?.unread, ["h2"]);
 });
 
 test(
@@ -859,13 +955,21 @@ test("the review view sends the desk's reading order, and the card counts what's
   );
   await t.f.release("acme/api#1");
   v = await t.desk.reviewView("api#1");
+  // The fake review's note sits on h1, which Claude didn't rank: it follows the ranked chunk instead of folding.
   assert.deepEqual(
-    [v.order.ranked, v.order.chunks.map((h) => [h.id, h.rank, h.level, h.why]), v.order.rest.map((r) => r.hunks.map((h) => h.id))],
-    [true, [["h2", 1, "look", "swaps old for fresh"]], [["h1"]]],
+    [v.order.ranked, v.order.chunks.map((h) => [h.id, h.rank, h.level, h.why, h.notes]), v.order.rest],
+    [
+      true,
+      [
+        ["h2", 1, "look", "swaps old for fresh", []],
+        ["h1", 2, "skim", NOTED_WHY, [0]],
+      ],
+      [],
+    ],
   );
   assert.deepEqual(v.order.notes, [0]);
   const card = t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")!;
-  assert.deepEqual(card.preflight?.chunks, { look: 1, skim: 0, total: 2 });
+  assert.deepEqual(card.preflight?.chunks, { look: 1, skim: 1, total: 2 });
 
   // An older review written before ranking keeps working: today's order, its notes in place, no counts on the card.
   const { chunks: _, ...unranked } = t.desk.item("api#1").ai!;

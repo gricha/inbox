@@ -49,6 +49,7 @@ import type {
   PreviewResult,
   ReviewDecision,
   ReviewFile,
+  ReviewNote,
   ReviewView,
   ReviewState,
   SettingsView,
@@ -1907,10 +1908,10 @@ const QUEUED = "acme/ml-pipeline#307";
 // How Claude ranked a written review's hunks (each generic file is one hunk): the first file's change to look at, the
 // rest not worth reviewing. The scheduler split shows a capped ranking with unread files, the date picker's move nothing
 // worth a look, and garden-sensors a review written before ranking.
-function ranking(id: string, files: ReviewFile[]): ChunkRanking | undefined {
+function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRanking | undefined {
   if (id === "friends/garden-sensors#18") return undefined;
   const pick = (ranked: [number, "look" | "skim", string][]) =>
-    parseReview({ summary: "-", chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })) }, files).chunks!;
+    parseReview({ summary: "-", notes, chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })) }, files).chunks!;
   if (id === "oss/calendar-ui#310") return pick([]);
   if (id === "acme/worker#879") {
     const moved = Array.from({ length: 19 }, (_, i): [number, "skim", string] => [i + 2, "skim", "moved from the scheduler"]);
@@ -1923,7 +1924,19 @@ function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   const [f] = files;
-  const chunks = ranking(r.id, files);
+  // The date picker's move has nothing to note: a note would bring its hunk back into the reading list.
+  const notes: ReviewNote[] =
+    f && r.id !== "oss/calendar-ui#310"
+      ? [
+          {
+            path: f.path,
+            side: "new",
+            line: f.path.endsWith(".py") ? 16 : 12,
+            body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
+          },
+        ]
+      : [];
+  const chunks = ranking(r.id, files, notes);
   return {
     verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
     risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
@@ -1933,16 +1946,7 @@ function written(r: Rec, head: string): AiReview {
         ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
         : [],
     ...WRITTEN[r.id],
-    notes: f
-      ? [
-          {
-            path: f.path,
-            side: "new",
-            line: f.path.endsWith(".py") ? 16 : 12,
-            body: "The behaviour change: calls the new implementation, with retries, and records how long it took.",
-          },
-        ]
-      : [],
+    notes,
     ...(chunks && { chunks }),
     head_oid: head,
     model: MODEL,
