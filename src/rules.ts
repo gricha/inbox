@@ -115,6 +115,24 @@ export function placedBy(p: Placement): Card["placed_by"] {
   return p.judge.pending ? "pending" : "unanswered";
 }
 
+// Weightiest first: handed back, close looks (current commit first), capped, yours approved and green, the rest, others' red, skips.
+export function queueOrder(cards: Card[], me: string): Card[] {
+  const weight = (c: Card) => {
+    const p = c.preflight;
+    const mine = c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
+    if (p?.verdict === "skip") return 7;
+    if (c.handed_back) return 0;
+    if (!mine && c.kind === "pr" && c.ci === "red") return 6;
+    if (p?.risk === "high" || p?.verdict === "look") return p.state === "ready" ? 1 : 2;
+    if (c.demoted) return 3;
+    return mine && c.ci === "green" && c.chips.includes("approved") ? 4 : 5;
+  };
+  return cards
+    .map((c, i) => ({ c, i, w: weight(c) }))
+    .sort((a, b) => a.w - b.w || a.i - b.i)
+    .map((x) => x.c);
+}
+
 const SORTS: Record<BoardConfig["sort"], (a: Entry, b: Entry) => number> = {
   waiting: (a, b) => a.waiting_since.localeCompare(b.waiting_since),
   updated: (a, b) => b.activity_at.localeCompare(a.activity_at),

@@ -1096,7 +1096,7 @@ export class Babysitter {
       desk.changed();
       if (!r.error && !r.aborted) desk.retryAgents(NOT_LOGGED_IN); // claude ran, so the login works
       if (pushed) void desk.sync();
-      if (s.escalation || s.drafts.some((d) => !d.sent_at)) desk.notifyNewNow();
+      if (s.escalation || s.drafts.some((d) => !d.sent_at)) desk.notifyNew();
       this.consider(id);
     })();
   }
@@ -1134,7 +1134,7 @@ export class Babysitter {
     if (this.outside(it, s)) return "comments from outside contributors";
     // With auto-merge on, GitHub merges it; otherwise the merge button is yours.
     const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft && !autoMerging(it, s);
-    // Still mergeable while a run answers a later comment: leaving Now and coming back would notify again.
+    // Still mergeable while a run answers a later comment: no longer waiting and then waiting again would notify again.
     if (ready && (st.state === "running" || st.state === "queued")) return "ready to merge";
     if (st.state === "running" || st.state === "queued" || st.state === "waiting") return null;
     const work = this.problems(it);

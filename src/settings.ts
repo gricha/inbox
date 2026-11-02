@@ -33,7 +33,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "queue",
     title: "Queue",
-    help: "The queue is one list, the most urgent first. Later and resolved stay out of it, on one quiet line below.",
+    help: "The queue is one list of what needs you, in the desk's order. What Claude and your rules sorted away is under Later.",
   },
   {
     id: "agent",
@@ -117,7 +117,7 @@ export const SETTINGS = [
     default: 14,
     min: 0,
     max: 365,
-    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, a review you were asked for in that time, and your PRs in Merging that need you stay. 0 keeps everything.",
+    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, and a review you were asked for in that time stay. 0 keeps everything.",
   },
   {
     key: "queue.cards",
@@ -127,7 +127,7 @@ export const SETTINGS = [
     default: 10,
     min: 0,
     max: 100,
-    help: "Cards, the most urgent first; the rest sit behind one line you can open. 0 shows them all.",
+    help: "Items, in the desk's order; the rest sit behind one line you can open. 0 shows them all.",
   },
   {
     key: "coordinator.enabled",
@@ -155,7 +155,14 @@ export const SETTINGS = [
     max: 1000,
     help: "20 items a call, on your own Claude Code login.",
   },
-  { key: "notify.enabled", section: "notify", label: "Notify me when something urgent lands in the queue", type: "boolean", default: true },
+  {
+    key: "notify.enabled",
+    section: "notify",
+    label: "Notify me when something new needs me",
+    type: "boolean",
+    default: true,
+    help: "A new item on the queue, once Claude or a hard rule placed it, and a PR in Merging that starts waiting on you.",
+  },
   {
     key: "notify.quiet",
     section: "notify",

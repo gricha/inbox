@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED } from "../../src/review.ts";
-import { capText, floorOf, placedBy, quietText } from "../../src/rules.ts";
+import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -1342,8 +1342,8 @@ function focus(): FocusView {
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   return {
     sections: {
-      now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
-      today: cards.filter((c) => c.bucket === "today").map(top),
+      now: queueOrder([...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top), ME),
+      today: queueOrder(cards.filter((c) => c.bucket === "today").map(top), ME),
     },
     cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
@@ -1379,7 +1379,12 @@ function queue(): QueueView {
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
   return {
-    sections: { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") },
+    sections: {
+      now: queueOrder([...needsCards(), ...of("now")].map(top), ME),
+      today: queueOrder(of("today").map(top), ME),
+      later: of("later"),
+      fyi: of("fyi"),
+    },
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
@@ -1397,26 +1402,15 @@ function top(c: Card): Card {
   if (s.author === ME && (s.kind ?? "pr") === "pr") {
     const next = nextOf(r);
     const failing = s.fly?.failing ?? s.checks ?? [];
-    const reply = laneOwned(r) ? flightOf(r).drafts.find((d) => !d.sent_at) : undefined;
     Object.assign(
       out,
       next && { next },
       failing.length && { checks_failed: failing },
       s.optional?.length && { checks_optional: s.optional },
     );
-    if (reply) out.reply = reply;
     // As Desk.card(): who last spoke on it.
     const said = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
-    if (said && !laneOwned(r)) out.last_event = said;
-    if (laneOwned(r)) {
-      const f = flightOf(r);
-      const resume = laneRow(r).resume;
-      if (f.question) Object.assign(out, { escalated: true }, resume && { resume });
-      // As Desk.neededSince(): when it started needing you, never before m.
-      const at = f.question?.at ?? reply?.at ?? "";
-      const from = r.state.inflight_at ?? out.waiting_since;
-      out.waiting_since = at > from ? at : from;
-    }
+    if (said) out.last_event = said;
   }
   if (s.kind === "issue") {
     const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
@@ -1517,18 +1511,16 @@ function needsYou(r: Rec): string | null {
   return r.seed.fly?.needs ?? null;
 }
 
-// As Desk.compute(): among other people's asks, it says it's your PR in Merging unless it already says who's asking.
+// As Desk.compute(): it says it's your PR in Merging unless it already says who's asking.
 function needsWhy(r: Rec): string | null {
   const needs = needsYou(r);
   return needs && !flightOf(r).question ? `merging: ${needs}` : needs;
 }
 
-// As Desk.shownAt(): Now with its reason when it needs you, else calm, as in Merging; handed back, at the top of Now.
+// As Desk.shownAt(): in Merging, Merging's (with why it waits on you, if it does); handed back, at the top of Now.
 function shownAt(r: Rec, p: Placement): Placement {
   if (handedBack(r)) return { ...p, bucket: "now", why: `handed back: ${r.seed.back}` };
-  if (!laneOwned(r)) return p;
-  const why = needsWhy(r);
-  return why ? { ...p, bucket: "now", why } : { ...p, bucket: "fyi", why: "merging" };
+  return laneOwned(r) ? { ...p, bucket: "fyi", why: needsWhy(r) ?? "merging" } : p;
 }
 
 function bestPlacement(r: Rec): Placement {
@@ -1540,7 +1532,7 @@ function bestPlacement(r: Rec): Placement {
   return best ?? { board: "", bucket: "later", rule_bucket: "later", rule: null, why: "", trace: [] };
 }
 
-const needsCards = () => recs.flatMap((r) => (needsYou(r) || handedBack(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
+const needsCards = () => recs.flatMap((r) => (handedBack(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
 
 function laneRow(r: Rec): InflightRow {
   const s = r.seed;

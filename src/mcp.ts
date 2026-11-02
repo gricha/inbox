@@ -405,7 +405,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_escalate",
     {
       description:
-        "Hand a decision on one of the user's PRs in Merging back to them: the PR goes to Now with the question as its why, and stays in Merging. Use it for anything that's theirs to decide and lets you carry on once they answer (scope or API changes, disagreeing with a reviewer, a failure you can't explain), then stop working on the PR. With hand_back: true, the PR can't realistically be merged by you (a reviewer wants a redesign, it needs a product decision, CI you can't fix): it leaves Merging and goes back to the user's desk with `question` as the reason.",
+        "Hand a decision on one of the user's PRs in Merging back to them: the PR waits on them in Merging with the question as its why (Merging lists and counts what waits on them). Use it for anything that's theirs to decide and lets you carry on once they answer (scope or API changes, disagreeing with a reviewer, a failure you can't explain), then stop working on the PR. With hand_back: true, the PR can't realistically be merged by you (a reviewer wants a redesign, it needs a product decision, CI you can't fix): it leaves Merging and goes back to the user's desk with `question` as the reason.",
       inputSchema: {
         ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
         question: z.string().min(1).max(300).describe("One short question, one line; with hand_back, why you're handing it back"),

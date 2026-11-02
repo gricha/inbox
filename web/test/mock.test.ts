@@ -110,9 +110,7 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
   assert.equal(of("me/notes-app#12").preflight?.state, "none");
   assert.equal(of("me/notes-app#12").next, "3 unresolved threads: m hands it off for merge");
   // Enter and o are on every card's keys, so a next step that would only name them is left out.
-  assert.equal(of("acme/api#4110").next, undefined);
   assert.equal(of("acme/worker#875").next, undefined);
-  assert.equal(of("acme/api#4122").reply?.to, "dana on src/export/audit.ts:88", "the reply y sends from the queue");
   assert.deepEqual([of("acme/api#3051").checks_failed?.length, of("acme/api#3051").checks_optional?.length], [2, 1]);
   assert.equal(of("acme/worker#860").last_event?.kind, "commented", "an issue's latest event");
 
@@ -389,7 +387,7 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 409);
 });
 
-test("Merging: its states, needs-you and handed-back cards at the top of Now, send, hand off and back to desk", async () => {
+test("Merging: its states, what waits on you only there, handed back at the top of Now, send, hand off and back to desk", async () => {
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");
   const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
   assert.deepEqual(
@@ -404,15 +402,18 @@ test("Merging: its states, needs-you and handed-back cards at the top of Now, se
   );
   assert.equal(row("acme/worker#871").state, "merged");
   assert.deepEqual([row("acme/api#4105").auto_merge, row("acme/web#2295").merge_note], [true, "the repo doesn't allow auto-merge"]);
+  assert.deepEqual(
+    [row("acme/api#4122").card.why, row("acme/api#4110").card.why],
+    ["merging: reply ready to send", `Claude asks: ${row("acme/api#4110").escalation!.question}`],
+  );
   const { data: q } = await call<QueueView>("GET", "/api/queue");
-  const now = q.sections.now.filter((c) => c.inflight || c.handed_back).map((c) => [c.id, c.why]);
-  assert.deepEqual(now.slice(0, 3), [
-    ["acme/api#4122", "merging: reply ready to send"],
-    ["acme/api#4110", `Claude asks: ${row("acme/api#4110").escalation!.question}`],
-    ["oss/tinyhttp#205", "handed back: no local clone of oss/tinyhttp"],
-  ]);
+  const all = [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared, ...q.resolved];
+  assert.ok(!all.some((c) => c.inflight), "Merging has them, whatever waits on you");
+  assert.deepEqual(
+    q.sections.now.slice(0, 1).map((c) => [c.id, c.why]),
+    [["oss/tinyhttp#205", "handed back: no local clone of oss/tinyhttp"]],
+  );
   assert.ok(q.sections.now.find((c) => c.id === "oss/tinyhttp#205")?.chips.includes("auto-merge on"), "auto-merge still on");
-  assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "Claude has it");
   const { data: o } = await call<Overview>("GET", "/api/overview");
   assert.deepEqual(o.inflight, { total: 4, needs_you: 2 });
 

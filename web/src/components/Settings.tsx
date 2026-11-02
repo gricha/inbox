@@ -17,6 +17,7 @@ import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
 import { SourceLine } from "./Source.tsx";
 import { acceleratorOf, authProblem, coordinatorText, draftOf, valueOf } from "../view.ts";
+import { applyTheme, savedTheme, THEMES, type ThemeId } from "../theme.ts";
 
 type Flash = (text: string, error?: boolean) => void;
 
@@ -566,6 +567,43 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
 
 // "/Users/me/.review-desk/settings.json" → "~/.review-desk/settings.json"
 
+// Not from the schema: the theme is this device's, so it's kept here, not on the desk.
+const APPEARANCE = { id: "appearance", title: "Appearance", help: "This device's theme. Other windows and devices keep their own." };
+
+function Appearance() {
+  const [theme, setTheme] = useState<ThemeId>(savedTheme);
+  return (
+    <div className="s-fields">
+      <div className="setting st-select">
+        <div className="s-label-col">
+          <label className="s-label" htmlFor="s-theme">
+            Theme
+          </label>
+          <p className="s-help">System follows your computer's light or dark.</p>
+        </div>
+        <div className="s-control">
+          <select
+            id="s-theme"
+            className="input choice"
+            value={theme}
+            onChange={(e) => {
+              const t = e.target.value as ThemeId;
+              applyTheme(t);
+              setTheme(t);
+            }}
+          >
+            {THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const RULES = {
   id: "rules",
   title: "Rules",
@@ -597,7 +635,11 @@ export function Settings({
   const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
   // Rules go after the sources and the agent they feed (GitHub, Agents), before the smaller settings.
   const at = view ? Math.max(1, view.sections.findIndex((x) => x.id === "agent") + 1) : 0;
-  const sections = view ? [...view.sections.slice(0, at), RULES, ...view.sections.slice(at)] : [RULES];
+  // Appearance goes before the desktop app's settings, or last.
+  const app = view ? (view.sections.findIndex((x) => x.id === "app") + 1 || view.sections.length + 1) - 1 : 0;
+  const sections = view
+    ? [...view.sections.slice(0, at), RULES, ...view.sections.slice(at, app), APPEARANCE, ...view.sections.slice(app)]
+    : [RULES];
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
@@ -670,6 +712,7 @@ export function Settings({
             {x.id === "agent" && <AgentLink active={active} loads={loads} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
+            {x.id === "appearance" && <Appearance />}
             {view && defs.length > 0 && (
               <div className="s-fields">
                 {defs.map((d) => (

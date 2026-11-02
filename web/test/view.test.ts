@@ -6,21 +6,16 @@ import { age, ago, clearedText, eventText, modelName, shortId, shortRef, tilde }
 import {
   acceleratorOf,
   actedText,
-  aiWord,
   authProblem,
   cardFacts,
   coordinatorText,
   currentFile,
   DEFAULT_OPEN,
   draftOf,
-  firstClause,
   foldOf,
-  foldText,
   groupsOf,
   judgeStatusText,
   judgeStepText,
-  keepUnits,
-  keyParts,
   laneFacts,
   waitsOn,
   lineOf,
@@ -28,18 +23,13 @@ import {
   policyLines,
   navigable,
   noCloneOf,
-  nextText,
-  opening,
   parseList,
   parseRoute,
-  problems,
   removeCard,
   resolvedHead,
   routeHash,
-  runs,
   says,
   sitterParts,
-  sizeOf,
   stops,
   valueOf,
   waitingText,
@@ -104,6 +94,7 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "github" });
   assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
   assert.equal(routeHash({ name: "inflight" }), "#/inflight");
+  assert.deepEqual(parseRoute(routeHash({ name: "later" })), { name: "later" });
 });
 
 test("an in-flight row's status in plain words", () => {
@@ -251,46 +242,49 @@ test("auth problems are told apart from other GitHub errors", () => {
   assert.ok(!authProblem("1 search(es) failed: author not found"));
 });
 
-test("sorted-away groups are skipped by j/k until opened; filtering opens groups with matches", () => {
+const away = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key !== "queue");
+const main = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "queue");
+
+test("the queue and Later are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
   assert.deepEqual(
     groups.map((g) => [g.key, g.open, g.total]),
     [
       ["queue", true, 2],
-      ["later", false, 1],
+      ["later", true, 1],
       ["fyi", false, 0],
       ["resolved", false, 1],
       ["hidden", false, 1],
       ["cleared", false, 1],
     ],
   );
-  assert.equal(groupsOf(queue(), DEFAULT_OPEN, "").find((g) => g.key === "resolved")?.variant, "resolved");
+  assert.equal(groups.find((g) => g.key === "resolved")?.variant, "resolved");
   assert.deepEqual(
-    navigable(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, ""), new Set()).map((c) => c.id),
-    ["acme/api#1", "acme/web#2", "acme/api#6"],
-  );
-  assert.deepEqual(
-    navigable(groups, new Set()).map((c) => c.id),
+    navigable(main(groups), new Set()).map((c) => c.id),
     ["acme/api#1", "acme/web#2"],
   );
   assert.deepEqual(
-    navigable(groups, new Set(["acme/api#1"])).map((c) => c.id),
+    navigable(main(groups), new Set(["acme/api#1"])).map((c) => c.id),
     ["acme/web#2"],
   );
   assert.deepEqual(
-    navigable(groupsOf(queue(), { ...DEFAULT_OPEN, later: true }, ""), new Set()).map((c) => c.id),
-    ["acme/api#1", "acme/web#2", "acme/api#3"],
-  );
-
-  const filtered = groupsOf(queue(), DEFAULT_OPEN, "api#3");
-  assert.deepEqual(
-    navigable(filtered, new Set()).map((c) => c.id),
+    navigable(away(groups), new Set()).map((c) => c.id),
     ["acme/api#3"],
   );
-  assert.equal(filtered.find((g) => g.key === "later")?.open, true);
+  assert.deepEqual(
+    navigable(away(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, "")), new Set()).map((c) => c.id),
+    ["acme/api#3", "acme/api#6"],
+  );
+
+  const filtered = groupsOf(queue(), { ...DEFAULT_OPEN, later: false }, "api#6");
+  assert.deepEqual(
+    navigable(away(filtered), new Set()).map((c) => c.id),
+    ["acme/api#6"],
+  );
+  assert.deepEqual(navigable(main(filtered), new Set()), []);
   // Opened by the filter, not by you: the toggle is off-limits until the filter clears.
-  assert.equal(filtered.find((g) => g.key === "later")?.forced, true);
-  assert.equal(groupsOf(queue(), { ...DEFAULT_OPEN, later: true }, "api#3").find((g) => g.key === "later")?.forced, false);
+  assert.deepEqual([filtered.find((g) => g.key === "resolved")?.open, filtered.find((g) => g.key === "resolved")?.forced], [true, true]);
+  assert.equal(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, "api#6").find((g) => g.key === "resolved")?.forced, false);
   assert.deepEqual(
     navigable(groupsOf(queue(), DEFAULT_OPEN, "PRIYA"), new Set()).map((c) => c.id),
     ["acme/web#2"],
@@ -298,233 +292,29 @@ test("sorted-away groups are skipped by j/k until opened; filtering opens groups
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
 });
 
-test("the queue is one list that folds after queue.cards: j/k stop on its line; unfolded, filtering, or 0 shows them all", () => {
+test("the queue is now's items then today's in the desk's order, and folds after queue.cards: j/k stop on its line", () => {
+  const look = { state: "ready" as const, verdict: "look" as const };
   const today = ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"].map((id) => card(id, { bucket: "today", author: id }));
-  const v = { ...queue(), sections: { ...queue().sections, today }, cards: 3 };
+  const now = [card("acme/api#1", { preflight: { state: "ready", verdict: "skip" } }), card("acme/api#2", { preflight: look })];
+  const v = { ...queue(), sections: { ...queue().sections, now, today }, cards: 3 };
   const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "queue")!;
   const folded = groupsOf(v, DEFAULT_OPEN, "");
   assert.deepEqual(
     [t(folded).cards.map((c) => c.id), t(folded).fold, t(folded).total],
-    [["acme/api#1", "acme/web#10", "acme/web#11"], 2, 5],
+    [["acme/api#1", "acme/api#2", "acme/web#10"], 3, 6],
+    "as the desk sent them: it orders them, the page only shows them",
   );
-  assert.deepEqual(
-    navigable(folded, new Set()).map((c) => c.id),
-    ["acme/api#1", "acme/web#10", "acme/web#11"],
-  );
-  assert.deepEqual(stops(folded, new Set()), ["acme/api#1", "acme/web#10", "acme/web#11", foldOf("queue")]);
-  assert.deepEqual(
-    stops(groupsOf(v, { ...DEFAULT_OPEN, later: true }, ""), new Set()).slice(-2),
-    [foldOf("queue"), "acme/api#3"],
-    "then the next open group",
-  );
+  assert.deepEqual(stops(main(folded), new Set()), ["acme/api#1", "acme/api#2", "acme/web#10", foldOf("queue")]);
 
-  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { queue: true })).cards.length, 5);
-  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { queue: true })).fold, 0);
-  assert.ok(!stops(groupsOf(v, DEFAULT_OPEN, "", { queue: true }), new Set()).includes(foldOf("queue")));
+  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { queue: true })).cards.length, 6);
+  assert.ok(!stops(main(groupsOf(v, DEFAULT_OPEN, "", { queue: true })), new Set()).includes(foldOf("queue")));
   assert.equal(t(groupsOf({ ...v, cards: 0 }, DEFAULT_OPEN, "")).fold, 0);
+  assert.equal(t(groupsOf({ ...v, cards: 5 }, DEFAULT_OPEN, "")).fold, 0, "a fold never hides just one");
   assert.deepEqual(
     t(groupsOf(v, DEFAULT_OPEN, "web#1")).cards.map((c) => c.id),
     ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"],
     "every match shows while filtering",
   );
-});
-
-test("the queue is now's cards then today's, each the weightiest first, and folds whole stacks at a time", () => {
-  const look = { state: "ready" as const, verdict: "look" as const };
-  const skip = { state: "ready" as const, verdict: "skip" as const };
-  const now = [
-    card("acme/api#20", { author: "a20", preflight: skip }),
-    card("acme/api#21", { author: "a21", preflight: { state: "ready", verdict: "skim" } }),
-    card("acme/api#22", { author: "a22", preflight: look }),
-    card("acme/api#25", { author: "me", inflight: true, why: "merging: CI failing; Claude couldn't fix it" }),
-    card("acme/api#23", {
-      author: "me",
-      inflight: true,
-      why: "merging: reply ready to send",
-      reply: { id: "d1", thread_id: null, to: "dana", quote: "", body: "Kept it.", at: "", sent_at: null, url: null },
-    }),
-    card("acme/api#24", { author: "a24", preflight: { state: "ready", verdict: "skim", risk: "high" } }),
-  ];
-  const v = { ...queue(), sections: { ...queue().sections, now, today: [] }, cards: 3 };
-  const g = groupsOf(v, DEFAULT_OPEN, "", {}, "me").find((x) => x.key === "queue")!;
-  // Your reply to send first, then a close look and high risk; skip last; otherwise as the rules ordered them. Your PR in
-  // Merging that no key can finish is one of the rest.
-  assert.deepEqual([g.cards.map((c) => c.id), g.fold], [["acme/api#23", "acme/api#22", "acme/api#24"], 3]);
-  assert.deepEqual(
-    groupsOf(v, DEFAULT_OPEN, "", { queue: true }, "me")
-      .find((x) => x.key === "queue")!
-      .cards.map((c) => c.id),
-    ["acme/api#23", "acme/api#22", "acme/api#24", "acme/api#21", "acme/api#25", "acme/api#20"],
-  );
-  // Approved and green comes after the close looks, a look at an older commit after a current one, and someone else's red
-  // PR after the ones ready to review.
-  const order = groupsOf(
-    {
-      ...queue(),
-      sections: {
-        ...queue().sections,
-        now: [
-          card("acme/api#50", { author: "me", ci: "green", chips: ["approved"] }),
-          card("acme/api#51", { author: "a51", ci: "red", chips: ["CI red"], preflight: look }),
-          card("acme/api#52", { author: "a52", preflight: { state: "stale", verdict: "look" } }),
-          card("acme/api#53", { author: "a53", preflight: look }),
-          card("acme/api#54", { author: "a54", preflight: { state: "ready", verdict: "skim" } }),
-        ],
-        today: [],
-      },
-    },
-    DEFAULT_OPEN,
-    "",
-    {},
-    "me",
-  ).find((x) => x.key === "queue")!;
-  assert.deepEqual(
-    order.cards.map((c) => c.id),
-    ["acme/api#53", "acme/api#52", "acme/api#50", "acme/api#54", "acme/api#51"],
-  );
-  assert.ok(stops([g], new Set()).includes(foldOf("queue")));
-  // Now's cards stay ahead of today's, whatever their weight: a skip that's urgent before a close look that isn't.
-  const split = groupsOf(
-    {
-      ...queue(),
-      sections: {
-        ...queue().sections,
-        now: [card("acme/api#60", { author: "a60", preflight: skip }), card("acme/api#61", { author: "a61" })],
-        today: [
-          card("acme/web#62", { author: "a62", bucket: "today" }),
-          card("acme/web#63", { author: "a63", bucket: "today", preflight: look }),
-        ],
-      },
-    },
-    DEFAULT_OPEN,
-    "",
-  ).find((x) => x.key === "queue")!;
-  assert.deepEqual(
-    split.cards.map((c) => c.id),
-    ["acme/api#61", "acme/api#60", "acme/web#63", "acme/web#62"],
-  );
-  const demoted = card("acme/web#30", { demoted: "3 from PRs to review are urgent already" });
-  const today = [card("acme/web#31", { author: "a31" }), card("acme/web#32", { author: "a32", preflight: skip }), demoted];
-  const t = groupsOf({ ...queue(), sections: { ...queue().sections, now: [], today }, cards: 1 }, DEFAULT_OPEN, "").find(
-    (x) => x.key === "queue",
-  )!;
-  assert.deepEqual(
-    t.cards.map((c) => c.id),
-    ["acme/web#30"],
-    "what a cap made not urgent comes first among today's",
-  );
-
-  // A stack is all above the line or all behind it, and one card's worth; the first one always shows whole.
-  const stack = ["acme/web#40", "acme/web#41", "acme/web#42", "acme/web#43"].map((id) =>
-    card(id, { author: "vaind", why: "close collaborator" }),
-  );
-  const stacked = (list: Card[], cap: number) =>
-    groupsOf({ ...queue(), sections: { ...queue().sections, now: [], today: list }, cards: cap }, DEFAULT_OPEN, "").find(
-      (x) => x.key === "queue",
-    )!;
-  const lead = card("acme/web#39", { author: "a39" });
-  assert.deepEqual([stacked([lead, ...stack], 1).cards.length, stacked([lead, ...stack], 1).fold], [1, 4]);
-  assert.deepEqual([stacked([lead, ...stack], 2).cards.length, stacked([lead, ...stack], 2).fold], [5, 0]);
-  assert.deepEqual([stacked(stack, 1).cards.length, stacked(stack, 1).fold], [4, 0]);
-  // A fold never hides just one card: the stack fills the slot and the one after it shows too.
-  const tail = stacked([...stack, card("acme/web#44", { author: "a44" })], 1);
-  assert.deepEqual([tail.cards.length, tail.fold], [5, 0]);
-  // 18 of your drafts don't swallow the fold: they take one slot, and nine singles fill the rest.
-  const drafts = Array.from({ length: 18 }, (_, i) => card(`acme/web#${100 + i}`, { author: "me", why: "your draft: finish it" }));
-  const singles = Array.from({ length: 12 }, (_, i) => card(`acme/web#${200 + i}`, { author: `s${i}`, bucket: "today" }));
-  const long = stacked([lead, ...drafts, ...singles], 10);
-  assert.deepEqual([long.cards.length, long.fold, long.foldLine], [1 + 18 + 8, 4, "4 more"]);
-  assert.deepEqual(
-    runs(stack).map((r) => r.cards.length),
-    [4],
-  );
-});
-
-test("the fold line says what's behind it that shouldn't wait: urgent cards and pinned ones", () => {
-  const now = Array.from({ length: 11 }, (_, i) => card(`acme/api#${300 + i}`, { author: `n${i}` }));
-  const today = [
-    card("acme/web#400", { author: "t0", bucket: "today", pinned: true }),
-    card("acme/web#401", { author: "t1", bucket: "today" }),
-  ];
-  const g = groupsOf({ ...queue(), sections: { ...queue().sections, now, today } }, DEFAULT_OPEN, "").find((x) => x.key === "queue")!;
-  assert.deepEqual([g.cards.length, g.foldLine], [10, "3 more, 1 urgent, 1 pinned"]);
-  assert.equal(foldText([card("acme/web#402", { bucket: "today" }), card("acme/web#403", { bucket: "today" })]), "2 more");
-});
-
-test("a PR Claude handed back sits above ordinary items in the queue", () => {
-  const now = [
-    card("acme/api#30", { author: "a30", preflight: { state: "ready", verdict: "look" } }),
-    card("acme/api#31", { author: "me", handed_back: true, why: "handed back: Dana wants the cache redesigned" }),
-  ];
-  const v = { ...queue(), sections: { ...queue().sections, now, today: [] } };
-  assert.deepEqual(
-    groupsOf(v, DEFAULT_OPEN, "", {}, "me")
-      .find((x) => x.key === "queue")!
-      .cards.map((c) => c.id),
-    ["acme/api#31", "acme/api#30"],
-  );
-});
-
-test("your PR's next step leaves out what its why already says", () => {
-  const next = "merge conflict with main: m hands it off for merge";
-  assert.equal(nextText({ why: "merge conflict", next }), "m hands it off for merge");
-  assert.equal(
-    nextText({ why: "approved and green: merge it", next: "approved and green: o opens it on GitHub to merge" }),
-    "o opens it on GitHub to merge",
-  );
-  assert.equal(nextText({ why: "close collaborator", next }), next);
-  assert.equal(nextText({ why: "", next }), next);
-  assert.equal(nextText({ why: "x", next: undefined }), undefined);
-});
-
-test("a card's next step sets its keys apart", () => {
-  assert.deepEqual(keyParts("enter opens Merging, y sends it"), ["", "enter", " opens Merging, ", "y", " sends it"]);
-  assert.deepEqual(keyParts("m hands it off for merge"), ["", "m", " hands it off for merge"]);
-  assert.deepEqual(keyParts("a draft: mark it ready for review when it is"), ["a draft: mark it ready for review when it is"]);
-});
-
-test("a card's gist and concern end at a whole sentence or clause, never in an ellipsis", () => {
-  const scheduler =
-    "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work.";
-  assert.equal(
-    opening(scheduler),
-    "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s.",
-  );
-  assert.equal(
-    opening("Splits the scheduler in two. Lease owns the jobs table."),
-    "Splits the scheduler in two. Lease owns the jobs table.",
-  );
-  // A first sentence longer than the limit stays whole: the card's line clamp is the fallback.
-  const long = `Moves the retry budget ${"and more ".repeat(40)}into the coordinator. Then this.`;
-  assert.equal(opening(long), long.replace(" Then this.", ""));
-  // The shortest gist is its first clause; a concern keeps its whole first sentence, so the consequence stays.
-  const budget = "The budget is per process; with 12 replicas one hot shard trips it on some and not others. Tests miss it.";
-  assert.equal(opening(budget, 0), "The budget is per process.");
-  assert.equal(opening(budget, 0, false), "The budget is per process; with 12 replicas one hot shard trips it on some and not others.");
-  assert.equal(opening("Adds an http2: 'prior-knowledge' option. HTTP/1.1 keeps working.", 0), "Adds an http2: 'prior-knowledge' option.");
-});
-
-test("a card's problems and size, in the review's and the lane's words", () => {
-  assert.deepEqual(problems({ chips: ["CI red", "conflict", "changes requested", "approved", "+62 −7"] }), [
-    { text: "CI failing", tone: "bad" },
-    { text: "changes requested", tone: "warn" },
-    { text: "merge conflict", tone: "warn" },
-  ]);
-  assert.deepEqual(problems({ chips: ["draft", "3 unresolved"] }), []);
-  assert.equal(sizeOf({ chips: ["CI red", "+341 −802"] }), "+341 −802");
-  assert.equal(sizeOf({ chips: ["issue"] }), undefined);
-});
-
-test("a card's AI word: the verdict, marked when it's for an older commit, or why there's none yet", () => {
-  assert.deepEqual(aiWord({ state: "ready", verdict: "look" }), { verdict: "look", note: "" });
-  assert.deepEqual(aiWord({ state: "stale", verdict: "skim" }), { verdict: "skim", note: "earlier commit" });
-  assert.deepEqual(aiWord({ state: "paused", verdict: "look" }), { verdict: "look", note: "earlier commit" });
-  assert.deepEqual(aiWord({ state: "off", verdict: "skip" }), { verdict: "skip", note: "earlier commit" });
-  assert.deepEqual(aiWord({ state: "running" }), { verdict: null, note: "AI review being written" });
-  assert.deepEqual(aiWord({ state: "queued" }), { verdict: null, note: "AI review queued" });
-  assert.deepEqual(aiWord({ state: "paused" }), { verdict: null, note: "AI review paused" });
-  assert.equal(aiWord({ state: "off" }), null);
-  assert.equal(aiWord({ state: "none" }), null);
 });
 
 test("the selected card's facts leave out what the card already says", () => {
@@ -786,28 +576,6 @@ test("formatting", () => {
     /^coordinator snoozed until .*\b9:00 or new activity$/,
   );
   assert.equal(clearedText(card("a/b#1", { status: "muted", cleared_by_coordinator: "" })), "coordinator muted");
-});
-
-test("a skip's gist is its first clause when the sentence won't fit a line; units stay with their numbers", () => {
-  assert.equal(
-    firstClause("Runs eval shard setup and sandbox provisioning in the background, with most of the change in evals-runner. More."),
-    "Runs eval shard setup and sandbox provisioning in the background.",
-  );
-  assert.equal(firstClause("Deletes an unused helper and its tests. Nothing else."), "Deletes an unused helper and its tests.");
-  // No comma in reach: it ends at the last joint that fits, with a period, never mid-clause.
-  assert.equal(
-    firstClause("Adds a two-point calibration per sensor (dry and wet readings) and maps raw readings to 0–100 % moisture."),
-    "Adds a two-point calibration per sensor (dry and wet readings).",
-  );
-  assert.equal(
-    firstClause("Adds a two-point calibration per sensor (dry readings and wet readings taken at install time on every board)."),
-    "Adds a two-point calibration per sensor.",
-  );
-  assert.equal(
-    keepUnits("maps raw readings to 0–100 % moisture every 15 s"),
-    "maps raw readings to 0–\u2060100\u202f% moisture every 15\u202fs",
-  );
-  assert.equal(keepUnits("2 sensors"), "2 sensors");
 });
 
 test("an AI review names the model that wrote it the way people say it", () => {

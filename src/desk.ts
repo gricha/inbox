@@ -48,7 +48,7 @@ import type {
 } from "./types.ts";
 import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
-import { classify, placedBy, type BoardResult } from "./rules.ts";
+import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
@@ -111,7 +111,8 @@ interface Snapshot {
   reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
-  needs: Map<string, string>; // PRs in Merging that need you, and ones Claude handed back: why, at the top of the queue
+  needs: Map<string, string>; // PRs Claude handed back: why, at the top of the queue
+  waiting: Map<string, string>; // PRs in Merging waiting on you: why; they stay in Merging, never in the queue
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
 }
 
@@ -635,7 +636,7 @@ export class Desk {
   // A connector brought in something new.
   synced(): void {
     this.changed();
-    this.notifyNewNow();
+    this.notifyNew();
     this.pumpAi();
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
@@ -724,22 +725,32 @@ export class Desk {
     }
   }
 
-  notifyNewNow(): void {
+  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin), and newly waiting in Merging.
+  notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
-    const now = this.focus().sections.now;
-    const prev = this.store.get("notified_now") as string[] | null;
-    this.store.set(
-      "notified_now",
-      now.map((c) => c.id),
-    );
-    if (prev === null || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
-    const fresh = now.filter((c) => !prev.includes(c.id));
-    if (!fresh.length) return;
+    const { now, today } = this.focus().sections;
+    const queued = [...now, ...today]
+      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin")
+      .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
+    const snap = this.snapshot();
+    const waiting = [...snap.waiting].map(([id, why]) => ({ id, ref: shortRef(snap.entries.get(id)!.item), why }));
+    const fresh = [this.freshSince("notified_queue", queued), this.freshSince("notified_merging", waiting)].flat();
+    if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
     const [only] = fresh;
     const body =
-      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new and urgent: ${fresh.map(shortRef).join(", ")}`;
+      fresh.length === 1 && only ? `${only.ref} · ${only.why}` : `${fresh.length} need you: ${fresh.map((x) => x.ref).join(", ")}`;
     this.notify("Review Desk", body);
+  }
+
+  // What isn't in the last pass's list under `key` (nothing on the first pass), keeping this pass's.
+  freshSince<T extends { id: string }>(key: string, list: T[]): T[] {
+    const prev = this.store.get(key) as string[] | null;
+    this.store.set(
+      key,
+      list.map((x) => x.id),
+    );
+    return prev === null ? [] : list.filter((x) => !prev.includes(x.id));
   }
 
   // ---------------------------------------------------------------- classification
@@ -836,27 +847,25 @@ export class Desk {
         if (!cur || RANK[p.bucket] < RANK[cur.bucket] || (p.bucket === cur.bucket && p.hard && !cur.hard)) best.set(id, p);
       }
     }
-    // A PR in Merging comes back to Now only when it needs you, with the reason as its why; one Claude handed back is on your
-    // desk again, at the top, until you deal with it (done, or m again).
+    // A PR in Merging stays there whatever it waits on you for; one Claude handed back tops your desk until done or m again.
     const needs = new Map<string, string>();
+    const waiting = new Map<string, string>();
     const sitters = this.store.prefixed<Partial<Sitter>>("sitter:");
     for (const e of entries.values()) {
-      let why: string;
       if (laneOwned(e)) {
         const v = this.sitterView(e.item);
-        if (!v.needs_you) continue;
-        // Among other people's asks, say it's your PR in Merging, unless it already says who's asking.
-        why = v.escalation && v.escalation.by !== "desk" ? v.needs_you : `merging: ${v.needs_you}`;
-      } else {
-        const back = sitters.get(e.item.id)?.handback;
-        if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
-        why = `handed back: ${back.reason}`;
+        // Say it's your PR in Merging, unless it already says who's asking.
+        if (v.needs_you) waiting.set(e.item.id, v.escalation && v.escalation.by !== "desk" ? v.needs_you : `merging: ${v.needs_you}`);
+        continue;
       }
+      const back = sitters.get(e.item.id)?.handback;
+      if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
+      const why = `handed back: ${back.reason}`;
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins };
+    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, waiting, pins };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -957,14 +966,14 @@ export class Desk {
       },
       inflight: {
         total: [...snap.entries.values()].filter((e) => e.inflight).length,
-        needs_you: [...snap.needs.keys()].filter((id) => snap.entries.get(id)?.inflight).length,
+        needs_you: snap.waiting.size,
       },
       rate_limit: this.gh.api.rateLimit(),
       coordinator: { state: this.coordinator.state(), acted: this.coordinator.acted() },
     };
   }
 
-  // Your PRs in Merging that need you, and those Claude handed back, at the top of Now.
+  // Your PRs Claude handed back, at the top of Now.
   needsCards(snap: Snapshot, seen: Set<string>): Card[] {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
@@ -984,19 +993,11 @@ export class Desk {
       if (next) c.next = next;
       if (it.checks_failed?.length) c.checks_failed = it.checks_failed;
       if (it.checks_optional?.length) c.checks_optional = it.checks_optional;
-      if (e.inflight) {
-        const v = this.sitterView(it);
-        if (v.drafts[0]) c.reply = v.drafts[0];
-        if (v.escalation) c.escalated = true;
-        if (v.escalation && v.resume) c.resume = v.resume;
-        c.waiting_since = this.neededSince(e, v);
-      } else {
-        // Who last spoke on it: a reviewer's comment or review is the context its threads and next step don't give.
-        const said = this.store
-          .activity({ after: 0, limit: 20, item: it.id, latest: true })
-          .find((x) => x.kind === "commented" || x.kind === "reviewed");
-        if (said) c.last_event = said;
-      }
+      // Who last spoke on it: a reviewer's comment or review is the context its threads and next step don't give.
+      const said = this.store
+        .activity({ after: 0, limit: 20, item: it.id, latest: true })
+        .find((x) => x.kind === "commented" || x.kind === "reviewed");
+      if (said) c.last_event = said;
     }
     if (it.kind === "issue") {
       const recent = this.store.activity({ after: 0, limit: 20, item: it.id, latest: true });
@@ -1015,16 +1016,6 @@ export class Desk {
       if (involved) c.involved = involved;
     }
     return c;
-  }
-
-  // When your PR in Merging started needing you: its question or reply, else the latest conflict or red CI; never before m.
-  neededSince(e: Entry, v: Pick<InflightRow, "escalation" | "drafts">): string {
-    const raised = this.store
-      .activity({ after: 0, limit: 20, item: e.item.id, latest: true })
-      .find((x) => x.kind === "conflict" || (x.kind === "ci" && x.data.to === "red"));
-    const at = v.escalation?.at ?? v.drafts[0]?.at ?? raised?.at ?? "";
-    const from = e.state.inflight_at ?? e.analysis.waiting_since;
-    return at > from ? at : from;
   }
 
   // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
@@ -1086,7 +1077,7 @@ export class Desk {
     };
   }
 
-  // Now and Today in the order the queue shows them (and the AI reviews run): your PRs that need you from Merging, then each board's.
+  // Now and Today in the queue's order, which the AI reviews run in too: what Claude handed back, then each board's.
   top(snap: Snapshot, seen: Set<string>): FocusView["sections"] {
     const loaded = this.requireConfig();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
@@ -1100,7 +1091,7 @@ export class Desk {
         }
       }
     }
-    return sections;
+    return { now: queueOrder(sections.now, this.me()), today: queueOrder(sections.today, this.me()) };
   }
 
   // The single surface: every item once, at its best placement across boards.
@@ -1170,11 +1161,10 @@ export class Desk {
     return all.sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
   }
 
-  // Where an item's card says it is: its best placement; a PR in Merging that doesn't need you is calm, as in Merging,
-  // whatever its boards would say ("CI failing" is Claude's to fix).
+  // Where an item's card says it is; a PR in Merging is Merging's whatever its boards say, with why it waits on you if it does.
   shownAt(e: Entry, snap: Snapshot): Placement | null {
     const p = snap.best.get(e.item.id) ?? this.placementOf(e.item.id, snap);
-    return p && laneOwned(e) && !snap.needs.has(e.item.id) ? { ...p, bucket: "fyi", why: "merging" } : p;
+    return p && laneOwned(e) ? { ...p, bucket: "fyi", why: snap.waiting.get(e.item.id) ?? "merging" } : p;
   }
 
   board(id: string): BoardView {
@@ -1708,11 +1698,11 @@ export class Desk {
     });
     this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: drafted a reply on ${id} to ${to}`);
     this.changed();
-    this.notifyNewNow();
+    this.notifyNew();
     return draft;
   }
 
-  // desk_escalate: a decision that's yours. The PR goes to Now with the question as its why; its babysitter waits.
+  // desk_escalate: a decision that's yours. The PR waits on you in Merging with the question as its why; its babysitter waits.
   // With `handBack`, it can't realistically be merged: the PR leaves Merging for your desk with the line as its why.
   escalate(ref: string, question: string, by?: { agent?: string; pr?: string }, handBack = false): { question: string } {
     const e = this.inflightEntry(ref);
@@ -1730,7 +1720,7 @@ export class Desk {
     });
     this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: ${e.item.id} needs you: ${clipped}`);
     this.changed();
-    this.notifyNewNow();
+    this.notifyNew();
     return { question: clipped };
   }
 
@@ -1884,7 +1874,7 @@ export class Desk {
     this.log(`${by === "agent" ? "an agent" : "babysitter"}: handed ${id} back: ${reason}`);
     this.changed();
     this.sitter.consider(id, 0);
-    this.notifyNewNow();
+    this.notifyNew();
   }
 
   // ---------------------------------------------------------------- config

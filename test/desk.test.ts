@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
+import { judgeKey } from "../src/judge.ts";
 import type { Context } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
@@ -151,7 +152,7 @@ test("preview shows moves without saving; putConfig saves valid text only", asyn
   t.cleanup();
 });
 
-test("notifies only for new NOW entries after the first sync", async () => {
+test("notifies for a new item on the queue after the first sync", async () => {
   const items = [reviewAsk(1)];
   const t = await setup(items);
   await t.desk.sync();
@@ -163,6 +164,28 @@ test("notifies only for new NOW entries after the first sync", async () => {
   assert.match(t.notes[0] ?? "", /api#5/);
   await t.desk.sync();
   assert.equal(t.notes.length, 1);
+  t.cleanup();
+});
+
+test("a new queue item notifies once Claude or a hard rule placed it, never while Claude hasn't sorted it or for your own pin", async () => {
+  const t = await setup([reviewAsk(1), teamPing(2)], { settings: { "notify.quiet": "" } });
+  await t.desk.sync();
+  t.gh.items.set("acme/web#3", myPr(3, { ci: "red" }));
+  await t.desk.sync();
+  assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/web#3" && x.placed_by === "pending"));
+  assert.deepEqual(t.notes, [], "the rules put it there, and Claude may still sort it away");
+  const e = t.desk.snapshot().entries.get("acme/web#3")!;
+  const key = judgeKey(e.item, e.analysis.activity_at, null);
+  t.desk.store.set("judge:acme/web#3", { key, policy: t.desk.policy.hash, bucket: "today", why: "your PR is red", at: NOW.toISOString() });
+  t.desk.changed();
+  t.desk.notifyNew();
+  assert.deepEqual(t.notes, ["web#3 · your PR is red"]);
+  t.desk.notifyNew();
+  assert.equal(t.notes.length, 1, "once");
+  t.desk.act("api#2", "pin");
+  assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
+  t.desk.notifyNew();
+  assert.equal(t.notes.length, 1, "your pin put it there");
   t.cleanup();
 });
 
@@ -450,7 +473,7 @@ test("your PR's card carries who last spoke on it; nobody asked you by name says
   t.cleanup();
 });
 
-test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging that needs you stays", async () => {
+test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging waits on you there", async () => {
   const days = (d: number) => hoursAgo(d * 24);
   const t = await setup([
     myPr(20631, { ci: "green", mergeable: "conflict", updated_at: days(143) }),
@@ -472,17 +495,14 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   );
   assert.deepEqual(
     q.sections.now.map((c) => [c.id, c.why]),
-    [
-      ["acme/web#8", "merging: CI failing"],
-      ["acme/api#1", "carol asked you directly"],
-    ],
+    [["acme/api#1", "carol asked you directly"]],
     "the ask came an hour ago, so it isn't quiet whatever updated_at says",
   );
   assert.deepEqual(
     q.sections.today.map((c) => [c.id, c.next]),
     [["acme/web#7", "merge conflict with main: m hands it off for merge"]],
   );
-  assert.equal(q.sections.now[0]?.next, undefined, "its why says it, and Enter on its keys opens the lane");
+  assert.deepEqual([t.desk.inflight().rows[0]?.needs_you, t.desk.overview().inflight.needs_you], ["CI failing", 1]);
 
   t.desk.putSettings({ set: { "queue.quiet_days": 0, "inflight.babysit": true } });
   assert.deepEqual(

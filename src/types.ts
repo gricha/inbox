@@ -444,9 +444,6 @@ export interface Card {
   next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"
   checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
   checks_optional?: string[]; // those of them its base branch doesn't require
-  reply?: Draft; // your PR in Merging: the first reply waiting for Send (y sends it from the queue too)
-  escalated?: boolean; // your PR in Merging: Claude (or the desk) asked you something; x dismisses it from the queue
-  resume?: string; // ...and the command that opens Claude's session, which c copies from the queue
   handed_back?: boolean; // your PR, back from Merging because Claude can't get it merged; its why says why
   desk_auto_merge?: boolean; // your open PR out of Merging with the auto-merge m turned on still on: b turns it off
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")

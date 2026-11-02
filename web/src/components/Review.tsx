@@ -5,6 +5,7 @@ import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, R
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
 import { currentFile, filePatch, noCloneOf, orderNotes, resolvedHead, says, sitterNews, sitterParts, splitPath, waitsOn } from "../view.ts";
+import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, Dots, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 
@@ -16,14 +17,13 @@ interface NoteMeta {
 const ARM_MS = 3000;
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the file you're in" is read off
-export const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
+const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
 const delta = (f: ReviewFile) => (f.patch === null && !f.additions && !f.deletions ? "binary" : `+${f.additions} −${f.deletions}`);
 
-// Pierre draws the diff in a shadow root; the themes follow the system's light or dark, like the rest of the app.
+// Pierre draws the diff in a shadow root; its light or dark follows the app's theme (diffTheme).
 const DIFF: FileDiffOptions<NoteMeta, undefined> = {
   theme: { light: "pierre-light", dark: "pierre-dark" },
-  themeType: "system",
   diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word-alt",
@@ -32,6 +32,15 @@ const DIFF: FileDiffOptions<NoteMeta, undefined> = {
   disableFileHeader: true,
   lineHoverHighlight: "disabled",
 };
+
+// One object per theme, so a re-render doesn't hand Pierre new options (and a fresh highlight) each time.
+const OPTIONS = new Map<string, FileDiffOptions<NoteMeta, undefined>>();
+function diffOptions(): FileDiffOptions<NoteMeta, undefined> {
+  const t = diffTheme();
+  const o = OPTIONS.get(t) ?? { ...DIFF, themeType: t };
+  OPTIONS.set(t, o);
+  return o;
+}
 
 export function Review({
   id,
@@ -308,11 +317,11 @@ export function Review({
   return (
     <div className="review">
       <div className="rv-top">
-        {/* A resolved PR needs nobody now, so it doesn't wear Now's highlighter. */}
+        {/* Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour. */}
         <header
           className={cls(
             "rv-head",
-            `b-${card.bucket}`,
+            `b-${card.inflight && row?.needs_you ? "now" : card.bucket}`,
             (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
           )}
         >
@@ -358,7 +367,10 @@ export function Review({
           )}
           {(row?.state === "open" || card.handed_back) && noCloneOf({ why: row?.needs_you ?? card.why, repo: card.repo }) && (
             <p className="rv-meta rv-lane">
-              <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
+              {/* In a span like every fact, so the line's gutter clips its "·", not the link's first letters. */}
+              <span>
+                <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
+              </span>
             </p>
           )}
           {draft && (
@@ -684,7 +696,7 @@ function FileSection({
         <FileDiff<NoteMeta>
           className="rv-diff"
           fileDiff={fileDiff}
-          options={DIFF}
+          options={diffOptions()}
           lineAnnotations={annotations}
           renderAnnotation={(a) => <Note index={a.metadata.index} body={a.metadata.body} on={current === a.metadata.index} />}
         />

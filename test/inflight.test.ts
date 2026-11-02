@@ -1,5 +1,5 @@
-// Merging (in flight): m on your own PR, the Merging tab, needs-you in Now, drafts, questions and hand-backs from agents, Send and
-// auto-merge (the GitHub writes).
+// Merging (in flight): m on your own PR, the Merging tab and what waits on you there (never in the queue), drafts, questions and
+// hand-backs from agents, Send and auto-merge (the GitHub writes).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/server.ts";
@@ -90,6 +90,31 @@ test("a hand-off puts your own open PR in Merging: it leaves the queue, and undo
   assert.equal(t.desk.inflight().rows.length, 1);
 });
 
+test("whatever a PR in Merging waits on you for, it stays there: never in the queue, focus or the status line, and counted", async (c) => {
+  const ready = { ci: "green" as const, review_decision: "approved" as const, mergeable: "clean" as const };
+  const t = await setup(
+    [reviewAsk(1), myPr(3, { ci: "pending" }), myPr(4, { ci: "pending" }), myPr(5, ready), myPr(6, { ci: "pending" })],
+    {
+      settings: OFF,
+    },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  for (const n of [3, 4, 5, 6]) t.desk.act(`web#${n}`, "inflight");
+  t.desk.escalate("web#3", "Keep v1?");
+  await t.desk.draftReply("web#4", null, "Rebased on main.");
+  const q = t.desk.queue();
+  const shown = [q.sections, t.desk.focus().sections].flatMap((x) => Object.values(x).flat());
+  assert.deepEqual([...new Set([...shown, ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id))], ["acme/api#1"]);
+  assert.equal(t.desk.status().text, "desk 1 ●1");
+  assert.deepEqual(t.desk.overview().inflight, { total: 4, needs_you: 3 });
+  assert.deepEqual(
+    t.desk.inflight().rows.map((r) => !!r.needs_you),
+    [true, true, true, false],
+    "what waits on you first",
+  );
+});
+
 test("only your own open PRs are handed off for merge", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3)], { settings: OFF });
   c.after(t.cleanup);
@@ -106,7 +131,7 @@ test("in Merging, Claude owns it: done, snooze and mute are refused, and the jud
   const t = await setup([myPr(3, { ci: "pending" })], { settings: OFF });
   c.after(t.cleanup);
   await t.desk.sync();
-  // Muted before you marked it: marking clears that, so its questions can reach Now.
+  // Muted before you marked it: marking clears that, so its questions reach you.
   const muted = t.desk.act("web#3", "mute");
   const marked = t.desk.act("web#3", "inflight");
   assert.equal(marked.state.muted, false);
@@ -116,10 +141,7 @@ test("in Merging, Claude owns it: done, snooze and mute are refused, and the jud
       () => t.desk.act("web#3", action, undefined, { agent: "coordinator", reason: "policy" }),
       (e: Error & { status: number }) => e.status === 409 && e.message.includes("back to the desk (b)"),
     );
-  assert.deepEqual(
-    t.desk.focus().sections.now.map((x) => x.id),
-    ["acme/web#3"],
-  );
+  assert.deepEqual(t.desk.focus().sections, { now: [], today: [] }, "Merging has it, question and all");
   assert.equal(t.desk.overview().inflight.needs_you, 1);
   // Undoing the mark brings back the mute.
   t.desk.undo(marked.undo_seq);
@@ -143,7 +165,7 @@ test("in Merging, Claude owns it: done, snooze and mute are refused, and the jud
   assert.deepEqual(t.desk.coordinator.pending(cursor), []);
 });
 
-test("with Claude off, a PR in Merging comes back to Now when CI fails, and when it's ready to merge", async (c) => {
+test("with Claude off, a PR in Merging waits on you there when CI fails and when it's ready to merge, never in the queue", async (c) => {
   const t = await setup(
     [myPr(3, { ci: "red" }), myPr(4, { ci: "green", review_decision: "approved", mergeable: "clean" }), myPr(5, { ci: "pending" })],
     {
@@ -153,40 +175,41 @@ test("with Claude off, a PR in Merging comes back to Now when CI fails, and when
   c.after(t.cleanup);
   await t.desk.sync();
   for (const n of [3, 4, 5]) t.desk.act(`web#${n}`, "inflight");
-  const now = t.desk.queue().sections.now;
+  assert.deepEqual(Object.values(t.desk.queue().sections).flat(), []);
   assert.deepEqual(
-    now.map((x) => [x.id, x.why]),
+    t.desk.inflight().rows.map((r) => [r.card.id, r.needs_you]),
     [
-      ["acme/web#3", "merging: CI failing"],
-      ["acme/web#4", "merging: ready to merge"],
+      ["acme/web#3", "CI failing"],
+      ["acme/web#4", "ready to merge"],
+      ["acme/web#5", null],
     ],
+    "what waits on you first",
   );
-  assert.ok(now.every((x) => x.inflight));
-  assert.ok(!t.desk.queue().sections.today.some((x) => x.id === "acme/web#5"));
-  // Its review and detail are as calm as its lane row: not in Now, whatever its boards would say.
+  // Its review and detail say so, as Merging does, and stay out of Now whatever its boards would say.
   assert.deepEqual(
-    [t.desk.item("web#5").card.bucket, t.desk.item("web#5").card.why, t.desk.item("web#3").card.bucket],
-    ["fyi", "merging", "now"],
+    [t.desk.item("web#3").card.bucket, t.desk.item("web#3").card.why, t.desk.item("web#5").card.why],
+    ["fyi", "merging: CI failing", "merging"],
   );
   assert.deepEqual(t.desk.overview().inflight, { total: 3, needs_you: 2 });
-  assert.equal(t.desk.focus().sections.now.length, 2);
+  assert.deepEqual([t.desk.overview().focus.now, t.desk.overview().focus.today, t.desk.status().text], [0, 0, ""]);
 });
 
-test("desk_escalate: the PR goes to Now with the question as its why, notifies, and x dismisses it", async (c) => {
+test("desk_escalate: the PR waits on you in Merging with the question as its why, notifies, and x dismisses it", async (c) => {
   const t = await setup([myPr(3, { ci: "pending" })], { settings: { ...OFF, "notify.quiet": "" } });
   c.after(t.cleanup);
   await t.desk.sync();
   t.desk.act("web#3", "inflight");
-  t.desk.notifyNewNow(); // the baseline, as after a sync
+  t.desk.notifyNew(); // the baseline, as after a sync
   assert.throws(() => t.desk.escalate("web#9", "x?"), /no item/);
   const r = t.desk.escalate("web#3", "  Bump the API version,\nor keep v1 compatible?  ");
   assert.equal(r.question, "Bump the API version, or keep v1 compatible?");
-  const [top] = t.desk.queue().sections.now;
-  assert.equal(top?.why, "your agent asks: Bump the API version, or keep v1 compatible?", "who asks: not a reviewer");
+  assert.equal(t.desk.queue().sections.now.length, 0);
+  assert.equal(t.desk.item("web#3").card.why, "your agent asks: Bump the API version, or keep v1 compatible?", "who asks");
   assert.equal(t.desk.inflight().rows[0]?.sitter.text, "needs you: Bump the API version, or keep v1 compatible?");
+  assert.equal(t.desk.overview().inflight.needs_you, 1);
   assert.deepEqual(t.notes, ["web#3 · your agent asks: Bump the API version, or keep v1 compatible?"]);
   t.desk.dismiss("web#3");
-  assert.equal(t.desk.queue().sections.now.length, 0);
+  assert.equal(t.desk.overview().inflight.needs_you, 0);
   assert.throws(() => {
     t.desk.dismiss("web#3");
   }, /nothing to dismiss/);
@@ -220,7 +243,7 @@ test("desk_draft_reply: a reply to one of the PR's threads waits for Send, which
     "a new draft for the same thread replaces the old one",
   );
   assert.equal(row.needs_you, "reply ready to send");
-  assert.equal(t.desk.queue().sections.now[0]?.why, "merging: reply ready to send");
+  assert.deepEqual([t.desk.queue().sections.now, t.desk.item("web#3").card.why], [[], "merging: reply ready to send"]);
   await assert.rejects(t.desk.sendDraft("web#3", first.id), /no draft/);
   assert.deepEqual(await t.desk.sendDraft("web#3", d.id), { url: "https://github.com/acme/web/pull/3#discussion_r1" });
   assert.deepEqual(w.calls, [["reply", "PRRT_open", "Yes: it retries 502s twice, in abc123."]]);
@@ -313,7 +336,7 @@ test("what agents may do to a PR in Merging: its babysitter drafts and asks on i
   assert.equal(t.desk.undo(its.undo_seq, "coordinator").action, "unpin");
 });
 
-test("ready to merge stays in Now while Claude answers a later comment, so it notifies once", async (c) => {
+test("ready to merge keeps waiting on you while Claude answers a later comment, so it notifies once", async (c) => {
   const t = await setup([myPr(3, { ci: "green", review_decision: "approved", mergeable: "clean" })], {
     settings: { ...OFF, "inflight.babysit": true, "notify.quiet": "" },
   });
@@ -321,15 +344,15 @@ test("ready to merge stays in Now while Claude answers a later comment, so it no
   t.desk.mcpUrl = "http://127.0.0.1:9/mcp";
   await t.desk.sync();
   t.desk.act("web#3", "inflight");
-  t.desk.notifyNewNow();
+  t.desk.notifyNew();
   for (let i = 0; i < 3; i++) {
     t.desk.sitter.queue.push("acme/web#3"); // a reviewer commented: a run is queued, then runs
     t.desk.changed();
     assert.equal(t.desk.inflight().rows[0]?.needs_you, "ready to merge");
-    t.desk.notifyNewNow();
+    t.desk.notifyNew();
     t.desk.sitter.queue = [];
     t.desk.changed();
-    t.desk.notifyNewNow();
+    t.desk.notifyNew();
   }
   assert.deepEqual(t.notes, ["web#3 · merging: ready to merge"]);
 });
@@ -404,7 +427,7 @@ test("nothing is written when the repo doesn't allow auto-merge, it's on already
   assert.deepEqual([already.auto_merge.on, already.auto_merge.why], [false, null]);
   assert.deepEqual(w.calls, []);
   const rows = () => new Map(t.desk.inflight().rows.map((r) => [r.card.id, r]));
-  // Nobody merges #3 for you: ready to merge, it's back in Now. #4 GitHub merges.
+  // Nobody merges #3 for you: ready to merge, it waits on you. #4 GitHub merges.
   assert.deepEqual(
     [rows().get("acme/web#3")?.merge_note, rows().get("acme/web#3")?.needs_you],
     ["the repo doesn't allow auto-merge", null],
@@ -415,7 +438,7 @@ test("nothing is written when the repo doesn't allow auto-merge, it's on already
   t.gh.items.set(it.id, { ...it, draft: false, updated_at: hoursAgo(1) });
   await t.desk.sync();
   assert.equal(rows().get("acme/web#3")?.needs_you, "ready to merge");
-  assert.ok(t.desk.queue().sections.now.some((x) => x.id === "acme/web#3" && x.why === "merging: ready to merge"));
+  assert.ok(!t.desk.queue().sections.now.some((x) => x.id === "acme/web#3"), "in Merging, not the queue");
   // Back to desk turns off only what the desk turned on.
   await t.desk.backToDesk("web#3");
   await t.desk.backToDesk("web#4");
@@ -481,7 +504,7 @@ test("Claude hands a PR back: it leaves Merging for the top of Now with the reas
   const it = t.gh.items.get("acme/web#3")!;
   t.gh.items.set(it.id, { ...it, auto_merge: true, updated_at: hoursAgo(1) });
   await t.desk.sync();
-  t.desk.notifyNewNow();
+  t.desk.notifyNew();
   const calls = w.calls.length;
   const app = createApp(t.desk, 47823);
   const handBack = (pr: string, headers: Record<string, string>) =>

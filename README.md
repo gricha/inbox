@@ -1,6 +1,6 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: what needs you **now**, what's for **today**, and everything else sorted away by rules you control. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m` hands it off for merge: Claude fixes red CI, merges the base in on a conflict and drafts replies to reviewers, GitHub's auto-merge merges it once it's approved and green, and it comes back only when it needs you, or when Claude can't get it merged. Approving, sending a reply you've read, and turning auto-merge on and off with `m` and `b` are the only things the desk writes to GitHub; Claude pushes to your PR's own branch.
+A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m` hands it off for merge: Claude fixes red CI, merges the base in on a conflict and drafts replies to reviewers, GitHub's auto-merge merges it once it's approved and green, and it comes back to the queue only when Claude can't get it merged (what it needs from you meanwhile waits in Merging). Approving, sending a reply you've read, and turning auto-merge on and off with `m` and `b` are the only things the desk writes to GitHub; Claude pushes to your PR's own branch.
 
 Runs on macOS, Linux and Windows.
 
@@ -25,11 +25,11 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 
 ## Use it
 
-- **The queue** is the whole app: one list, what's urgent first (its ref marked with a highlighter), its first ten cards and a line for the rest. Each card has its AI review's summary under it, or for your own PR what to do next. Anything nobody has touched for two weeks drops to Later. What the rules filed as later, FYI, hidden or cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), stays off the page behind one quiet "Sorted away" line.
-- Every item says **why** it's there ("vaind asked you directly", "CI failing"). Open it to see which rule placed it.
-- **Merging** (the sidebar, `g m`): your own PRs you've handed off with `m`, the ones Claude is getting merged, in plain words: CI, reviews, threads, conflicts, what each waits on, and what Claude is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). A drafted reply waits there for you to send (`y`); a question from Claude puts the PR back in the queue. `b` brings one back to your desk, and Claude hands one back itself, with its reason at the top of the queue, when it can't realistically get it merged (a reviewer wants a redesign, CI it can't fix, no local clone). Settings → Merging turns Claude or auto-merge off, sets how many run at once, and where your clones are.
-- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Desktop app, AI review, Hand-off prompts. Changes save as you go.
-- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something urgent lands in the queue. All three can be changed in Settings → Desktop app.
+- **The queue** is the main page: only what you must act on, one ordered list, one line each (the title, its repo#number, its age), its first ten and a line for the rest. Enter on a PR opens its review (the AI summary, concerns and why it's here are there); an issue opens in place. Anything nobody has touched for two weeks drops to Later.
+- **Later** (the sidebar, `g l`): what the rules and Claude sorted away (later, FYI, hidden), what you cleared, and what resolved itself (merged, closed, approved by someone else, no longer requested), each row with why it's there.
+- **Merging** (the sidebar, `g m`): your own PRs you've handed off with `m`, the ones Claude is getting merged, in plain words: CI, reviews, threads, conflicts, what each waits on, and what Claude is doing ("fixing CI · 4m", "pushed a fix for 2 comments · abc1234"). What waits on you (a drafted reply to send with `y`, a question, ready to merge, outsiders' comments) is listed first there and counted on its sidebar entry; it never goes to the queue. `b` brings one back to your desk, and Claude hands one back itself, with its reason at the top of the queue, when it can't realistically get it merged (a reviewer wants a redesign, CI it can't fix, no local clone). Settings → Merging turns Claude or auto-merge off, sets how many run at once, and where your clones are.
+- **Settings** (the sliders icon, `,`, or ⌘, in the app): GitHub, Rules, Agents, Notifications, Appearance (this device's theme: System, Light, Dark, Sand, Slate), Desktop app, AI review, Hand-off prompts. Changes save as you go.
+- In the app: the menu bar shows the counts, `Control+Alt+D` shows or hides the window from anywhere, and notifications fire when something new lands in the queue (once Claude or a hard rule placed it) or a PR in Merging starts waiting on you. All three can be changed in Settings → Desktop app.
 
 | Key       | Does                                                           |
 | --------- | -------------------------------------------------------------- |
@@ -43,7 +43,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `u`       | undo                                                           |
 | `c`       | copy a review prompt to paste into a Claude session            |
 | `i`       | AI review: look / skim / skip, summary, concerns, notes        |
-| `/`       | filter · `r` sync · `,` settings · `g r` rules · `?` all keys  |
+| `/`       | filter · `r` sync · `,` settings · `g l` later · `?` all keys  |
 
 Done, snooze, mute and pin are local. Nothing is sent to GitHub.
 
@@ -144,7 +144,7 @@ npm run dev         # server + Vite in a browser at :5173
 npm test            # node:test, no network
 npm run check       # format, lint (type-aware), CSS lint, types, dead code, tests: what CI runs
 npm run smoke:app   # launches the app on a scratch home and checks it end to end
-npm run shots       # visual QA: screenshots of every key state, light and dark, plus highlight checks (.shots/index.html)
+npm run shots       # visual QA: screenshots of every key state, light and dark and each theme (.shots/index.html)
 ```
 
 Verification: Prettier formats; oxlint with type-aware rules (`.oxlintrc.json`) and stylelint lint; `tsc` runs with `noUncheckedIndexedAccess` and friends; knip catches dead code. A pre-commit hook formats and lints staged files, a pre-push hook runs `npm run check`, and CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs it on macOS, Linux and Windows.

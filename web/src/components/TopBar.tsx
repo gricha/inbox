@@ -4,6 +4,9 @@ import { ago, cls, sinceText } from "../format.ts";
 import { actedText, type Route } from "../view.ts";
 import { Dots } from "./Detail.tsx";
 
+const BACK = { queue: "the queue", later: "Later", inflight: "Merging" };
+const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging" };
+
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
   if (!o) return "Connecting…";
@@ -31,7 +34,7 @@ export function TopBar({
   offline: boolean;
   now: number;
   route: Route;
-  from: "queue" | "inflight"; // where a review goes back to
+  from: "queue" | "later" | "inflight"; // where a review goes back to
   filter: string;
   setFilter: (s: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
@@ -50,7 +53,7 @@ export function TopBar({
     <header className="topbar" inert={inert}>
       <a className="wordmark" href="#/" title="Queue">
         <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="2" y="3" width="16" height="4" rx="1.5" className="mark-hl" />
+          <rect x="2" y="3" width="16" height="4" rx="1.5" />
           <rect x="2" y="9" width="12" height="2.5" rx="1.25" />
           <rect x="2" y="14" width="9" height="2.5" rx="1.25" />
         </svg>
@@ -59,16 +62,12 @@ export function TopBar({
       {inSettings || route.name === "inflight" ? (
         <span className="crumb">{inSettings ? "Settings" : "Merging"}</span>
       ) : route.name === "review" ? (
-        <a
-          className="back"
-          href={from === "inflight" ? "#/inflight" : "#/"}
-          title={`Back to ${from === "inflight" ? "Merging" : "the queue"} (esc)`}
-        >
+        <a className="back" href={`#/${from === "queue" ? "" : from}`} title={`Back to ${BACK[from]} (esc)`}>
           <kbd>esc</kbd>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>{from === "inflight" ? "Merging" : "Queue"}</span>
+          <span>{BACK_LABEL[from]}</span>
         </a>
       ) : (
         <label className="search">
@@ -130,10 +129,15 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 820px the sidebar is gone: Merging is reachable from here. */}
+        {/* Below 820px the sidebar is gone: Later and Merging are reachable from here. */}
+        {route.name !== "later" && (
+          <a className="tb-flight" href="#/later" title="Sorted away (g l)">
+            Later
+          </a>
+        )}
         {!!o?.inflight.total && route.name !== "inflight" && (
-          <a className="tb-flight" href="#/inflight" title={`${o.inflight.needs_you} need you (g m)`}>
-            Merging {o.inflight.total}
+          <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging, ${o.inflight.needs_you} waiting on you (g m)`}>
+            Merging{o.inflight.needs_you ? ` ${o.inflight.needs_you}` : ""}
           </a>
         )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">

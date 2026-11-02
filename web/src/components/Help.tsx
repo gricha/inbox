@@ -1,26 +1,21 @@
 import { useEffect, useRef } from "react";
 import { Dots } from "./Detail.tsx";
 
-// The keys on the cards; the rest are one line at the end.
+// The keys on the queue's and Later's rows; the rest are one line at the top.
 const KEYS: [string[], string][] = [
-  [["j", "k"], "Move down and up. The selected card shows its whole AI review, its facts and its keys"],
-  [["enter"], "Review the PR; an issue opens in place, your PR in Merging opens Merging, “n more” shows the rest"],
+  [["j", "k"], "Move down and up"],
+  [["enter"], "Review the PR; an issue opens in place; “n more” shows the rest"],
   [["o"], "Open on GitHub"],
   [
     ["m"],
     "Your own PR: hand it off for merge, m twice. Claude gets it merged; auto-merge goes on where the repo allows it, a draft marked ready",
   ],
-  [
-    ["b"],
-    "Your PR in Merging: back to desk. Claude stops, auto-merge goes off (a draft stays ready). Elsewhere, it turns off what m turned on",
-  ],
-  [["y"], "Your PR in Merging: send its drafted reply on GitHub, as you. Press y, then y again within 3 seconds"],
-  [["x"], "Your PR in Merging with a question: dismiss it (c copies the command to answer it)"],
+  [["b"], "Your PR back from Merging: turn off the auto-merge m turned on"],
   [["e", "d"], "Done: it comes back when someone else acts"],
   [["s"], "Snooze, then 1 to 5 to pick how long"],
   [["m"], "Someone else's: mute or unmute"],
   [["/"], "Filter"],
-  [["esc"], "Close the item, then clear the filter"],
+  [["esc"], "Close the item, then clear the filter; on Later, back to the queue"],
   [["?"], "This list"],
 ];
 
@@ -32,6 +27,7 @@ const MORE_KEYS: [string, string][] = [
   ["w", "rule trace"],
   ["r", "sync"],
   ["g l", "later"],
+  ["g f", "FYI"],
   ["g d", "resolved"],
   ["g m", "merging"],
   ["g r", "rules"],
@@ -101,7 +97,7 @@ export function Help({ onClose }: { onClose: () => void }) {
         </p>
         <div className="keys-cols">
           <section>
-            <h3 className="keys-head">In the queue</h3>
+            <h3 className="keys-head">In the queue and Later</h3>
             <Keys keys={KEYS} />
           </section>
           <section>

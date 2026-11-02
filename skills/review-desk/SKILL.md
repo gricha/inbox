@@ -9,7 +9,7 @@ Review Desk is a desktop app on the user's machine that turns their GitHub revie
 
 - **The queue**: one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
 - **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted).
-- **Merging**: the user's own open PRs they've handed off for merge (`m` in the desk). Claude (a babysitter agent per PR) gets them merged (fixes red CI, merges the base in on a conflict, drafts replies to reviewers; GitHub's auto-merge merges where the repo allows it) and a PR comes back to Now only when it needs the user: a question, a reply ready to send, a problem nobody is fixing, or ready to merge. One Claude can't get merged goes back to their desk with the reason.
+- **Merging**: the user's own open PRs they've handed off for merge (`m` in the desk). Claude (a babysitter agent per PR) gets them merged (fixes red CI, merges the base in on a conflict, drafts replies to reviewers; GitHub's auto-merge merges where the repo allows it) and what needs the user there (a question, a reply ready to send, a problem nobody is fixing, ready to merge) waits in Merging, listed first and counted; it never goes to Now. One Claude can't get merged goes back to their desk, at the top of Now, with the reason.
 
 Rules decide where each item lands. A board is one or more GitHub searches plus ordered rules; the first rule whose `when` is true sets the bucket and a `why` ("alice asked you directly"). Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket with a note.
 
@@ -37,7 +37,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 | `desk_sync`        | Sync with GitHub now (read only). The desk also syncs on its own every minute or two.                                                                                             |
 | `desk_events`      | Read what happened (asked, approved, pushed, CI red, merged, resolved). Pass `last_seq` back as `after`; `wait` up to 60 s.                                                       |
 | `desk_draft_reply` | On the user's own PR in Merging: draft a reply to a review thread (`thread_id`, `PRRT_…`) or, without it, a comment on the PR. Nothing is posted: the user sends it from Merging. |
-| `desk_escalate`    | On the user's own PR in Merging: ask (`question`, one line; to Now), or with `hand_back: true` give it back to their desk with that line as the reason.                           |
+| `desk_escalate`    | On the user's own PR in Merging: ask (`question`, one line; it waits on them in Merging), or with `hand_back: true` give it back to their desk with that line as the reason.      |
 | `desk_policy`      | `get` the policy (fenced) with its hash and the judge's status; `set` with the whole new `text` and `base` = that hash.                                                           |
 | `desk_config`      | `get` config.toml with its hash; `preview` a full new text (what moves, nothing saved); `save` it with `base` = the hash.                                                         |
 | `desk_note`        | Add a line to the coordinator's log, which the user reads from the queue's top bar.                                                                                               |
@@ -100,7 +100,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ### "Is my PR moving?" (Merging)
 
-1. `desk_overview` gives how many of the user's PRs are in Merging and how many need them; `desk_list` shows those in Now, with the reason as the why.
+1. `desk_overview` gives how many of the user's PRs are in Merging and how many wait on them there; `desk_list` never shows them (only what Claude handed back, in Now with the reason as the why).
 2. For one PR, `desk_item`: its facts and why. The desk's Merging tab (`GET /api/inflight`) has the rest: CI, reviews, threads, conflicts, auto-merge, what Claude is doing, drafts waiting to be sent, the question it asked.
 3. Handing a PR off for merge, bringing it back, sending a draft and dismissing a question are the user's, in the desk (`m`, `b`, `y`, `x`).
 

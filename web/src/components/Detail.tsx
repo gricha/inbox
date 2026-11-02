@@ -4,7 +4,7 @@ import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
 import { cardFacts, handArm, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 
-const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "Urgent", today: "In the queue" };
+const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "In the queue", today: "In the queue" };
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
 export const REVIEW: Record<ReviewDecision, string> = {
@@ -111,7 +111,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     </div>
   );
 
-  // Opened in place (an issue), it's the selected card's shape: one line of facts, what's new about why, its activity, its keys.
+  // Opened in place (an issue): why it's here (its row doesn't say), one line of facts, more on why, its activity, its keys.
   if (!ctx.showSignals) {
     const facts = [
       ...cardFacts(card, ctx.me),
@@ -123,6 +123,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     ];
     return (
       <div className="more opened">
+        {card.why && !card.resolved && <p className="d-why">{card.why.charAt(0).toUpperCase() + card.why.slice(1)}</p>}
         <p className="card-facts">
           {facts.map((f) => (
             <span key={f}>{f}</span>

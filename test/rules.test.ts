@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classify, compileBoard, placedBy, quietText, type Entry } from "../src/rules.ts";
+import { classify, compileBoard, placedBy, queueOrder, quietText, type Entry } from "../src/rules.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
-import type { BoardConfig, Bucket, Item } from "../src/types.ts";
+import type { BoardConfig, Bucket, Card, Item } from "../src/types.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
@@ -340,4 +340,25 @@ test("quiet for: days, then weeks, then months", () => {
   assert.equal(quietText(14 * 24), "quiet for 2 weeks");
   assert.equal(quietText(20 * 24), "quiet for 3 weeks");
   assert.equal(quietText(143 * 24), "quiet for 5 months");
+});
+
+test("the queue's order within Now or Today: handed back, close looks, then the rest; someone else's red PR and skip last", () => {
+  const card = (n: number, o: Partial<Card> = {}): Card =>
+    ({ id: `acme/api#${n}`, kind: "pr", author: `a${n}`, ci: "green", chips: [], resolved: null, ...o }) as Card;
+  const look = { state: "ready" as const, verdict: "look" as const };
+  const cards = [
+    card(1, { preflight: { state: "ready", verdict: "skip" } }),
+    card(2, { preflight: { state: "ready", verdict: "skim" } }),
+    card(3, { preflight: { state: "stale", verdict: "look" } }),
+    card(4, { preflight: look }),
+    card(5, { author: "me", ci: "green", chips: ["approved"] }),
+    card(6, { ci: "red", chips: ["CI red"], preflight: look }),
+    card(7, { demoted: "3 from PRs to review are urgent already" }),
+    card(8, { preflight: { state: "ready", verdict: "skim", risk: "high" } }),
+    card(9, { author: "me", handed_back: true, why: "handed back: Dana wants a redesign" }),
+  ];
+  assert.deepEqual(
+    queueOrder(cards, "me").map((c) => c.id.split("#")[1]),
+    ["9", "4", "8", "3", "7", "5", "2", "6", "1"],
+  );
 });

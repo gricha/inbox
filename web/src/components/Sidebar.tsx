@@ -2,7 +2,7 @@ import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import type { Route } from "../view.ts";
 
-// Sources of work, one entry each (just GitHub for now), your PRs in Merging, and Settings in the footer.
+// Sources of work, one entry each (just GitHub for now), what was sorted away, your PRs in Merging, and Settings in the footer.
 export function Sidebar({
   route,
   from,
@@ -11,12 +11,13 @@ export function Sidebar({
   inert,
 }: {
   route: Route;
-  from: "queue" | "inflight"; // where a review was opened from: it stays that page's
+  from: "queue" | "later" | "inflight"; // where a review was opened from: it stays that page's
   view: QueueView | null;
   overview: Overview | null;
   inert?: boolean;
 }) {
   const onQueue = route.name === "queue" || (route.name === "review" && from === "queue");
+  const onLater = route.name === "later" || (route.name === "review" && from === "later");
   const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
   const onSettings = route.name === "settings";
   const now = view?.sections.now.length ?? 0;
@@ -27,7 +28,7 @@ export function Sidebar({
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
       <div className="wordmark side-brand">
         <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="2" y="3" width="16" height="4" rx="1.5" className="mark-hl" />
+          <rect x="2" y="3" width="16" height="4" rx="1.5" />
           <rect x="2" y="9" width="12" height="2.5" rx="1.25" />
           <rect x="2" y="14" width="9" height="2.5" rx="1.25" />
         </svg>
@@ -38,7 +39,7 @@ export function Sidebar({
           href="#/"
           className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
-          title={view ? `${now + today} in the queue${now ? `, ${now} urgent` : ""}` : undefined}
+          title={view ? `${now + today} need you` : undefined}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (route.name === "queue") {
@@ -50,15 +51,24 @@ export function Sidebar({
           <span className="side-name">GitHub</span>
           <span className="side-count">{view && now + today > 0 ? now + today : ""}</span>
         </a>
-        {/* All of them, as the lane's heading says; the ones that need you are in the queue already. */}
+        {/* What Claude and the rules sorted away: no count, nothing there needs you. */}
+        <a
+          href="#/later"
+          className={cls("side-item", onLater && "on")}
+          aria-current={onLater ? "page" : undefined}
+          title="Sorted away (g l)"
+        >
+          <span className="side-name">Later</span>
+        </a>
+        {/* The count is what waits on you there; the rest Claude has. */}
         <a
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight ? `${flight.total} merging, ${flight.needs_you} need you (g m)` : "Your PRs Claude is getting merged (g m)"}
+          title={flight ? `${flight.total} merging, ${flight.needs_you} waiting on you (g m)` : "Your PRs Claude is getting merged (g m)"}
         >
           <span className="side-name">Merging</span>
-          <span className="side-count">{flight && flight.total > 0 ? flight.total : ""}</span>
+          <span className="side-count">{flight && flight.needs_you > 0 ? flight.needs_you : ""}</span>
         </a>
       </nav>
       <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>

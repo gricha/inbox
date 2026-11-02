@@ -797,7 +797,7 @@ test("a PR answered by reviewers gets a run for their comments, with the thread 
 });
 
 test(
-  "only collaborators' feedback reaches a babysitter: an outsider's comes back to you, and a trusted bot's goes to the agent",
+  "only collaborators' feedback reaches a babysitter: an outsider's waits on you in Merging, and a trusted bot's goes to the agent",
   posix,
   async (c) => {
     const s = await sitterDesk(c, []);
@@ -826,7 +826,7 @@ test(
     assert.equal(s.w.count(), 0, "a comment from someone who isn't a collaborator starts no run");
     const row = () => s.desk.inflight().rows.find((r) => r.card.id === item.id)!;
     assert.equal(row().needs_you, "comments from outside contributors");
-    assert.equal(s.desk.queue().sections.now[0]?.id, item.id, "it's yours to read");
+    assert.equal(s.desk.overview().inflight.needs_you, 1, "it's yours to read, in Merging");
     s.desk.dismiss(item.id);
     assert.deepEqual([row().needs_you, row().outside_at], [null, null]);
 

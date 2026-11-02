@@ -1,6 +1,6 @@
 // npm run shots [-- --url http://localhost:47823] [--out .shots]: visual QA.
-// Screenshots every key state in light and dark at two window sizes, zooms into every highlighter mark at 3x,
-// and fails on clipped or short highlight bands, sideways scrolling and console errors.
+// Screenshots every key state in light and dark at four window sizes, and each theme, and fails on sideways scrolling and
+// console errors.
 // Without --url it starts the mock API and Vite, so the data is the same on every run.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -46,39 +46,8 @@ async function start(): Promise<string> {
   return `http://localhost:${VITE}`;
 }
 
-// Every highlighter mark: the ::before band must cover the text and nothing may clip it.
-// Page code is a string: this project's tsconfig has no DOM types, on purpose (the server mustn't touch them).
-const HIGHLIGHTS = ".b-now .ref-ink";
-const CHECK_HIGHLIGHTS = `(() => {
-  const problems = [];
-  const px = (v) => Number.parseFloat(v) || 0;
-  for (const el of document.querySelectorAll(${JSON.stringify(HIGHLIGHTS)})) {
-    const pseudo = getComputedStyle(el, "::before");
-    if (pseudo.content === "none") continue;
-    const box = el.getBoundingClientRect();
-    if (!box.width) continue; // not rendered at this size
-    const band = { left: box.left + px(pseudo.left), right: box.right - px(pseudo.right), top: box.top + px(pseudo.top), bottom: box.bottom - px(pseudo.bottom) };
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    // Only the text you can see: an ellipsis hides the rest of a long repo name.
-    const r = range.getBoundingClientRect();
-    const text = { left: Math.max(r.left, box.left), right: Math.min(r.right, box.right), top: r.top, bottom: r.bottom };
-    const name = '"' + el.textContent + '"';
-    if (band.top > text.top + 0.5 || band.bottom < text.bottom - 0.5) problems.push(name + ": the band doesn't cover the text's height");
-    if (band.left > text.left - 2 || band.right < text.right + 2) problems.push(name + ": the band doesn't run past both ends of the text");
-    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-      const st = getComputedStyle(p);
-      if (st.overflowX === "visible" && st.overflowY === "visible") continue;
-      const r = p.getBoundingClientRect();
-      // 1px of slack for the stroke's tilt
-      if (band.left < r.left - 1 || band.right > r.right + 1 || band.top < r.top - 1 || band.bottom > r.bottom + 1) {
-        problems.push(name + ': clipped by <' + p.tagName.toLowerCase() + ' class="' + p.className + '">');
-        break;
-      }
-    }
-  }
-  return problems;
-})()`;
+// The queue has loaded: its rows, or its one empty line.
+const READY = ".queue .line, .queue .queue-empty";
 
 interface Shot {
   name: string;
@@ -116,18 +85,18 @@ const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
     await route.fulfill({ response: res, json: q });
   });
   await page.reload();
-  await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// The queue folds after its first ten: open it for a card that sits behind the line.
+// The queue folds after its first ten: open it for a row that sits behind the line.
 const unfold = async (page: Page) => {
-  const fold = page.locator(".g-queue .fold");
+  const fold = page.locator(".queue .fold");
   if (await fold.isVisible()) await fold.click();
   await page.waitForTimeout(200);
 };
 // The fold is per window: a reload folds the queue again for the shots after this one.
 const refold = async (page: Page) => {
   await page.reload();
-  await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
 // Scrolled to the end, the last thing on the page ends near the window's bottom: no empty room to scroll into.
 const BOTTOM_ROOM = 160;
@@ -166,18 +135,37 @@ const setting = (key: string, value: unknown) => async (page: Page) => {
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
+// A theme picked in Settings → Appearance, as its select sets it; `after` puts System back.
+const pickTheme = (id: string) => async (page: Page) => {
+  await page.evaluate(`localStorage.setItem("desk.theme", ${JSON.stringify(id)}); location.hash = "#/"`);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+const systemTheme = async (page: Page) => {
+  await page.evaluate(`localStorage.removeItem("desk.theme"); location.hash = "#/"`);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
   {
-    // A selected card the AI says to look at closely: its whole review, its facts and its keys.
+    // j j from the top: the selected row's calm fill, and the rows stay evenly spaced.
     name: "queue-selected",
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
-      await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
-      await page.waitForTimeout(200);
+      await top(page);
+      await page.locator(".queue [data-id]").first().locator(".row-main").focus();
+      for (const k of ["j", "j"]) {
+        await page.keyboard.press(k);
+        await page.waitForTimeout(250);
+      }
+      const gaps = await page.evaluate<number[]>(`(() => {
+        const rows = [...document.querySelectorAll(".queue .lines > [data-id]")].map((el) => el.getBoundingClientRect());
+        return rows.slice(1).map((r, i) => Math.round(r.top - rows[i].bottom));
+      })()`);
+      if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 1)
+        failures.push(`queue-selected: uneven gaps between the queue's rows: ${gaps.join(", ")}px`);
     },
-    after: refold,
   },
   {
     // Nothing in the queue: one line, with no 0.
@@ -192,7 +180,7 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await page.unroute("**/api/queue");
       await page.reload();
-      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
   },
   {
@@ -200,62 +188,22 @@ const SHOTS: Shot[] = [
     name: "queue-fold",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".g-queue .fold").focus();
-      await page.locator(".g-queue .fold").scrollIntoViewIfNeeded();
+      await page.locator(".queue .fold").focus();
+      await page.locator(".queue .fold").scrollIntoViewIfNeeded();
     },
   },
   {
     name: "queue-unfolded",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".g-queue .fold").focus();
+      await page.locator(".queue .fold").focus();
       await page.keyboard.press("Enter");
       await page.waitForTimeout(200);
     },
     after: refold,
   },
   {
-    // A stack behind the queue's line: three PRs from one author on one sheet, under one line that says why.
-    name: "queue-stack",
-    go: async (page) => {
-      await at("#/")(page);
-      await unfold(page);
-      await page.locator(".run", { hasText: "3 PRs from rosa" }).scrollIntoViewIfNeeded();
-      await page.waitForTimeout(200);
-    },
-    after: refold,
-  },
-  {
-    // Tab from the selected card lands on its first key: the cursor's fill and ring, clear of the letters.
-    name: "queue-tab-key",
-    go: async (page) => {
-      await at("#/")(page);
-      await page.locator(".row", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
-      await page.keyboard.press("Tab");
-      await page.waitForTimeout(200);
-    },
-  },
-  {
-    // j j from the top: the cards stay one sheet's gap apart while the selection moves down, with no room left between them.
-    name: "queue-jj",
-    go: async (page) => {
-      await at("#/")(page);
-      await top(page);
-      await page.locator(".g-queue [data-id]").first().locator(".row-main").focus();
-      for (const k of ["j", "j"]) {
-        await page.keyboard.press(k);
-        await page.waitForTimeout(250);
-      }
-      const gaps = await page.evaluate<number[]>(`(() => {
-        const cards = [...document.querySelectorAll(".g-queue .rows > [data-id]")].map((el) => el.getBoundingClientRect());
-        return cards.slice(1).map((r, i) => Math.round(r.top - cards[i].bottom));
-      })()`);
-      if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2)
-        failures.push(`queue-jj: uneven gaps between the queue's cards: ${gaps.join(", ")}px`);
-    },
-  },
-  {
-    // The end of the queue: its last cards, the fold line and the sorted-away line, then the window's edge.
+    // The end of the queue: its last rows and the fold line, then the window's edge.
     name: "queue-bottom",
     go: async (page) => {
       await at("#/")(page);
@@ -279,7 +227,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
-      await page.locator(".row", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
+      await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
     },
   },
@@ -311,24 +259,24 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
-      await page.locator(".row", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
+      await page.locator(".line", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
       await page.keyboard.press("Enter");
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
     },
   },
   {
-    // The menu opens under the card, so its keys stay in view.
+    // The menu opens under the row.
     name: "snooze",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".row", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
+      await page.locator(".line", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
       await page.keyboard.press("s");
       await page.waitForTimeout(200);
     },
   },
   {
-    // The Resolved group open, scrolled into view. Before "sorted-away" opens Later.
+    // g d: Later, with the Resolved group open and scrolled into view.
     name: "resolved",
     go: async (page) => {
       await at("#/")(page);
@@ -343,8 +291,8 @@ const SHOTS: Shot[] = [
     // Enter on a resolved PR: its review says why it resolved, and when, under the facts.
     name: "review-resolved",
     go: async (page) => {
-      await at("#/")(page);
-      const row = page.locator(".g-resolved .row", { hasText: "Tighten the CSP" }).locator(".row-main");
+      await at("#/later")(page);
+      const row = page.locator(".g-resolved .line", { hasText: "Tighten the CSP" }).locator(".row-main");
       if (!(await row.isVisible())) {
         await page.keyboard.press("g");
         await page.keyboard.press("d");
@@ -363,15 +311,8 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
-  {
-    name: "sorted-away",
-    go: async (page) => {
-      await at("#/")(page);
-      await page.keyboard.press("g");
-      await page.keyboard.press("l");
-      await page.waitForTimeout(300);
-    },
-  },
+  // What Claude and the rules sorted away, on its own page.
+  { name: "later", go: at("#/later") },
   // Merging: a reply to send, a question, CI being fixed where the repo has no auto-merge, one waiting with auto-merge on,
   // one merged.
   { name: "inflight", go: at("#/inflight") },
@@ -384,21 +325,20 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Claude handed it back (no local clone): at the top of Now with its reason, auto-merge still on, m to hand it off again
-    // and b to turn off the auto-merge m turned on.
+    // Claude handed it back (no local clone): at the top of the queue, one line like the rest.
     name: "handed-back",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator('.row[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
       await page.waitForTimeout(200);
     },
   },
   {
-    // A first m on your own PR only arms the hand-off, as y does Send: the key and a toast say press it again.
+    // A first m on your own PR only arms the hand-off, as y does Send: a toast says press it again.
     name: "handoff-armed",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator('.row[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
       await page.keyboard.press("m");
       await page.waitForTimeout(200);
     },
@@ -454,7 +394,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
-      await page.locator(".row", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
+      await page.locator(".line", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
       await page.keyboard.press("w");
       await page.locator(".trace-toggle summary").first().click();
       await page.waitForTimeout(300);
@@ -486,6 +426,7 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "settings-app", go: at("#/settings/app") },
+  { name: "settings-appearance", go: at("#/settings/appearance") },
   { name: "settings-inflight", go: at("#/settings/inflight") },
   { name: "settings-review", go: at("#/settings/review") },
   {
@@ -544,7 +485,7 @@ const SHOTS: Shot[] = [
     // Cleared, with what the coordinator put away saying so.
     name: "cleared",
     go: async (page) => {
-      await at("#/")(page);
+      await at("#/later")(page);
       await page.keyboard.press("g");
       await page.keyboard.press("x");
       await page.waitForTimeout(300);
@@ -553,7 +494,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The sidebar after use: a group opened from it, then a Settings page. Only the page you're on gets the pill.
+    // The sidebar after use: Later opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",
     go: async (page) => {
       await at("#/")(page);
@@ -562,6 +503,26 @@ const SHOTS: Shot[] = [
       await at("#/settings/notify")(page);
     },
   },
+  // Each theme picked on this device, over the system's light or dark: the queue, a row selected, and a review.
+  ...["light", "dark", "sand", "slate"].flatMap((id): Shot[] => [
+    {
+      name: `theme-${id}`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await page.locator(".queue [data-id]").first().locator(".row-main").focus();
+        await page.keyboard.press("j");
+      },
+      after: systemTheme,
+    },
+    {
+      name: `theme-${id}-review`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await review("acme/api#4127")(page);
+      },
+      after: systemTheme,
+    },
+  ]),
   // Last: its "press a again" toast would sit over the next shot.
   { name: "review-approve", go: review("acme/api#4127", ["a"]) },
 ];
@@ -598,7 +559,7 @@ try {
         if (m.type() === "error") failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
       });
       await page.goto(`${url}/#/`);
-      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
       for (const shot of shots) {
         await page.keyboard.press("Escape");
         await shot.go(page);
@@ -608,29 +569,10 @@ try {
         files.push(file);
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
         if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
-        for (const p of await page.evaluate<string[]>(CHECK_HIGHLIGHTS)) failures.push(`${file}: ${p}`);
         await shot.after?.(page);
       }
       await page.close();
     }
-    // Close-ups of every highlighter mark, at 3x.
-    const zoom = await browser.newPage({ viewport: { width: 1280, height: 820 }, colorScheme: theme, deviceScaleFactor: 3 });
-    await zoom.goto(`${url}/#/`);
-    await zoom.locator(".queue h2").first().waitFor({ timeout: 15_000 });
-    const marks = zoom.locator(HIGHLIGHTS);
-    for (let i = 0; i < (await marks.count()); i++) {
-      // Cards with a line of context are taller: a long Now runs past the window.
-      await marks.nth(i).scrollIntoViewIfNeeded();
-      const b = await marks.nth(i).boundingBox();
-      if (!b) continue;
-      const file = `${theme}-zoom-${i}.png`;
-      await zoom.screenshot({
-        path: path.join(out, file),
-        clip: { x: b.x - 16, y: b.y - 10, width: b.width + 120, height: b.height + 20 },
-      });
-      files.push(file);
-    }
-    await zoom.close();
   }
   await browser.close();
   const sheet = files.map((f) => `<figure><img src="${f}" loading="lazy"><figcaption>${f}</figcaption></figure>`).join("\n");

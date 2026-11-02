@@ -7,7 +7,6 @@ import type {
   InflightRow,
   JudgeStatus,
   JudgeStep,
-  Preflight,
   QueueView,
   ReviewFile,
   ReviewNote,
@@ -16,9 +15,10 @@ import type {
 } from "../../src/types.ts";
 import { age as ageOf, ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
 
-// One surface (the queue), a PR's review in its place, your PRs in Merging, and Settings, whose sections include the rules editor.
-export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "inflight" } | { name: "settings"; section: string };
-// The queue is one list: what the rules and Claude put in now, then today. The rest is sorted away.
+// The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, and Settings (with the rules).
+export type Route =
+  { name: "queue" } | { name: "review"; id: string } | { name: "later" } | { name: "inflight" } | { name: "settings"; section: string };
+// The queue is one list: what the rules and Claude put in now, then today, in the desk's order. The rest is under Later.
 export type GroupKey = "queue" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
 export type Variant = "active" | "hidden" | "cleared" | "resolved";
 
@@ -30,8 +30,7 @@ export interface Group {
   open: boolean;
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
-  fold: number; // the queue: cards behind its "n more" line
-  foldLine: string; // ...and that line's words
+  fold: number; // the queue: items behind its "n more" line
 }
 
 // The cursor's stop on a group's "n more" line.
@@ -40,14 +39,13 @@ export const handArm = (id: string) => `m:${id}`; // what a first m on your own 
 export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];
-// The quiet line under the queue names only these; FYI, hidden and cleared open on their chords (g f, g h, g x) or the filter.
-export const AWAY_BAR: GroupKey[] = ["later", "resolved"];
 
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] === undefined || m[1] === "" ? "github" : m[1] };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
+  if (hash === "#/later") return { name: "later" };
   const review = /^#\/review\/(.+)$/.exec(hash);
   if (review) {
     try {
@@ -62,13 +60,13 @@ export function parseRoute(hash: string): Route {
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
   if (r.name === "review") return `#/review/${encodeURIComponent(r.id)}`;
-  return r.name === "inflight" ? "#/inflight" : "#/";
+  return r.name === "inflight" ? "#/inflight" : r.name === "later" ? "#/later" : "#/";
 }
 
 // ---------------------------------------------------------------- merging (in flight)
 
 // Check names can be long ("tacos-gha / TACOS Unlock (terragrunt/regions/…)"): two at most, each clipped.
-export function checkNames(names: string[]): string {
+function checkNames(names: string[]): string {
   const clip = (n: string) => (n.length > 40 ? `${n.slice(0, 39)}…` : n);
   return names.length > 2 ? `${clip(names[0]!)} and ${names.length - 1} more` : names.map(clip).join(", ");
 }
@@ -184,9 +182,10 @@ export function currentFile(tops: number[], line: number, atEnd = false): number
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
+// Later's own group opens with its page; the rest open when asked (g f, g d, g h, g x, or a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   queue: true,
-  later: false,
+  later: true,
   fyi: false,
   resolved: false,
   hidden: false,
@@ -202,94 +201,35 @@ const LABEL: Record<GroupKey, string> = {
   cleared: "Cleared",
 };
 
-const mineOf = (c: Pick<Card, "kind" | "author" | "resolved">, me: string) =>
-  c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
-
-// How much a card wants you first, lowest first: your PR one key from done that only you can answer (a reply to send, a
-// question) or one Claude handed back; a close look or high risk on the current commit, then one on an older commit; an item
-// a cap made not urgent; your PR approved and green; the rest (your stuck PR in Merging among them); someone else's PR with
-// CI failing, which waits on its author; the AI's "skip it".
-function weight(c: Card, me: string): number {
-  const p = c.preflight;
-  const mine = mineOf(c, me);
-  if (p?.verdict === "skip") return 7;
-  if (mine && ((c.inflight && (!!c.reply || !!c.escalated)) || !!c.handed_back)) return 0;
-  if (!mine && c.kind === "pr" && c.ci === "red") return 6;
-  if (p?.risk === "high" || p?.verdict === "look") return p.state === "ready" ? 1 : 2;
-  if (c.demoted) return 3;
-  return mine && c.ci === "green" && c.chips.includes("approved") ? 4 : 5;
-}
-
-// Consecutive cards with the same author and reason (a stack of PRs) read as one block from three on.
-export function runs(cards: Card[]): { id: string; author: string; why: string; cards: Card[] }[] {
-  const out: { id: string; author: string; why: string; cards: Card[] }[] = [];
-  for (const c of cards) {
-    const last = out.at(-1);
-    if (last && last.author === c.author && last.why === c.why) last.cards.push(c);
-    else out.push({ id: c.id, author: c.author, why: c.why, cards: [c] });
-  }
-  return out;
-}
-
-// The fold takes whole stacks, each one card's worth since it reads as one block: the first always shows.
-function foldAt(cards: Card[], cap: number): number {
-  let n = 0;
-  let slots = 0;
-  for (const r of runs(cards)) {
-    for (const size of r.cards.length < 3 ? r.cards.map(() => 1) : [r.cards.length]) {
-      if (slots >= cap) return n;
-      n += size;
-      slots += 1;
-    }
-  }
-  return n;
-}
-
-// What the fold line hides that shouldn't wait: "13 more, 1 urgent, 1 pinned".
-export function foldText(behind: Card[]): string {
-  const urgent = behind.filter((c) => c.bucket === "now").length;
-  const pinned = behind.filter((c) => c.pinned && c.bucket !== "now").length;
-  return [`${behind.length} more`, urgent && `${urgent} urgent`, pinned && `${pinned} pinned`].filter(Boolean).join(", ");
-}
-
-// The queue is now's cards then today's, each the weightiest first, and folds after its first queue.cards. While
-// filtering, every group with a match opens so nothing that matches stays tucked away, and nothing folds.
+// The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
+// group with a match opens so nothing that matches stays tucked away, and nothing folds.
 export function groupsOf(
   view: QueueView | null,
   open: Record<GroupKey, boolean>,
   filter: string,
   unfolded: Partial<Record<GroupKey, boolean>> = {},
-  me = "",
 ): Group[] {
   if (!view) return [];
   const q = filter.trim();
-  const byWeight = (cards: Card[]) =>
-    cards
-      .map((c, i) => ({ c, i, w: weight(c, me) }))
-      .sort((a, b) => a.w - b.w || a.i - b.i)
-      .map((x) => x.c);
   const group = (key: GroupKey, all: Card[], variant: Variant = "active", cap?: number): Group => {
     const matched = all.filter((c) => matches(c, q));
     const forced = !!q && matched.length > 0 && !open[key];
-    // A fold that would hide one card costs more than the card: it folds only when two or more would go behind it.
-    const at = cap && !q && !unfolded[key] ? foldAt(matched, cap) : matched.length;
-    const n = matched.length - at < 2 ? matched.length : at;
-    const cards = matched.slice(0, n);
+    // A fold that would hide one item costs more than the item: it folds only when two or more would go behind it.
+    const n = cap && !q && !unfolded[key] && matched.length - cap >= 2 ? cap : matched.length;
     return {
       key,
       label: LABEL[key],
-      cards,
+      cards: matched.slice(0, n),
       total: all.length,
       open: open[key] || forced,
       forced,
       variant,
-      fold: matched.length - cards.length,
-      foldLine: foldText(matched.slice(n)),
+      fold: matched.length - n,
     };
   };
   const s = view.sections;
   return [
-    group("queue", [...byWeight(s.now), ...byWeight(s.today)], "active", view.cards),
+    group("queue", [...s.now, ...s.today], "active", view.cards),
     group("later", s.later),
     group("fyi", s.fyi),
     group("resolved", view.resolved, "resolved"),
@@ -298,49 +238,8 @@ export function groupsOf(
   ];
 }
 
-// Your PR's next step, less what its why already says: under "merge conflict", "merge conflict with main: m hands it off for
-// merge" needs only its second half.
-export function nextText(card: Pick<Card, "why" | "next">): string | undefined {
-  const [what = "", todo] = (card.next ?? "").split(/: (.*)/);
-  const why = card.why.toLowerCase();
-  return todo && why && (why.startsWith(what.toLowerCase()) || what.toLowerCase().startsWith(why)) ? todo : card.next;
-}
-
 // Your PR with no local clone for Claude to work in: the repo to clone.
 export const noCloneOf = (c: Pick<Card, "why" | "repo">) => (/\bno local clone of /.test(c.why) ? c.repo : undefined);
-
-// "m hands it off for merge" split so its keys can be set apart: odd indexes are keys.
-export const keyParts = (text: string): string[] => text.split(/(?<=^|, )(enter|[a-z])(?= (?:opens|sends|hands|puts) )/);
-
-// Whole sentences (or, with clauses, the parts around a ";") up to about max characters, and always the first: a card's
-// gist ends where a thought ends, never in an ellipsis. A concern keeps its whole first sentence, consequence included.
-export function opening(text: string, max = 200, clauses = true): string {
-  const [first = "", ...rest] = text.trim().split(clauses ? /(?<=[.!?])\s+(?=[A-Z0-9`"'(])|(?<=;)\s+/ : /(?<=[.!?])\s+(?=[A-Z0-9`"'(])/);
-  let out = first;
-  for (const u of rest) {
-    if (out.length + 1 + u.length > max) break;
-    out += ` ${u}`;
-  }
-  return out.replace(/;$/, ".");
-}
-
-// A skip's gist: the first sentence, or its first clause when the sentence won't fit on one line.
-export function firstClause(text: string, max = 72): string {
-  const first = opening(text, 0);
-  if (first.length <= max) return first;
-  const cut = /[,;] /.exec(first);
-  if (cut && cut.index <= max) return `${first.slice(0, cut.index)}.`;
-  // No clause fits: end at the last joint that does (" and ", " with ", " (", else a word), never in an ellipsis.
-  const head = first.slice(0, max);
-  const joint = Math.max(head.lastIndexOf(" and "), head.lastIndexOf(" with "), head.lastIndexOf(" ("));
-  let out = first.slice(0, joint > 0 ? joint : Math.max(head.lastIndexOf(" "), 1));
-  // A cut inside brackets drops the bracket.
-  if (out.split("(").length > out.split(")").length) out = out.slice(0, out.lastIndexOf(" ("));
-  return `${out.replace(/[\s,;:–-]+$/, "")}.`;
-}
-
-// A number keeps its unit and a range its ends on one line: "0–100 %", "15 s".
-export const keepUnits = (text: string) => text.replaceAll(/(\d) (%|ms\b|s\b)/g, "$1\u202f$2").replaceAll(/(\d)–(\d)/g, "$1–\u2060$2");
 
 // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
 const MEANINGS = [
@@ -353,32 +252,6 @@ const MEANINGS = [
 // Whether a why already says a fact, in its words or in other words for the same thing.
 export const says = (why: string, fact: string) =>
   why.toLowerCase().includes(fact.toLowerCase()) || MEANINGS.some((m) => m.test(why) && m.test(fact));
-
-// A card's problems, in the review's and the lane's words and tones.
-export function problems(c: Pick<Card, "chips">): { text: string; tone: "bad" | "warn" }[] {
-  const out: { text: string; tone: "bad" | "warn" }[] = [];
-  if (c.chips.includes("CI red")) out.push({ text: "CI failing", tone: "bad" });
-  if (c.chips.includes("changes requested")) out.push({ text: "changes requested", tone: "warn" });
-  if (c.chips.includes("conflict")) out.push({ text: "merge conflict", tone: "warn" });
-  return out;
-}
-
-export const sizeOf = (c: Pick<Card, "chips">): string | undefined => c.chips.find((x) => /^\+\d+ −\d+$/.test(x));
-
-const WAITING: Partial<Record<Preflight["state"], string>> = {
-  running: "AI review being written",
-  queued: "AI review queued",
-  paused: "AI review paused",
-};
-
-// What a card says about its AI review after its why: the verdict, with a note when it's for an earlier commit, or why
-// there's none yet. Nothing for an issue, your own PR, or auto reviews off with none written.
-export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"] | null; note: string } | null {
-  if (!p || p.state === "none") return null;
-  if (p.verdict) return { verdict: p.verdict, note: p.state === "ready" ? "" : "earlier commit" };
-  const note = WAITING[p.state];
-  return note ? { verdict: null, note } : null;
-}
 
 const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
   hard: "placed by a hard rule",

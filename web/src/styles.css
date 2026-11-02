@@ -1,5 +1,6 @@
-/* Review Desk: one queue, read like a page someone went through with a highlighter.
-   Only urgency gets colour: the highlighter marks what's urgent. Everything else is ink and pencil. */
+/* Review Desk: an informational app. Ink and pencil grey on calm paper; colour only where it carries information (CI failing,
+   a merge conflict, changes requested). Themes are token sets: the system's light or dark by default, or one picked per
+   device in Settings → Appearance (data-theme on <html>, set before the first paint). */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -17,9 +18,10 @@
 }
 
 :root {
-  --paper: #f6f6f4;
+  --paper: #f7f7f5;
   --sheet: #fff;
-  --wash: #ececea;
+  --wash: #ededea;
+  --hover: #efefec;
   --ink: #1b1d21;
   --ink-2: #3c4047;
   --pencil: #62676f;
@@ -27,20 +29,11 @@
   --rule: #e4e4e0;
   --rule-strong: #d3d3ce;
   --control: #929590;
-  --sel: #e9e9e4;
+  --sel: #e8e8e4;
   --card-sel: #f3f3f0;
-  --side: #efefec;
+  --side: #f0f0ed;
   --side-on: #e3e3de;
   --side-hover: #e9e9e5;
-  --hl: #ffe15c;
-
-  /* The highlighter's shape: chisel tips slanted like a real marker's, around a wavy middle (see .b-now .ref-ink::before). */
-  --marker-l: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 24' preserveAspectRatio='none'%3E%3Cpath d='M10 1.5 6.2 1.7 5.1 4.6 3.9 9.8 2.6 14.6 1.1 20 0 23 10 22.6Z'/%3E%3C/svg%3E");
-  --marker-m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 24' preserveAspectRatio='none'%3E%3Cpath d='M0 1.5C18 .4 36 2.9 58 1.6 76 .6 90 1.2 100 1.1V22.6C82 23.8 64 21.7 44 22.9 24 23.9 10 22.4 0 22.6Z'/%3E%3C/svg%3E");
-  --marker-r: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 24' preserveAspectRatio='none'%3E%3Cpath d='M0 1.1 10 .7 8.9 5.4 7.6 10.8 6.1 16.4 4.6 22.4 0 22.6Z'/%3E%3C/svg%3E");
-  --hl-ink: #1b1d21;
-  --blue: #2c58d1;
-  --blue-wash: #e6ecfb;
   --red: #bf3227;
   --red-wash: #fbe9e7;
   --amber: #8d5c00;
@@ -50,7 +43,6 @@
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
   --card-shadow: 0 0 0 1px rgb(27 29 33 / 5%), 0 1px 2px rgb(27 29 33 / 6%);
   --card-lift: 0 0 0 1px rgb(27 29 33 / 9%), 0 2px 6px rgb(27 29 33 / 8%);
-  --peek: var(--sheet);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
   --ref-w: 124px;
@@ -59,11 +51,13 @@
   color-scheme: light;
 }
 
+/* System: dark when the computer is, unless a theme was picked. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --paper: #151618;
     --sheet: #1e1f22;
     --wash: #232427;
+    --hover: #1b1c1f;
     --ink: #eaebed;
     --ink-2: #c6c9ce;
     --pencil: #9599a1;
@@ -71,15 +65,11 @@
     --rule: #28292d;
     --rule-strong: #35373c;
     --control: #6a6e76;
-    --sel: #232427;
+    --sel: #26272b;
     --card-sel: #26272b;
     --side: #111214;
     --side-on: #232427;
     --side-hover: #1b1c1f;
-    --hl: #e7c547;
-    --hl-ink: #141414;
-    --blue: #91aaff;
-    --blue-wash: #1f2638;
     --red: #ff8073;
     --red-wash: #34201e;
     --amber: #e3b45e;
@@ -89,10 +79,101 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
     --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
     --card-lift: 0 0 0 1px rgb(255 255 255 / 9%);
-    --peek: #2a2b2f;
 
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --paper: #151618;
+  --sheet: #1e1f22;
+  --wash: #232427;
+  --hover: #1b1c1f;
+  --ink: #eaebed;
+  --ink-2: #c6c9ce;
+  --pencil: #9599a1;
+  --faint: #686c74;
+  --rule: #28292d;
+  --rule-strong: #35373c;
+  --control: #6a6e76;
+  --sel: #26272b;
+  --card-sel: #26272b;
+  --side: #111214;
+  --side-on: #232427;
+  --side-hover: #1b1c1f;
+  --red: #ff8073;
+  --red-wash: #34201e;
+  --amber: #e3b45e;
+  --amber-wash: #2f2614;
+  --green: #7dcb98;
+  --scrim: rgb(0 0 0 / 55%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
+  --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+  --card-lift: 0 0 0 1px rgb(255 255 255 / 9%);
+
+  color-scheme: dark;
+}
+
+/* Sand: a warm paper, for daylight. */
+:root[data-theme="sand"] {
+  --paper: #f3eee5;
+  --sheet: #fbf8f2;
+  --wash: #e9e2d5;
+  --hover: #ece6da;
+  --ink: #2a251f;
+  --ink-2: #4a4237;
+  --pencil: #73685a;
+  --faint: #a59886;
+  --rule: #e2d9ca;
+  --rule-strong: #d3c7b3;
+  --control: #9d8f7b;
+  --sel: #e6ddcd;
+  --card-sel: #f0e9dd;
+  --side: #ece5d8;
+  --side-on: #dfd5c3;
+  --side-hover: #e5ddcf;
+  --red: #a8382b;
+  --red-wash: #f5e2db;
+  --amber: #80570c;
+  --amber-wash: #f1e4c8;
+  --green: #3b6a37;
+  --scrim: rgb(42 37 31 / 30%);
+  --shadow: 0 1px 2px rgb(42 37 31 / 7%), 0 10px 30px rgb(42 37 31 / 13%);
+  --card-shadow: 0 0 0 1px rgb(42 37 31 / 6%), 0 1px 2px rgb(42 37 31 / 6%);
+  --card-lift: 0 0 0 1px rgb(42 37 31 / 10%), 0 2px 6px rgb(42 37 31 / 8%);
+
+  color-scheme: light;
+}
+
+/* Slate: a blue-grey dark, softer than black. */
+:root[data-theme="slate"] {
+  --paper: #1b2028;
+  --sheet: #232a33;
+  --wash: #29313b;
+  --hover: #222830;
+  --ink: #e3e7ed;
+  --ink-2: #bfc6d0;
+  --pencil: #8e98a5;
+  --faint: #5e6772;
+  --rule: #2b323c;
+  --rule-strong: #38414c;
+  --control: #66707c;
+  --sel: #2a323d;
+  --card-sel: #2a323d;
+  --side: #171b22;
+  --side-on: #29313b;
+  --side-hover: #1f252d;
+  --red: #f08a7e;
+  --red-wash: #3a2427;
+  --amber: #dfb468;
+  --amber-wash: #352c1c;
+  --green: #86c99c;
+  --scrim: rgb(0 0 0 / 50%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
+  --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+  --card-lift: 0 0 0 1px rgb(255 255 255 / 9%);
+
+  color-scheme: dark;
 }
 
 * {
@@ -107,7 +188,7 @@ body {
 }
 
 body {
-  font: 14px/1.45 var(--sans);
+  font: 15px/1.5 var(--sans);
   font-stretch: 100%;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizelegibility;
@@ -118,7 +199,7 @@ a {
   text-decoration: none;
 }
 
-/* A link in a sentence: ink-2 over a quiet rule. Colour is for urgency, so no blue. */
+/* A link in a sentence: ink-2 over a quiet rule. Colour carries information, so no blue. */
 a:not([class]),
 .link-btn {
   color: var(--ink-2);
@@ -213,7 +294,7 @@ kbd {
 
 /* One measure on every page that has the queue's column, loading or not, so nothing moves between them. */
 .col {
-  --col-w: 800px;
+  --col-w: 880px;
 
   display: flex;
   flex-direction: column;
@@ -324,7 +405,7 @@ kbd {
   padding: 0 16px 0 20px;
   border-bottom: 1px solid var(--rule);
 
-  /* Opaque: the highlighter scrolling under a frosted bar smeared into a yellow blob. */
+  /* Opaque, so rows scrolling under it don't show through. */
   background: var(--paper);
   -webkit-app-region: drag;
   user-select: none;
@@ -382,10 +463,6 @@ kbd {
   width: 18px;
   height: 18px;
   fill: var(--faint);
-}
-
-.mark-hl {
-  fill: var(--hl);
 }
 
 .crumb {
@@ -584,6 +661,167 @@ kbd {
   gap: 30px;
 }
 
+/* The queue and Later use the window's width. */
+.col:has(.queue:not(.lane)) {
+  --col-w: 100%;
+}
+
+/* minmax(0, 1fr): a long unwrapped row truncates instead of widening the page. */
+.queue:not(.lane),
+.later .group,
+.lines {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.queue:not(.lane) {
+  gap: 10px;
+}
+
+.queue-empty {
+  padding: 8px 12px;
+  color: var(--pencil);
+  font-size: 16px;
+}
+
+/* One line each: the title, quietly its repo#number, its age on the right. Selected, a neutral fill. */
+.lines {
+  display: grid;
+  gap: 1px;
+}
+
+.line {
+  position: relative;
+  border-radius: 8px;
+  scroll-margin: 72px 0 84px;
+}
+
+/* .line for weight: the button is a .row-main too (j/k focus it), whose grid is the Merging card's. */
+.line .line-main {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.line .line-main:hover {
+  background: var(--hover);
+}
+
+.line.sel > .line-main {
+  background: var(--sel);
+}
+
+/* The fill is the cursor; a ring on top of it would be a second one. */
+.line .line-main:focus-visible {
+  outline: none;
+}
+
+.line-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.008em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-ref,
+.line-note,
+.line-age {
+  color: var(--pencil);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.line-ref {
+  flex: none;
+}
+
+.line-note {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-age {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.dim .line-title {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.line.leaving {
+  pointer-events: none;
+  animation: leave 200ms ease forwards;
+}
+
+/* Opened in place (an issue, or w): under the title's edge. */
+.line .more.opened,
+.line .detail {
+  padding: 4px 12px 18px;
+}
+
+.line .popover {
+  left: 4px;
+}
+
+.d-why {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.queue .fold {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.queue .fold.sel {
+  box-shadow: none;
+}
+
+/* Later's groups open and close on their heading. */
+.group-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.group-toggle[aria-expanded="false"] {
+  color: var(--ink-2);
+}
+
+.group-toggle:disabled {
+  cursor: default;
+}
+
+.later .group {
+  display: grid;
+  gap: 4px;
+}
+
 .quiet-note {
   padding: 40px 12px;
   color: var(--pencil);
@@ -617,10 +855,10 @@ kbd {
 
 /* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
 .ai-paused {
-  margin: 0 0 -12px;
-  padding: 0 18px;
+  margin: 0 0 6px;
+  padding: 0 12px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .ai-paused b {
@@ -704,10 +942,7 @@ kbd {
   }
 }
 
-/* The negative margins give the highlighter room inside the clipped ref box. */
 .ref {
-  margin: -2px 0 -2px -8px;
-  padding: 2px 0 2px 8px;
   overflow: hidden;
   color: var(--ink-2);
   font-size: 13px;
@@ -733,75 +968,20 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.b-now .ref-ink,
-.b-now .ref-repo {
-  color: var(--hl-ink);
-}
-
-/* The highlighter: a marker stroke (ragged chisel ends, slight tilt) drawn behind the ink. */
-.b-now .ref-ink {
-  position: relative;
-  isolation: isolate;
-}
-
-.b-now .ref-ink::before {
-  position: absolute;
-  z-index: -1;
-  inset: -0.06em -0.55em -0.08em -0.5em;
-  background: linear-gradient(
-    90deg,
-    color-mix(in oklab, var(--hl), #e8a400 22%),
-    var(--hl) 0.9em,
-    var(--hl) calc(100% - 0.9em),
-    color-mix(in oklab, var(--hl), #e8a400 16%)
-  );
-  content: "";
-  mask-image: var(--marker-l), var(--marker-m), var(--marker-r);
-  mask-position:
-    left center,
-    center,
-    right center;
-  mask-repeat: no-repeat;
-
-  /* caps keep their size at any width; the middle overlaps them by 1px so no seam shows */
-  mask-size:
-    0.55em 100%,
-    calc(100% - 1.05em + 2px) 100%,
-    0.55em 100%;
-  transform: rotate(-1deg);
-}
-
-/* No two neighbouring strokes sit at the same angle. */
-.b-now:nth-child(3n + 2) .ref-ink::before {
-  transform: rotate(0.5deg) translateY(0.5px);
-}
-
-.b-now:nth-child(3n) .ref-ink::before {
-  transform: rotate(-0.4deg);
-}
-
 .b-later .ref-ink,
 .b-fyi .ref-ink,
 .b-hide .ref-ink {
   color: var(--pencil);
 }
 
-/* Cleared and hidden items never carry the highlighter, even if a rule still says now. */
+/* Cleared, hidden and landed rows are pencil. */
 .dim .ref-ink {
   color: var(--pencil);
-}
-
-.dim .ref-ink::before {
-  content: none;
 }
 
 .dim .ref-repo {
   color: var(--pencil);
   opacity: 1;
-}
-
-.row-body {
-  min-width: 0;
 }
 
 .title-line {
@@ -825,23 +1005,6 @@ kbd {
 .b-fyi .title {
   color: var(--ink-2);
   font-weight: 400;
-}
-
-.new-dot {
-  flex: none;
-  align-self: center;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--blue);
-}
-
-.pin {
-  flex: none;
-  align-self: center;
-  width: 12px;
-  height: 12px;
-  fill: var(--pencil);
 }
 
 .meta {
@@ -880,7 +1043,7 @@ kbd {
   font-weight: 600;
 }
 
-/* Only urgency gets colour: the verdict is ink, its weight says "look". */
+/* The verdict is ink; its weight says "look". */
 .v-look {
   color: var(--ink);
 }
@@ -894,72 +1057,6 @@ kbd {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   text-align: right;
-}
-
-.run-title {
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 600;
-}
-
-.away .run-title {
-  color: var(--ink-2);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-/* Sorted away: the pile the rules handled, one quiet line. */
-.away {
-  padding-top: 16px;
-  border-top: 1px solid var(--rule);
-}
-
-.away-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 2px;
-  padding: 0 6px 0 12px;
-}
-
-.away-label {
-  margin-right: 8px;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 550;
-}
-
-.away-btn {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  height: 30px;
-  padding: 6px 8px 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--pencil);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.away-btn .n {
-  color: var(--ink-2);
-  font-weight: 550;
-  font-variant-numeric: tabular-nums;
-}
-
-.away-btn:hover {
-  color: var(--ink);
-}
-
-.away-btn.on {
-  box-shadow: inset 0 -2px 0 var(--ink);
-  color: var(--ink);
-}
-
-.away-btn.on .n {
-  color: var(--ink);
 }
 
 .group-head.sub {
@@ -1029,13 +1126,6 @@ kbd {
   white-space: normal;
 }
 
-.card .new-dot,
-.card .pin {
-  display: inline-block;
-  margin-left: 8px;
-  vertical-align: 1px;
-}
-
 .card .age {
   grid-area: 1 / 2;
 }
@@ -1066,7 +1156,7 @@ kbd {
   white-space: normal;
 }
 
-/* Inline, the ref has the line's room: nothing truncates and nothing clips the highlighter. */
+/* Inline, the ref has the line's room, so nothing truncates. */
 .card .ref {
   margin: 0 12px 0 0;
   padding: 0;
@@ -1101,30 +1191,12 @@ kbd {
   white-space: nowrap;
 }
 
-.ai-word {
-  display: flex;
-  gap: 8px;
-  color: var(--pencil);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.ai-word > :not(:first-child)::before {
-  margin-right: 8px;
-  color: var(--faint);
-  content: "·";
-}
-
 /* Parts of one line ("pushed a fix · 4be71c2 · 24m"), apart like the card's call. */
 .dots > :not(:first-child)::before {
   margin: 0 8px;
   color: var(--faint);
   font-weight: 400;
   content: "·";
-}
-
-.ai-word .size {
-  font-variant-numeric: tabular-nums;
 }
 
 /* The call ranks by weight, as in the review: look is semibold ink, skim is ink-2, skip is pencil. */
@@ -1142,10 +1214,6 @@ kbd {
   font-weight: 450;
 }
 
-.ai-word .t-bad {
-  font-weight: 600;
-}
-
 .gist {
   grid-column: 1 / -1;
   max-width: 72ch;
@@ -1158,19 +1226,6 @@ kbd {
 .gist b {
   color: var(--ink);
   font-weight: 600;
-}
-
-/* The top concern sits like the review's margin notes: a thin rule, no box. */
-.concern {
-  grid-column: 1 / -1;
-  max-width: 72ch;
-  margin-top: 6px;
-  padding: 1px 0 1px 12px;
-  border-left: 2px solid var(--rule-strong);
-  color: var(--ink-2);
-  font-size: 13px;
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
 }
 
 /* An AI review of an older commit, kept until the new one lands. */
@@ -1186,50 +1241,6 @@ kbd {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-}
-
-.gist.clip-3 {
-  -webkit-line-clamp: 3;
-}
-
-.gist.clip-2 {
-  -webkit-line-clamp: 2;
-}
-
-/* One line: the card's full width, since firstClause already ends it at a whole clause. */
-.gist.clip-1 {
-  max-width: none;
-  -webkit-line-clamp: 1;
-}
-
-/* An issue's latest event: context, not a call. */
-.gist.event {
-  color: var(--pencil);
-  font-size: 13px;
-}
-
-/* The reply y sends on your PR: who it answers in pencil, then what you'd post as you, in ink. Selected, what it answers
-   gets its own line. */
-.concern.reply .reply-to {
-  color: var(--pencil);
-}
-
-.concern.reply .reply-body {
-  color: var(--ink);
-}
-
-.card.sel .concern.reply .reply-to {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.card.sel .concern.reply .reply-body {
-  white-space: pre-wrap;
-}
-
-/* A concern is one whole sentence; four lines only guards against a runaway one. */
-.concern.clip {
-  -webkit-line-clamp: 4;
 }
 
 /* The selected card's facts, then its keys under a hairline, as far below it as the facts sit above. */
@@ -1270,183 +1281,6 @@ kbd {
   margin-top: 4px;
 }
 
-.deck .fold {
-  margin-top: 4px;
-  padding: 10px 18px;
-  border-radius: 12px;
-}
-
-/* The cursor on the fold: on the paper, the cards' lighter fill wouldn't show. */
-.deck .fold.sel {
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-  color: var(--ink-2);
-}
-
-/* Folded, the next two cards' edges show under the last one, so the line below reads as more of the same. In dark, where
-   shadows don't show, the edges (--peek) are a step lighter than a sheet. */
-.cards.folded {
-  position: relative;
-  padding-bottom: 10px;
-  isolation: isolate;
-}
-
-.cards.folded::before,
-.cards.folded::after {
-  position: absolute;
-  z-index: -1;
-  height: 24px;
-  border-radius: 0 0 12px 12px;
-  background: var(--peek);
-  box-shadow: var(--card-lift);
-  content: "";
-}
-
-.cards.folded::before {
-  right: 8px;
-  bottom: 5px;
-  left: 8px;
-}
-
-.cards.folded::after {
-  right: 16px;
-  bottom: 0;
-  left: 16px;
-}
-
-.deck .fold:focus-visible {
-  outline: none;
-}
-
-/* A run (three or more from one author, for one reason) is one stack: a sheet, its cards ruled apart. */
-.run {
-  margin: 6px 0 2px;
-}
-
-.run-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-  margin: 0 0 6px;
-  padding: 0 18px;
-}
-
-.deck .run-cards {
-  display: grid;
-  border-radius: 12px;
-  background: var(--sheet);
-  box-shadow: var(--card-shadow);
-}
-
-.run-cards > .card,
-.run-cards > .card:hover:not(.sel) {
-  box-shadow: none;
-}
-
-.run-cards > .card + .card {
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-}
-
-.run-cards > .card:has(+ .card) {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.run-cards > .card + .card::before {
-  display: block;
-  margin: 0 18px;
-  border-top: 1px solid var(--rule);
-  content: "";
-}
-
-.run-cards > .card.sel {
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-}
-
-.run-cards > .card.sel::before,
-.run-cards > .card.sel + .card::before {
-  border-color: transparent;
-}
-
-.run-why {
-  color: var(--pencil);
-  font-size: 13px;
-}
-
-.run-why.t-bad {
-  color: var(--red);
-  font-weight: 600;
-}
-
-.run-why.t-warn {
-  color: var(--amber);
-  font-weight: 600;
-}
-
-.run-next {
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
-.run-next b {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-/* Your own stack: each PR is its title and its ref line. */
-.run.mine .card .row-main {
-  padding-top: 10px;
-  padding-bottom: 11px;
-}
-
-.deck .popover {
-  left: 10px;
-}
-
-/* Sorted away: flat rows on the paper, so the cards above stay the ones that need you. */
-.away .card {
-  background: none;
-  box-shadow: none;
-}
-
-.away .card:hover:not(.sel) {
-  background: color-mix(in srgb, var(--wash) 60%, transparent);
-}
-
-.away .card.sel {
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-}
-
-.away .cards {
-  gap: 0;
-}
-
-.away .run-cards {
-  background: none;
-  box-shadow: none;
-}
-
-.away .card .row-main {
-  padding-top: 9px;
-  padding-bottom: 10px;
-}
-
-.away .card .title {
-  font-size: 14.5px;
-  font-weight: 400;
-}
-
-.away .dim .title {
-  color: var(--pencil);
-}
-
-.deck .away-bar {
-  padding-left: 18px;
-}
-
 /* An empty group says so on its heading's line. */
 .group-none {
   color: var(--pencil);
@@ -1456,7 +1290,7 @@ kbd {
 }
 
 /* Merging --------------------------------------------------------------------
-   Your PRs Claude is getting merged. Grey unless one needs you: then its ref gets the highlighter and its problems their colour. */
+   Your PRs Claude is getting merged. Grey while Claude has one; one waiting on you has its why in ink and its problems their colour. */
 
 .lane-intro {
   margin: -2px 0 10px;
@@ -1471,7 +1305,7 @@ kbd {
 }
 
 /* A calm row's state is pencil, problems included; one that needs you has its why in ink and its problems coloured. */
-.lane-row:not(.b-now) .meta .fact-word {
+.lane-row:not(.waits) .meta .fact-word {
   color: var(--pencil);
 }
 
@@ -1592,7 +1426,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-/* Passing isn't urgent: no colour, as in the review header and the lane. */
+/* Passing is no news: no colour, as in the review header and the lane. */
 .t-ci-green {
   color: inherit;
 }
@@ -1677,12 +1511,6 @@ kbd {
 
 .also .placement {
   margin: 8px 0 0 14px;
-}
-
-.brief-line {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 4px;
 }
 
 /* Below high, risk is a fact, not a second verdict. */
@@ -2785,7 +2613,7 @@ kbd {
   font-size: 13px;
 }
 
-/* The header has room for the whole ref, so nothing truncates and nothing clips the highlighter. */
+/* The header has room for the whole ref, so nothing truncates. */
 .rv-ref .ref {
   flex: none;
   overflow: visible;
@@ -3338,11 +3166,6 @@ kbd {
     margin-bottom: 2px;
   }
 
-  .row-body {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
   .age {
     grid-column: 2;
     grid-row: 1;
@@ -3378,10 +3201,6 @@ pre,
   font-feature-settings:
     "calt" 0,
     "liga" 0;
-}
-
-.away-btn:disabled {
-  cursor: default;
 }
 
 .plain {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Action,
   Card,
@@ -19,10 +19,10 @@ import {
   handArm,
   isFold,
   navigable,
-  noCloneOf,
   parseRoute,
   removeCard,
   routeHash,
+  SORTED_AWAY,
   stops,
   type GroupKey,
   type Route,
@@ -31,7 +31,7 @@ import type { RowCtx } from "./components/CardRow.tsx";
 import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
-import { Queue } from "./components/Queue.tsx";
+import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
@@ -70,6 +70,7 @@ const CHORDS: Record<string, Route> = {
   m: { name: "inflight" },
   i: { name: "inflight" },
 };
+// g l, g f, g d, g h, g x: Later, with that group open.
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
 const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
@@ -93,7 +94,7 @@ export function App() {
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  // Sorted-away groups open only when asked (g l, …), and close again on reload.
+  // Later's groups other than its own open only when asked (g f, …), and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
   const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
   const [filter, setFilter] = useState("");
@@ -109,7 +110,7 @@ export function App() {
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
   const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed, or handArm(card) for m
-  const [reviewFrom, setReviewFrom] = useState<"queue" | "inflight">("queue"); // where Esc goes back to from a review
+  const [reviewFrom, setReviewFrom] = useState<"queue" | "later" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -125,7 +126,6 @@ export function App() {
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
   const lastIndex = useRef(0);
-  const landing = useRef<{ id: string; top: number } | null>(null); // where the card j/k moves to sat on screen
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
@@ -226,7 +226,7 @@ export function App() {
   const onLane = route.name === "inflight";
   // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
   useEffect(() => {
-    if (route.name !== "review") setReviewFrom(route.name === "inflight" ? "inflight" : "queue");
+    if (route.name !== "review") setReviewFrom(route.name === "inflight" || route.name === "later" ? route.name : "queue");
   }, [route.name]);
   useEffect(() => {
     if (!onLane) return;
@@ -304,9 +304,12 @@ export function App() {
   }, []);
 
   const me = overview?.me ?? "";
-  const groups = useMemo(() => groupsOf(view, open, filter, unfolded, me), [view, open, filter, unfolded, me]);
-  const flat = useMemo(() => navigable(groups, leaving), [groups, leaving]);
-  const cursor = useMemo(() => stops(groups, leaving), [groups, leaving]);
+  const onLater = route.name === "later";
+  const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
+  // j/k and the selection go through the page on screen: the queue, or Later's groups.
+  const page = useMemo(() => groups.filter((g) => SORTED_AWAY.includes(g.key) === onLater), [groups, onLater]);
+  const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
+  const cursor = useMemo(() => stops(page, leaving), [page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
@@ -327,32 +330,23 @@ export function App() {
     const next = flat[Math.min(lastIndex.current, flat.length - 1)];
     if (!next) return;
     setSelected(next.id);
-    // The first pick of a session takes focus too, so the first Tab reaches its keys and not the sidebar.
-    if (document.activeElement === document.body && routeRef.current.name === "queue")
+    // The first pick of a session takes focus too, so the keys act on it and Tab goes on from it.
+    if (document.activeElement === document.body && ["queue", "later"].includes(routeRef.current.name))
       requestAnimationFrame(() => {
         focusRow(next.id);
       });
     // tick re-checks once the undo hold has run out.
   }, [flat, cursor, selected, tick]);
 
-  // The card j/k lands on stays put while the one it left closes above it; near the top, where the page can't scroll up that
-  // far, it moves up by the rest. Then it's scrolled into view if it grew past the window.
-  useLayoutEffect(() => {
-    const at = landing.current;
-    landing.current = null;
-    const el = selected ? document.querySelector(`[data-id="${CSS.escape(selected)}"]`) : null;
-    if (el && at?.id === selected) window.scrollBy(0, el.getBoundingClientRect().top - at.top);
-  }, [selected]);
-
-  // The first card of a group brings its heading along (the queue's first, the top of the page), so no heading sits under the bar.
+  // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
-    if (!selected || route.name !== "queue") return;
+    if (!selected || (route.name !== "queue" && route.name !== "later")) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
-    const group = el?.closest(".group");
+    const head = el?.closest(".group")?.querySelector(".group-head");
     if (!el) return;
     if (document.querySelector(".queue [data-id]") === el) window.scrollTo(0, 0);
-    else if (group?.querySelector("[data-id]") === el && group.querySelector(".group-head")!.getBoundingClientRect().top < 64)
-      group.querySelector(".group-head")!.scrollIntoView({ block: "start" });
+    else if (head && el.closest(".group")?.querySelector("[data-id]") === el && head.getBoundingClientRect().top < 64)
+      head.scrollIntoView({ block: "start" });
     else el.scrollIntoView({ block: "nearest" });
     // Filtering moves rows, so scroll the selection back into view.
   }, [selected, filter, route.name]);
@@ -487,14 +481,7 @@ export function App() {
     }
     setSelected(c.id);
     setSnoozeFor(null);
-    // With no clone for Claude to work in, the next step is setting one up.
-    if (c.inflight && noCloneOf(c)) {
-      go({ name: "settings", section: "inflight" });
-      return;
-    }
-    // A PR in Merging is in the queue for what Claude left you (a reply to send, a question): that's in Merging.
-    if (c.inflight) setLaneSel(c.id);
-    go(c.inflight ? { name: "inflight" } : { name: "review", id: c.id });
+    go({ name: "review", id: c.id });
     void seen(c);
   }
 
@@ -643,16 +630,6 @@ export function App() {
 
   const copyResume = (r: InflightRow) => copyCommand(r.resume);
 
-  async function dismissQuestion(c: Card) {
-    try {
-      await api.dismiss(c.id);
-      flash(`Dismissed the question on ${shortRef(c)}`);
-    } catch (e) {
-      flash(message(e), true);
-    }
-    refresh(0);
-  }
-
   async function copyCommand(resume: string | null) {
     if (!resume) {
       flash("No session of Claude's to open yet");
@@ -678,6 +655,7 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "esc") setExpanded(null);
+    // From its review: a PR in Merging is Claude's.
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
       flash(`${shortRef(c)} is in Merging, so Claude has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
@@ -691,15 +669,9 @@ export function App() {
       setSnoozeFor(c.id);
     } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
-    // On your PR in Merging with a question, c and x are Merging's: answer it in Claude's session, or dismiss it.
-    else if (k === "c" && c.inflight && c.escalated) void copyCommand(c.resume ?? null);
-    else if (k === "x" && c.inflight && c.escalated) void dismissQuestion(c);
     else if (k === "c") void copy(c);
     else if (k === "i") void aiReview(c);
-    else if (k === "y") {
-      if (c.inflight && c.reply) sendArmed(c.id, c.reply);
-      else flash(`No reply to send on ${shortRef(c)}`);
-    } else if (k === "w") {
+    else if (k === "w") {
       if (expanded === c.id) setShowSignals((s) => !s);
       else {
         toggle(c);
@@ -708,7 +680,7 @@ export function App() {
     }
   }
 
-  // Focus follows the cursor (Tab then reaches the selected card's keys), without a scroll of its own.
+  // Focus follows the cursor, without a scroll of its own.
   function focusRow(id: string) {
     const el = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
     const target = el instanceof HTMLButtonElement ? el : el?.querySelector(".row-main");
@@ -720,8 +692,6 @@ export function App() {
     const i = cursor.indexOf(selected ?? "");
     const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
     if (!next) return;
-    const top = document.querySelector(`[data-id="${CSS.escape(next)}"]`)?.getBoundingClientRect().top;
-    landing.current = top === undefined ? null : { id: next, top };
     setSelected(next);
     focusRow(next);
   }
@@ -729,7 +699,7 @@ export function App() {
   // A group's "n more" line opens in place; the cursor goes on to the first card it showed.
   function unfold(k: GroupKey) {
     const shown = groups.find((g) => g.key === k)?.cards.length ?? 0;
-    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true }, me).find((g) => g.key === k)?.cards[shown];
+    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true }).find((g) => g.key === k)?.cards[shown];
     setUnfolded((u) => ({ ...u, [k]: true }));
     if (first) {
       setSelected(first.id);
@@ -741,6 +711,16 @@ export function App() {
 
   function toggleGroup(k: GroupKey) {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
+  }
+
+  // A chord opens its group on Later, and scrolls to it; pressed again there, it closes it.
+  function chordGroup(k: GroupKey) {
+    if (!onLater || !open[k]) setOpen((o) => ({ ...o, [k]: true }));
+    else toggleGroup(k);
+    if (!onLater) go({ name: "later" });
+    requestAnimationFrame(() => {
+      document.querySelector(`.g-${k}`)?.scrollIntoView({ block: "start" });
+    });
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -795,6 +775,7 @@ export function App() {
       if (expanded) setExpanded(null);
       else if (coordOpen) setCoordOpen(false);
       else if (filter) setFilter("");
+      else if (onLater) go({ name: "queue" });
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
@@ -804,7 +785,7 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oedsmbpcwiyx".includes(k)) {
+    } else if (current && k.length === 1 && "oedsmbpcwi".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
@@ -829,7 +810,7 @@ export function App() {
     e.stopImmediatePropagation();
     const k = e.key;
     if (CHORDS[k]) go(CHORDS[k]);
-    else if (AWAY_KEYS[k] && route.name === "queue") toggleGroup(AWAY_KEYS[k]);
+    else if (AWAY_KEYS[k]) chordGroup(AWAY_KEYS[k]);
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
@@ -958,13 +939,13 @@ export function App() {
               groups={groups}
               ctx={ctx}
               filter={filter}
-              toggle={toggleGroup}
               unfold={unfold}
               selectFold={(k) => {
                 setSelected(`fold:${k}`);
               }}
             />
           )}
+          {route.name === "later" && !broken && <Later view={view} groups={groups} ctx={ctx} filter={filter} toggle={toggleGroup} />}
           {route.name === "review" && !broken && (
             <Review
               key={route.id} // a different PR starts fresh: first file, no note, nothing armed

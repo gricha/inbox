@@ -25,6 +25,7 @@ export function Inflight({
   if (!view) return <p className="quiet-note">Loading…</p>;
   const open = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
+  const waiting = open.filter((r) => r.needs_you).length;
   const rows = (list: InflightRow[]) => (
     <div className="rows cards">
       {list.map((r) => (
@@ -38,15 +39,18 @@ export function Inflight({
         <section className="group" aria-labelledby="h-inflight">
           <h2 id="h-inflight" className="group-head">
             <span>Merging</span>
-            <span className="count">{open.length}</span>
+            <span className="count">
+              {open.length}
+              {waiting > 0 && ` · ${waiting} waiting on you`}
+            </span>
           </h2>
           <p className="lane-intro">
             {view.babysitting ? (
-              "Claude is getting these merged: it fixes CI and drafts replies, and a PR is back in the queue only when it needs you. What it can't get merged goes back to your desk."
+              "Claude is getting these merged: it fixes CI and drafts replies. What waits on you is listed first; what it can't get merged goes back to your queue."
             ) : (
               <>
-                Your PRs handed off for merge. <a href="#/settings/inflight">Claude is off</a>, so a PR is back in the queue when CI fails
-                or reviewers ask for something.
+                Your PRs handed off for merge. <a href="#/settings/inflight">Claude is off</a>, so a PR waits on you here when CI fails or
+                reviewers ask for something.
               </>
             )}
           </p>
@@ -109,7 +113,7 @@ function Row({
   // With Claude off the problem itself is the why ("CI failing"); its fact says it in full, so the why goes.
   const said = !!needs && facts.some((f) => f.text === needs || f.text.startsWith(`${needs}: `));
   return (
-    <div className={cls("row", "card", "lane-row", needs && "b-now", on && "sel", !live && "dim")} data-id={c.id}>
+    <div className={cls("row", "card", "lane-row", needs && "waits", on && "sel", !live && "dim")} data-id={c.id}>
       <div className="row-line">
         <button
           type="button"
@@ -138,7 +142,7 @@ function Row({
                   <span className="ref-repo">{c.repo.split("/")[1]}</span>#{c.number}
                 </span>
               </span>
-              {/* The highlighter on the ref already says it needs you: the reason, in ink, as the queue's why. */}
+              {/* Why it waits on you, its label in ink. */}
               {needs && !said && <Owed why={needs} />}
               {live ? (
                 facts.map((f) => (

@@ -448,6 +448,9 @@ export class Judge {
         };
         desk.store.set(`judge:${g.item.id}`, row);
       }
+      // What it put on the queue notifies now, not at the next sync.
+      desk.changed();
+      desk.notifyNew();
       this.error = null;
       this.failures = 0;
       this.lastAt = at;
