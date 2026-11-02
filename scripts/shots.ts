@@ -187,6 +187,20 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A stack behind Today's line: three PRs from one author on one sheet, under one line that says why.
+    name: "queue-stack",
+    go: async (page) => {
+      await at("#/")(page);
+      await unfoldNow(page);
+      await page.locator(".run", { hasText: "3 PRs from rosa" }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.reload();
+      await page.locator(".queue h2").first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
     // Tab from the selected card lands on its first key: the cursor's fill and ring, clear of the letters.
     name: "queue-tab-key",
     go: async (page) => {
@@ -373,6 +387,25 @@ const SHOTS: Shot[] = [
       await at("#/settings/review")(page);
       await page.evaluate(`document.querySelector("#s-review").scrollIntoView()`);
       await page.waitForTimeout(200);
+    },
+    after: pauseAi(false),
+  },
+  {
+    // Logged out, the coordinator and the judge stop too: each says so in its one line, in ink, with when it tries again.
+    name: "settings-agent-paused",
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+      await at("#/settings/agent")(page);
+    },
+    after: pauseAi(false),
+  },
+  {
+    name: "settings-policy-paused",
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+      await at("#/settings/policy")(page);
     },
     after: pauseAi(false),
   },

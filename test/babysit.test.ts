@@ -478,7 +478,11 @@ async function sitterDesk(c: TestContext, items: Item[], settings: Record<string
     },
   });
   t.desk.mcpUrl = "http://127.0.0.1:9/mcp"; // the fake claude never calls it
-  c.after(() => {
+  c.after(async () => {
+    t.desk.stop();
+    // A run still getting ready (git in the clone, a login probe) writes into the dirs about to be removed.
+    await until("the babysitter to settle", () => !t.desk.sitter.starting.size && !t.desk.sitter.live.size);
+    await Promise.all(t.desk.sitter.gitQueues.values());
     t.cleanup();
     fs.rmSync(w.root, { recursive: true, force: true });
   });

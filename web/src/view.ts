@@ -323,9 +323,17 @@ export function firstClause(text: string, max = 72): string {
 // A number keeps its unit and a range its ends on one line: "0–100 %", "15 s".
 export const keepUnits = (text: string) => text.replaceAll(/(\d) (%|ms\b|s\b)/g, "$1\u202f$2").replaceAll(/(\d)–(\d)/g, "$1–\u2060$2");
 
-// Whether a why already says a problem: "conflicts with main" says "merge conflict".
-export const says = (why: string, problem: string) =>
-  why.toLowerCase().includes(problem.toLowerCase()) || (problem === "merge conflict" && /conflict/i.test(why));
+// The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
+const MEANINGS = [
+  /conflict/i,
+  /\bCI\b.*\b(?:fail\w*|red|broken)\b|\b(?:fail\w*|red|broken)\b.*\bCI\b/i,
+  /\bchanges requested\b|\brequested changes\b/i,
+  /\bapprov(?:ed|als?)\b/i,
+];
+
+// Whether a why already says a fact, in its words or in other words for the same thing.
+export const says = (why: string, fact: string) =>
+  why.toLowerCase().includes(fact.toLowerCase()) || MEANINGS.some((m) => m.test(why) && m.test(fact));
 
 // A card's problems, in the review's and the lane's words and tones.
 export function problems(c: Pick<Card, "chips">): { text: string; tone: "bad" | "warn" }[] {
@@ -338,18 +346,17 @@ export function problems(c: Pick<Card, "chips">): { text: string; tone: "bad" | 
 
 export const sizeOf = (c: Pick<Card, "chips">): string | undefined => c.chips.find((x) => /^\+\d+ −\d+$/.test(x));
 
-const OLDER: Partial<Record<Preflight["state"], string>> = { stale: "updating", paused: "paused", off: "earlier commit" };
 const WAITING: Partial<Record<Preflight["state"], string>> = {
   running: "AI review being written",
   queued: "AI review queued",
   paused: "AI review paused",
 };
 
-// What a card says about its AI review after its why: the verdict, with a note when it's for an older commit, or why
+// What a card says about its AI review after its why: the verdict, with a note when it's for an earlier commit, or why
 // there's none yet. Nothing for an issue, your own PR, or auto reviews off with none written.
 export function aiWord(p: Preflight | undefined): { verdict: Preflight["verdict"] | null; note: string } | null {
   if (!p || p.state === "none") return null;
-  if (p.verdict) return { verdict: p.verdict, note: OLDER[p.state] ?? "" };
+  if (p.verdict) return { verdict: p.verdict, note: p.state === "ready" ? "" : "earlier commit" };
   const note = WAITING[p.state];
   return note ? { verdict: null, note } : null;
 }
@@ -379,8 +386,7 @@ export function cardFacts(
   if (c.demoted && !away) out.push(c.demoted);
   // Why the coordinator put it away: e restores it, as with your own.
   if (c.cleared_by_coordinator) out.push(`the coordinator: ${c.cleared_by_coordinator}`);
-  const why = c.why.toLowerCase();
-  return out.filter((f) => !why.includes(f.toLowerCase()));
+  return out.filter((f) => !says(c.why, f));
 }
 
 // The cards on screen, in screen order.

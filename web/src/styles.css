@@ -211,17 +211,13 @@ kbd {
   min-height: 100vh;
 }
 
+/* One measure on every page that has the queue's column, loading or not, so nothing moves between them. */
 .col {
-  --col-w: 920px;
+  --col-w: 800px;
 
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-/* The queue's cards keep a shorter measure, so the AI's call on the right sits near the title it's about. */
-.col:has(.main > .deck) {
-  --col-w: 800px;
 }
 
 /* Sidebar ------------------------------------------------------------------ */

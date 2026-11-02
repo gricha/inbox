@@ -1,7 +1,8 @@
 // In-memory mock of the desk HTTP API for UI work. Run: node --disable-warning=ExperimentalWarning web/mock/server.ts
 // Rules aren't evaluated: each seed lists the `when` keys it satisfies per board, so reordering
 // rules, changing buckets, caps or defaults in the config editor really moves cards.
-// MOCK_AI_PAUSED=1 starts with AI reviews paused (an expired login); POST /api/mock/ai-paused { paused } flips it.
+// MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews, the judge, the coordinator and babysitters paused);
+// POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge and coordinator to work.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { quietText } from "../../src/rules.ts";
@@ -127,7 +128,8 @@ let config: Config = {
         { when: W.pushed, bucket: "now", why: "pushed since your review" },
         { when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
         { when: W.bot, bucket: "later", why: "added by a bot" },
-        { when: W.red, bucket: "later", why: "CI failing" },
+        // In its own words: the row says the problem once, not again as "CI failing".
+        { when: W.red, bucket: "later", why: "red CI, so it waits on its author" },
         { when: W.owners, bucket: "fyi", why: "CODEOWNERS ping to @{me.requested_team}" },
         { when: W.approved, bucket: "hide", why: "already approved by {pr.approvals} others" },
       ],
@@ -867,6 +869,25 @@ const SEEDS: Seed[] = [
     size: [30, 52, 4],
     on: { "personal-mine": [] },
   },
+  // A stack from one close collaborator: three small PRs, each on the one before, for the same reason.
+  ...(
+    [
+      [310, "Extract the date picker into its own package", [180, 140, 9]],
+      [311, "Move the date picker's styles onto design tokens", [64, 88, 4]],
+      [312, "Use the shared date picker in the report filters", [42, 31, 3]],
+    ] as const
+  ).map(([n, title, size]): Seed => ({
+    repo: "oss/calendar-ui",
+    n,
+    title,
+    author: "rosa",
+    age: 354 - n,
+    wait: 354 - n,
+    by: "rosa",
+    size: [...size],
+    close: 7,
+    on: { "personal-review": ["close"] },
+  })),
   // A stack of your own PRs, one per team, all red on the same checks.
   ...(
     [
@@ -1726,6 +1747,8 @@ const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
 const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
+let agentsBusy = false; // the judge and the coordinator at work: POST /api/mock/agents-busy { busy }
+const retryAt = () => new Date(Date.now() + 26 * 60_000).toISOString();
 const autoAiOn = () => setting("review.auto_ai");
 
 // What the agent wrote (or will write) for the other PRs in Now and Today, so every card has something real to skim.
@@ -1798,6 +1821,24 @@ const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "s
     summary:
       "Tracks search latency and answers 503 with Retry-After while the rolling p95 stays over 800 ms for a minute, so a slow index sheds load instead of queueing it.",
     concerns: ["The budget is per process: with 12 replicas one hot shard trips it on some and not others, so clients see flapping 503s."],
+  },
+  "oss/calendar-ui#310": {
+    verdict: "skim",
+    risk: "low",
+    summary: "Moves the date picker and its tests into packages/date-picker with no behaviour change; the app imports it from there.",
+    concerns: [],
+  },
+  "oss/calendar-ui#311": {
+    verdict: "skim",
+    risk: "low",
+    summary: "Replaces the date picker's hard-coded colours and spacing with design tokens, so it follows the dark theme.",
+    concerns: [],
+  },
+  "oss/calendar-ui#312": {
+    verdict: "skim",
+    risk: "low",
+    summary: "Swaps the report filters' own date inputs for the shared picker and deletes the old component.",
+    concerns: [],
   },
   "acme/ml-pipeline#307": {
     verdict: "skim",
@@ -2341,7 +2382,7 @@ const settingsView = (): SettingsView => ({
   github: github(),
   paused: {
     ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
-    babysitters: null,
+    babysitters: aiPaused && setting("inflight.babysit") ? { why: aiPaused, until: retryAt() } : null,
   },
 });
 
@@ -2409,16 +2450,17 @@ function policyDoc(): PolicyDoc {
     path: `${homedir()}/.review-desk/policy.md (mock, in memory)`,
     text: policyText,
     hash: policyHash(),
+    // An expired login stops it as it stops every agent: they're all your one Claude Code.
     judge: {
-      state: off ? "off" : "idle",
+      state: off ? "off" : aiPaused ? "error" : agentsBusy ? "running" : "idle",
       off_reason: off,
-      waiting: 0,
+      waiting: agentsBusy ? 2 : 0,
       judged: off ? 0 : 23,
       spent: off ? 0 : 7,
       max_per_hour: setting("policy.max_per_hour"),
       last_at: iso(0.3),
-      error: null,
-      retry_at: null,
+      error: !off && aiPaused ? aiPaused : null,
+      retry_at: !off && aiPaused ? retryAt() : null,
     },
   };
 }
@@ -2444,18 +2486,21 @@ const undone = (e: CoordinatorLogEntry) => e.undo_seq !== null && !events.some((
 function coordinatorStatus(): CoordinatorStatus {
   const off = setting("coordinator.enabled") ? null : "Off";
   const dir = `${homedir()}/.review-desk/coordinator`;
+  const failed = !off && aiPaused;
   return {
-    state: off ? "off" : "idle",
+    state: off ? "off" : failed ? "error" : agentsBusy ? "running" : "idle",
     off_reason: off,
     session_id: SESSION,
     started: true,
     dir,
     command: `cd ${dir} && claude --resume ${SESSION} --mcp-config mcp.json`,
-    running_since: null,
-    pending: 0,
-    next_at: null,
-    last_run: { n: 14, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
-    error: null,
+    running_since: agentsBusy ? iso(20 / 3600) : null,
+    pending: agentsBusy ? 2 : 0,
+    next_at: failed ? retryAt() : null,
+    last_run: failed
+      ? { n: 15, kind: "events", started_at: iso(4 / 60), ms: 3_000, ok: false, events: 2, actions: 0, error: aiPaused }
+      : { n: 14, kind: "events", started_at: iso((3 * 60 + 22) / 3600), ms: 22_000, ok: true, events: 3, actions: 1, error: null },
+    error: failed ? aiPaused : null,
     policy_empty: !policyText.trim(),
     held: false,
   };
@@ -2608,6 +2653,11 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "POST /api/mock/ai-paused") {
     pauseAi((await readBody(req)).paused !== false);
     return { ok: true, ai_paused: aiPaused };
+  }
+  if (route === "POST /api/mock/agents-busy") {
+    agentsBusy = (await readBody(req)).busy !== false;
+    bump();
+    return { ok: true };
   }
   if (route === "POST /api/coordinator/note") {
     note(0, 0, "note", textOf(await readBody(req)));
