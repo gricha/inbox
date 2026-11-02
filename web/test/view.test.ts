@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, CoordinatorLogEntry, CoordinatorStatus, JudgeStatus, QueueView } from "../../src/types.ts";
+import type { ActivityEvent, Card, JudgeStatus, QueueView } from "../../src/types.ts";
 import { age, ago, clearedText, eventText, modelName, shortId, shortRef, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
-  actedText,
   authProblem,
   cardFacts,
-  coordinatorText,
   currentFile,
   DEFAULT_OPEN,
   draftOf,
@@ -16,23 +14,16 @@ import {
   groupsOf,
   judgeStatusText,
   judgeStepText,
-  laneFacts,
-  waitsOn,
   lineOf,
-  logText,
-  policyLines,
   navigable,
-  noCloneOf,
   parseList,
   parseRoute,
   removeCard,
   resolvedHead,
   routeHash,
   says,
-  sitterParts,
   stops,
   valueOf,
-  waitingText,
   type KeyLike,
 } from "../src/view.ts";
 
@@ -79,7 +70,6 @@ const queue = (): QueueView => ({
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
   cards: 10,
   paused: null,
-  babysitting: true,
 });
 
 test("routes round-trip through the hash", () => {
@@ -95,90 +85,6 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
   assert.equal(routeHash({ name: "inflight" }), "#/inflight");
   assert.deepEqual(parseRoute(routeHash({ name: "later" })), { name: "later" });
-});
-
-test("an in-flight row's status in plain words", () => {
-  const row = {
-    ci: "red" as const,
-    failing: ["test (3.12)", "lint"],
-    approved_by: ["marco"],
-    changes_by: ["dana"],
-    waiting_on: ["sam", "@backend"],
-    threads_unresolved: 2,
-    mergeable: "conflict" as const,
-    draft: false,
-  };
-  // The same words and colours as the queue and the review: red for CI, amber for changes requested and a conflict.
-  assert.deepEqual(laneFacts(row), [
-    { text: "CI failing: test (3.12), lint", tone: "bad" },
-    { text: "approved by marco", tone: "" },
-    { text: "changes requested by dana", tone: "warn" },
-    { text: "waiting on sam, @backend", tone: "" },
-    { text: "2 unresolved threads", tone: "" },
-    { text: "merge conflict", tone: "warn" },
-  ]);
-  assert.deepEqual(
-    laneFacts({
-      ...row,
-      ci: "green",
-      failing: [],
-      approved_by: [],
-      changes_by: [],
-      waiting_on: [],
-      threads_unresolved: 1,
-      mergeable: "clean",
-    }).map((f) => f.text),
-    ["CI passing", "1 unresolved thread"],
-  );
-  assert.deepEqual(
-    laneFacts({
-      ...row,
-      ci: "pending",
-      failing: [],
-      approved_by: [],
-      changes_by: [],
-      waiting_on: [],
-      threads_unresolved: 0,
-      mergeable: "unknown",
-      draft: true,
-    }).map((f) => f.text),
-    ["draft", "CI running"],
-  );
-  assert.equal(laneFacts({ ...row, failing: ["a", "b", "c"] })[0]?.text, "CI failing: a and 2 more");
-  assert.equal(
-    laneFacts({ ...row, failing: ["tacos-gha / TACOS Unlock (terraform/eng-tools/workflow-engine)"] })[0]?.text,
-    "CI failing: tacos-gha / TACOS Unlock (terraform/eng…",
-  );
-  // A CODEOWNERS list of teams is a count, people first.
-  const teams = ["@issue-detection-backend", "@issues-feed", "@security", "@foundations", "@owners-auth"];
-  assert.ok(laneFacts({ ...row, waiting_on: ["azulus", ...teams] }).some((f) => f.text === "waiting on azulus and 5 teams"));
-  assert.equal(waitingText(teams), "5 teams");
-  assert.equal(waitingText(["a", "b", "c", "@t"]), "a, b and 2 more");
-  assert.equal(waitingText(["a", "@t"]), "a, @t");
-  assert.equal(laneFacts({ ...row, auto_merge: true }).at(-1)?.text, "auto-merge on");
-});
-
-test("what a PR in Merging waits on, while Claude has nothing to do on it and nothing needs you", () => {
-  const idle = { state: "idle" as const, text: "watching", since: null };
-  const r = {
-    state: "open" as const,
-    needs_you: null,
-    sitter: idle,
-    ci: "green" as const,
-    approved_by: ["marco"],
-    changes_by: [],
-    mergeable: "clean" as const,
-    draft: false,
-    auto_merge: true,
-  };
-  assert.equal(waitsOn(r), "waits on GitHub to merge it");
-  assert.equal(waitsOn({ ...r, auto_merge: false }), null, "ready to merge says itself");
-  assert.equal(waitsOn({ ...r, ci: "pending" }), "waits on CI");
-  assert.equal(waitsOn({ ...r, approved_by: [] }), "waits on a review");
-  assert.equal(waitsOn({ ...r, changes_by: ["dana"] }), "waits on a second look");
-  assert.equal(waitsOn({ ...r, approved_by: [], sitter: { ...idle, state: "running" } }), null, "Claude's line says what it's doing");
-  assert.equal(waitsOn({ ...r, approved_by: [], needs_you: "reply ready to send" }), null);
-  assert.equal(waitsOn({ ...r, state: "merged" }), null);
 });
 
 test("settings fields: text to value and back", () => {
@@ -223,16 +129,6 @@ test("a key combo becomes an Electron accelerator", () => {
   const re = new RegExp(settingDef("app.hotkey")!.pattern!);
   for (const a of ["Control+Alt+D", "CommandOrControl+Shift+K", "Control+Shift+Space", "Alt+Up", "CommandOrControl+/", "Control+F12"])
     assert.ok(re.test(a), a);
-});
-
-test("a babysitter's line in parts, so each sits apart", () => {
-  const now = Date.parse("2026-10-30T12:00:00Z");
-  const at = new Date(now - 24 * 60_000).toISOString();
-  assert.deepEqual(sitterParts({ sitter: { state: "done", text: "pushed a fix for 3 comments · 4be71c2", since: at }, run: null }, now), [
-    "pushed a fix for 3 comments",
-    "4be71c2",
-    "24m",
-  ]);
 });
 
 test("auth problems are told apart from other GitHub errors", () => {
@@ -383,10 +279,6 @@ test("the selected card's facts leave out what the card already says", () => {
     cardFacts(card("acme/api#5", { author: "me", why: "approved and green: merge it", ci: "green", chips: ["approved"] }), "me"),
     [],
   );
-  assert.deepEqual(cardFacts(card("acme/api#6", { ci: "none", cleared_by_coordinator: "a thread you've left" }), "me"), [
-    "by dana",
-    "the coordinator: a thread you've left",
-  ]);
   // Who placed it, before any demotion: the why is a hard rule's, Claude's, or the rule's until Claude answers.
   assert.deepEqual(cardFacts({ ...pr, placed_by: "claude" }, "me").slice(-2), ["sorted by Claude", "3 from B are urgent already"]);
   assert.deepEqual(cardFacts(card("acme/api#7", { ci: "none", placed_by: "hard" }), "me"), ["by dana", "placed by a hard rule"]);
@@ -399,11 +291,6 @@ test("the file you're in: the last whose top passed the line, and the last file 
   // Scrolled to the end, short last files never reach the line.
   assert.equal(currentFile([-900, -200, 60, 400, 700], 96, true), 4);
   assert.equal(currentFile([], 96, true), 0);
-});
-
-test("a PR with no clone for Claude to work in", () => {
-  assert.equal(noCloneOf({ why: "handed back: no local clone of oss/tinyhttp", repo: "oss/tinyhttp" }), "oss/tinyhttp");
-  assert.equal(noCloneOf({ why: "merging: reply ready to send", repo: "oss/tinyhttp" }), undefined);
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {
@@ -569,13 +456,9 @@ test("formatting", () => {
   assert.equal(shortId("getsentry/seer#9085"), "seer#9085");
   assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_until: null })), "snoozed until activity");
   assert.equal(clearedText(card("a/b#1", { status: "muted" })), "muted");
-  // What the coordinator put away says so; times read as the snooze menu writes them.
+  // Times read as the snooze menu writes them.
   const sat = new Date(2026, 9, 31, 9, 0).toISOString();
-  assert.match(
-    clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat, cleared_by_coordinator: "a CODEOWNERS ping" })),
-    /^coordinator snoozed until .*\b9:00 or new activity$/,
-  );
-  assert.equal(clearedText(card("a/b#1", { status: "muted", cleared_by_coordinator: "" })), "coordinator muted");
+  assert.match(clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat })), /^snoozed until .*\b9:00 or new activity$/);
 });
 
 test("an AI review names the model that wrote it the way people say it", () => {
@@ -593,77 +476,6 @@ test("lineOf finds rules written as an inline array", () => {
   assert.equal(lineOf(t, "boards[0].rules[1].when"), 7);
   assert.equal(lineOf(t, "boards[1].rules[0].bucket"), 13);
   assert.equal(lineOf(t, "boards[1].id"), 11);
-});
-
-test("the coordinator in plain words: the top bar's line, its log, its status", () => {
-  assert.equal(actedText({ counts: { snooze: 3 }, buckets: ["fyi", "fyi", "fyi"], at: "" }), "snoozed 3 FYI items");
-  assert.equal(actedText({ counts: { snooze: 1 }, buckets: ["later"], at: "" }), "snoozed 1 Later item");
-  // The queue is one list: no "Today item".
-  assert.equal(actedText({ counts: { snooze: 1 }, buckets: ["today"], at: "" }), "snoozed 1 item");
-  assert.equal(actedText({ counts: { done: 2 }, buckets: ["now", "now"], at: "" }), "cleared 2 items");
-  assert.equal(actedText({ counts: { snooze: 2 }, buckets: ["fyi", "later"], at: "" }), "snoozed 2 items");
-  assert.equal(actedText({ counts: { mute: 1, snooze: 2 }, buckets: ["fyi", "fyi", "fyi"], at: "" }), "snoozed 2 items and muted 1");
-  assert.equal(actedText({ counts: { done: 1, mute: 1, snooze: 4 }, buckets: [], at: "" }), "snoozed 4 items, cleared 1 and muted 1");
-
-  const entry = (o: Partial<CoordinatorLogEntry>): CoordinatorLogEntry => ({
-    seq: 1,
-    at: "",
-    run: 3,
-    kind: "note",
-    text: "",
-    item_id: null,
-    action: null,
-    bucket: null,
-    undo_seq: null,
-    version: null,
-    undone: false,
-    ...o,
-  });
-  assert.equal(logText(entry({ kind: "act", action: "snooze", item_id: "acme/api#12", text: "bot bump" })), "Snoozed api#12: bot bump");
-  const change = entry({ kind: "policy", text: "Changed the policy\n− Bot PRs: hide.\n+ Bot PRs: fyi.", version: 2 });
-  assert.equal(logText(change), "Changed the policy");
-  assert.deepEqual(policyLines(change), ["− Bot PRs: hide.", "+ Bot PRs: fyi."]);
-  assert.deepEqual(policyLines(entry({ text: "a note\nwith two lines" })), [], "only a policy change comes apart");
-  assert.equal(logText(entry({ kind: "act", action: "done", item_id: "acme/api#12" })), "Cleared api#12");
-  assert.equal(logText(entry({ kind: "run", text: "6 events, 3 actions · 41s" })), "Run 3 · 6 events, 3 actions · 41s");
-  assert.equal(logText(entry({ kind: "note", text: "Nothing needed you." })), "Nothing needed you.");
-
-  const now = Date.parse("2026-10-27T12:00:00Z");
-  const s: CoordinatorStatus = {
-    state: "idle",
-    off_reason: null,
-    session_id: "x",
-    started: true,
-    dir: "/h/coordinator",
-    command: "cd …",
-    running_since: null,
-    pending: 0,
-    next_at: null,
-    last_run: { n: 4, kind: "events", started_at: "2026-10-27T11:48:00Z", ms: 1, ok: true, events: 1, actions: 2, error: null },
-    error: null,
-    held: false,
-  };
-  assert.equal(coordinatorText(s, now), "Idle. Last run 12m ago: 1 event, 2 actions.");
-  assert.equal(
-    coordinatorText({ ...s, last_run: { ...s.last_run!, kind: "learn", events: 5, actions: 0 } }, now),
-    "Idle. Last run 12m ago: read your last 5 actions.",
-  );
-  assert.equal(
-    coordinatorText({ ...s, state: "off", off_reason: "Coordinator needs Claude Code for now" }, now),
-    "Coordinator needs Claude Code for now.",
-  );
-  assert.equal(
-    coordinatorText(
-      { ...s, state: "error", error: "claude CLI isn't logged in. Run: claude auth login", next_at: "2026-10-27T12:05:00Z" },
-      now,
-    ),
-    "Its last run failed 12m ago: Claude CLI isn't logged in. Run: claude auth login. Next try in 5m.",
-  );
-  assert.equal(
-    coordinatorText({ ...s, state: "waiting", held: true }, now),
-    "Waiting: you have it open in a terminal. It picks up the new events once you close it.",
-  );
-  assert.equal(coordinatorText({ ...s, started: false, last_run: null }, now), "It starts its session after the first sync.");
 });
 
 test("the judge in plain words", () => {

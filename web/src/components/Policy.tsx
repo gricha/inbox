@@ -1,4 +1,4 @@
-// Settings → Policy: ~/.review-desk/policy.md, prose Claude sorts by and the coordinator follows. Saved with ⌘S, like the rules.
+// Settings → Policy: ~/.review-desk/policy.md, prose Claude sorts by. Saved with ⌘S, like the rules.
 // While the file is empty the starter is in effect, so the editor shows it: editing it and saving makes it yours.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
@@ -64,7 +64,7 @@ export function Policy({
       flash(text.trim() ? "Policy saved. Claude sorts your desk by it." : "Policy cleared. Claude sorts by the starter policy again.");
     } catch (e) {
       if ((e as { status?: number }).status === 409) {
-        // Changed under us (the coordinator, an editor): keep your edit, take the new file as the base.
+        // Changed under us (an agent, an editor): keep your edit, take the new file as the base.
         const p = await api.policy().catch(() => null);
         if (p) setDoc(p);
         flash("policy.md changed since you opened it. Your edit is still here: Revert loads the new text, Save again overwrites it.", true);
@@ -141,7 +141,7 @@ export function Policy({
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       <p className="s-path quiet" title={doc?.path}>
-        <code>{doc ? tilde(doc.path) : "…"}</code>. The coordinator edits it too.
+        <code>{doc ? tilde(doc.path) : "…"}</code>
       </p>
     </div>
   );

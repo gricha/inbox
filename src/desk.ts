@@ -1,9 +1,7 @@
 // The desk: runs the connectors, keeps the event log, and serves the classified views and local actions.
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { stopAll } from "./children.ts";
-import { answerable, autoMerging, Babysitter, threadRef, worktreePath, type Sitter, type SitterOptions } from "./babysit.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -22,9 +20,6 @@ import type {
   ConfigDoc,
   ConfigError,
   Context,
-  CoordinatorLogEntry,
-  CoordinatorView,
-  Draft,
   FocusView,
   InflightRow,
   InflightView,
@@ -56,7 +51,6 @@ import { inQuietHours, notify } from "./notify.ts";
 import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
-import { Coordinator } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -81,9 +75,7 @@ const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
-const MAX_DRAFT = 5_000;
-const MAX_QUESTION = 300;
-const BACK_FIRST = "it was back on your desk before auto-merge went on";
+const MAX_LINE = 300; // a hand-back's why, a note
 
 export class DeskError extends Error {
   status: number;
@@ -112,8 +104,7 @@ interface Snapshot {
   reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
-  needs: Map<string, string>; // PRs Claude handed back: why, at the top of the queue
-  waiting: Map<string, string>; // PRs in Merging waiting on you: why; they stay in Merging, never in the queue
+  needs: Map<string, string>; // PRs the coordinator handed back: why, at the top of the queue
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
 }
 
@@ -127,23 +118,16 @@ export interface DeskOptions {
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
-  writer?: GitHubWriter; // approve, send and auto-merge; without it they're off
-  mcpUrl?: string; // the desk's own MCP endpoint, for the coordinator; without it the coordinator is off
-  babysit?: SitterOptions;
+  writer?: GitHubWriter; // approve and ready for review; without it they're off
+}
+
+// A PR's Merging record, in kv under the babysitters' old `sitter:` prefix so hand-backs made before survive.
+interface Merging {
+  handback?: { reason: string; at: string };
+  note?: { text: string; at: string };
 }
 
 const MAX_POLICY = 20_000; // it goes with every judge call
-const POLICY_VERSIONS = 20;
-
-// A change to policy.md, kept in kv `policy_history` (the last 20): what it replaced, so Undo can put that back.
-interface PolicyVersion {
-  v: number;
-  at: string;
-  by: "owner" | "coordinator";
-  before: string;
-  text: string;
-  undone?: boolean;
-}
 
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Promise<PrText>;
@@ -167,11 +151,9 @@ export class Desk {
   log: (msg: string) => void;
   review: ReviewDeps | null;
   writer: GitHubWriter | null;
-  mcpUrl: string | null;
   policyPath: string;
   policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
-  coordinator: Coordinator;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -189,9 +171,7 @@ export class Desk {
   aiFailures = 0; // in a row, across PRs
   aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
-  approving = new Set<string>();
-  sending = new Set<string>(); // draft ids on their way to GitHub
-  sitter: Babysitter;
+  approving = new Set<string>(); // PRs on their way to an approval or ready for review
 
   constructor(opts: DeskOptions) {
     this.home = opts.home;
@@ -204,7 +184,6 @@ export class Desk {
       });
     this.review = opts.review ?? null;
     this.writer = opts.writer ?? null;
-    this.mcpUrl = opts.mcpUrl ?? null;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
     this.policyPath = path.join(this.home, "policy.md");
@@ -215,8 +194,6 @@ export class Desk {
     this.gh = new GitHubConnector(this, opts.github);
     this.connectors = [this.gh];
     this.judge = new Judge(this);
-    this.coordinator = new Coordinator(this);
-    this.sitter = new Babysitter(this, opts.babysit);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -274,18 +251,14 @@ export class Desk {
 
   start(): void {
     for (const c of this.connectors) c.start();
-    this.coordinator.wake();
-    this.sitter.start();
   }
 
-  // Kills a judge call or coordinator run in progress.
+  // Kills a judge call in progress.
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    this.sitter.stop();
     for (const c of this.connectors) c.stop();
     this.judge.stop();
-    this.coordinator.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -354,30 +327,15 @@ export class Desk {
     this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
   }
 
-  // What the judge and the coordinator follow: policy.md, or the starter while it's empty.
+  // What the judge follows: policy.md, or the starter while it's empty.
   policyText(): string {
     return this.policy.text.trim() ? this.policy.text : DEFAULT_POLICY;
   }
 
-  // Re-reads policy.md; a change is kept as a version. Returns its number, or null when the text is the same.
-  policyChanged(by: PolicyVersion["by"] = "owner"): number | null {
-    const before = this.policy.text;
+  policyChanged(): void {
     this.readPolicy();
-    let v: number | null = null;
-    if (this.policy.text !== before) {
-      const history = this.policyHistory();
-      v = (history.at(-1)?.v ?? 0) + 1;
-      const kept: PolicyVersion = { v, at: this.now().toISOString(), by, before, text: this.policy.text };
-      this.store.set("policy_history", [...history, kept].slice(-POLICY_VERSIONS));
-    }
     this.changed();
     this.judge.pump();
-    this.coordinator.wake();
-    return v;
-  }
-
-  policyHistory(): PolicyVersion[] {
-    return (this.store.get("policy_history") as PolicyVersion[] | null) ?? [];
   }
 
   getPolicy(): PolicyDoc {
@@ -390,53 +348,14 @@ export class Desk {
     fs.renameSync(`${real}.tmp`, real);
   }
 
-  // `base` is the hash from GET: a stale one means it changed since (the coordinator, an editor) and nothing is written.
-  putPolicy(text: string, base?: string, agent?: string): { ok: true; hash: string } {
-    this.ownerAsked(agent, "the policy", true);
+  // `base` is the hash from GET: a stale one means it changed since (an agent, an editor) and nothing is written.
+  putPolicy(text: string, base?: string): { ok: true; hash: string } {
     if (base !== undefined && base !== this.policy.hash)
       throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
     if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
-    const before = this.policyText();
     this.writePolicy(text);
-    const v = this.policyChanged(agent === "coordinator" ? "coordinator" : "owner");
-    if (agent === "coordinator" && v !== null) this.coordinator.policyChanged(before, this.policyText(), v);
-    return { ok: true, hash: this.policy.hash };
-  }
-
-  // The coordinator log's Undo on a policy change: puts back the text before it, while that change is still the latest.
-  undoPolicy(v: number): { ok: true; hash: string } {
-    const history = this.policyHistory();
-    const ver = history.find((h) => h.v === v);
-    if (!ver) throw new DeskError(404, "the desk no longer keeps that policy change");
-    if (ver.undone) throw new DeskError(409, "that policy change is undone already");
-    if (this.policy.text !== ver.text) throw new DeskError(409, "the policy changed since; undo the later change first");
-    ver.undone = true;
-    this.store.set("policy_history", history);
-    this.writePolicy(ver.before);
     this.policyChanged();
     return { ok: true, hash: this.policy.hash };
-  }
-
-  // ---------------------------------------------------------------- the coordinator
-
-  coordinatorView(): CoordinatorView {
-    return this.coordinator.view();
-  }
-
-  note(text: string): void {
-    const line = text.trim();
-    if (!line) throw new DeskError(400, "need { text }");
-    this.coordinator.note(line.slice(0, 500));
-    this.changed();
-  }
-
-  // A wake carries only GitHub text, so a policy or rules change then wasn't the owner asking. A learn run reads the owner's
-  // own actions and may refine the policy (`learnable`), never the rules: hard rules live there.
-  ownerAsked(agent: string | undefined, what: string, learnable = false): void {
-    const run = this.coordinator.running;
-    if (agent !== "coordinator" || !run || (learnable && run.kind === "learn")) return;
-    const not = run.kind === "learn" ? "a learn run refines only the policy" : "not on a wake";
-    throw new DeskError(403, `${what} can change only when the owner asks you in a conversation; ${not}`);
   }
 
   // ---------------------------------------------------------------- settings
@@ -460,15 +379,13 @@ export class Desk {
     if (this.configText) this.reloadConfig(searchKey(this.settings) !== searches);
     else this.changed();
     if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
-    this.sitter.settingsChanged();
     // A changed agent starts afresh: whatever failed on the old one tries again now.
     if (agentKey(this.settings) !== agent) this.retryAgents();
     this.pumpAi();
     this.judge.pump();
-    this.coordinator.wake();
   }
 
-  // What failed on the agent (AI reviews, the judge, the coordinator, babysitters) tries again now instead of after its
+  // What failed on the agent (AI reviews, the judge) tries again now instead of after its
   // backoff. `only`: just what failed with this error, e.g. NOT_LOGGED_IN once another call shows the login works again.
   retryAgents(only?: string): void {
     const hit = (m: string | null | undefined) => !only || !!m?.endsWith(only);
@@ -488,21 +405,11 @@ export class Desk {
       this.judge.retry();
       any = true;
     }
-    const co = this.coordinator.load();
-    if (co.retry_at && hit(co.error)) {
-      this.coordinator.save({ failures: 0, retry_at: 0 });
-      any = true;
-    }
-    if (this.sitter.paused && hit(this.sitter.paused.why)) {
-      this.sitter.unpause();
-      any = true;
-    }
     if (!any || !only) return; // a settings change pumps everything itself
     this.log("the agent works again: retrying what failed on its login");
     this.changed();
     this.pumpAi();
     this.judge.pump();
-    this.coordinator.wake();
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
@@ -586,10 +493,6 @@ export class Desk {
       },
       paused: {
         ai: this.aiPausedNow() ? { why: this.aiPaused!.why, until: new Date(this.aiPaused!.until).toISOString() } : null,
-        babysitters:
-          this.sitter.paused && Date.now() < this.sitter.paused.until
-            ? { why: this.sitter.paused.why, until: new Date(this.sitter.paused.until).toISOString() }
-            : null,
       },
     };
   }
@@ -652,7 +555,6 @@ export class Desk {
     this.store.pruneKv("sitter:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     this.judge.pump();
-    this.coordinator.wake();
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips.
@@ -682,8 +584,6 @@ export class Desk {
     if (!events.length) return;
     this.store.addActivity(events.map((e) => ({ ...e, source })));
     for (const wake of this.waiters) wake();
-    this.coordinator.wake();
-    this.sitter.onEvents(events);
   }
 
   resolutionOf(item: Item): Resolution | null {
@@ -732,7 +632,7 @@ export class Desk {
     }
   }
 
-  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin), and newly waiting in Merging.
+  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin); a hand-back is on it, in Now.
   notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
@@ -740,9 +640,7 @@ export class Desk {
     const queued = [...now, ...today]
       .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin")
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
-    const snap = this.snapshot();
-    const waiting = [...snap.waiting].map(([id, why]) => ({ id, ref: shortRef(snap.entries.get(id)!.item), why }));
-    const fresh = [this.freshSince("notified_queue", queued), this.freshSince("notified_merging", waiting)].flat();
+    const fresh = this.freshSince("notified_queue", queued);
     if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
     const [only] = fresh;
     const body =
@@ -854,25 +752,18 @@ export class Desk {
         if (!cur || RANK[p.bucket] < RANK[cur.bucket] || (p.bucket === cur.bucket && p.hard && !cur.hard)) best.set(id, p);
       }
     }
-    // A PR in Merging stays there whatever it waits on you for; one Claude handed back tops your desk until done or m again.
+    // A PR in Merging stays there; one the coordinator handed back tops your desk until done or m again.
     const needs = new Map<string, string>();
-    const waiting = new Map<string, string>();
-    const sitters = this.store.prefixed<Partial<Sitter>>("sitter:");
+    const merging = this.store.prefixed<Merging>("sitter:");
     for (const e of entries.values()) {
-      if (laneOwned(e)) {
-        const v = this.sitterView(e.item);
-        // Say it's your PR in Merging, unless it already says who's asking.
-        if (v.needs_you) waiting.set(e.item.id, v.escalation && v.escalation.by !== "desk" ? v.needs_you : `merging: ${v.needs_you}`);
-        continue;
-      }
-      const back = sitters.get(e.item.id)?.handback;
+      const back = merging.get(e.item.id)?.handback;
       if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
       const why = `handed back: ${back.reason}`;
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, waiting, pins };
+    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -890,8 +781,7 @@ export class Desk {
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
-    const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is Claude's
-    const am = !e.inflight && it.state === "open" && e.analysis.signals.me.author ? this.sitter.record(it.id).auto_merge : null;
+    const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -925,7 +815,7 @@ export class Desk {
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
-      ...(am?.on && autoMerging(it, { auto_merge: am }) && { desk_auto_merge: true }),
+      ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(by && { placed_by: by }),
     };
   }
@@ -971,16 +861,12 @@ export class Desk {
         today: focus.sections.today.length,
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
       },
-      inflight: {
-        total: [...snap.entries.values()].filter((e) => e.inflight).length,
-        needs_you: snap.waiting.size,
-      },
+      inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
       rate_limit: this.gh.api.rateLimit(),
-      coordinator: { state: this.coordinator.state(), acted: this.coordinator.acted() },
     };
   }
 
-  // Your PRs Claude handed back, at the top of Now.
+  // Your PRs the coordinator handed back, at the top of Now.
   needsCards(snap: Snapshot, seen: Set<string>): Card[] {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
@@ -1071,8 +957,7 @@ export class Desk {
   paused(): Paused | null {
     const login = (why: string | null | undefined) => !!why?.endsWith(NOT_LOGGED_IN);
     const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
-    const co = this.coordinator.offReason() ? null : this.coordinator.load().error;
-    if (login(ai) || (!this.judge.offReason() && login(this.judge.error)) || login(co)) return { who: "claude", why: CLAUDE_PAUSED };
+    if (login(ai) || (!this.judge.offReason() && login(this.judge.error))) return { who: "claude", why: CLAUDE_PAUSED };
     return ai ? { who: "ai", why: ai } : null;
   }
 
@@ -1084,7 +969,7 @@ export class Desk {
     };
   }
 
-  // Now and Today in the queue's order, which the AI reviews run in too: what Claude handed back, then each board's.
+  // Now and Today in the queue's order, which the AI reviews run in too: what was handed back, then each board's.
   top(snap: Snapshot, seen: Set<string>): FocusView["sections"] {
     const loaded = this.requireConfig();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
@@ -1143,14 +1028,6 @@ export class Desk {
         } else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
       }
     }
-    // What the coordinator cleared says so: on a managed desk you see what the agent put away, and why.
-    const acts = new Map<string, CoordinatorLogEntry>();
-    for (const a of this.store.log({ limit: 1000, kind: "act" }))
-      if (a.item_id && !a.undone && a.undo_seq !== null && !acts.has(a.item_id)) acts.set(a.item_id, a);
-    for (const c of cleared) {
-      const a = acts.get(c.id);
-      if (a && a.undo_seq === this.store.lastActionSeq(c.id)) c.cleared_by_coordinator = a.text;
-    }
     return {
       sections,
       hidden,
@@ -1158,7 +1035,6 @@ export class Desk {
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
       cards: this.settings["queue.cards"],
       paused: this.paused(),
-      babysitting: this.settings["inflight.babysit"],
     };
   }
 
@@ -1168,10 +1044,10 @@ export class Desk {
     return all.sort((a, b) => RANK[a.bucket] - RANK[b.bucket])[0] ?? null;
   }
 
-  // Where an item's card says it is; a PR in Merging is Merging's whatever its boards say, with why it waits on you if it does.
+  // Where an item's card says it is; a PR in Merging is Merging's whatever its boards say.
   shownAt(e: Entry, snap: Snapshot): Placement | null {
     const p = snap.best.get(e.item.id) ?? this.placementOf(e.item.id, snap);
-    return p && laneOwned(e) ? { ...p, bucket: "fyi", why: snap.waiting.get(e.item.id) ?? "merging" } : p;
+    return p && laneOwned(e) ? { ...p, bucket: "fyi", why: "merging" } : p;
   }
 
   board(id: string): BoardView {
@@ -1453,10 +1329,8 @@ export class Desk {
 
   // ---------------------------------------------------------------- actions
 
-  // `by`: the agent behind it (the coordinator marks its calls) and its reason, kept in the coordinator's log.
-  act(ref: string, action: Action, until?: string, by?: { agent?: string; reason?: string }): { state: ItemState; undo_seq: number } {
+  act(ref: string, action: Action, until?: string): { state: ItemState; undo_seq: number } {
     const id = this.resolve(ref);
-    const bucket = this.snapshot().best.get(id)?.bucket ?? null;
     if (action === "undo") {
       const ev = this.store.lastActionFor(id);
       if (!ev) throw new DeskError(404, `nothing to undo for ${id}`);
@@ -1466,18 +1340,9 @@ export class Desk {
     const before = this.store.state(id);
     const s: StateRow = { ...before };
     const entry = this.snapshot().entries.get(id)!;
-    // Claude keeps working whatever its status, and a question it asks must stay in Now.
+    // The coordinator keeps working on it whatever its status, so it comes back to the desk first.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
-      throw new DeskError(409, `${id} is in Merging, so Claude has it; bring it back to the desk (b) first`);
-    // Whatever policy it learned, what a hard rule placed stays on the owner's desk. A mute never lapses, so it would outlast a
-    // later ask by name: what the coordinator clears comes back on new activity (done, snooze).
-    const clears = action === "done" || action === "snooze" || action === "mute";
-    if (by?.agent === "coordinator" && action === "mute")
-      throw new DeskError(403, "the coordinator doesn't mute; mark it done or snooze it, so it comes back on new activity");
-    if (by?.agent === "coordinator" && clears && [...this.snapshot().boards.values()].some((b) => b.result.placements.get(id)?.hard))
-      throw new DeskError(403, `a hard rule keeps ${id} on the owner's desk; the coordinator can't clear it`);
-    if (by?.agent === "coordinator" && clears && !entry.inflight && this.snapshot().needs.has(id))
-      throw new DeskError(403, `Claude handed ${id} back to the owner; the coordinator can't clear it`);
+      throw new DeskError(409, `${id} is in Merging, so the coordinator has it; bring it back to the desk (b) first`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = entry.analysis.activity_at;
     switch (action) {
@@ -1523,19 +1388,16 @@ export class Desk {
         s.snoozed_at = null;
         s.muted = false;
         break;
-      case "inflight": {
-        // Handed off for merge: only your own open PR, and Claude takes it from here.
+      case "inflight":
+        // Handed off for merge: only your own open PR, and the coordinator takes it from here.
         if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
           throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
-        // A fresh start (not the drafts or tries from last time), but auto-merge an earlier m turned on stays b's to turn off.
-        const kept = this.sitter.record(id).auto_merge;
-        this.store.set(`sitter:${id}`, kept?.on ? { auto_merge: kept } : null);
+        this.store.set(`sitter:${id}`, null); // a fresh start: no hand-back or note from last time
         break;
-      }
       case "takeback":
         if (!s.inflight_at) throw new DeskError(409, `${id} isn't in Merging`);
         s.inflight_at = null;
@@ -1544,18 +1406,13 @@ export class Desk {
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
     this.store.putState(s);
-    const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString(), by?.agent);
-    if (by?.agent === "coordinator" && seq)
-      this.coordinator.logAct({ item_id: id, action, bucket, undo_seq: seq }, (by.reason ?? "").trim().slice(0, 300));
+    const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
     this.changed();
-    // Back to desk stops Claude at once; a hand-off waits a moment, so an undo right after costs nothing.
-    if (action === "inflight" || action === "takeback") this.sitter.consider(id, action === "takeback" ? 0 : undefined);
     const { snoozed_at: _, acked_at: __, ...state } = s;
     return { state, undo_seq: seq };
   }
 
-  // `agent`: who asks, when it isn't you. Hand-offs are yours (undoing one restarts or stops Claude), and the coordinator,
-  // woken by GitHub text, undoes only what it did itself.
+  // `agent`: an agent asks, not you. Hand-offs are yours.
   undo(seq?: number, agent?: string): { id: string; state: ItemState; action: Action } {
     const ev = this.store.lastAction(seq);
     if (!ev) throw new DeskError(404, "nothing to undo");
@@ -1564,49 +1421,19 @@ export class Desk {
         409,
         `only the user undoes ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"}`,
       );
-    if (agent === "coordinator" && ev.agent !== "coordinator")
-      throw new DeskError(409, `that action on ${ev.item_id} wasn't yours; the coordinator undoes only its own (pass its seq)`);
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
     const cur = this.store.state(ev.item_id);
     const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
     this.store.putState(restored);
     this.store.markUndone(ev.seq);
-    // You took back what the coordinator did: its next learn run reads that as a lesson.
-    if (ev.agent === "coordinator" && (!agent || agent === "agent"))
-      this.store.logWrite(ev.item_id, `undo:${ev.action}`, this.now().toISOString());
     this.changed();
-    if (restored.inflight_at !== cur.inflight_at) this.sitter.consider(ev.item_id, restored.inflight_at ? undefined : 0);
     const { snoozed_at: _, acked_at: __, ...state } = restored;
     return { id: ev.item_id, state, action: ev.action as Action };
   }
 
   // ---------------------------------------------------------------- merging (in flight)
 
-  // Claude's side of one PR: its status, drafts, question, why it needs you, and whether GitHub merges it by itself.
-  sitterView(
-    it: Item,
-  ): Pick<InflightRow, "needs_you" | "escalation" | "outside_at" | "sitter" | "drafts" | "run" | "resume" | "auto_merge" | "merge_note"> {
-    const s = this.sitter.record(it.id);
-    const st = this.sitter.status(it.id, it, s);
-    const run = s.runs.at(-1) ?? null;
-    const wt = worktreePath(this.home, it.id); // not s.worktree: in a desk.db copied from another desk, it's that desk's
-    const on = autoMerging(it, s);
-    return {
-      needs_you: this.sitter.needsYou(it, s, st),
-      escalation: s.escalation,
-      outside_at: it.state === "open" ? this.sitter.outside(it, s) || null : null,
-      sitter: st,
-      drafts: s.drafts.filter((d) => !d.sent_at),
-      run,
-      resume: run && fs.existsSync(wt) ? `cd ${shellQuote(wt)} && claude --resume ${run.id}` : null,
-      auto_merge: on,
-      // The desk turned it on, and GitHub has it off since (someone turned it off, or a push did).
-      merge_note:
-        on || it.state !== "open" ? null : (s.auto_merge?.why ?? (s.auto_merge?.on ? "auto-merge was turned off on GitHub" : null)),
-    };
-  }
-
-  // GET /api/inflight: your PRs in Merging, open ones first (those that need you on top), then any that merged or closed in the last 3 days.
+  // GET /api/inflight: your PRs in Merging, open ones first (latest activity on top), then any that merged or closed in the last 3 days.
   inflight(): InflightView {
     this.requireConfig();
     const snap = this.snapshot();
@@ -1626,10 +1453,11 @@ export class Desk {
         )
           verdicts.set(r.author.toLowerCase(), r);
       const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
-      rows.push({
-        card: this.card(e, this.shownAt(e, snap), snap),
+      const row = {
         state: it.state,
         base: it.base,
+        stacked: e.analysis.signals.pr.stacked,
+        merge_method: it.merge_method ?? null,
         ci: it.ci,
         failing: it.checks_failed ?? [],
         approved_by: by("approved"),
@@ -1638,252 +1466,88 @@ export class Desk {
         threads_unresolved: it.threads_unresolved,
         mergeable: it.mergeable,
         draft: it.draft,
-        ...this.sitterView(it),
+      };
+      rows.push({
+        card: this.card(e, this.shownAt(e, snap), snap),
+        ...row,
+        waits_on: waitsOn(row),
+        note: this.merging(it.id).note ?? null,
       });
     }
-    const rank = (r: InflightRow) => (r.state !== "open" ? 3 : r.needs_you ? 0 : r.sitter.state === "running" ? 1 : 2);
     rows.sort(
       (a, b) =>
-        rank(a) - rank(b) ||
+        Number(a.state !== "open") - Number(b.state !== "open") ||
         (a.state === "open"
           ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
           : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
     );
-    return { rows, babysitting: this.settings["inflight.babysit"] };
+    return { rows };
   }
 
-  // Your own open PR in Merging, for what agents and Merging's keys may do to it.
+  merging(id: string): Merging {
+    return (this.store.get(`sitter:${id}`) as Merging | null) ?? {};
+  }
+
+  // Your own open PR in Merging: what the coordinator's tools may touch.
   inflightEntry(ref: string): Entry {
     const e = this.pr(ref);
     if (!e.inflight) throw new DeskError(409, `${e.item.id} isn't one of your open PRs in Merging`);
     return e;
   }
 
-  // What an agent may say about your PR in Merging: its own babysitter may (one PR each); the coordinator, woken by GitHub
-  // text about anything on the desk, may not.
-  agentMay(id: string, by: { agent?: string; pr?: string } | undefined, what: string): Draft["by"] {
-    if (by?.agent === "coordinator") throw new DeskError(403, `the coordinator doesn't ${what} on PRs in Merging; their babysitters do`);
-    if (by?.agent === "babysitter" && by.pr !== id) throw new DeskError(403, `a babysitter can ${what} only on its own PR, ${by.pr}`);
-    return by?.agent === "babysitter" ? "babysitter" : "agent";
-  }
-
-  // desk_draft_reply: an agent's reply for you to send. A thread must be one of this PR's; a new draft for a thread replaces the old one.
-  async draftReply(ref: string, threadId: string | null, body: string, by?: { agent?: string; pr?: string }): Promise<Draft> {
-    const e = this.inflightEntry(ref);
-    const author = this.agentMay(e.item.id, by, "draft replies");
-    const id = e.item.id;
-    const text = body.trim();
-    if (!text) throw new DeskError(400, "the reply is empty");
-    if (text.length > MAX_DRAFT) throw new DeskError(400, `keep a reply under ${MAX_DRAFT} characters`);
-    let to = "the PR";
-    let quote = "";
-    if (threadId) {
-      let t = this.sitter.record(id).threads.find((x) => x.id === threadId);
-      if (!t) {
-        const ctx = await this.gh.api.prContext(e.item.node_id).catch((err: unknown) => {
-          throw new DeskError(502, `couldn't read the PR's threads: ${(err as Error).message}`);
-        });
-        // Not one an outsider spoke last in: an agent never answers their words.
-        const found = ctx.threads.find((x) => x.id === threadId && answerable(x, this.me(), this.sitter.trust()));
-        t = (found && threadRef(found)) ?? undefined;
-      }
-      if (!t) throw new DeskError(400, `no review thread "${threadId}" on ${id}`);
-      ({ to, quote } = t);
-    }
-    const draft: Draft = {
-      id: randomBytes(6).toString("hex"),
-      thread_id: threadId,
-      to,
-      quote,
-      body: text,
-      at: this.now().toISOString(),
-      sent_at: null,
-      url: null,
-      by: author,
-    };
-    const replaces = (d: Draft) => !d.sent_at && threadId !== null && d.thread_id === threadId;
-    this.sitter.update(id, (s) => {
-      s.drafts = [...s.drafts.filter((d) => !replaces(d)), draft].slice(-20);
-    });
-    this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: drafted a reply on ${id} to ${to}`);
-    this.changed();
-    this.notifyNew();
-    return draft;
-  }
-
-  // desk_escalate: a decision that's yours. The PR waits on you in Merging with the question as its why; its babysitter waits.
-  // With `handBack`, it can't realistically be merged: the PR leaves Merging for your desk with the line as its why.
-  escalate(ref: string, question: string, by?: { agent?: string; pr?: string }, handBack = false): { question: string } {
-    const e = this.inflightEntry(ref);
-    const author = this.agentMay(e.item.id, by, handBack ? "hand PRs back" : "ask you questions");
+  // One plain line from an agent, whatever it sent.
+  line(text: string, what: string): string {
     // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
-    const q = question.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
-    if (!q) throw new DeskError(400, handBack ? "the reason is empty" : "the question is empty");
-    const clipped = q.length > MAX_QUESTION ? `${q.slice(0, MAX_QUESTION - 1)}…` : q;
-    if (handBack) {
-      this.handBack(e.item.id, clipped, author ?? "agent");
-      return { question: clipped };
-    }
-    this.sitter.update(e.item.id, (s) => {
-      s.escalation = { question: clipped, at: this.now().toISOString(), by: author };
-    });
-    this.log(`${author === "babysitter" ? "babysitter" : "an agent"}: ${e.item.id} needs you: ${clipped}`);
-    this.changed();
-    this.notifyNew();
-    return { question: clipped };
+    const t = text.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+    if (!t) throw new DeskError(400, `the ${what} is empty`);
+    return t.length > MAX_LINE ? `${t.slice(0, MAX_LINE - 1)}…` : t;
   }
 
-  // Merging's x: drop a draft, or the question (and Claude looks at the PR again), or else outsiders' comments you've read.
-  dismiss(ref: string, draftId?: string): void {
-    const e = this.pr(ref);
+  // desk_note: the coordinator's latest status line on a PR in Merging, shown on its row.
+  note(ref: string, text: string): { text: string } {
+    const e = this.inflightEntry(ref);
+    const note = { text: this.line(text, "note"), at: this.now().toISOString() };
+    this.store.set(`sitter:${e.item.id}`, { ...this.merging(e.item.id), note });
+    this.changed();
+    return { text: note.text };
+  }
+
+  // desk_hand_back: the coordinator can't realistically get it merged. The PR leaves Merging for your desk with the line as its
+  // why, on top. Nothing goes to GitHub.
+  handBack(ref: string, why: string): { reason: string } {
+    const e = this.inflightEntry(ref);
     const id = e.item.id;
-    const s = this.sitter.record(id);
-    if (draftId !== undefined && !s.drafts.some((d) => d.id === draftId && !d.sent_at))
-      throw new DeskError(404, `no draft ${draftId} on ${id}`);
-    const outside = this.sitter.outside(e.item, s);
-    if (draftId === undefined && !s.escalation && !outside) throw new DeskError(404, `nothing to dismiss on ${id}`);
-    this.sitter.update(id, (x) => {
-      if (draftId !== undefined) x.drafts = x.drafts.filter((d) => d.id !== draftId);
-      else if (x.escalation) x.escalation = null;
-      else x.outside_seen = outside;
-    });
-    this.changed();
-    this.sitter.consider(id, 0);
-  }
-
-  // POST /api/inflight/:id/send: a drafted reply, posted to GitHub on your keypress. One of the desk's GitHub writes.
-  async sendDraft(ref: string, draftId: string): Promise<{ url: string }> {
-    const e = this.pr(ref);
-    const id = e.item.id;
-    if (!e.analysis.signals.me.author) throw new DeskError(409, `can't send on ${id}: it isn't your PR`);
-    if (e.item.state !== "open") throw new DeskError(409, `can't send on ${id}: it's ${e.item.state}`);
-    const d = this.sitter.record(id).drafts.find((x) => x.id === draftId);
-    if (!d) throw new DeskError(404, `no draft ${draftId} on ${id}`);
-    if (d.sent_at) throw new DeskError(409, `that reply was sent already: ${d.url ?? ""}`);
-    if (!this.writer) throw new DeskError(409, "sending isn't available in this desk");
-    if (this.sending.has(draftId)) throw new DeskError(409, "already sending that reply");
-    this.sending.add(draftId);
-    let url: string;
-    try {
-      ({ url } = d.thread_id ? await this.writer.reply(d.thread_id, d.body) : await this.writer.comment(e.item.node_id, d.body));
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't take the reply: ${(err as Error).message}`);
-    } finally {
-      this.sending.delete(draftId);
-    }
-    const at = this.now().toISOString();
-    this.sitter.update(id, (s) => {
-      s.drafts = s.drafts.map((x) => (x.id === draftId ? { ...x, sent_at: at, url } : x));
-    });
-    this.store.logWrite(id, d.thread_id ? "reply" : "comment", at);
-    this.log(`sent a ${d.thread_id ? "reply" : "comment"} on ${id} to ${d.to}${url ? ` (${url})` : ""}`);
-    this.changed();
-    void this.sync();
-    return { url };
-  }
-
-  // POST /api/inflight/:id/handoff: m on your own open PR. Claude gets it merged, and GitHub's auto-merge goes on where the
-  // repo allows it, a draft marked ready first: GitHub writes, so only on your keypress in the desk's window.
-  async handOff(ref: string): Promise<{ state: ItemState; auto_merge: NonNullable<Sitter["auto_merge"]> }> {
-    const id = this.pr(ref).item.id;
-    const { state } = this.act(id, "inflight");
-    let it = this.snapshot().entries.get(id)!.item;
-    const kept = this.sitter.record(id).auto_merge;
-    if (kept?.on && autoMerging(it, { auto_merge: kept })) return { state, auto_merge: kept };
-    if (it.auto_merge_allowed === undefined) {
-      await this.gh.refresh(id); // stored before the desk asked
-      it = this.store.itemsById([id]).get(id) ?? it;
-    }
-    const auto = await this.autoMergeOn(it, state.inflight_at!);
-    this.sitter.update(id, (s) => {
-      s.auto_merge = auto;
-    });
-    this.changed();
-    return { state, auto_merge: auto };
-  }
-
-  // `since`: the hand-off's inflight_at. A b while the writes are on their way stops the ones not yet sent.
-  async autoMergeOn(it: Item, since: string): Promise<NonNullable<Sitter["auto_merge"]>> {
-    const at = this.now().toISOString();
-    const no = (why: string | null) => ({ on: false, why, at });
-    const left = () => this.store.state(it.id).inflight_at !== since;
-    if (!this.settings["inflight.auto_merge"]) return no("auto-merge is off in Settings");
-    if (it.auto_merge) return no(null); // on already: not the desk's to turn off
-    if (it.auto_merge_allowed === undefined) return no("the desk couldn't read whether the repo allows auto-merge");
-    if (!it.auto_merge_allowed) return no("the repo doesn't allow auto-merge");
-    if (!this.writer) return no("auto-merge isn't available in this desk");
-    if (left()) return no(BACK_FIRST);
-    try {
-      if (it.draft) {
-        await this.writer.ready(it.node_id);
-        this.store.logWrite(it.id, "ready", at);
-        this.log(`marked ${it.id} ready for review on GitHub`);
-        if (left()) return no(BACK_FIRST);
-      }
-      await this.writer.autoMerge(it.node_id, it.merge_method ?? "MERGE");
-    } catch (err) {
-      this.log(`couldn't turn on auto-merge for ${it.id}: ${(err as Error).message}`);
-      return no(`GitHub didn't turn auto-merge on: ${(err as Error).message}`);
-    } finally {
-      void this.gh.refresh(it.id);
-    }
-    this.store.logWrite(it.id, "auto_merge", at);
-    this.log(`turned on auto-merge for ${it.id} (${it.merge_method ?? "MERGE"})`);
-    return { on: true, why: null, at };
-  }
-
-  // POST /api/inflight/:id/back: Back to desk. Claude stops, and auto-merge goes off if the desk turned it on. Out of Merging
-  // (handed back, done, or the hand-off undone), b only turns off the auto-merge m turned on.
-  async backToDesk(ref: string): Promise<{ state: ItemState; auto_merge_off: boolean; error?: string }> {
-    const e = this.pr(ref);
-    const id = e.item.id;
-    const auto = this.sitter.record(id).auto_merge;
-    const ours = !!auto?.on && e.item.state === "open" && autoMerging(e.item, { auto_merge: auto });
-    const { snoozed_at: _, acked_at: __, ...current } = e.state;
-    const state = e.state.inflight_at || !ours ? this.act(id, "takeback").state : current;
-    if (!ours) {
-      // GitHub has it off already (a push, or someone turned it off): nothing for b to write.
-      if (auto?.on)
-        this.sitter.update(id, (s) => {
-          s.auto_merge = null;
-        });
-      return { state, auto_merge_off: false };
-    }
-    if (!this.writer) return { state, auto_merge_off: false };
-    const at = this.now().toISOString();
-    try {
-      await this.writer.autoMergeOff(e.item.node_id);
-    } catch (err) {
-      this.log(`couldn't turn off auto-merge for ${id}: ${(err as Error).message}`);
-      return { state, auto_merge_off: false, error: `GitHub didn't turn auto-merge off: ${(err as Error).message}` };
-    } finally {
-      void this.gh.refresh(id);
-    }
-    this.store.logWrite(id, "auto_merge_off", at);
-    this.log(`turned off auto-merge for ${id}`);
-    this.sitter.update(id, (s) => {
-      s.auto_merge = { on: false, why: "you turned it off with Back to desk", at };
-    });
-    this.changed();
-    return { state, auto_merge_off: true };
-  }
-
-  // Claude can't realistically get it merged: the PR leaves Merging for your desk with the reason as its why. Nothing goes
-  // to GitHub, so auto-merge stays as it is (the card says so).
-  handBack(id: string, reason: string, by: NonNullable<Sitter["handback"]>["by"]): void {
+    const reason = this.line(why, "reason");
     const before = this.store.state(id);
-    if (!before.inflight_at) return;
     const at = this.now().toISOString();
     this.store.putState({ ...before, inflight_at: null });
-    this.store.logAction(id, "takeback", before, at, by);
-    this.sitter.update(id, (s) => {
-      s.handback = { reason, at, by };
-      s.escalation = null;
-    });
-    this.log(`${by === "agent" ? "an agent" : "babysitter"}: handed ${id} back: ${reason}`);
+    this.store.logAction(id, "takeback", before, at, "agent");
+    this.store.set(`sitter:${id}`, { ...this.merging(id), handback: { reason, at } });
+    this.log(`an agent handed ${id} back: ${reason}`);
     this.changed();
-    this.sitter.consider(id, 0);
     this.notifyNew();
+    return { reason };
+  }
+
+  // POST /api/review/:id/ready: your own draft's "Ready for review" (a a), one of the desk's GitHub writes, on your keypress.
+  async markReady(ref: string): Promise<void> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
+    if (e.item.state !== "open" || !e.item.draft) throw new DeskError(409, `${id} isn't an open draft`);
+    if (!this.writer) throw new DeskError(409, "marking ready isn't available in this desk");
+    if (this.approving.has(id)) throw new DeskError(409, `already marking ${id} ready`);
+    this.approving.add(id);
+    try {
+      await this.writer.ready(e.item.node_id);
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't mark it ready: ${(err as Error).message}`);
+    } finally {
+      this.approving.delete(id);
+    }
+    this.store.logWrite(id, "ready", this.now().toISOString());
+    this.log(`marked ${id} ready for review on GitHub`);
+    void this.gh.refresh(id);
   }
 
   // ---------------------------------------------------------------- config
@@ -1944,8 +1608,7 @@ export class Desk {
   }
 
   // `base`: the text you started from, or its hash from GET /api/config.
-  putConfig(text: string, base?: string, agent?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
-    this.ownerAsked(agent, "the rules");
+  putConfig(text: string, base?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
     if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
       throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
     const { loaded, errors, warnings } = parseConfig(text, this.settings);
@@ -1955,7 +1618,6 @@ export class Desk {
     const real = fs.realpathSync(this.configPath); // keep a symlinked config a symlink
     fs.writeFileSync(`${real}.tmp`, text);
     fs.renameSync(`${real}.tmp`, real);
-    if (agent === "coordinator") this.coordinator.log(this.coordinator.running?.n ?? 0, "config", "Saved the rules");
     this.reloadConfig(true);
     return { ok: true, errors: [], warnings };
   }
@@ -1985,11 +1647,25 @@ function statusOf(s: StateRow, activityAt: string, now: Date): Status {
   return "active";
 }
 
+// What a PR in Merging waits on, the first thing between it and a merge.
+function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | null {
+  const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
+  const threads = r.threads_unresolved;
+  if (r.state !== "open") return null;
+  if (r.draft) return "waits on ready for review";
+  if (r.ci === "red") return "waits on a CI fix";
+  if (r.mergeable === "conflict") return "waits on a merge conflict fix";
+  if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
+  if (r.ci === "pending") return "waits on CI";
+  if (threads) return `waits on ${threads} unresolved ${threads === 1 ? "thread" : "threads"}`;
+  if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
+  if (r.stacked) return `waits on ${r.base} to merge first`;
+  return "ready to merge";
+}
+
 function shortRef(c: { repo: string; number: number }): string {
   return `${c.repo.split("/")[1]}#${c.number}`;
 }
-
-const shellQuote = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 
 export function parseUntil(until: string, now: Date): Date {
   const rel = /^(\d+)([hd])$/.exec(until);

@@ -1,25 +1,14 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
-import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
-import type {
-  AgentStatus,
-  CoordinatorView,
-  DesktopBridge,
-  GitHubStatus,
-  SettingDef,
-  SettingsView,
-  SettingType,
-  SettingValue,
-} from "../../../src/types.ts";
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, copyText, tilde, when } from "../format.ts";
+import { ago, cls, tilde, when } from "../format.ts";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
 import { SourceLine } from "./Source.tsx";
-import { acceleratorOf, authProblem, coordinatorText, draftOf, valueOf } from "../view.ts";
+import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
 import { applyTheme, savedTheme, THEMES, type ThemeId } from "../theme.ts";
-
-type Flash = (text: string, error?: boolean) => void;
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // Resolves to the value the server saved, or null when it was rejected (the row shows why).
@@ -389,69 +378,6 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
 
-// "--resume <id>" stays together when a command wraps.
-const argGroups = (command: string) =>
-  command.split(" ").reduce<string[]>((out, a) => {
-    const last = out.at(-1);
-    if (last?.startsWith("--") && !last.includes(" ") && !a.startsWith("--")) out[out.length - 1] = `${last} ${a}`;
-    else out.push(a);
-    return out;
-  }, []);
-
-// Under the coordinator switch: what it's doing, and the command that opens its session in a terminal.
-function CoordinatorInfo({ active, loads, now, flash }: { active: boolean; loads: number; now: number; flash: Flash }) {
-  const [view, setView] = useState<CoordinatorView | null>(null);
-  useEffect(() => {
-    if (active) api.coordinator().then(setView, () => {});
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
-  }, [active, loads]);
-  if (!view) return null;
-  const s = view.status;
-  const command = s.command;
-  async function copy(text: string) {
-    try {
-      await copyText(text);
-      flash("Copied. Paste it into a terminal.");
-    } catch (e) {
-      flash(`Couldn't copy: ${message(e)}`, true);
-    }
-  }
-  return (
-    <div className="coord">
-      {/* An agent's failure is about the agent: ink, not red. */}
-      <p className={cls("s-live", s.state !== "error" && "quiet")}>{withCode(coordinatorText(s, now))}</p>
-      {command && (
-        <>
-          <p className="s-live quiet" title={s.session_id}>
-            Session {s.session_id.slice(0, 8)}. Talk to it in a terminal to shape the policy or the rules:
-          </p>
-          <div className="coord-cmd">
-            {/* Every flag shows: it wraps between arguments, never inside one or between a flag and its value. */}
-            <code>
-              {argGroups(command).map((g, i) => (
-                // oxlint-disable-next-line react/no-array-index-key -- positional parts of one command
-                <Fragment key={i}>
-                  {i > 0 && " "}
-                  <span className="nowrap">{g}</span>
-                </Fragment>
-              ))}
-            </code>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                void copy(command);
-              }}
-            >
-              Copy
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // Whether Claude Code has the desk's MCP tools and skill, and Connect when it doesn't.
 function AgentLink({ active, loads }: { active: boolean; loads: number }) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
@@ -702,13 +628,7 @@ export function Settings({
             )}
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
             {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
-            {view && (x.id === "review" || x.id === "inflight") && (
-              <PausedLine
-                p={view.paused[x.id === "review" ? "ai" : "babysitters"]}
-                label={x.id === "review" ? "AI reviews are paused:" : "Claude is paused here:"}
-                now={now}
-              />
-            )}
+            {view && x.id === "review" && <PausedLine p={view.paused.ai} label="AI reviews are paused:" now={now} />}
             {x.id === "agent" && <AgentLink active={active} loads={loads} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
@@ -722,13 +642,9 @@ export function Settings({
                     view={view}
                     onView={onView}
                     extra={
-                      d.key === "coordinator.enabled" ? (
-                        <CoordinatorInfo active={active} loads={loads} now={now} flash={flash} />
-                      ) : d.key === "app.source" ? (
-                        live && <SourceLine s={live.source ?? null} />
-                      ) : (
-                        d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
-                      )
+                      d.key === "app.source"
+                        ? live && <SourceLine s={live.source ?? null} />
+                        : d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
                     }
                   />
                 ))}

@@ -3,7 +3,6 @@ import type {
   Action,
   Card,
   DesktopBridge,
-  Draft,
   InflightRow,
   InflightView,
   ItemDetail,
@@ -14,9 +13,9 @@ import type {
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
 import {
+  armOf,
   DEFAULT_OPEN,
   groupsOf,
-  handArm,
   isFold,
   navigable,
   parseRoute,
@@ -28,7 +27,6 @@ import {
   type Route,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
-import { CoordinatorLog } from "./components/CoordinatorLog.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
@@ -62,7 +60,7 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
-const ARM_MS = 3000; // a first y (or m) arms Send (or a hand-off), a second one within this goes: GitHub writes a key can't take back
+const ARM_MS = 3000; // a first m (or a) arms a hand-off (or Ready for review), a second one within this goes
 const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
@@ -105,11 +103,9 @@ export function App() {
   const [settingsSeen, setSettingsSeen] = useState(route.name === "settings");
   const [loads, setLoads] = useState(0); // bumped on every refresh, so Rules can re-read a file changed on disk
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
-  const [coordOpen, setCoordOpen] = useState(false); // the coordinator's log, above the queue
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
-  const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
-  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed, or handArm(card) for m
+  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // armOf(key, card) after a first m or a
   const [reviewFrom, setReviewFrom] = useState<"queue" | "later" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
@@ -500,25 +496,19 @@ export function App() {
     }
   }
 
-  // m arms a hand-off (the toast says what it writes); a second m within 3 s hands it off, any other key lets it lapse.
+  // m arms a hand-off; a second m within 3 s hands it off, any other key lets it lapse.
   function handOffArmed(c: Card) {
-    const id = handArm(c.id);
+    const id = armOf("m", c.id);
     if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
       setArmed({ id, at: Date.now() });
-      flash(
-        `Press m again to hand off ${shortRef(c)} for merge${c.draft ? ": it marks the draft ready for review and turns on auto-merge" : ""}`,
-        false,
-        false,
-        ARM_MS,
-      );
+      flash(`Press m again to hand off ${shortRef(c)} for merge`, false, false, ARM_MS);
       return;
     }
     setArmed(null);
     void handOff(c);
   }
 
-  // m m: your own open PR goes to Merging (you're done; Claude gets it merged, and GitHub's auto-merge goes on where the repo
-  // allows it, a draft marked ready first). Not undone with u: b brings it back, and turns auto-merge off again.
+  // m m: your own open PR goes to Merging (you're done; the coordinator gets it merged). Not undone with u: b brings it back.
   async function handOff(c: Card) {
     setSnoozeFor(null);
     const i = flat.findIndex((x) => x.id === c.id);
@@ -528,17 +518,10 @@ export function App() {
       setLeaving((s) => new Set(s).add(c.id));
     }
     try {
-      const { auto_merge: a } = await api.handOff(c.id);
+      await api.act(c.id, "inflight");
       undoSeq.current = null;
       setView((v) => v && removeCard(v, c.id));
-      const merge = a.on
-        ? c.draft
-          ? "Marked ready for review, and auto-merge is on."
-          : "Auto-merge is on."
-        : a.why
-          ? `${a.why.charAt(0).toUpperCase()}${a.why.slice(1)}: merge it yourself when it's green.`
-          : "Auto-merge was on already.";
-      flash(`Handed off for merge: ${shortRef(c)}. ${merge}`, false, false, 8000);
+      flash(`Handed off for merge: ${shortRef(c)}. The coordinator gets it merged.`);
     } catch (e) {
       flash(message(e), true);
     } finally {
@@ -551,96 +534,49 @@ export function App() {
     }
   }
 
-  // b: your PR leaves Merging for your desk; Claude stops. Out of Merging, it turns off the auto-merge m turned on.
+  // b: your PR leaves Merging for your desk.
   async function back(c: Card) {
-    if (!c.inflight && !c.desk_auto_merge) {
+    if (!c.inflight) {
       flash(`${shortRef(c)} isn't in Merging`);
       return;
     }
     try {
-      const r = await api.back(c.id);
+      await api.act(c.id, "takeback");
       undoSeq.current = null;
-      const head = c.inflight ? `Back on your desk: ${shortRef(c)}` : `${shortRef(c)} is on your desk`;
-      flash(r.error ? `${head}. ${r.error}` : `${head}${r.auto_merge_off ? ". Auto-merge is off again." : ""}`, !!r.error);
+      flash(`Back on your desk: ${shortRef(c)}`);
     } catch (e) {
       flash(message(e), true);
     }
     refresh(0);
   }
 
-  // y arms Send (the key line and a toast say so); a second y within 3 s sends it, any other key lets it lapse.
-  function sendArmed(id: string, d: Draft) {
-    if (!armed || armed.id !== d.id || Date.now() - armed.at > ARM_MS) {
-      setArmed({ id: d.id, at: Date.now() });
-      flash(`Press y again to send your reply to ${d.to}`, false, false, ARM_MS);
+  // a arms the row's Ready for review; a second a within 3 s marks it ready on GitHub, any other key lets it lapse.
+  function readyArmed(c: Card) {
+    const id = armOf("a", c.id);
+    if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
+      setArmed({ id, at: Date.now() });
+      flash(`Press a again to mark ${shortRef(c)} ready for review`, false, false, ARM_MS);
       return;
     }
     setArmed(null);
-    void send(id, d);
-  }
-
-  async function send(id: string, d: Draft) {
-    if (sending) return;
-    setSending(d.id);
-    try {
-      await api.sendDraft(id, d.id);
-      flash(`Sent your reply to ${d.to}`);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setSending(null);
+    void (async () => {
+      try {
+        await api.ready(c.id);
+        flash(`Marked ${shortRef(c)} ready for review on GitHub`);
+      } catch (e) {
+        flash(message(e), true);
+      }
       refresh(0);
-    }
+    })();
   }
 
-  async function dismiss(r: InflightRow, d?: Draft) {
-    try {
-      await api.dismiss(r.card.id, d?.id);
-      flash(
-        d
-          ? `Discarded the reply to ${d.to}`
-          : r.escalation
-            ? `Dismissed the question on ${shortRef(r.card)}`
-            : `Marked the outside comments on ${shortRef(r.card)} read`,
-      );
-    } catch (e) {
-      flash(message(e), true);
-    }
-    refresh(0);
-  }
-
-  // Merging's keys: enter review, o GitHub, b back to desk, y send a reply, x discard it (or the question), c copy the resume command.
-  function laneRun(r: InflightRow, k: string, d?: Draft) {
+  // Merging's keys: enter review, o GitHub, b back to desk.
+  function laneRun(r: InflightRow, k: string) {
     const c = r.card;
     setLaneSel(c.id);
     if (k === "enter") go({ name: "review", id: c.id });
     else if (k === "o") window.open(c.url, "_blank", "noopener,noreferrer");
     else if (k === "b" && r.state === "open") void back(c);
-    else if (k === "y") {
-      const draft = d ?? r.drafts[0];
-      if (draft) sendArmed(c.id, draft);
-      else flash(`No reply to send on ${shortRef(c)}`);
-    } else if (k === "x") {
-      if (d) void dismiss(r, d);
-      else if (r.escalation || r.outside_at) void dismiss(r);
-      else if (r.drafts[0]) void dismiss(r, r.drafts[0]);
-      else flash(`Nothing to dismiss on ${shortRef(c)}`);
-    } else if (k === "c") void copyResume(r);
-  }
-
-  const copyResume = (r: InflightRow) => copyCommand(r.resume);
-
-  async function copyCommand(resume: string | null) {
-    if (!resume) {
-      flash("No session of Claude's to open yet");
-      return;
-    }
-    try {
-      await copyText(resume);
-      flash("Copied: paste it in a terminal to open Claude's session");
-    } catch (e) {
-      flash(`Couldn't copy: ${message(e)}`, true);
-    }
   }
 
   function moveLane(d: number) {
@@ -655,10 +591,11 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "esc") setExpanded(null);
-    // From its review: a PR in Merging is Claude's.
+    // From its review: a PR in Merging is the coordinator's.
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
-      flash(`${shortRef(c)} is in Merging, so Claude has it. b brings it back to the desk.`);
+      flash(`${shortRef(c)} is in Merging, so the coordinator has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
+    else if (k === "a" && c.cta === "ready") readyArmed(c);
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOffArmed(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
@@ -732,8 +669,8 @@ export function App() {
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
-    // Any other key lets an armed Send or hand-off lapse (Esc does only that, in onChord).
-    if (armed && k !== (armed.id.startsWith(handArm("")) ? "m" : "y") && !["Shift", "Meta", "Control", "Alt"].includes(k)) setArmed(null);
+    // Any other key lets an armed hand-off or Ready for review lapse (Esc does only that, in onChord).
+    if (armed && k !== armed.id.split(":")[0] && !["Shift", "Meta", "Control", "Alt"].includes(k)) setArmed(null);
     if (help) {
       if (k === "Escape" || k === "?") setHelp(false);
       return;
@@ -764,7 +701,7 @@ export function App() {
       else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
         e.preventDefault();
         moveLane(k === "j" || k === "ArrowDown" ? 1 : -1);
-      } else if (laneCur && (k === "Enter" || (k.length === 1 && "obyxc".includes(k)))) {
+      } else if (laneCur && (k === "Enter" || k === "o" || k === "b")) {
         e.preventDefault();
         laneRun(laneCur, k === "Enter" ? "enter" : k);
       }
@@ -773,7 +710,6 @@ export function App() {
       filterRef.current?.focus();
     } else if (k === "Escape") {
       if (expanded) setExpanded(null);
-      else if (coordOpen) setCoordOpen(false);
       else if (filter) setFilter("");
       else if (onLater) go({ name: "queue" });
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
@@ -785,15 +721,15 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oedsmbpcwi".includes(k)) {
+    } else if (current && k.length === 1 && "oedsmbpcwia".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
   };
-  // The key after g is the chord's, whatever it means on its own (i in a review, x and b in Merging), so it never falls
+  // The key after g is the chord's, whatever it means on its own (i in a review, b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
-    // Esc with Send or a hand-off armed only lets it lapse; here, so the review never reads it as "go back".
+    // Esc with a hand-off armed only lets it lapse; here, so the review never reads it as "go back".
     if (armed && e.key === "Escape") {
       setArmed(null);
       e.preventDefault();
@@ -876,10 +812,6 @@ export function App() {
           onHelp={() => {
             setHelp(true);
           }}
-          coordOpen={coordOpen}
-          onCoordinator={() => {
-            setCoordOpen((o) => !o);
-          }}
           inert={help}
         />
         <main className="main" inert={help}>
@@ -922,16 +854,6 @@ export function App() {
               </a>
             </div>
           )}
-          {route.name === "queue" && !broken && coordOpen && (
-            <CoordinatorLog
-              loads={loads}
-              now={now}
-              flash={flash}
-              onClose={() => {
-                setCoordOpen(false);
-              }}
-            />
-          )}
           {route.name === "queue" && !broken && (
             <Queue
               view={view}
@@ -958,22 +880,13 @@ export function App() {
               onCard={run}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               armed={armed?.id ?? null}
-              onLane={laneRun}
               onBack={() => {
                 go({ name: reviewFrom });
               }}
             />
           )}
           {route.name === "inflight" && !broken && (
-            <Inflight
-              view={lane}
-              now={now}
-              selected={laneCur?.card.id ?? null}
-              sending={sending}
-              armed={armed?.id ?? null}
-              select={setLaneSel}
-              run={laneRun}
-            />
+            <Inflight view={lane} now={now} selected={laneCur?.card.id ?? null} select={setLaneSel} run={laneRun} />
           )}
           {/* Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue. */}
           {settingsSeen && (

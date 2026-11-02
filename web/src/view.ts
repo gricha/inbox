@@ -1,10 +1,6 @@
 import type {
   ActivityEvent,
   Card,
-  CoordinatorActed,
-  CoordinatorLogEntry,
-  CoordinatorStatus,
-  InflightRow,
   JudgeStatus,
   JudgeStep,
   QueueView,
@@ -13,7 +9,7 @@ import type {
   SettingDef,
   SettingValue,
 } from "../../src/types.ts";
-import { age as ageOf, ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts";
+import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
 
 // The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, and Settings (with the rules).
 export type Route =
@@ -35,7 +31,7 @@ export interface Group {
 
 // The cursor's stop on a group's "n more" line.
 export const foldOf = (k: GroupKey) => `fold:${k}`;
-export const handArm = (id: string) => `m:${id}`; // what a first m on your own PR arms, beside a draft's id for y
+export const armOf = (key: "m" | "a", id: string) => `${key}:${id}`; // what a first m (hand off) or a (ready for review) armed
 export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];
@@ -61,70 +57,6 @@ export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
   if (r.name === "review") return `#/review/${encodeURIComponent(r.id)}`;
   return r.name === "inflight" ? "#/inflight" : r.name === "later" ? "#/later" : "#/";
-}
-
-// ---------------------------------------------------------------- merging (in flight)
-
-// Check names can be long ("tacos-gha / TACOS Unlock (terragrunt/regions/…)"): two at most, each clipped.
-function checkNames(names: string[]): string {
-  const clip = (n: string) => (n.length > 40 ? `${n.slice(0, 39)}…` : n);
-  return names.length > 2 ? `${clip(names[0]!)} and ${names.length - 1} more` : names.map(clip).join(", ");
-}
-
-// Reviewers not heard from yet, people first: a CODEOWNERS list of teams is a count ("azulus and 5 teams").
-export function waitingText(names: string[]): string {
-  if (names.length <= 2) return names.join(", ");
-  const people = names.filter((n) => !n.startsWith("@")).slice(0, 2);
-  const rest = names.length - people.length;
-  const teams = names.length - names.filter((n) => !n.startsWith("@")).length;
-  const tail = rest === teams ? `${teams} teams` : `${rest} more`;
-  return people.length ? `${people.join(", ")} and ${tail}` : tail;
-}
-
-// A PR in Merging's state in plain words; `problem` marks what's wrong, which is coloured only while it needs you.
-// Tones as in the queue and the review: CI failing is bad, changes requested and a merge conflict are warnings.
-export function laneFacts(
-  r: Pick<InflightRow, "ci" | "failing" | "approved_by" | "changes_by" | "waiting_on" | "threads_unresolved" | "mergeable" | "draft"> &
-    Partial<Pick<InflightRow, "auto_merge">>,
-): { text: string; tone: "" | "bad" | "warn" }[] {
-  const out: { text: string; tone: "" | "bad" | "warn" }[] = [];
-  const add = (text: string, tone: "" | "bad" | "warn" = "") => out.push({ text, tone });
-  if (r.draft) add("draft");
-  const failing = checkNames(r.failing);
-  if (r.ci === "red") add(failing ? `CI failing: ${failing}` : "CI failing", "bad");
-  else if (r.ci === "green") add("CI passing");
-  else if (r.ci === "pending") add("CI running");
-  if (r.approved_by.length) add(`approved by ${r.approved_by.join(", ")}`);
-  if (r.changes_by.length) add(`changes requested by ${r.changes_by.join(", ")}`, "warn");
-  if (r.waiting_on.length) add(`waiting on ${waitingText(r.waiting_on)}`);
-  if (r.threads_unresolved) add(`${r.threads_unresolved} unresolved ${r.threads_unresolved === 1 ? "thread" : "threads"}`);
-  if (r.mergeable === "conflict") add("merge conflict", "warn");
-  if (r.auto_merge) add("auto-merge on");
-  return out;
-}
-
-// What a PR in Merging waits on while Claude has nothing to do on it; what needs you (a reply, a question) says itself.
-export function waitsOn(
-  r: Pick<InflightRow, "state" | "needs_you" | "sitter" | "ci" | "approved_by" | "changes_by" | "mergeable" | "draft" | "auto_merge">,
-): string | null {
-  if (r.state !== "open" || r.needs_you || r.sitter.state === "running" || r.sitter.state === "queued") return null;
-  if (r.ci === "pending") return "waits on CI";
-  if (r.changes_by.length) return "waits on a second look";
-  if (!r.approved_by.length) return "waits on a review";
-  if (r.draft) return "waits on ready for review";
-  if (r.ci === "green" && r.mergeable === "clean" && r.auto_merge) return "waits on GitHub to merge it";
-  return null;
-}
-
-// Whether Claude's line says more than why the PR needs you ("Claude asks: …" says it).
-export const sitterNews = (r: Pick<InflightRow, "state" | "needs_you" | "sitter">) =>
-  r.state === "open" && !!r.sitter.text && (!r.needs_you || r.sitter.state === "done" || r.sitter.state === "running");
-
-// What Claude is doing on a PR, in Merging's words: "fixing CI", "4m", "npm test"; "pushed a fix for 2 comments", "abc1234".
-export function sitterParts(r: Pick<InflightRow, "sitter" | "run">, now: number): string[] {
-  const s = r.sitter;
-  const [text = "", ...more] = s.text.split(" · ");
-  return [text, ...more, s.since ? ageOf(s.since, now) : "", s.state === "running" ? (r.run?.step ?? "") : ""].filter(Boolean);
 }
 
 // ---------------------------------------------------------------- review
@@ -238,9 +170,6 @@ export function groupsOf(
   ];
 }
 
-// Your PR with no local clone for Claude to work in: the repo to clone.
-export const noCloneOf = (c: Pick<Card, "why" | "repo">) => (/\bno local clone of /.test(c.why) ? c.repo : undefined);
-
 // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
 const MEANINGS = [
   /conflict/i,
@@ -264,7 +193,7 @@ const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
 // The selected card's facts, in the review header's words, less what the card already says: its why, its problems and
 // size, which every card shows, and a sorted-away row's note.
 export function cardFacts(
-  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "cleared_by_coordinator" | "placed_by">,
+  c: Pick<Card, "kind" | "author" | "why" | "chips" | "ci" | "preflight" | "demoted" | "team_ask" | "placed_by">,
   me: string,
   away = false,
   inRun = false, // its stack's head names the author
@@ -286,8 +215,6 @@ export function cardFacts(
   // Who placed it: its why is a hard rule's, Claude's, or a rule's until Claude answers.
   if (c.placed_by) out.push(PLACED_BY[c.placed_by]);
   if (c.demoted && !away) out.push(c.demoted);
-  // Why the coordinator put it away: e restores it, as with your own.
-  if (c.cleared_by_coordinator) out.push(`the coordinator: ${c.cleared_by_coordinator}`);
   return out.filter((f) => !says(c.why, f));
 }
 
@@ -440,18 +367,8 @@ export function acceleratorOf(e: KeyLike, mac: boolean): string | null {
 // Errors that `gh auth login` fixes, e.g. "GitHub rejected the token (HTTP 401)".
 export const authProblem = (error: string) => /\b(401|token|bad credentials|unauthori[sz]ed|gh auth)\b/i.test(error);
 
-// ---------------------------------------------------------------- the policy judge and the coordinator
+// ---------------------------------------------------------------- the policy judge
 
-const PAST: Record<string, string> = {
-  snooze: "snoozed",
-  done: "cleared",
-  mute: "muted",
-  unmute: "unmuted",
-  pin: "pinned",
-  unpin: "unpinned",
-  restore: "restored",
-};
-const past = (action: string | null) => PAST[action ?? ""] ?? action ?? "acted on";
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!?]$/.test(s) ? "" : "."}`;
 // "5m": how long until `at`.
@@ -464,33 +381,6 @@ export function judgeStepText(j: JudgeStep): string {
   return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
 }
 
-// "snoozed 3 FYI items", "snoozed 2 items and muted 1": the top bar's line, after "Coordinator".
-export function actedText(a: CoordinatorActed): string {
-  const parts = Object.entries(a.counts).sort((x, y) => y[1] - x[1]);
-  const [first] = parts;
-  if (!first) return "";
-  const [bucket] = a.buckets;
-  // Now and today are one list, the queue: no "Today items".
-  const named = !!bucket && !["hide", "now", "today"].includes(bucket);
-  const where = parts.length === 1 && named && a.buckets.every((b) => b === bucket) ? `${BUCKET_LABEL[bucket]} ` : "";
-  const head = `${past(first[0])} ${first[1]} ${where}${first[1] === 1 ? "item" : "items"}`;
-  const all = [head, ...parts.slice(1).map(([action, n]) => `${past(action)} ${n}`)];
-  return all.length === 1 ? head : `${all.slice(0, -1).join(", ")} and ${all.at(-1)!}`;
-}
-
-// One line of the coordinator's log; a policy change's lines before and after come apart (policyLines).
-export function logText(e: CoordinatorLogEntry): string {
-  if (e.kind === "act") {
-    const what = `${sentence(past(e.action)).slice(0, -1)} ${e.item_id ? shortId(e.item_id) : "an item"}`;
-    return e.text ? `${what}: ${e.text}` : what;
-  }
-  if (e.kind === "policy") return e.text.split("\n")[0]!;
-  return e.kind === "run" && e.run ? `Run ${e.run} · ${e.text.charAt(0).toLowerCase()}${e.text.slice(1)}` : e.text;
-}
-
-// A policy change's "− removed" and "+ added" lines.
-export const policyLines = (e: CoordinatorLogEntry) => (e.kind === "policy" ? e.text.split("\n").slice(1) : []);
-
 export function judgeStatusText(j: JudgeStatus, now: number): string {
   if (j.state === "off") return `Claude doesn't sort your desk: ${j.off_reason ?? "it's off"}.`;
   const hour = `${j.spent} of ${j.max_per_hour} this hour.`;
@@ -500,27 +390,4 @@ export function judgeStatusText(j: JudgeStatus, now: number): string {
   if (j.state === "idle" && j.retry_at)
     return `${sentence(placed)} The hour's limit is reached (${j.max_per_hour}); next batch in ${until(j.retry_at, now)}.`;
   return j.state === "running" ? `Sorting now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
-}
-
-export function coordinatorText(s: CoordinatorStatus, now: number): string {
-  if (s.state === "off") return sentence(s.off_reason ?? "Off");
-  if (s.state === "running") return `Running, started ${ago(s.running_since ?? new Date(now).toISOString(), now)}.`;
-  if (s.state === "error") {
-    const when = s.last_run ? ` ${ago(s.last_run.started_at, now)}` : "";
-    return `Its last run failed${when}: ${sentence(s.error ?? "unknown error")}${s.next_at ? ` Next try in ${until(s.next_at, now)}.` : ""}`;
-  }
-  if (s.held) return "Waiting: you have it open in a terminal. It picks up the new events once you close it.";
-  if (!s.started) return "It starts its session after the first sync.";
-  const r = s.last_run;
-  const did =
-    r &&
-    (r.kind === "intro"
-      ? "its first"
-      : r.kind === "learn"
-        ? `read your last ${count(r.events, "action")}`
-        : `${count(r.events, "event")}, ${count(r.actions, "action")}`);
-  const last = r ? ` Last run ${ago(r.started_at, now)}: ${did}.` : "";
-  const head =
-    s.state === "waiting" ? `Waiting for things to settle${s.next_at ? `; next run in ${until(s.next_at, now)}` : ""}.` : "Idle.";
-  return `${head}${last}`;
 }

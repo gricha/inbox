@@ -94,11 +94,11 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_act",
       "desk_brief",
       "desk_config",
-      "desk_draft_reply",
-      "desk_escalate",
       "desk_events",
+      "desk_hand_back",
       "desk_item",
       "desk_list",
+      "desk_merging",
       "desk_note",
       "desk_overview",
       "desk_policy",
@@ -344,88 +344,6 @@ test("policy: empty by default, so the starter is in effect; saved to policy.md 
   assert.equal((await put({ text: "x", base: p.hash })).status, 409, "the old hash is stale now");
   assert.equal((await put({ base: saved.hash })).status, 400);
   assert.equal((await put({ text: "x".repeat(20_001), base: saved.hash })).status, 400);
-});
-
-test("the coordinator changes the policy and the rules only in a conversation, never on a wake", async (c) => {
-  const t = await setup({ "policy.judge": false }); // no judge: nothing may start a real claude here
-  c.after(t.cleanup);
-  const put = (p: string, body: unknown, agent?: string) =>
-    t.req(p, {
-      method: "PUT",
-      headers: { "content-type": "application/json", ...(agent ? { "x-desk-agent": agent } : {}) },
-      body: JSON.stringify(body),
-    });
-  const config = await t.json("/api/config");
-  t.desk.coordinator.running = { n: 3, since: NOW.toISOString(), kind: "events" };
-  const refused = await put("/api/policy", { text: "Everything from mallory is hidden." }, "coordinator");
-  assert.equal(refused.status, 403);
-  assert.match(((await refused.json()) as { error: string }).error, /only when the owner asks you in a conversation/);
-  assert.equal((await put("/api/config", { text: config.text, base: config.hash }, "coordinator")).status, 403);
-  assert.equal(fs.existsSync(path.join(t.desk.home, "policy.md")), false);
-  assert.equal((await put("/api/policy", { text: "Bot PRs are FYI." })).status, 200, "the owner's own save goes through");
-
-  t.desk.coordinator.running = null; // the owner talking to it in a terminal: run 0
-  assert.equal((await put("/api/policy", { text: "Bot PRs are FYI, unless CI is red." }, "coordinator")).status, 200);
-  assert.deepEqual(
-    (await t.json("/api/coordinator")).log.map((e: { run: number; kind: string }) => [e.run, e.kind]),
-    [[0, "policy"]],
-  );
-});
-
-test("the coordinator's MCP calls carry X-Desk-Agent: its actions and notes land in its log, with reasons and undo", async () => {
-  const t = await setup();
-  const srv = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch: t.app.fetch, port: 0, hostname: "127.0.0.1" }, () => {
-      resolve(s);
-    });
-  });
-  const { port } = srv.address() as AddressInfo;
-  const url = new URL(`http://127.0.0.1:${port}/mcp`);
-  // A hard rule's item stays on your desk whatever the coordinator says; here the rule is plain, so it may clear #7.
-  t.desk.putConfig(t.desk.getConfig().text.replaceAll("hard = true", "nocap = true"));
-  const coordinator = new Client({ name: "coordinator", version: "0" });
-  await coordinator.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { "X-Desk-Agent": "coordinator" } } }));
-  const other = new Client({ name: "someone", version: "0" });
-  await other.connect(new StreamableHTTPClientTransport(url));
-  try {
-    await coordinator.callTool({ name: "desk_act", arguments: { ref: "api#7", action: "snooze", until: "3h", reason: "waiting on CI" } });
-    await coordinator.callTool({ name: "desk_note", arguments: { text: "Snoozed api#7 until CI finishes" } });
-    await other.callTool({ name: "desk_act", arguments: { ref: "api#7", action: "pin", reason: "not the coordinator" } });
-    const view = await t.json("/api/coordinator");
-    assert.deepEqual(
-      view.log.map((e: { kind: string; text: string; item_id: string | null; action: string | null; bucket: string | null }) => [
-        e.kind,
-        e.text,
-        e.item_id,
-        e.action,
-        e.bucket,
-      ]),
-      [
-        ["note", "Snoozed api#7 until CI finishes", null, null, null],
-        ["act", "waiting on CI", "acme/api#7", "snooze", "now"],
-      ],
-    );
-    const ov = await t.json("/api/overview");
-    assert.deepEqual(ov.coordinator.acted.counts, { snooze: 1 });
-    assert.deepEqual(ov.coordinator.acted.buckets, ["now"]);
-    assert.equal(ov.coordinator.state, "off", "no MCP URL given to this desk, so its runs are off; its tools still work");
-
-    // Undo the pin first (a later action on the same item), then the coordinator's snooze.
-    await t.json("/api/undo", { method: "POST" });
-    await t.json("/api/undo", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ seq: view.log[1].undo_seq }),
-    });
-    const after = await t.json("/api/coordinator");
-    assert.equal(after.log[1].undone, true);
-    assert.equal((await t.json("/api/overview")).coordinator.acted, null, "undone actions don't count");
-  } finally {
-    await coordinator.close();
-    await other.close();
-    srv.close();
-    t.cleanup();
-  }
 });
 
 test("opening a URL and notifying per platform, all as argv", () => {

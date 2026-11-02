@@ -775,7 +775,9 @@ test(
     assert.equal(t.placed(2).bucket, "fyi");
 
     t.desk.act("api#2", "pin");
-    t.desk.act("api#3", "pin", undefined, { agent: "coordinator", reason: "your area" });
+    t.desk.act("api#3", "pin");
+    // A pin the old desk-run coordinator made: an opinion Claude weighs, not a floor.
+    t.desk.store.db.prepare("UPDATE events SET agent = 'coordinator' WHERE item_id = 'acme/api#3'").run();
     assert.deepEqual([t.placed(2).bucket, t.desk.item("api#2").card.placed_by], ["today", "pin"]);
     assert.deepEqual([t.placed(3).bucket, t.placed(3).judge?.pending], ["fyi", true], "Claude sorts it again, pinned");
     await t.sync();
@@ -866,7 +868,6 @@ test(
       ],
     );
     assert.deepEqual([t.placed(1).bucket, t.placed(1).why, t.placed(1).judge?.bucket], ["today", "carol asked you directly", "fyi"]);
-    assert.throws(() => t.desk.act("api#1", "snooze", "tomorrow", { agent: "coordinator", reason: "per policy" }), /a hard rule keeps/);
 
     // Once: taking hard out again is the owner's call.
     t.desk.stop();

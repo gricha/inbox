@@ -761,6 +761,24 @@ kbd {
   padding-left: 12px;
 }
 
+/* The row's one call to action, on the right before its age; armed, it's said in ink like approve's. */
+.line-cta {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.line-cta + .line-age {
+  margin-left: 0;
+}
+
+.line-cta.armed {
+  color: var(--ink);
+  font-weight: 650;
+}
+
 .dim .line-title {
   color: var(--ink-2);
   font-weight: 400;
@@ -1304,20 +1322,6 @@ kbd {
   margin-top: 0;
 }
 
-/* A calm row's state is pencil, problems included; one that needs you has its why in ink and its problems coloured. */
-.lane-row:not(.waits) .meta .fact-word {
-  color: var(--pencil);
-}
-
-.lane-link {
-  margin: -6px 18px 12px;
-  font-size: 13px;
-}
-
-.lane-link a {
-  color: var(--pencil);
-}
-
 /* Merged reads like Resolved: a flat row on the paper, its title regular and pencil. */
 .lane .dim.card {
   background: none;
@@ -1329,33 +1333,10 @@ kbd {
   font-weight: 400;
 }
 
-.gist.sitter {
+/* The coordinator's latest note on a PR in Merging, and its age. */
+.gist.lane-note {
   color: var(--pencil);
   font-size: 13px;
-}
-
-/* A reply waiting for Send: what it answers, then the reply, like an AI note in a review: a margin rule, no card. */
-.draft {
-  display: grid;
-  gap: 4px;
-  margin: -4px 18px 12px;
-  padding: 1px 0 1px 12px;
-  border-left: 2px solid var(--rule-strong);
-  font-size: 13px;
-}
-
-.draft-to {
-  color: var(--pencil);
-}
-
-.draft-quote {
-  overflow-wrap: anywhere;
-}
-
-.draft-body {
-  color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .keys-head.lane-keys {
@@ -2207,28 +2188,6 @@ kbd {
   margin-top: 6px;
 }
 
-/* The coordinator, under its switch in Settings → Agents. */
-.coord {
-  flex-basis: 100%;
-  min-width: 0;
-}
-
-.coord-cmd {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-}
-
-.coord-cmd code {
-  flex: 1;
-  min-width: 0;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
 /* Below 820px, where the sidebar's Merging entry is hidden: the same, in pencil. */
 .tb-flight {
   display: inline-flex;
@@ -2243,133 +2202,6 @@ kbd {
 
 .tb-flight:hover {
   background: var(--wash);
-  color: var(--ink);
-}
-
-/* The queue's top bar: one quiet line when the coordinator acted recently. */
-.coord-line {
-  height: 30px;
-  min-width: 0;
-  padding: 0 10px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--pencil);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.coord-line:hover,
-.coord-line.on {
-  background: var(--wash);
-  color: var(--ink);
-}
-
-/* Below 1000px the verb stays and the name goes ("Snoozed 2 items · 4m"): a name and a time alone say nothing. */
-.coord-line .cl-narrow {
-  display: none;
-}
-
-@media (width <= 1000px) {
-  .coord-line .cl-wide {
-    display: none;
-  }
-
-  .coord-line .cl-narrow {
-    display: inline;
-  }
-}
-
-.coord-log {
-  margin-bottom: 30px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--rule);
-}
-
-.cl-head {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  margin-bottom: 8px;
-  padding: 0 18px;
-}
-
-.cl-head h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.cl-status {
-  flex: 1;
-  color: var(--pencil);
-  font-size: 13px;
-}
-
-.cl-list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 13.5px;
-}
-
-.cl-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: baseline;
-  column-gap: 14px;
-  padding: 4px 18px;
-}
-
-.cl-when {
-  grid-column: 3;
-  color: var(--pencil);
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.cl-text {
-  color: var(--ink-2);
-}
-
-.cl-run .cl-text,
-.undone .cl-text {
-  color: var(--pencil);
-}
-
-/* A policy change's lines out and in, under its head: pencil, one per line. */
-.cl-diff {
-  display: grid;
-  gap: 1px;
-  margin-top: 3px;
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
-.cl-undone {
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
-/* The least important action on the log: pencil, ink on hover. */
-.cl-undo {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--pencil);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.cl-undo:hover {
   color: var(--ink);
 }
 
@@ -2673,14 +2505,9 @@ kbd {
   color: var(--pencil);
 }
 
-/* A PR in Merging: Claude's line, in pencil as there. */
+/* A PR in Merging: what it waits on and the coordinator's note, in pencil as there. */
 .rv-lane {
   color: var(--pencil);
-}
-
-/* Your PR's reply waiting for y, on the facts' edge. */
-.rv-draft {
-  margin: 4px 0 0;
 }
 
 /* Recent activity: a few quiet lines, the time after the same "·" as the facts; the rest behind "n more". */

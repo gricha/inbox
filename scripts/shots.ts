@@ -123,15 +123,6 @@ const toBottom = (name: string) => async (page: Page) => {
   if (room !== null && room > BOTTOM_ROOM)
     failures.push(`${name}: ${room}px of empty page below the last content when scrolled to the bottom`);
 };
-// A setting changed through the API, as Settings would; `after` puts it back.
-const setting = (key: string, value: unknown) => async (page: Page) => {
-  await page.evaluate(
-    `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(${JSON.stringify(
-      value === undefined ? { reset: [key] } : { set: { [key]: value } },
-    )}) })`,
-  );
-  await page.waitForTimeout(300);
-};
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
@@ -313,11 +304,11 @@ const SHOTS: Shot[] = [
   },
   // What Claude and the rules sorted away, on its own page.
   { name: "later", go: at("#/later") },
-  // Merging: a reply to send, a question, CI being fixed where the repo has no auto-merge, one waiting with auto-merge on,
-  // one merged.
+  // Merging: what each waits on and the coordinator's latest note, one merged.
   { name: "inflight", go: at("#/inflight") },
   {
-    name: "inflight-question",
+    // The selected row's keys: Review, Open on GitHub, Back to desk.
+    name: "inflight-selected",
     go: async (page) => {
       await at("#/inflight")(page);
       await page.keyboard.press("j");
@@ -325,7 +316,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Claude handed it back (no local clone): at the top of the queue, one line like the rest.
+    // The coordinator handed it back: at the top of the queue, one line like the rest.
     name: "handed-back",
     go: async (page) => {
       await at("#/")(page);
@@ -334,7 +325,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A first m on your own PR only arms the hand-off, as y does Send: a toast says press it again.
+    // A first m on your own PR only arms the hand-off: a toast says press it again.
     name: "handoff-armed",
     go: async (page) => {
       await at("#/")(page);
@@ -379,12 +370,25 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The coordinator's line in the top bar (its latest run touched Today), opened: its recent log above the queue.
-    name: "coordinator-log",
+    // Your own draft's one call to action, Ready for review, and armed after a first a.
+    name: "draft-cta",
+    after: refold,
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".coord-line").click();
-      await page.locator(".cl-list li").first().waitFor({ timeout: 5000 });
+      await unfold(page);
+      await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    name: "draft-cta-armed",
+    after: refold,
+    go: async (page) => {
+      await at("#/")(page);
+      await unfold(page);
+      await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
+      await page.keyboard.press("a");
+      await page.waitForTimeout(200);
     },
   },
   {
@@ -427,7 +431,6 @@ const SHOTS: Shot[] = [
   },
   { name: "settings-app", go: at("#/settings/app") },
   { name: "settings-appearance", go: at("#/settings/appearance") },
-  { name: "settings-inflight", go: at("#/settings/inflight") },
   { name: "settings-review", go: at("#/settings/review") },
   {
     // Settings is one page: its end, Rules and Policy above it.
@@ -451,17 +454,6 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Logged out, the coordinator and the judge stop too: each says so in its one line, in ink, with when it tries again.
-    name: "settings-agent-paused",
-    writes: true,
-    go: async (page) => {
-      await at("#/")(page);
-      await pauseAi(true)(page);
-      await at("#/settings/agent")(page);
-    },
-    after: pauseAi(false),
-  },
-  {
     name: "settings-policy-paused",
     writes: true,
     go: async (page) => {
@@ -472,17 +464,7 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Claude off: the intro says so once, a PR that needs you has its problem as its why, nothing says "watching".
-    name: "inflight-babysit-off",
-    writes: true,
-    go: async (page) => {
-      await setting("inflight.babysit", false)(page);
-      await at("#/inflight")(page);
-    },
-    after: setting("inflight.babysit", undefined),
-  },
-  {
-    // Cleared, with what the coordinator put away saying so.
+    // Cleared: what was snoozed, done or muted, with until when.
     name: "cleared",
     go: async (page) => {
       await at("#/later")(page);

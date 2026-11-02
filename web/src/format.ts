@@ -48,13 +48,11 @@ export function modelName(id: string): string {
   return `${family[0]!.toUpperCase()}${family.slice(1)}${version.replaceAll("-", ".").replace(/^\./, " ")}`;
 }
 
-// "snoozed until Sat 9:00 or new activity"; the coordinator's own say so ("coordinator snoozed until …").
+// "snoozed until Sat 9:00 or new activity".
 export function clearedText(c: Card): string {
-  const by = c.cleared_by_coordinator === undefined ? "" : "coordinator ";
-  if (c.status === "muted") return `${by}muted`;
-  if (c.status === "done") return `${by}${by ? "cleared" : "done"} until someone else acts`;
-  if (c.status === "snoozed")
-    return `${by}${c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity"}`;
+  if (c.status === "muted") return "muted";
+  if (c.status === "done") return "done until someone else acts";
+  if (c.status === "snoozed") return c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity";
   return "";
 }
 

@@ -10,37 +10,19 @@ const execFileAsync = promisify(execFile);
 
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve or post.
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
-// reply and comment send a reply an agent drafted on your own PR in Merging, when you press Send.
-// ready, auto_merge and auto_merge_off: m hands your own PR off for merge (a draft is marked ready first, as auto-merge
-// needs), and Back to desk turns off what m turned on.
+// ready: your own draft's "Ready for review" (a a on its row).
 export const ALLOWED = {
   approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {
   addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: APPROVE, body: $body }) { pullRequestReview { url } }
 }`,
-  reply: `mutation DeskReply($thread: ID!, $body: String!) {
-  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } }
-}`,
-  comment: `mutation DeskComment($subject: ID!, $body: String!) {
-  addComment(input: { subjectId: $subject, body: $body }) { commentEdge { node { url } } }
-}`,
   ready: `mutation DeskReady($pr: ID!) {
   markPullRequestReadyForReview(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
-}`,
-  auto_merge: `mutation DeskAutoMerge($pr: ID!, $method: PullRequestMergeMethod!) {
-  enablePullRequestAutoMerge(input: { pullRequestId: $pr, mergeMethod: $method }) { pullRequest { autoMergeRequest { enabledAt } } }
-}`,
-  auto_merge_off: `mutation DeskAutoMergeOff($pr: ID!) {
-  disablePullRequestAutoMerge(input: { pullRequestId: $pr }) { pullRequest { autoMergeRequest { enabledAt } } }
 }`,
 } as const;
 
 export interface GitHubWriter {
   approve(prNodeId: string, commit: string, body?: string): Promise<{ url: string }>;
-  reply(threadId: string, body: string): Promise<{ url: string }>; // to a review thread
-  comment(prNodeId: string, body: string): Promise<{ url: string }>; // on the PR
   ready(prNodeId: string): Promise<void>; // a draft, ready for review
-  autoMerge(prNodeId: string, method: "MERGE" | "SQUASH" | "REBASE"): Promise<void>;
-  autoMergeOff(prNodeId: string): Promise<void>;
 }
 
 export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHubWriter {
@@ -63,9 +45,7 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
 
   // No retries: a write that timed out may have landed.
   async function send(name: keyof typeof ALLOWED, target: string, variables: Record<string, unknown>): Promise<unknown> {
-    log(
-      `github write: ${name} ${target}${typeof variables.commit === "string" ? ` at ${variables.commit}` : ""}${typeof variables.method === "string" ? ` (${variables.method})` : ""}`,
-    );
+    log(`github write: ${name} ${target}${typeof variables.commit === "string" ? ` at ${variables.commit}` : ""}`);
     const res = await doFetch(ENDPOINT, {
       method: "POST",
       headers: { authorization: `bearer ${await token()}`, "content-type": "application/json", "user-agent": "review-desk" },
@@ -86,26 +66,8 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
       } | null;
       return { url: data?.addPullRequestReview?.pullRequestReview?.url ?? "" };
     },
-    reply: async (thread, body) => {
-      const data = (await send("reply", thread, { thread, body })) as {
-        addPullRequestReviewThreadReply?: { comment?: { url?: string } | null } | null;
-      } | null;
-      return { url: data?.addPullRequestReviewThreadReply?.comment?.url ?? "" };
-    },
-    comment: async (subject, body) => {
-      const data = (await send("comment", subject, { subject, body })) as {
-        addComment?: { commentEdge?: { node?: { url?: string } | null } | null } | null;
-      } | null;
-      return { url: data?.addComment?.commentEdge?.node?.url ?? "" };
-    },
     ready: async (pr) => {
       await send("ready", pr, { pr });
-    },
-    autoMerge: async (pr, method) => {
-      await send("auto_merge", pr, { pr, method });
-    },
-    autoMergeOff: async (pr) => {
-      await send("auto_merge_off", pr, { pr });
     },
   };
 }

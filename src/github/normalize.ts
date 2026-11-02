@@ -30,9 +30,9 @@ interface RawComment {
   createdAt: string;
 }
 
-// Has a say on the repo: what a babysitter may act on. Anyone else can comment on a public PR.
+// Has a say on the repo. Anyone else can comment on a public PR.
 const COLLABORATORS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-export const collaborator = (association: string | undefined) => COLLABORATORS.has(association ?? "");
+const collaborator = (association: string | undefined) => COLLABORATORS.has(association ?? "");
 
 export interface RawHit {
   __typename: "PullRequest" | "Issue";
@@ -107,8 +107,8 @@ export interface RawCheck {
 }
 // Cancelled and skipped runs aren't the code's fault, so they don't count.
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]);
-export const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "");
-export const checkName = (c: RawCheck) => (c.__typename === "CheckRun" ? c.name : c.context) ?? "";
+const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "");
+const checkName = (c: RawCheck) => (c.__typename === "CheckRun" ? c.name : c.context) ?? "";
 const checkRunning = (c: RawCheck) =>
   c.__typename === "CheckRun" ? c.status !== undefined && c.status !== "COMPLETED" : c.state === "PENDING" || c.state === "EXPECTED";
 

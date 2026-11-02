@@ -52,47 +52,41 @@ async function until(cond: () => boolean): Promise<void> {
   assert.ok(cond(), "timed out waiting");
 }
 
-test(
-  "closing the desk stops the judge, an AI review and the coordinator, what they started, and what ignores SIGTERM",
-  posix,
-  async (c) => {
-    const fake = stuckClaude(c);
-    process.env.DESK_CLAUDE = fake.bin;
-    c.after(() => {
-      process.env.DESK_CLAUDE = "/nonexistent/claude";
-    });
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-close-"));
-    c.after(() => {
-      fs.rmSync(home, { recursive: true, force: true });
-    });
-    const item = makeItem({ number: 1, author: "carol", review_requests: [{ reviewer: "me", type: "user", codeowner: false }] });
-    const gh: FakeGitHub = new FakeGitHub([item], (q) =>
-      q.includes("review-requested:@me") && !q.includes("-review-requested") ? [item.id] : [],
-    );
-    const desk = new Desk({
-      home,
-      github: gh,
-      now: () => NOW,
-      notify: () => {},
-      log: () => {},
-      mcpUrl: "http://127.0.0.1:9/mcp",
-      review: { fetchPr: () => Promise.resolve({ body: "", files: [] }), generate: generateReview },
-    });
-    desk.coordinator.debounceMs = 0;
-    await desk.init();
-    await desk.sync();
-    void desk.generate(item.id).catch(() => {});
-    // The judge, the coordinator's first run and the AI review: a claude and its child each.
-    await until(() => fake.pids().length === 6);
-    const pids = fake.pids();
-    assert.ok(pids.every(alive));
+test("closing the desk stops the judge and an AI review, what they started, and what ignores SIGTERM", posix, async (c) => {
+  const fake = stuckClaude(c);
+  process.env.DESK_CLAUDE = fake.bin;
+  c.after(() => {
+    process.env.DESK_CLAUDE = "/nonexistent/claude";
+  });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-close-"));
+  c.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const item = makeItem({ number: 1, author: "carol", review_requests: [{ reviewer: "me", type: "user", codeowner: false }] });
+  const gh: FakeGitHub = new FakeGitHub([item], (q) =>
+    q.includes("review-requested:@me") && !q.includes("-review-requested") ? [item.id] : [],
+  );
+  const desk = new Desk({
+    home,
+    github: gh,
+    now: () => NOW,
+    notify: () => {},
+    log: () => {},
+    review: { fetchPr: () => Promise.resolve({ body: "", files: [] }), generate: generateReview },
+  });
+  await desk.init();
+  await desk.sync();
+  void desk.generate(item.id).catch(() => {});
+  // The judge and the AI review: a claude and its child each.
+  await until(() => fake.pids().length === 4);
+  const pids = fake.pids();
+  assert.ok(pids.every(alive));
 
-    const t0 = Date.now();
-    await desk.close();
-    assert.deepEqual(pids.filter(alive), [], "nothing left running");
-    assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
-  },
-);
+  const t0 = Date.now();
+  await desk.close();
+  assert.deepEqual(pids.filter(alive), [], "nothing left running");
+  assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
+});
 
 test("a call that times out takes what it started with it", posix, async (c) => {
   const fake = stuckClaude(c);

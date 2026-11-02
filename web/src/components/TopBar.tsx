@@ -1,8 +1,7 @@
 import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { ago, cls, sinceText } from "../format.ts";
-import { actedText, type Route } from "../view.ts";
-import { Dots } from "./Detail.tsx";
+import { ago, cls } from "../format.ts";
+import type { Route } from "../view.ts";
 
 const BACK = { queue: "the queue", later: "Later", inflight: "Merging" };
 const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging" };
@@ -26,8 +25,6 @@ export function TopBar({
   filterRef,
   onSync,
   onHelp,
-  coordOpen,
-  onCoordinator,
   inert,
 }: {
   overview: Overview | null;
@@ -40,15 +37,10 @@ export function TopBar({
   filterRef: RefObject<HTMLInputElement | null>;
   onSync: () => void;
   onHelp: () => void;
-  coordOpen: boolean;
-  onCoordinator: () => void;
   inert?: boolean;
 }) {
   const inSettings = route.name === "settings";
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
-  // Only what reached the queue: housekeeping in Later and FYI stays in its log and Settings → Agents.
-  const acted = route.name === "queue" ? o?.coordinator.acted : null;
-  const shown = acted?.buckets.some((b) => b === "now" || b === "today") ? acted : null;
   return (
     <header className="topbar" inert={inert}>
       <a className="wordmark" href="#/" title="Queue">
@@ -95,29 +87,6 @@ export function TopBar({
         </label>
       )}
       <div className="tb-right">
-        {(coordOpen || !!shown) && (
-          <button
-            type="button"
-            className={cls("coord-line", coordOpen && "on")}
-            aria-expanded={coordOpen}
-            title={coordOpen ? "Hide the coordinator's log" : "What the coordinator did"}
-            onClick={onCoordinator}
-          >
-            <Dots
-              parts={[
-                shown ? (
-                  <>
-                    <span className="cl-wide">Coordinator {actedText(shown)}</span>
-                    <span className="cl-narrow">{actedText(shown).replace(/^./, (c) => c.toUpperCase())}</span>
-                  </>
-                ) : (
-                  "Coordinator"
-                ),
-                ...(shown ? [sinceText(shown.at, now)] : []),
-              ]}
-            />
-          </button>
-        )}
         <button
           type="button"
           className={cls("sync", ((!!o?.sync_error && !o.syncing) || offline) && "err")}
@@ -136,8 +105,8 @@ export function TopBar({
           </a>
         )}
         {!!o?.inflight.total && route.name !== "inflight" && (
-          <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging, ${o.inflight.needs_you} waiting on you (g m)`}>
-            Merging{o.inflight.needs_you ? ` ${o.inflight.needs_you}` : ""}
+          <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging (g m)`}>
+            Merging
           </a>
         )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">

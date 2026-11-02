@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, Draft, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
+import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, noCloneOf, orderNotes, resolvedHead, says, sitterNews, sitterParts, splitPath, waitsOn } from "../view.ts";
+import { currentFile, filePatch, orderNotes, resolvedHead, says, splitPath } from "../view.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, Dots, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
@@ -51,8 +51,7 @@ export function Review({
   flash,
   onCard,
   row,
-  armed: armedDraft,
-  onLane,
+  armed: armedKey,
   onBack,
 }: {
   id: string;
@@ -62,16 +61,15 @@ export function Review({
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
-  row: InflightRow | null; // your PR in Merging: Claude's line goes under the facts, as in Merging
-  armed: string | null; // the draft a first y armed, or handArm(id) for a first m
-  onLane: (row: InflightRow, key: string, draft?: Draft) => void; // y sends its reply, x discards it, as in Merging
+  row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
+  armed: string | null; // armOf("m", id) after a first m
   onBack: () => void;
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [fileIdx, setFileIdx] = useState(0);
   const [noteIdx, setNoteIdx] = useState<number | null>(null);
   const [armed, setArmed] = useState(0); // when `a` was pressed once
-  const [busy, setBusy] = useState<"approve" | "ai" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "ready" | "ai" | null>(null);
   const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
@@ -79,11 +77,9 @@ export function Review({
   const listRef = useRef<HTMLElement>(null);
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
-  // Your PR in Merging with a reply waiting: it's shown under the header, and y sends it from here too.
-  const draft = row?.state === "open" ? row.drafts[0] : undefined;
-  // ...or with a question from Claude: c answers it in a terminal and x dismisses it, as in Merging.
-  const asking = row?.state === "open" && !!row.escalation;
-  // A PR in Merging is Claude's: no prompt to copy or AI review to ask for.
+  // Your own open draft: a a marks it ready for review instead of approving.
+  const readying = v?.card.cta === "ready" && approved !== v.card.id;
+  // A PR in Merging is the coordinator's: no prompt to copy or AI review to ask for.
   const flying = !!row && row.state === "open";
 
   useEffect(() => {
@@ -192,6 +188,27 @@ export function Review({
     }
   }
 
+  // a, then a again: your own draft is marked ready for review on GitHub.
+  async function markReady() {
+    if (!v || busy === "ready") return;
+    if (!armed || Date.now() - armed > ARM_MS) {
+      setArmed(Date.now());
+      flash(`Press a again to mark ${shortRef(v.card)} ready for review`, false, ARM_MS);
+      return;
+    }
+    setArmed(0);
+    setBusy("ready");
+    try {
+      await api.ready(v.card.id);
+      setApproved(v.card.id);
+      flash(`Marked ${shortRef(v.card)} ready for review on GitHub`);
+    } catch (e) {
+      flash(message(e), true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function approve() {
     if (!v || busy === "approve") return;
     if (!canApprove) {
@@ -232,12 +249,9 @@ export function Review({
     else if (k === "]") goNote(1);
     else if (k === "[") goNote(-1);
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
-    else if (k === "c" && asking && row) onLane(row, "c");
-    else if (k === "x" && asking && row) onLane(row, "x");
-    else if ((k === "y" || k === "x") && draft && row) onLane(row, k, draft);
     else if (k === "c" && !flying) void copyPrompt();
     else if (k === "i" && !flying) void askAi();
-    else if (k === "a") void approve();
+    else if (k === "a") void (readying ? markReady() : approve());
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "esc") onBack();
   }
@@ -250,9 +264,9 @@ export function Review({
     if (armed && e.key !== "a" && e.key !== "Escape") setArmed(0); // any other key lets the approval lapse
     if (e.key === "Escape") {
       if (armed) setArmed(0);
-      // Esc with Send or a hand-off armed never reaches here: App lets it lapse first.
+      // Esc with a hand-off armed never reaches here: App lets it lapse first.
       else onBack();
-    } else if ((draft || asking ? "npoci[]admbyx" : "npoci[]admb").includes(e.key) && e.key.length === 1) {
+    } else if ("npoci[]admb".includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
     }
@@ -283,7 +297,6 @@ export function Review({
   const { card, item, files } = view;
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
   const mine = item.state === "open" && isMine;
-  const armedY = !!draft && armedDraft === draft.id;
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
@@ -308,11 +321,9 @@ export function Review({
   const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
   const open = item.state === "open";
-  // What it waits on and what Claude is doing, as Merging says it.
-  const waits = row && waitsOn(row);
-  const lane = row
-    ? [waits ?? "", ...(sitterNews(row) && !(waits && row.sitter.state === "idle") ? sitterParts(row, now) : [])].filter(Boolean)
-    : [];
+  // What it waits on and the coordinator's latest note, as Merging says it.
+  const lane =
+    row?.state === "open" ? [row.waits_on ?? "", row.note?.text ?? "", row.note ? age(row.note.at, now) : ""].filter(Boolean) : [];
 
   return (
     <div className="review">
@@ -321,7 +332,7 @@ export function Review({
         <header
           className={cls(
             "rv-head",
-            `b-${card.inflight && row?.needs_you ? "now" : card.bucket}`,
+            `b-${card.bucket}`,
             (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
           )}
         >
@@ -351,36 +362,12 @@ export function Review({
               {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
             </p>
           )}
-          {/* In Merging: the why above says why it needs you ("merging: …"); this is Claude's line under it, unless it only
-              repeats the why. With no clone, where to set one up. */}
           {lane.length > 0 && (
             <p className="rv-meta rv-lane">
               {lane.map((p) => (
                 <span key={p}>{p}</span>
               ))}
             </p>
-          )}
-          {row?.state === "open" && row.merge_note && (
-            <p className="rv-meta rv-lane">
-              <span>Merge it yourself when it's green: {row.merge_note}</span>
-            </p>
-          )}
-          {(row?.state === "open" || card.handed_back) && noCloneOf({ why: row?.needs_you ?? card.why, repo: card.repo }) && (
-            <p className="rv-meta rv-lane">
-              {/* In a span like every fact, so the line's gutter clips its "·", not the link's first letters. */}
-              <span>
-                <a href="#/settings/inflight">Set up a local clone of {card.repo}</a>
-              </span>
-            </p>
-          )}
-          {draft && (
-            <div className="draft rv-draft">
-              <p className="draft-to">
-                {draft.by === "agent" ? "Your agent's reply" : "Reply"} to {draft.to}
-                {draft.quote && <span className="draft-quote">: “{draft.quote}”</span>}
-              </p>
-              <p className="draft-body">{draft.body}</p>
-            </div>
           )}
         </header>
         {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
@@ -391,19 +378,18 @@ export function Review({
         )}
       </div>
 
-      {/* One order on every surface: what finishes it (y Send, c Answer), then x, then a, o and the rest, m or b last. */}
+      {/* One order on every surface: what finishes it (a), then o and the rest, m or b last. */}
       <div className="actions rv-actions">
-        {draft && (
+        {readying && (
           <KeyButton
-            k="y"
-            label={armedY ? "again to send" : "Send"}
-            title="Post this reply on GitHub, as you: press y twice"
-            className={cls(armedY && "armed")}
+            k="a"
+            label={busy === "ready" ? "Marking ready…" : armed ? "again to mark ready" : "Ready for review"}
             run={run}
+            disabled={busy === "ready"}
+            title="Mark it ready for review on GitHub: press a twice"
+            className={cls(armed > 0 && "armed")}
           />
         )}
-        {asking && row.resume && <KeyButton k="c" label="Answer in a terminal" title={`Copies ${row.resume}`} run={run} />}
-        {asking ? <KeyButton k="x" label="Dismiss the question" run={run} /> : draft && <KeyButton k="x" label="Discard" run={run} />}
         {/* Only someone else's open PR is yours to approve. */}
         {open && !isMine && (
           <KeyButton
@@ -425,7 +411,7 @@ export function Review({
             disabled={view.generating || busy === "ai"}
           />
         )}
-        {mine && <HandKey card={card} run={run} armed={armedDraft} />}
+        {mine && <HandKey card={card} run={run} armed={armedKey} />}
       </div>
 
       {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}

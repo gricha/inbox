@@ -9,7 +9,6 @@ import type {
   AgentStatus,
   BoardView,
   ConfigError,
-  CoordinatorView,
   FieldDoc,
   FocusView,
   InflightView,
@@ -135,21 +134,16 @@ test("logged out: the queue says Claude is paused once, cards wait, every agent 
   ]);
   const { paused } = (await call<SettingsView>("GET", "/api/settings")).data;
   assert.match(paused.ai?.why ?? "", /^Claude Code/);
-  assert.match(paused.babysitters?.why ?? "", /^Claude Code/);
-  // The judge and the coordinator are the same Claude Code: each says it failed on the login, and when it tries again.
+  // The judge is the same Claude Code: it says it failed on the login, and when it tries again.
   const { judge } = (await call<PolicyDoc>("GET", "/api/policy")).data;
   assert.deepEqual([judge.state, judge.error, !!judge.retry_at], ["error", loggedOut, true]);
-  const { status } = (await call<CoordinatorView>("GET", "/api/coordinator")).data;
-  assert.deepEqual([status.state, status.error, !!status.next_at], ["error", loggedOut, true]);
   await call("POST", "/api/mock/ai-paused", { paused: false });
   const { data: back } = await call<QueueView>("GET", "/api/queue");
   assert.equal(back.paused, null);
   assert.equal((await call<PolicyDoc>("GET", "/api/policy")).data.judge.state, "idle");
-  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.status.state, "idle");
-  // At work: the judge judging, the coordinator running.
+  // At work: the judge judging.
   await call("POST", "/api/mock/agents-busy", { busy: true });
   assert.equal((await call<PolicyDoc>("GET", "/api/policy")).data.judge.state, "running");
-  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.status.state, "running");
   await call("POST", "/api/mock/agents-busy", { busy: false });
   assert.equal([...back.sections.now, ...back.sections.today].find((c) => c.id === "acme/web#2301")?.preflight?.state, "running");
 });
@@ -346,93 +340,61 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   assert.equal(mine.status, 409);
 });
 
-test("policy and coordinator: a policy with its judge, the coordinator's log, and what it did for the top bar", async () => {
+test("policy: a policy with its judge, saved against its hash", async () => {
   const { data: p } = await call<PolicyDoc>("GET", "/api/policy");
   assert.ok(p.text.trim());
   assert.equal(p.judge.state, "idle");
   assert.equal((await call("PUT", "/api/policy", { text: "x", base: "stale" })).status, 409);
   const { data: saved } = await call<{ ok: boolean; hash: string }>("PUT", "/api/policy", { text: p.text, base: p.hash });
   assert.notEqual(saved.hash, p.hash);
-
-  const { data: o } = await call<Overview>("GET", "/api/overview");
-  // Its latest run snoozed a Today item, so the top bar names Today; the FYI run before it stays in the log.
-  assert.deepEqual(o.coordinator.acted?.counts, { snooze: 1 });
-  assert.deepEqual(o.coordinator.acted?.buckets, ["today"]);
-  const { data: v } = await call<CoordinatorView>("GET", "/api/coordinator");
-  assert.equal(v.status.state, "idle");
-  assert.ok(v.status.command?.includes(`--resume ${v.status.session_id}`));
-  const acts = v.log.filter((e) => e.kind === "act");
-  assert.equal(acts.length, 4);
-  const { data: q } = await call<QueueView>("GET", "/api/queue");
-  for (const a of acts)
-    assert.ok(
-      q.cleared.some((c) => c.id === a.item_id && c.status === "snoozed"),
-      `${a.item_id} is snoozed`,
-    );
-
-  // Undoing one from the log takes it out of the top bar's count: the run before it is the latest that acted.
-  await call("POST", "/api/undo", { seq: acts[0]!.undo_seq });
-  const { data: undone } = await call<CoordinatorView>("GET", "/api/coordinator");
-  assert.equal(undone.log.find((e) => e.seq === acts[0]!.seq)?.undone, true);
-  assert.deepEqual((await call<Overview>("GET", "/api/overview")).data.coordinator.acted?.counts, { snooze: 3 });
-  await call("POST", "/api/coordinator/note", { text: "from the test" });
-  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log[0]?.text, "from the test");
-
-  // What it learned from you is a policy change with its line in, and Undo puts the text from before back.
-  const learned = undone.log.find((e) => e.kind === "policy" && e.version !== null)!;
-  assert.match(learned.text, /^Changed the policy\n\+ /);
-  assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 200);
-  assert.doesNotMatch((await call<PolicyDoc>("GET", "/api/policy")).data.text, /Release notes/);
-  assert.equal((await call<CoordinatorView>("GET", "/api/coordinator")).data.log.find((e) => e.seq === learned.seq)?.undone, true);
-  assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 409);
 });
 
-test("Merging: its states, what waits on you only there, handed back at the top of Now, send, hand off and back to desk", async () => {
+test("Merging: what each waits on and the coordinator's note, handed back at the top of Now, hand off and back to desk", async () => {
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");
   const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
   assert.deepEqual(
-    lane.rows.map((r) => [r.card.id, r.needs_you !== null, r.sitter.state]),
+    lane.rows.map((r) => [r.card.id, r.waits_on]),
     [
-      ["acme/api#4122", true, "done"],
-      ["acme/api#4110", true, "waiting"],
-      ["acme/web#2295", false, "running"],
-      ["acme/api#4105", false, "idle"],
-      ["acme/worker#871", false, "done"],
+      ["acme/api#4122", "waits on a second look from dana"],
+      ["acme/web#2295", "waits on a CI fix"],
+      ["acme/api#4110", "waits on a merge conflict fix"],
+      ["acme/api#4105", "waits on a review from sam, @backend and 4 more"],
+      ["acme/worker#871", null],
     ],
   );
   assert.equal(row("acme/worker#871").state, "merged");
-  assert.deepEqual([row("acme/api#4105").auto_merge, row("acme/web#2295").merge_note], [true, "the repo doesn't allow auto-merge"]);
-  assert.deepEqual(
-    [row("acme/api#4122").card.why, row("acme/api#4110").card.why],
-    ["merging: reply ready to send", `Claude asks: ${row("acme/api#4110").escalation!.question}`],
-  );
+  assert.match(row("acme/api#4122").note?.text ?? "", /^Pushed 4be71c2/);
+  assert.equal(row("acme/api#4105").note, null);
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const all = [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared, ...q.resolved];
-  assert.ok(!all.some((c) => c.inflight), "Merging has them, whatever waits on you");
+  assert.ok(!all.some((c) => c.inflight), "Merging has them");
   assert.deepEqual(
-    q.sections.now.slice(0, 1).map((c) => [c.id, c.why]),
-    [["oss/tinyhttp#205", "handed back: no local clone of oss/tinyhttp"]],
+    q.sections.now.slice(0, 1).map((c) => c.id),
+    ["oss/tinyhttp#205"],
   );
-  assert.ok(q.sections.now.find((c) => c.id === "oss/tinyhttp#205")?.chips.includes("auto-merge on"), "auto-merge still on");
+  assert.match(q.sections.now[0]!.why, /^handed back: /);
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.inflight, { total: 4, needs_you: 2 });
+  assert.deepEqual(o.inflight, { total: 4 });
 
-  const id = encodeURIComponent("acme/api#4122");
-  const draft = row("acme/api#4122").drafts[0]!;
-  assert.equal((await call("POST", `/api/inflight/${id}/send`, { draft_id: draft.id })).status, 200);
-  assert.equal((await call("POST", `/api/inflight/${id}/send`, { draft_id: draft.id })).status, 404);
-  const { data: sent } = await call<InflightView>("GET", "/api/inflight");
-  assert.equal(sent.rows.find((r) => r.card.id === "acme/api#4122")?.needs_you, null);
-
-  assert.equal((await call("POST", `/api/inflight/${encodeURIComponent("acme/api#4127")}/handoff`)).status, 409, "not your PR");
-  const web = encodeURIComponent("acme/web#2295");
-  assert.equal((await call("POST", `/api/inflight/${web}/back`)).status, 200);
+  const act = (id: string, action: string) => call("POST", "/api/act", { id, action });
+  assert.equal((await act("acme/api#4127", "inflight")).status, 409, "not your PR");
+  assert.equal((await act("acme/web#2295", "takeback")).status, 200);
   const { data: q2 } = await call<QueueView>("GET", "/api/queue");
   assert.ok(
     Object.values(q2.sections)
       .flat()
       .some((c) => c.id === "acme/web#2295" && !c.inflight),
   );
-  const { data: again } = await call<{ auto_merge: { on: boolean; why: string } }>("POST", `/api/inflight/${web}/handoff`);
-  assert.deepEqual(again.auto_merge, { on: false, why: "the repo doesn't allow auto-merge" });
+  assert.equal((await act("acme/web#2295", "inflight")).status, 200);
+});
+
+test("your own draft carries one call to action, Ready for review, and the mock takes it", async () => {
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const drafts = [...q.sections.now, ...q.sections.today, ...q.sections.later].filter((c) => c.draft && c.author === "me");
+  assert.ok(drafts.length > 0);
+  assert.ok(drafts.every((c) => c.cta === "ready"));
+  assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta && (!c.draft || c.author !== "me")));
+  const id = encodeURIComponent(drafts[0]!.id);
+  assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 200);
+  assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 409, "not a draft any more");
 });

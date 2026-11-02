@@ -60,15 +60,14 @@ export function Sidebar({
         >
           <span className="side-name">Later</span>
         </a>
-        {/* The count is what waits on you there; the rest Claude has. */}
+        {/* No count: nothing there needs you, the coordinator has it. */}
         <a
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight ? `${flight.total} merging, ${flight.needs_you} waiting on you (g m)` : "Your PRs Claude is getting merged (g m)"}
+          title={flight ? `${flight.total} merging (g m)` : "Your PRs the coordinator is getting merged (g m)"}
         >
           <span className="side-name">Merging</span>
-          <span className="side-count">{flight && flight.needs_you > 0 ? flight.needs_you : ""}</span>
         </a>
       </nav>
       <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>
