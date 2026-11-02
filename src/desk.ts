@@ -47,15 +47,7 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import {
-  defaultConfigText,
-  migrateBotAsk,
-  migrateDrafts,
-  migrateDraftsSoft,
-  migrateHard,
-  parseConfig,
-  type LoadedConfig,
-} from "./config.ts";
+import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -543,14 +535,13 @@ export class Desk {
   }
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
-  // added gets a hard rule too (migrateBotAsk), the old rule sending all your drafts to later suggests a draft you touched
-  // lately for the desk (migrateDrafts), and that rule, written hard before, becomes soft (migrateDraftsSoft).
+  // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
+  // on the desk (migrateDrafts).
   migrateRules(): void {
     const due = [
       { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
       { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
-      { key: "drafts_migrated", migrate: migrateDrafts, did: "let your policy put drafts touched in the last 14 days on the desk" },
-      { key: "drafts_soft_migrated", migrate: migrateDraftsSoft, did: "made the rule for your recent drafts soft, so your policy decides" },
+      { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
     ].filter((m) => !this.store.get(m.key));
     if (!due.length) return;
     const before = fs.readFileSync(this.configPath, "utf8");

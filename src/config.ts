@@ -215,7 +215,7 @@ export function migrateBotAsk(text: string): string | null {
   return next === text ? null : next;
 }
 
-const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it"`;
+const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true`;
 
 // The old first-run rule sending all your drafts to later, only as written, becomes today's two draft rules; null if absent.
 export function migrateDrafts(text: string): string | null {
@@ -224,12 +224,6 @@ export function migrateDrafts(text: string): string | null {
     (_, indent: string) =>
       `${indent}${FRESH_DRAFT} },\n${indent}{ when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
   );
-  return next === text ? null : next;
-}
-
-// The fresh-draft rule an earlier migrateDrafts wrote hard becomes soft, so the policy decides; null if absent.
-export function migrateDraftsSoft(text: string): string | null {
-  const next = text.replaceAll(`${FRESH_DRAFT}, hard = true }`, `${FRESH_DRAFT} }`);
   return next === text ? null : next;
 }
 

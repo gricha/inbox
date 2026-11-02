@@ -582,7 +582,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
     )
     .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
     .replaceAll(
-      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it" },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
+      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "item.draft", bucket = "later", why = "draft" },`,
     );
   fs.writeFileSync(config, old);
@@ -593,7 +593,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
   assert.equal(fs.readFileSync(config, "utf8"), now);
   assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
   assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
-  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "drafts_soft_migrated"]) {
+  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated"]) {
     assert.ok(desk.store.get(k), k);
     desk.store.set(k, null);
   }
