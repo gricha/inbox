@@ -61,6 +61,19 @@ test("settings that no longer exist (the Claude model and command) load without 
   assert.equal(checkSetting("analyze.command", "/opt/bin/claude"), 'unknown setting "analyze.command"');
 });
 
+test("Now's and Today's folds give way to one for the queue: the old keys load without errors and are dropped", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
+  const file = path.join(dir, "settings.json");
+  fs.writeFileSync(file, JSON.stringify({ "queue.now_cards": 3, "queue.today_cards": 8, "queue.quiet_days": 7 }));
+  const { overrides, errors, raw } = readSettings(file);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(overrides, { "queue.quiet_days": 7 });
+  assert.deepEqual(raw, { "queue.quiet_days": 7 });
+  assert.equal(effective(overrides)["queue.cards"], 10);
+  assert.match(checkSetting("queue.now_cards", 3)!, /unknown/);
+  assert.equal(checkSetting("queue.cards", 0), null, "0 shows them all");
+});
+
 test("writeSettings writes through a symlinked settings.json", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
   const real = path.join(dir, "dotfiles.json");

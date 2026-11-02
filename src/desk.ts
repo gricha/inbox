@@ -46,7 +46,7 @@ import type {
   Signals,
   Status,
 } from "./types.ts";
-import { defaultConfigText, migrateBotAsk, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -511,12 +511,14 @@ export class Desk {
     this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
   }
 
-  // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), then a direct ask a
-  // bot added gets a hard rule too (migrateBotAsk).
+  // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
+  // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched
+  // lately on the desk (migrateDrafts).
   migrateRules(): void {
     const due = [
       { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
       { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
+      { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
     ].filter((m) => !this.store.get(m.key));
     if (!due.length) return;
     const before = fs.readFileSync(this.configPath, "utf8");
@@ -721,7 +723,7 @@ export class Desk {
     if (!fresh.length) return;
     const [only] = fresh;
     const body =
-      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new in Now: ${fresh.map(shortRef).join(", ")}`;
+      fresh.length === 1 && only ? `${shortRef(only)} · ${only.why}` : `${fresh.length} new and urgent: ${fresh.map(shortRef).join(", ")}`;
     this.notifyFn("Review Desk", body);
   }
 
@@ -1038,7 +1040,7 @@ export class Desk {
     return `waiting on review: ${hand}`;
   }
 
-  // Said once above Now, not on every card: a failed login stops every agent, so it's Claude as a whole.
+  // Said once above the queue, not on every card: a failed login stops every agent, so it's Claude as a whole.
   paused(): Paused | null {
     const login = (why: string | null | undefined) => !!why?.endsWith(NOT_LOGGED_IN);
     const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
@@ -1050,8 +1052,7 @@ export class Desk {
   focus(): FocusView {
     return {
       sections: this.top(this.snapshot(), new Set()),
-      now_cards: this.settings["queue.now_cards"],
-      today_cards: this.settings["queue.today_cards"],
+      cards: this.settings["queue.cards"],
       paused: this.paused(),
     };
   }
@@ -1128,8 +1129,7 @@ export class Desk {
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-      now_cards: this.settings["queue.now_cards"],
-      today_cards: this.settings["queue.today_cards"],
+      cards: this.settings["queue.cards"],
       paused: this.paused(),
       babysitting: this.settings["inflight.babysit"],
     };
@@ -1811,7 +1811,7 @@ export class Desk {
 
   status(): { now: number; today: number; new: number; text: string } {
     const f = this.overview().focus;
-    const parts = [f.now ? `●${f.now}` : "", f.today ? `◐${f.today}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
+    const parts = [`${f.now + f.today}`, f.now ? `●${f.now}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
     return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
   }
 }

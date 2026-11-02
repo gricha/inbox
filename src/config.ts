@@ -215,6 +215,17 @@ export function migrateBotAsk(text: string): string | null {
   return next === text ? null : next;
 }
 
+// The old first-run rule sending all your drafts to later, only as written, becomes today's two draft rules; null if absent.
+export function migrateDrafts(text: string): string | null {
+  const next = text.replaceAll(
+    /^(\s*)\{ when = "item\.draft", bucket = "later", why = "draft" \},$/gm,
+    (_, indent: string) =>
+      `${indent}{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n` +
+      `${indent}{ when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
+  );
+  return next === text ? null : next;
+}
+
 // First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
 export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const orgs = opts.workOrgs;
@@ -282,7 +293,8 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "later"`,
       `default_why = "waiting on reviewers"`,
       `rules = [`,
-      `  { when = "item.draft", bucket = "later", why = "draft" },`,
+      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },`,
+      `  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },`,
       `  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },`,
       `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },`,

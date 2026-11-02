@@ -108,15 +108,14 @@ const overview: Overview = {
   coordinator: { state: "idle", acted: null },
 };
 
-const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, now_cards: 5, today_cards: 5, paused: null };
+const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, cards: 10, paused: null };
 
 const queueView: QueueView = {
   sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
-  now_cards: 5,
-  today_cards: 5,
+  cards: 10,
   paused: null,
   babysitting: true,
 };
@@ -314,7 +313,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case "PUT /api/settings":
       return reply(200, putSettings(api, body));
     case "GET /api/status":
-      return reply(200, { now: 1, today: 1, new: 1, text: "desk ●1 ◐1 +1" });
+      return reply(200, { now: 1, today: 1, new: 1, text: "desk 2 ●1 +1" });
     case "GET /api/activity": {
       const after = Number(url.searchParams.get("after") ?? 0);
       const events = EVENTS.filter((e) => e.seq > after);

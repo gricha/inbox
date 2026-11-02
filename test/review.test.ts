@@ -624,11 +624,11 @@ test("AI reviews run in the queue's order: Now, then Today from the top, so the 
       review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }],
       request_events: [{ at: hoursAgo(n), actor: "alice", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
     });
-  const t = await setup([team(10), team(11), ask(1), team(12), team(13), ask(2), team(14)], { settings: { "queue.today_cards": 2 } });
+  const t = await setup([team(10), team(11), ask(1), team(12), team(13), ask(2), team(14)], { settings: { "queue.cards": 2 } });
   await t.sync();
   const q = t.desk.queue();
-  assert.equal(q.today_cards, 2);
-  assert.equal(t.desk.focus().today_cards, 2);
+  assert.equal(q.cards, 2);
+  assert.equal(t.desk.focus().cards, 2);
   const order = [...q.sections.now, ...q.sections.today].map((c) => c.id);
   assert.deepEqual(order, ["acme/api#2", "acme/api#1", "me/api#14", "me/api#13", "me/api#12", "me/api#11", "me/api#10"]);
   while (t.f.started.length < order.length || t.desk.generating.size)

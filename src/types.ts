@@ -370,7 +370,7 @@ export interface Placement {
   rule_bucket: Bucket; // before caps (after the judge)
   rule: number | null; // matched rule index, null = default
   why: string;
-  demoted?: string; // e.g. "Now takes 3 from PRs to review"
+  demoted?: string; // e.g. "3 from PRs to review are urgent already"
   trace: TraceStep[];
   hard?: boolean; // a hard rule matched it
   floor?: Bucket; // ...or you pinned it, so it never sorts below this, whatever Claude, quiet days or caps say
@@ -497,10 +497,9 @@ export interface BoardView {
 }
 
 export interface FocusView {
-  sections: { now: Card[]; today: Card[] };
-  now_cards: number; // queue.now_cards: Now shows this many, the rest behind one line; 0 = all
-  today_cards: number; // queue.today_cards: Today shows this many, the rest behind one line; 0 = all
-  paused: Paused | null; // said once above Now instead of on every card
+  sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
+  cards: number; // queue.cards: the queue shows this many, the rest behind one line; 0 = all
+  paused: Paused | null; // said once above the queue instead of on every card
 }
 
 // Claude stopped: its login failed (the AI review, the judge or the coordinator), or AI reviews nobody asked for keep failing.
@@ -515,8 +514,7 @@ export interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
-  now_cards: number; // as in FocusView
-  today_cards: number;
+  cards: number; // as in FocusView
   paused: Paused | null;
   babysitting: boolean; // inflight.babysit: d on your PR hands it to a babysitter, or only puts it in flight
 }

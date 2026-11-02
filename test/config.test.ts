@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultConfigText, migrateBotAsk, migrateHard, parseConfig } from "../src/config.ts";
+import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig } from "../src/config.ts";
 
 test("default configs parse cleanly", () => {
   for (const orgs of [["acme"], ["acme", "globex"], []]) {
@@ -110,4 +110,29 @@ test("a config from before the bot-ask rule gets it right after the hard rule fo
   assert.equal(migrateBotAsk(soft), null, "a rule the owner made soft is theirs");
   const last = old.replace(/(asked you directly", hard = true \}),/, "$1");
   assert.deepEqual(parseConfig(migrateBotAsk(last)!).errors, [], "one without its trailing comma");
+});
+
+test("a config written before drafts reached the desk gets both draft rules on every My PRs board, and nothing else", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const fresh = `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`;
+  const old = now.replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`);
+  assert.notEqual(old, now);
+  assert.equal(migrateDrafts(old), now);
+  assert.equal(migrateDrafts(now), null, "already migrated");
+  assert.equal(migrateDrafts(old.replaceAll(`why = "draft" }`, `why = "my draft" }`)), null, "a rule the owner changed is theirs");
+  const mine = parseConfig(migrateDrafts(old)!).loaded!.config.boards.filter((b) => b.name === "My PRs");
+  assert.equal(mine.length, 2);
+  for (const b of mine) assert.deepEqual([b.rules[0]?.hard, b.rules[0]?.bucket, b.rules[1]?.bucket], [true, "today", "later"]);
+});
+
+test("the oldest first-run config reaches today's through all three migrations, and today's is left alone", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
+  const fresh = `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`;
+  const old = now
+    .replaceAll(`  ${bot}\n`, "")
+    .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
+    .replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`);
+  assert.equal(migrateDrafts(migrateBotAsk(migrateHard(old)!)!), now);
+  for (const m of [migrateHard, migrateBotAsk, migrateDrafts]) assert.equal(m(now), null, m.name);
 });

@@ -18,7 +18,8 @@ import { age as ageOf, ago, BUCKET_LABEL, shortId, shortRef } from "./format.ts"
 
 // One surface (the queue), a PR's review in its place, your in-flight PRs, and Settings, whose sections include the rules editor.
 export type Route = { name: "queue" } | { name: "review"; id: string } | { name: "inflight" } | { name: "settings"; section: string };
-export type GroupKey = "now" | "today" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
+// The queue is one list: what the rules and Claude put in now, then today. The rest is sorted away.
+export type GroupKey = "queue" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
 export type Variant = "active" | "hidden" | "cleared" | "resolved";
 
 export interface Group {
@@ -29,7 +30,8 @@ export interface Group {
   open: boolean;
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
-  fold: number; // Now and Today: cards behind its "n more" line
+  fold: number; // the queue: cards behind its "n more" line
+  foldLine: string; // ...and that line's words
 }
 
 // The cursor's stop on a group's "n more" line.
@@ -154,8 +156,10 @@ export function resolvedHead(events: ActivityEvent[], resolved: string, me: stri
   return { line: `Resolved: ${resolved}${who}`, events: events.filter((e) => e !== cause && e.kind !== "resolved") };
 }
 
-// Which file the reader is in: the last one whose top has scrolled past the line under the top bar.
-export function currentFile(tops: number[], line: number): number {
+// Which file the reader is in: the last one whose top has scrolled past the line under the top bar. At the page's end the
+// last files can't reach that line, so it's the last one.
+export function currentFile(tops: number[], line: number, atEnd = false): number {
+  if (atEnd) return Math.max(0, tops.length - 1);
   let cur = 0;
   for (const [i, top] of tops.entries()) if (top <= line) cur = i;
   return cur;
@@ -165,8 +169,7 @@ const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
-  now: true,
-  today: true,
+  queue: true,
   later: false,
   fyi: false,
   resolved: false,
@@ -175,8 +178,7 @@ export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
 };
 
 const LABEL: Record<GroupKey, string> = {
-  now: "Now",
-  today: "Today",
+  queue: "Queue",
   later: "Later",
   fyi: "FYI",
   resolved: "Resolved",
@@ -188,7 +190,7 @@ const mineOf = (c: Pick<Card, "kind" | "author" | "resolved">, me: string) =>
   c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
 
 // How much a card wants you first, lowest first: your PR one key from done that only you can answer (a reply to send, a
-// question); a close look or high risk on the current commit, then one on an older commit; an item a cap pushed out of Now;
+// question); a close look or high risk on the current commit, then one on an older commit; an item a cap made not urgent;
 // your PR approved and green; the rest (your stuck PR in flight among them); someone else's PR with CI failing, which waits
 // on its author; the AI's "skip it".
 function weight(c: Card, me: string): number {
@@ -213,19 +215,28 @@ export function runs(cards: Card[]): { id: string; author: string; why: string; 
   return out;
 }
 
-// The fold takes whole stacks: a stack is either all above its line or all behind it (the first one always shows).
+// The fold takes whole stacks, each one card's worth since it reads as one block: the first always shows.
 function foldAt(cards: Card[], cap: number): number {
   let n = 0;
+  let slots = 0;
   for (const r of runs(cards)) {
     for (const size of r.cards.length < 3 ? r.cards.map(() => 1) : [r.cards.length]) {
-      if (n > 0 && n + size > cap) return n;
+      if (slots >= cap) return n;
       n += size;
+      slots += 1;
     }
   }
   return n;
 }
 
-// Now and Today put the weightiest first and fold after their first queue.now_cards and queue.today_cards cards. While
+// What the fold line hides that shouldn't wait: "13 more, 1 urgent, 1 pinned".
+export function foldText(behind: Card[]): string {
+  const urgent = behind.filter((c) => c.bucket === "now").length;
+  const pinned = behind.filter((c) => c.pinned && c.bucket !== "now").length;
+  return [`${behind.length} more`, urgent && `${urgent} urgent`, pinned && `${pinned} pinned`].filter(Boolean).join(", ");
+}
+
+// The queue is now's cards then today's, each the weightiest first, and folds after its first queue.cards. While
 // filtering, every group with a match opens so nothing that matches stays tucked away, and nothing folds.
 export function groupsOf(
   view: QueueView | null,
@@ -236,22 +247,18 @@ export function groupsOf(
 ): Group[] {
   if (!view) return [];
   const q = filter.trim();
-  const caps: Partial<Record<GroupKey, number>> = { now: view.now_cards, today: view.today_cards };
-  const group = (key: GroupKey, all: Card[], variant: Variant = "active"): Group => {
-    const cap = caps[key];
+  const byWeight = (cards: Card[]) =>
+    cards
+      .map((c, i) => ({ c, i, w: weight(c, me) }))
+      .sort((a, b) => a.w - b.w || a.i - b.i)
+      .map((x) => x.c);
+  const group = (key: GroupKey, all: Card[], variant: Variant = "active", cap?: number): Group => {
     const matched = all.filter((c) => matches(c, q));
-    const ordered =
-      cap === undefined
-        ? matched
-        : matched
-            .map((c, i) => ({ c, i, w: weight(c, me) }))
-            .sort((a, b) => a.w - b.w || a.i - b.i)
-            .map((x) => x.c);
     const forced = !!q && matched.length > 0 && !open[key];
     // A fold that would hide one card costs more than the card: it folds only when two or more would go behind it.
-    const at = cap && !q && !unfolded[key] ? foldAt(ordered, cap) : ordered.length;
-    const n = ordered.length - at < 2 ? ordered.length : at;
-    const cards = ordered.slice(0, n);
+    const at = cap && !q && !unfolded[key] ? foldAt(matched, cap) : matched.length;
+    const n = matched.length - at < 2 ? matched.length : at;
+    const cards = matched.slice(0, n);
     return {
       key,
       label: LABEL[key],
@@ -260,13 +267,13 @@ export function groupsOf(
       open: open[key] || forced,
       forced,
       variant,
-      fold: ordered.length - cards.length,
+      fold: matched.length - cards.length,
+      foldLine: foldText(matched.slice(n)),
     };
   };
   const s = view.sections;
   return [
-    group("now", s.now),
-    group("today", s.today),
+    group("queue", [...byWeight(s.now), ...byWeight(s.today)], "active", view.cards),
     group("later", s.later),
     group("fyi", s.fyi),
     group("resolved", view.resolved, "resolved"),
@@ -578,7 +585,9 @@ export function actedText(a: CoordinatorActed): string {
   const [first] = parts;
   if (!first) return "";
   const [bucket] = a.buckets;
-  const where = parts.length === 1 && bucket && bucket !== "hide" && a.buckets.every((b) => b === bucket) ? `${BUCKET_LABEL[bucket]} ` : "";
+  // Now and today are one list, the queue: no "Today items".
+  const named = !!bucket && !["hide", "now", "today"].includes(bucket);
+  const where = parts.length === 1 && named && a.buckets.every((b) => b === bucket) ? `${BUCKET_LABEL[bucket]} ` : "";
   const head = `${past(first[0])} ${first[1]} ${where}${first[1] === 1 ? "item" : "items"}`;
   const all = [head, ...parts.slice(1).map(([action, n]) => `${past(action)} ${n}`)];
   return all.length === 1 ? head : `${all.slice(0, -1).join(", ")} and ${all.at(-1)!}`;

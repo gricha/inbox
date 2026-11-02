@@ -115,7 +115,7 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     assert.ok(seq > 0, act.text);
     assert.equal(t.desk.status().text, "");
     assert.deepEqual(await call("desk_undo", { seq }), { text: "undid done on acme/api#7", isError: false });
-    assert.equal(t.desk.status().text, "desk ●1");
+    assert.equal(t.desk.status().text, "desk 1 ●1");
 
     const missing = await call("desk_item", { ref: "api#99" });
     assert.equal(missing.isError, true);
@@ -148,7 +148,7 @@ test("API round trip: overview, board, item, act, undo, status", async () => {
   assert.equal((await t.json("/api/status")).text, "");
   const undo = await t.json("/api/undo", { method: "POST" });
   assert.deepEqual(undo, { ok: true, id: "acme/api#7", action: "done" });
-  assert.equal((await t.json("/api/status")).text, "desk ●1");
+  assert.equal((await t.json("/api/status")).text, "desk 1 ●1");
   t.cleanup();
 });
 

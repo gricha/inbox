@@ -1,5 +1,5 @@
 /* Review Desk: one queue, read like a page someone went through with a highlighter.
-   Only urgency gets colour: highlighter = now, blue pencil = today. Everything else is ink and pencil. */
+   Only urgency gets colour: the highlighter marks what's urgent. Everything else is ink and pencil. */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -522,12 +522,13 @@ kbd {
   }
 }
 
+/* The page ends where j/k leave the last card (a row's bottom scroll-margin), clear of a toast. */
 .main {
   flex: 1;
   width: 100%;
   max-width: var(--col-w);
   margin: 0 auto;
-  padding: 28px 24px 120px;
+  padding: 28px 24px 84px;
 }
 
 .main:has(.rules-wrap:not([hidden])) {
@@ -585,14 +586,6 @@ kbd {
   scroll-margin-top: 64px;
 }
 
-.g-now > .group-head > span:first-child {
-  color: var(--hl-ink);
-}
-
-.g-now > .group-head .count {
-  margin-left: 0.5em;
-}
-
 .group-head .count {
   color: var(--pencil);
   font-size: 13px;
@@ -619,7 +612,7 @@ kbd {
   font-weight: 600;
 }
 
-/* Today's "n more for today": the cursor stops on it, Enter opens it in place. */
+/* The queue's "n more": the cursor stops on it, Enter opens it in place. */
 .fold {
   display: block;
   width: 100%;
@@ -730,14 +723,12 @@ kbd {
 }
 
 /* The highlighter: a marker stroke (ragged chisel ends, slight tilt) drawn behind the ink. */
-.b-now .ref-ink,
-.g-now > .group-head > span:first-child {
+.b-now .ref-ink {
   position: relative;
   isolation: isolate;
 }
 
-.b-now .ref-ink::before,
-.g-now > .group-head > span:first-child::before {
+.b-now .ref-ink::before {
   position: absolute;
   z-index: -1;
   inset: -0.06em -0.55em -0.08em -0.5em;
@@ -968,7 +959,7 @@ kbd {
 }
 
 /* Cards ------------------------------------------------------------------------
-   Now and Today: a sheet each, three lines (the title; why, ref and verdict; the AI's first sentence). The selected one
+   The queue: a sheet each, three lines (the title; why, ref and verdict; the AI's first sentence). The selected one
    opens in place with the rest. Sorted-away groups stay flat rows. */
 
 .deck .group-head,
@@ -1440,14 +1431,6 @@ kbd {
   padding-left: 18px;
 }
 
-.g-now.none > .group-head > span:first-child {
-  color: var(--ink);
-}
-
-.g-now.none > .group-head > span:first-child::before {
-  content: none;
-}
-
 /* An empty group says so on its heading's line. */
 .group-none {
   color: var(--pencil);
@@ -1466,7 +1449,7 @@ kbd {
   font-size: 13px;
 }
 
-/* Landed sits one group gap below the open rows, as Today does below Now. */
+/* Landed sits one group gap below the open rows, as Sorted away does below the queue. */
 .lane .group-head.sub {
   margin-top: 0;
 }
@@ -2441,7 +2424,7 @@ kbd {
   color: var(--ink);
 }
 
-/* Below 1000px the verb stays and the name goes ("Snoozed 1 Today item · 4m"): a name and a time alone say nothing. */
+/* Below 1000px the verb stays and the name goes ("Snoozed 2 items · 4m"): a name and a time alone say nothing. */
 .coord-line .cl-narrow {
   display: none;
 }
@@ -3072,12 +3055,11 @@ kbd {
   white-space: nowrap;
 }
 
-/* Room below the last file, so n can bring it to the top. */
+/* No room below the last file: n on the last ones scrolls as far as the page goes. */
 .rv-diffs {
   display: grid;
   gap: 26px;
   min-width: 0;
-  padding-bottom: 55vh;
 }
 
 /* minmax(0, 1fr): a long file name in the header wraps instead of widening the track, and the page, past the window. */
@@ -3327,7 +3309,7 @@ kbd {
   }
 
   .main {
-    padding: 18px 12px 100px;
+    padding: 18px 12px 84px;
   }
 
   .row-main {

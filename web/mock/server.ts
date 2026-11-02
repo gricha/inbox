@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED } from "../../src/review.ts";
-import { floorOf, placedBy, quietText } from "../../src/rules.ts";
+import { capText, floorOf, placedBy, quietText } from "../../src/rules.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -1220,7 +1220,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
     );
     for (const { r, p } of counted.toSorted((x, y) => call(x.r) - call(y.r)).slice(cap)) {
       p.bucket = to;
-      p.demoted = call(r) === 3 ? "the AI says skip it" : `${from.charAt(0).toUpperCase()}${from.slice(1)} takes ${cap} from ${b.name}`;
+      p.demoted = call(r) === 3 ? "the AI says skip it" : capText(from, cap, b.name);
     }
   }
   return rows;
@@ -1336,8 +1336,7 @@ function focus(): FocusView {
       now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
       today: cards.filter((c) => c.bucket === "today").map(top),
     },
-    now_cards: setting("queue.now_cards"),
-    today_cards: setting("queue.today_cards"),
+    cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
   };
 }
@@ -1375,8 +1374,7 @@ function queue(): QueueView {
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-    now_cards: setting("queue.now_cards"),
-    today_cards: setting("queue.today_cards"),
+    cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     babysitting: setting("inflight.babysit"),
   };
@@ -2790,9 +2788,9 @@ for (const [id, why] of [
 note(5 * 60, 12, "note", "Snoozed 3 FYI items until tomorrow: 2 CODEOWNERS pings and a thread you've left.");
 note(5 * 60, 12, "run", "6 events, 3 actions · 41s");
 note(2 * 60, 13, "policy", `Changed the policy\n+ ${LEARNED}`, { version: 1 });
-note(2 * 60, 13, "note", "You cleared 4 release-notes pings I kept in Today, so the policy sorts them to FYI now.");
+note(2 * 60, 13, "note", "You cleared 4 release-notes pings I kept in the queue, so the policy sorts them to FYI now.");
 note(2 * 60, 13, "run", "Read your last 6 actions · 34s");
-note(61, 14, "note", "Nothing to do: the new review request on api#4127 already sits in Now.");
+note(61, 14, "note", "Nothing to do: the new review request on api#4127 already sits at the top of the queue.");
 note(61, 14, "run", "2 events, 0 actions · 18s");
 {
   const { undo_seq } = act(resolve("acme/ml-pipeline#311"), "snooze", "tomorrow");

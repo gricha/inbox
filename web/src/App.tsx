@@ -92,9 +92,9 @@ export function App() {
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  // Sorted-away groups open only when asked (g l, …), and close again on reload: the queue is Now and Today.
+  // Sorted-away groups open only when asked (g l, …), and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
-  const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // Now's and Today's "n more" lines
+  const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
   const [help, setHelp] = useState(false);
@@ -485,7 +485,7 @@ export function App() {
       go({ name: "settings", section: "inflight" });
       return;
     }
-    // An in-flight PR is in Now for what its babysitter left you (a reply to send, a question): that's in the lane.
+    // An in-flight PR is in the queue for what its babysitter left you (a reply to send, a question): that's in the lane.
     if (c.inflight) setLaneSel(c.id);
     go(c.inflight ? { name: "inflight" } : { name: "review", id: c.id });
     void seen(c);

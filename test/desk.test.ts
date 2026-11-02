@@ -42,7 +42,7 @@ test("sync fills boards, focus and status", async () => {
   const focus = t.desk.focus();
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
   assert.deepEqual(focus.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk ●1 ◐1");
+  assert.equal(t.desk.status().text, "desk 2 ●1");
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 1);
@@ -515,6 +515,44 @@ test("saving settings keeps entries in settings.json it can't use", async () => 
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "github.poll_seconds": 5, "notify.enabled": false, "x.typo": true });
   await idle(t.desk);
   t.cleanup();
+});
+
+test("a desk started on the oldest config migrates its rules once, with one backup, and leaves today's config alone", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  const config = path.join(home, "config.toml");
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const old = now
+    .replaceAll(
+      `  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },\n`,
+      "",
+    )
+    .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
+    .replaceAll(
+      `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
+      `  { when = "item.draft", bucket = "later", why = "draft" },`,
+    );
+  fs.writeFileSync(config, old);
+  const logs: string[] = [];
+  const opts = { home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: (m: string) => void logs.push(m) };
+  const desk = new Desk(opts);
+  await desk.init();
+  assert.equal(fs.readFileSync(config, "utf8"), now);
+  assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
+  assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
+  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated"]) {
+    assert.ok(desk.store.get(k), k);
+    desk.store.set(k, null);
+  }
+  desk.stop();
+
+  fs.writeFileSync(config, now);
+  fs.rmSync(`${config}.bak`);
+  const again = new Desk(opts);
+  await again.init();
+  assert.equal(fs.readFileSync(config, "utf8"), now);
+  assert.ok(!fs.existsSync(`${config}.bak`), "today's config isn't touched");
+  again.stop();
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test("an unreadable settings.json is never overwritten: saving and moving settings both wait", async () => {

@@ -33,7 +33,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "queue",
     title: "Queue",
-    help: "Now and Today are the queue. Later and resolved stay out of it, on one quiet line below.",
+    help: "The queue is one list, the most urgent first. Later and resolved stay out of it, on one quiet line below.",
   },
   {
     id: "agent",
@@ -117,27 +117,17 @@ export const SETTINGS = [
     default: 14,
     min: 0,
     max: 365,
-    help: "An item nobody has touched for this long leaves Now and Today. Pinned items, what a hard rule placed, a review you were asked for in that time, and your PRs in flight that need you stay. 0 keeps everything.",
+    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, a review you were asked for in that time, and your PRs in flight that need you stay. 0 keeps everything.",
   },
   {
-    key: "queue.now_cards",
+    key: "queue.cards",
     section: "queue",
-    label: "Now shows",
+    label: "The queue shows",
     type: "number",
-    default: 5,
+    default: 10,
     min: 0,
     max: 100,
-    help: "The most important first; the rest sit behind one line you can open. 0 shows them all.",
-  },
-  {
-    key: "queue.today_cards",
-    section: "queue",
-    label: "Today shows",
-    type: "number",
-    default: 5,
-    min: 0,
-    max: 100,
-    help: "The rest sit behind one line you can open. 0 shows them all.",
+    help: "Cards, the most urgent first; the rest sit behind one line you can open. 0 shows them all.",
   },
   {
     key: "coordinator.enabled",
@@ -165,7 +155,7 @@ export const SETTINGS = [
     max: 1000,
     help: "20 items a call, on your own Claude Code login.",
   },
-  { key: "notify.enabled", section: "notify", label: "Notify me when something new lands in Now", type: "boolean", default: true },
+  { key: "notify.enabled", section: "notify", label: "Notify me when something urgent lands in the queue", type: "boolean", default: true },
   {
     key: "notify.quiet",
     section: "notify",
@@ -197,7 +187,7 @@ export const SETTINGS = [
     label: "Babysit PRs in flight",
     type: "boolean",
     default: true,
-    help: "Only PRs you marked with d. Off: they still leave the queue, and come back to Now when CI fails or reviewers ask for something.",
+    help: "Only PRs you marked with d. Off: they still leave the queue, and come back to it when CI fails or reviewers ask for something.",
   },
   {
     key: "inflight.max_agents",
@@ -218,7 +208,7 @@ export const SETTINGS = [
     pattern: "^[\\w.-]+(\\[bot\\])?$",
     pattern_hint: "a GitHub login",
     placeholder: "cursor[bot]",
-    help: "Babysitters act on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in Now; their words never reach an agent.",
+    help: "Babysitters act on feedback from the repo's collaborators (owners, members, collaborators) and these bots. Anyone else's comments come back to you, in the queue; their words never reach an agent.",
   },
   {
     key: "inflight.repos",
@@ -244,7 +234,7 @@ export const SETTINGS = [
   {
     key: "review.auto_ai",
     section: "review",
-    label: "Review PRs in Now and Today ahead of time",
+    label: "Review PRs in the queue ahead of time",
     type: "boolean",
     default: true,
     help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: press i in a review to ask for one.",
@@ -292,7 +282,7 @@ export function checkSetting(key: string, value: unknown): string | null {
 }
 
 // Settings that no longer exist: ignored when read, and gone from the file on the next save.
-const REMOVED = new Set(["analyze.model", "analyze.command", "agent.driver"]);
+const REMOVED = new Set(["analyze.model", "analyze.command", "agent.driver", "queue.now_cards", "queue.today_cards"]);
 
 // Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
 export function readSettings(file: string): {

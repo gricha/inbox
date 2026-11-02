@@ -58,8 +58,10 @@ test("hard = true: the first-run template sets it on asks by name, a person's or
   assert.deepEqual(hard, [
     "acme-review: me.requested_direct && !me.requested_by_bot -> now",
     "acme-review: me.requested_direct -> today",
+    "acme-mine: item.draft && item.updated_hours < 336 -> today",
     "personal-review: me.requested_direct && !me.requested_by_bot -> now",
     "personal-review: me.requested_direct -> today",
+    "personal-mine: item.draft && item.updated_hours < 336 -> today",
   ]);
   const errors = (t: string) => parseConfig(t).errors.map((e) => `${e.path}: ${e.message}`);
   const rule = `why = "{me.requested_by} asked you directly", hard = true`;
@@ -159,7 +161,7 @@ test("a hard rule is a floor: Claude picks Now or Today, and caps and the quiet 
   assert.deepEqual(r.order.now, ["acme/api#3"]);
   assert.deepEqual(r.order.today.toSorted(), ["acme/api#1", "acme/api#2", "acme/api#5"], "Today's cap of one leaves hard ones be");
   assert.deepEqual(r.order.later.toSorted(), ["acme/api#4", "acme/api#6"]);
-  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "Today takes 1 from B"], "not hard: down to Later");
+  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "the queue has 1 from B already"], "not hard: down to Later");
 });
 
 test("caps apply after the judge", () => {
@@ -172,8 +174,8 @@ test("caps apply after the judge", () => {
   assert.deepEqual(
     demoted.map((p) => [p.bucket, p.rule_bucket, p.demoted]),
     [
-      ["today", "now", "Now takes 1 from B"],
-      ["today", "now", "Now takes 1 from B"],
+      ["today", "now", "1 from B is urgent already"],
+      ["today", "now", "1 from B is urgent already"],
     ],
   );
 });
@@ -194,10 +196,11 @@ test("the prompt is triage: it fences item text, carries the policy, and gives e
   assert.match(p, /^You triage what reaches me's review desk: for each GitHub item below, decide what me should do with it\./);
   assert.match(p, /- fyi: someone else has it, or nobody needs them\. It's kept off their page\./);
   assert.match(p, /- now: a person is blocked on them today: .* CI on their own PR is never now\./);
+  assert.match(p, /- today: .*their own draft touched in the last two weeks\)\./);
   assert.match(p, /Less is more: when unsure, sort it away\./);
   assert.match(
     p,
-    /When the policy's lines disagree, a line that sorts an item away for who made it or its state \(bots, drafts, stacked PRs, someone else asked by name, a teammate reviewing\) beats a line that promotes it for what it touches\. Being asked by name, their own pin and a hard rule's floor beat both\./,
+    /When the policy's lines disagree, a line that sorts an item away for who made it or its state \(bots, drafts other than their own recent ones, stacked PRs, someone else asked by name, a teammate reviewing\) beats a line that promotes it for what it touches\. Being asked by name, their own pin and a hard rule's floor beat both\./,
   );
   assert.match(p, /That a PR touches a directory they've worked in is weak evidence on its own\./);
   assert.match(
@@ -841,7 +844,8 @@ test(
   async (c) => {
     const old = defaultConfigText({ workOrgs: ["acme"] })
       .replaceAll('asked you directly", hard = true', 'asked you directly", nocap = true')
-      .replaceAll(/^ *\{ when = "me\.requested_direct", .*\n/gm, "");
+      .replaceAll(/^ *\{ when = "me\.requested_direct", .*\n/gm, "")
+      .replaceAll('finish it", hard = true', 'finish it"');
     const direct = makeItem({
       number: 1,
       author: "carol",

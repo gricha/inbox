@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
-import type { Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
+import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
 import { cardFacts, handLabel, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
+
+const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "Urgent", today: "In the queue" };
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
 export const REVIEW: Record<ReviewDecision, string> = {
@@ -64,7 +66,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       {(!!card.resolved || main.why !== card.why || claude) && (
         <p className="pl-head">
           {card.resolved && "Otherwise "}
-          <b>{BUCKET_LABEL[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
+          <b>{PLACE[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
           {claude && main.judge?.why && ", sorted by Claude"}
           {main.why && main.why !== card.why && <>: {main.why}</>}
         </p>

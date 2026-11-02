@@ -43,7 +43,7 @@ export function TopBar({
 }) {
   const inSettings = route.name === "settings";
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
-  // Only what reached Now or Today: housekeeping in Later and FYI stays in its log and Settings → Agents.
+  // Only what reached the queue: housekeeping in Later and FYI stays in its log and Settings → Agents.
   const acted = route.name === "queue" ? o?.coordinator.acted : null;
   const shown = acted?.buckets.some((b) => b === "now" || b === "today") ? acted : null;
   return (

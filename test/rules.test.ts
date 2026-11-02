@@ -95,8 +95,8 @@ test("caps demote overflow in order; pinned and nocap are exempt", () => {
   assert.deepEqual(r.order.now, ["acme/api#7", "acme/api#6", "acme/api#1", "acme/api#2"]);
   assert.deepEqual(r.order.today, ["acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#4", "acme/api#5"]);
-  assert.equal(r.placements.get("acme/api#3")!.demoted, "Now takes 2 from B");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today takes 1 from B");
+  assert.equal(r.placements.get("acme/api#3")!.demoted, "2 from B are urgent already");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "the queue has 1 from B already");
   assert.equal(r.placements.get("acme/api#4")!.rule_bucket, "now");
 });
 
@@ -110,7 +110,7 @@ test("over a cap, the lightest AI call leaves first: skip, then skim, then not r
   assert.deepEqual(r.order.today, ["acme/api#2", "acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#1", "acme/api#4"]);
   assert.equal(r.placements.get("acme/api#1")!.demoted, "the AI says skip it");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "Today takes 2 from B");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "the queue has 2 from B already");
   const calls = classify(
     b,
     items.map((it) => entry(it, { ai: (["skim", undefined, "skim", "look"] as const)[it.number - 1] })),
@@ -234,6 +234,26 @@ test("default review rules: a CODEOWNERS ping hints Later when it changes code y
   assert.equal(b(3).bucket, "fyi", "files not known yet: the fyi hint, until they are");
 });
 
+test("default My PRs rules: your draft touched in two weeks is on the desk by a hard rule; an older one waits in Later", () => {
+  const mine = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-mine")!;
+  const draft = (number: number, hours: number) =>
+    makeItem({ number, author: "me", draft: true, ci: "red", created_at: hoursAgo(24 * 40), updated_at: hoursAgo(hours) });
+  // Claude would sort them all away; the hard rule keeps the fresh ones on the desk anyway.
+  const away = () => ({ bucket: "fyi" as const, why: "a draft", pending: false });
+  const fresh = [1, 2, 3, 4, 5, 6, 7].map((n) => draft(n, 30 + n));
+  const r = classify(
+    mine,
+    [...fresh, draft(8, 24 * 20)].map((it) => entry(it)),
+    away,
+    14,
+  );
+  const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).hard], ["today", "your draft: finish it", true]);
+  assert.equal(r.order.today.length, 7, "over the board's cap of 6, all of them");
+  assert.deepEqual([b(8).bucket, b(8).rule_bucket, b(8).hard], ["fyi", "fyi", undefined]);
+  assert.equal(r.placements.get("acme/api#8")!.hint?.why, "draft, quiet for 2+ weeks");
+});
+
 test("priority sorts within a bucket before the board sort", () => {
   const { board: b, errors } = compileBoard(
     board({ priority: "author.engaged_90d", sort: "waiting", caps: { today: 1 }, rules: [{ when: "true", bucket: "today" }] }),
@@ -307,7 +327,7 @@ test("quiet items leave Now and Today for Later, before caps; pinned items and a
   assert.equal(r.order.now.length, 0);
   // Quiet ones leave before the cap counts, so Today's one slot (the pinned one doesn't count) goes to the fresh ask.
   assert.deepEqual(r.order.today, ["acme/api#3", "acme/api#4"]);
-  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "Today takes 1 from B"]);
+  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "the queue has 1 from B already"]);
   assert.deepEqual(r.order.later, ["acme/api#5", "acme/api#1", "acme/api#2"]);
 
   const off = classify(b, entries, undefined, 0);
