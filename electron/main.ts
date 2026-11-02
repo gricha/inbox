@@ -32,6 +32,7 @@ import {
   desktopSettings,
   envVar,
   fallbackDirs,
+  findNode,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
@@ -64,8 +65,10 @@ const origins = [deskUrl, api];
 const envSource = envVar("DESK_SOURCE");
 const launchSource = desktopSettings(readSettings(settingsPath(home)).overrides).source;
 const sourceWanted = sourceDir(envSource ?? launchSource, os.homedir());
-const sourceProblem = sourceWanted ? checkoutProblem(sourceWanted) : null;
-const fromSource = sourceProblem ? "" : sourceWanted;
+// Set once the login shell's PATH is in: the desk from a checkout needs its node.
+let node: string | null = null;
+let sourceProblem: string | null = null;
+let fromSource = "";
 const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
 type Status = { now: number; today: number; new: number; text: string };
@@ -149,11 +152,15 @@ async function main(): Promise<void> {
   createTray();
   createWindow();
   await pathReady;
+  node = findNode(process.env.PATH ?? "");
+  sourceProblem = sourceWanted ? checkoutProblem(sourceWanted, node) : null;
+  fromSource = sourceProblem ? "" : sourceWanted;
   if (sourceProblem) log(`not running from a checkout: ${sourceProblem}`);
-  if (fromSource) await reap(home, log);
+  await reap(home, log);
   if (!(await connect())) return;
-  await loadUi();
+  // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
   void watch();
+  await loadUi();
 }
 
 async function loadUi(): Promise<void> {
@@ -205,8 +212,8 @@ async function connect(): Promise<boolean> {
       return false;
     }
     // A desk from source that fails shows that in the window and waits for a fix; never an in-process desk in its place.
-    if (fromSource) {
-      source = await startSource({ dir: fromSource, port, home, log });
+    if (fromSource && node) {
+      source = await startSource({ dir: fromSource, node, port, home, log });
       uiUrl = source.ui;
       origins.push(source.ui);
       log(`running the desk on ${deskUrl} and the UI on ${source.ui} from ${fromSource}`);

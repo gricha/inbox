@@ -80,7 +80,7 @@ const freePort = () =>
     });
   });
 
-export async function startSource(o: { dir: string; port: number; home: string; log: (m: string) => void }): Promise<Source> {
+export async function startSource(o: { dir: string; node: string; port: number; home: string; log: (m: string) => void }): Promise<Source> {
   fs.mkdirSync(o.home, { recursive: true });
   const logFile = path.join(o.home, "live.log");
   const ui = `http://127.0.0.1:${await freePort()}`;
@@ -88,6 +88,7 @@ export async function startSource(o: { dir: string; port: number; home: string; 
   const kids: Record<Name, ChildProcess | null> = { desk: null, vite: null };
   let stopping = false;
   let failed = false;
+  let reload = false; // the desk's node --watch was stopped to pick up new packages
   let tail: string[] = []; // the desk's output since it last started
 
   let logSize = 0;
@@ -119,8 +120,8 @@ export async function startSource(o: { dir: string; port: number; home: string; 
 
   const run = (name: Name, args: string[], attempt: number) => {
     if (stopping) return;
-    write("app", `${new Date().toISOString()} starting node ${args.join(" ")}`);
-    const c = spawn("node", args, { cwd: o.dir, env, detached: !win, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    write("app", `${new Date().toISOString()} starting ${o.node} ${args.join(" ")}`);
+    const c = spawn(o.node, args, { cwd: o.dir, env, detached: !win, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     kids[name] = c;
     if (name === "desk") {
       failed = false;
@@ -140,6 +141,11 @@ export async function startSource(o: { dir: string; port: number; home: string; 
     const end = (why: string) => {
       if (ended || stopping) return;
       ended = true;
+      if (name === "desk" && reload) {
+        reload = false;
+        run(name, args, 0);
+        return;
+      }
       if (name === "desk") {
         failed = true;
         tail = [...tail, why].slice(-TAIL);
@@ -161,6 +167,16 @@ export async function startSource(o: { dir: string; port: number; home: string; 
 
   run("vite", viteArgs(Number(new URL(ui).port)), 0);
   run("desk", DESK_ARGS, 0);
+
+  // npm install (say, after a merge that added a package) restarts the desk too. Polled by path: npm ci replaces the file.
+  const lock = path.join(o.dir, "node_modules", ".package-lock.json");
+  fs.watchFile(lock, { interval: 2000 }, (cur, prev) => {
+    const desk = kids.desk;
+    if (stopping || cur.mtimeMs === prev.mtimeMs || !desk || desk.exitCode !== null || desk.signalCode !== null) return;
+    write("app", `${new Date().toISOString()} node_modules changed; starting the desk again`);
+    reload = true;
+    signal(desk.pid, "SIGTERM", false); // node --watch hands it on to the desk, which closes cleanly
+  });
 
   const exited = (c: ChildProcess) =>
     c.exitCode !== null || c.signalCode !== null || !c.pid
@@ -186,6 +202,7 @@ export async function startSource(o: { dir: string; port: number; home: string; 
     async stop() {
       if (stopping) return;
       stopping = true;
+      fs.unwatchFile(lock);
       const all = [kids.desk, kids.vite].filter((c): c is ChildProcess => c !== null);
       // node --watch passes one SIGTERM on to the desk, which closes cleanly; a second one to the desk would cut that short.
       signal(kids.desk?.pid, "SIGTERM", false);
@@ -198,6 +215,7 @@ export async function startSource(o: { dir: string; port: number; home: string; 
     kill() {
       if (stopping) return;
       stopping = true;
+      fs.unwatchFile(lock);
       signal(kids.desk?.pid, "SIGTERM", false);
       signal(kids.vite?.pid, "SIGTERM", true);
     },

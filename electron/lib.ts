@@ -118,11 +118,28 @@ export function sourceDir(value: string, homedir: string): string {
   return path.resolve(v === "~" || v.startsWith("~/") ? path.join(homedir, v.slice(1)) : v);
 }
 
-// Why the desk and its UI can't run from `dir`, or null when they can.
-export function checkoutProblem(dir: string, exists: (p: string) => boolean = fs.existsSync): string | null {
+// The first `node` on PATH, as an absolute path so a retry doesn't depend on the PATH it started with.
+export function findNode(PATH: string, sep = path.delimiter, isFile: (p: string) => boolean = executable): string | null {
+  const exe = process.platform === "win32" ? "node.exe" : "node";
+  for (const dir of PATH.split(sep)) if (path.isAbsolute(dir) && isFile(path.join(dir, exe))) return path.join(dir, exe);
+  return null;
+}
+
+function executable(p: string): boolean {
+  try {
+    fs.accessSync(p, fs.constants.X_OK);
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Why the desk and its UI can't run from `dir` with `node`, or null when they can.
+export function checkoutProblem(dir: string, node: string | null, exists: (p: string) => boolean = fs.existsSync): string | null {
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
     return `${dir} isn't a Review Desk checkout`;
   if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js"))) return `${dir} has no node_modules yet; run npm install there`;
+  if (!node) return "Couldn't find node on your login shell's PATH, so the app runs its own desk";
   return null;
 }
 

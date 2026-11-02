@@ -34,7 +34,7 @@ export function SourceNotice({ s }: { s: SourceStatus }) {
         </span>
       ) : (
         <span>
-          The desk in <code>{tilde(s.dir)}</code> stopped. It starts again on the next change under src/.
+          The desk in <code>{tilde(s.dir)}</code> stopped. It starts again on the next change under src/ or after npm install.
           {s.detail && <pre className="notice-log">{s.detail}</pre>}
         </span>
       )}
@@ -57,7 +57,7 @@ export function SourceLine({ s }: { s: SourceStatus | null }) {
     return (
       <div className="s-live">
         <p className="t-bad">
-          The desk in <code>{tilde(s.dir)}</code> stopped. It starts again on the next change under src/.
+          The desk in <code>{tilde(s.dir)}</code> stopped. It starts again on the next change under src/ or after npm install.
         </p>
         {s.detail && <pre className="notice-log">{s.detail}</pre>}
       </div>

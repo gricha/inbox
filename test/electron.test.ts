@@ -13,6 +13,7 @@ import {
   desktopEntry,
   desktopSettings,
   envVar,
+  findNode,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
@@ -130,18 +131,36 @@ test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => 
 test("checkoutProblem: a Review Desk clone with its packages installed", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
   try {
-    assert.match(checkoutProblem(dir) ?? "", /isn't a Review Desk checkout/);
+    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /isn't a Review Desk checkout/);
     for (const f of ["src/cli.ts", "web/vite.config.ts"]) {
       fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
       fs.writeFileSync(path.join(dir, f), "");
     }
-    assert.match(checkoutProblem(dir) ?? "", /run npm install there/);
+    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /run npm install there/);
     fs.mkdirSync(path.join(dir, "node_modules/vite/bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, "node_modules/vite/bin/vite.js"), "");
-    assert.equal(checkoutProblem(dir), null);
+    assert.match(
+      checkoutProblem(dir, null) ?? "",
+      /find node on your login shell/,
+      "without node it runs in-process, never a stuck window",
+    );
+    assert.equal(checkoutProblem(dir, "/bin/node"), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("findNode: the first node on PATH, absolute dirs only", () => {
+  const exe = process.platform === "win32" ? "node.exe" : "node";
+  const has = new Set([path.join("/b", exe), path.join("/c", exe)]);
+  const isFile = (p: string) => has.has(p);
+  assert.equal(findNode(["/a", "/b", "/c"].join(path.delimiter), path.delimiter, isFile), path.join("/b", exe));
+  assert.equal(
+    findNode(["", "b"].join(path.delimiter), path.delimiter, () => true),
+    null,
+    "a relative PATH entry isn't trusted",
+  );
+  assert.equal(findNode(path.dirname(process.execPath)), process.execPath, "finds a real one");
 });
 
 test("the desk runs under node --watch on all of src/, Vite on one exact port", () => {
