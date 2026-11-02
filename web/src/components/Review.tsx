@@ -54,7 +54,7 @@ export function Review({
   flash: (text: string, error?: boolean, ms?: number) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
   row: InflightRow | null; // your PR in Merging: Claude's line goes under the facts, as in Merging
-  armed: string | null; // the draft a first y armed
+  armed: string | null; // the draft a first y armed, or handArm(id) for a first m
   onLane: (row: InflightRow, key: string, draft?: Draft) => void; // y sends its reply, x discards it, as in Merging
   onBack: () => void;
 }) {
@@ -240,8 +240,8 @@ export function Review({
     if (armed && e.key !== "a" && e.key !== "Escape") setArmed(0); // any other key lets the approval lapse
     if (e.key === "Escape") {
       if (armed) setArmed(0);
-      // An armed Send lapses on Esc (App drops it); only an unarmed Esc goes back.
-      else if (!draft || armedDraft !== draft.id) onBack();
+      // Esc with Send or a hand-off armed never reaches here: App lets it lapse first.
+      else onBack();
     } else if ((draft || asking ? "npoci[]admbyx" : "npoci[]admb").includes(e.key) && e.key.length === 1) {
       e.preventDefault();
       run(e.key);
@@ -412,7 +412,7 @@ export function Review({
             disabled={view.generating || busy === "ai"}
           />
         )}
-        {mine && <HandKey card={card} run={run} />}
+        {mine && <HandKey card={card} run={run} armed={armedDraft} />}
       </div>
 
       {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}

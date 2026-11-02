@@ -36,7 +36,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `j` / `k` | move                                                           |
 | `Enter`   | review a PR (diff, AI notes, approve); an issue opens in place |
 | `o`       | open on GitHub                                                 |
-| `m`       | your own PR: hand off for merge; `b` brings it back to desk    |
+| `m` `m`   | your own PR: hand off for merge; `b` brings it back to desk    |
 | `e` / `d` | done: hidden until someone else comments, reviews or pushes    |
 | `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
 | `m` / `p` | someone else's: mute / pin                                     |

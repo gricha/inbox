@@ -16,6 +16,7 @@ import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
 import {
   DEFAULT_OPEN,
   groupsOf,
+  handArm,
   isFold,
   navigable,
   noCloneOf,
@@ -60,7 +61,7 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
-const ARM_MS = 3000; // a first y arms Send, a second one within this sends: a reply on GitHub can't be taken back with a key
+const ARM_MS = 3000; // a first y (or m) arms Send (or a hand-off), a second one within this goes: GitHub writes a key can't take back
 const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
@@ -106,7 +107,7 @@ export function App() {
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null); // a draft on its way to GitHub
-  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed
+  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // the draft a first y armed, or handArm(card) for m
   const [reviewFrom, setReviewFrom] = useState<"queue" | "inflight">("queue"); // where Esc goes back to from a review
   const rulesDirty = useRef(false);
 
@@ -505,8 +506,25 @@ export function App() {
     }
   }
 
-  // m: your own open PR goes to Merging (you're done; Claude gets it merged, and GitHub's auto-merge goes on where the repo
-  // allows it). Not undone with u: b brings it back, and turns auto-merge off again.
+  // m arms a hand-off (the toast says what it writes); a second m within 3 s hands it off, any other key lets it lapse.
+  function handOffArmed(c: Card) {
+    const id = handArm(c.id);
+    if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
+      setArmed({ id, at: Date.now() });
+      flash(
+        `Press m again to hand off ${shortRef(c)} for merge${c.draft ? ": it marks the draft ready for review and turns on auto-merge" : ""}`,
+        false,
+        false,
+        ARM_MS,
+      );
+      return;
+    }
+    setArmed(null);
+    void handOff(c);
+  }
+
+  // m m: your own open PR goes to Merging (you're done; Claude gets it merged, and GitHub's auto-merge goes on where the repo
+  // allows it, a draft marked ready first). Not undone with u: b brings it back, and turns auto-merge off again.
   async function handOff(c: Card) {
     setSnoozeFor(null);
     const i = flat.findIndex((x) => x.id === c.id);
@@ -520,7 +538,9 @@ export function App() {
       undoSeq.current = null;
       setView((v) => v && removeCard(v, c.id));
       const merge = a.on
-        ? "Auto-merge is on."
+        ? c.draft
+          ? "Marked ready for review, and auto-merge is on."
+          : "Auto-merge is on."
         : a.why
           ? `${a.why.charAt(0).toUpperCase()}${a.why.slice(1)}: merge it yourself when it's green.`
           : "Auto-merge was on already.";
@@ -537,21 +557,17 @@ export function App() {
     }
   }
 
-  // b: your PR leaves Merging for your desk; Claude stops.
+  // b: your PR leaves Merging for your desk; Claude stops. Out of Merging, it turns off the auto-merge m turned on.
   async function back(c: Card) {
-    if (!c.inflight) {
+    if (!c.inflight && !c.desk_auto_merge) {
       flash(`${shortRef(c)} isn't in Merging`);
       return;
     }
     try {
       const r = await api.back(c.id);
       undoSeq.current = null;
-      flash(
-        r.error
-          ? `Back on your desk: ${shortRef(c)}. ${r.error}`
-          : `Back on your desk: ${shortRef(c)}${r.auto_merge_off ? ". Auto-merge is off again." : ""}`,
-        !!r.error,
-      );
+      const head = c.inflight ? `Back on your desk: ${shortRef(c)}` : `${shortRef(c)} is on your desk`;
+      flash(r.error ? `${head}. ${r.error}` : `${head}${r.auto_merge_off ? ". Auto-merge is off again." : ""}`, !!r.error);
     } catch (e) {
       flash(message(e), true);
     }
@@ -658,7 +674,7 @@ export function App() {
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
       flash(`${shortRef(c)} is in Merging, so Claude has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
-    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) void handOff(c);
+    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOffArmed(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);
@@ -729,11 +745,8 @@ export function App() {
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
-    // Any other key lets an armed Send lapse; Esc only does that.
-    if (armed && k !== "y" && !["Shift", "Meta", "Control", "Alt"].includes(k)) {
-      setArmed(null);
-      if (k === "Escape") return;
-    }
+    // Any other key lets an armed Send or hand-off lapse (Esc does only that, in onChord).
+    if (armed && k !== (armed.id.startsWith(handArm("")) ? "m" : "y") && !["Shift", "Meta", "Control", "Alt"].includes(k)) setArmed(null);
     if (help) {
       if (k === "Escape" || k === "?") setHelp(false);
       return;
@@ -792,6 +805,13 @@ export function App() {
   // The key after g is the chord's, whatever it means on its own (i in a review, x and b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
+    // Esc with Send or a hand-off armed only lets it lapse; here, so the review never reads it as "go back".
+    if (armed && e.key === "Escape") {
+      setArmed(null);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (!gAt.current || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;

@@ -432,6 +432,7 @@ export interface Card {
   escalated?: boolean; // your PR in Merging: Claude (or the desk) asked you something; x dismisses it from the queue
   resume?: string; // ...and the command that opens Claude's session, which c copies from the queue
   handed_back?: boolean; // your PR, back from Merging because Claude can't get it merged; its why says why
+  desk_auto_merge?: boolean; // your open PR out of Merging with the auto-merge m turned on still on: b turns it off
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open

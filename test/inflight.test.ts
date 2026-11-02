@@ -521,6 +521,82 @@ test("Claude hands a PR back: it leaves Merging for the top of Now with the reas
   assert.equal(t.desk.sitter.record("acme/web#3").handback, null);
 });
 
+test("after a hand-back, b turns off the auto-merge m turned on; m again keeps it the desk's", async (c) => {
+  const w = fakeWriter();
+  const t = await setup([myPr(3, { ci: "pending", ...allows })], { settings: OFF, desk: { writer: w.writer } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  let clock = Date.parse(hoursAgo(0));
+  const onGitHub = async (on: boolean) => {
+    const it = t.gh.items.get("acme/web#3")!;
+    t.gh.items.set(it.id, { ...it, auto_merge: on, updated_at: new Date(clock).toISOString() });
+    t.setNow(new Date((clock += 60_000)));
+    await t.desk.sync();
+  };
+  const card = () => t.desk.queue().sections.now.find((x) => x.id === "acme/web#3");
+  await t.desk.handOff("web#3");
+  await onGitHub(true);
+  t.desk.escalate("web#3", "Dana wants a redesign", { agent: "babysitter", pr: "acme/web#3" }, true);
+  assert.deepEqual([card()?.handed_back, card()?.desk_auto_merge], [true, true]);
+  // m again: no new write, and it's still the desk's to turn off.
+  const again = await t.desk.handOff("web#3");
+  assert.equal(again.auto_merge.on, true);
+  assert.deepEqual(w.calls, [["auto_merge", "PR_acme/web_3", "SQUASH"]]);
+  t.desk.escalate("web#3", "still a redesign", { agent: "babysitter", pr: "acme/web#3" }, true);
+  const b = await t.desk.backToDesk("web#3");
+  assert.deepEqual([b.state.inflight_at, b.auto_merge_off], [null, true]);
+  assert.deepEqual(w.calls.at(-1), ["auto_merge_off", "PR_acme/web_3"]);
+  assert.deepEqual([card()?.handed_back, card()?.desk_auto_merge], [true, undefined], "still yours to deal with, auto-merge off");
+  await onGitHub(false);
+  await assert.rejects(t.desk.backToDesk("web#3"), /isn't in Merging/);
+  // Undoing a hand-off leaves it on too: b turns it off from the card.
+  await t.desk.handOff("web#3");
+  await onGitHub(true);
+  t.desk.undo();
+  assert.equal(t.desk.store.state("acme/web#3").inflight_at, null);
+  const out = Object.values(t.desk.queue().sections)
+    .flat()
+    .find((x) => x.id === "acme/web#3");
+  assert.deepEqual([out?.inflight, out?.desk_auto_merge], [false, true]);
+  assert.equal((await t.desk.backToDesk("web#3")).auto_merge_off, true);
+  assert.equal(w.calls.filter((x) => x[0] === "auto_merge_off").length, 2);
+});
+
+test("b writes nothing when GitHub has auto-merge off already, and a b during m's writes stops the rest", async (c) => {
+  const w = fakeWriter();
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  const writer: GitHubWriter = { ...w.writer, ready: (pr) => w.writer.ready(pr).then(() => held) };
+  const t = await setup([myPr(3, { ci: "pending", ...allows }), myPr(4, { ci: "pending", draft: true, ...allows })], {
+    settings: OFF,
+    desk: { writer },
+  });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  await t.desk.handOff("web#3");
+  // A push turned it off on GitHub, and the desk has read that since.
+  const it = t.gh.items.get("acme/web#3")!;
+  t.gh.items.set(it.id, { ...it, auto_merge: false, updated_at: hoursAgo(0) });
+  t.setNow(new Date(Date.parse(hoursAgo(0)) + 60_000));
+  await t.desk.sync();
+  assert.equal(t.desk.inflight().rows.find((r) => r.card.id === "acme/web#3")?.merge_note, "auto-merge was turned off on GitHub");
+  const b = await t.desk.backToDesk("web#3");
+  assert.deepEqual([b.state.inflight_at, b.auto_merge_off], [null, false]);
+  assert.deepEqual(w.calls, [["auto_merge", "PR_acme/web_3", "SQUASH"]]);
+
+  const m = t.desk.handOff("web#4");
+  await new Promise((r) => {
+    setTimeout(r, 10);
+  });
+  assert.equal((await t.desk.backToDesk("web#4")).auto_merge_off, false);
+  release();
+  const r = await m;
+  assert.deepEqual([r.auto_merge.on, r.auto_merge.why], [false, "it was back on your desk before auto-merge went on"]);
+  assert.deepEqual(w.calls.slice(1), [["ready", "PR_acme/web_4"]], "no auto-merge for a PR already back on your desk");
+});
+
 test("d on your own PR is plain done: it leaves the queue and comes back when someone else acts", async (c) => {
   const t = await setup([myPr(3, { ci: "red" })], { settings: OFF });
   c.after(t.cleanup);

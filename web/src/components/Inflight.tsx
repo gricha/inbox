@@ -2,7 +2,7 @@ import type { Draft, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { laneFacts, sitterNews, sitterParts, waitsOn } from "../view.ts";
 import { atCommas, Owed } from "./CardRow.tsx";
-import { Dots, KeyButton } from "./Detail.tsx";
+import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
 
 // Merging: your PRs handed off for merge, what Claude is doing on each and what it waits on, and what's back with you.
 export function Inflight({
@@ -207,9 +207,7 @@ function Row({
             <KeyButton k="enter" label="Review" run={keys} />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {r.resume && !(live && r.escalation) && <KeyButton k="c" label="Copy resume command" title={`Copies ${r.resume}`} run={keys} />}
-            {live && (
-              <KeyButton k="b" label="Back to desk" title="Claude stops, and auto-merge goes off if the desk turned it on" run={keys} />
-            )}
+            {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
           </div>
         </div>
       )}

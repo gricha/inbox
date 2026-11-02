@@ -306,7 +306,7 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
           {card.escalated && <KeyButton k="x" label="Dismiss the question" run={run} />}
           <KeyButton k="enter" label={noCloneOf(card) ? "Set up a local clone" : "Show in Merging"} run={run} />
           {github}
-          <HandKey card={card} run={run} />
+          <HandKey card={card} run={run} armed={ctx.armed} />
         </div>
       </div>
     );
@@ -318,7 +318,7 @@ function More({ card, ctx, mine, away, inRun }: { card: Card; ctx: RowCtx; mine:
         {merge && github}
         <KeyButton k="enter" label={card.kind !== "pr" ? "Open" : "Review"} run={run} />
         {!merge && github}
-        {mine && <HandKey card={card} run={run} />}
+        {mine && <HandKey card={card} run={run} armed={ctx.armed} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
         {!mine && <KeyButton k="m" label={card.status === "muted" ? "Unmute" : "Mute"} run={run} />}

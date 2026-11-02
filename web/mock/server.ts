@@ -246,6 +246,7 @@ interface Seed {
   judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
   fly?: Flight; // your PR, in Merging (with st.inflight_at): what Claude is up to
   automerge?: boolean; // your PR: GitHub's auto-merge is on
+  deskauto?: boolean; // ...because m turned it on, so b turns it off
   noauto?: boolean; // your PR: its repo doesn't allow auto-merge
   back?: string; // your PR, handed back from Merging: Claude's reason
   checks?: string[]; // your PR: its failing checks' names
@@ -856,6 +857,7 @@ const SEEDS: Seed[] = [
     // Claude had nowhere to work on it, so it's back on your desk; the auto-merge m turned on stays until you turn it off.
     back: "no local clone of oss/tinyhttp",
     automerge: true,
+    deskauto: true,
     checks: ["node 22", "lint"],
   },
   {
@@ -1281,6 +1283,7 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
+    ...(!inFlight(r) && s.deskauto && s.automerge && !s.resolved && { desk_auto_merge: true }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
   };
 }
@@ -2683,14 +2686,18 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   const hand = /^\/api\/inflight\/(.+)\/(handoff|back)$/.exec(url.pathname);
   if (hand && req.method === "POST") {
     const r = resolve(decodeURIComponent(hand[1]!));
-    const { state } = act(r, hand[2] === "handoff" ? "inflight" : "takeback");
+    // Out of Merging, b only turns off the auto-merge m turned on.
+    const outside = hand[2] === "back" && !r.state.inflight_at && r.seed.deskauto && r.seed.automerge;
+    const state = outside ? r.state : act(r, hand[2] === "handoff" ? "inflight" : "takeback").state;
     const had = !!r.seed.automerge;
     const why = !setting("inflight.auto_merge")
       ? "auto-merge is off in Settings"
       : r.seed.noauto
         ? "the repo doesn't allow auto-merge"
         : null;
+    r.seed.deskauto = hand[2] === "handoff" && (!!r.seed.deskauto || (!had && !why));
     r.seed.automerge = hand[2] === "handoff" ? had || !why : false;
+    if (outside) bump();
     return hand[2] === "handoff" ? { ok: true, state, auto_merge: { on: !had && !why, why } } : { ok: true, state, auto_merge_off: had };
   }
   const lane = /^\/api\/inflight\/(.+)\/(send|dismiss)$/.exec(url.pathname);

@@ -82,6 +82,7 @@ const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays the
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_DRAFT = 5_000;
 const MAX_QUESTION = 300;
+const BACK_FIRST = "it was back on your desk before auto-merge went on";
 
 export class DeskError extends Error {
   status: number;
@@ -838,6 +839,7 @@ export class Desk {
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is Claude's
+    const am = !e.inflight && it.state === "open" && e.analysis.signals.me.author ? this.sitter.record(it.id).auto_merge : null;
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -871,6 +873,7 @@ export class Desk {
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
+      ...(am?.on && autoMerging(it, { auto_merge: am }) && { desk_auto_merge: true }),
       ...(by && { placed_by: by }),
     };
   }
@@ -1495,7 +1498,9 @@ export class Desk {
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
-        this.store.set(`sitter:${id}`, null); // a fresh start: not the drafts or tries from the last time it was handed off
+        // A fresh start (not the drafts or tries from last time), but auto-merge an earlier m turned on stays b's to turn off.
+        const kept = this.sitter.record(id).auto_merge;
+        this.store.set(`sitter:${id}`, kept?.on ? { auto_merge: kept } : null);
         break;
       }
       case "takeback":
@@ -1750,11 +1755,13 @@ export class Desk {
     const id = this.pr(ref).item.id;
     const { state } = this.act(id, "inflight");
     let it = this.snapshot().entries.get(id)!.item;
+    const kept = this.sitter.record(id).auto_merge;
+    if (kept?.on && autoMerging(it, { auto_merge: kept })) return { state, auto_merge: kept };
     if (it.auto_merge_allowed === undefined) {
       await this.gh.refresh(id); // stored before the desk asked
       it = this.store.itemsById([id]).get(id) ?? it;
     }
-    const auto = await this.autoMergeOn(it);
+    const auto = await this.autoMergeOn(it, state.inflight_at!);
     this.sitter.update(id, (s) => {
       s.auto_merge = auto;
     });
@@ -1762,19 +1769,23 @@ export class Desk {
     return { state, auto_merge: auto };
   }
 
-  async autoMergeOn(it: Item): Promise<NonNullable<Sitter["auto_merge"]>> {
+  // `since`: the hand-off's inflight_at. A b while the writes are on their way stops the ones not yet sent.
+  async autoMergeOn(it: Item, since: string): Promise<NonNullable<Sitter["auto_merge"]>> {
     const at = this.now().toISOString();
     const no = (why: string | null) => ({ on: false, why, at });
+    const left = () => this.store.state(it.id).inflight_at !== since;
     if (!this.settings["inflight.auto_merge"]) return no("auto-merge is off in Settings");
     if (it.auto_merge) return no(null); // on already: not the desk's to turn off
     if (it.auto_merge_allowed === undefined) return no("the desk couldn't read whether the repo allows auto-merge");
     if (!it.auto_merge_allowed) return no("the repo doesn't allow auto-merge");
     if (!this.writer) return no("auto-merge isn't available in this desk");
+    if (left()) return no(BACK_FIRST);
     try {
       if (it.draft) {
         await this.writer.ready(it.node_id);
         this.store.logWrite(it.id, "ready", at);
         this.log(`marked ${it.id} ready for review on GitHub`);
+        if (left()) return no(BACK_FIRST);
       }
       await this.writer.autoMerge(it.node_id, it.merge_method ?? "MERGE");
     } catch (err) {
@@ -1788,13 +1799,24 @@ export class Desk {
     return { on: true, why: null, at };
   }
 
-  // POST /api/inflight/:id/back: Back to desk. Claude stops, and auto-merge goes off if the desk turned it on.
+  // POST /api/inflight/:id/back: Back to desk. Claude stops, and auto-merge goes off if the desk turned it on. Out of Merging
+  // (handed back, done, or the hand-off undone), b only turns off the auto-merge m turned on.
   async backToDesk(ref: string): Promise<{ state: ItemState; auto_merge_off: boolean; error?: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
     const auto = this.sitter.record(id).auto_merge;
-    const { state } = this.act(id, "takeback");
-    if (!auto?.on || !this.writer || e.item.state !== "open") return { state, auto_merge_off: false };
+    const ours = !!auto?.on && e.item.state === "open" && autoMerging(e.item, { auto_merge: auto });
+    const { snoozed_at: _, acked_at: __, ...current } = e.state;
+    const state = e.state.inflight_at || !ours ? this.act(id, "takeback").state : current;
+    if (!ours) {
+      // GitHub has it off already (a push, or someone turned it off): nothing for b to write.
+      if (auto?.on)
+        this.sitter.update(id, (s) => {
+          s.auto_merge = null;
+        });
+      return { state, auto_merge_off: false };
+    }
+    if (!this.writer) return { state, auto_merge_off: false };
     const at = this.now().toISOString();
     try {
       await this.writer.autoMergeOff(e.item.node_id);

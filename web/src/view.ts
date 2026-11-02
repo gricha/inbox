@@ -34,6 +34,7 @@ export interface Group {
 
 // The cursor's stop on a group's "n more" line.
 export const foldOf = (k: GroupKey) => `fold:${k}`;
+export const handArm = (id: string) => `m:${id}`; // what a first m on your own PR arms, beside a draft's id for y
 export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];

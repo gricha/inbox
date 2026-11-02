@@ -344,11 +344,22 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Claude handed it back (no local clone): at the top of Now with its reason, auto-merge still on, m to hand it off again.
+    // Claude handed it back (no local clone): at the top of Now with its reason, auto-merge still on, m to hand it off again
+    // and b to turn off the auto-merge m turned on.
     name: "handed-back",
     go: async (page) => {
       await at("#/")(page);
       await page.locator('.row[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // A first m on your own PR only arms the hand-off, as y does Send: the key and a toast say press it again.
+    name: "handoff-armed",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator('.row[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.keyboard.press("m");
       await page.waitForTimeout(200);
     },
   },
