@@ -7,7 +7,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createClient, type DeskClient } from "./client.ts";
 import { judgeText } from "./judge.ts";
-import type { ActivityEvent, Card, JudgeStatus, Placement } from "./types.ts";
+import type { ActivityEvent, Card, JudgeStatus, Placement, Stack } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
 const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
@@ -47,10 +47,23 @@ const compact = (c: Card) => ({
   new: c.new,
   pinned: c.pinned,
   boards: c.boards,
+  ...(c.stack && { stack: c.stack }),
 });
 
+// A stack is one line on the queue: it says how many of its PRs that line stands for.
+const stackNote = (c: Card) =>
+  c.stack ? ` (stack ${c.stack.pos}/${c.stack.size}${c.stack.folded?.length ? `, stands for ${c.stack.folded.join(", ")} too` : ""})` : "";
+
 const cardLine = (c: Card) =>
-  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}`;
+  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (in flight)" : ""}${stackNote(c)}`;
+
+const stackLines = (s: Stack) => [
+  `stack ${s.id}, bottom first on ${s.base}:`,
+  ...[...s.line, ...s.forks].map(
+    (m) =>
+      `  ${m.current ? "→" : " "} ${m.id} ${m.state}${m.draft ? " draft" : ""}, CI ${m.ci}, review ${m.review}${m.bucket ? `, ${m.bucket}: ${oneLine(m.why)}` : ""}${s.forks.includes(m) ? `, forked off ${m.parent}` : ""}  ${oneLine(m.title)}`,
+  ),
+];
 
 function traceLines(p: Placement): string[] {
   const head = `${p.board}: ${p.bucket} — ${oneLine(p.why)} [${p.rule === null ? "default" : `rule #${p.rule}`}${p.floor ? `, ${p.hard ? "hard" : "pinned"}: never below ${p.floor}` : ""}]${p.demoted ? ` (${p.demoted})` : ""}`;
@@ -173,6 +186,7 @@ async function itemText(api: DeskClient, ref: string): Promise<string> {
       ...(d.placements.length
         ? d.placements.flatMap(traceLines)
         : ["not on any board now: a board filter drops it, or no board's search returns it anymore"]),
+      ...(d.stack ? stackLines(d.stack) : []),
       ...(d.ai
         ? [
             `AI review (${d.ai.model}${d.ai_stale ? ", stale: new commits since" : ""}): ${d.ai.verdict}, risk ${d.ai.risk}. ${oneLine(d.ai.summary)}`,

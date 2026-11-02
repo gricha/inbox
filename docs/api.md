@@ -96,8 +96,8 @@ The same thirteen tools over HTTP and stdio. Results are text; most end with a J
 | Tool               | Arguments                                                                                                                                                                                | Returns                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `desk_overview`    | none                                                                                                                                                                                     | Counts per space and board, Focus totals, sync status and config errors; JSON `Overview`. Read only                                                                                                                                                                                                                                                               |
-| `desk_list`        | `board?` (board id; omit or `"focus"` for Focus), `buckets?` (`now` `today` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25)                            | One line per card (bucket, id, title, why); JSON of the cards (`id bucket title why author url chips status new pinned boards`). Focus only holds now and today. Read only                                                                                                                                                                                        |
-| `desk_item`        | `ref`                                                                                                                                                                                    | Facts, bucket and why on each board, the rule trace, the AI review's verdict, summary and concerns if there is one, and the review hand-off prompt; JSON `{ card, placements, state }`. Read only                                                                                                                                                                 |
+| `desk_list`        | `board?` (board id; omit or `"focus"` for Focus), `buckets?` (`now` `today` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25)                            | One line per card (bucket, id, title, why, and "stack 3/20" with the PRs a stack's one line stands for); JSON of the cards (`id bucket title why author url chips status new pinned boards stack`). Focus only holds now and today, a stack once. Read only                                                                                                       |
+| `desk_item`        | `ref`                                                                                                                                                                                    | Facts, bucket and why on each board, the rule trace, its stack bottom first (state, CI, review, where each sits), the AI review's verdict, summary and concerns if there is one, and the review hand-off prompt; JSON `{ card, placements, state }`. Read only                                                                                                    |
 | `desk_act`         | `ref`, `action` (`done` `snooze` `mute` `unmute` `pin` `unpin` `restore`), `until?` (snooze only, default `tomorrow`), `reason?` (up to 300 characters)                                  | What changed and the undo `seq`; JSON `{ ok, state: ItemState, undo_seq }`. Local only. The coordinator's actions go in its log with the reason; it can't mute                                                                                                                                                                                                    |
 | `desk_undo`        | `seq?` (positive integer; default the latest action from anyone: UI, CLI or agent). Not marking a PR in flight or taking it back (yours to undo); the coordinator's only its own actions | `undid <action> on <id>`                                                                                                                                                                                                                                                                                                                                          |
 | `desk_brief`       | `ref`                                                                                                                                                                                    | The PR's AI review: look, skim or skip, risk, summary, concerns and notes on the changes; JSON `AiReview`. Usually written already for PRs in Now and Today; otherwise a model call through `agent.driver` (a minute or two). Cached per commit                                                                                                                   |
@@ -200,6 +200,7 @@ interface Card {
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, marked in flight
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in flight
+  stack?: StackRef; // an open PR in a stack with two or more open PRs (Stacks, below)
 }
 
 // The AI review of a card's head, for skimming. The other fields come from the latest review, for an older head unless ready.
@@ -221,9 +222,10 @@ interface QueueView {
   now_cards: number; // queue.now_cards: Now shows this many (the weightiest first), the rest behind one line; 0 = all
   today_cards: number; // queue.today_cards: the same for Today
   paused: { who: "claude" | "ai"; why: string } | null; // said once above Now: claude, when the AI review, the judge or the coordinator can't log in; ai, when AI reviews nobody asked for keep failing otherwise
+  stacks: Record<string, Stack>; // by stack id: each stack with a card in sections, which list it once (Stacks, below); current is that card
 }
-// BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items.
-// FocusView is { sections: { now: Card[]; today: Card[] }, now_cards, today_cards, paused }; resolved items are never in it.
+// BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items, and no stacks: a board lists every PR.
+// FocusView is { sections: { now: Card[]; today: Card[] }, now_cards, today_cards, paused }; resolved items are never in it; a stack is one card, as in the queue.
 
 interface Overview {
   me: string;
@@ -310,6 +312,7 @@ interface ItemDetail {
   ai_stale: boolean; // new commits since the AI review
   generating: boolean;
   activity: ActivityEvent[]; // the item's last 8 events, newest first
+  stack: Stack | null; // its stack, with it current
 }
 
 interface ReviewView {
@@ -324,6 +327,7 @@ interface ReviewView {
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
+  stack: Stack | null; // its stack, with it current: the sidebar's chain, and up/down for the keys that move along it
 }
 
 interface AiReview {
@@ -371,8 +375,59 @@ interface InflightRow {
   run: SitterRun | null; // the latest run: session id, why, outcome, pushed_oid, summary, step, log path
   resume: string | null; // `cd <worktree> && claude --resume <session>`
 }
-// InflightView is { rows: InflightRow[]; babysitting: boolean } (inflight.babysit: off, the lane says so once).
+// InflightView is { rows: InflightRow[]; babysitting: boolean; stacks: Record<string, Stack> } (inflight.babysit: off, the lane says so
+// once). A stack's rows are together, bottom first, where its first row would be; stacks has each of them, its first row current.
+
+// Where a card's PR sits in its stack, counting what's still to land: "3/20".
+interface StackRef {
+  id: string; // the stack: its bottom PR's id
+  pos: number; // this PR's place among the open PRs of its line, 1 = the lowest open one; merged ones below don't count
+  size: number; // the open PRs in that line
+  folded?: string[]; // on the one card a queue view lists for the stack: its other members it stands for, bottom first
+}
+
+interface Stack {
+  id: string; // its bottom PR's id
+  repo: string;
+  base: string; // the branch under the bottom PR: the default branch, or one no PR the desk knows heads
+  line: StackMember[]; // bottom first, through the current PR; above a fork, the branch with open PRs, then the longest, then the oldest
+  forks: StackMember[]; // the other branches at a fork, bottom first; each member's parent says where it branches off
+  current: string; // the PR the view is about
+  up: string | null; // the PR above the current one on the line
+  down: string | null; // and below it
+  needs_you: number; // members in Now or Today
+}
+
+interface StackMember {
+  id: string;
+  number: number;
+  title: string; // untrusted
+  url: string;
+  author: string;
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  ci: "green" | "red" | "pending" | "none";
+  review: "approved" | "changes_requested" | "required" | "none";
+  parent: string | null; // the member it's based on; null at the bottom
+  current: boolean;
+  bucket: Bucket | null; // where the queue has it; null off the queue (merged, closed, cleared, in flight and calm, on no board)
+  why: string; // its card's why ("merged" for a merged one); "" when the desk has none
+  needs_you: boolean; // in Now or Today
+  new: boolean;
+  inflight: boolean;
+}
 ```
+
+## Stacks
+
+A stack is PRs in one repo, each based on the head branch of the one below it, the bottom one on the default branch (or on a branch no PR heads). The desk works them out on every snapshot from the PRs it holds (`src/stacks.ts`, pure), whoever wrote them; nothing about a stack is stored.
+
+- **Links.** A PR's parent is the PR whose head branch is its base, from the repo itself (a fork's branch of the same name isn't it): an open one first, then merged, then closed. A PR GitHub moved to the default branch when the PR below it merged (its latest base change, `Item.retargeted`) keeps that merged PR as its parent.
+- **Forks and dead branches.** A PR with two PRs on its branch forks the stack. A line goes bottom to top through a PR and, above it at each fork, takes the branch with open PRs, then the longest, then the oldest PR's; `Stack.forks` has the rest. A closed PR with nothing open or merged above it is in no stack; one with open PRs above it stays, closed.
+- **Counting.** `StackRef.pos`/`size` count the open PRs of the PR's line, what's still to land, so merged PRs below don't move "3/20"; the chain still lists them. A PR has a ref when it's open and its stack has two or more open PRs.
+- **One line per stack.** `GET /api/queue` and `/api/focus` list a stack once: of its members with a card in Now, Today, Later and FYI, the one in the most urgent section stands for it, the lowest in the stack on a tie (then the main line before a fork); the others leave the sections and are named on that card's `stack.folded`, bottom first. `QueueView.stacks` has its chain, with that card current. Boards, hidden, cleared and resolved list every PR. `oneLinePerStack()` is the rule.
+- **Merging.** `GET /api/inflight` keeps a stack's rows together, bottom first.
+- **What the desk fetches.** Each sync, for the stacks of PRs on the boards, read only and at most 120 probes a pass, each asked again only after 30 minutes: the PR heading the branch a bottom PR is based on (or was, before GitHub moved it), open PRs based on an open PR's branch, and the stack's members no board lists that are open as of a fetch over 30 minutes ago. Three rounds a pass, so a chain a few PRs deep fills in at once. What it fetches is stored without events: context for a stack, not news, so the coordinator doesn't wake for it. Any stored member opens in the review view. PRs stored before the desk asked for `head_ref`, `default_branch` and `retargeted` are refetched, 40 a pass.
 
 ## Resolved
 

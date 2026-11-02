@@ -3,6 +3,7 @@ import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
+import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
 import type { Connector, NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
@@ -14,6 +15,10 @@ const FEED_RETRY = 10 * 60_000;
 // Notification reasons that mean an item the desk doesn't have yet may belong on it.
 const FRESH_REASONS = new Set(["review_requested", "mention", "team_mention", "assign", "author"]);
 const MENTIONS = new Set(["mention", "team_mention"]);
+const BACKFILL = 40; // stored PRs a pass refetches for fields stacks need that they were stored without
+const PROBE_TTL = 30 * 60_000; // a stack probe isn't asked again before this; an off-board open member is refreshed after it
+const MAX_PROBES = 120; // stack probes a pass
+const STACK_ROUNDS = 3; // probe, fetch, probe again: a chain a few PRs deep fills in one pass
 
 interface Feed {
   since: string | null; // ask for threads updated after this
@@ -204,6 +209,8 @@ export class GitHubConnector implements Connector {
         const ttl = h.author.toLowerCase() === me ? 3 * 60_000 : 30 * 60_000;
         return now.getTime() - Date.parse(m.detail_at) > ttl;
       });
+      const backfill = [...hits.values()].filter((h) => meta.get(h.id)?.lacks && !need.includes(h)).slice(0, BACKFILL);
+      need.push(...backfill);
       // An item that left every search gets one refresh, so the desk learns it merged, closed or stopped asking you.
       // A failed search keeps what it had.
       const still = new Set(hits.keys());
@@ -231,11 +238,13 @@ export class GitHubConnector implements Connector {
       const [firstError] = errors;
       if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
       desk.store.set("reconciled_at", iso);
+      const filled = await this.fillStacks(new Set(hits.keys()));
       this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
       desk.store.set("synced_at", this.syncedAt);
       this.error = errors.length ? `${errors.length} search(es) failed: ${errors[0]}` : null;
       const left = drops.length ? `, ${drops.length} left the searches` : "";
-      desk.log(`synced ${queries.length} searches, ${hits.size} items, ${items.length} refreshed${left}`);
+      const stacked = filled ? `, ${filled} for stacks` : "";
+      desk.log(`synced ${queries.length} searches, ${hits.size} items, ${items.length} refreshed${left}${stacked}`);
     } catch (e) {
       if (this.stopped) return;
       this.error = (e as Error).message;
@@ -251,6 +260,59 @@ export class GitHubConnector implements Connector {
         }
       }
     }
+  }
+
+  // Stack members no board search returns (the PR below a stack's bottom, PRs stacked on one on the desk) and stored ones
+  // gone stale, fetched read only and stored without events: they're context for a stack, not news. Returns how many.
+  async fillStacks(listed: Set<string>): Promise<number> {
+    const desk = this.desk;
+    const at = desk.now();
+    const asked = Object.fromEntries(
+      Object.entries((desk.store.get("stack_probes") as Record<string, string> | null) ?? {}).filter(
+        ([, t]) => at.getTime() - Date.parse(t) < PROBE_TTL,
+      ),
+    );
+    let budget = MAX_PROBES;
+    let fetched = 0;
+    try {
+      for (let round = 0; round < STACK_ROUNDS; round++) {
+        const stored = desk.store.items();
+        const before = new Date(at.getTime() - PROBE_TTL).toISOString();
+        const { probes, stale } = toFetch(stored, buildStacks(stored), listed, before);
+        const todo = probes.filter((p) => !asked[probeKey(p)]).slice(0, budget);
+        const old = round === 0 ? stale : [];
+        if (!todo.length && !old.length) break;
+        budget -= todo.length;
+        const repos = new Map<string, Probe[]>();
+        for (const p of todo) {
+          asked[probeKey(p)] = at.toISOString();
+          repos.set(p.repo, [...(repos.get(p.repo) ?? []), p]);
+        }
+        const found: SearchHit[] = [];
+        for (const [repo, ps] of repos) {
+          try {
+            found.push(...(await this.api.branchPrs(repo, ps)));
+          } catch (e) {
+            if (isRateLimited(e)) throw e;
+            desk.log(`stack probes in ${repo} failed: ${(e as Error).message}`);
+          }
+        }
+        const meta = desk.store.itemMeta();
+        const want = new Map<string, SearchHit>();
+        for (const h of found) {
+          const m = meta.get(h.id);
+          if (!listed.has(h.id) && (m?.updated_at !== h.updated_at || m.lacks)) want.set(h.id, h);
+        }
+        for (const it of old) want.set(it.id, hitOf(it.id, it));
+        if (!want.size) continue;
+        const items = await this.api.details([...want.values()], desk.me());
+        desk.ingest(this, items, true);
+        fetched += items.length;
+      }
+    } finally {
+      desk.store.set("stack_probes", asked);
+    }
+    return fetched;
   }
 
   // One item's details now, outside the loops: after you approve it, so it resolves in seconds, not at the next pass.

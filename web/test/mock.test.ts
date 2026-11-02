@@ -390,6 +390,45 @@ test("policy and coordinator: a policy with its judge, the coordinator's log, an
   assert.equal((await call("POST", "/api/policy/undo", { version: learned.version })).status, 409);
 });
 
+test("stacks: the queue lists each once with its chain, and a member no board lists opens in review", async () => {
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const all = Object.values(q.sections).flat();
+  assert.deepEqual(
+    all.filter((c) => c.stack).map((c) => [c.id, c.stack]),
+    [
+      [
+        "acme/api#4152",
+        { id: "acme/api#4150", pos: 1, size: 6, folded: ["acme/api#4154", "acme/api#4155", "acme/api#4156", "acme/api#4157"] },
+      ],
+      ["acme/worker#890", { id: "acme/worker#890", pos: 1, size: 3, folded: ["acme/worker#891"] }],
+    ],
+  );
+  assert.deepEqual(Object.keys(q.stacks), ["acme/api#4150", "acme/worker#890"]);
+  const mine = q.stacks["acme/api#4150"]!;
+  assert.deepEqual(
+    [mine.current, mine.up, mine.down, mine.needs_you, mine.forks],
+    ["acme/api#4152", "acme/api#4153", "acme/api#4151", 2, []],
+  );
+  assert.deepEqual(
+    mine.line.map((m) => [m.number, m.state, m.draft, m.ci, m.review, m.bucket]),
+    [
+      [4150, "merged", false, "green", "required", null],
+      [4151, "merged", false, "green", "required", null],
+      [4152, "open", false, "green", "approved", "now"],
+      [4153, "open", false, "red", "required", null],
+      [4154, "open", false, "green", "changes_requested", "now"],
+      [4155, "open", false, "green", "required", "fyi"],
+      [4156, "open", true, "red", "required", "later"],
+      [4157, "open", true, "green", "required", "fyi"],
+    ],
+  );
+  const { data: top } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/worker#892")}`);
+  assert.deepEqual(
+    [top.stack?.current, top.stack?.up, top.stack?.down, top.card.stack],
+    ["acme/worker#892", null, "acme/worker#891", { id: "acme/worker#890", pos: 3, size: 3 }],
+  );
+});
+
 test("in flight: the lane's states, needs-you cards at the top of Now, send and take back", async () => {
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");
   const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
@@ -397,11 +436,26 @@ test("in flight: the lane's states, needs-you cards at the top of Now, send and 
     lane.rows.map((r) => [r.card.id, r.needs_you !== null, r.sitter.state]),
     [
       ["acme/api#4122", true, "done"],
+      ["acme/api#4152", true, "idle"],
+      ["acme/api#4153", false, "running"], // with the PR below it in its stack
       ["oss/tinyhttp#205", true, "blocked"],
       ["acme/api#4110", true, "waiting"],
       ["acme/web#2295", false, "running"],
       ["acme/api#4105", false, "idle"],
       ["acme/worker#871", false, "done"],
+    ],
+  );
+  assert.deepEqual(
+    lane.stacks["acme/api#4150"]?.line.map((m) => [m.number, m.state, m.inflight, m.current]),
+    [
+      [4150, "merged", false, false],
+      [4151, "merged", false, false],
+      [4152, "open", true, true],
+      [4153, "open", true, false],
+      [4154, "open", false, false],
+      [4155, "open", false, false],
+      [4156, "open", false, false],
+      [4157, "open", false, false],
     ],
   );
   assert.equal(row("oss/tinyhttp#205").sitter.text, "no local clone of oss/tinyhttp");
@@ -415,7 +469,7 @@ test("in flight: the lane's states, needs-you cards at the top of Now, send and 
   ]);
   assert.ok(![...q.sections.today, ...q.sections.later, ...q.cleared].some((c) => c.id === "acme/web#2295"), "the babysitter has it");
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.inflight, { total: 5, needs_you: 3 });
+  assert.deepEqual(o.inflight, { total: 7, needs_you: 4 });
 
   const id = encodeURIComponent("acme/api#4122");
   const draft = row("acme/api#4122").drafts[0]!;

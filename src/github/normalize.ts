@@ -70,6 +70,7 @@ export interface RawNode extends RawHit {
   checks?: Conn<{ commit: { statusCheckRollup: { contexts: Conn<RawCheck | null> } | null } }>;
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
   timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
+  baseChanges?: Conn<{ previousRefName?: string; oldBase?: string; createdAt: string }>;
   latestReviews?: Conn<RawReview>;
   latestOpinionatedReviews?: Conn<RawReview>;
   reviews?: Conn<RawReview>;
@@ -145,6 +146,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
   const threads = n.reviewThreads?.nodes ?? [];
   const checks = n.checks ? (n.checks.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c !== null) : null;
   const { ci, optional } = ciOf(head?.statusCheckRollup?.state, checks);
+  const moved = n.baseChanges?.nodes[0];
   // reviews(last: 20) can be flooded by bot comments; the latest* lists keep each reviewer's verdict.
   const reviews = new Map<string, Item["reviews"][number]>();
   for (const r of [...(n.reviews?.nodes ?? []), ...(n.latestReviews?.nodes ?? []), ...(n.latestOpinionatedReviews?.nodes ?? [])]) {
@@ -188,6 +190,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_author: head?.author?.user?.login ?? "",
     head_ref: n.headRefName ?? "",
     head_repo: n.headRepository?.nameWithOwner ?? "",
+    ...(n.baseChanges && { retargeted: moved ? { from: moved.previousRefName ?? moved.oldBase ?? "", at: moved.createdAt } : null }),
     ...(n.files && { paths: n.files.nodes.map((f) => f.path) }),
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),

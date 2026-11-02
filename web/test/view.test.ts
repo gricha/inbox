@@ -89,6 +89,7 @@ const queue = (): QueueView => ({
   today_cards: 5,
   paused: null,
   babysitting: true,
+  stacks: {},
 });
 
 test("routes round-trip through the hash", () => {

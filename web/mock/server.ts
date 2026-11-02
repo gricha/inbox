@@ -9,6 +9,7 @@ import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED } from "../../src/review.ts";
 import { floorOf, placedBy, quietText } from "../../src/rules.ts";
+import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -53,6 +54,7 @@ import type {
   SettingValue,
   Signals,
   SitterStatus,
+  Stack,
   Status,
   TraceStep,
 } from "../../src/types.ts";
@@ -247,6 +249,9 @@ interface Seed {
   fly?: Flight; // your PR, in flight (with st.inflight_at): what its babysitter is up to
   checks?: string[]; // your PR: its failing checks' names
   optional?: string[]; // those of them the base branch doesn't require
+  base?: string; // a PR's base branch, default "main"; another seed's head makes a stack
+  head?: string; // its head branch, default "<author>/<n>"
+  moved?: [string, number]; // GitHub moved it to main when the PR below merged: the branch it was on, hours ago
 }
 
 // A canned babysitter state for the In-flight lane; the mock never runs one.
@@ -940,6 +945,137 @@ const SEEDS: Seed[] = [
     size: [210, 95, 7],
     on: { "work-mine": ["conflict"] },
   },
+  // Your 8-PR stack: two merged below (GitHub moved each next one to main), the next one approved and green in flight, then
+  // red CI with its babysitter on it, changes requested, waiting on review, and two drafts. A dropped fork off #4153 is
+  // closed, so it's in no stack. The queue lists the stack once: #4152, the lowest one in Now.
+  ...(
+    [
+      [4150, "Planner: pull the cost model out of the executor", { resolved: "merged", upd: 72, on: {} }],
+      [4151, "Planner: a Stage interface and the stage runner", { resolved: "merged", upd: 20, moved: ["me/planner-1", 72], on: {} }],
+      [
+        4152,
+        "Planner: run the table scan as a stage",
+        {
+          moved: ["me/planner-2", 20],
+          review: "approved",
+          reviews: [
+            ["dana", "approved", 6],
+            ["sam", "approved", 4],
+          ],
+          mergeable: "clean",
+          on: { "work-mine": ["merge"] },
+          st: { inflight_at: iso(5) },
+          fly: { needs: "approved and green: merge it" },
+        },
+      ],
+      [
+        4153,
+        "Planner: push filters down into the scan stage",
+        {
+          ci: "red",
+          checks: ["test (3.12)"],
+          on: { "work-mine": ["red"] },
+          st: { inflight_at: iso(5) },
+          fly: {
+            sitter: { state: "running", text: "fixing CI", since: iso(0.3) },
+            failing: ["test (3.12)"],
+            step: "pytest tests/planner/test_filters.py",
+            session: "0b3a7c1e-58d2-4f60-9b1d-2e4c6a8f0d37",
+          },
+        },
+      ],
+      [
+        4154,
+        "Planner: hash join stage",
+        {
+          review: "changes_requested",
+          reviews: [["sam", "changes_requested", 3]],
+          threads: [2, 3],
+          fresh: true,
+          on: { "work-mine": ["cr", "unres"] },
+        },
+      ],
+      [4155, "Planner: aggregate stage", { on: { "work-mine": [] } }],
+      [
+        4156,
+        "Planner: stream partial results between stages",
+        { draft: true, ci: "red", on: { "work-mine": ["red"] }, judge: ["later", "a draft: its CI can wait"] },
+      ],
+      [4157, "Planner: delete the old planner", { draft: true, on: { "work-mine": [] } }],
+    ] as [number, string, Partial<Seed>][]
+  ).map(([n, title, o], i): Seed =>
+    Object.assign(
+      {
+        repo: "acme/api",
+        n,
+        title,
+        author: ME,
+        age: 120 - i * 12,
+        upd: 8 - i * 0.5,
+        size: [80 + i * 23, 12 + i * 5, 3 + (i % 4)],
+        head: `me/planner-${i + 1}`,
+        base: i === 0 || o.moved ? "main" : `me/planner-${i}`,
+        on: {},
+      },
+      o,
+    ),
+  ),
+  {
+    repo: "acme/api",
+    n: 4158,
+    title: "Planner: sort-merge join stage (dropped for the hash join)",
+    author: ME,
+    age: 60,
+    upd: 30,
+    size: [140, 20, 4],
+    head: "me/planner-sortmerge",
+    base: "me/planner-4",
+    resolved: "closed",
+    on: {},
+  },
+  // Marco's 3-PR stack: the bottom asked of you directly, the middle of your team, the top asked of nobody yet (the desk
+  // fetches it for the stack). One line in Now: #890.
+  {
+    repo: "acme/worker",
+    n: 890,
+    title: "Queue: a leases table for in-flight jobs",
+    author: "marco",
+    age: 30,
+    wait: 5,
+    by: "marco",
+    direct: true,
+    close: 2,
+    size: [120, 8, 4],
+    head: "marco/leases-1",
+    on: { "work-review": ["direct"] },
+  },
+  {
+    repo: "acme/worker",
+    n: 891,
+    title: "Queue: renew leases from the worker heartbeat",
+    author: "marco",
+    age: 28,
+    wait: 5,
+    by: "marco",
+    team: "backend",
+    size: [64, 10, 2],
+    head: "marco/leases-2",
+    base: "marco/leases-1",
+    on: { "work-review": [] },
+  },
+  {
+    repo: "acme/worker",
+    n: 892,
+    title: "Queue: expire stale leases and requeue their jobs",
+    author: "marco",
+    age: 20,
+    draft: true,
+    ci: "pending",
+    size: [96, 30, 3],
+    head: "marco/leases-3",
+    base: "marco/leases-2",
+    on: {},
+  },
 ];
 
 interface Rec {
@@ -1028,8 +1164,8 @@ function signals(r: Rec): Signals {
       mergeable: mine ? (s.mergeable ?? "unknown") : "unknown",
       approvals: reviews.filter(([, st]) => st === "approved").length,
       unresolved_threads: s.threads?.[0] ?? 0,
-      base: pr ? "main" : "",
-      stacked: false,
+      base: pr ? (s.base ?? "main") : "",
+      stacked: pr && (s.base ?? "main") !== "main",
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
@@ -1106,6 +1242,11 @@ function itemOf(r: Rec): Item {
     deletions: sig.pr.deletions,
     changed_files: sig.pr.files,
     base: sig.pr.base,
+    default_branch: "main",
+    head_ref: s.head ?? `${s.author}/${s.n}`,
+    head_repo: s.repo,
+    retargeted: s.moved ? { from: s.moved[0], at: iso(s.moved[1]) } : null,
+    ...(s.resolved === "merged" || s.resolved === "closed" ? { closed_at: iso(s.upd ?? 1) } : {}),
     ci: sig.pr.ci,
     review_decision: sig.pr.review,
     mergeable: sig.pr.mergeable,
@@ -1241,9 +1382,14 @@ function chips(r: Rec): string[] {
   return out;
 }
 
+// As the desk's snapshot: stacks from the PRs' branches, which the mock never changes.
+let stacksMemo: Stacks | null = null;
+const stacks = () => (stacksMemo ??= buildStacks(recs.map(itemOf)));
+
 function cardOf(r: Rec, p: Placement): Card {
   const s = r.seed;
   const sig = signals(r);
+  const stack = stackRef(stacks(), r.id);
   const me = sig.me;
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
   return {
@@ -1279,7 +1425,30 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(!inFlight(r) && placedBy(p) && { placed_by: placedBy(p) }),
+    ...(stack && { stack }),
   };
+}
+
+// As Desk.seat(): where a stack's member is on the queue.
+function seat(id: string): Seat {
+  const r = recs.find((x) => x.id === id)!;
+  const facts = { new: r.fresh && !r.seed.resolved && status(r) === "active", inflight: inFlight(r) };
+  if (r.seed.resolved) return { bucket: null, why: r.seed.resolved, ...facts };
+  const needs = needsWhy(r);
+  if (laneOwned(r)) return { bucket: needs ? "now" : null, why: needs ?? "", ...facts };
+  if (status(r) !== "active") return { bucket: null, why: "", ...facts };
+  const placed = config.boards.flatMap((b) => boardPlacements(b).filter((x) => x.r === r && x.p.bucket !== "hide")).map((x) => x.p);
+  const best = placed.toSorted((a, b) => RANK[a.bucket] - RANK[b.bucket])[0];
+  return { bucket: best?.bucket ?? null, why: best?.why ?? "", ...facts };
+}
+
+const stackOf = (id: string): Stack | null => stackView(stacks(), id, seat);
+
+// As Desk.stacksOf(): each stack of these cards, with the first of its cards current.
+function stacksOf(cards: Card[]): Record<string, Stack> {
+  const out: Record<string, Stack> = {};
+  for (const c of cards) if (c.stack && !out[c.stack.id]) out[c.stack.id] = stackOf(c.id)!;
+  return out;
 }
 
 // As Desk.queue(): a cleared item the coordinator put away, its latest action still in effect, says so and why.
@@ -1331,11 +1500,13 @@ function focus(): FocusView {
     }
   }
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
+  const sections = {
+    now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
+    today: cards.filter((c) => c.bucket === "today").map(top),
+  };
+  oneLinePerStack(sections, ["now", "today"], stacks());
   return {
-    sections: {
-      now: [...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top),
-      today: cards.filter((c) => c.bucket === "today").map(top),
-    },
+    sections,
     now_cards: setting("queue.now_cards"),
     today_cards: setting("queue.today_cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
@@ -1370,8 +1541,10 @@ function queue(): QueueView {
   }
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
+  const sections = { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") };
+  const leads = oneLinePerStack(sections, ["now", "today", "later", "fyi"], stacks());
   return {
-    sections: { now: [...needsCards(), ...of("now")].map(top), today: of("today").map(top), later: of("later"), fyi: of("fyi") },
+    sections,
     hidden: of("hide"),
     cleared: [...cleared.values()].filter((c) => !best.has(c.id)).map(byCoordinator),
     resolved: [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
@@ -1379,6 +1552,7 @@ function queue(): QueueView {
     today_cards: setting("queue.today_cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     babysitting: setting("inflight.babysit"),
+    stacks: stacksOf(leads),
   };
 }
 
@@ -1585,10 +1759,12 @@ function laneRow(r: Rec): InflightRow {
 function inflight(): InflightView {
   const rows = recs.filter((r) => r.state.inflight_at && r.seed.author === ME).map(laneRow);
   const rank = (x: InflightRow) => (x.state !== "open" ? 3 : x.needs_you ? 0 : x.sitter.state === "running" ? 1 : 2);
-  return {
-    rows: rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)),
-    babysitting: setting("inflight.babysit"),
-  };
+  const lane = grouped(
+    rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)),
+    (x) => x.card.id,
+    stacks(),
+  );
+  return { rows: lane, babysitting: setting("inflight.babysit"), stacks: stacksOf(lane.map((x) => x.card)) };
 }
 
 // Send is a no-op here: the mock never talks to GitHub. It only remembers, so the draft leaves the lane.
@@ -1760,8 +1936,10 @@ function detail(r: Rec): ItemDetail {
       .filter((x) => x.r === r)
       .map((x) => x.p),
   );
-  if (!placements.length) throw new HttpError(404, `${r.id} isn't on any board`);
-  const best = placements.reduce((a, b) => (RANK[b.bucket] < RANK[a.bucket] ? b : a));
+  // A stack's member no board lists is on the desk too, fetched for the stack.
+  if (!placements.length && !stacks().nodes.has(r.id)) throw new HttpError(404, `${r.id} isn't on any board`);
+  const none: Placement = { board: "", bucket: "fyi", rule_bucket: "fyi", rule: null, why: "", trace: [] };
+  const best = placements.reduce((a, b) => (RANK[b.bucket] < RANK[a.bucket] ? b : a), placements[0] ?? none);
   const item = itemOf(r);
   const ai = reviews.get(r.id) ?? null;
   return {
@@ -1777,6 +1955,7 @@ function detail(r: Rec): ItemDetail {
     activity: EVENTS.filter((e) => e.item_id === r.id)
       .toReversed()
       .slice(0, 8),
+    stack: stackOf(r.id),
   };
 }
 
@@ -2007,6 +2186,7 @@ function reviewView(r: Rec): ReviewView {
           ? { ok: false, reason: "you approved this commit" }
           : { ok: true, reason: null },
     activity: d.activity,
+    stack: d.stack,
   };
 }
 

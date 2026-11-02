@@ -119,6 +119,7 @@ const queueView: QueueView = {
   today_cards: 5,
   paused: null,
   babysitting: true,
+  stacks: {},
 };
 
 const boardView: BoardView = {
@@ -167,6 +168,7 @@ function detail(c: Card): ItemDetail {
     ai_stale: false,
     generating: false,
     activity: EVENTS.filter((e) => e.item_id === c.id).toReversed(),
+    stack: null,
   };
 }
 

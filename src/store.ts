@@ -9,6 +9,7 @@ export interface ItemMeta {
   updated_at: string;
   detail_at: string;
   last_hit_at: string; // the last time a search returned it
+  lacks: boolean; // a PR stored before the desk asked for what stacks need (head_ref, default_branch, retargeted)
 }
 
 export interface StateRow extends ItemState {
@@ -125,7 +126,9 @@ export class Store {
   itemMeta(): Map<string, ItemMeta> {
     const rows = this.db
       .prepare(
-        "SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at FROM items",
+        `SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at,
+          json_extract(data, '$.kind') = 'pr' AND (json_type(data, '$.head_ref') IS NULL OR json_type(data, '$.default_branch') IS NULL
+            OR json_type(data, '$.retargeted') IS NULL) AS lacks FROM items`,
       )
       .all();
     return new Map(
@@ -137,6 +140,7 @@ export class Store {
           updated_at: r.updated_at as string,
           detail_at: r.detail_at as string,
           last_hit_at: r.last_hit_at as string,
+          lacks: r.lacks === 1,
         };
         return [r.id as string, meta];
       }),
