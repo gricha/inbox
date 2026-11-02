@@ -247,6 +247,20 @@ test("your PR's head branch, where it lives, and the names of its failing checks
   assert.equal(normalize({ ...fixture("pr-mine"), headRepository: null }, NOW).head_repo, "");
 });
 
+test("a PR's latest base change says the branch it was on before: by hand, or GitHub's when the PR below merged", () => {
+  const moved = (nodes: object[]) => normalize({ ...fixture("pr-review"), baseChanges: { nodes } } as RawNode, NOW).retargeted;
+  assert.deepEqual(moved([{ oldBase: "ref/sa-api", createdAt: "2026-10-30T20:51:11Z" }]), {
+    from: "ref/sa-api",
+    at: "2026-10-30T20:51:11Z",
+  });
+  assert.deepEqual(moved([{ previousRefName: "master", createdAt: "2026-10-23T21:33:03Z" }]), {
+    from: "master",
+    at: "2026-10-23T21:33:03Z",
+  });
+  assert.equal(moved([]), null);
+  assert.equal(normalize(fixture("issue"), NOW).retargeted, undefined, "an issue has no base");
+});
+
 test("a failing check the base branch doesn't require doesn't make CI red", () => {
   const withChecks = (state: string, nodes: RawCheck[]): RawNode => {
     const raw = fixture("pr-mine");

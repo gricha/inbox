@@ -45,6 +45,9 @@ export interface Item {
   head_author: string; // login of the head commit's author, "" if unknown
   head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
   head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
+  // Its latest base change: the branch it was based on before (GitHub moves a stacked PR to main when the one below merges),
+  // and when; null if it never changed; absent on items stored before it was fetched
+  retargeted?: { from: string; at: string } | null;
   paths?: string[]; // PR only: its changed files' paths, the first 50 (changed_files counts all); absent on items stored before it was fetched
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
@@ -454,6 +457,52 @@ export interface Card {
   cleared_by_coordinator?: string; // cleared (snoozed, done, muted) by the coordinator: its reason; untrusted, it wrote it
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
+  stack?: StackRef; // an open PR whose line has two or more open
+}
+
+// ---------------------------------------------------------------------------
+// Stacks: PRs in one repo, each based on the head branch of the one below it, the bottom one on the default branch (or on
+// a branch no PR heads). Computed by the desk (src/stacks.ts) from the PRs it holds plus those it fetched for the stack.
+
+// Where a card's PR sits in its stack, counting what's still to land: "3/20".
+export interface StackRef {
+  id: string; // the stack: its bottom PR's id
+  pos: number; // this PR's place among the open PRs of its line, 1 = the lowest open one; merged ones below don't count
+  size: number; // the open PRs in that line (Stack.line with this PR current, less its merged and closed ones)
+  folded?: string[]; // on the one card a queue view lists for the stack: its other members it stands for, bottom first
+}
+
+// One PR of a stack.
+export interface StackMember {
+  id: string;
+  number: number;
+  title: string; // untrusted
+  url: string;
+  author: string;
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  ci: Ci;
+  review: ReviewDecision;
+  parent: string | null; // the member it's based on; null at the bottom
+  current: boolean; // the PR the view is about
+  bucket: Bucket | null; // where the queue has it; null off the queue (merged, closed, cleared, in Merging, on no board)
+  why: string; // its card's why ("merged" for a merged one), "" when the desk has none
+  needs_you: boolean; // in Now or Today: one of the stack's PRs you act on
+  new: boolean; // activity since you last looked
+  inflight: boolean; // your PR in Merging
+}
+
+// A whole stack, as one view shows it.
+export interface Stack {
+  id: string; // its bottom PR's id
+  repo: string;
+  base: string; // the branch under the bottom PR: the default branch, or one no PR the desk knows heads
+  line: StackMember[]; // bottom first, through the current PR; above a fork it takes the branch with open PRs, then the longest
+  forks: StackMember[]; // the members on other branches of a fork, each with its parent; bottom first
+  current: string; // the PR the view is about: the reviewed one, or the one card the queue lists for the stack
+  up: string | null; // the PR above the current one on the line (the review view's key up the stack)
+  down: string | null; // ...and below it
+  needs_you: number; // members in Now or Today
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
@@ -529,6 +578,7 @@ export interface QueueView {
   cards: number; // as in FocusView
   paused: Paused | null;
   babysitting: boolean; // inflight.babysit: Claude works on your PRs in Merging, or they only wait there
+  stacks: Record<string, Stack>; // by id: each stack a card here carries (current: the card sections list it by, else its first card)
 }
 
 // One changed file, from GitHub's pulls/{n}/files.
@@ -573,6 +623,7 @@ export interface ItemDetail {
   ai_stale: boolean;
   generating: boolean;
   activity: ActivityEvent[]; // the latest events for this item, newest first
+  stack: Stack | null; // its stack, with it current
 }
 
 // GET /api/review/:id: one PR's review view.
@@ -588,6 +639,7 @@ export interface ReviewView {
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
+  stack: Stack | null; // its stack, with it current
 }
 
 // ---------------------------------------------------------------------------
@@ -685,8 +737,9 @@ export interface InflightRow {
 }
 
 export interface InflightView {
-  rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days
+  rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days; a stack's rows together, bottom first
   babysitting: boolean; // inflight.babysit: off, Merging says so once instead of on every row
+  stacks: Record<string, Stack>; // by id: each stack with a row here (current: its first row)
 }
 
 // GET /api/config

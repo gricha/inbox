@@ -80,6 +80,7 @@ const queue = (): QueueView => ({
   cards: 10,
   paused: null,
   babysitting: true,
+  stacks: {},
 });
 
 test("routes round-trip through the hash", () => {

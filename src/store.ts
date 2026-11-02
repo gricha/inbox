@@ -9,6 +9,8 @@ export interface ItemMeta {
   updated_at: string;
   detail_at: string;
   last_hit_at: string; // the last time a search returned it
+  lacks: boolean; // a PR stored before the desk asked for what stacks need (head_ref, default_branch, retargeted)
+  quiet: boolean; // stored without events (a stack's member no board listed) since its events were last logged
 }
 
 export interface StateRow extends ItemState {
@@ -70,6 +72,12 @@ export class Store {
       .all()
       .map((c) => c.name);
     if (!hitCols.includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
+    const itemCols = this.db
+      .prepare("PRAGMA table_info(items)")
+      .all()
+      .map((c) => c.name);
+    // The snapshot an item's events were last logged against, while it's stored quietly since ('null': never); else NULL.
+    if (!itemCols.includes("said")) this.db.exec("ALTER TABLE items ADD COLUMN said TEXT");
     const logCols = this.db
       .prepare("PRAGMA table_info(coordinator_log)")
       .all()
@@ -125,7 +133,9 @@ export class Store {
   itemMeta(): Map<string, ItemMeta> {
     const rows = this.db
       .prepare(
-        "SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at FROM items",
+        `SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at,
+          json_extract(data, '$.kind') = 'pr' AND (json_type(data, '$.head_ref') IS NULL OR json_type(data, '$.default_branch') IS NULL
+            OR json_type(data, '$.retargeted') IS NULL) AS lacks, said IS NOT NULL AS quiet FROM items`,
       )
       .all();
     return new Map(
@@ -137,21 +147,36 @@ export class Store {
           updated_at: r.updated_at as string,
           detail_at: r.detail_at as string,
           last_hit_at: r.last_hit_at as string,
+          lacks: r.lacks === 1,
+          quiet: r.quiet === 1,
         };
         return [r.id as string, meta];
       }),
     );
   }
 
-  // last_hit_at is set on insert and by touchItems: refreshing an item no search returns doesn't renew it.
-  putItems(items: Item[], now: string): void {
+  // last_hit_at is set on insert and by touchItems: refreshing an item no search returns doesn't renew it. `quiet`: stored
+  // without logging its events, which keeps what they were last logged against in `said`.
+  putItems(items: Item[], now: string, quiet = false): void {
     const stmt = this.db.prepare(
-      `INSERT INTO items (id, node_id, data, updated_at, detail_at, last_hit_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET node_id = excluded.node_id, data = excluded.data, updated_at = excluded.updated_at, detail_at = excluded.detail_at`,
+      `INSERT INTO items (id, node_id, data, updated_at, detail_at, last_hit_at, said) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET node_id = excluded.node_id, data = excluded.data, updated_at = excluded.updated_at, detail_at = excluded.detail_at,
+         said = ${quiet ? "COALESCE(items.said, items.data)" : "NULL"}`,
     );
     this.tx(() => {
-      for (const it of items) stmt.run(it.id, it.node_id, JSON.stringify(it), it.updated_at, it.detail_at, now);
+      for (const it of items) stmt.run(it.id, it.node_id, JSON.stringify(it), it.updated_at, it.detail_at, now, quiet ? "null" : null);
     });
+  }
+
+  // Of these, the ones stored quietly, with the snapshot their events were last logged against (null: never).
+  said(ids: string[]): Map<string, Item | null> {
+    const stmt = this.db.prepare("SELECT said FROM items WHERE id = ? AND said IS NOT NULL");
+    const out = new Map<string, Item | null>();
+    for (const id of ids) {
+      const r = stmt.get(id);
+      if (r) out.set(id, JSON.parse(r.said as string) as Item | null);
+    }
+    return out;
   }
 
   touchItems(ids: string[], now: string): void {
@@ -161,8 +186,10 @@ export class Store {
     });
   }
 
-  pruneItems(before: string): void {
-    this.db.prepare("DELETE FROM items WHERE last_hit_at < ?").run(before);
+  pruneItems(before: string, keep: Set<string> = new Set()): void {
+    this.db
+      .prepare("DELETE FROM items WHERE last_hit_at < ? AND id NOT IN (SELECT value FROM json_each(?))")
+      .run(before, JSON.stringify([...keep]));
   }
 
   // --- query results
