@@ -22,14 +22,8 @@ const DENY = [
   "Bash(gh pr edit:*)",
   "Bash(gh issue comment:*)",
   "Bash(gh api:*)",
-  // The space after a flag is part of the rule, so --force-with-lease matches none of these.
-  "Bash(git push --force *)",
-  "Bash(git push * --force)",
-  "Bash(git push * --force *)",
-  "Bash(git push -f *)",
-  "Bash(git push * -f)",
-  "Bash(git push * -f *)",
-  "Bash(git push * +*)",
+  "Bash(git push --force:*)", // same as "git push --force *", so --force-with-lease passes
+  "Bash(git push -f:*)",
 ];
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =

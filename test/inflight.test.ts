@@ -179,16 +179,22 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
   assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 7)!.stacked, true, "the coordinator sees it sits on another PR");
 });
 
-// Your own PR #3, approved and green, and #4, green and waiting on review; the coordinator's wakes are kept, not delivered.
+const SAVED = { id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" };
+
+// Your own PR #3, approved and green, #4, green and waiting on review, and #5, approved and green but quiet for 40 days; a
+// coordinator was started, and its wakes are kept, not delivered.
 async function conflicts(c: TestContext, settings: Record<string, unknown> = {}) {
-  const t = await setup([myPr(3, { ci: "green", review_decision: "approved", mergeable: "clean" }), myPr(4, { ci: "green" })], {
+  const ready = { ci: "green", review_decision: "approved", mergeable: "clean" } as const;
+  const t = await setup([myPr(3, ready), myPr(4, { ci: "green" }), myPr(5, { ...ready, updated_at: hoursAgo(40 * 24) })], {
     settings: { "policy.judge": false, "notify.quiet": "", ...settings },
   });
   c.after(t.cleanup);
+  t.desk.store.set("coordinator_bg", SAVED);
   const woke: [string, string][] = [];
   t.desk.coordinator.wake = (id, what) => {
     woke.push([id, what]);
   };
+  t.desk.coordinator.stop = async () => {};
   await t.desk.sync();
   let step = 0;
   const update = async (n: number, o: Partial<Item>) => {
@@ -253,6 +259,48 @@ test("with the coordinator off, a ready PR's conflict stays yours: nothing is se
   await t.update(3, { mergeable: "conflict" });
   assert.deepEqual([t.woke, t.merging()], [[], []]);
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
+  // On, it goes; off again, it comes back to your desk.
+  t.desk.putSettings({ set: { "agent.coordinator": true } });
+  await t.desk.sync();
+  assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
+  t.desk.putSettings({ set: { "agent.coordinator": false } });
+  await t.desk.sync();
+  assert.deepEqual([t.merging(), t.main()], [[], [["acme/web#3", "approved and green: ready to merge"]]]);
+});
+
+test("nothing is sent from a desk that never started a coordinator, or for your PR that isn't on your desk", async (c) => {
+  const t = await conflicts(c);
+  t.desk.store.set("coordinator_bg", null);
+  await t.update(3, { mergeable: "conflict" });
+  assert.deepEqual([t.woke, t.merging()], [[], []], "a scratch desk's would be a second coordinator");
+  t.desk.store.set("coordinator_bg", SAVED);
+  const quiet = t.gh.items.get("acme/web#5")!;
+  t.gh.items.set(quiet.id, { ...quiet, mergeable: "conflict" });
+  await t.desk.sync();
+  assert.deepEqual(t.woke, [["acme/web#3", REBASE]], "not #5, quiet in Later");
+});
+
+test("CI that never ran doesn't hold a conflicting PR back: GitHub runs none on one", async (c) => {
+  const t = await conflicts(c);
+  t.desk.act("web#4", "pin");
+  await t.update(4, { review_decision: "approved", ci: "pending", mergeable: "conflict" });
+  assert.deepEqual(t.woke, [["acme/web#4", REBASE]]);
+});
+
+test("your handed-off PR's conflict stays the coordinator's to merge; one it hands back or you bring back stays yours", async (c) => {
+  const t = await conflicts(c);
+  t.desk.act("web#3", "inflight");
+  await t.update(3, { mergeable: "conflict" });
+  assert.deepEqual(t.merging(), [["acme/web#3", "waits on a merge conflict fix", false]]);
+  t.desk.handBack("web#3", "can't rebase cleanly");
+  await t.update(3, { comments_total: 1 });
+  assert.deepEqual(t.main(), [["acme/web#3", "handed back: can't rebase cleanly"]]);
+  t.desk.act("web#3", "inflight");
+  t.desk.act("web#3", "takeback");
+  await t.update(3, { comments_total: 2 });
+  assert.deepEqual(t.merging(), []);
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
+  assert.ok(!t.woke.some(([, what]) => what === REBASE));
 });
 
 test("desk_note: the coordinator's latest line on a PR in Merging shows on its row; m again starts without it", async (c) => {

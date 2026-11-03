@@ -136,6 +136,7 @@ interface Merging {
   handback?: { reason: string; at: string };
   note?: { text: string; at: string };
   rebase?: string; // when the desk gave it to the coordinator to rebase, ready to merge but for a conflict
+  back?: string; // when you brought it back with b
 }
 
 const MAX_POLICY = 20_000; // it goes with every judge call
@@ -1012,14 +1013,15 @@ export class Desk {
   // (in Merging: Enter opens it there; approved and green: o merges it on GitHub).
   nextStep(e: Entry): string | undefined {
     const it = e.item;
-    if (e.inflight || (mergeReady(it) && it.mergeable === "clean")) return undefined;
+    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+    if (e.inflight || ready) return undefined;
     const hand = "m hands it off for merge";
-    if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
     if (it.ci === "red") return `CI failing: ${hand}`;
     if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
     const n = it.threads_unresolved;
     if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
     if (it.draft) return "a draft: mark it ready for review when it is";
+    if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
     return `waiting on review: ${hand}`;
   }
 
@@ -1027,7 +1029,7 @@ export class Desk {
   replyOnly(e: Entry): boolean {
     const it = e.item;
     if (it.state !== "open" || e.inflight || it.draft || it.ci === "red" || it.mergeable === "conflict") return false;
-    if (it.review_decision === "changes_requested" || mergeReady(it)) return false;
+    if (it.review_decision === "changes_requested" || (it.review_decision === "approved" && it.ci === "green")) return false;
     return owesReply(it, this.me());
   }
 
@@ -1498,6 +1500,7 @@ export class Desk {
       case "takeback":
         if (!s.inflight_at) throw new DeskError(409, `${id} isn't in Merging`);
         s.inflight_at = null;
+        this.store.set(`sitter:${id}`, { ...this.merging(id), back: now.toISOString() }); // yours now: not sent to rebase
         break;
       default:
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
@@ -1599,26 +1602,31 @@ export class Desk {
     return (this.store.get(`sitter:${id}`) as Merging | null) ?? {};
   }
 
-  // Your own PR that's ready to merge but conflicts goes to the coordinator to rebase, in Merging until GitHub sees it mergeable
-  // again; once per conflict, so a hand-back stays handed back.
+  // Your own PR on your desk, ready to merge but for a conflict, goes to your coordinator to rebase until GitHub sees it mergeable.
   rebaseConflicts(): void {
     if (!this.loaded) return;
+    const on = this.settings["agent.coordinator"];
+    const snap = this.snapshot();
     const merging = this.store.prefixed<Merging>("sitter:");
     let moved = false;
-    for (const e of this.snapshot().entries.values()) {
+    for (const e of snap.entries.values()) {
       const it = e.item;
-      if (merging.get(it.id)?.rebase) {
-        if (it.state === "open" && it.mergeable !== "clean") continue;
+      const m = merging.get(it.id);
+      const bucket = snap.best.get(it.id)?.bucket;
+      if (m?.rebase) {
+        if (on && it.state === "open" && it.mergeable !== "clean") continue;
         if (e.state.inflight_at) this.store.putState({ ...e.state, inflight_at: null });
         this.store.set(`sitter:${it.id}`, null);
         moved = true;
       } else if (
-        this.settings["agent.coordinator"] &&
-        !e.state.inflight_at &&
-        e.status === "active" &&
-        it.kind === "pr" &&
+        on &&
+        !m && // handed back or brought back with b: yours
+        this.coordinator.saved() && // a scratch desk's would be a second one, on your real branches
+        (bucket === "now" || bucket === "today") &&
         e.analysis.signals.me.author &&
-        mergeReady(it) &&
+        !it.draft &&
+        it.review_decision === "approved" &&
+        it.ci !== "red" && // GitHub runs no pull_request CI on a conflicting PR
         it.mergeable === "conflict"
       ) {
         const at = this.now().toISOString();
@@ -1898,11 +1906,6 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
   if (r.stacked) return `waits on ${r.base} to merge first`;
   return "ready to merge";
-}
-
-// Approved by someone with a say, CI green, not a draft: ready to merge, but for a conflict.
-function mergeReady(it: Item): boolean {
-  return it.state === "open" && !it.draft && it.review_decision === "approved" && it.ci === "green";
 }
 
 function shortRef(c: { repo: string; number: number }): string {
