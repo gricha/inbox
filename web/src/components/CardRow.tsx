@@ -94,6 +94,11 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             <kbd>a</kbd> {armed ? "again to mark ready" : "Ready for review"}
           </span>
         )}
+        {card.cta === "reply" && !why && (
+          <span className="line-cta" title="Someone waits on your answer: Enter opens the review, with a reply ready">
+            Reply
+          </span>
+        )}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}
         </span>

@@ -8,6 +8,7 @@ import { currentFile, filePatch, onLines, resolvedHead, routeHash, says, section
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
+import { Conversation } from "./Conversation.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -416,7 +417,7 @@ export function Review({
               </p>
             )}
           </header>
-          {/* The threads waiting on you go here: <Conversation view={view} />. */}
+          <Conversation view={view} now={now} flash={flash} />
           {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
           {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
             <AiSection view={view} asking={busy === "ai"} notes={notes.length} />

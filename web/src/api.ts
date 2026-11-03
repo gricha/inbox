@@ -56,9 +56,11 @@ export const api = {
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
   review: (id: string) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
-  // The calls that write to GitHub: the review view's approve key, and Ready for review on your own draft.
+  // The calls that write to GitHub: the review view's approve key and replies, and Ready for review on your own draft.
   approve: (id: string, head_oid: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
+  reply: (id: string, convo: string, body: string) =>
+    call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   ready: (id: string) => call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, {}),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),

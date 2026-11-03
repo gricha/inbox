@@ -342,7 +342,6 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
     ],
   );
 
-  t.desk.putSettings({ set: { "inflight.babysit": false } });
   for (const n of [7, 8, 5, 6]) t.desk.act(id(n, "acme/web"), "inflight");
   const lane = t.desk.inflight();
   const web = (n: number) => id(n, "acme/web");

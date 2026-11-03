@@ -1,10 +1,19 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
 import { buildAreas, type AreaPr } from "../areas.ts";
-import type { Areas, Context, Item } from "../types.ts";
+import type { Areas, Context, Item, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
 import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
-import { branchPrs as branchPrsQuery, DETAILS_REVIEW, detailsMine, FILES_SEARCH, LIGHT_SEARCH, TEAMS, VIEWER } from "./queries.ts";
+import {
+  branchPrs as branchPrsQuery,
+  DETAILS_REVIEW,
+  detailsMine,
+  FILES_SEARCH,
+  LIGHT_SEARCH,
+  PR_CONTEXT,
+  TEAMS,
+  VIEWER,
+} from "./queries.ts";
 
 export interface SearchHit {
   node_id: string;
@@ -28,6 +37,30 @@ export interface NotificationPage {
   poll_interval: number; // seconds GitHub asks clients to wait (X-Poll-Interval)
   date: string | null; // GitHub's clock
 }
+// One comment, review or reply; id and url are GitHub's for it.
+interface Said {
+  id: string;
+  author: string;
+  bot: boolean;
+  body: string;
+  at: string;
+  url: string;
+}
+// A PR's conversation, for the review's conversation and Claude's read of it. Every text field is untrusted GitHub text.
+export interface PrContext {
+  threads: {
+    id: string; // the review thread's node id: what a reply goes to
+    resolved: boolean;
+    outdated: boolean;
+    path: string;
+    line: number | null;
+    hunk: string; // the diff the thread started on
+    comments: Said[];
+  }[];
+  reviews: (Said & { state: ReviewState })[];
+  comments: Said[]; // on the PR itself
+  commits: { oid: string; headline: string; at: string }[]; // the latest 20, oldest first
+}
 export interface GitHub {
   viewer(): Promise<string>;
   search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
@@ -36,12 +69,65 @@ export interface GitHub {
   areas(): Promise<Areas>; // the directories of your PRs and reviews, last 90 days
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
+  prContext(nodeId: string): Promise<PrContext>; // a PR's threads, reviews, comments and recent commits
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
   // open PRs based on it.
   branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
+type RawSaid = { id: string; author: { __typename?: string; login: string } | null; body: string; createdAt: string; url: string };
+interface RawPrContext {
+  node: {
+    reviewThreads?: {
+      nodes: {
+        id: string;
+        isResolved: boolean;
+        isOutdated: boolean;
+        path: string;
+        line: number | null;
+        hunk?: { nodes: { diffHunk: string }[] };
+        comments: { nodes: RawSaid[] };
+      }[];
+    };
+    reviews?: { nodes: (RawSaid & { state: string; submittedAt: string | null })[] };
+    comments?: { nodes: RawSaid[] };
+    history?: { nodes: { commit: { abbreviatedOid: string; messageHeadline: string; committedDate: string } }[] };
+  } | null;
+}
+
+const said = (c: RawSaid, at = c.createdAt): Said => ({
+  id: c.id,
+  author: c.author?.login ?? "ghost",
+  bot: c.author?.__typename === "Bot" || !!c.author?.login.endsWith("[bot]"),
+  body: c.body,
+  at,
+  url: c.url,
+});
+
+function parsePrContext(data: RawPrContext): PrContext {
+  const n = data.node;
+  return {
+    threads: (n?.reviewThreads?.nodes ?? []).map((t) => ({
+      id: t.id,
+      resolved: t.isResolved,
+      outdated: t.isOutdated,
+      path: t.path,
+      line: t.line,
+      hunk: t.hunk?.nodes[0]?.diffHunk ?? "",
+      comments: t.comments.nodes.map((c) => said(c)),
+    })),
+    reviews: (n?.reviews?.nodes ?? []).map((r) =>
+      Object.assign(said(r, r.submittedAt ?? r.createdAt), { state: r.state.toLowerCase() as ReviewState }),
+    ),
+    comments: (n?.comments?.nodes ?? []).map((c) => said(c)),
+    commits: (n?.history?.nodes ?? []).map(({ commit: c }) => ({
+      oid: c.abbreviatedOid,
+      headline: c.messageHeadline,
+      at: c.committedDate,
+    })),
+  };
+}
 interface RawThread {
   id: string;
   reason: string;
@@ -263,6 +349,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     context,
     areas,
     notifications,
+    prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
     branchPrs,
     rateLimit: () => client.rateLimit(),
   };

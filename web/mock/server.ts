@@ -28,6 +28,7 @@ import type {
   Ci,
   Config,
   ConfigError,
+  Conversation,
   FieldDoc,
   FocusView,
   GitHubStatus,
@@ -1106,6 +1107,94 @@ interface Rec {
   pushes: number;
 }
 
+// What reviewers said, as GET /api/review/:id sends it, with Claude's read of what waits on you.
+const said = (id: string, author: string, h: number, body: string) => ({
+  id,
+  author,
+  bot: author.endsWith("[bot]"),
+  body,
+  at: iso(h),
+  url: `https://github.com/me/notes-app/pull/12#${id}`,
+});
+const convo = (o: Partial<Conversation> & Pick<Conversation, "id" | "comments">): Conversation => ({
+  kind: "thread",
+  path: null,
+  line: null,
+  outdated: false,
+  resolved: false,
+  state: null,
+  waiting_on_you: false,
+  url: o.comments[0]!.url,
+  take: null,
+  ...o,
+});
+const TALK = new Map<string, Conversation[]>([
+  [
+    "me/notes-app#12",
+    [
+      convo({
+        id: "PRRT_tomb",
+        path: "src/sync/merge.ts",
+        line: 88,
+        waiting_on_you: true,
+        comments: [
+          said(
+            "c1",
+            "azulus",
+            5,
+            "Tombstones never go away here. On a long-lived notebook this list grows forever, and every sync ships all of it.\n\nIs there a plan to compact them, or should merge() drop the ones older than the last full sync?",
+          ),
+        ],
+        take: {
+          gist: "Tombstones are never compacted, so every sync ships all of them",
+          take: "Valid concern: nothing in this PR or on main prunes the tombstone list, and syncTombstones() sends it whole on every pull.",
+          reply:
+            "Good catch: nothing prunes them yet. I'll have merge() drop tombstones older than the oldest device's last full sync, in this PR, with a test that a week-old delete doesn't come back.",
+          comment_id: "c1",
+          at: iso(4.5),
+        },
+      }),
+      convo({
+        id: "IC_freeze",
+        kind: "comment",
+        waiting_on_you: true,
+        comments: [said("ic1", "priya", 2, "Can this ship before the Thursday freeze? The mobile release wants it.")],
+        take: {
+          gist: "Can it ship before Thursday's freeze?",
+          take: "Only you can answer: it turns on whether the tombstone fix lands here or in a follow-up.",
+          reply: "Yes, if compacting tombstones can follow in its own PR; otherwise [Friday].",
+          comment_id: "ic1",
+          at: iso(1.5),
+        },
+      }),
+      convo({
+        id: "PRRT_name",
+        path: "src/sync/clock.ts",
+        line: 14,
+        resolved: true,
+        comments: [
+          said("c2", "kai", 6, "Nit: lamport() reads oddly next to tick(); maybe nextClock()?"),
+          said("c3", ME, 5.5, "Renamed in 3e1f0a2."),
+        ],
+      }),
+      convo({
+        id: "PRRT_bot",
+        path: "src/sync/merge.ts",
+        outdated: true,
+        comments: [
+          said("c4", "cursor[bot]", 6, "Possible null dereference: `local` may be undefined when the note was deleted on this device."),
+        ],
+      }),
+      convo({
+        id: "PRR_kai",
+        kind: "review",
+        state: "commented",
+        comments: [said("r1", "kai", 6, "Read through the merge logic; it looks right to me apart from the naming nit.")],
+      }),
+    ],
+  ],
+]);
+
 const recs: Rec[] = SEEDS.map((s) => {
   const id = `${s.repo}#${s.n}`;
   return {
@@ -1588,8 +1677,12 @@ function top(c: Card): Card {
       s.optional?.length && { checks_optional: s.optional },
     );
     // As Desk.card(): who last spoke on it.
-    const said = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
-    if (said) out.last_event = said;
+    const spoke = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
+    if (spoke) out.last_event = spoke;
+    // As Desk.replyOnly(): someone waits on your answer, and nothing else needs doing.
+    const sig = signals(r);
+    const only = sig.pr.ci !== "red" && sig.pr.mergeable !== "conflict" && sig.pr.review !== "changes_requested" && !sig.item.draft;
+    if (only && !laneOwned(r) && TALK.get(r.id)?.some((x) => x.waiting_on_you)) out.cta = "reply";
   }
   if (s.kind === "issue") {
     const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
@@ -2155,6 +2248,10 @@ function reviewView(r: Rec): ReviewView {
           : { ok: true, reason: null },
     activity: d.activity,
     stack: d.stack,
+    conversation: TALK.get(r.id) ?? [],
+    conversation_error: null,
+    reading: false,
+    reading_error: null,
   };
 }
 
@@ -2726,7 +2823,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     bump();
     return { ok: true };
   }
-  const review = /^\/api\/review\/(.+?)(\/ai|\/approve)?$/.exec(url.pathname);
+  const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply)?$/.exec(url.pathname);
   if (review) {
     const r = resolve(decodeURIComponent(review[1]!));
     if (req.method === "GET" && !review[2]) return reviewView(r);
@@ -2734,6 +2831,17 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       const { force } = await readBody(req);
       const cur = reviews.get(r.id);
       return { ok: true, ai: cur && !force ? cur : await generate(r) };
+    }
+    // Like approve, the mock only remembers: your reply ends the conversation's wait on you.
+    if (req.method === "POST" && review[2] === "/reply") {
+      const body = await readBody(req);
+      const c = TALK.get(r.id)?.find((x) => x.id === body.id);
+      if (!c) throw new HttpError(404, `no conversation "${String(body.id)}" on ${r.id}`);
+      c.comments.push(said(`mine-${c.comments.length}`, ME, 0, String(body.body)));
+      c.waiting_on_you = false;
+      c.take = null;
+      bump();
+      return { ok: true, url: `${urlOf(r.seed)}#discussion-mock` };
     }
     // A no-op: the mock never talks to GitHub. It only remembers, so the view shows you approved.
     if (req.method === "POST" && review[2] === "/approve") {

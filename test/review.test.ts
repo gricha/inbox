@@ -1067,6 +1067,8 @@ function fakeWriter(landed = () => {}) {
       landed();
       return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
     },
+    reply: () => Promise.reject(new Error("approve tests don't reply")),
+    comment: () => Promise.reject(new Error("approve tests don't comment")),
     ready: () => Promise.reject(new Error("approve tests don't mark ready")),
   };
   return {

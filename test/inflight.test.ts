@@ -11,6 +11,8 @@ function fakeWriter(refuse = false) {
   const calls: string[][] = [];
   const writer: GitHubWriter = {
     approve: () => Promise.reject(new Error("no approvals here")),
+    reply: () => Promise.reject(new Error("no replies here")),
+    comment: () => Promise.reject(new Error("no comments here")),
     ready: (pr) => {
       calls.push(["ready", pr]);
       return refuse ? Promise.reject(new Error("Resource not accessible")) : Promise.resolve();

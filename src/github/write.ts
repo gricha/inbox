@@ -10,10 +10,17 @@ const execFileAsync = promisify(execFile);
 
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve or post.
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
+// reply and comment: your reply to a conversation in a PR's review, when you press Send.
 // ready: your own draft's "Ready for review" (a a on its row).
 export const ALLOWED = {
   approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {
   addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: APPROVE, body: $body }) { pullRequestReview { url } }
+}`,
+  reply: `mutation DeskReply($thread: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } }
+}`,
+  comment: `mutation DeskComment($subject: ID!, $body: String!) {
+  addComment(input: { subjectId: $subject, body: $body }) { commentEdge { node { url } } }
 }`,
   ready: `mutation DeskReady($pr: ID!) {
   markPullRequestReadyForReview(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
@@ -22,6 +29,8 @@ export const ALLOWED = {
 
 export interface GitHubWriter {
   approve(prNodeId: string, commit: string, body?: string): Promise<{ url: string }>;
+  reply(threadId: string, body: string): Promise<{ url: string }>; // to a review thread
+  comment(prNodeId: string, body: string): Promise<{ url: string }>; // on the PR
   ready(prNodeId: string): Promise<void>; // a draft, ready for review
 }
 
@@ -65,6 +74,18 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
         addPullRequestReview?: { pullRequestReview?: { url?: string } | null } | null;
       } | null;
       return { url: data?.addPullRequestReview?.pullRequestReview?.url ?? "" };
+    },
+    reply: async (thread, body) => {
+      const data = (await send("reply", thread, { thread, body })) as {
+        addPullRequestReviewThreadReply?: { comment?: { url?: string } | null } | null;
+      } | null;
+      return { url: data?.addPullRequestReviewThreadReply?.comment?.url ?? "" };
+    },
+    comment: async (subject, body) => {
+      const data = (await send("comment", subject, { subject, body })) as {
+        addComment?: { commentEdge?: { node?: { url?: string } | null } | null } | null;
+      } | null;
+      return { url: data?.addComment?.commentEdge?.node?.url ?? "" };
     },
     ready: async (pr) => {
       await send("ready", pr, { pr });

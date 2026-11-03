@@ -506,7 +506,7 @@ test("your own draft carries one call to action, Ready for review, and the mock 
   const drafts = [...q.sections.now, ...q.sections.today, ...q.sections.later].filter((c) => c.draft && c.author === "me");
   assert.ok(drafts.length > 0);
   assert.ok(drafts.every((c) => c.cta === "ready"));
-  assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta && (!c.draft || c.author !== "me")));
+  assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta === "ready" && (!c.draft || c.author !== "me")));
   const id = encodeURIComponent(drafts[0]!.id);
   assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 200);
   assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 409, "not a draft any more");

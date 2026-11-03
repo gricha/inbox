@@ -108,6 +108,25 @@ export function branchPrs(dirs: ("up" | "down")[]): string {
 fragment B on PullRequest { __typename id number title updatedAt repository { nameWithOwner } author { __typename login } headRepository { nameWithOwner } }`;
 }
 
+// A PR's conversation: its review threads (with ids to reply to), reviews, comments and recent commits.
+export const PR_CONTEXT = `query($id: ID!) {
+  ${RATE}
+  node(id: $id) {
+    ... on PullRequest {
+      reviewThreads(first: 100) {
+        nodes {
+          id isResolved isOutdated path line
+          hunk: comments(first: 1) { nodes { diffHunk } }
+          comments(first: 30) { nodes { id author { __typename login } body createdAt url } }
+        }
+      }
+      reviews(last: 30) { nodes { id author { __typename login } state body submittedAt createdAt url } }
+      comments(last: 20) { nodes { id author { __typename login } body createdAt url } }
+      history: commits(last: 20) { nodes { commit { abbreviatedOid messageHeadline committedDate } } }
+    }
+  }
+}`;
+
 export const TEAMS = `query($me: String!) {
   ${RATE}
   viewer { name organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }

@@ -372,3 +372,93 @@ test("branchPrs: one aliased query per 40 probes a repo; up drops a fork's PR on
   assert.match(calls[0]!.query, /p1: pullRequests\(baseRefName: \$b1, states: \[OPEN\]/);
   assert.doesNotMatch(calls[0]!.query, /mutation/);
 });
+
+test("prContext: a PR's threads with ids and the code they're on, reviews, comments and recent commits, in one query", async () => {
+  const who = (login: string, bot = false) => ({ __typename: bot ? "Bot" : "User", login });
+  const { gh, calls } = fakeGitHub(() => ({
+    data: {
+      rateLimit: RL,
+      node: {
+        reviewThreads: {
+          nodes: [
+            {
+              id: "PRRT_1",
+              isResolved: false,
+              isOutdated: true,
+              path: "src/a.ts",
+              line: null,
+              hunk: { nodes: [{ diffHunk: "@@ -1 +1 @@\n-a\n+b" }] },
+              comments: {
+                nodes: [
+                  {
+                    id: "PRRC_1",
+                    author: who("dana"),
+                    body: "Retry?",
+                    createdAt: "2026-03-01T10:00:00Z",
+                    url: "https://github.com/acme/api/pull/1#discussion_r1",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        reviews: {
+          nodes: [
+            {
+              id: "PRR_1",
+              url: "https://github.com/acme/api/pull/1#pullrequestreview-1",
+              author: who("dana"),
+              state: "CHANGES_REQUESTED",
+              body: "See inline",
+              submittedAt: null,
+              createdAt: "2026-03-01T10:00:00Z",
+            },
+          ],
+        },
+        comments: {
+          nodes: [{ id: "IC_1", url: "", author: null, body: "+1", createdAt: "2026-03-01T11:00:00Z" }],
+        },
+        history: {
+          nodes: [{ commit: { abbreviatedOid: "abc1234", messageHeadline: "Retry 502s", committedDate: "2026-03-01T12:00:00Z" } }],
+        },
+      },
+    },
+  }));
+  const ctx = await gh.prContext("PR_1");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.query, /^query\(\$id: ID!\)/);
+  assert.deepEqual(calls[0]!.variables, { id: "PR_1" });
+  assert.deepEqual(ctx.threads, [
+    {
+      id: "PRRT_1",
+      resolved: false,
+      outdated: true,
+      path: "src/a.ts",
+      line: null,
+      hunk: "@@ -1 +1 @@\n-a\n+b",
+      comments: [
+        {
+          id: "PRRC_1",
+          author: "dana",
+          bot: false,
+          body: "Retry?",
+          at: "2026-03-01T10:00:00Z",
+          url: "https://github.com/acme/api/pull/1#discussion_r1",
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(ctx.reviews, [
+    {
+      id: "PRR_1",
+      author: "dana",
+      bot: false,
+      state: "changes_requested",
+      body: "See inline",
+      at: "2026-03-01T10:00:00Z",
+      url: "https://github.com/acme/api/pull/1#pullrequestreview-1",
+    },
+  ]);
+  assert.deepEqual(ctx.comments, [{ id: "IC_1", author: "ghost", bot: false, body: "+1", at: "2026-03-01T11:00:00Z", url: "" }]);
+  assert.deepEqual(ctx.commits, [{ oid: "abc1234", headline: "Retry 502s", at: "2026-03-01T12:00:00Z" }]);
+});
