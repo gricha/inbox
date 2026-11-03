@@ -760,9 +760,10 @@ kbd {
   outline: none;
 }
 
+/* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
 .line-title {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: calc-size(max-content, min(size, 40%, 24ch));
   overflow: hidden;
   color: var(--ink);
   font-size: 17px;
@@ -799,16 +800,19 @@ kbd {
   margin-left: -14px;
 }
 
-.line-stack,
-.line-stage {
+.line-stack {
   flex: none;
 }
 
 .line-by {
-  flex: none;
-  max-width: 18ch;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.line-stage {
+  margin-left: 14px;
 }
 
 .line-stage.t-warn {

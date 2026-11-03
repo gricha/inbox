@@ -22,5 +22,6 @@ export function stage(it: Item, self: string): Stage | undefined {
   if (it.draft) return "draft";
   const v = verdicts(it, self);
   if (v.changes_by.length) return "changes requested";
-  return v.approved_by.length ? "approved" : "waiting for review";
+  // GitHub says "required" while the branch still wants another approval or a code owner's.
+  return v.approved_by.length && it.review_decision !== "required" ? "approved" : "waiting for review";
 }

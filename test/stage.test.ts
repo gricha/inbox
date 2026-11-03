@@ -13,7 +13,8 @@ const review = (author: string, state: Item["reviews"][number]["state"], h: numb
   at: hoursAgo(h),
   commit: "abc",
 });
-const of = (o: Partial<Item>) => stage(makeItem(o), "alice");
+// makeItem's default is "required"; most cases here leave the verdicts alone to decide.
+const of = (o: Partial<Item>) => stage(makeItem({ review_decision: "none", ...o }), "alice");
 
 test("a PR's stage: closed or merged, else a draft, else what its reviewers with a say left it at", () => {
   assert.equal(of({ kind: "issue" }), undefined, "an issue has none");
@@ -34,6 +35,12 @@ test("only a collaborator's approval counts, each reviewer's latest verdict stan
   assert.equal(of({ reviews: [review("alice", "approved", 1)] }), "waiting for review", "the author's own");
   assert.equal(of({ reviews: [review("dana", "changes_requested", 3), review("dana", "approved", 1)] }), "approved");
   assert.equal(of({ reviews: [review("dana", "approved", 3), review("dana", "dismissed", 1)] }), "waiting for review");
+});
+
+test("an approval isn't approved while GitHub still requires another review", () => {
+  const approved = [review("dana", "approved", 1)];
+  assert.equal(of({ review_decision: "required", reviews: approved }), "waiting for review");
+  assert.equal(of({ review_decision: "approved", reviews: approved }), "approved");
 });
 
 test("each card says who it's from, you for yours or a bot's for you, and a PR's stage", async (c) => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, SNOOZE } from "../format.ts";
-import { armOf, says, type Variant } from "../view.ts";
+import { armOf, type Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
 // Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a t).
@@ -55,8 +55,8 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
-  // Later's note may say it already: "merged", "approved by dana".
-  const stage = card.stage && !says(note, card.stage) ? card.stage : "";
+  // Under Later the note is the row's why; the stage is the queue's.
+  const stage = why ? undefined : card.stage;
   const armed = ctx.armed === armOf("a", card.id);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
@@ -94,8 +94,11 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
               {card.stack.pos}/{card.stack.size}
             </span>
           )}
-          <span className="line-by">by {card.by}</span>
-          {stage && <span className={cls("line-stage", stage === "changes requested" && variant === "active" && "t-warn")}>{stage}</span>}
+          {/* One span, so a tight row cuts the stage before who it's from; amber only on yours, where it's work for you. */}
+          <span className="line-by">
+            by {card.by}
+            {stage && <span className={cls("line-stage", stage === "changes requested" && card.by === "you" && "t-warn")}>{stage}</span>}
+          </span>
           {note && <span className="line-note">{note}</span>}
         </button>
         {/* Under the cursor only: the quiet way to tell the coordinator something about it. */}
