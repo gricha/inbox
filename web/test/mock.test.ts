@@ -513,3 +513,16 @@ test("your own draft carries one call to action, Ready for review, and the mock 
   assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 200);
   assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 409, "not a draft any more");
 });
+
+test("the More menu's GitHub writes: the cards say which, and the mock takes them like the desk", async () => {
+  const card = async (id: string) => (await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent(id)}`)).data.card;
+  assert.deepEqual((await card("acme/worker#875")).actions, ["close", "draft", "merge"], "yours, approved and green");
+  assert.deepEqual((await card("acme/api#4127")).actions, ["request_changes"], "someone else's");
+  assert.equal((await card("acme/web#2295")).actions, undefined, "in Merging");
+  const gh = (id: string, action: string) => call("POST", "/api/github", { id, action });
+  assert.equal((await gh("acme/api#4127", "close")).status, 409, "not yours");
+  assert.equal((await gh("acme/worker#875", "close")).status, 200);
+  assert.deepEqual((await card("acme/worker#875")).actions, ["reopen"]);
+  assert.equal((await gh("acme/worker#875", "reopen")).status, 200);
+  assert.deepEqual((await card("acme/worker#875")).actions, ["close", "draft", "merge"]);
+});

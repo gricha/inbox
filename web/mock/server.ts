@@ -32,6 +32,7 @@ import type {
   Conversation,
   FieldDoc,
   FocusView,
+  GitHubAction,
   GitHubStatus,
   InflightRow,
   CoordinatorView,
@@ -1497,6 +1498,7 @@ function cardOf(r: Rec, p: Placement): Card {
   const stack = stackRef(stacks(), r.id);
   const me = sig.me;
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
+  const actions = actionsOf(r);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
     id: r.id,
@@ -1531,9 +1533,23 @@ function cardOf(r: Rec, p: Placement): Card {
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
     ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && sig.pr.ci !== "red" && { cta: "ready" as const }),
+    ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),
   };
+}
+
+// As Desk.actions(): the More menu's GitHub writes; the mock's desk always has a writer.
+function actionsOf(r: Rec): GitHubAction[] {
+  const s = r.seed;
+  const it = itemOf(r);
+  if (inFlight(r)) return [];
+  if (it.kind === "issue") return it.state === "open" && (s.author === ME || !!s.assignee) ? ["close"] : [];
+  if (s.author !== ME) return it.state === "open" ? ["request_changes"] : [];
+  if (it.state === "closed") return ["reopen"];
+  if (it.state !== "open") return [];
+  const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+  return ["close", ...(it.draft ? [] : (["draft"] as const)), ...(ready ? (["merge"] as const) : [])];
 }
 
 // As Desk.seat(): where a stack's member is on the queue.
@@ -2873,6 +2889,20 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     r.seed.draft = false;
     bump();
     return { ok: true };
+  }
+  // The More menu's writes: the mock only remembers, as GitHub would answer.
+  if (route === "POST /api/github") {
+    const body = await readBody(req);
+    const r = resolve(String(body.id));
+    const action = body.action as GitHubAction;
+    if (!actionsOf(r).includes(action)) throw new HttpError(409, `can't ${action} ${r.id} now`);
+    if (action === "close" || action === "merge") {
+      r.seed.resolved = action === "close" ? "closed" : "merged";
+      r.seed.upd = (T0 - Date.now()) / HOUR;
+    } else if (action === "reopen") delete r.seed.resolved;
+    else if (action === "draft") r.seed.draft = true;
+    bump();
+    return { ok: true, url: "" };
   }
   const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply)?$/.exec(url.pathname);
   if (review) {

@@ -15,7 +15,7 @@ import { createMcpServer } from "./mcp.ts";
 import { openUrl } from "./notify.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
-import type { Action } from "./types.ts";
+import { GITHUB_ACTIONS, type Action, type GitHubAction } from "./types.ts";
 
 const VERSION = "0.1.0";
 export const DEFAULT_PORT = 47823;
@@ -32,7 +32,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// The desk's own page, for its GitHub writes (approve, a reply, ready for review), hand-offs and asks: a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, a reply, ready for review, the More menu's), hand-offs and asks: a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -137,6 +137,18 @@ export function createApp(desk: Desk, port: number): Hono {
     if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a a)");
     await desk.markReady(c.req.param("id"));
     return c.json({ ok: true });
+  });
+  // The More menu's GitHub writes (close, draft, merge, reopen, request changes), from the desk's own window only.
+  app.post("/api/github", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window (.)");
+    const b = await c.req
+      .json<{ id?: unknown; action?: unknown; head_oid?: unknown; body?: unknown }>()
+      .catch((): { id?: unknown; action?: unknown; head_oid?: unknown; body?: unknown } => ({}));
+    if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) throw new DeskError(400, "need { id, action }");
+    if (b.head_oid !== undefined && typeof b.head_oid !== "string") throw new DeskError(400, "head_oid must be a string");
+    if (b.body !== undefined && typeof b.body !== "string") throw new DeskError(400, "body must be a string");
+    return c.json({ ok: true, ...(await desk.githubAct(b.id, b.action as GitHubAction, { head: b.head_oid, body: b.body })) });
   });
   // Merging: your own PRs you handed off (m m, b through /api/act), which the coordinator gets merged.
   app.get("/api/inflight", (c) => {

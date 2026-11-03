@@ -7,6 +7,7 @@ import type {
   ConfigDoc,
   ConfigError,
   FieldDoc,
+  GitHubAction,
   InflightView,
   ItemDetail,
   ItemState,
@@ -64,6 +65,9 @@ export const api = {
   reply: (id: string, convo: string, body: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   ready: (id: string) => call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, {}),
+  // The More menu's: close, draft, merge, reopen, request changes (with a body, pinned to the head you read).
+  github: (id: string, action: GitHubAction, more: { head_oid?: string; body?: string } = {}) =>
+    call<{ ok: true; url: string }>("POST", "/api/github", { id, action, ...more }),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
   wakeCoordinator: () => call<{ ok: true }>("POST", "/api/coordinator/wake", {}),
   asks: () => call<AsksView>("GET", "/api/asks"),

@@ -8,13 +8,12 @@ import { REBASE } from "../src/coordinator.ts";
 import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo } from "./helpers/items.ts";
+import { refuseWrites } from "./helpers/writer.ts";
 
 function fakeWriter(refuse = false) {
   const calls: string[][] = [];
   const writer: GitHubWriter = {
-    approve: () => Promise.reject(new Error("no approvals here")),
-    reply: () => Promise.reject(new Error("no replies here")),
-    comment: () => Promise.reject(new Error("no comments here")),
+    ...refuseWrites(),
     ready: (pr) => {
       calls.push(["ready", pr]);
       return refuse ? Promise.reject(new Error("Resource not accessible")) : Promise.resolve();

@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView, Stack, StackMember } from "../../../src/types.ts";
+import type {
+  ActivityEvent,
+  Card,
+  GitHubAction,
+  InflightRow,
+  ReviewFile,
+  ReviewNote,
+  ReviewView,
+  Stack,
+  StackMember,
+} from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
 import { currentFile, filePatch, onLines, resolvedHead, routeHash, says, sections, splitPath, type Section } from "../view.ts";
@@ -10,6 +20,7 @@ import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 import { Asks, type Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
+import { MoreButton, MoreMenu, RequestChanges } from "./More.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
@@ -66,6 +77,7 @@ export function Review({
   inert,
   flash,
   onCard,
+  onGithub,
   row,
   armed: armedKey,
   onBack,
@@ -79,6 +91,7 @@ export function Review({
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
+  onGithub: (c: Card, action: GitHubAction, head: string) => void; // the More menu's writes but request changes, which is here
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   armed: string | null; // armOf("m", id) after a first m
   onBack: () => void;
@@ -93,6 +106,8 @@ export function Review({
   const [armed, setArmed] = useState(0); // when `a` was pressed once
   const [busy, setBusy] = useState<"approve" | "ready" | "ai" | null>(null);
   const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
+  const [more, setMore] = useState(false); // the More menu (.)
+  const [changes, setChanges] = useState(false); // Request changes, being written
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
@@ -299,7 +314,10 @@ export function Review({
     else if (k === "i" && !flying) void askAi();
     else if (k === "a") void (readying ? markReady() : approve());
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
-    else if (k === "esc") onBack();
+    else if (k === "." && v) {
+      if (v.card.actions?.length) setMore(true);
+      else flash(`Nothing more to do on GitHub for ${shortRef(v.card)}`);
+    } else if (k === "esc") onBack();
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -312,7 +330,7 @@ export function Review({
       if (armed) setArmed(0);
       // Esc with a hand-off armed never reaches here: App lets it lapse first.
       else onBack();
-    } else if (("npoci[]admbfNP".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
+    } else if (("npoci[]admbfNP.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
       e.preventDefault();
       run(e.key);
     }
@@ -456,7 +474,8 @@ export function Review({
           )}
           {/* While you owe replies, Send is the one filled button. */}
           {mine && <HandKey card={card} run={run} armed={armedKey} primary={card.cta !== "reply"} />}
-          <KeyButton k="o" label="Open on GitHub" run={run} />
+          {/* "GitHub" alone leaves room for More, so the row stays one line beside the sidebar. */}
+          <KeyButton k="o" label="GitHub" title="Open it on GitHub" run={run} />
           {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
           {!flying && (open || view.ai) && (
             <KeyButton
@@ -472,7 +491,42 @@ export function Review({
             title="The sidebar: the stack, the files and recent activity"
             run={run}
           />
+          {!!card.actions?.length && (
+            <span className="more-wrap">
+              <MoreButton
+                onClick={() => {
+                  run(".");
+                }}
+              />
+              {more && (
+                <MoreMenu
+                  card={card}
+                  actions={card.actions}
+                  pick={(a) => {
+                    if (a === "request_changes") setChanges(true);
+                    else onGithub(card, a, item.head_oid);
+                  }}
+                  onClose={() => {
+                    setMore(false);
+                  }}
+                  flash={(text) => {
+                    flash(text, false, ARM_MS);
+                  }}
+                />
+              )}
+            </span>
+          )}
         </div>
+        {changes && (
+          <RequestChanges
+            card={card}
+            head={item.head_oid}
+            flash={flash}
+            onClose={() => {
+              setChanges(false);
+            }}
+          />
+        )}
 
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
         {list.length > 0 && (

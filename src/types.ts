@@ -317,6 +317,10 @@ export interface ItemState {
 }
 
 export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
+// The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
+// merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
+export type GitHubAction = "close" | "draft" | "merge" | "reopen" | "request_changes";
+export const GITHUB_ACTIONS: GitHubAction[] = ["close", "draft", "merge", "reopen", "request_changes"];
 // snooze `until`: "1h" | "3h" | "tomorrow" (09:00) | "monday" (09:00) | "activity" | ISO time
 
 // ---------------------------------------------------------------------------
@@ -398,6 +402,7 @@ export interface Card {
   checks_optional?: string[]; // those of them its base branch doesn't require
   handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged; its why says why
   cta?: "ready" | "reply"; // the row's one call to action: Ready for review on your own open draft (a a), or Reply on your PR whose only action is answering someone
+  actions?: GitHubAction[]; // the GitHub writes its More menu (.) offers, as the desk allows them now; absent when none
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open

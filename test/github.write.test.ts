@@ -13,8 +13,19 @@ function fakeFetch(reply: { status?: number; body: unknown }) {
   return { fetch: fn, calls };
 }
 
-test("the allowlist is exactly four mutations: approve, a reply or comment you send, and ready for review on your own draft", () => {
-  assert.deepEqual(Object.keys(ALLOWED), ["approve", "reply", "comment", "ready"]);
+test("the allowlist is exactly these mutations: approve, a reply or comment, ready for review, and the More menu's", () => {
+  assert.deepEqual(Object.keys(ALLOWED), [
+    "approve",
+    "reply",
+    "comment",
+    "ready",
+    "close",
+    "draft",
+    "merge",
+    "reopen",
+    "request_changes",
+    "close_issue",
+  ]);
   assert.match(
     ALLOWED.approve,
     /addPullRequestReview\(input: \{ pullRequestId: \$pr, commitOID: \$commit, event: APPROVE, body: \$body \}\)/,
@@ -25,6 +36,15 @@ test("the allowlist is exactly four mutations: approve, a reply or comment you s
   );
   assert.match(ALLOWED.comment, /^mutation DeskComment[^{]*\{\s*addComment\(input: \{ subjectId: \$subject, body: \$body \}\)/);
   assert.match(ALLOWED.ready, /^mutation DeskReady[^{]*\{\s*markPullRequestReadyForReview\(input: \{ pullRequestId: \$pr \}\)/);
+  assert.match(ALLOWED.close, /^mutation DeskClose[^{]*\{\s*closePullRequest\(input: \{ pullRequestId: \$pr \}\)/);
+  assert.match(ALLOWED.draft, /^mutation DeskDraft[^{]*\{\s*convertPullRequestToDraft\(input: \{ pullRequestId: \$pr \}\)/);
+  assert.match(
+    ALLOWED.merge,
+    /^mutation DeskMerge[^{]*\{\s*mergePullRequest\(input: \{ pullRequestId: \$pr, expectedHeadOid: \$head, mergeMethod: \$method \}\)/,
+  );
+  assert.match(ALLOWED.reopen, /^mutation DeskReopen[^{]*\{\s*reopenPullRequest\(input: \{ pullRequestId: \$pr \}\)/);
+  assert.match(ALLOWED.request_changes, /commitOID: \$commit, event: REQUEST_CHANGES, body: \$body \}\)/);
+  assert.match(ALLOWED.close_issue, /^mutation DeskCloseIssue[^{]*\{\s*closeIssue\(input: \{ issueId: \$issue \}\)/);
   // One mutation per document: nothing else rides along.
   for (const doc of Object.values(ALLOWED)) assert.equal(doc.match(/\(input:/g)?.length, 1);
 });
@@ -89,6 +109,44 @@ test("approve sends the allowlisted mutation once, pinned to the commit, with it
   assert.deepEqual(logs, ["github write: approve PR_node at abc123"]);
 });
 
+test("the More menu's writes send their mutation once each, a merge pinned to its head, and log it", async () => {
+  const f = fakeFetch({ body: { data: { addPullRequestReview: { pullRequestReview: { url: "https://github.com/a/b/pull/1#r2" } } } } });
+  const logs: string[] = [];
+  const w = createWriter({
+    token: "t",
+    fetch: f.fetch,
+    log: (m) => {
+      logs.push(m);
+    },
+  });
+  await w.close("PR_1");
+  await w.draft("PR_1");
+  await w.merge("PR_1", "h1", "SQUASH");
+  await w.reopen("PR_1");
+  assert.deepEqual(await w.requestChanges("PR_1", "h1", "Add a test"), { url: "https://github.com/a/b/pull/1#r2" });
+  await w.closeIssue("I_1");
+  const sent = f.calls.map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
+  assert.deepEqual(
+    sent.map((x) => [x.query, x.variables]),
+    [
+      [ALLOWED.close, { pr: "PR_1" }],
+      [ALLOWED.draft, { pr: "PR_1" }],
+      [ALLOWED.merge, { pr: "PR_1", head: "h1", method: "SQUASH" }],
+      [ALLOWED.reopen, { pr: "PR_1" }],
+      [ALLOWED.request_changes, { pr: "PR_1", commit: "h1", body: "Add a test" }],
+      [ALLOWED.close_issue, { issue: "I_1" }],
+    ],
+  );
+  assert.deepEqual(logs, [
+    "github write: close PR_1",
+    "github write: draft PR_1",
+    "github write: merge PR_1 at h1",
+    "github write: reopen PR_1",
+    "github write: request_changes PR_1 at h1",
+    "github write: close_issue I_1",
+  ]);
+});
+
 test("GitHub's errors come back as errors, and nothing is retried", async () => {
   const gql = fakeFetch({ body: { errors: [{ message: "Can not approve your own pull request" }] } });
   await assert.rejects(createWriter({ token: "t", fetch: gql.fetch }).approve("PR_x", "c"), /Can not approve your own pull request/);
@@ -97,10 +155,10 @@ test("GitHub's errors come back as errors, and nothing is retried", async () => 
   assert.equal(down.calls.length, 1);
 });
 
-test("the read client still refuses mutations, and neither the CLI's nor MCP's client can approve or mark ready", async () => {
+test("the read client still refuses mutations, and neither the CLI's nor MCP's client can write to GitHub", async () => {
   const f = fakeFetch({ body: { data: {} } });
   for (const doc of Object.values(ALLOWED)) await assert.rejects(createClient({ token: "t", fetch: f.fetch }).query(doc), /read-only/);
   assert.equal(f.calls.length, 0);
   const api = createDeskClient(() => new Response("{}"));
-  assert.ok(!Object.keys(api).some((k) => /approve|send|merge|ready/i.test(k)));
+  assert.ok(!Object.keys(api).some((k) => /approve|send|merge|ready|close|draft|reopen|changes|github/i.test(k)));
 });

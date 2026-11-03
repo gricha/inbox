@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import type { Card, ItemDetail } from "../../../src/types.ts";
+import type { Card, GitHubAction, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, SNOOZE } from "../format.ts";
 import { armOf, type Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
+import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a t).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a t .).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
@@ -21,6 +22,10 @@ export interface RowCtx {
   run: (c: Card, key: string) => void;
   snooze: (c: Card, until: string) => void;
   closeSnooze: () => void;
+  moreFor: string | null; // the row whose More menu (.) is open
+  closeMore: () => void;
+  github: (c: Card, action: GitHubAction) => void; // a More menu write, after its second press where it takes one
+  flash: (text: string) => void;
 }
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
@@ -108,6 +113,14 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             Ask
           </button>
         )}
+        {sel && rowActions(card).length > 0 && (
+          <MoreButton
+            className="line-more"
+            onClick={() => {
+              ctx.run(card, ".");
+            }}
+          />
+        )}
         {/* Filled and with its key only under the cursor, since that's the row the key acts on. */}
         {card.cta === "ready" && !why && (
           <button
@@ -140,6 +153,17 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         </span>
       </div>
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
+      {ctx.moreFor === card.id && (
+        <MoreMenu
+          card={card}
+          actions={rowActions(card)}
+          pick={(a) => {
+            ctx.github(card, a);
+          }}
+          onClose={ctx.closeMore}
+          flash={ctx.flash}
+        />
+      )}
       {/* Under the row, so it never covers the row itself. */}
       {ctx.snoozeFor === card.id && (
         <SnoozeMenu

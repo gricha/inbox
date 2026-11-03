@@ -11,6 +11,7 @@ import type { GitHubWriter } from "../src/github/write.ts";
 import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
+import { refuseWrites } from "./helpers/writer.ts";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -197,9 +198,8 @@ async function until(cond: () => boolean): Promise<void> {
 
 function fakeWriter() {
   const calls: string[][] = [];
-  const no = () => Promise.reject(new Error("not here"));
   const writer: GitHubWriter = {
-    approve: no,
+    ...refuseWrites("not here"),
     reply: (to, body) => {
       calls.push(["reply", to, body]);
       return Promise.resolve({ url: "https://github.com/acme/web/pull/3#discussion_r9" });
@@ -208,7 +208,6 @@ function fakeWriter() {
       calls.push(["comment", pr, body]);
       return Promise.resolve({ url: "https://github.com/acme/web/pull/3#issuecomment-9" });
     },
-    ready: no,
   };
   return { writer, calls };
 }

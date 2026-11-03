@@ -1,6 +1,6 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m m` hands it off for merge: the coordinator, a background Claude Code session the desk starts, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to the queue only when it can't. Approving someone's PR, sending your reply to a reviewer and marking your own draft ready for review are the only things the desk writes to GitHub.
+A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m m` hands it off for merge: the coordinator, a background Claude Code session the desk starts, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to the queue only when it can't. Approving someone's PR, sending your reply to a reviewer, marking your own draft ready for review and the More menu's typical PR and issue actions (close, convert to draft, merge, reopen, request changes) are the only things the desk writes to GitHub.
 
 Runs on macOS, Linux and Windows.
 
@@ -38,6 +38,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `o`       | open on GitHub                                                 |
 | `a` `a`   | the row's call to action: your draft, ready for review         |
 | `m` `m`   | your own PR: hand off for merge; `b` brings it back to desk    |
+| `.`       | more, on GitHub: close, convert to draft, merge, reopen        |
 | `e` / `d` | done: hidden until someone else comments, reviews or pushes    |
 | `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
 | `m` / `p` | someone else's: mute / pin                                     |
@@ -141,7 +142,7 @@ It runs with your own Claude Code permissions, so allow or approve `git`, `gh pr
 
 ## Never
 
-- Its writes to GitHub are approving a PR, when you press `a` twice in its review; your reply to a conversation, when you press Send twice under it in a PR's review; and marking your own draft ready for review, when you press `a` twice on its row or in its review. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it, and `m`, `b` and a hand-back write nothing. The coordinator is your own Claude Code session, which the desk starts and wakes: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
+- Its writes to GitHub are approving a PR, when you press `a` twice in its review; your reply to a conversation, when you press Send twice under it in a PR's review; marking your own draft ready for review, when you press `a` twice on its row or in its review; and the More menu's (`.` on the selected row or in a PR's review), each only when the desk allows it for that item: closing (`c` twice) or reopening (`r`) your own PR, converting it to a draft (`d`), merging it (`m` twice; only when it's approved, green and GitHub says it's mergeable, with the repo's merge method, pinned to the commit the desk judged ready), closing an issue you opened or are assigned (`c` twice), and requesting changes on someone else's PR with what you write in its review (`x`, then send twice). `u` right after a close or a draft reopens it or marks it ready again. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it, and `m`, `b` and a hand-back write nothing. The coordinator is your own Claude Code session, which the desk starts and wakes: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
 - It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools.
 

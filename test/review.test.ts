@@ -27,6 +27,7 @@ import {
 import { analyze } from "../src/signals.ts";
 import type { AiReview, Item, ReviewFile } from "../src/types.ts";
 import { FakeGitHub, hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
+import { refuseWrites } from "./helpers/writer.ts";
 
 const PATCH = [
   "@@ -10,3 +10,4 @@ export function plan(q: Query) {",
@@ -1066,15 +1067,13 @@ function fakeWriter(landed = () => {}) {
   const calls: { pr: string; commit: string; body?: string }[] = [];
   let fail = false;
   const writer: GitHubWriter = {
+    ...refuseWrites("approve tests only approve"),
     approve: (pr, commit, body) => {
       calls.push({ pr, commit, body });
       if (fail) return Promise.reject(new Error("Resource not accessible"));
       landed();
       return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
     },
-    reply: () => Promise.reject(new Error("approve tests don't reply")),
-    comment: () => Promise.reject(new Error("approve tests don't comment")),
-    ready: () => Promise.reject(new Error("approve tests don't mark ready")),
   };
   return {
     writer,

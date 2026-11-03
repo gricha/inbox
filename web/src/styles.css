@@ -831,8 +831,9 @@ kbd {
   margin-left: 0;
 }
 
-/* The selected row's quiet way to the coordinator, before its call to action, at its height. */
-.line .line-ask {
+/* The selected row's quiet way to the coordinator and its More menu, before its call to action, at its height. */
+.line .line-ask,
+.line .line-more {
   position: relative;
   z-index: 1;
   flex: none;
@@ -841,11 +842,14 @@ kbd {
   margin: -4px 0 -4px auto;
 }
 
-.line-ask + .line-cta {
+.line-ask + .line-cta,
+.line-ask + .line-more,
+.line-more + .line-cta {
   margin-left: -8px;
 }
 
-.line-ask + .line-age {
+.line-ask + .line-age,
+.line-more + .line-age {
   margin-left: 0;
 }
 
@@ -867,6 +871,21 @@ kbd {
 
 .line .popover {
   left: 4px;
+}
+
+/* Under its More button, at the row's right end. */
+.line .more-pop {
+  right: 4px;
+  left: auto;
+}
+
+.more-wrap {
+  position: relative;
+}
+
+.more-wrap .more-pop {
+  right: 0;
+  left: auto;
 }
 
 .d-why {
@@ -1912,6 +1931,18 @@ kbd {
   background: var(--wash);
 }
 
+/* Letters differ in width too: m would push its label past c's and d's. */
+.more-pop .pop-item kbd {
+  min-width: 1.6ch;
+  text-align: center;
+}
+
+/* A second press closes or merges it: the accent's ring, as on an armed button. */
+.pop-item.armed {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--ink);
+}
+
 /* Digits differ in width: a fixed key column starts every label on one edge. */
 .pop-item kbd {
   min-width: 1ch;
@@ -2802,8 +2833,16 @@ kbd {
 .rv-head,
 .rv-ai,
 .rv-actions,
+.rv-changes,
 .rv-files-err {
   padding: 0 12px;
+}
+
+.rv-changes {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+  margin-top: 12px;
 }
 
 /* The facts, the threads waiting on you, and the AI review. */

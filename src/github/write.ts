@@ -12,6 +12,8 @@ const execFileAsync = promisify(execFile);
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
 // reply and comment: your reply to a conversation in a PR's review, when you press Send.
 // ready: your own draft's "Ready for review" (a a on its row).
+// The rest are the More menu's (.): close, draft, merge and reopen your own PR, request changes on someone else's, close an issue.
+// expectedHeadOid pins a merge to the commit the desk judged ready, so a push since then isn't merged unseen.
 export const ALLOWED = {
   approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {
   addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: APPROVE, body: $body }) { pullRequestReview { url } }
@@ -25,6 +27,24 @@ export const ALLOWED = {
   ready: `mutation DeskReady($pr: ID!) {
   markPullRequestReadyForReview(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
 }`,
+  close: `mutation DeskClose($pr: ID!) {
+  closePullRequest(input: { pullRequestId: $pr }) { pullRequest { state } }
+}`,
+  draft: `mutation DeskDraft($pr: ID!) {
+  convertPullRequestToDraft(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
+}`,
+  merge: `mutation DeskMerge($pr: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {
+  mergePullRequest(input: { pullRequestId: $pr, expectedHeadOid: $head, mergeMethod: $method }) { pullRequest { state } }
+}`,
+  reopen: `mutation DeskReopen($pr: ID!) {
+  reopenPullRequest(input: { pullRequestId: $pr }) { pullRequest { state } }
+}`,
+  request_changes: `mutation DeskRequestChanges($pr: ID!, $commit: GitObjectID!, $body: String!) {
+  addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: REQUEST_CHANGES, body: $body }) { pullRequestReview { url } }
+}`,
+  close_issue: `mutation DeskCloseIssue($issue: ID!) {
+  closeIssue(input: { issueId: $issue }) { issue { state } }
+}`,
 } as const;
 
 export interface GitHubWriter {
@@ -32,6 +52,12 @@ export interface GitHubWriter {
   reply(threadId: string, body: string): Promise<{ url: string }>; // to a review thread
   comment(prNodeId: string, body: string): Promise<{ url: string }>; // on the PR
   ready(prNodeId: string): Promise<void>; // a draft, ready for review
+  close(prNodeId: string): Promise<void>;
+  draft(prNodeId: string): Promise<void>; // back to draft
+  merge(prNodeId: string, head: string, method: "MERGE" | "SQUASH" | "REBASE"): Promise<void>;
+  reopen(prNodeId: string): Promise<void>;
+  requestChanges(prNodeId: string, commit: string, body: string): Promise<{ url: string }>;
+  closeIssue(issueNodeId: string): Promise<void>;
 }
 
 export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHubWriter {
@@ -54,7 +80,8 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
 
   // No retries: a write that timed out may have landed.
   async function send(name: keyof typeof ALLOWED, target: string, variables: Record<string, unknown>): Promise<unknown> {
-    log(`github write: ${name} ${target}${typeof variables.commit === "string" ? ` at ${variables.commit}` : ""}`);
+    const at = variables.commit ?? variables.head;
+    log(`github write: ${name} ${target}${typeof at === "string" ? ` at ${at}` : ""}`);
     const res = await doFetch(ENDPOINT, {
       method: "POST",
       headers: { authorization: `bearer ${await token()}`, "content-type": "application/json", "user-agent": "review-desk" },
@@ -89,6 +116,27 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
     },
     ready: async (pr) => {
       await send("ready", pr, { pr });
+    },
+    close: async (pr) => {
+      await send("close", pr, { pr });
+    },
+    draft: async (pr) => {
+      await send("draft", pr, { pr });
+    },
+    merge: async (pr, head, method) => {
+      await send("merge", pr, { pr, head, method });
+    },
+    reopen: async (pr) => {
+      await send("reopen", pr, { pr });
+    },
+    requestChanges: async (pr, commit, body) => {
+      const data = (await send("request_changes", pr, { pr, commit, body })) as {
+        addPullRequestReview?: { pullRequestReview?: { url?: string } | null } | null;
+      } | null;
+      return { url: data?.addPullRequestReview?.pullRequestReview?.url ?? "" };
+    },
+    closeIssue: async (issue) => {
+      await send("close_issue", issue, { issue });
     },
   };
 }

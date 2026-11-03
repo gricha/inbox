@@ -586,6 +586,35 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
+  // The More menu (.): on your PR's review, on the queue's selected row, and on an old PR of yours under Later.
+  { name: "more-review", go: review("acme/worker#875", ["."]) },
+  {
+    name: "more-row",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator('.line[data-id="acme/worker#875"] .row-main').focus();
+      await page.keyboard.press(".");
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    name: "more-later",
+    go: async (page) => {
+      await at("#/later")(page);
+      await page.locator('.line[data-id="acme/api#4040"] .row-main').focus();
+      await page.keyboard.press(".");
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Request changes on someone else's PR: what you write, sent twice.
+    name: "review-request-changes",
+    go: async (page) => {
+      await review("acme/api#4127", [".", "x"])(page);
+      await page.keyboard.type("The retry loop never gives up: cap it, and add a test for the cap.");
+      await page.waitForTimeout(200);
+    },
+  },
   {
     // The sidebar after use: Later opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",
@@ -625,6 +654,8 @@ const SHOTS: Shot[] = [
       after: systemTheme,
     },
   ]),
+  // Close armed in a review's More menu: a second c closes it. Its toast goes under the next one's.
+  { name: "more-armed", go: review("acme/worker#875", [".", "c"]) },
   // Last: its "press a again" toast would sit over the next shot.
   { name: "review-approve", go: review("acme/api#4127", ["a"]) },
 ];

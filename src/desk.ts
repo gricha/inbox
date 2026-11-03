@@ -24,6 +24,7 @@ import type {
   ConfigError,
   Context,
   FocusView,
+  GitHubAction,
   InflightRow,
   InflightView,
   Item,
@@ -83,6 +84,14 @@ const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays the
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_LINE = 300; // a hand-back's why, a note
 const MAX_REPLY = 5_000;
+// What each More menu write does to % (the item), and what it did.
+const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
+  close: ["close %", "closed %"],
+  draft: ["convert % to a draft", "converted % to a draft"],
+  merge: ["merge %", "merged %"],
+  reopen: ["reopen %", "reopened %"],
+  request_changes: ["request changes on %", "requested changes on %"],
+};
 const MAX_ASK = 2_000; // an ask or its answer
 const ASKS_KEPT = 200;
 
@@ -185,7 +194,7 @@ export class Desk {
   aiFailures = 0; // in a row, across PRs
   aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
-  approving = new Set<string>(); // PRs on their way to an approval or ready for review
+  approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   sending = new Set<string>(); // conversations a reply is on its way to
 
   constructor(opts: DeskOptions) {
@@ -826,6 +835,7 @@ export class Desk {
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
     const stack = stackRef(snap.stacks, it.id);
+    const actions = this.actions(e);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -861,6 +871,7 @@ export class Desk {
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
       // A red draft needs finishing first; its why says so.
       ...(it.kind === "pr" && it.draft && it.state === "open" && it.ci !== "red" && me.author && this.writer && { cta: "ready" as const }),
+      ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
     };
@@ -1013,8 +1024,7 @@ export class Desk {
   // (in Merging: Enter opens it there; approved and green: o merges it on GitHub).
   nextStep(e: Entry): string | undefined {
     const it = e.item;
-    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
-    if (e.inflight || ready) return undefined;
+    if (e.inflight || readyToMerge(it)) return undefined;
     const hand = "m hands it off for merge";
     if (it.ci === "red") return `CI failing: ${hand}`;
     if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
@@ -1418,6 +1428,60 @@ export class Desk {
     this.changed();
     // The PR itself first, so it resolves as "you approved" within seconds; the search index lags, so a full pass alone wouldn't see it.
     void this.gh.refresh(id).then(() => this.sync());
+    return { url };
+  }
+
+  // The More menu's GitHub writes this item allows now. A PR in Merging is the coordinator's: b brings it back first.
+  actions(e: Entry): GitHubAction[] {
+    const it = e.item;
+    const me = e.analysis.signals.me;
+    if (!this.writer || e.inflight) return [];
+    if (it.kind === "issue") return it.state === "open" && (me.author || me.assignee) ? ["close"] : [];
+    if (!me.author) return it.state === "open" ? ["request_changes"] : [];
+    if (it.state === "closed") return ["reopen"];
+    if (it.state !== "open") return [];
+    return [
+      "close",
+      ...(it.draft ? [] : (["draft"] as const)),
+      ...(readyToMerge(it) && it.merge_method && it.head_oid ? (["merge"] as const) : []),
+    ];
+  }
+
+  // POST /api/github: a More menu write, on your keypress in the desk's window (close and merge armed, twice). A merge or a
+  // change request given `head` (from a review) must be on the commit it showed; a merge is pinned to the desk's head either way.
+  async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
+    this.requireConfig();
+    const e = this.snapshot().entries.get(this.resolve(ref))!;
+    const it = e.item;
+    const id = it.id;
+    const [verb, done] = GITHUB_VERB[action].map((x) => x.replace("%", id));
+    if (!this.actions(e).includes(action)) throw new DeskError(409, `can't ${verb} now`);
+    const pinned = action === "merge" || action === "request_changes";
+    if (pinned && opts.head !== undefined && opts.head !== it.head_oid)
+      throw new DeskError(409, `can't ${verb}: it has new commits since you opened it`);
+    const body = opts.body?.trim() ?? "";
+    if (action === "request_changes" && !body) throw new DeskError(400, "say what needs to change");
+    if (body.length > MAX_REPLY) throw new DeskError(400, `keep it under ${MAX_REPLY} characters`);
+    if (this.approving.has(id)) throw new DeskError(409, `already writing to ${id} on GitHub`);
+    const w = this.writer!;
+    this.approving.add(id);
+    let url = "";
+    try {
+      if (action === "close") await (it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
+      else if (action === "draft") await w.draft(it.node_id);
+      else if (action === "merge") await w.merge(it.node_id, it.head_oid, it.merge_method!);
+      else if (action === "reopen") await w.reopen(it.node_id);
+      else ({ url } = await w.requestChanges(it.node_id, it.head_oid, body));
+    } catch (err) {
+      throw new DeskError(502, `couldn't ${verb} on GitHub: ${(err as Error).message}`);
+    } finally {
+      this.approving.delete(id);
+    }
+    this.store.logWrite(id, action, this.now().toISOString());
+    this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
+    this.changed();
+    // Before answering, so the window shows it closed (or a draft) at once and its u finds it so.
+    await this.gh.refresh(id);
     return { url };
   }
 
@@ -1872,6 +1936,11 @@ export class Desk {
     const parts = [`${f.now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
     return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
   }
+}
+
+// The desk's ready rule: what o merges on GitHub, and what the More menu's merge needs.
+function readyToMerge(it: Item): boolean {
+  return it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
 }
 
 function countsOf(r: BoardResult): Record<Bucket, number> {

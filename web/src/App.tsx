@@ -3,6 +3,7 @@ import type {
   Action,
   Card,
   DesktopBridge,
+  GitHubAction,
   InflightRow,
   InflightView,
   ItemDetail,
@@ -31,6 +32,7 @@ import type { RowCtx } from "./components/CardRow.tsx";
 import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
+import { rowActions } from "./components/More.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
@@ -54,6 +56,14 @@ const VERB: Partial<Record<Action, string>> = {
   pin: "Pinned",
   unpin: "Unpinned",
   restore: "Restored",
+};
+// What a More menu write says it did; close and draft can be undone with u (reopen, ready for review).
+const DID: Record<GitHubAction, string> = {
+  close: "Closed on GitHub",
+  draft: "Converted to a draft on GitHub",
+  merge: "Merged on GitHub",
+  reopen: "Reopened on GitHub",
+  request_changes: "Requested changes on GitHub",
 };
 const sleep = (ms: number) =>
   new Promise((r) => {
@@ -94,6 +104,7 @@ export function App() {
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
+  const [moreFor, setMoreFor] = useState<string | null>(null); // the row whose More menu is open
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   // Later's groups other than its own open only when asked (g f, …), and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
@@ -126,6 +137,7 @@ export function App() {
   const refreshTimer = useRef(0);
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
+  const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // u after a close or a draft, instead
   const lastIndex = useRef(0);
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const gAt = useRef(0);
@@ -221,6 +233,7 @@ export function App() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setExpanded(null);
     setSnoozeFor(null);
+    setMoreFor(null);
     if (settingsSection !== null) {
       setSection(settingsSection);
       setSettingsSeen(true);
@@ -414,6 +427,7 @@ export function App() {
       const started = Date.now();
       const res = await api.act(c.id, action, until);
       undoSeq.current = res.undo_seq || null; // before the animation, so a quick u undoes this action
+      undoWrite.current = null;
       if (leaves) {
         await sleep(Math.max(0, 200 - (Date.now() - started)));
         setView((v) => v && removeCard(v, c.id));
@@ -434,6 +448,18 @@ export function App() {
   }
 
   async function undo() {
+    const w = undoWrite.current;
+    if (w) {
+      undoWrite.current = null;
+      try {
+        await (w.to === "ready" ? api.ready(w.id) : api.github(w.id, "reopen"));
+        flash(`Undid it on GitHub: ${shortId(w.id)} is ${w.to === "ready" ? "ready for review" : "open"} again`);
+      } catch (e) {
+        flash(message(e), true);
+      }
+      refresh(0);
+      return;
+    }
     // Only what this window did: a stray u must not walk back yesterday's history.
     if (undoSeq.current === null) {
       flash("Nothing to undo in this window");
@@ -531,6 +557,7 @@ export function App() {
     try {
       await api.act(c.id, "inflight");
       undoSeq.current = null;
+      undoWrite.current = null;
       setView((v) => v && removeCard(v, c.id));
       flash(`Handed off for merge: ${shortRef(c)}. The coordinator gets it merged.`);
     } catch (e) {
@@ -554,6 +581,7 @@ export function App() {
     try {
       await api.act(c.id, "takeback");
       undoSeq.current = null;
+      undoWrite.current = null;
       flash(`Back on your desk: ${shortRef(c)}`);
     } catch (e) {
       flash(message(e), true);
@@ -579,6 +607,29 @@ export function App() {
       }
       refresh(0);
     })();
+  }
+
+  // .: the row's More menu, with what the desk allows it on GitHub.
+  function openMore(c: Card) {
+    setSelected(c.id);
+    setSnoozeFor(null);
+    if (rowActions(c).length) setMoreFor(c.id);
+    else flash(`Nothing more to do on GitHub for ${shortRef(c)}`);
+  }
+
+  // A More menu write, from a row or a review (head: the commit the review showed).
+  async function github(c: Card, action: GitHubAction, head?: string) {
+    setMoreFor(null);
+    try {
+      await api.github(c.id, action, head ? { head_oid: head } : {});
+      undoSeq.current = null;
+      const to = action === "close" && c.kind === "pr" ? "reopen" : action === "draft" ? "ready" : null;
+      undoWrite.current = to && { id: c.id, to };
+      flash(`${DID[action]}: ${shortRef(c)}`, false, !!to);
+    } catch (e) {
+      flash(message(e), true);
+    }
+    refresh(0);
   }
 
   // t: a word with the coordinator about what you're on: the review's PR and its conversation, a row, or nothing.
@@ -635,6 +686,7 @@ export function App() {
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
       flash(`${shortRef(c)} is in Merging, so the coordinator has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
+    else if (k === ".") openMore(c);
     else if (k === "a" && c.cta === "ready") readyArmed(c);
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOffArmed(c);
     else if (k === "o") {
@@ -769,7 +821,7 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oedsmbpcwia".includes(k)) {
+    } else if (current && k.length === 1 && "oedsmbpcwia.".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
@@ -843,6 +895,16 @@ export function App() {
     },
     closeSnooze: () => {
       setSnoozeFor(null);
+    },
+    moreFor,
+    closeMore: () => {
+      setMoreFor(null);
+    },
+    github: (c, a) => {
+      void github(c, a);
+    },
+    flash: (text) => {
+      flash(text, false, false, ARM_MS);
     },
   };
   const configErrors = overview?.config_errors.length ?? 0;
@@ -933,6 +995,9 @@ export function App() {
               inert={help}
               flash={reviewFlash}
               onCard={run}
+              onGithub={(c, a, head) => {
+                void github(c, a, head);
+              }}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               armed={armed?.id ?? null}
               onBack={() => {
