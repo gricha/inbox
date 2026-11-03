@@ -5,8 +5,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type Page } from "playwright-core";
-import type { QueueView } from "../src/types.ts";
+import { chromium, type Page, type Route } from "playwright-core";
+import type { InflightView, QueueView, ReviewView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -85,6 +85,40 @@ const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
     await route.fulfill({ response: res, json: q });
   });
   await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+// The desk slow to answer: GETs matching `glob` wait until `release` lets them go. A reload first, so nothing the page
+// already fetched (a review a row's rest prefetched) stands in for them.
+const held: Route[] = [];
+const hold = async (page: Page, glob: string) => {
+  await page.route(glob, (route) => {
+    held.push(route);
+  });
+  await page.reload();
+};
+// The queue in a fresh page: nothing a changed answer left behind stands in for the next shot's.
+const fresh = async (page: Page) => {
+  await page.evaluate(`location.hash = "#/"`);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+const release = (glob: string) => async (page: Page) => {
+  await page.unroute(glob);
+  for (const r of held.splice(0)) await r.continue().catch(() => {}); // a reload dropped it
+  await fresh(page);
+};
+// Puts back what queueAs, reviewAs and the like changed; a live update refetching mid-handler just then fulfills too late.
+const unroute = (page: Page) => page.unrouteAll({ behavior: "ignoreErrors" });
+// A review as the mock serves it, changed in the browser.
+const reviewAs = (change: (v: ReviewView) => void) => async (page: Page) => {
+  await page.route("**/api/review/**", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const res = await route.fetch();
+    const v = (await res.json()) as ReviewView;
+    change(v);
+    await route.fulfill({ response: res, json: v });
+  });
+  await page.reload(); // nothing fetched before this stands in for it
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
 // The queue folds after its first ten: open it for a row that sits behind the line.
@@ -173,10 +207,20 @@ const SHOTS: Shot[] = [
       await top(page);
     },
     after: async (page) => {
-      await page.unroute("**/api/queue");
+      await unroute(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
+  },
+  {
+    // The first load while the desk is slow: quiet rows where the rows will be.
+    name: "queue-loading",
+    go: async (page) => {
+      await hold(page, "**/api/queue");
+      await page.locator(".queue .sk-row").first().waitFor();
+      await page.waitForTimeout(600); // the placeholders show only once the wait is noticeable
+    },
+    after: release("**/api/queue"),
   },
   {
     // The cursor on the queue's "n more" line, then Enter opens the rest in place.
@@ -227,6 +271,33 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "review", go: review("acme/api#4127") },
+  {
+    // Opened while the desk fetches its diff: the row's header and AI read at once, quiet placeholders for the rest.
+    name: "review-loading",
+    go: async (page) => {
+      await hold(page, "**/api/review/**");
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
+      await page.waitForTimeout(300);
+    },
+    after: release("**/api/review/**"),
+  },
+  {
+    // Nothing to show yet: no comments, no AI review, no files, one quiet line each.
+    name: "review-empty",
+    go: async (page) => {
+      await reviewAs((v) => {
+        Object.assign(v, { files: [], conversation: [], ai: null, ai_stale: false, generating: false, ai_error: null });
+        v.order = { ...v.order, ranked: false, chunks: [], unread: [], skipped: [], rest: [], notes: [] };
+        v.item = { ...v.item, additions: 0, deletions: 0, changed_files: 0 };
+      })(page);
+      await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
   {
     // The last file ends at the window's bottom: no empty room below it to scroll into.
     name: "review-bottom",
@@ -354,8 +425,41 @@ const SHOTS: Shot[] = [
   },
   // What Claude and the rules sorted away, on its own page.
   { name: "later", go: at("#/later") },
+  {
+    name: "later-empty",
+    go: async (page) => {
+      await queueAs((q) => {
+        q.sections.later = [];
+        q.sections.fyi = [];
+        q.hidden = [];
+        q.cleared = [];
+        q.resolved = [];
+      })(page);
+      await at("#/later")(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    },
+  },
   // Merging: what each waits on and the coordinator's latest note, one merged.
   { name: "inflight", go: at("#/inflight") },
+  {
+    name: "inflight-empty",
+    go: async (page) => {
+      await page.route("**/api/inflight", async (route) => {
+        const res = await route.fetch();
+        const v = (await res.json()) as InflightView;
+        v.rows = [];
+        await route.fulfill({ response: res, json: v });
+      });
+      await at("#/inflight")(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+    },
+  },
   {
     // The selected row's keys: Review, Open on GitHub, Back to desk.
     name: "inflight-selected",

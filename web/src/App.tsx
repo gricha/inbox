@@ -13,6 +13,7 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
+import { restOn } from "./reviews.ts";
 import { adoptTheme } from "./theme.ts";
 import {
   armOf,
@@ -336,6 +337,32 @@ export function App() {
   const current = flat.find((c) => c.id === selected) ?? null;
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
+  // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
+  const known = useMemo(() => {
+    const m = new Map<string, Card>();
+    if (view) for (const c of [...Object.values(view.sections).flat(), ...view.hidden, ...view.cleared, ...view.resolved]) m.set(c.id, c);
+    for (const r of laneRows) m.set(r.card.id, r.card);
+    return m;
+  }, [view, laneRows]);
+  const knownRef = useRef(known);
+  knownRef.current = known;
+
+  // The PR row you rest on, by j/k or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
+  const onRow = route.name === "inflight" ? (laneCur?.card ?? null) : route.name === "queue" || route.name === "later" ? current : null;
+  const restingPr = onRow?.kind === "pr" ? onRow.id : null;
+  useEffect(() => {
+    restOn(restingPr);
+  }, [restingPr]);
+  useEffect(() => {
+    const over = (e: PointerEvent) => {
+      const id = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-id]")?.dataset.id : undefined;
+      restOn(id && knownRef.current.get(id)?.kind === "pr" ? id : null);
+    };
+    document.addEventListener("pointerover", over);
+    return () => {
+      document.removeEventListener("pointerover", over);
+    };
+  }, []);
 
   useEffect(() => {
     if (onLane && laneCur) document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
@@ -1010,6 +1037,7 @@ export function App() {
             <Review
               key={route.id} // a different PR starts fresh: first file, no note, nothing armed
               id={route.id}
+              known={known.get(route.id) ?? null}
               loads={loads}
               me={overview?.me ?? ""}
               now={now}

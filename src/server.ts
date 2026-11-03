@@ -106,7 +106,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
     ready();
-    return c.json(await desk.reviewView(c.req.param("id")));
+    return c.json(await desk.reviewView(c.req.param("id"), c.req.query("ahead") === "1"));
   });
   app.post("/api/review/:id{.+}/ai", async (c) => {
     ready();

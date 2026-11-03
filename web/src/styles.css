@@ -760,9 +760,10 @@ kbd {
   outline: none;
 }
 
+/* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
 .line-title {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: calc-size(max-content, min(size, 40%, 24ch));
   overflow: hidden;
   color: var(--ink);
   font-size: 17px;
@@ -775,6 +776,8 @@ kbd {
 .line-ref,
 .line-num,
 .line-stack,
+.line-by,
+.line-stage,
 .line-note,
 .line-age {
   color: var(--pencil);
@@ -799,6 +802,21 @@ kbd {
 
 .line-stack {
   flex: none;
+}
+
+.line-by {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-stage {
+  margin-left: 14px;
+}
+
+.line-stage.t-warn {
+  color: var(--amber);
 }
 
 .line-note {
@@ -932,6 +950,94 @@ kbd {
 .quiet-note {
   padding: 40px 12px;
   color: var(--pencil);
+}
+
+/* Loading ------------------------------------------------------------------ */
+
+/* What's on its way: calm bars where its text will be. They show only once the wait is noticeable, then breathe slowly. */
+.sk {
+  display: inline-block;
+  width: 100%;
+  height: 0.7em;
+  border-radius: 4px;
+  background: var(--wash);
+  vertical-align: middle;
+  animation:
+    sk-in 200ms ease-out 150ms both,
+    sk-breathe 1.4s ease-in-out 350ms infinite alternate;
+}
+
+@keyframes sk-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sk-breathe {
+  to {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk {
+    animation: sk-in 200ms ease-out 150ms both;
+  }
+}
+
+/* Lines of text, each bar in the middle of its line's height. */
+.sk-lines {
+  display: grid;
+  line-height: 1.5;
+}
+
+.sk-lines .sk {
+  display: block;
+  margin: 0.4em 0;
+}
+
+.sk-lines .sk:nth-child(3n + 2) {
+  width: 88%;
+}
+
+.sk-lines .sk:nth-child(3n) {
+  width: 72%;
+}
+
+.sk-lines .sk:last-child:not(:only-child) {
+  width: 46%;
+}
+
+/* A row on its way, at a row's height: its title, its ref, its age on the right. */
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 48px;
+  padding: 0 12px;
+}
+
+.sk-row .sk {
+  flex: none;
+  width: 64px;
+}
+
+.sk-row .sk:first-child {
+  width: 40%;
+  height: 12px;
+}
+
+.sk-row:nth-child(3n + 2) .sk:first-child {
+  width: 54%;
+}
+
+.sk-row:nth-child(3n) .sk:first-child {
+  width: 30%;
+}
+
+.sk-row .sk:last-child {
+  width: 28px;
+  margin-left: auto;
 }
 
 .group-head {
@@ -2834,8 +2940,14 @@ kbd {
 .rv-ai,
 .rv-actions,
 .rv-changes,
-.rv-files-err {
+.rv-files-err,
+.rv-nofiles {
   padding: 0 12px;
+}
+
+/* As quiet as the review's other empty lines. */
+.rv-nofiles {
+  font-size: 13.5px;
 }
 
 .rv-changes {
@@ -3321,6 +3433,65 @@ kbd {
   overflow: hidden;
   border-radius: 8px;
   box-shadow: 0 0 0 1px var(--rule);
+}
+
+/* The review on its way: its header (when its row isn't at hand), keys, a file's name and code, the sidebar's files. */
+.rv-ref .sk {
+  width: 9em;
+}
+
+.rv-title .sk {
+  width: 60%;
+}
+
+.rv-meta .sk {
+  width: 24em;
+  max-width: 100%;
+}
+
+.sk-short .sk {
+  width: 16em;
+  max-width: 100%;
+}
+
+.sk-key {
+  width: 112px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.sk-key:first-child {
+  width: 152px;
+}
+
+.rv-fhead .sk {
+  width: 16em;
+  max-width: 60%;
+  margin: 5px 0;
+}
+
+.sk-code {
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--sheet);
+  box-shadow: 0 0 0 1px var(--rule);
+  font-size: 12px;
+  line-height: 19px;
+  animation: sk-in 200ms ease-out 150ms both;
+}
+
+.sk-code .sk {
+  margin: 5px 0;
+  background: var(--rule);
+}
+
+.s-section h2 .sk {
+  width: 6em;
+}
+
+.sk-files {
+  padding: 0 8px;
+  font-size: 13px;
 }
 
 /* A margin note: the AI's word on the change just above it. */

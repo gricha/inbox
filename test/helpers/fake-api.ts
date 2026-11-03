@@ -34,6 +34,7 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     url: `https://github.com/${repo}/pull/${n}`,
     author: "octo",
     author_bot: false,
+    by: "octo",
     bucket,
     why,
     board: "reviews",

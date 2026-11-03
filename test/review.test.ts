@@ -764,7 +764,7 @@ test("after a sync, other people's PRs in Now and Today get AI reviews two at a 
   for (const id of t.f.started.slice(1)) await t.f.release(id);
   assert.equal(t.desk.generating.size, 0);
   assert.ok(!t.f.started.includes("acme/web#4"), "never your own PR");
-  assert.equal(t.f.fetched.length, 3, "one diff fetch per PR");
+  assert.equal(t.f.fetched.length, 4, "one diff fetch per PR on the main page, yours too");
 
   assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")?.verdict, "skim");
   assert.equal(t.desk.item("api#1").ai?.summary, "Review of acme/api#1");
@@ -805,6 +805,63 @@ test("review.auto_ai off: nothing runs on its own; asking runs once per commit a
   assert.equal(t.f.started.length, 2, "force runs it again");
   await t.f.release("acme/api#1");
   await forced;
+  t.cleanup();
+});
+
+test("after a sync, the main page's PRs' diffs and conversations are fetched ahead, three at a time, once per head commit", async () => {
+  const t = await setup([ask(1), ask(2), ask(3), ask(4), ask(5), mine(6)], { settings: { "review.auto_ai": false } });
+  const calls: string[] = [];
+  const held: (() => void)[] = [];
+  let open = 0;
+  let most = 0;
+  t.f.deps.fetchPr = (item) => {
+    calls.push(`${item.id}@${item.head_oid}`);
+    most = Math.max(most, ++open);
+    return new Promise((resolve) => {
+      held.push(() => {
+        open--;
+        resolve({ body: "", files: [FILE] });
+      });
+    });
+  };
+  const drain = async () => {
+    while (held.length) {
+      held.shift()!();
+      await flush();
+    }
+  };
+  await t.sync();
+  assert.equal(calls.length, 3, "three at a time");
+  await drain();
+  assert.equal(calls.length, 6, "every PR on the main page, yours too");
+  assert.equal(most, 3, "never more than three");
+  assert.deepEqual(new Set(t.gh.contextCalls).size, 6, "and each one's conversation");
+
+  await t.sync();
+  assert.equal(calls.length, 6, "kept per head commit: another sync fetches nothing");
+  t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
+  await t.sync();
+  await drain();
+  assert.deepEqual(calls.slice(6), ["acme/api#1@h1b"], "a new commit is fetched again");
+
+  const before = calls.length;
+  assert.deepEqual((await t.desk.reviewView("api#1")).files, [FILE]);
+  assert.equal(calls.length, before, "opening it doesn't wait on GitHub");
+  t.cleanup();
+});
+
+test("a review fetched ahead (the row the cursor rests on) starts no AI review; opening it does", async () => {
+  const t = await setup([ask(1), ask(2), ask(3)]);
+  await t.sync();
+  assert.equal(t.f.started.length, 2, "two at a time");
+  const waiting = ["acme/api#1", "acme/api#2", "acme/api#3"].find((id) => !t.f.started.includes(id))!;
+  const ahead = await t.desk.reviewView(waiting, true);
+  assert.deepEqual(ahead.files, [FILE]);
+  assert.equal(ahead.generating, false);
+  assert.equal(t.f.started.length, 2, "fetched ahead: nothing starts");
+  assert.equal((await t.desk.reviewView(waiting)).generating, true, "opened: its AI review starts");
+  assert.equal(t.f.started.length, 3);
+  for (const id of t.f.started.slice()) await t.f.release(id);
   t.cleanup();
 });
 

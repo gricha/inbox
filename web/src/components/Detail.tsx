@@ -3,6 +3,7 @@ import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } fro
 import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
 import { armOf, cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
+import { SkLines } from "./Skeleton.tsx";
 
 const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "In the queue", today: "In the queue" };
 
@@ -33,7 +34,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   if (detail === undefined)
     return (
       <div className="detail">
-        <p className="quiet">Loading…</p>
+        <SkLines />
       </div>
     );
   if (typeof detail === "string")

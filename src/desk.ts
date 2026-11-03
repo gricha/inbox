@@ -9,6 +9,7 @@ import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
+import { stage, verdicts } from "./stage.ts";
 import type {
   Action,
   ActivityPage,
@@ -76,6 +77,7 @@ const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide:
 const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
 const AI_AT_ONCE = 2;
+const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
@@ -194,6 +196,8 @@ export class Desk {
   aiFailures = 0; // in a row, across PRs
   aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Promise<PrText>>();
+  warming = false;
+  warmAgain = false; // a sync landed while warming: go round once more
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   sending = new Set<string>(); // conversations a reply is on its way to
 
@@ -593,7 +597,38 @@ export class Desk {
       const top = this.top(this.snapshot(), new Set());
       void this.convos.warm([...top.now, ...top.today].filter((c) => c.cta === "reply").map((c) => c.id));
     }
+    void this.warmReviews();
     this.judge.pump();
+  }
+
+  // The main page's PRs' diffs and conversations, fetched ahead (only what changed: both are kept) so opening one doesn't wait.
+  async warmReviews(): Promise<void> {
+    if (this.warming) {
+      this.warmAgain = true;
+      return;
+    }
+    this.warming = true;
+    try {
+      do {
+        this.warmAgain = false;
+        if (this.stopped || !this.loaded || !this.review) return;
+        const top = this.top(this.snapshot(), new Set());
+        const ids = [...top.now, ...top.today]
+          .filter((c) => c.kind === "pr")
+          .map((c) => c.id)
+          .values();
+        const next = async () => {
+          for (const id of ids) {
+            if (this.stopped) return;
+            if (!this.snapshot().entries.has(id)) continue; // gone since: both would throw on it
+            await Promise.all([this.prText(id).catch(() => {}), this.convos.context(id).catch(() => {})]);
+          }
+        };
+        await Promise.all(Array.from({ length: WARM_AT_ONCE }, next));
+      } while (this.warmAgain);
+    } finally {
+      this.warming = false;
+    }
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips. `quiet`:
@@ -836,6 +871,8 @@ export class Desk {
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
     const stack = stackRef(snap.stacks, it.id);
     const actions = this.actions(e);
+    const via = e.analysis.signals.author.via.replace(/^@/, "");
+    const st = stage(it, me.author ? this.me() : it.author);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -846,6 +883,8 @@ export class Desk {
       url: it.url,
       author: it.author,
       author_bot: e.analysis.signals.author.bot,
+      by: me.author ? "you" : via || it.author,
+      ...(st && { stage: st }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? p?.why ?? "",
       demoted: p?.demoted,
@@ -1224,12 +1263,12 @@ export class Desk {
     return e;
   }
 
-  // GET /api/review/:id. Opening a PR asks for its AI review when auto_ai is on and there's none for this commit.
-  async reviewView(ref: string): Promise<ReviewView> {
+  // GET /api/review/:id. Opening a PR starts its AI review (auto_ai, none for this commit) and Claude's read; `ahead` neither.
+  async reviewView(ref: string, ahead = false): Promise<ReviewView> {
     const id = this.pr(ref).item.id;
     let files: ReviewFile[] = [];
     let filesError: string | null = null;
-    const talk = this.convos.view(id);
+    const talk = this.convos.view(id, !ahead);
     try {
       files = (await this.prText(id)).files;
     } catch (err) {
@@ -1237,7 +1276,7 @@ export class Desk {
     }
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
-    if (this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
+    if (!ahead && this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
     const d = this.item(id);
     const err = this.aiErrors.get(id);
     const own = err?.head_oid === e.item.head_oid ? err.message : null;
@@ -1617,16 +1656,7 @@ export class Desk {
       if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
       if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
       const m = this.merging(it.id);
-      const verdicts = new Map<string, Item["reviews"][number]>();
-      // The coordinator merges on an approval, so only a collaborator's counts; anyone's change request still holds it.
-      for (const r of it.reviews)
-        if (
-          !r.author_bot &&
-          r.author.toLowerCase() !== me &&
-          (r.state === "changes_requested" || r.state === "dismissed" || (r.state === "approved" && r.trusted))
-        )
-          verdicts.set(r.author.toLowerCase(), r);
-      const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
+      const { approved_by, changes_by } = verdicts(it, me);
       const row = {
         state: it.state,
         base: it.base,
@@ -1634,8 +1664,8 @@ export class Desk {
         merge_method: it.merge_method ?? null,
         ci: it.ci,
         failing: it.checks_failed ?? [],
-        approved_by: by("approved"),
-        changes_by: by("changes_requested"),
+        approved_by,
+        changes_by,
         waiting_on: it.review_requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer)),
         threads_unresolved: it.threads_unresolved,
         mergeable: it.mergeable,

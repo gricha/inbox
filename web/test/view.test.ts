@@ -9,6 +9,8 @@ import {
   cardFacts,
   currentFile,
   DEFAULT_OPEN,
+  diffRows,
+  drawUpTo,
   draftOf,
   foldOf,
   groupsOf,
@@ -40,6 +42,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     url: "",
     author: "dana",
     author_bot: false,
+    by: "dana",
     bucket: "now",
     why: "",
     board: "b",
@@ -579,4 +582,20 @@ test("the judge in plain words", () => {
   assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, keeps the rule's why");
   assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not sorted yet, so where the rules put it");
   assert.equal(judgeStepText({ bucket: "fyi", why: "bot", pending: true }), "fyi, bot (an earlier answer; sorting it again)");
+});
+
+test("a big diff draws a screenful of files first, then the rest a chunk at a time, at least one file each", () => {
+  const sec = (lines: number) => ({ hunks: [{ patch: Array.from({ length: lines }, () => "+x").join("\n") }] });
+  const list = [sec(150), sec(150), sec(150), sec(2000), sec(10), sec(10)];
+  assert.equal(drawUpTo(list, 0, 400), 3, "until the lines fill the budget");
+  assert.equal(drawUpTo(list, 3, 400), 4, "a file bigger than the budget goes alone");
+  assert.equal(drawUpTo(list, 4, 400), 6);
+  assert.equal(drawUpTo(list, 6, 400), 6, "all drawn");
+  assert.equal(drawUpTo([sec(5), sec(5)], 0), 2, "a small PR draws whole");
+});
+
+test("a diff's height is held at its context, added and removed lines until Pierre draws it", () => {
+  const h = (patch: string) => ({ patch });
+  assert.equal(diffRows([h("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n\\ No newline at end of file"), h("@@ -9 +10 @@\n x\n")]), 5);
+  assert.equal(diffRows([]), 0);
 });

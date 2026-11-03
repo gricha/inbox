@@ -194,7 +194,7 @@ export class Conversations {
   }
 
   // GET /api/review/:id's fields. Claude reads in the background; the view updates when it's done.
-  async view(id: string): Promise<Pick<ReviewView, "conversation" | "conversation_error" | "reading" | "reading_error">> {
+  async view(id: string, read = true): Promise<Pick<ReviewView, "conversation" | "conversation_error" | "reading" | "reading_error">> {
     let list: Conversation[];
     try {
       list = await this.list(id);
@@ -202,7 +202,7 @@ export class Conversations {
       return { conversation: [], conversation_error: (err as Error).message, reading: false, reading_error: null };
     }
     const unread = list.some((c) => c.waiting_on_you && !c.take);
-    if (unread) this.read(id);
+    if (unread && read) this.read(id);
     const err = unread ? this.errors.get(id) : undefined;
     return { conversation: list, conversation_error: null, reading: unread && !err, reading_error: err?.message ?? null };
   }

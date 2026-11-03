@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildTakePrompt, conversation, owesReply, parseTakes } from "../src/conversation.ts";
 import type { PrContext } from "../src/github/index.ts";
+import type { ReviewView } from "../src/types.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
@@ -301,6 +302,22 @@ test("your PR whose only action is answering someone says Reply on its row, and 
   await t.desk.sync();
   await until(() => fake.calls() === 1 && !t.desk.convos.reading);
   assert.ok(fake.stdin(1).includes("acme/web#3"));
+});
+
+test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude read nothing; opening it does", posix, async (c) => {
+  fakeClaude(c);
+  const t = await setup([myPr(4, { ci: "red", thread_last: azulus })], { settings: JUDGE_OFF });
+  c.after(t.cleanup);
+  t.gh.contexts.set("PR_acme/web_4", CTX);
+  await t.desk.sync();
+  t.desk.act("web#4", "pin");
+  const app = createApp(t.desk, 47823);
+  const get = (q = "") => app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/web#4")}${q}`);
+  const ahead = (await (await get("?ahead=1")).json()) as ReviewView;
+  assert.ok(ahead.conversation.some((x) => x.waiting_on_you));
+  assert.equal(t.desk.convos.reading, null, "not a Reply row, and only fetched ahead: nothing read");
+  await get();
+  assert.equal(t.desk.convos.reading, "acme/web#4", "opened: Claude reads it");
 });
 
 test("a reply goes only from the desk's window, to one of the PR's own conversations, and is logged", async (c) => {

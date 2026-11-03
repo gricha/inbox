@@ -7,6 +7,7 @@ export type Ci = "green" | "red" | "pending" | "none";
 export type ReviewDecision = "approved" | "changes_requested" | "required" | "none";
 export type Mergeable = "clean" | "conflict" | "unknown";
 export type ReviewState = "approved" | "changes_requested" | "commented" | "dismissed" | "pending";
+export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "merged" | "closed";
 
 // ---------------------------------------------------------------------------
 // GitHub item, normalized from GraphQL. Times are ISO strings.
@@ -377,6 +378,8 @@ export interface Card {
   url: string;
   author: string;
   author_bot: boolean;
+  by: string; // as its row says who it's from: "you" (yours, or a bot's for you), the person a bot opened it for, else its author
+  stage?: Stage; // a PR's, from stage() in src/stage.ts; an issue has none
   bucket: Bucket;
   why: string;
   demoted?: string;
