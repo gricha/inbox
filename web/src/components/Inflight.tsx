@@ -68,13 +68,13 @@ export function Inflight({
   );
 }
 
-// One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w nudges it).
+// One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
 function Coordinator({ c }: { c: CoordinatorView }) {
   if (!c.on) return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
   if (!c.id)
     return (
       <p className="lane-coord">
-        Starting the coordinator; <kbd>w</kbd> tries now.
+        The coordinator starts on your first hand-off; <kbd>w</kbd> starts it now.
       </p>
     );
   return (
@@ -93,7 +93,7 @@ function Coordinator({ c }: { c: CoordinatorView }) {
             <kbd>c</kbd> copy <code>claude attach {c.id}</code>
           </span>,
           <span key="wake">
-            <kbd>w</kbd> nudge it
+            <kbd>w</kbd> wake it
           </span>,
         ]}
       />

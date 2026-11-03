@@ -38,7 +38,7 @@ const LANE_KEYS: [string[], string][] = [
   [["b"], "Back to desk: the coordinator leaves it alone"],
   [["o"], "Open on GitHub"],
   [["c"], "Copy the command that opens the coordinator in a terminal"],
-  [["w"], "Nudge the coordinator: it looks at Merging now"],
+  [["w"], "Wake the coordinator: it starts, or looks at Merging now"],
   [["esc"], "Back to the queue"],
 ];
 

@@ -130,7 +130,7 @@ export const SETTINGS = [
     label: "Coordinator",
     type: "boolean",
     default: true,
-    help: "A background Claude Code session that gets the PRs you hand off merged. The desk keeps it running (it creates it once and picks it up after that) and messages it when something changes on a PR in Merging. Off: it's stopped and nothing reaches it.",
+    help: "A background Claude Code session that gets the PRs you hand off merged. The desk starts it on your first hand-off, keeps it running and wakes it when something changes on a PR in Merging. Off: it's stopped and nothing wakes it.",
   },
   {
     key: "policy.judge",

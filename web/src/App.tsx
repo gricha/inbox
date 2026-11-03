@@ -601,7 +601,7 @@ export function App() {
     else if (k === "b" && r.state === "open") void back(c);
   }
 
-  // c copies `claude attach <id>`; w has the coordinator look at Merging now (and starts it if it isn't running).
+  // c copies `claude attach <id>`; w starts the coordinator, or has it look at Merging now.
   async function coordinatorKey(k: "c" | "w") {
     const id = lane?.coordinator.id;
     try {
@@ -612,7 +612,7 @@ export function App() {
       } else if (id) {
         await copyText(`claude attach ${id}`);
         flash("Copied. Run it in a terminal to open the coordinator.");
-      } else flash("The coordinator isn't running yet: w starts it.");
+      } else flash("The coordinator isn't started yet: w starts it.");
     } catch (e) {
       flash(message(e), true);
     }
