@@ -132,7 +132,7 @@ export function App() {
 
   const armedRef = useRef(armed);
   armedRef.current = armed;
-  // An armed Send or hand-off needs its toast on screen: another toast replacing it disarms it.
+  // An armed hand-off or Ready for review needs its toast on screen: another toast replacing it disarms it.
   const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, arm = false) => {
     clearTimeout(toastTimer.current);
     if (!arm && armedRef.current) setArmed(null);
