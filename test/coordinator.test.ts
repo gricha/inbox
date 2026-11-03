@@ -203,7 +203,7 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null });
+    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null, error: null });
     t.desk.start();
     await until(() => t.fake.calls().length === 1);
     await settle();
@@ -224,7 +224,12 @@ test(
     const deny = (JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
       .permissions.deny;
     assert.ok(deny.includes("Bash(gh pr comment:*)") && deny.includes("Bash(git push --force:*)"));
-    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" });
+    assert.deepEqual(t.desk.inflight().coordinator, {
+      on: true,
+      id: "c0ffee01",
+      url: "https://claude.ai/code/session_01Fakec0ffee01",
+      error: null,
+    });
   },
 );
 
@@ -352,6 +357,20 @@ test("news a desk restart or a failed start interrupts isn't lost: it goes with 
   assert.match(t.said()[0]!, /In Merging: acme\/web#3 \S+: handed off, new comment\.$/);
   await settle();
   assert.deepEqual(desk.coordinator.news(), []);
+});
+
+test("when claude can't start or resume it, Merging says why and the owner is notified once, until it runs", posix, async (c) => {
+  const t = await coordinated(c, { "notify.quiet": "" });
+  t.fake.fail(true);
+  t.desk.act("web#3", "inflight");
+  await until(() => t.desk.inflight().coordinator.error === "Not logged in");
+  await t.desk.coordinator.flush();
+  assert.equal(starts(t.fake.calls()).length, 2, "it tried again");
+  assert.deepEqual(t.notes, ["Not logged in"], "notified once");
+  t.fake.fail(false);
+  await t.desk.coordinator.flush();
+  assert.equal(t.fake.sessions().length, 1);
+  assert.equal(t.desk.inflight().coordinator.error, null);
 });
 
 test(

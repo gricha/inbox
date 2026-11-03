@@ -461,6 +461,25 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // claude couldn't start or resume it: the line says why, in red.
+    name: "inflight-coord-error",
+    go: async (page) => {
+      await page.route("**/api/inflight", async (route) => {
+        const res = await route.fetch();
+        const v = (await res.json()) as InflightView;
+        v.coordinator.error =
+          "Workspace not trusted. Run `claude` in /Users/you/.review-desk/coordinator once and accept the trust prompt, then retry.";
+        await route.fulfill({ response: res, json: v });
+      });
+      await at("#/")(page); // from Merging itself the hash wouldn't change, so nothing would refetch
+      await at("#/inflight")(page);
+      await page.locator(".lane-coord-error").waitFor({ timeout: 5000 });
+    },
+    after: async (page) => {
+      await unroute(page);
+    },
+  },
+  {
     // The selected row's keys: Review, Open on GitHub, Back to desk.
     name: "inflight-selected",
     go: async (page) => {

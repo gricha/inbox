@@ -77,6 +77,12 @@ export function Inflight({
 // One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
 function Coordinator({ c }: { c: CoordinatorView }) {
   if (!c.on) return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
+  if (c.error)
+    return (
+      <p className="lane-coord lane-coord-error">
+        The coordinator can't run: {c.error} <kbd>w</kbd> tries again.
+      </p>
+    );
   if (!c.id)
     return (
       <p className="lane-coord">

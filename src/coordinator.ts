@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Desk } from "./desk.ts";
+import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
 
@@ -12,6 +13,7 @@ const NAME = "Review Desk coordinator";
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
 const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
 const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines
+const ERROR = "coordinator_error"; // why it last couldn't run; kept so a desk restart doesn't notify again
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 // It reads CI logs and comments anyone can write; these keep injected text from posting or rewriting as the owner.
 // gh api whole: it POSTs whenever a field is passed, with no -X.
@@ -106,6 +108,22 @@ export class Coordinator {
     return (this.desk.store.get(ASKS) as string[] | null) ?? [];
   }
 
+  error(): string | null {
+    return (this.desk.store.get(ERROR) as string | null) ?? null;
+  }
+
+  // Shown in Merging until a run succeeds, and notified once: news waits on it, and the log alone went unseen for hours.
+  failed(why: string | null): void {
+    if (this.desk.stopped) return;
+    const was = this.error();
+    if (was === why) return;
+    this.desk.store.set(ERROR, why);
+    this.desk.changed();
+    const s = this.desk.settings;
+    if (why && !was && s["notify.enabled"] && !inQuietHours(s["notify.quiet"], this.desk.now()))
+      this.desk.notify("Coordinator can't run", why);
+  }
+
   // The desk home's coordinator directory, with the deny list as its project settings unless the owner wrote their own.
   dir(): string {
     const dir = path.join(this.desk.home, "coordinator");
@@ -120,7 +138,7 @@ export class Coordinator {
   view(): CoordinatorView {
     const s = this.saved();
     if (s && !s.url && this.on && Date.now() - this.checked > FRESH) void this.flush();
-    return { on: this.on, id: s?.id ?? null, url: s?.url ?? null };
+    return { on: this.on, id: s?.id ?? null, url: s?.url ?? null, error: this.on ? this.error() : null };
   }
 
   // Desk start: the one it has is picked up, and checked every few minutes so one that crashed or was stopped comes back.
@@ -235,10 +253,12 @@ export class Coordinator {
           this.desk.changed();
         }
       }
+      this.failed(null);
       this.schedule();
     } catch (e) {
       this.asked = false;
       this.desk.log(`coordinator: ${(e as Error).message}`);
+      this.failed((e as Error).message.trim());
     } finally {
       this.flushing = null;
     }

@@ -736,6 +736,7 @@ export interface CoordinatorView {
   on: boolean;
   id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take; null until it's started
   url: string | null; // its Remote Control page on claude.ai
+  error: string | null; // why claude last couldn't start or resume it, until it does
 }
 
 // Your words to the coordinator from the desk's window (t), about what you were on, and its answer (desk_answer).
