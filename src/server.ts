@@ -173,7 +173,7 @@ export function createApp(desk: Desk, port: number): Hono {
       throw new DeskError(400, `${k} must be a string`);
     };
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
-    const ask = desk.ask({ text: b.text, item_id: str("item_id"), thread_id: str("thread_id"), thread_url: str("thread_url") });
+    const ask = await desk.ask({ text: b.text, item_id: str("item_id"), thread_id: str("thread_id"), thread_url: str("thread_url") });
     return c.json({ ok: true, ask });
   });
   app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks() }));

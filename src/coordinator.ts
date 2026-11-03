@@ -126,14 +126,21 @@ export class Coordinator {
   }
 
   // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle.
-  tell(line: string): void {
+  tell(line: string): Promise<void> {
     claudeSpawn(claudeCommand(), [line]); // throws on what cmd.exe can't pass
     this.desk.store.set(ASKS, [...this.asks(), line]);
-    void (async () => {
+    return (async () => {
       await this.flushing;
       this.close();
       await this.flush();
     })();
+  }
+
+  untell(line: string): void {
+    this.desk.store.set(
+      ASKS,
+      this.asks().filter((l) => l !== line),
+    );
   }
 
   // w in Merging: start it, or have it look now.

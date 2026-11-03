@@ -3,7 +3,7 @@ import type { Ask, AsksView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, shortId } from "../format.ts";
 
-const SHOWN = 3; // a review shows your latest asks; the older ones are a click away
+const SHOWN = 3; // your latest asks; in a review the older ones are a click away
 
 // A conversation in a PR's review, the one you were last on.
 export interface Thread {
@@ -23,7 +23,6 @@ export interface About {
 export function Composer({ about, loads, now, onClose }: { about: About; loads: number; now: number; onClose: () => void }) {
   const [text, setText] = useState("");
   const [view, setView] = useState<AsksView | null>(null);
-  const [sent, setSent] = useState<string[]>([]); // what you sent since it opened
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -67,7 +66,6 @@ export function Composer({ about, loads, now, onClose }: { about: About; loads: 
         thread_id: about.thread?.id,
         thread_url: about.thread?.url,
       });
-      setSent((s) => [...s, ask.id]);
       setView((v) => v && { ...v, asks: [...v.asks, ask] });
       setText("");
     } catch (e) {
@@ -77,7 +75,8 @@ export function Composer({ about, loads, now, onClose }: { about: About; loads: 
     }
   }
 
-  const mine = sent.flatMap((id) => view?.asks.filter((a) => a.id === id) ?? []);
+  // Your latest about the same item (or about nothing), so an answer is still here after a close.
+  const mine = (view?.asks ?? []).filter((a) => a.item_id === about.item).slice(-SHOWN);
   const what = [about.item && shortId(about.item), about.thread?.label].filter(Boolean);
   return (
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a native <dialog> is modal or needs show(); this bar sits over the page

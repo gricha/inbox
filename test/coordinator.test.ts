@@ -480,22 +480,46 @@ test("an ask comes only from the desk's own window, and only while the coordinat
   assert.deepEqual(t.fake.calls(), [], "nothing started or woke it");
 });
 
-test("desk_answer keeps the answer on its ask and notifies the owner; an unknown ask is a 404", posix, async (c) => {
+test(
+  "desk_answer keeps the answer on its ask and notifies the owner once, outside quiet hours; an unknown ask is a 404",
+  posix,
+  async (c) => {
+    const t = await coordinated(c, { "notify.quiet": "" });
+    const api = asking(t);
+    const { ask } = (await (await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" })).json()) as { ask: Ask };
+    await until(() => t.fake.sessions().length === 1);
+    const rev = t.desk.rev;
+    const res = await api.answer(ask.id, "Yes: 4be71c2 handles the\nempty list, with a test.");
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()) as { ask: Ask }).ask.answer, {
+      text: "Yes: 4be71c2 handles the empty list, with a test.",
+      at: NOW.toISOString(),
+    });
+    assert.ok(t.desk.rev > rev, "the window hears of it");
+    assert.deepEqual(t.notes, ["acme/web#3: Yes: 4be71c2 handles the empty list, with a test."]);
+    assert.deepEqual((await api.list()).asks[0]!.answer?.text, "Yes: 4be71c2 handles the empty list, with a test.");
+    assert.equal((await api.answer("nope", "hi")).status, 404);
+    assert.equal((await api.answer(ask.id, " ")).status, 400);
+    assert.equal((await api.answer(ask.id, "Also rebased it.")).status, 200);
+    assert.equal(t.notes.length, 1, "only its first answer notifies");
+    const h = NOW.getHours();
+    t.desk.putSettings({ set: { "notify.quiet": `${h}:00-${h + 1}:00` } });
+    const quiet = ((await (await api.ask({ text: "anything left for me today?" })).json()) as { ask: Ask }).ask;
+    assert.equal((await api.answer(quiet.id, "No.")).status, 200);
+    assert.equal(t.notes.length, 1, "quiet hours");
+  },
+);
+
+test("an ask that can't start the coordinator says so and isn't kept", posix, async (c) => {
   const t = await coordinated(c);
   const api = asking(t);
-  const { ask } = (await (await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" })).json()) as { ask: Ask };
-  await until(() => t.fake.sessions().length === 1);
-  const rev = t.desk.rev;
-  const res = await api.answer(ask.id, "Yes: 4be71c2 handles the\nempty list, with a test.");
-  assert.equal(res.status, 200);
-  assert.deepEqual(((await res.json()) as { ask: Ask }).ask.answer, {
-    text: "Yes: 4be71c2 handles the empty list, with a test.",
-    at: NOW.toISOString(),
-  });
-  assert.ok(t.desk.rev > rev, "the window hears of it");
-  assert.deepEqual(t.notes, ["acme/web#3: Yes: 4be71c2 handles the empty list, with a test."]);
-  assert.deepEqual((await api.list()).asks[0]!.answer?.text, "Yes: 4be71c2 handles the empty list, with a test.");
-  assert.equal((await api.answer("nope", "hi")).status, 404);
-  assert.equal((await api.answer(ask.id, " ")).status, 400);
-  assert.equal(t.notes.length, 1);
+  t.fake.fail(true);
+  const res = await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" });
+  assert.equal(res.status, 502);
+  assert.deepEqual((await api.list()).asks, []);
+  assert.deepEqual(t.desk.coordinator.asks(), []);
+  t.fake.fail(false);
+  const { ask } = (await (await api.ask({ text: "try again" })).json()) as { ask: Ask };
+  assert.equal(t.fake.sessions()[0]!.prompts[0], `${ROLE} My ask ${ask.id}: "try again" Answer it with desk_answer.`);
+  assert.deepEqual((await api.list()).asks, [ask]);
 });

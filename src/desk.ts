@@ -1646,7 +1646,7 @@ export class Desk {
   }
 
   // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread) you were on.
-  ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }): Ask {
+  async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }): Promise<Ask> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
     const item = b.item_id ? this.snapshot().entries.get(this.resolve(b.item_id))!.item : null;
     if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) throw new DeskError(400, "thread_url must be a GitHub URL");
@@ -1659,13 +1659,29 @@ export class Desk {
       thread_url: item && b.thread_url ? b.thread_url : null,
       answer: null,
     };
+    const line = askLine(a, item?.url ?? null);
+    const started = !!this.coordinator.saved();
+    let told: Promise<void>;
     try {
-      this.coordinator.tell(askLine(a, item?.url ?? null));
+      told = this.coordinator.tell(line);
     } catch (err) {
       throw new DeskError(400, (err as Error).message);
     }
     this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
     this.changed();
+    // Like w: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
+    if (!started) {
+      await told;
+      if (!this.coordinator.saved()) {
+        this.coordinator.untell(line);
+        this.store.set(
+          "asks",
+          this.asks().filter((x) => x.id !== a.id),
+        );
+        this.changed();
+        throw new DeskError(502, "the coordinator didn't start; the desk's log says why");
+      }
+    }
     return a;
   }
 
@@ -1680,7 +1696,8 @@ export class Desk {
       all.map((x) => (x === a ? done : x)),
     );
     this.changed();
-    if (this.settings["notify.enabled"]) this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
+    if (!a.answer && this.settings["notify.enabled"] && !inQuietHours(this.settings["notify.quiet"], this.now()))
+      this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
     return done;
   }
 

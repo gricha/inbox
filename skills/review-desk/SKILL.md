@@ -39,6 +39,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 | `desk_merging`   | The user's PRs in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base (stacked or not), the repo's merge method, the last note. |
 | `desk_note`      | A status line on a PR in Merging (`ref`, `text`), shown on its row with its age. Only the latest shows.                                                  |
 | `desk_hand_back` | Give a PR in Merging back to the user (`ref`, `why`, one line): it leaves Merging for the top of the queue with that reason.                             |
+| `desk_answer`    | Answer the user's ask (`ask_id` from the wake, `text`): it shows under their ask in the desk and notifies them.                                          |
 | `desk_policy`    | `get` the policy (fenced) with its hash and the judge's status; `set` with the whole new `text` and `base` = that hash.                                  |
 | `desk_config`    | `get` config.toml with its hash; `preview` a full new text (what moves, nothing saved); `save` it with `base` = the hash.                                |
 

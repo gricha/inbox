@@ -208,6 +208,7 @@ export function App() {
   useEffect(() => {
     const on = () => {
       setRoute(parseRoute(location.hash));
+      setThread(null); // a review you come back to asks about the PR until you pick a conversation again
     };
     window.addEventListener("hashchange", on);
     return () => {

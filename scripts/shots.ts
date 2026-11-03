@@ -447,10 +447,10 @@ const SHOTS: Shot[] = [
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");
       await page.keyboard.press("t");
-      await page.locator(".composer-input").waitFor();
+      await page.locator(".composer .ask", { hasText: "kai's naming nit" }).waitFor(); // its asks loaded, so they can't replace the one sent
       await page.keyboard.type("Confirm we addressed priya's question so I can reply");
       await page.keyboard.press("Enter");
-      await page.locator(".composer .ask").waitFor();
+      await page.locator(".composer .ask", { hasText: "priya's question" }).waitFor();
       await page.waitForTimeout(300); // its rise in has run
     },
     after: async (page) => {
