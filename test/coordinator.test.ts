@@ -365,7 +365,8 @@ test(
     await settle();
     assert.deepEqual([t.said(), t.fake.calls()], [[], []], "a desk with no coordinator starts none for it");
     t.desk.act("web#4", "inflight");
-    await until(() => t.said().length === 1);
+    // The desk sends rebases only once it has stored its coordinator, a moment after claude was asked to start it.
+    await until(() => t.said().length === 1 && !!t.desk.coordinator.saved());
     await t.desk.sync();
     await until(() => t.said().length === 2);
     await t.desk.sync();
