@@ -193,5 +193,5 @@ test("stacked: a PR whose base isn't its repo's default branch; unknown until th
   const s = (o: Partial<Item>) => analyze(makeItem(o), makeContext(), cfg, NOW).signals.pr.stacked;
   assert.equal(s({ base: "ref/sa-narrow", default_branch: "master" }), true);
   assert.equal(s({ base: "master", default_branch: "master" }), false);
-  assert.equal(s({ base: "ref/sa-narrow" }), false, "stored before the default branch was fetched");
+  assert.equal(s({ base: "ref/sa-narrow", default_branch: undefined }), false, "stored before the default branch was fetched");
 });

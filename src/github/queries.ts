@@ -45,6 +45,12 @@ const PR = `${COMMON}
   timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
     nodes { ... on ReviewRequestedEvent { createdAt actor { __typename login } requestedReviewer { ${REVIEWER} } } }
   }
+  baseChanges: timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT, AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT], last: 1) {
+    nodes {
+      ... on BaseRefChangedEvent { previousRefName createdAt }
+      ... on AutomaticBaseChangeSucceededEvent { oldBase createdAt }
+    }
+  }
   latestReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
   latestOpinionatedReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
   reviews(last: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
@@ -84,6 +90,22 @@ export function detailsMine(n: number): string {
   ${RATE}
   ${ids.map(one).join("\n  ")}
 }`;
+}
+
+// Stack probes in one repo, one alias each: up, the PRs whose head is the branch, any state (a fork's are dropped after);
+// down, the open PRs based on it. Exact branch names, unlike search's head:/base: qualifiers.
+export function branchPrs(dirs: ("up" | "down")[]): string {
+  const one = (d: "up" | "down", i: number) =>
+    d === "up"
+      ? `p${i}: pullRequests(headRefName: $b${i}, states: [OPEN, MERGED, CLOSED], first: 3, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`
+      : `p${i}: pullRequests(baseRefName: $b${i}, states: [OPEN], first: 10, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`;
+  return `query($owner: String!, $name: String!, ${dirs.map((_, i) => `$b${i}: String!`).join(", ")}) {
+  ${RATE}
+  repository(owner: $owner, name: $name) {
+    ${dirs.map(one).join("\n    ")}
+  }
+}
+fragment B on PullRequest { __typename id number title updatedAt repository { nameWithOwner } author { __typename login } headRepository { nameWithOwner } }`;
 }
 
 export const TEAMS = `query($me: String!) {

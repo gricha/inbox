@@ -1322,6 +1322,18 @@ kbd {
   margin-top: 0;
 }
 
+/* A stack's rows together, bottom first, under one quiet line. */
+.lane-stack {
+  margin: 6px 0;
+}
+
+.lane-stack-head {
+  margin: 0;
+  padding: 0 18px;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
 /* Merged reads like Resolved: a flat row on the paper, its title regular and pencil. */
 .lane .dim.card {
   background: none;
@@ -2388,14 +2400,133 @@ kbd {
 
 /* Review ------------------------------------------------------------------- */
 
-/* A PR's review takes the queue's place: a header, the AI's read, then the files and the diff with its notes. */
-.main:has(.review) {
-  max-width: 1280px;
+/* A PR's review takes the queue's place, the window's width: a header, the AI's read, then the diff in reading order with
+   its notes; beside it, unless folded, the sidebar with the stack, the files and recent activity. */
+.col:has(.review) {
+  --col-w: 100%;
 }
 
 .review {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.rv-main {
+  display: grid;
   gap: 22px;
+  min-width: 0;
+}
+
+@media (width > 1100px) {
+  .review.side-open {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+}
+
+.rv-side {
+  position: sticky;
+  top: 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 26px;
+  align-content: start;
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+  font-size: 12.5px;
+}
+
+/* Narrower, it opens over the diff's right edge rather than squeezing it. */
+@media (width <= 1100px) {
+  .rv-side {
+    position: fixed;
+    top: 52px;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    width: min(300px, 85vw);
+    max-height: none;
+    padding: 20px 14px 20px 16px;
+    border-left: 1px solid var(--rule);
+    background: var(--paper);
+  }
+}
+
+.rv-side ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rv-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.rv-stack h3.rv-side-head {
+  margin-top: 12px;
+}
+
+/* A stack member: its state's glyph, its number, its title, and what's wrong, running or approved. */
+.rv-member {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.rv-member:hover {
+  background: var(--side-hover);
+  text-decoration: none;
+}
+
+/* The PR on screen: the cursor's neutral fill and pencil ring, as the file you're in. */
+.rv-member.on {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+  color: var(--ink);
+}
+
+.rv-member.dim {
+  color: var(--pencil);
+}
+
+.rv-node {
+  flex: none;
+  width: 1em;
+  color: var(--pencil);
+  text-align: center;
+}
+
+.rv-mnum {
+  flex: none;
+  color: var(--pencil);
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-mtitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rv-marks {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  color: var(--pencil);
 }
 
 .back {
@@ -2412,21 +2543,14 @@ kbd {
   text-decoration: none;
 }
 
-@media (width > 820px) {
-  .topbar:has(.back) {
-    padding-left: max(20px, calc((100% - 1280px) / 2 + 24px));
-  }
-}
-
 .rv-head,
-.rv-activity,
 .rv-ai,
 .rv-actions,
 .rv-files-err {
   padding: 0 12px;
 }
 
-/* The facts, recent activity and the AI review; the activity's place depends on the width (see Narrow windows). */
+/* The facts, the threads waiting on you, and the AI review. */
 .rv-top {
   display: grid;
   gap: 22px;
@@ -2517,13 +2641,13 @@ kbd {
   align-content: start;
   justify-items: start;
   min-width: 0;
-  padding-top: 3px;
+  padding: 0 8px;
   color: var(--ink-2);
   font-size: 13px;
 }
 
 .rv-activity .d-head {
-  margin: 0;
+  margin: 0 0 2px;
 }
 
 .rv-age {
@@ -2593,42 +2717,6 @@ kbd {
 .act.armed {
   color: var(--ink);
   font-weight: 650;
-}
-
-.rv-body {
-  display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: 22px;
-  align-items: start;
-}
-
-.rv-files {
-  position: sticky;
-  top: 68px;
-  max-height: calc(100vh - 88px);
-  overflow: auto;
-  font-size: 12.5px;
-}
-
-.rv-files ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rv-files-head,
-.rv-files-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 0 6px;
-  padding: 0 8px;
-  color: var(--pencil);
-}
-
-.rv-files-foot {
-  display: block;
-  margin: 10px 0 0;
 }
 
 .rv-keys {
@@ -2705,12 +2793,6 @@ kbd {
   overflow-wrap: break-word;
 }
 
-@media (width >= 1280px) {
-  .rv-body {
-    grid-template-columns: 300px minmax(0, 1fr);
-  }
-}
-
 .rv-nn {
   flex: none;
   width: 6px;
@@ -2719,7 +2801,8 @@ kbd {
   background: var(--pencil);
 }
 
-.rv-delta {
+.rv-delta,
+.rv-lvl {
   flex: none;
   color: var(--pencil);
   font-variant-numeric: tabular-nums;
@@ -2762,6 +2845,10 @@ kbd {
   white-space: nowrap;
 }
 
+.rv-fhead .rv-fname {
+  flex: 0 1 auto;
+}
+
 .rv-fhead .rv-delta {
   margin-left: auto;
 }
@@ -2770,6 +2857,43 @@ kbd {
   flex: 0 1 auto;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* What Claude made of it, before the name: a look in ink, a skim a step quieter, unread in pencil. */
+.rv-level {
+  flex: none;
+  font-weight: 650;
+}
+
+.l-skim {
+  color: var(--ink-2);
+  font-weight: 550;
+}
+
+.l-unread {
+  color: var(--pencil);
+  font-weight: 500;
+}
+
+.rv-why {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pencil);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The rest, folded: one line with a count; Enter (or a click) opens it in place. */
+.rv-fold {
+  margin: 0;
+  padding: 8px 12px 9px;
+}
+
+.rv-fold[aria-expanded="true"] {
+  color: var(--ink-2);
+  font-weight: 550;
 }
 
 /* Pierre's diff, in its own shadow root: its variables take our fonts and surfaces. */
@@ -2785,14 +2909,6 @@ kbd {
   overflow: hidden;
   border-radius: 8px;
   box-shadow: 0 0 0 1px var(--rule);
-}
-
-.rv-nodiff {
-  padding: 10px 12px;
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--rule);
-  color: var(--pencil);
-  font-size: 13px;
 }
 
 /* A margin note: the AI's word on the change just above it. */
@@ -2838,90 +2954,6 @@ kbd {
 
   .keys-cols {
     grid-template-columns: 1fr 1fr;
-  }
-}
-
-/* Wide: recent activity in a column of its own beside the facts and the AI review. */
-@media (width > 1100px) {
-  .rv-top:has(.rv-activity) {
-    grid-template-rows: auto 1fr;
-    grid-template-columns: minmax(0, 1fr) 300px;
-    column-gap: 48px;
-  }
-
-  .rv-top .rv-activity {
-    grid-row: 1 / span 2;
-    grid-column: 2;
-  }
-
-  /* Your own PR without an AI review: no empty row under the facts. */
-  .rv-top:has(.rv-activity):not(:has(.rv-ai)) {
-    grid-template-rows: auto;
-  }
-
-  .rv-top:not(:has(.rv-ai)) .rv-activity {
-    grid-row: 1;
-  }
-
-  .rv-top .rv-ai {
-    grid-column: 1;
-  }
-}
-
-@media (width <= 1100px) {
-  /* Under the facts, recent activity is one wrapped line, so the AI review and the diff stay near the top. */
-  .rv-activity {
-    display: flex;
-    align-items: baseline;
-    margin-top: -8px;
-    padding-top: 0;
-  }
-
-  .rv-activity .d-head {
-    flex: none;
-    margin-right: 10px;
-  }
-
-  .rv-activity .events {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px 0;
-    min-width: 0;
-    margin-left: -18px;
-    clip-path: inset(0 0 0 18px);
-  }
-
-  .rv-activity .events > li {
-    position: relative;
-    padding-left: 18px;
-  }
-
-  .rv-activity .events > li::before {
-    position: absolute;
-    left: 0;
-    width: 18px;
-    color: var(--pencil);
-    text-align: center;
-    content: "·";
-  }
-
-  .rv-age {
-    padding-left: 0.3em;
-  }
-
-  .rv-age::before {
-    content: none;
-  }
-
-  .rv-body {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-  }
-
-  .rv-files {
-    position: relative;
-    top: 0;
-    max-height: 220px;
   }
 }
 

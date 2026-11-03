@@ -40,8 +40,10 @@ const LANE_KEYS: [string[], string][] = [
 ];
 
 const REVIEW_KEYS: [string[], string][] = [
-  [["n", "p"], "Next and previous file"],
+  [["n", "p"], "Next and previous change, in the AI review's reading order"],
   [["]", "["], "Next and previous AI note"],
+  [["N", "P"], "Up and down the PR's stack"],
+  [["f"], "Show or hide the sidebar: the stack, the files and recent activity"],
   [["a"], "Approve on GitHub, or your draft ready for review: press a, then a again within 3 seconds"],
   [["m", "b"], "Your own PR: hand it off for merge (m twice), or back to desk"],
   [["d"], "Done"],

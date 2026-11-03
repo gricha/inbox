@@ -20,7 +20,7 @@ import type {
   ReviewView,
   SettingsView,
 } from "../../src/types.ts";
-import { CLAUDE_PAUSED, parseReview } from "../../src/review.ts";
+import { CLAUDE_PAUSED, NOTED_WHY, parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -340,6 +340,47 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   assert.equal(mine.status, 409);
 });
 
+test("review view: the desk's reading order for a ranked review, a capped one, nothing worth a look, and an old one", async () => {
+  const view = async (id: string) => (await call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`)).data;
+  const v = await view("acme/api#4127");
+  const py = await view("acme/ml-pipeline#311");
+  // The canned rankings name real hunks: parsing them again keeps them as they are.
+  for (const x of [v, py]) {
+    const raw = x.ai!.chunks!.ranked.map(({ id, level, why }) => ({ id, level, why }));
+    assert.deepEqual(parseReview({ ...x.ai, chunks: raw }, x.files).chunks, x.ai!.chunks);
+  }
+  // The test file's note keeps it in the reading list, after what Claude ranked.
+  assert.deepEqual(
+    v.order.chunks.map((h) => [h.rank, h.level, h.path, h.why === NOTED_WHY]),
+    [
+      [1, "look", "src/planner/plan.ts", false],
+      [2, "look", "src/routes/query.ts", false],
+      [3, "skim", "src/planner/stream.ts", false],
+      [4, "skim", "test/planner/stream.test.ts", true],
+    ],
+  );
+  assert.deepEqual(
+    v.order.rest.map((r) => r.path),
+    ["src/planner/plan.ts", "docs/api/query.md"],
+  );
+  assert.equal(new Set(v.order.notes).size, v.ai!.notes.length, "every note once");
+  assert.ok(py.order.rest.some((r) => r.why.startsWith("no text diff") && !r.hunks.length));
+
+  const big = await view("acme/worker#879");
+  assert.deepEqual([big.order.capped, big.order.chunks.length, big.order.unread.length], [true, 20, 5]);
+  const none = await view("oss/calendar-ui#310");
+  assert.deepEqual([none.order.ranked, none.order.chunks.length], [true, 0]);
+  const old = await view("friends/garden-sensors#18");
+  assert.equal(old.order.ranked, false, "written before ranking: today's order");
+  assert.ok(old.order.chunks.length && old.order.chunks.every((h) => h.level === null));
+  const stale = await view("acme/api#4099");
+  assert.deepEqual([stale.ai_stale, stale.order.ranked, stale.order.notes], [true, false, []]);
+
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const card = [...q.sections.now, ...q.sections.today].find((c) => c.id === "acme/worker#879");
+  assert.deepEqual(card?.preflight?.chunks, { look: 1, skim: 19, total: 31 });
+});
+
 test("policy: a policy with its judge, saved against its hash", async () => {
   const { data: p } = await call<PolicyDoc>("GET", "/api/policy");
   assert.ok(p.text.trim());
@@ -349,6 +390,63 @@ test("policy: a policy with its judge, saved against its hash", async () => {
   assert.notEqual(saved.hash, p.hash);
 });
 
+test("stacks: the queue lists each once with its chain, and a member no board lists opens in review", async () => {
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  const all = Object.values(q.sections).flat();
+  assert.deepEqual(
+    all.filter((c) => c.stack).map((c) => [c.id, c.stack]),
+    [
+      // 4152 and 4153 are in Merging, never on the queue: 4154 stands for the stack.
+      ["acme/api#4154", { id: "acme/api#4150", pos: 3, size: 6, folded: ["acme/api#4155", "acme/api#4156", "acme/api#4157"] }],
+      ["acme/worker#890", { id: "acme/worker#890", pos: 1, size: 3, folded: ["acme/worker#891"] }],
+      ["oss/calendar-ui#310", { id: "oss/calendar-ui#310", pos: 1, size: 3, folded: ["oss/calendar-ui#311", "oss/calendar-ui#312"] }],
+    ],
+  );
+  assert.deepEqual(
+    q.cleared.filter((c) => c.stack).map((c) => [c.id, c.stack]),
+    [
+      ["acme/api#4091", { id: "acme/api#4091", pos: 1, size: 2 }],
+      ["acme/api#4092", { id: "acme/api#4091", pos: 2, size: 2 }],
+    ],
+    "a stack snoozed whole is in Cleared, every PR",
+  );
+  assert.deepEqual(Object.keys(q.stacks).toSorted(), ["acme/api#4091", "acme/api#4150", "acme/worker#890", "oss/calendar-ui#310"]);
+  assert.equal(q.stacks["acme/api#4091"]?.current, "acme/api#4091");
+  assert.deepEqual(
+    q.stacks["acme/worker#890"]?.forks.map((m) => [m.number, m.parent, m.bucket]),
+    [[893, "acme/worker#890", null]],
+    "a fork off the bottom, asked of nobody",
+  );
+  const mine = q.stacks["acme/api#4150"]!;
+  assert.deepEqual(
+    [mine.current, mine.up, mine.down, mine.needs_you, mine.forks],
+    ["acme/api#4154", "acme/api#4155", "acme/api#4153", 1, []],
+  );
+  assert.deepEqual(
+    mine.line.map((m) => [m.number, m.state, m.draft, m.ci, m.review, m.bucket]),
+    [
+      [4150, "merged", false, "green", "required", null],
+      [4151, "merged", false, "green", "required", null],
+      [4152, "open", false, "green", "approved", null],
+      [4153, "open", false, "red", "required", null],
+      [4154, "open", false, "green", "changes_requested", "now"],
+      [4155, "open", false, "green", "required", "fyi"],
+      [4156, "open", true, "red", "required", "later"],
+      [4157, "open", true, "green", "required", "fyi"],
+    ],
+  );
+  const { data: top } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/worker#892")}`);
+  assert.deepEqual(
+    [top.stack?.current, top.stack?.up, top.stack?.down, top.card.stack],
+    ["acme/worker#892", null, "acme/worker#891", { id: "acme/worker#890", pos: 3, size: 3 }],
+  );
+  const { data: fork } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/worker#893")}`);
+  assert.deepEqual(
+    [fork.stack?.line.map((m) => m.number), fork.stack?.forks.map((m) => m.number), fork.stack?.down, fork.card.stack],
+    [[890, 893], [891, 892], "acme/worker#890", { id: "acme/worker#890", pos: 2, size: 2 }],
+  );
+});
+
 test("Merging: what each waits on and the coordinator's note, handed back at the top of Now, hand off and back to desk", async () => {
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");
   const row = (id: string) => lane.rows.find((r) => r.card.id === id)!;
@@ -356,10 +454,25 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
     lane.rows.map((r) => [r.card.id, r.waits_on]),
     [
       ["acme/api#4122", "waits on a second look from dana"],
+      ["acme/api#4152", "ready to merge"],
+      ["acme/api#4153", "waits on a CI fix"], // with the PR below it in its stack
       ["acme/web#2295", "waits on a CI fix"],
       ["acme/api#4110", "waits on a merge conflict fix"],
       ["acme/api#4105", "waits on a review from sam, @backend and 4 more"],
       ["acme/worker#871", null],
+    ],
+  );
+  assert.deepEqual(
+    lane.stacks["acme/api#4150"]?.line.map((m) => [m.number, m.state, m.inflight, m.current]),
+    [
+      [4150, "merged", false, false],
+      [4151, "merged", false, false],
+      [4152, "open", true, true],
+      [4153, "open", true, false],
+      [4154, "open", false, false],
+      [4155, "open", false, false],
+      [4156, "open", false, false],
+      [4157, "open", false, false],
     ],
   );
   assert.equal(row("acme/worker#871").state, "merged");
@@ -374,7 +487,7 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
   );
   assert.match(q.sections.now[0]!.why, /^handed back: /);
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.inflight, { total: 4 });
+  assert.deepEqual(o.inflight, { total: 6 });
 
   const act = (id: string, action: string) => call("POST", "/api/act", { id, action });
   assert.equal((await act("acme/api#4127", "inflight")).status, 409, "not your PR");

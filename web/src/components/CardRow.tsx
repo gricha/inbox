@@ -82,6 +82,12 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         <span className="line-ref" title={`${card.repo}#${card.number}`}>
           {card.repo.split("/")[1]}#{card.number}
         </span>
+        {/* One line stands for its stack: where it sits in what's still to land. */}
+        {card.stack && (
+          <span className="line-ref" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
+            {card.stack.pos}/{card.stack.size}
+          </span>
+        )}
         {note && <span className="line-note">{note}</span>}
         {card.cta === "ready" && !why && (
           <span className={cls("line-cta", armed && "armed")} title="Mark it ready for review on GitHub: press a twice">

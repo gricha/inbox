@@ -117,6 +117,7 @@ const queueView: QueueView = {
   resolved: [CARDS.resolved],
   cards: 10,
   paused: null,
+  stacks: {},
 };
 
 // Your PR in Merging: CI failing on one check, stacked on another branch, with the coordinator's last note.
@@ -141,6 +142,7 @@ const inflightView: InflightView = {
       note: { text: "Fixing the flaky test", at: ago(0.1) },
     },
   ],
+  stacks: {},
 };
 
 const boardView: BoardView = {
@@ -189,6 +191,7 @@ function detail(c: Card): ItemDetail {
     ai_stale: false,
     generating: false,
     activity: EVENTS.filter((e) => e.item_id === c.id).toReversed(),
+    stack: null,
   };
 }
 

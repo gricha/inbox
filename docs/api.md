@@ -33,7 +33,9 @@ Every agent the desk runs (the AI review and the judge) is the `claude` CLI from
 
 ### The AI review
 
-The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, and short notes anchored to lines of the diff. Claude Code runs as `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` (`claude` from your PATH), and the review says which model wrote it, as Claude Code reports it (`modelUsage`); it gets the prompt on stdin in `~/.review-desk/agent/`, an empty directory the AI review, the judge and login checks share (Claude Code keeps a `~/.claude/projects` entry per directory, so the desk has one), with the PR text fenced as untrusted. When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`), and the review adds `since`: one sentence on what changed since you looked and whether it settles the concerns, which the card shows as its gist ("Since your review: …"). Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`paused`; when the cause is the login, which stops the judge too, it says Claude is paused, as it does when the judge fails on it first), the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review or the judge) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
+The same agent writes each PR's AI review: a verdict, a risk level, a summary, concerns, short notes anchored to lines of the diff, and a ranking of the diff's hunks. Claude Code runs as `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` (`claude` from your PATH), and the review says which model wrote it, as Claude Code reports it (`modelUsage`); it gets the prompt on stdin in `~/.review-desk/agent/`, an empty directory the AI review, the judge and login checks share (Claude Code keeps a `~/.claude/projects` entry per directory, so the desk has one), with the PR text fenced as untrusted. When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`), and the review adds `since`: one sentence on what changed since you looked and whether it settles the concerns, which the card shows as its gist ("Since your review: …"). Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for other people's open PRs in Now and Today, two at a time, in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open; a failure isn't retried on the same commit for 30 minutes unless you ask. Two failures in a row (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`paused`; when the cause is the login, which stops the judge too, it says Claude is paused, as it does when the judge fails on it first), the review view says so on a PR that wasn't tried, asking with `i` (or `desk brief`) still runs, and a success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review or the judge) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
+
+The ranking says which chunks are worth your attention and in what order. The prompt numbers every hunk `h1`, `h2`, … across the files in order (before its `@@` line; a lockfile's hunks keep their numbers but aren't shown, and the "since your review" diff has none), and Claude answers `chunks`: at most 20 hunk ids in the order to read them (most worth first, looks before skims; on a re-review, what changed since you looked first), each with a level (`look` or `skim`) and a few words why. Everything it leaves out is not worth reviewing (imports, renames, formatting, generated files, lockfiles, snapshots, tests that mirror the code). The desk keeps Claude's order and only ids the prompt showed, each once; a hunk Claude wrote a note on but left out joins the end as a skim ("has a note, though not ranked"), so leaving a hunk out, by a slip or because PR text talked Claude into it, can't fold what Claude itself flagged. It stores the ranking with the review (`chunks`: the ids with their paths, the hunks left out for length as `unread`, whether the list filled the cap, the total). A file's diff past 20 KB is cut inside the hunk that crosses it: that hunk's start is shown and counts as read, and the hunks after it are unread. `GET /api/review/:id` turns it into `order`: the chunks to read, ranked, then the unread ones (with why: the PR or their file was too long), then the rest by file with why, each hunk with its own patch, level, rank, why and the notes that sit on it, and `order.notes`, the notes in that reading order. Clients render hunks from `order`; `files[].patch` repeats the same text for today's review UI and goes once that reads `order`. A review from before ranking, one for an older commit, or a ranking whose ids no longer name the same files keeps today's order: every hunk file by file (`ranked: false`). Ranking adds about 20 output tokens a chunk, so even a full list costs little: measured on 2026-11-02 on honojs/hono#5547 (5 files, 14 hunks, +63 −16), the whole review took 90 s and 7,133 output tokens (4,338 of them thinking), and its 7 ranked chunks were 0.5 KB of the 4.9 KB answer.
 
 ### The policy and the judge
 
@@ -87,8 +89,8 @@ The same thirteen tools over HTTP and stdio. Results are text; most end with a J
 | Tool             | Arguments                                                                                                                                                     | Returns                                                                                                                                                                                                                                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `desk_overview`  | none                                                                                                                                                          | Counts per space and board, Focus totals, sync status and config errors; JSON `Overview`. Read only                                                                                                                                                                                                                 |
-| `desk_list`      | `board?` (board id; omit or `"focus"` for Focus), `buckets?` (`now` `today` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25) | One line per card (bucket, id, title, why); JSON of the cards (`id bucket title why author url chips status new pinned boards`). Focus only holds now and today. Read only                                                                                                                                          |
-| `desk_item`      | `ref`                                                                                                                                                         | Facts, bucket and why on each board, the rule trace, the AI review's verdict, summary and concerns if there is one, and the review hand-off prompt; JSON `{ card, placements, state }`. Read only                                                                                                                   |
+| `desk_list`      | `board?` (board id; omit or `"focus"` for Focus), `buckets?` (`now` `today` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25) | One line per card (bucket, id, title, why, and "stack 3/20" with the PRs a stack's one line stands for); JSON of the cards (`id bucket title why author url chips status new pinned boards stack`). Focus only holds now and today, a stack once. Read only                                                         |
+| `desk_item`      | `ref`                                                                                                                                                         | Facts, bucket and why on each board, the rule trace, its stack bottom first (state, CI, review, where each sits), the AI review's verdict, summary and concerns if there is one, and the review hand-off prompt; JSON `{ card, placements, state }`. Read only                                                      |
 | `desk_act`       | `ref`, `action` (`done` `snooze` `mute` `unmute` `pin` `unpin` `restore`), `until?` (snooze only, default `tomorrow`)                                         | What changed and the undo `seq`; JSON `{ ok, state: ItemState, undo_seq }`. Local only                                                                                                                                                                                                                              |
 | `desk_undo`      | `seq?` (positive integer; default the latest action from anyone: UI, CLI or agent). Not a hand-off for merge, nor a Back to desk (yours to undo)              | `undid <action> on <id>`                                                                                                                                                                                                                                                                                            |
 | `desk_brief`     | `ref`                                                                                                                                                         | The PR's AI review: look, skim or skip, risk, summary, concerns and notes on the changes; JSON `AiReview`. Usually written already for PRs in Now and Today; otherwise a model call through `agent.driver` (a minute or two). Cached per commit                                                                     |
@@ -116,7 +118,7 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }` with a 4x
 | GET         | `/api/item`                  | `?id=<ref>` (encode `#` as `%23`)                             | `ItemDetail`                                                                                                                                                                                                                                                                                                                                                                                                   | ✓                  |
 | POST        | `/api/act`                   | `{ id: string, action: Action, until?: string }`              | `{ ok: true, state: ItemState, undo_seq: number }` (`seen` and `undo` return `undo_seq: 0`)                                                                                                                                                                                                                                                                                                                    | ✓                  |
 | POST        | `/api/undo`                  | `{ seq?: number, agent?: true }` (default: the latest action) | `{ ok: true, id: string, action: Action }`; 409 if a later action on the same item must be undone first, or for an agent (`agent`) undoing a hand-off or Back to desk                                                                                                                                                                                                                                          | ✓                  |
-| GET         | `/api/review/:id`            | `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`)         | `ReviewView`: the PR's facts, its changed files, the AI review and whether you can approve; 400 for an issue. Opening it asks for the AI review when `review.auto_ai` is on and there's none for this commit                                                                                                                                                                                                   | ✓                  |
+| GET         | `/api/review/:id`            | `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`)         | `ReviewView`: the PR's facts, its changed files, the order to read its hunks in, the AI review and whether you can approve; 400 for an issue. Opening it asks for the AI review when `review.auto_ai` is on and there's none for this commit                                                                                                                                                                   | ✓                  |
 | POST        | `/api/review/:id/ai`         | `{ force?: boolean }`                                         | `{ ok: true, ai: AiReview }`: the one for this commit unless `force`; joins a run already going; 502 with the reason if the agent fails                                                                                                                                                                                                                                                                        | ✓                  |
 | POST        | `/api/review/:id/approve`    | `{ head_oid: string, body?: string }`                         | `{ ok: true, url: string }`: approves the PR on GitHub at `head_oid`, the commit the view showed (below), then refreshes that PR (it resolves as `you approved` within seconds) and runs a full sync; 403 unless it's the desk's own page (`Sec-Fetch-Site: same-origin` and its `Origin`); 409 for your own PR, a closed one, one you approved at this commit, or new commits since; 502 with GitHub's reason | ✓                  |
 | POST        | `/api/review/:id/ready`      |                                                               | `{ ok: true }`: marks your own open draft ready for review on GitHub (Ready for review, `a a`), logs it and refreshes the PR; 403 unless it's the desk's own page, as for approve; 409 unless it's your own open draft; 502 with GitHub's reason                                                                                                                                                               | ✓                  |
@@ -186,6 +188,7 @@ interface Card {
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, in Merging
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in Merging
+  stack?: StackRef; // an open PR whose line has two or more open PRs (Stacks, below)
 }
 
 // The AI review of a card's head, for skimming. The other fields come from the latest review, for an older head unless ready.
@@ -196,6 +199,7 @@ interface Preflight {
   summary?: string;
   concerns?: string[]; // at most 2
   notes?: number;
+  chunks?: { look: number; skim: number; total: number }; // hunks ranked worth a look or a skim, of all in the diff; unset without a ranking
   at?: string;
 }
 
@@ -206,9 +210,10 @@ interface QueueView {
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
   cards: number; // queue.cards: the queue is one list, now's cards then today's (each the weightiest first); it shows this many, the rest behind one line; 0 = all
   paused: { who: "claude" | "ai"; why: string } | null; // said once above the queue: claude, when the AI review or the judge can't log in; ai, when AI reviews nobody asked for keep failing otherwise
+  stacks: Record<string, Stack>; // by stack id: each stack a card here carries (Stacks, below); current is the card sections list it by, else its first card
 }
-// BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items.
-// FocusView is { sections: { now: Card[]; today: Card[] }, cards, paused }; resolved items are never in it.
+// BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items, and no stacks: a board lists every PR.
+// FocusView is { sections: { now: Card[]; today: Card[] }, cards, paused }; resolved items are never in it; a stack is one card, as in the queue.
 
 interface Overview {
   me: string;
@@ -256,20 +261,23 @@ interface ItemDetail {
   ai_stale: boolean; // new commits since the AI review
   generating: boolean;
   activity: ActivityEvent[]; // the item's last 8 events, newest first
+  stack: Stack | null; // its stack, with it current
 }
 
 interface ReviewView {
   card: Card;
   item: Item;
   handoff_prompt: string;
-  files: { path: string; previous_path: string | null; status: string; additions: number; deletions: number; patch: string | null }[];
+  files: { path: string; previous_path: string | null; status: string; additions: number; deletions: number; patch: string | null }[]; // patch: today's UI renders it; new clients render order's hunks
   files_error: string | null; // the diff couldn't be fetched
+  order: ReviewOrder; // every hunk once, in the order to read them (below)
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
   generating: boolean;
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
+  stack: Stack | null; // its stack, with it current: the sidebar's chain, and up/down for the keys that move along it
 }
 
 interface AiReview {
@@ -278,9 +286,41 @@ interface AiReview {
   summary: string;
   concerns: string[];
   notes: { path: string; line: number; side: "new" | "old"; body: string }[]; // line 0: about the whole file
+  chunks?: {
+    // absent on reviews written before ranking, or when Claude gave no list
+    ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // Claude's order (at most 20), then hunks it noted but didn't rank, as skims
+    unread: string[]; // hunks left out of the prompt because the PR, or their file, was too long to read whole
+    capped: boolean; // Claude ranked as many as it may: more may be worth a look
+    total: number; // hunks in the diff
+  };
   head_oid: string; // the commit it read
   model: string; // as Claude Code reports it ("claude-opus-5[1m]"), else "claude-code"
   at: string;
+}
+
+// The desk's reading order for GET /api/review/:id: clients render it as is, without sorting or ranking anything.
+interface ReviewOrder {
+  ranked: boolean; // false: no ranking for this commit (none yet, written before ranking, or a newer push): chunks is every hunk, file by file
+  capped: boolean; // Claude ranked as many as it may: something in rest may still be worth a look
+  chunks: ReviewHunk[]; // read these, in this order: Claude's (most worth first; a re-review, what changed since you looked first), then hunks it noted but didn't rank
+  unread: ReviewHunk[]; // Claude didn't see these (the PR or their file was too long to read whole), file by file
+  rest: { path: string; file: number; why: string; hunks: ReviewHunk[]; notes: number[] }[]; // not worth reviewing, by file; why: "not worth reviewing", "lockfile or generated", "no text diff: binary or too large", "renamed without changes"; notes: a file's own when it has no hunks
+  notes: number[]; // indices into ai.notes in reading order; empty when the review is for an older commit
+}
+
+interface ReviewHunk {
+  id: string; // h1, h2, … across the files in order, as the AI review's prompt numbers them
+  path: string;
+  file: number; // index in files
+  index: number; // its place among its file's hunks
+  header: string; // its @@ line
+  patch: string; // its own lines, the @@ line first: render it on its own
+  additions: number;
+  deletions: number;
+  level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking
+  rank: number | null; // 1 = read it first; look and skim only
+  why: string | null; // look and skim: Claude's few words, or "has a note, though not ranked"; unread: "the PR was too long to read whole" or "its file was too long to read whole"
+  notes: number[]; // indices into ai.notes to show with it; the file's own notes (line 0) ride on its first hunk in the order
 }
 
 interface ActivityEvent {
@@ -315,8 +355,59 @@ interface InflightRow {
   waits_on: string | null; // the first thing between it and a merge: "waits on a CI fix", "waits on a review from dana", "ready to merge"; null once merged or closed
   note: { text: string; at: string } | null; // the coordinator's latest desk_note; untrusted, an agent wrote it
 }
-// InflightView is { rows: InflightRow[] }.
+// InflightView is { rows: InflightRow[]; stacks: Record<string, Stack> }.
+// A stack's rows are together, bottom first, where its first row would be; stacks has each of them, its first row current.
+
+// Where a card's PR sits in its stack, counting what's still to land: "3/20".
+interface StackRef {
+  id: string; // the stack: its bottom PR's id
+  pos: number; // this PR's place among the open PRs of its line, 1 = the lowest open one; merged ones below don't count
+  size: number; // the open PRs in that line
+  folded?: string[]; // on the one card a queue view lists for the stack: its other members it stands for, bottom first
+}
+
+interface Stack {
+  id: string; // its bottom PR's id
+  repo: string;
+  base: string; // the branch under the bottom PR: the default branch, or one no PR the desk knows heads
+  line: StackMember[]; // bottom first, through the current PR; above a fork, the branch with open PRs, then the longest, then the oldest
+  forks: StackMember[]; // the other branches at a fork, bottom first; each member's parent says where it branches off
+  current: string; // the PR the view is about
+  up: string | null; // the PR above the current one on the line
+  down: string | null; // and below it
+  needs_you: number; // members in Now or Today
+}
+
+interface StackMember {
+  id: string;
+  number: number;
+  title: string; // untrusted
+  url: string;
+  author: string;
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  ci: "green" | "red" | "pending" | "none";
+  review: "approved" | "changes_requested" | "required" | "none";
+  parent: string | null; // the member it's based on; null at the bottom
+  current: boolean;
+  bucket: Bucket | null; // where the queue has it; null off the queue (merged, closed, cleared, in Merging, on no board)
+  why: string; // its card's why ("merged" for a merged one); "" when the desk has none
+  needs_you: boolean; // in Now or Today
+  new: boolean;
+  inflight: boolean;
+}
 ```
+
+## Stacks
+
+A stack is PRs in one repo, each based on the head branch of the one below it, the bottom one on the default branch (or on a branch no PR heads). The desk works them out on every snapshot from the PRs it holds (`src/stacks.ts`, pure), whoever wrote them; nothing about a stack is stored.
+
+- **Links.** A PR's parent is the PR whose head branch is its base, from the repo itself (a fork's branch of the same name isn't it): an open one first, then merged, then closed. A PR GitHub moved to the default branch when the PR below it merged (its latest base change, `Item.retargeted`) keeps that merged PR as its parent.
+- **Forks and dead branches.** A PR with two PRs on its branch forks the stack. A line goes bottom to top through a PR and, above it at each fork, takes the branch with open PRs, then the longest, then the oldest PR's; `Stack.forks` has the rest. A closed PR with nothing open or merged above it is in no stack; one with open PRs above it stays, closed.
+- **Counting.** `StackRef.pos`/`size` count the open PRs of the PR's line, what's still to land, so merged PRs below don't move "3/20"; the chain still lists them. A PR has a ref when it's open and its line has two or more open PRs: two open PRs forking off a merged one aren't stacked on each other, so neither has a ref and each is its own card (the chain still shows the other branch).
+- **One line per stack.** `GET /api/queue` and `/api/focus` list a stack once: of its members with a card in Now, Today, Later and FYI, the one in the most urgent section stands for it, the lowest in the stack on a tie (then the main line before a fork); the others leave the sections and are named on that card's `stack.folded`, bottom first. Boards, hidden, cleared and resolved list every PR. `QueueView.stacks` has the chain of every stack a card in the view carries: current is the card the sections list it by, or the first card of a stack with none there (all cleared, say). `oneLinePerStack()` is the rule. Desktop notifications go per PR, not per line: a member newly in Now is news even while a lower one stands for its stack, and isn't again when it comes to stand for it.
+- **Merging.** `GET /api/inflight` keeps a stack's rows together, bottom first.
+- **What the desk fetches.** Each sync, for the stacks of PRs on the boards, read only and at most 120 probes a pass, each asked again only after 30 minutes: the PR heading the branch a bottom PR is based on (or was, before GitHub moved it), open PRs based on an open PR's branch, and the stack's members no board lists that are open as of a fetch over 30 minutes ago. Probes for a stack or a PR based on another's branch go first; those that only look for a stack above a PR on the default branch get what's left after 40 are kept for later rounds, and the rest wait for the next pass. Three rounds a pass, so a chain a few PRs deep fills in at once; one repo's probes are one query, three repos at a time. What it fetches is stored without events: context for a stack, not news, so the coordinator doesn't wake for it and the notifications feed treats it as an item the desk doesn't hold. Once a board lists it, it's fetched again and its events since the desk last logged any are logged (`new` if it never did). Any stored member opens in the review view. Members of a listed PR's stack aren't pruned with the items no search returned for 14 days. PRs stored before the desk asked for `head_ref`, `default_branch` and `retargeted` are refetched, 40 a pass.
 
 ## Resolved
 

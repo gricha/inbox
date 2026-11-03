@@ -19,13 +19,32 @@ export function Inflight({
   if (!view) return <p className="quiet-note">Loading…</p>;
   const open = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
-  const rows = (list: InflightRow[]) => (
-    <div className="rows cards">
-      {list.map((r) => (
-        <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} run={run} />
-      ))}
-    </div>
-  );
+  const row = (r: InflightRow) => <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} run={run} />;
+  // The desk sends a stack's rows together, bottom first: two or more sit under one quiet header.
+  const rows = (list: InflightRow[]) => {
+    const parts: InflightRow[][] = [];
+    for (const r of list) {
+      const last = parts.at(-1);
+      if (last && r.card.stack && last[0]!.card.stack?.id === r.card.stack.id) last.push(r);
+      else parts.push([r]);
+    }
+    return (
+      <div className="rows cards">
+        {parts.map((p) => {
+          const s = p.length > 1 && p[0]!.card.stack;
+          if (!s) return p.map(row);
+          return (
+            <div key={s.id} className="rows cards lane-stack" aria-label={`Stack of ${s.size}`}>
+              <p className="lane-stack-head">
+                Stack on {view.stacks[s.id]?.base ?? "its base"} · {s.size} open
+              </p>
+              {p.map(row)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
   return (
     <div className="queue deck lane">
       {open.length ? (
@@ -107,6 +126,7 @@ function Row({
                   <span className="ref-repo">{c.repo.split("/")[1]}</span>#{c.number}
                 </span>
               </span>
+              {c.stack && <span title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>{`${c.stack.pos}/${c.stack.size}`}</span>}
               <span>{r.waits_on ?? r.state}</span>
             </span>
           </span>

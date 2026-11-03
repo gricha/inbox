@@ -4,7 +4,7 @@ import { buildAreas, type AreaPr } from "../areas.ts";
 import type { Areas, Context, Item } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
 import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
-import { DETAILS_REVIEW, detailsMine, FILES_SEARCH, LIGHT_SEARCH, TEAMS, VIEWER } from "./queries.ts";
+import { branchPrs as branchPrsQuery, DETAILS_REVIEW, detailsMine, FILES_SEARCH, LIGHT_SEARCH, TEAMS, VIEWER } from "./queries.ts";
 
 export interface SearchHit {
   node_id: string;
@@ -36,6 +36,9 @@ export interface GitHub {
   areas(): Promise<Areas>; // the directories of your PRs and reviews, last 90 days
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
+  // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
+  // open PRs based on it.
+  branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
@@ -63,11 +66,15 @@ interface RawFiles {
   changedFiles: number;
   files: { nodes: { path: string }[] } | null;
 }
+interface BranchData {
+  repository: Record<string, { nodes: ((RawHit & { headRepository: { nameWithOwner: string } | null }) | null)[] } | null> | null;
+}
 interface TeamsData {
   viewer: { name?: string | null; organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
 }
 
 const RECENT = 20; // your latest PRs' titles, for the judge
+const PROBES = 40; // stack probes (aliases) a query
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
@@ -77,7 +84,7 @@ function tally(keys: string[]): Record<string, number> {
   return out;
 }
 
-async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = [];
   let next = 0;
   let failed = false;
@@ -209,6 +216,22 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     return buildAreas(found.flat());
   }
 
+  async function branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]> {
+    const [owner, name] = repo.split("/");
+    const out = new Map<string, SearchHit>();
+    for (const part of chunk(probes, PROBES)) {
+      const vars = Object.fromEntries(part.map((p, i) => [`b${i}`, p.branch]));
+      const data = await client.query<BranchData>(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
+      part.forEach((p, i) => {
+        for (const n of data.repository?.[`p${i}`]?.nodes ?? []) {
+          if (!n || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
+          out.set(n.id, toHit(n));
+        }
+      });
+    }
+    return [...out.values()];
+  }
+
   async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
@@ -240,6 +263,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     context,
     areas,
     notifications,
+    branchPrs,
     rateLimit: () => client.rateLimit(),
   };
 }

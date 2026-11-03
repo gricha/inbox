@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, JudgeStatus, QueueView } from "../../src/types.ts";
+import type { ActivityEvent, Card, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
 import { age, ago, clearedText, eventText, modelName, shortId, shortRef, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
@@ -16,12 +16,14 @@ import {
   judgeStepText,
   lineOf,
   navigable,
+  onLines,
   parseList,
   parseRoute,
   removeCard,
   resolvedHead,
   routeHash,
   says,
+  sections,
   stops,
   valueOf,
   type KeyLike,
@@ -70,6 +72,7 @@ const queue = (): QueueView => ({
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
   cards: 10,
   paused: null,
+  stacks: {},
 });
 
 test("routes round-trip through the hash", () => {
@@ -230,7 +233,6 @@ test("the selected card's facts leave out what the card already says", () => {
   ]);
   // A sorted-away row shows its note already.
   assert.ok(!cardFacts(pr, "me", true).includes("3 from B are urgent already"));
-  assert.ok(!cardFacts(pr, "me", false, true).includes("by dana"), "in a stack, its head names the author");
   assert.ok(says("conflicts with main", "merge conflict"));
   assert.ok(!says("asked you directly", "merge conflict"));
   // A rule's why in its own words says the same problem: a sorted-away row shows it once.
@@ -291,6 +293,74 @@ test("the file you're in: the last whose top passed the line, and the last file 
   // Scrolled to the end, short last files never reach the line.
   assert.equal(currentFile([-900, -200, 60, 400, 700], 96, true), 4);
   assert.equal(currentFile([], 96, true), 0);
+});
+
+test("the review reads in the desk's order: a file's hunks next to each other at one level are one section", () => {
+  const hunk = (id: string, path: string, level: ReviewHunk["level"], why: string | null, notes: number[] = []): ReviewHunk => ({
+    id,
+    path,
+    file: path === "a.ts" ? 0 : 1,
+    index: 0,
+    header: "@@ -1,3 +1,4 @@",
+    patch: "@@ -1,3 +1,4 @@\n+x",
+    additions: 1,
+    deletions: 0,
+    level,
+    rank: null,
+    why,
+    notes,
+  });
+  const ranked: ReviewOrder = {
+    ranked: true,
+    capped: false,
+    chunks: [
+      hunk("h3", "b.ts", "look", "unchecked input", [1]),
+      hunk("h1", "a.ts", "skim", "rename"),
+      hunk("h2", "a.ts", "skim", "rename"),
+    ],
+    unread: [hunk("h5", "b.ts", "unread", "its file was too long to read whole")],
+    rest: [{ path: "a.ts", file: 0, why: "not worth reviewing", hunks: [hunk("h4", "a.ts", "skip", null)], notes: [] }],
+    notes: [1, 0],
+  };
+  const { list, rest } = sections(ranked);
+  assert.deepEqual(
+    list.map((s) => [s.path, s.level, s.hunks.map((h) => h.id), s.notes]),
+    [
+      ["b.ts", "look", ["h3"], [1]],
+      ["a.ts", "skim", ["h1", "h2"], []],
+      ["b.ts", "unread", ["h5"], []],
+      ["a.ts", "skip", ["h4"], []],
+    ],
+  );
+  assert.equal(rest, 3, "the fold starts at the files not worth reviewing");
+  // Without a ranking: file by file, and a file with no text diff is no fold of its own.
+  const plain = sections({
+    ranked: false,
+    capped: false,
+    chunks: [hunk("h1", "a.ts", null, null, [0]), hunk("h2", "a.ts", null, null), hunk("h3", "b.ts", null, null)],
+    unread: [],
+    rest: [{ path: "logo.png", file: 2, why: "no text diff: binary or too large", hunks: [], notes: [2] }],
+    notes: [0, 2],
+  });
+  assert.deepEqual(
+    plain.list.map((s) => [s.path, s.level, s.hunks.length, s.notes]),
+    [
+      ["a.ts", null, 2, [0]],
+      ["b.ts", null, 1, []],
+      ["logo.png", null, 0, [2]],
+    ],
+  );
+});
+
+test("a note on a hunk's lines goes on the diff; one on none of them is about the whole file", () => {
+  const h = [{ header: "@@ -10,3 +12,5 @@ function plan()" }];
+  assert.equal(onLines(h, { side: "new", line: 12 }), true);
+  assert.equal(onLines(h, { side: "new", line: 16 }), true);
+  assert.equal(onLines(h, { side: "new", line: 17 }), false);
+  assert.equal(onLines(h, { side: "old", line: 12 }), true);
+  assert.equal(onLines(h, { side: "old", line: 13 }), false);
+  assert.equal(onLines(h, { side: "new", line: 0 }), false, "line 0: the file itself");
+  assert.equal(onLines([{ header: "@@ -0,0 +1 @@" }], { side: "new", line: 1 }), true, "a count of one is left out");
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

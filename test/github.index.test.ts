@@ -329,3 +329,46 @@ test("notifications: a 304 means nothing changed and costs one call", async () =
   const r = await createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: "LM" });
   assert.deepEqual([r.modified, r.threads, r.poll_interval, n], [false, [], 60, 1]);
 });
+
+test("branchPrs: one aliased query per 40 probes a repo; up drops a fork's PR on a branch of the same name", async () => {
+  const pr = (id: string, number: number, head: string) => ({
+    __typename: "PullRequest",
+    id,
+    number,
+    title: `PR ${number}`,
+    updatedAt: "2026-11-02T00:00:00Z",
+    repository: { nameWithOwner: "getsentry/sentry" },
+    author: { __typename: "User", login: "gricha" },
+    headRepository: { nameWithOwner: head },
+  });
+  const { gh, calls } = fakeGitHub((b) => {
+    const repository: Record<string, object> = {};
+    for (const k of Object.keys(b.variables).filter((v) => v.startsWith("b"))) {
+      const i = k.slice(1);
+      repository[`p${i}`] = {
+        nodes:
+          b.variables[k] === "ref/a"
+            ? [pr("PR_a", 1, "getsentry/sentry"), pr("PR_fork", 7, "someone/sentry")]
+            : b.variables[k] === "ref/b"
+              ? [pr("PR_c", 3, "getsentry/sentry"), null]
+              : [],
+      };
+    }
+    return { data: { rateLimit: RL, repository } };
+  });
+  const probes = [
+    { dir: "up" as const, branch: "ref/a" },
+    { dir: "down" as const, branch: "ref/b" },
+    ...Array.from({ length: 40 }, (_, i) => ({ dir: "down" as const, branch: `x${i}` })),
+  ];
+  const hits = await gh.branchPrs("getsentry/sentry", probes);
+  assert.deepEqual(
+    hits.map((h) => h.id),
+    ["getsentry/sentry#1", "getsentry/sentry#3"],
+  );
+  assert.equal(calls.length, 2);
+  assert.deepEqual([calls[0]!.variables.owner, calls[0]!.variables.name, calls[0]!.variables.b0], ["getsentry", "sentry", "ref/a"]);
+  assert.match(calls[0]!.query, /p0: pullRequests\(headRefName: \$b0, states: \[OPEN, MERGED, CLOSED\]/);
+  assert.match(calls[0]!.query, /p1: pullRequests\(baseRefName: \$b1, states: \[OPEN\]/);
+  assert.doesNotMatch(calls[0]!.query, /mutation/);
+});

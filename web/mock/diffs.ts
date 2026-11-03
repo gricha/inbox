@@ -1,4 +1,5 @@
 // Realistic diffs and AI reviews for the mock API, so the review view (and npm run shots) has real-looking code to show.
+import { NOTED_WHY } from "../../src/review.ts";
 import type { AiReview, ReviewFile } from "../../src/types.ts";
 
 type Canned = { files: ReviewFile[]; ai: Omit<AiReview, "head_oid" | "at" | "model"> | null };
@@ -277,6 +278,17 @@ const CANNED: Record<string, Canned> = {
           body: "Covers batching and abort, but nothing exercises runPlan's partial path or the route's header.",
         },
       ],
+      chunks: {
+        ranked: [
+          { id: "h3", path: "src/planner/plan.ts", level: "look", why: "budget checked only between batches" },
+          { id: "h4", path: "src/routes/query.ts", level: "look", why: "?budget= read unchecked" },
+          { id: "h1", path: "src/planner/stream.ts", level: "skim", why: "new batching generator" },
+          { id: "h5", path: "test/planner/stream.test.ts", level: "skim", why: NOTED_WHY },
+        ],
+        unread: [],
+        capped: false,
+        total: 6,
+      },
     },
   },
   "acme/ml-pipeline#311": {
@@ -303,6 +315,17 @@ const CANNED: Record<string, Canned> = {
           body: "Runs after the fork, so each worker loads its own copy: memory goes up by one tokenizer per worker (about 400 MB for the default model).",
         },
       ],
+      chunks: {
+        ranked: [
+          { id: "h1", path: "pipeline/tokenize.py", level: "look", why: "cache keyed on the name argument" },
+          { id: "h3", path: "pipeline/worker.py", level: "look", why: "loads after fork, once per worker" },
+          { id: "h2", path: "requirements.txt", level: "skim", why: "transformers minor bump" },
+          { id: "h4", path: "pipeline/migrations/versions/0008_tokenizer_cache.py", level: "skim", why: "setting nothing reads yet" },
+        ],
+        unread: [],
+        capped: false,
+        total: 5,
+      },
     },
   },
 };

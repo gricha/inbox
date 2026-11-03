@@ -123,6 +123,10 @@ const toBottom = (name: string) => async (page: Page) => {
   if (room !== null && room > BOTTOM_ROOM)
     failures.push(`${name}: ${room}px of empty page below the last content when scrolled to the bottom`);
 };
+// The review's sidebar back to its default for the window's width: what f chose is kept per device.
+const sideDefault = async (page: Page) => {
+  await page.evaluate(`localStorage.removeItem("desk.review.side")`);
+};
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
@@ -232,8 +236,27 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
-  // n lands on requirements.txt: a file at the repo's root, with a long folder below it in the list.
+  // n goes to the next change in reading order; the sidebar lists a file at the repo's root and a long folder.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
+  // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
+  { name: "review-stack", go: review("acme/api#4154") },
+  // n past the last change stops on the folded rest's line; Enter opens it in place.
+  { name: "review-fold", go: review("acme/api#4127", ["n", "n", "n", "n", "n"]) },
+  { name: "review-rest", go: review("acme/api#4127", ["n", "n", "n", "n", "n", "Enter"]) },
+  {
+    // A capped ranking: what Claude didn't read, then the fold that says some may still be worth a look.
+    name: "review-unread",
+    go: async (page) => {
+      await review("acme/worker#879")(page);
+      await toBottom("review-unread")(page);
+    },
+  },
+  {
+    // f: folded where it was open (wide), open over the diff where it starts folded (narrow); f again puts it back.
+    name: "review-side-toggled",
+    go: review("acme/api#4154", ["f"]),
+    after: sideDefault,
+  },
   {
     // Rule whys are yours to write and can run long: a fact that wraps carries on after its "·", never under it.
     name: "review-long-why",
@@ -298,9 +321,11 @@ const SHOTS: Shot[] = [
     name: "review-activity",
     go: async (page) => {
       await review("acme/api#4127")(page);
+      if (!(await page.locator(".rv-side").isVisible())) await page.keyboard.press("f"); // folded in a narrow window
       await page.locator(".rv-more").click();
       await page.waitForTimeout(200);
     },
+    after: sideDefault,
   },
   // What Claude and the rules sorted away, on its own page.
   { name: "later", go: at("#/later") },

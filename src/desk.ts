@@ -7,6 +7,7 @@ import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
+import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
 import type {
   Action,
   ActivityPage,
@@ -40,6 +41,7 @@ import type {
   SettingsView,
   SettingValue,
   Signals,
+  Stack,
   Status,
 } from "./types.ts";
 import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
@@ -48,7 +50,7 @@ import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, type PrText } from "./review.ts";
+import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import {
@@ -106,6 +108,7 @@ interface Snapshot {
   best: Map<string, Placement>; // best placement across boards, active items only
   needs: Map<string, string>; // PRs the coordinator handed back: why, at the top of the queue
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
+  stacks: Stacks;
 }
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
@@ -557,16 +560,22 @@ export class Desk {
     this.judge.pump();
   }
 
-  // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips.
-  ingest(from: Connector, all: Item[]): void {
+  // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips. `quiet`:
+  // only stores them (a stack's members no board lists: context, not news); the next ingest that isn't logs what changed.
+  ingest(from: Connector, all: Item[], quiet = false): void {
     const prev = this.store.itemsById(all.map((i) => i.id));
     // The feed and the full pass can fetch the same item at once; an older answer landing last would replay changes backwards.
     const items = all.filter((i) => !(i.updated_at < (prev.get(i.id)?.updated_at ?? "")));
     if (!items.length) return;
     const now = this.now().toISOString();
+    if (quiet) {
+      this.store.putItems(items, now, true);
+      return;
+    }
+    const said = this.store.said(items.map((i) => i.id));
     const events: NewEvent[] = [];
     for (const next of items) {
-      const before = prev.get(next.id) ?? null;
+      const before = (said.has(next.id) ? said.get(next.id) : prev.get(next.id)) ?? null;
       events.push(...from.events(before, next));
       const was = before && this.resolutionOf(before);
       const is = this.resolutionOf(next);
@@ -633,10 +642,12 @@ export class Desk {
   }
 
   // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin); a hand-back is on it, in Now.
+  // Per PR, not the queue's one line per stack: a member that comes to stand for its stack isn't news.
   notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
-    const { now, today } = this.focus().sections;
+    const snap = this.snapshot();
+    const { now, today } = this.top(snap, new Set());
     const queued = [...now, ...today]
       .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin")
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
@@ -673,7 +684,8 @@ export class Desk {
     const states = this.store.states();
     const baseline = (this.store.get("baseline_at") as string | null) ?? now.toISOString();
     const entries = new Map<string, Entry>();
-    for (const item of this.store.items()) {
+    const items = this.store.items();
+    for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
       const state = states.get(item.id) ?? emptyState(item.id);
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
@@ -763,7 +775,7 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins };
+    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins, stacks: buildStacks(items) };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -782,6 +794,7 @@ export class Desk {
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
+    const stack = stackRef(snap.stacks, it.id);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -817,7 +830,31 @@ export class Desk {
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(by && { placed_by: by }),
+      ...(stack && { stack }),
     };
+  }
+
+  // A stack member's place on the queue, for the stack's views.
+  seat(id: string, snap: Snapshot): Seat {
+    const e = snap.entries.get(id)!;
+    const p = snap.best.get(id);
+    return {
+      bucket: p?.bucket ?? null,
+      why: e.resolved?.reason ?? p?.why ?? "",
+      new: e.isNew && !e.resolved && e.status === "active",
+      inflight: e.inflight,
+    };
+  }
+
+  stack(id: string, snap: Snapshot): Stack | null {
+    return stackView(snap.stacks, id, (x) => this.seat(x, snap));
+  }
+
+  // By id, each stack of these cards, with the first of its cards current.
+  stacksOf(cards: Card[], snap: Snapshot): Record<string, Stack> {
+    const out: Record<string, Stack> = {};
+    for (const c of cards) if (c.stack && !out[c.stack.id]) out[c.stack.id] = this.stack(c.id, snap)!;
+    return out;
   }
 
   // ---------------------------------------------------------------- views
@@ -924,6 +961,13 @@ export class Desk {
           ...(ai.since && { since: ai.since }),
           concerns: ai.concerns.slice(0, 2),
           notes: ai.notes.length,
+          ...(ai.chunks && {
+            chunks: {
+              look: ai.chunks.ranked.filter((c) => c.level === "look").length,
+              skim: ai.chunks.ranked.filter((c) => c.level === "skim").length,
+              total: ai.chunks.total,
+            },
+          }),
           at: ai.at,
         }
       : {};
@@ -961,9 +1005,13 @@ export class Desk {
     return ai ? { who: "ai", why: ai } : null;
   }
 
+  // A stack is one line here, as in the queue.
   focus(): FocusView {
+    const snap = this.snapshot();
+    const sections = this.top(snap, new Set());
+    oneLinePerStack(sections, ["now", "today"], snap.stacks);
     return {
-      sections: this.top(this.snapshot(), new Set()),
+      sections,
       cards: this.settings["queue.cards"],
       paused: this.paused(),
     };
@@ -1003,6 +1051,7 @@ export class Desk {
         }
       }
     }
+    const leads = oneLinePerStack(sections, ["now", "today", "later", "fyi"], snap.stacks);
     const cleared: Card[] = [];
     const resolved: Card[] = [];
     // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
@@ -1035,6 +1084,7 @@ export class Desk {
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
       cards: this.settings["queue.cards"],
       paused: this.paused(),
+      stacks: this.stacksOf([...leads, ...hidden, ...cleared, ...resolved], snap),
     };
   }
 
@@ -1115,6 +1165,7 @@ export class Desk {
       ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
       generating: this.generating.has(id),
       activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
+      stack: this.stack(id, snap),
     };
   }
 
@@ -1151,12 +1202,14 @@ export class Desk {
       handoff_prompt: d.handoff_prompt,
       files,
       files_error: filesError,
+      order: reviewOrder(files, d.ai, d.ai_stale),
       ai: d.ai,
       ai_stale: d.ai_stale,
       ai_error: this.generating.has(id) ? null : (own ?? paused),
       generating: this.generating.has(id),
       approve: this.canApprove(e),
       activity: d.activity,
+      stack: d.stack,
     };
   }
 
@@ -1237,7 +1290,9 @@ export class Desk {
       this.aiFailures = 0;
       if (this.aiPaused) this.log("AI reviews resume");
       this.aiPaused = null;
-      this.log(`AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes`);
+      this.log(
+        `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}`,
+      );
       this.retryAgents(NOT_LOGGED_IN);
       return ai;
     } catch (err) {
@@ -1481,7 +1536,14 @@ export class Desk {
           ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
           : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
     );
-    return { rows };
+    const lane = grouped(rows, (r) => r.card.id, snap.stacks);
+    return {
+      rows: lane,
+      stacks: this.stacksOf(
+        lane.map((r) => r.card),
+        snap,
+      ),
+    };
   }
 
   merging(id: string): Merging {

@@ -27,6 +27,10 @@ export function makeItem(o: Partial<Item> & { repo?: string; number?: number } =
     deletions: 2,
     changed_files: 1,
     base: "main",
+    default_branch: "main",
+    head_ref: `change-${number}`,
+    head_repo: repo,
+    retargeted: null,
     ci: "green",
     review_decision: "required",
     mergeable: "unknown",
@@ -123,6 +127,23 @@ export class FakeGitHub implements GitHub {
       poll_interval: this.pollInterval,
       date,
     });
+  }
+
+  // Stack probes over the same items, as GitHub answers them; each call is logged as "repo dir branch".
+  probeCalls: string[] = [];
+
+  branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]> {
+    const hits = new Map<string, SearchHit>();
+    for (const p of probes) {
+      this.probeCalls.push(`${repo} ${p.dir} ${p.branch}`);
+      for (const it of this.items.values()) {
+        if (it.kind !== "pr" || it.repo !== repo) continue;
+        const up = p.dir === "up" && it.head_ref === p.branch && (it.head_repo ?? repo) === repo;
+        const down = p.dir === "down" && it.base === p.branch && it.state === "open";
+        if (up || down) hits.set(it.id, { node_id: it.node_id, id: it.id, kind: "pr", updated_at: it.updated_at, author: it.author });
+      }
+    }
+    return Promise.resolve([...hits.values()]);
   }
 
   rateLimit() {
