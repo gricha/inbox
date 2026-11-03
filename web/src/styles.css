@@ -1498,6 +1498,10 @@ kbd {
   color: inherit;
 }
 
+.lane-coord-error {
+  color: var(--red);
+}
+
 /* A stack's rows together, bottom first, under one quiet line. */
 .lane-stack {
   margin: 6px 0;

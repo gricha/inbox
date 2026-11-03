@@ -1832,7 +1832,7 @@ function inflight(): InflightView {
 }
 
 // The coordinator session, with its claude.ai link; w has it look now.
-const coordinator: CoordinatorView = { on: true, id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator" };
+const coordinator: CoordinatorView = { on: true, id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator", error: null };
 
 // Your asks to the coordinator: one answered, one it's still on. A new one gets a canned answer a few seconds later.
 const ASKS: Ask[] = [
