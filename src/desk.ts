@@ -258,6 +258,7 @@ export class Desk {
       if (cur.nlink === 0) return; // deleted or mid-rename; keep the loaded config
       if (fs.readFileSync(this.configPath, "utf8") !== this.configText) this.reloadConfig(true);
     });
+    this.coordinator.schedule();
   }
 
   start(): void {
@@ -612,7 +613,8 @@ export class Desk {
     for (const wake of this.waiters) wake();
     for (const e of events) {
       const what = wakeFor(e);
-      if (what && this.store.state(e.item_id).inflight_at) this.coordinator.wake(e.item_id, what);
+      if (what && this.store.state(e.item_id).inflight_at && this.store.itemsById([e.item_id]).get(e.item_id)?.state === "open")
+        this.coordinator.wake(e.item_id, what);
     }
   }
 

@@ -9,14 +9,17 @@ import type { ActivityEvent, CoordinatorView } from "./types.ts";
 
 const NAME = "Review Desk coordinator";
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
-const FRESH = 15_000; // how old the Merging line's state may be when it's read
+const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
+const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 // It reads CI logs and comments anyone can write; these keep injected text from posting or rewriting as the owner.
+// gh api whole: it POSTs whenever a field is passed, with no -X.
 const DENY = [
   "Bash(gh pr comment:*)",
   "Bash(gh pr review:*)",
   "Bash(gh pr ready:*)",
-  "Bash(gh api -X:*)",
-  "Bash(gh api --method:*)",
+  "Bash(gh pr edit:*)",
+  "Bash(gh issue comment:*)",
+  "Bash(gh api:*)",
   "Bash(git push --force:*)",
   "Bash(git push -f:*)",
 ];
@@ -60,11 +63,9 @@ export function wakeFor(e: Pick<ActivityEvent, "kind" | "data">): string | null 
 export class Coordinator {
   desk: Desk;
   batch = 60_000; // what lands within this goes in one message
-  pending = new Map<string, Set<string>>(); // PR id → what changed
   asked = false; // w in Merging
   timer: NodeJS.Timeout | null = null;
   flushing: Promise<void> | null = null;
-  state: "not started" | "idle" | "working" = "idle";
   checked = 0;
 
   constructor(desk: Desk) {
@@ -77,6 +78,11 @@ export class Coordinator {
 
   saved(): { id: string; url?: string } | null {
     return this.desk.store.get(KEY) as { id: string; url?: string } | null;
+  }
+
+  // [PR id, what changed], oldest first; only appended to until delivered.
+  news(): [string, string][] {
+    return (this.desk.store.get(NEWS) as [string, string][] | null) ?? [];
   }
 
   // The desk home's coordinator directory, with the deny list as its project settings unless the owner wrote their own.
@@ -92,27 +98,30 @@ export class Coordinator {
 
   view(): CoordinatorView {
     const s = this.saved();
-    if (s && this.on && Date.now() - this.checked > FRESH) void this.flush();
-    return { state: !this.on ? "off" : s ? this.state : "not started", id: s?.id ?? null, url: s?.url ?? null };
+    if (s && !s.url && this.on && Date.now() - this.checked > FRESH) void this.flush();
+    return { on: this.on, id: s?.id ?? null, url: s?.url ?? null };
   }
 
   // A hand-off, or news on a PR in Merging.
   wake(id: string, what: string): void {
     if (!this.on || !PR.test(id)) return;
-    this.pending.set(id, (this.pending.get(id) ?? new Set()).add(what));
+    const news = this.news();
+    if (!news.some(([i, w]) => i === id && w === what)) this.desk.store.set(NEWS, [...news, [id, what]]);
     this.schedule();
   }
 
   // w in Merging: start it, or have it look now.
   now(): Promise<void> {
+    if (this.flushing) return this.flushing; // a second w while one runs would wake it twice
     this.asked = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     return this.flush();
   }
 
+  // Also on desk start, for news a restart or a failed start left waiting.
   schedule(): void {
-    if (this.timer || this.desk.stopped) return;
+    if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asked)) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush();
@@ -127,7 +136,7 @@ export class Coordinator {
 
   // Turned off in Settings: stopped, its history kept for when it's turned on again.
   async stop(): Promise<void> {
-    this.pending.clear();
+    this.desk.store.set(NEWS, null);
     this.asked = false;
     if (!this.saved()) return;
     try {
@@ -138,18 +147,18 @@ export class Coordinator {
     }
   }
 
-  // Looks at it and hands it what's waiting once it's idle; again a batch later while it works or something waits.
+  // Hands it what's waiting once it's idle; looks again a batch later while it works.
   flush(): Promise<void> {
     this.flushing ??= this.run();
     return this.flushing;
   }
 
+  // A failure keeps the news for the next wake or desk start: retrying on a timer could resume it, paid, every minute.
   async run(): Promise<void> {
     try {
       await this.check();
-      if (this.pending.size || this.asked || this.state === "working") this.schedule();
+      this.schedule();
     } catch (e) {
-      this.pending.clear();
       this.asked = false;
       this.desk.log(`coordinator: ${(e as Error).message}`);
     } finally {
@@ -158,11 +167,11 @@ export class Coordinator {
   }
 
   async check(): Promise<void> {
+    const news = this.news();
     let a = await this.find();
     // Busy, in a shell or waiting on a permission: it stays queued.
-    if ((this.pending.size || this.asked) && this.on && (!a?.status || a.status === "idle")) {
-      const text = this.message();
-      this.pending.clear();
+    if ((news.length || this.asked) && this.on && (!a?.status || a.status === "idle")) {
+      const text = this.message(news);
       this.asked = false;
       if (!a) await this.launch(["--bg", "--name", NAME, "--remote-control", NAME, `${ROLE} ${text}`]);
       else {
@@ -171,25 +180,27 @@ export class Coordinator {
         for (let i = 0; a.pid && i < 50 && alive(a.pid); i++) await sleep(200);
         await this.launch(["--resume", a.sessionId, "--bg", text]);
       }
+      this.desk.store.set(NEWS, this.news().slice(news.length));
       a = await this.find();
+      this.desk.changed();
     }
-    const state = !a ? "not started" : a.status && a.status !== "idle" ? "working" : "idle";
-    let changed = state !== this.state;
-    this.state = state;
     if (a && !this.saved()?.url) {
       const url = /https:\/\/claude\.ai\/code\/session_\w+/.exec(await claude(["logs", a.id]).catch(() => ""))?.[0];
-      if (url) this.desk.store.set(KEY, { id: a.id, url });
-      changed ||= !!url;
+      if (url) {
+        this.desk.store.set(KEY, { id: a.id, url });
+        this.desk.changed();
+      }
     }
-    if (changed) this.desk.changed();
   }
 
-  message(): string {
-    const news = [...this.pending].map(([id, what]) => {
+  message(news: [string, string][]): string {
+    const by = new Map<string, Set<string>>();
+    for (const [id, what] of news) by.set(id, (by.get(id) ?? new Set()).add(what));
+    const lines = [...by].map(([id, what]) => {
       const [, repo, n] = PR.exec(id)!;
       return `${id} (https://github.com/${repo}/pull/${n}): ${[...what].join(", ")}`;
     });
-    return news.length ? `In Merging: ${news.join("; ")}.` : "I'd like you to look at Merging now.";
+    return lines.length ? `In Merging: ${lines.join("; ")}.` : "I'd like you to look at Merging now.";
   }
 
   // Keeps the id claude says it backgrounded: a copy's, if it made one.

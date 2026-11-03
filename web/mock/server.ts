@@ -1824,8 +1824,8 @@ function inflight(): InflightView {
   return { rows: lane, stacks: stacksOf(lane.map((x) => x.card)), coordinator };
 }
 
-// The coordinator session: idle, with its claude.ai link; w has it look now.
-const coordinator: CoordinatorView = { state: "idle", id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator" };
+// The coordinator session, with its claude.ai link; w has it look now.
+const coordinator: CoordinatorView = { on: true, id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator" };
 
 // ---------------------------------------------------------------------------
 // The event log: each seed's story (first seen, the ask, reviews, its `log`), numbered oldest first.
@@ -2869,11 +2869,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     }
   }
   if (route === "GET /api/inflight") return inflight();
-  if (route === "POST /api/coordinator/wake") {
-    coordinator.state = "working";
-    bump();
-    return { ok: true };
-  }
+  if (route === "POST /api/coordinator/wake") return { ok: true };
   if (route === "POST /api/undo") {
     const body = await readBody(req);
     return { ok: true, id: undo(body.seq as number | undefined) };

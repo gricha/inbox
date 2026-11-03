@@ -70,8 +70,8 @@ export function Inflight({
 
 // One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
 function Coordinator({ c }: { c: CoordinatorView }) {
-  if (c.state === "off") return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
-  if (!c.id || c.state === "not started")
+  if (!c.on) return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
+  if (!c.id)
     return (
       <p className="lane-coord">
         The coordinator starts on your first hand-off; <kbd>w</kbd> starts it now.
@@ -81,7 +81,7 @@ function Coordinator({ c }: { c: CoordinatorView }) {
     <p className="lane-coord">
       <Dots
         parts={[
-          `Coordinator ${c.state}`,
+          "Coordinator",
           ...(c.url
             ? [
                 <a key="url" href={c.url} target="_blank" rel="noreferrer">

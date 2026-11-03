@@ -39,6 +39,7 @@ const st = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : { session
 const args = process.argv.slice(2);
 st.calls.push({ args, cwd: process.cwd() });
 const busy = fs.existsSync(path.join(__dirname, "busy"));
+const fail = fs.existsSync(path.join(__dirname, "fail"));
 const cp = require("node:child_process");
 const alive = (pid) => {
   try {
@@ -73,6 +74,9 @@ if (args[0] === "agents") {
   st.sessions = st.sessions.filter((s) => s.id !== args[1]);
 } else if (args[0] === "logs") {
   console.log("/remote-control is active · Continue at https://claude.ai/code/session_01Fake" + args[1] + "\\x1b[0m");
+} else if (fail && args.includes("--bg")) {
+  console.error("Not logged in");
+  process.exitCode = 1;
 } else if (args[0] === "--resume") {
   const s = st.sessions.find((x) => x.sessionId === args[1]);
   if (args.length !== 4 || s.running || alive(s.pid)) {
@@ -108,6 +112,10 @@ fs.renameSync(f + ".tmp", f);
     busy: (on: boolean) => {
       if (on) fs.writeFileSync(path.join(dir, "busy"), "");
       else fs.rmSync(path.join(dir, "busy"), { force: true });
+    },
+    fail: (on: boolean) => {
+      if (on) fs.writeFileSync(path.join(dir, "fail"), "");
+      else fs.rmSync(path.join(dir, "fail"), { force: true });
     },
     // The owner's own claude stop or rm, which the desk doesn't see.
     owner: (cmd: "stop" | "rm", id: string) => {
@@ -167,7 +175,7 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    assert.deepEqual(t.desk.inflight().coordinator, { state: "not started", id: null, url: null });
+    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null });
     await settle();
     assert.deepEqual(t.fake.calls(), [], "a desk starting runs no claude");
     t.desk.act("web#3", "inflight");
@@ -190,7 +198,7 @@ test(
     assert.ok(deny.includes("Bash(gh pr comment:*)") && deny.includes("Bash(git push --force:*)"));
     await until(() => t.desk.inflight().coordinator.url !== null);
     assert.deepEqual(t.desk.inflight().coordinator, {
-      state: "idle",
+      on: true,
       id: "c0ffee01",
       url: "https://claude.ai/code/session_01Fakec0ffee01",
     });
@@ -234,7 +242,7 @@ test("a busy coordinator gets the news once it's idle, all of it in one message"
   await until(() => t.fake.sessions().length === 1);
   t.fake.busy(true);
   t.event(3, "ci", { from: "pending", to: "green" });
-  await until(() => t.desk.inflight().coordinator.state === "working");
+  await settle();
   t.event(3, "reviewed", { state: "approved" });
   await settle();
   assert.equal(resumes(t.fake.calls()).length, 0, "nothing reaches it while it works");
@@ -242,7 +250,6 @@ test("a busy coordinator gets the news once it's idle, all of it in one message"
   t.fake.busy(false);
   await until(() => t.fake.sessions()[0]?.prompts.length === 2);
   assert.equal(t.fake.sessions()[0]!.prompts[1], "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): CI passed, approved.");
-  await until(() => t.desk.inflight().coordinator.state === "idle");
 });
 
 test("a coordinator the owner stopped is resumed; one they removed is started afresh on the next wake", posix, async (c) => {
@@ -292,16 +299,55 @@ test("the desk restarting leaves its coordinator running, and the next desk wake
   assert.equal(t.fake.sessions()[0]!.prompts[1], "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): merge conflict.");
 });
 
+test("news a desk restart or a failed start interrupts isn't lost: it goes with the next try", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.coordinator.batch = 60_000;
+  t.desk.act("web#3", "inflight");
+  await t.desk.close();
+  assert.deepEqual(t.fake.calls(), [], "the batch hadn't gone out");
+  t.fake.fail(true);
+  const desk = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    desk.stop();
+  });
+  desk.coordinator.batch = 30;
+  await desk.init();
+  await until(() => starts(t.fake.calls()).length === 1);
+  await settle();
+  assert.equal(t.fake.sessions().length, 0, "claude couldn't start it");
+  t.fake.fail(false);
+  desk.record("github", [{ at: NOW.toISOString(), item_id: "acme/web#3", kind: "commented", actor: "dana", data: {} }]);
+  await until(() => t.fake.sessions().length === 1);
+  assert.match(t.fake.sessions()[0]!.prompts[0]!, /In Merging: acme\/web#3 \S+: handed off, new comment\.$/);
+});
+
+test("news on a PR that's merged or closed doesn't wake it", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.act("web#3", "inflight");
+  await until(() => t.fake.sessions()[0]?.prompts.length === 1);
+  t.gh.items.set("acme/web#3", { ...t.gh.items.get("acme/web#3")!, state: "merged", merged_by: "me", closed_at: NOW.toISOString() });
+  await t.desk.sync();
+  t.event(3, "commented");
+  await settle(500);
+  assert.ok(!t.fake.calls().some((a) => a[0] === "stop" || a[0] === "--resume"), "nothing stops or resumes it");
+});
+
 test("w in Merging starts it now; off in Settings, nothing starts it and the running one stops", posix, async (c) => {
   const t = await coordinated(c);
   const app = createApp(t.desk, 47823);
   const wake = () => app.request("http://127.0.0.1:47823/api/coordinator/wake", { method: "POST" });
-  assert.equal((await wake()).status, 200);
+  const first = wake();
+  await until(() => starts(t.fake.calls()).length === 1);
+  const again = wake(); // pressed while the first still runs
+  assert.equal((await first).status, 200);
+  assert.equal((await again).status, 200);
+  await settle(500);
   assert.equal(t.fake.sessions().length, 1, "at once, no batch");
+  assert.deepEqual(resumes(t.fake.calls()), [], "one wake, not two");
   assert.match(t.fake.sessions()[0]!.prompts[0]!, /review-desk skill\. I'd like you to look at Merging now\.$/);
   t.desk.putSettings({ set: { "agent.coordinator": false } });
   await until(() => !t.fake.sessions()[0]!.running);
-  assert.equal(t.desk.inflight().coordinator.state, "off");
+  assert.equal(t.desk.inflight().coordinator.on, false);
   assert.equal((await wake()).status, 409);
   t.desk.act("web#3", "inflight");
   t.event(3, "commented");
@@ -326,5 +372,5 @@ test("w says so when claude can't start it", async (c) => {
     logs.some((l) => l.startsWith("coordinator: /nonexistent/claude not found")),
     logs.join("\n"),
   );
-  assert.equal(t.desk.inflight().coordinator.state, "not started");
+  assert.equal(t.desk.inflight().coordinator.id, null);
 });

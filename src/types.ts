@@ -723,8 +723,8 @@ export interface InflightView {
 
 // The background Claude Code session the desk starts and wakes (README → Coordinator).
 export interface CoordinatorView {
-  state: "off" | "not started" | "idle" | "working";
-  id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take
+  on: boolean;
+  id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take; null until it's started
   url: string | null; // its Remote Control page on claude.ai
 }
 
