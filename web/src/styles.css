@@ -177,7 +177,7 @@
   --amber: #dfb468;
   --amber-wash: #352c1c;
   --green: #86c99c;
-  --accent: #4a71a8;
+  --accent: #3f6599;
   --on-accent: #f1f4f8;
   --scrim: rgb(0 0 0 / 50%);
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
@@ -808,10 +808,13 @@ kbd {
   text-overflow: ellipsis;
 }
 
+/* One width for every age, so the calls to action before it end in one column. */
 .line-age {
   flex: none;
+  min-width: calc(12px + 3.5ch);
   margin-left: auto;
   padding-left: 12px;
+  text-align: right;
 }
 
 /* The row's one call to action, a button on the right before its age; its negative margin keeps every row one height. */
@@ -1591,7 +1594,7 @@ kbd {
   align-items: center;
   gap: 6px;
   height: 34px;
-  padding: 0 11px;
+  padding: 0 8px;
   border: 1px solid var(--rule-strong);
   border-radius: 9px;
   background: none;
@@ -1618,6 +1621,13 @@ kbd {
   color: var(--faint);
 }
 
+/* Wide enough for "again to mark ready", so arming a review's or a row's call to action never moves what's beside it. */
+.rv-actions .act.primary,
+.line .line-cta {
+  justify-content: center;
+  min-width: 152px;
+}
+
 .act.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -1627,13 +1637,13 @@ kbd {
 
 .act.primary:hover:not(:disabled) {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 86%, var(--ink));
+  background: color-mix(in srgb, var(--accent) 88%, #000);
   color: var(--on-accent);
 }
 
 .act.primary kbd {
   color: inherit;
-  opacity: 0.75;
+  opacity: 0.85;
 }
 
 .act.primary:disabled {

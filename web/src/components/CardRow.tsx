@@ -94,29 +94,30 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
           )}
           {note && <span className="line-note">{note}</span>}
         </button>
+        {/* Filled and with its key only under the cursor, since that's the row the key acts on. */}
         {card.cta === "ready" && !why && (
           <button
             type="button"
-            className={cls("act primary line-cta", armed && "armed")}
+            className={cls("act line-cta", sel && "primary", armed && "armed")}
             title="Mark it ready for review on GitHub: press a twice"
             onClick={() => {
               ctx.run(card, "a");
             }}
           >
-            <kbd>a</kbd>
+            {sel && <kbd>a</kbd>}
             {armed ? "again to mark ready" : "Ready for review"}
           </button>
         )}
         {card.cta === "reply" && !why && (
           <button
             type="button"
-            className="act primary line-cta"
+            className={cls("act line-cta", sel && "primary")}
             title="Someone waits on your answer: Enter opens the review, with a reply ready"
             onClick={() => {
               ctx.click(card);
             }}
           >
-            <kbd>enter</kbd>
+            {sel && <kbd>enter</kbd>}
             Reply
           </button>
         )}
