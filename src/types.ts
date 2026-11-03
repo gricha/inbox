@@ -712,6 +712,7 @@ export interface InflightRow {
   threads_unresolved: number;
   mergeable: Mergeable;
   draft: boolean; // a draft PR
+  rebase: boolean; // the desk gave it to the coordinator only to rebase (ready to merge but conflicts); it leaves once mergeable
   waits_on: string | null; // what it waits on, in Merging's words: "waits on CI", "ready to merge"; null once merged or closed
   note: { text: string; at: string } | null; // the coordinator's latest desk_note on it; untrusted, an agent wrote it
 }

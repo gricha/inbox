@@ -223,7 +223,8 @@ test(
     assert.ok(!t.fake.calls().flat().join(" ").includes("Ignore previous"), "never PR text");
     const deny = (JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
       .permissions.deny;
-    assert.ok(deny.includes("Bash(gh pr comment:*)") && deny.includes("Bash(git push --force:*)"));
+    assert.ok(deny.includes("Bash(gh pr comment:*)") && deny.includes("Bash(git push --force *)"));
+    assert.ok(!deny.some((r) => r.includes("--force-with-lease") || r.includes("--force:*")), "a rebase pushes with --force-with-lease");
     assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" });
   },
 );
@@ -352,6 +353,19 @@ test("news a desk restart or a failed start interrupts isn't lost: it goes with 
   assert.match(t.said()[0]!, /In Merging: acme\/web#3 \S+: handed off, new comment\.$/);
   await settle();
   assert.deepEqual(desk.coordinator.news(), []);
+});
+
+test("your PR that's ready to merge but conflicts reaches it as one rebase line, ids and URLs only", posix, async (c) => {
+  const t = await coordinated(c);
+  const it = t.gh.items.get("acme/web#3")!;
+  t.gh.items.set(it.id, { ...it, ci: "green", review_decision: "approved", mergeable: "conflict", updated_at: NOW.toISOString() });
+  await t.desk.sync();
+  await until(() => t.said().length === 1);
+  await t.desk.sync();
+  await settle();
+  assert.deepEqual(t.said(), [
+    `${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly.`,
+  ]);
 });
 
 test("news on a PR that's merged or closed doesn't wake it", posix, async (c) => {

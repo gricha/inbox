@@ -138,6 +138,7 @@ const inflightView: InflightView = {
       threads_unresolved: 2,
       mergeable: "clean",
       draft: false,
+      rebase: false,
       waits_on: "waits on a CI fix",
       note: { text: "Fixing the flaky test", at: ago(0.1) },
     },

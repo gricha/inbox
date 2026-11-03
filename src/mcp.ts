@@ -238,6 +238,7 @@ function mergingLine(r: InflightRow): string {
   };
   const facts = [
     r.state === "open" ? "" : r.state,
+    r.rebase ? "rebase only: don't merge it" : "",
     r.draft ? "draft" : "",
     ci[r.ci],
     r.approved_by.length ? `approved by ${r.approved_by.join(", ")}` : "not approved",

@@ -22,13 +22,22 @@ const DENY = [
   "Bash(gh pr edit:*)",
   "Bash(gh issue comment:*)",
   "Bash(gh api:*)",
-  "Bash(git push --force:*)",
-  "Bash(git push -f:*)",
+  // The space after a flag is part of the rule, so --force-with-lease matches none of these.
+  "Bash(git push --force *)",
+  "Bash(git push * --force)",
+  "Bash(git push * --force *)",
+  "Bash(git push -f *)",
+  "Bash(git push * -f)",
+  "Bash(git push * -f *)",
+  "Bash(git push * +*)",
 ];
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
   "You are my Review Desk coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the review-desk skill.";
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
+// The desk's news for the owner's PR that's ready to merge but conflicts: it's in Merging only until GitHub sees it mergeable.
+export const REBASE =
+  "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
 
 interface Agent {
   id: string;

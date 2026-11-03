@@ -1,9 +1,11 @@
 // Merging (in flight): m on your own PR, the Merging tab (never the queue), the coordinator's notes and hand-backs, and Ready
 // for review on your own draft (a GitHub write).
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
+import { REBASE } from "../src/coordinator.ts";
+import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo } from "./helpers/items.ts";
 
@@ -175,6 +177,82 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
   });
   assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 9)!.approved_by, [], "the coordinator merges on it");
   assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 7)!.stacked, true, "the coordinator sees it sits on another PR");
+});
+
+// Your own PR #3, approved and green, and #4, green and waiting on review; the coordinator's wakes are kept, not delivered.
+async function conflicts(c: TestContext, settings: Record<string, unknown> = {}) {
+  const t = await setup([myPr(3, { ci: "green", review_decision: "approved", mergeable: "clean" }), myPr(4, { ci: "green" })], {
+    settings: { "policy.judge": false, "notify.quiet": "", ...settings },
+  });
+  c.after(t.cleanup);
+  const woke: [string, string][] = [];
+  t.desk.coordinator.wake = (id, what) => {
+    woke.push([id, what]);
+  };
+  await t.desk.sync();
+  let step = 0;
+  const update = async (n: number, o: Partial<Item>) => {
+    const it = t.gh.items.get(`acme/web#${n}`)!;
+    t.gh.items.set(it.id, { ...it, ...o, updated_at: hoursAgo(1 - ++step / 10) });
+    await t.desk.sync();
+  };
+  const main = () =>
+    Object.values(t.desk.focus().sections)
+      .flat()
+      .map((x) => [x.id, x.why]);
+  const merging = () => t.desk.inflight().rows.map((r) => [r.card.id, r.waits_on, r.rebase]);
+  return { ...t, woke, update, main, merging };
+}
+
+test("your PR that's ready to merge but conflicts goes to the coordinator to rebase, once, off your desk and unannounced", async (c) => {
+  const t = await conflicts(c);
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
+  await t.update(3, { mergeable: "conflict" });
+  assert.deepEqual(t.woke, [["acme/web#3", REBASE]]);
+  assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
+  assert.deepEqual(t.main(), []);
+  await t.update(3, { comments_total: 1 });
+  await t.desk.sync();
+  assert.equal(t.woke.length, 1, "once per conflict, not every sync");
+  assert.deepEqual(t.notes, []);
+  // GitHub sees it mergeable again: it leaves Merging by itself, and is ready to merge on your desk.
+  await t.update(3, { mergeable: "unknown", head_oid: "def" });
+  assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]], "not while GitHub works it out");
+  await t.update(3, { mergeable: "clean" });
+  assert.deepEqual(t.merging(), []);
+  assert.deepEqual(t.desk.merging("acme/web#3"), {});
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
+  assert.deepEqual(t.notes, ["web#3 · approved and green: ready to merge"]);
+  await t.update(3, { mergeable: "conflict" });
+  assert.equal(t.woke.length, 2, "a new conflict goes again");
+});
+
+test("a conflict on your PR that isn't ready to merge yet is nobody's: nothing goes to the coordinator, nothing notifies", async (c) => {
+  const t = await conflicts(c);
+  await t.update(4, { mergeable: "conflict" });
+  await t.update(3, { mergeable: "conflict", ci: "pending" });
+  await t.update(3, { draft: true, ci: "green" });
+  assert.deepEqual([t.woke, t.merging(), t.notes], [[], [], []]);
+  assert.ok(!t.main().some(([id]) => id === "acme/web#4"));
+});
+
+test("a rebase the coordinator hands back tops your desk with its reason, and isn't sent again for that conflict", async (c) => {
+  const t = await conflicts(c);
+  await t.update(3, { mergeable: "conflict" });
+  t.desk.handBack("web#3", "can't rebase cleanly: both change the retry schedule");
+  await t.update(3, { comments_total: 1 });
+  assert.deepEqual(t.main(), [["acme/web#3", "handed back: can't rebase cleanly: both change the retry schedule"]]);
+  assert.deepEqual([t.woke.length, t.merging()], [1, []]);
+  // You fix it yourself: once it's mergeable, the hand-back is done with.
+  await t.update(3, { mergeable: "clean" });
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
+});
+
+test("with the coordinator off, a ready PR's conflict stays yours: nothing is sent and it stays on your desk", async (c) => {
+  const t = await conflicts(c, { "agent.coordinator": false });
+  await t.update(3, { mergeable: "conflict" });
+  assert.deepEqual([t.woke, t.merging()], [[], []]);
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
 });
 
 test("desk_note: the coordinator's latest line on a PR in Merging shows on its row; m again starts without it", async (c) => {

@@ -485,12 +485,12 @@ test("your PR's card carries who last spoke on it; nobody asked you by name says
   t.cleanup();
 });
 
-test("quiet items drop out of Now and Today: your old conflicting PRs go to Later; a PR in Merging stays there", async () => {
+test("quiet items drop out of Now and Today: your old failing PRs go to Later; a PR in Merging stays there", async () => {
   const days = (d: number) => hoursAgo(d * 24);
   const t = await setup([
-    myPr(20631, { ci: "green", mergeable: "conflict", updated_at: days(143) }),
-    myPr(548, { ci: "green", mergeable: "conflict", updated_at: days(20) }),
-    myPr(7, { ci: "green", mergeable: "conflict" }),
+    myPr(20631, { updated_at: days(143) }),
+    myPr(548, { updated_at: days(20) }),
+    myPr(7),
     myPr(8, { ci: "red", updated_at: days(30) }),
     reviewAsk(1, { updated_at: days(30) }),
   ]);
@@ -511,7 +511,7 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
   );
   assert.deepEqual(
     q.sections.today.map((c) => [c.id, c.next]),
-    [["acme/web#7", "merge conflict with main: m hands it off for merge"]],
+    [["acme/web#7", "CI failing: m hands it off for merge"]],
   );
   assert.deepEqual([t.desk.inflight().rows[0]?.waits_on, t.desk.overview().inflight.total], ["waits on a CI fix", 1]);
 
@@ -523,10 +523,7 @@ test("quiet items drop out of Now and Today: your old conflicting PRs go to Late
       .sort(),
     ["acme/web#20631", "acme/web#548", "acme/web#7"],
   );
-  assert.equal(
-    t.desk.queue().sections.today.find((c) => c.id === "acme/web#7")?.next,
-    "merge conflict with main: m hands it off for merge",
-  );
+  assert.equal(t.desk.queue().sections.today.find((c) => c.id === "acme/web#7")?.next, "CI failing: m hands it off for merge");
   t.cleanup();
 });
 
@@ -574,6 +571,10 @@ test("a desk started on the oldest config migrates its rules once, with one back
     .replaceAll(
       `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "item.draft", bucket = "later", why = "draft" },`,
+    )
+    .replaceAll(
+      /^.*why = "CI failing" \},\n/gm,
+      `$&  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },\n`,
     );
   fs.writeFileSync(config, old);
   const logs: string[] = [];
@@ -583,7 +584,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
   assert.equal(fs.readFileSync(config, "utf8"), now);
   assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
   assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
-  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated"]) {
+  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "conflict_migrated"]) {
     assert.ok(desk.store.get(k), k);
     desk.store.set(k, null);
   }

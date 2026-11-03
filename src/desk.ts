@@ -46,7 +46,7 @@ import type {
   Stack,
   Status,
 } from "./types.ts";
-import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -56,7 +56,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, owesReply } from "./conversation.ts";
-import { askLine, Coordinator, wakeFor } from "./coordinator.ts";
+import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -135,6 +135,7 @@ export interface DeskOptions {
 interface Merging {
   handback?: { reason: string; at: string };
   note?: { text: string; at: string };
+  rebase?: string; // when the desk gave it to the coordinator to rebase, ready to merge but for a conflict
 }
 
 const MAX_POLICY = 20_000; // it goes with every judge call
@@ -464,12 +465,13 @@ export class Desk {
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
   // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
-  // on the desk (migrateDrafts).
+  // on the desk (migrateDrafts), and the rule putting a merge conflict on the desk goes (migrateConflict).
   migrateRules(): void {
     const due = [
       { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
       { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
       { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
+      { key: "conflict_migrated", migrate: migrateConflict, did: "removed the rule putting a merge conflict on your desk" },
     ].filter((m) => !this.store.get(m.key));
     if (!due.length) return;
     const before = fs.readFileSync(this.configPath, "utf8");
@@ -567,6 +569,7 @@ export class Desk {
   // A connector brought in something new.
   synced(): void {
     this.changed();
+    this.rebaseConflicts();
     this.notifyNew();
     this.pumpAi();
     const kept = new Set(this.store.itemMeta().keys());
@@ -1009,8 +1012,7 @@ export class Desk {
   // (in Merging: Enter opens it there; approved and green: o merges it on GitHub).
   nextStep(e: Entry): string | undefined {
     const it = e.item;
-    const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
-    if (e.inflight || ready) return undefined;
+    if (e.inflight || (mergeReady(it) && it.mergeable === "clean")) return undefined;
     const hand = "m hands it off for merge";
     if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
     if (it.ci === "red") return `CI failing: ${hand}`;
@@ -1025,7 +1027,7 @@ export class Desk {
   replyOnly(e: Entry): boolean {
     const it = e.item;
     if (it.state !== "open" || e.inflight || it.draft || it.ci === "red" || it.mergeable === "conflict") return false;
-    if (it.review_decision === "changes_requested" || (it.review_decision === "approved" && it.ci === "green")) return false;
+    if (it.review_decision === "changes_requested" || mergeReady(it)) return false;
     return owesReply(it, this.me());
   }
 
@@ -1540,6 +1542,7 @@ export class Desk {
       const it = e.item;
       if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
       if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
+      const m = this.merging(it.id);
       const verdicts = new Map<string, Item["reviews"][number]>();
       // The coordinator merges on an approval, so only a collaborator's counts; anyone's change request still holds it.
       for (const r of it.reviews)
@@ -1563,13 +1566,9 @@ export class Desk {
         threads_unresolved: it.threads_unresolved,
         mergeable: it.mergeable,
         draft: it.draft,
+        rebase: !!m.rebase,
       };
-      rows.push({
-        card: this.card(e, this.shownAt(e, snap), snap),
-        ...row,
-        waits_on: waitsOn(row),
-        note: this.merging(it.id).note ?? null,
-      });
+      rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
     }
     rows.sort(
       (a, b) =>
@@ -1598,6 +1597,39 @@ export class Desk {
 
   merging(id: string): Merging {
     return (this.store.get(`sitter:${id}`) as Merging | null) ?? {};
+  }
+
+  // Your own PR that's ready to merge but conflicts goes to the coordinator to rebase, in Merging until GitHub sees it mergeable
+  // again; once per conflict, so a hand-back stays handed back.
+  rebaseConflicts(): void {
+    if (!this.loaded) return;
+    const merging = this.store.prefixed<Merging>("sitter:");
+    let moved = false;
+    for (const e of this.snapshot().entries.values()) {
+      const it = e.item;
+      if (merging.get(it.id)?.rebase) {
+        if (it.state === "open" && it.mergeable !== "clean") continue;
+        if (e.state.inflight_at) this.store.putState({ ...e.state, inflight_at: null });
+        this.store.set(`sitter:${it.id}`, null);
+        moved = true;
+      } else if (
+        this.settings["agent.coordinator"] &&
+        !e.state.inflight_at &&
+        e.status === "active" &&
+        it.kind === "pr" &&
+        e.analysis.signals.me.author &&
+        mergeReady(it) &&
+        it.mergeable === "conflict"
+      ) {
+        const at = this.now().toISOString();
+        this.store.putState({ ...e.state, inflight_at: at });
+        this.store.set(`sitter:${it.id}`, { rebase: at });
+        this.coordinator.wake(it.id, REBASE);
+        this.log(`gave ${it.id} to the coordinator to rebase: ready to merge but conflicts`);
+        moved = true;
+      }
+    }
+    if (moved) this.changed();
   }
 
   // Your own open PR in Merging: what the coordinator's tools may touch.
@@ -1857,6 +1889,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
+  if (r.rebase) return "rebasing";
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
@@ -1865,6 +1898,11 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
   if (r.stacked) return `waits on ${r.base} to merge first`;
   return "ready to merge";
+}
+
+// Approved by someone with a say, CI green, not a draft: ready to merge, but for a conflict.
+function mergeReady(it: Item): boolean {
+  return it.state === "open" && !it.draft && it.review_decision === "approved" && it.ci === "green";
 }
 
 function shortRef(c: { repo: string; number: number }): string {

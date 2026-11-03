@@ -227,6 +227,16 @@ export function migrateDrafts(text: string): string | null {
   return next === text ? null : next;
 }
 
+// A merge conflict alone isn't yours (the coordinator rebases a PR that's otherwise ready): the old first-run rule putting
+// one on your desk goes, only as written. Null if absent.
+export function migrateConflict(text: string): string | null {
+  const next = text.replaceAll(
+    /^[ \t]*\{ when = "pr\.mergeable == 'conflict'", bucket = "today", why = "merge conflict" \},?[ \t]*\r?\n/gm,
+    "",
+  );
+  return next === text ? null : next;
+}
+
 // First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
 export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const orgs = opts.workOrgs;
@@ -299,7 +309,6 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },`,
       `  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },`,
       `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },`,
-      `  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },`,
       `  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },`,
       `  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },`,
       `  { when = "pr.unresolved_threads > 0", bucket = "later", why = "unresolved threads: {pr.unresolved_threads}" },`,

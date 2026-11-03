@@ -24,7 +24,7 @@ export const DEFAULT_POLICY = `Less is more. Show me what a person is waiting on
 - Bot PRs (dependency bumps, autofix, flag cleanups, release tooling): hide unless I'm asked by name. A PR an agent opened for a person ("via …") is that person's, and mine when it's via me.
 - PRs from people I work with often, where I wasn't asked: fyi, unless I'm clearly the natural reviewer.
 - Where the AI pre-flight review says to skip it and nobody asked me by name: fyi.
-- My own PRs: now when a person is blocked on me (changes requested, a question to me). Today when it's approved and green, ready to merge; when the bottom of a stack has a conflict or required CI red that isn't from my last hour's push; or when it's a draft I touched in the last two weeks, mine to finish whatever CI says. Everything else is later: older drafts, PRs stacked on another of mine, bot review threads, waiting on reviewers.
+- My own PRs: now when a person is blocked on me (changes requested, a question to me). Today when it's approved and green, ready to merge; when the bottom of a stack has required CI red that isn't from my last hour's push; or when it's a draft I touched in the last two weeks, mine to finish whatever CI says. Everything else is later: older drafts, PRs stacked on another of mine, bot review threads, waiting on reviewers. A merge conflict alone never needs me: the coordinator rebases a PR once it's otherwise ready to merge.
 - Mentions and assigned issues: today when someone asks me something or waits for my answer; fyi for drive-by mentions, release notes and bulk pings.
 - Anything nobody is waiting on that's been quiet for weeks: later.
 `;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultConfigText, migrateBotAsk, migrateDrafts, migrateHard, parseConfig } from "../src/config.ts";
+import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig } from "../src/config.ts";
 
 test("default configs parse cleanly", () => {
   for (const orgs of [["acme"], ["acme", "globex"], []]) {
@@ -131,6 +131,24 @@ test("a config written before drafts reached the desk gets both draft rules on e
   assert.ok(migrateDrafts(spaced)!.includes(`rules = [\n\n${fresh}`));
 });
 
+const RED = `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },\n`;
+const CONFLICT = `  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },\n`;
+
+test("a merge conflict alone leaves the desk: the old rule goes from every My PRs board, unless the owner changed it", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const old = now.replaceAll(RED, RED + CONFLICT);
+  assert.equal(old.split(CONFLICT).length - 1, 2, "both My PRs boards, as in the owner's config");
+  assert.equal(migrateConflict(old), now);
+  assert.equal(migrateConflict(now), null, "already gone");
+  const edited = old.replace(`why = "merge conflict" }`, `why = "rebase it" }`);
+  const kept = migrateConflict(edited)!;
+  assert.ok(kept.includes(`bucket = "today", why = "rebase it" },`), "a rule the owner changed is theirs");
+  assert.equal(kept.split(CONFLICT).length - 1, 0, "the other board's goes");
+  const last = now.replace(`nudge a reviewer?" },\n`, `$&${CONFLICT.replace("},", "}")}`);
+  assert.deepEqual(parseConfig(last).errors, []);
+  assert.deepEqual(parseConfig(migrateConflict(last)!).errors, [], "the last one, without its trailing comma");
+});
+
 test("the oldest first-run config reaches today's through the migrations, and today's is left alone", () => {
   const now = defaultConfigText({ workOrgs: ["acme"] });
   const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
@@ -138,7 +156,8 @@ test("the oldest first-run config reaches today's through the migrations, and to
   const old = now
     .replaceAll(`  ${bot}\n`, "")
     .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
-    .replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`);
-  assert.equal(migrateDrafts(migrateBotAsk(migrateHard(old)!)!), now);
-  for (const m of [migrateHard, migrateBotAsk, migrateDrafts]) assert.equal(m(now), null, m.name);
+    .replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`)
+    .replaceAll(RED, RED + CONFLICT);
+  assert.equal(migrateConflict(migrateDrafts(migrateBotAsk(migrateHard(old)!)!)!), now);
+  for (const m of [migrateHard, migrateBotAsk, migrateDrafts, migrateConflict]) assert.equal(m(now), null, m.name);
 });

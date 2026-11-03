@@ -1783,6 +1783,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
+  if (r.rebase) return "rebasing";
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
@@ -1810,6 +1811,7 @@ function laneRow(r: Rec): InflightRow {
     threads_unresolved: sig.pr.unresolved_threads,
     mergeable: sig.pr.mergeable,
     draft: !!s.draft,
+    rebase: false,
   };
   return { card: cardOf(r, shownAt(r, bestPlacement(r))), ...row, waits_on: waitsOn(row), note: laneNotes.get(r.id) ?? null };
 }
