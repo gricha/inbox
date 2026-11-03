@@ -9,6 +9,7 @@ import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
+import { stage, verdicts } from "./stage.ts";
 import type {
   Action,
   ActivityPage,
@@ -826,6 +827,8 @@ export class Desk {
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
     const stack = stackRef(snap.stacks, it.id);
+    const via = e.analysis.signals.author.via.replace(/^@/, "");
+    const st = stage(it, me.author ? this.me() : it.author);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -836,6 +839,8 @@ export class Desk {
       url: it.url,
       author: it.author,
       author_bot: e.analysis.signals.author.bot,
+      by: me.author ? "you" : via || it.author,
+      ...(st && { stage: st }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? p?.why ?? "",
       demoted: p?.demoted,
@@ -1546,16 +1551,7 @@ export class Desk {
       if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
       if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
       const m = this.merging(it.id);
-      const verdicts = new Map<string, Item["reviews"][number]>();
-      // The coordinator merges on an approval, so only a collaborator's counts; anyone's change request still holds it.
-      for (const r of it.reviews)
-        if (
-          !r.author_bot &&
-          r.author.toLowerCase() !== me &&
-          (r.state === "changes_requested" || r.state === "dismissed" || (r.state === "approved" && r.trusted))
-        )
-          verdicts.set(r.author.toLowerCase(), r);
-      const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
+      const { approved_by, changes_by } = verdicts(it, me);
       const row = {
         state: it.state,
         base: it.base,
@@ -1563,8 +1559,8 @@ export class Desk {
         merge_method: it.merge_method ?? null,
         ci: it.ci,
         failing: it.checks_failed ?? [],
-        approved_by: by("approved"),
-        changes_by: by("changes_requested"),
+        approved_by,
+        changes_by,
         waiting_on: it.review_requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer)),
         threads_unresolved: it.threads_unresolved,
         mergeable: it.mergeable,

@@ -775,6 +775,8 @@ kbd {
 .line-ref,
 .line-num,
 .line-stack,
+.line-by,
+.line-stage,
 .line-note,
 .line-age {
   color: var(--pencil);
@@ -797,8 +799,20 @@ kbd {
   margin-left: -14px;
 }
 
-.line-stack {
+.line-stack,
+.line-stage {
   flex: none;
+}
+
+.line-by {
+  flex: none;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-stage.t-warn {
+  color: var(--amber);
 }
 
 .line-note {
