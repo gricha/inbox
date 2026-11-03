@@ -1,19 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView, Stack, StackMember } from "../../../src/types.ts";
+import type {
+  ActivityEvent,
+  AiReview,
+  Card,
+  InflightRow,
+  ReviewFile,
+  ReviewNote,
+  ReviewView,
+  Stack,
+  StackMember,
+} from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { currentFile, filePatch, onLines, resolvedHead, routeHash, says, sections, splitPath, type Section } from "../view.ts";
+import { keptReview, reviewOf } from "../reviews.ts";
+import { currentFile, drawUpTo, filePatch, onLines, resolvedHead, routeHash, says, sections, splitPath, type Section } from "../view.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 import { Asks, type Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
+import { SkLines } from "./Skeleton.tsx";
 
 interface NoteMeta {
   index: number; // in reading order, what ] and [ step through
   body: string;
+}
+
+interface Fact {
+  text: string;
+  tone: string; // t-bad, t-warn, or "" for pencil
 }
 
 const ARM_MS = 3000;
@@ -60,6 +77,7 @@ function diffOptions(): FileDiffOptions<NoteMeta, undefined> {
 
 export function Review({
   id,
+  known,
   loads,
   me,
   now,
@@ -73,6 +91,7 @@ export function Review({
   onThread,
 }: {
   id: string;
+  known: Card | null; // its row's card, drawn at once while the review is on its way
   loads: number; // bumped on every refresh, so the review follows the server's updates
   me: string; // your login: m and b are for your own PRs
   now: number;
@@ -92,6 +111,7 @@ export function Review({
   const [side, setSide] = useState(sideSaved);
   const [armed, setArmed] = useState(0); // when `a` was pressed once
   const [busy, setBusy] = useState<"approve" | "ready" | "ai" | null>(null);
+  const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
@@ -107,9 +127,20 @@ export function Review({
     if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
     shown.current = id;
     const n = ++seq.current;
+    let opened = false;
+    // The last view fetched (resting on its row fetches it) draws at once; the open's own GET starts its AI review.
     void (async () => {
       try {
-        const r = await api.review(id);
+        const r = await keptReview(id);
+        if (r && n === seq.current && !opened) setView(r);
+      } catch {
+        // the open's own GET says what went wrong
+      }
+    })();
+    void (async () => {
+      try {
+        const r = await reviewOf(id);
+        opened = true;
         if (n === seq.current) setView(r);
       } catch (e) {
         // Keep what's on screen if a refresh fails.
@@ -125,6 +156,24 @@ export function Review({
   const notes = order?.notes ?? [];
   const folded = !!order?.ranked && rest < list.length && !restOpen;
   const visible = folded ? list.slice(0, rest) : list;
+  // A big diff draws a screenful with the page and the rest a few files a frame, so the top never waits on highlighting.
+  const first = useMemo(() => drawUpTo(list, 0), [list]);
+  const upTo = Math.max(first, drawn);
+  useEffect(() => {
+    let t = 0;
+    const f =
+      upTo < list.length
+        ? requestAnimationFrame(() => {
+            t = window.setTimeout(() => {
+              setDrawn(drawUpTo(list, upTo));
+            });
+          })
+        : 0;
+    return () => {
+      cancelAnimationFrame(f);
+      clearTimeout(t);
+    };
+  }, [upTo, list]);
 
   // The section you're reading follows the scroll, except right after a key moved you: then it's the one the key picked.
   useEffect(() => {
@@ -132,7 +181,7 @@ export function Review({
     const onScroll = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const tops = [...document.querySelectorAll(".rv-file-sec")].map((el) => el.getBoundingClientRect().top);
+        const tops = [...document.querySelectorAll(".rv-file-sec[id]")].map((el) => el.getBoundingClientRect().top); // not the placeholders
         const atEnd = scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
         if (tops.length && Date.now() - jumped.current > 400) setSecIdx(currentFile(tops, LINE, atEnd));
       });
@@ -170,6 +219,7 @@ export function Review({
   function goTo(i: number, el = `#rv-s-${i}`, block: ScrollLogicalPosition = "start") {
     jumped.current = Date.now();
     if (i >= rest) setRestOpen(true);
+    setDrawn((d) => Math.max(d, i + 1));
     setSecIdx(i);
     requestAnimationFrame(() => {
       document.querySelector(el)?.scrollIntoView({ block });
@@ -182,8 +232,11 @@ export function Review({
     if (!folded || n < rest) goTo(n);
     else {
       jumped.current = Date.now();
+      setDrawn((d) => Math.max(d, rest)); // the fold shows once what's above it is drawn
       setSecIdx(n);
-      document.querySelector(".rv-fold")?.scrollIntoView({ block: "center" });
+      requestAnimationFrame(() => {
+        document.querySelector(".rv-fold")?.scrollIntoView({ block: "center" });
+      });
     }
   }
 
@@ -329,7 +382,7 @@ export function Review({
     };
   }, []);
 
-  if (view === null) return <p className="quiet-note">Loading the review…</p>;
+  if (view === null) return <Shell card={known} me={me} now={now} row={row} side={side} />;
   if (typeof view === "string")
     return (
       <div className="review">
@@ -346,7 +399,7 @@ export function Review({
   const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
   const approvals = approvers.length;
   // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
-  const facts = [
+  const facts: Fact[] = [
     { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "" },
     {
       text:
@@ -360,74 +413,29 @@ export function Review({
     ...(item.draft ? [{ text: "draft", tone: "" }] : []),
     { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
   ];
-  // The why leaves out a fact it already says, as on the card ("conflicts with main" says "merge conflict").
-  const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
-  const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
   const section = (x: Section, i: number) => (
     <SectionView key={x.key} section={x} index={i} file={files[x.file]!} notes={view.ai?.notes ?? []} order={notes} current={noteIdx} />
   );
   const open = item.state === "open";
-  // What it waits on and the coordinator's latest note, as Merging says it.
-  const lane =
-    row?.state === "open" ? [row.waits_on ?? "", row.note?.text ?? "", row.note ? age(row.note.at, now) : ""].filter(Boolean) : [];
 
   return (
     <div className={cls("review", side && "side-open")}>
       <div className="rv-main">
         <div className="rv-top">
-          {/* Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour. */}
-          <header
-            className={cls(
-              "rv-head",
-              `b-${card.bucket}`,
-              (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
-            )}
-          >
-            <p className="rv-ref">
-              <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
-                <span className="ref-ink">
-                  <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
-                </span>
-              </a>
-              {card.stack && (
-                <span className="rv-by" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
-                  {card.stack.pos}/{card.stack.size}
-                </span>
-              )}
-              <span className="rv-by">
-                by {isMine ? "you" : card.author}
-                {card.author_bot ? " (bot)" : ""}
-              </span>
-            </p>
-            <h1 className="rv-title">{card.title}</h1>
-            <p className="rv-meta">
-              {why && (mine ? <Owed why={why} /> : <span className="why">{why}</span>)}
-              {shownFacts.map((f) => (
-                <span key={f.text} className={cls("fact-word", f.tone)}>
-                  {f.text}
-                </span>
-              ))}
-            </p>
-            {resolved && (
-              <p className="rv-meta rv-resolved">
-                <span>{resolved.line}</span>
-                {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
-              </p>
-            )}
-            {lane.length > 0 && (
-              <p className="rv-meta rv-lane">
-                {lane.map((p) => (
-                  <span key={p}>{p}</span>
-                ))}
-              </p>
-            )}
-          </header>
+          <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
           <Conversation view={view} now={now} flash={flash} onThread={onThread} onAsk={onAsk} />
           <Asks asks={view.asks} now={now} />
           {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
           {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
-            <AiSection view={view} asking={busy === "ai"} notes={notes.length} />
+            <AiSection
+              ai={view.ai}
+              stale={view.ai_stale}
+              busy={view.generating || busy === "ai"}
+              error={view.ai_error}
+              open={open}
+              notes={notes.length}
+            />
           )}
         </div>
 
@@ -475,10 +483,11 @@ export function Review({
         </div>
 
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
+        {!view.files_error && !files.length && <p className="quiet rv-nofiles">No files changed.</p>}
         {list.length > 0 && (
           <div className="rv-diffs">
-            {visible.slice(0, rest).map(section)}
-            {order?.ranked && rest < list.length && (
+            {visible.slice(0, Math.min(rest, upTo)).map(section)}
+            {order?.ranked && rest < list.length && upTo >= rest && (
               <button
                 type="button"
                 className={cls("fold", "rv-fold", folded && secIdx >= rest && "sel")}
@@ -491,7 +500,7 @@ export function Review({
                 {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
               </button>
             )}
-            {visible.slice(rest).map((x, i) => section(x, rest + i))}
+            {visible.slice(rest, upTo).map((x, i) => section(x, rest + i))}
           </div>
         )}
       </div>
@@ -538,6 +547,168 @@ export function Review({
           )}
           {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
           <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
+        </aside>
+      )}
+    </div>
+  );
+}
+
+// The header: the ref, the title, and one line of why and facts; a resolved PR's line, and Merging's for your PR there.
+function Head({
+  card,
+  me,
+  now,
+  facts,
+  owed,
+  resolved,
+  row,
+}: {
+  card: Card;
+  me: string;
+  now: number;
+  facts: Fact[];
+  owed: boolean; // your open PR: its why is what you owe
+  resolved: string | null;
+  row: InflightRow | null;
+}) {
+  const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
+  // The why leaves out a fact it already says, as on the card ("conflicts with main" says "merge conflict").
+  const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
+  const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
+  // What it waits on and the coordinator's latest note, as Merging says it.
+  const lane =
+    row?.state === "open" ? [row.waits_on ?? "", row.note?.text ?? "", row.note ? age(row.note.at, now) : ""].filter(Boolean) : [];
+  return (
+    // Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour.
+    <header
+      className={cls(
+        "rv-head",
+        `b-${card.bucket}`,
+        (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
+      )}
+    >
+      <p className="rv-ref">
+        <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
+          <span className="ref-ink">
+            <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
+          </span>
+        </a>
+        {card.stack && (
+          <span className="rv-by" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
+            {card.stack.pos}/{card.stack.size}
+          </span>
+        )}
+        <span className="rv-by">
+          by {isMine ? "you" : card.author}
+          {card.author_bot ? " (bot)" : ""}
+        </span>
+      </p>
+      <h1 className="rv-title">{card.title}</h1>
+      <p className="rv-meta">
+        {why && (owed ? <Owed why={why} /> : <span className="why">{why}</span>)}
+        {shownFacts.map((f) => (
+          <span key={f.text} className={cls("fact-word", f.tone)}>
+            {f.text}
+          </span>
+        ))}
+      </p>
+      {resolved && (
+        <p className="rv-meta rv-resolved">
+          <span>{resolved}</span>
+          {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
+        </p>
+      )}
+      {lane.length > 0 && (
+        <p className="rv-meta rv-lane">
+          {lane.map((p) => (
+            <span key={p}>{p}</span>
+          ))}
+        </p>
+      )}
+    </header>
+  );
+}
+
+// The header's facts as its row has them, until the review brings who approved and how many files.
+function rowFacts(c: Card): Fact[] {
+  const size = c.chips.find((x) => x.startsWith("+"));
+  return [
+    { text: `CI ${CI[c.ci]}`, tone: c.ci === "red" ? "t-bad" : "" },
+    { text: REVIEW[c.review], tone: c.review === "changes_requested" ? "t-warn" : "" },
+    ...(!c.resolved && c.chips.includes("conflict") ? [{ text: "merge conflict", tone: "t-warn" }] : []),
+    ...(c.draft ? [{ text: "draft", tone: "" }] : []),
+    ...(size ? [{ text: size, tone: "" }] : []),
+  ];
+}
+
+// The review before it lands: what its row knows, and quiet placeholders where the rest will be, so nothing moves.
+function Shell({ card, me, now, row, side }: { card: Card | null; me: string; now: number; row: InflightRow | null; side: boolean }) {
+  const isMine = !!card && !!me && card.author.toLowerCase() === me.toLowerCase();
+  const pf = card?.preflight;
+  const read = pf?.state === "ready" && pf.verdict && pf.risk && pf.summary;
+  const ai = read ? { verdict: pf.verdict!, risk: pf.risk!, summary: pf.summary!, since: pf.since, concerns: pf.concerns ?? [] } : null;
+  const writing = pf?.state === "running" || pf?.state === "queued";
+  return (
+    <div className={cls("review", side && "side-open")} aria-busy="true">
+      <div className="rv-main">
+        <div className="rv-top">
+          {card ? (
+            <Head
+              card={card}
+              me={me}
+              now={now}
+              facts={rowFacts(card)}
+              owed={isMine && !card.resolved}
+              resolved={card.resolved ? resolvedHead([], card.resolved, me).line : null}
+              row={row}
+            />
+          ) : (
+            <header className="rv-head" aria-hidden="true">
+              <p className="rv-ref">
+                <span className="sk sk-ref" />
+              </p>
+              <h1 className="rv-title">
+                <span className="sk sk-title" />
+              </h1>
+              <p className="rv-meta">
+                <span className="sk sk-meta" />
+              </p>
+            </header>
+          )}
+          <SkLines count={1} className="rv-convo sk-short" />
+          {ai || writing ? (
+            <AiSection ai={ai} stale={false} busy={!ai && writing} error={null} open notes={pf?.notes ?? 0} />
+          ) : (
+            (!isMine || !!card?.verdict) && (
+              <section className="rv-ai" aria-label="AI review">
+                <h2 className="d-head">AI review</h2>
+                <SkLines count={3} className="rv-summary" />
+              </section>
+            )
+          )}
+        </div>
+        <div className="actions rv-actions" aria-hidden="true">
+          <span className="sk sk-key" />
+          <span className="sk sk-key" />
+          <span className="sk sk-key" />
+        </div>
+        <div className="rv-diffs" aria-hidden="true">
+          {[0, 1].map((i) => (
+            <section key={i} className="rv-file-sec">
+              <h3 className="rv-fhead">
+                <span className="sk sk-file" />
+              </h3>
+              <SkLines count={9} className="sk-code" />
+            </section>
+          ))}
+        </div>
+      </div>
+      {side && (
+        <aside className="rv-side" aria-hidden="true">
+          <nav className="rv-files">
+            <h2 className="rv-side-head">Files</h2>
+            <SkLines count={5} className="sk-files" />
+          </nav>
         </aside>
       )}
     </div>
@@ -620,33 +791,48 @@ function StackList({ stack }: { stack: Stack }) {
   );
 }
 
-function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean; notes: number }) {
-  const ai = view.ai;
-  const busy = view.generating || asking;
+// The AI review's read, from the review or, until it lands, from its row's preflight (no model or time yet).
+type AiShown = Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns"> & Partial<Pick<AiReview, "model" | "at">>;
+
+function AiSection({
+  ai,
+  stale,
+  busy,
+  error,
+  open,
+  notes,
+}: {
+  ai: AiShown | null;
+  stale: boolean;
+  busy: boolean; // being written
+  error: string | null;
+  open: boolean;
+  notes: number;
+}) {
   return (
     <section className="rv-ai" aria-label="AI review">
       <h2 className="d-head">
         AI review{" "}
-        {ai && (
+        {ai?.model && ai.at && (
           <span className="quiet">
             from {modelName(ai.model)}, {when(ai.at)}
-            {view.ai_stale ? ", on an earlier commit" : ""}
+            {stale ? ", on an earlier commit" : ""}
           </span>
         )}
       </h2>
-      {busy && <p className="quiet">Claude Code is reading the diff. This takes a minute or two; the notes land in the code below.</p>}
-      {!busy && view.ai_error && (
+      {busy && <p className="quiet">Claude is reading it. The notes land in the code below in a minute or two.</p>}
+      {!busy && error && (
         <p>
-          {withCode(view.ai_error)}{" "}
+          {withCode(error)}{" "}
           <span className="quiet">
             Press <kbd>i</kbd> to try again.
           </span>
         </p>
       )}
-      {!busy && !ai && !view.ai_error && view.item.state !== "open" && <p className="quiet">No AI review.</p>}
-      {!busy && !ai && !view.ai_error && view.item.state === "open" && (
+      {!busy && !ai && !error && !open && <p className="quiet">No AI review.</p>}
+      {!busy && !ai && !error && open && (
         <p className="quiet">
-          None yet. Press <kbd>i</kbd> to ask Claude Code for a summary, concerns and notes on the changes.
+          No AI review yet. Press <kbd>i</kbd> to ask Claude for one.
         </p>
       )}
       {ai && (
@@ -670,7 +856,7 @@ function AiSection({ view, asking, notes }: { view: ReviewView; asking: boolean;
           ) : (
             <p className="quiet">No concerns.</p>
           )}
-          {!view.ai_stale && notes > 0 && (
+          {!stale && notes > 0 && (
             <p className="quiet">
               {notes} {notes === 1 ? "note" : "notes"} on the changes below: <kbd>]</kbd> next, <kbd>[</kbd> previous.
             </p>

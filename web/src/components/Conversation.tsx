@@ -67,7 +67,12 @@ export function Conversation({
   };
   const rest = view.conversation.filter((c) => !c.waiting_on_you);
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
-  if (!view.conversation.length) return null;
+  if (!view.conversation.length)
+    return (
+      <section className="rv-convo" aria-label="Conversation">
+        <p className="quiet">No comments yet.</p>
+      </section>
+    );
 
   // Sending is yours: Send (or ⌘↩) twice.
   async function send(c: Convo, text: string) {

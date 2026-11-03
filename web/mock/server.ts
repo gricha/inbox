@@ -2265,12 +2265,13 @@ function pauseAi(on: boolean) {
 }
 
 // Like the desk, opening an open PR with no AI review asks for one; a merged or closed one can't be approved.
-function reviewView(r: Rec): ReviewView {
+// ahead: fetched before it's opened, so no AI review starts, as on the desk.
+function reviewView(r: Rec, ahead = false): ReviewView {
   const d = detail(r);
   if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
   const ended = r.seed.resolved === "merged" || r.seed.resolved === "closed";
   const wants = (!d.ai || d.ai_stale) && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME && !ended;
-  if (wants && autoAiOn() && !aiPaused) {
+  if (wants && autoAiOn() && !aiPaused && !ahead) {
     void generate(r).catch(() => {});
     d.generating = true;
   }
@@ -2877,7 +2878,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply)?$/.exec(url.pathname);
   if (review) {
     const r = resolve(decodeURIComponent(review[1]!));
-    if (req.method === "GET" && !review[2]) return reviewView(r);
+    if (req.method === "GET" && !review[2]) return reviewView(r, url.searchParams.get("ahead") === "1");
     if (req.method === "POST" && review[2] === "/ai") {
       const { force } = await readBody(req);
       const cur = reviews.get(r.id);

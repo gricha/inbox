@@ -3,6 +3,7 @@ import { cls } from "../format.ts";
 import { foldOf, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { withCode } from "./Review.tsx";
+import { SkRows } from "./Skeleton.tsx";
 
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
 
@@ -28,7 +29,7 @@ export function Queue({
     const first = !!overview && !overview.synced_at;
     return (
       <div className="queue">
-        <p className="quiet-note">{first ? "Reading your GitHub queue for the first time. This takes about 30 seconds." : "Loading…"}</p>
+        {first ? <p className="quiet-note">Reading your GitHub queue for the first time. This takes about 30 seconds.</p> : <SkRows />}
       </div>
     );
   }
@@ -86,7 +87,12 @@ export function Later({
   filter: string;
   toggle: (k: GroupKey) => void;
 }) {
-  if (!view) return <p className="quiet-note">Loading…</p>;
+  if (!view)
+    return (
+      <div className="queue later">
+        <SkRows />
+      </div>
+    );
   const filtering = !!filter.trim();
   const away = groups.filter((g) => SORTED_AWAY.includes(g.key) && (filtering ? g.cards.length : g.total));
   return (

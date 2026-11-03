@@ -1,6 +1,7 @@
 import type { CoordinatorView, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
+import { SkRows } from "./Skeleton.tsx";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
 export function Inflight({
@@ -16,7 +17,12 @@ export function Inflight({
   select: (id: string) => void;
   run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b t
 }) {
-  if (!view) return <p className="quiet-note">Loading…</p>;
+  if (!view)
+    return (
+      <div className="queue lane">
+        <SkRows count={4} />
+      </div>
+    );
   const open = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
   const row = (r: InflightRow) => <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} run={run} />;

@@ -6,6 +6,7 @@ import { ago, cls, tilde, when } from "../format.ts";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
+import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
 import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
 import { applyTheme, savedTheme, THEMES, type ThemeId } from "../theme.ts";
@@ -598,7 +599,14 @@ export function Settings({
           </p>
         )}
       </header>
-      {!view && <p className="quiet">Loading…</p>}
+      {!view && (
+        <section className="s-section" aria-busy="true" aria-label="Loading">
+          <h2>
+            <span className="sk" />
+          </h2>
+          <SkLines count={3} className="s-intro" />
+        </section>
+      )}
       {view && view.errors.length > 0 && (
         <div className="notice warn" role="alert">
           <span>

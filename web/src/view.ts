@@ -107,6 +107,19 @@ export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
   return { list, rest };
 }
 
+const DRAW_LINES = 400; // about what Pierre highlights in a frame or two
+
+// How far to draw the sections from `from` on: as many as fit in `lines` diff lines, and at least one more.
+export function drawUpTo(list: { hunks: Pick<ReviewHunk, "patch">[] }[], from: number, lines = DRAW_LINES): number {
+  let i = from;
+  let n = 0;
+  while (i < list.length && (i === from || n < lines)) {
+    for (const h of list[i]!.hunks) n += h.patch.split("\n").length;
+    i++;
+  }
+  return i;
+}
+
 // Whether a note sits on one of these hunks' lines; one that doesn't is about the whole file, above its diff.
 export function onLines(hunks: Pick<ReviewHunk, "header">[], n: Pick<ReviewNote, "side" | "line">): boolean {
   return hunks.some((h) => {

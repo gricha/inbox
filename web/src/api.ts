@@ -56,7 +56,8 @@ export const api = {
   item: (id: string) => call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent(id)}`),
   act: (id: string, action: Action, until?: string) =>
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
-  review: (id: string) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}`),
+  // ahead: before you open it, so the desk starts no AI review or read for it.
+  review: (id: string, ahead = false) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}${ahead ? "?ahead=1" : ""}`),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
   // The calls that write to GitHub: the review view's approve key and replies, and Ready for review on your own draft.
   approve: (id: string, head_oid: string) =>
