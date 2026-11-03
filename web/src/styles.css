@@ -1,6 +1,7 @@
 /* Review Desk: an informational app. Ink and pencil grey on calm paper; colour only where it carries information (CI failing,
-   a merge conflict, changes requested). Themes are token sets: the system's light or dark by default, or one picked per
-   device in Settings → Appearance (data-theme on <html>, set before the first paint). */
+   a merge conflict, changes requested), and one calm accent on the primary action. Themes are token sets: the system's
+   light or dark by default, or one picked per device in Settings → Appearance (data-theme on <html>, set before the first
+   paint). */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -39,6 +40,8 @@
   --amber: #8d5c00;
   --amber-wash: #f8eed8;
   --green: #28703f;
+  --accent: #33609a;
+  --on-accent: #fff;
   --scrim: rgb(27 29 33 / 30%);
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
   --card-shadow: 0 0 0 1px rgb(27 29 33 / 5%), 0 1px 2px rgb(27 29 33 / 6%);
@@ -75,6 +78,8 @@
     --amber: #e3b45e;
     --amber-wash: #2f2614;
     --green: #7dcb98;
+    --accent: #42679e;
+    --on-accent: #f3f6fb;
     --scrim: rgb(0 0 0 / 55%);
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
     --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -106,6 +111,8 @@
   --amber: #e3b45e;
   --amber-wash: #2f2614;
   --green: #7dcb98;
+  --accent: #42679e;
+  --on-accent: #f3f6fb;
   --scrim: rgb(0 0 0 / 55%);
   --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
   --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -137,6 +144,8 @@
   --amber: #80570c;
   --amber-wash: #f1e4c8;
   --green: #3b6a37;
+  --accent: #355d80;
+  --on-accent: #fbf8f2;
   --scrim: rgb(42 37 31 / 30%);
   --shadow: 0 1px 2px rgb(42 37 31 / 7%), 0 10px 30px rgb(42 37 31 / 13%);
   --card-shadow: 0 0 0 1px rgb(42 37 31 / 6%), 0 1px 2px rgb(42 37 31 / 6%);
@@ -168,6 +177,8 @@
   --amber: #dfb468;
   --amber-wash: #352c1c;
   --green: #86c99c;
+  --accent: #4a71a8;
+  --on-accent: #f1f4f8;
   --scrim: rgb(0 0 0 / 50%);
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
   --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -236,7 +247,6 @@ code {
 
 /* A key under the keyboard is the cursor: a neutral fill and the pencil ring, never an outline box. It sits on a selected
    card's fill, so it takes the deeper one, and its padding clears the text without moving the row. */
-.act:focus-visible,
 .cl-undo:focus-visible {
   outline: none;
   border-radius: 8px;
@@ -711,6 +721,36 @@ kbd {
   background: var(--hover);
 }
 
+/* A queue row's button: its ::after covers the whole line, under the call to action. */
+.line-row {
+  position: relative;
+}
+
+.line .line-btn {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.line .line-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+
+.line .line-btn:focus-visible {
+  outline: none;
+}
+
 .line.sel > .line-main {
   background: var(--sel);
 }
@@ -774,22 +814,18 @@ kbd {
   padding-left: 12px;
 }
 
-/* The row's one call to action, on the right before its age; armed, it's said in ink like approve's. */
-.line-cta {
+/* The row's one call to action, a button on the right before its age; its negative margin keeps every row one height. */
+.line .line-cta {
+  position: relative;
+  z-index: 1;
   flex: none;
-  margin-left: auto;
-  color: var(--ink-2);
-  font-size: 14px;
-  white-space: nowrap;
+  align-self: center;
+  height: 32px;
+  margin: -4px 0 -4px auto;
 }
 
 .line-cta + .line-age {
   margin-left: 0;
-}
-
-.line-cta.armed {
-  color: var(--ink);
-  font-weight: 650;
 }
 
 .dim .line-title {
@@ -1546,31 +1582,81 @@ kbd {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 16px;
+  gap: 6px;
 }
 
+/* Narrow enough that a review's action row, armed or not, stays one line beside its sidebar. */
 .act {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0;
-  border: 0;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 9px;
   background: none;
   color: var(--ink-2);
   font: 500 13px var(--sans);
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .act:hover:not(:disabled) {
+  border-color: var(--faint);
+  background: var(--hover);
   color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration: none;
+}
+
+.act:focus-visible {
+  border-radius: 9px;
+  outline-offset: 2px;
 }
 
 .act:disabled {
   cursor: default;
+  color: var(--faint);
+}
+
+.act.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.act.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 86%, var(--ink));
+  color: var(--on-accent);
+}
+
+.act.primary kbd {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.act.primary:disabled {
+  border-color: var(--rule-strong);
+  background: none;
   color: var(--pencil);
+  font-weight: 500;
+}
+
+.act.primary:disabled kbd {
+  color: var(--pencil);
+  opacity: 1;
+}
+
+/* Armed, a second press does it: a ring of the accent around it, since amber is for problems. */
+.act.armed {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.act.primary.armed {
+  color: var(--on-accent);
 }
 
 .trace-toggle {
@@ -2847,12 +2933,6 @@ kbd {
 .cv-quiet .cv-comments {
   padding-left: 12px;
   border-left: 2px solid var(--rule);
-}
-
-/* Armed, a second press sends it: said in ink, since amber is for problems. */
-.act.armed {
-  color: var(--ink);
-  font-weight: 650;
 }
 
 .rv-keys {

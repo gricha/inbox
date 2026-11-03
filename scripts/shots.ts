@@ -236,6 +236,9 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
+  // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
+  { name: "review-draft", go: review("acme/web#2303") },
+  { name: "review-mine", go: review("oss/tinyhttp#205") },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
   {
     name: "review-conversation",

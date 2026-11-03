@@ -4,6 +4,7 @@ import { api, message } from "../api.ts";
 import { age, cls } from "../format.ts";
 
 const ARM_MS = 3000;
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
 const firstLine = (s: string) => {
@@ -129,13 +130,14 @@ export function Conversation({
             <div className="actions">
               <button
                 type="button"
-                className={cls("act", armed === c.id && "armed")}
-                title="Post this reply on GitHub, as you: Send twice, or ⌘↩ twice"
+                className={cls("act primary", armed === c.id && "armed")}
+                title={`Post this reply on GitHub, as you: Send twice, or ${MOD}↵ twice`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {
                   void send(c, text);
                 }}
               >
+                <kbd>{MOD}↵</kbd>
                 {busy === c.id ? "Sending…" : armed === c.id ? "Send again to post" : "Send"}
               </button>
               <a className="act" href={c.url} target="_blank" rel="noreferrer">

@@ -434,7 +434,7 @@ export function Review({
               run={run}
               disabled={busy === "ready"}
               title="Mark it ready for review on GitHub: press a twice"
-              className={cls(armed > 0 && "armed")}
+              className={cls("primary", armed > 0 && "armed")}
             />
           )}
           {/* Only someone else's open PR is yours to approve. */}
@@ -445,7 +445,7 @@ export function Review({
               run={run}
               disabled={!canApprove || busy === "approve"}
               title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-              className={cls(armed > 0 && "armed")}
+              className={cls("primary", armed > 0 && "armed")}
             />
           )}
           <KeyButton k="o" label="Open on GitHub" run={run} />
@@ -464,7 +464,7 @@ export function Review({
             title="The sidebar: the stack, the files and recent activity"
             run={run}
           />
-          {mine && <HandKey card={card} run={run} armed={armedKey} />}
+          {mine && <HandKey card={card} run={run} armed={armedKey} primary />}
         </div>
 
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
