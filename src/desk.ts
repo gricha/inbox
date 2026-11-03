@@ -1436,8 +1436,11 @@ export class Desk {
     const it = e.item;
     const me = e.analysis.signals.me;
     if (!this.writer || e.inflight) return [];
-    if (it.kind === "issue") return it.state === "open" && (me.author || me.assignee) ? ["close"] : [];
+    // The real author: a bot's "via" line is anyone's to edit, so it never unlocks a write.
+    const mine = it.author.toLowerCase() === this.me().toLowerCase();
+    if (it.kind === "issue") return it.state === "open" && (mine || me.assignee) ? ["close"] : [];
     if (!me.author) return it.state === "open" ? ["request_changes"] : [];
+    if (!mine) return [];
     if (it.state === "closed") return ["reopen"];
     if (it.state !== "open") return [];
     return [
@@ -1447,8 +1450,8 @@ export class Desk {
     ];
   }
 
-  // POST /api/github: a More menu write, on your keypress in the desk's window (close and merge armed, twice). A merge or a
-  // change request given `head` (from a review) must be on the commit it showed; a merge is pinned to the desk's head either way.
+  // POST /api/github: a More menu write, on your keypress in the desk's window (each pressed twice). A change request needs `head`
+  // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
   async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
     this.requireConfig();
     const e = this.snapshot().entries.get(this.resolve(ref))!;
@@ -1456,6 +1459,7 @@ export class Desk {
     const id = it.id;
     const [verb, done] = GITHUB_VERB[action].map((x) => x.replace("%", id));
     if (!this.actions(e).includes(action)) throw new DeskError(409, `can't ${verb} now`);
+    if (action === "request_changes" && opts.head === undefined) throw new DeskError(400, "need head_oid");
     const pinned = action === "merge" || action === "request_changes";
     if (pinned && opts.head !== undefined && opts.head !== it.head_oid)
       throw new DeskError(409, `can't ${verb}: it has new commits since you opened it`);
@@ -1465,24 +1469,27 @@ export class Desk {
     if (this.approving.has(id)) throw new DeskError(409, `already writing to ${id} on GitHub`);
     const w = this.writer!;
     this.approving.add(id);
-    let url = "";
     try {
-      if (action === "close") await (it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
-      else if (action === "draft") await w.draft(it.node_id);
-      else if (action === "merge") await w.merge(it.node_id, it.head_oid, it.merge_method!);
-      else if (action === "reopen") await w.reopen(it.node_id);
-      else ({ url } = await w.requestChanges(it.node_id, it.head_oid, body));
-    } catch (err) {
-      throw new DeskError(502, `couldn't ${verb} on GitHub: ${(err as Error).message}`);
+      let url = "";
+      try {
+        if (action === "close") await (it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
+        else if (action === "draft") await w.draft(it.node_id);
+        else if (action === "merge") await w.merge(it.node_id, it.head_oid, it.merge_method!);
+        else if (action === "reopen") await w.reopen(it.node_id);
+        else ({ url } = await w.requestChanges(it.node_id, it.head_oid, body));
+      } catch (err) {
+        throw new DeskError(502, `couldn't ${verb} on GitHub: ${(err as Error).message}`);
+      }
+      this.store.logWrite(id, action, this.now().toISOString());
+      this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
+      this.changed();
+      // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
+      // since actions() reads the snapshot this refresh replaces.
+      await this.gh.refresh(id);
+      return { url };
     } finally {
       this.approving.delete(id);
     }
-    this.store.logWrite(id, action, this.now().toISOString());
-    this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
-    this.changed();
-    // Before answering, so the window shows it closed (or a draft) at once and its u finds it so.
-    await this.gh.refresh(id);
-    return { url };
   }
 
   // ---------------------------------------------------------------- actions

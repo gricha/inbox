@@ -2896,6 +2896,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const r = resolve(String(body.id));
     const action = body.action as GitHubAction;
     if (!actionsOf(r).includes(action)) throw new HttpError(409, `can't ${action} ${r.id} now`);
+    if (action === "request_changes" && !body.head_oid) throw new HttpError(400, "need head_oid");
     if (action === "close" || action === "merge") {
       r.seed.resolved = action === "close" ? "closed" : "merged";
       r.seed.upd = (T0 - Date.now()) / HOUR;

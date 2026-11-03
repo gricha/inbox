@@ -3507,3 +3507,10 @@ pre,
   padding: 48px;
   color: var(--ink);
 }
+
+/* A lone dot for a key: heavier and larger, so it reads as a key and not a speck. */
+kbd.dot-key {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}

@@ -170,10 +170,48 @@ test("request changes needs what you wrote, is pinned to the commit you read, an
   const { t, w } = await withWriter(c, [reviewAsk(1, { head_oid: "h1" }), myPr(3, { ci: "green" })]);
   await assert.rejects(t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "  " }), /say what needs to change/);
   await assert.rejects(t.desk.githubAct("web#3", "request_changes", { head: "abc", body: "Fix it" }), /can't request changes/);
+  await assert.rejects(
+    t.desk.githubAct("api#1", "request_changes", { body: "Fix it" }),
+    (e: Error & { status: number }) => e.status === 400,
+    "pinned to the commit you read, like approve",
+  );
   const r = await t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "Please add a test\n" });
   assert.equal(r.url, "https://github.com/acme/api/pull/1#pullrequestreview-2");
   assert.deepEqual(w.calls, [["requestChanges", "PR_acme/api_1", "h1", "Please add a test"]]);
   assert.deepEqual(writes(t, "acme/api#1"), ["request_changes"]);
+});
+
+test("a bot's PR whose untrusted via line names you gets no close, draft or merge", async (c) => {
+  const { t, w } = await withWriter(c, [reviewAsk(9, { author: "junior[bot]", author_bot: true, via: "@me", ...READY })]);
+  assert.equal(t.desk.item("api#9").signals.me.author, true, "the rules still call it yours");
+  assert.equal(t.desk.item("api#9").card.actions, undefined);
+  await assert.rejects(t.desk.githubAct("api#9", "merge"), (e: Error & { status: number }) => e.status === 409);
+  assert.deepEqual(w.calls, []);
+});
+
+test("a second write while the first's refresh still reads GitHub is refused, not sent twice", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "green" })]);
+  const details = t.gh.details.bind(t.gh);
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  t.gh.details = async (hits) => {
+    await held;
+    return details(hits);
+  };
+  const first = t.desk.githubAct("web#3", "close");
+  await new Promise((r) => {
+    setImmediate(r);
+  });
+  const second = t.desk.githubAct("web#3", "close").then(
+    () => "sent",
+    (e: Error) => e.message,
+  );
+  release();
+  await first;
+  assert.match(await second, /already writing/);
+  assert.deepEqual(w.calls, [["close", "PR_acme/web_3"]]);
 });
 
 test("an issue you opened closes with closeIssue", async (c) => {

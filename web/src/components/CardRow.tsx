@@ -113,7 +113,8 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             Ask
           </button>
         )}
-        {sel && rowActions(card).length > 0 && (
+        {/* Only where no call to action shows: the row keeps room for its title, and . still opens it. */}
+        {sel && (!card.cta || !!why) && rowActions(card).length > 0 && (
           <MoreButton
             className="line-more"
             onClick={() => {

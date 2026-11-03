@@ -6,12 +6,13 @@ import { cls, shortRef } from "../format.ts";
 const ARM_MS = 3000;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
-// The More menu's keys, read only while it's open. Close and merge are final, so they take a second press.
-const MORE: Record<GitHubAction, { key: string; label: string; again?: string }> = {
-  close: { key: "c", label: "Close", again: "again to close" },
-  draft: { key: "d", label: "Convert to draft" },
-  merge: { key: "m", label: "Merge", again: "again to merge" },
-  reopen: { key: "r", label: "Reopen" },
+// The More menu's keys, read only while it's open. Each write takes a second press, so a slipped d (Done) writes nothing;
+// x only opens the box to write in. `verb`: what the second press does to % (the item).
+const MORE: Record<GitHubAction, { key: string; label: string; verb?: string }> = {
+  close: { key: "c", label: "Close", verb: "close %" },
+  draft: { key: "d", label: "Convert to draft", verb: "convert % to a draft" },
+  merge: { key: "m", label: "Merge now", verb: "merge % now" },
+  reopen: { key: "r", label: "Reopen", verb: "reopen %" },
   request_changes: { key: "x", label: "Request changes" },
 };
 
@@ -24,11 +25,11 @@ export function MoreButton({ className, onClick }: { className?: string; onClick
     <button
       type="button"
       className={cls("act", className)}
-      title="More GitHub actions: close, convert to draft, merge, …"
+      title="More on GitHub: close, convert to draft, merge now, …"
+      aria-label="More on GitHub"
       onClick={onClick}
     >
-      <kbd>.</kbd>
-      More
+      <kbd className="dot-key">.</kbd>…
     </button>
   );
 }
@@ -67,9 +68,9 @@ export function MoreMenu({
 
   function choose(a: GitHubAction) {
     const m = MORE[a];
-    if (m.again && armed !== a) {
+    if (m.verb && armed !== a) {
       setArmed(a);
-      flash(`Press ${m.key} again to ${m.label.toLowerCase()} ${shortRef(card)} on GitHub`);
+      flash(`Press ${m.key} again to ${m.verb.replace("%", shortRef(card))} on GitHub`);
       return;
     }
     onClose();
@@ -116,7 +117,13 @@ export function MoreMenu({
             }}
           >
             <kbd>{MORE[a].key}</kbd>
-            <span>{armed === a ? MORE[a].again : a === "close" && card.kind === "issue" ? "Close issue" : MORE[a].label}</span>
+            <span>
+              {armed === a
+                ? `again to ${MORE[a].verb!.replace(" %", "")}`
+                : a === "close" && card.kind === "issue"
+                  ? "Close issue"
+                  : MORE[a].label}
+            </span>
           </button>
         ))}
       </div>
@@ -161,7 +168,7 @@ export function RequestChanges({
     setBusy(true);
     try {
       await api.github(card.id, "request_changes", { head_oid: head, body: text });
-      flash(`Requested changes on ${shortRef(card)} on GitHub`);
+      flash(`Requested changes on GitHub: ${shortRef(card)}`);
       onClose();
     } catch (e) {
       flash(message(e), true);

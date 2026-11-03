@@ -146,13 +146,16 @@ export function App() {
 
   const armedRef = useRef(armed);
   armedRef.current = armed;
-  // An armed hand-off or Ready for review needs its toast on screen: another toast replacing it disarms it.
+  // An armed hand-off or Ready for review needs its toast on screen: another toast replacing it disarms it. A GitHub
+  // write's u lasts as long as its toast, so a stray u hours later can't reopen or un-draft anything.
   const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, arm = false) => {
     clearTimeout(toastTimer.current);
     if (!arm && armedRef.current) setArmed(null);
+    if (!canUndo) undoWrite.current = null;
     setToast({ id: Date.now(), text, error, undo: canUndo, arm });
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
+      undoWrite.current = null;
     }, ms);
   }, []);
   const reviewFlash = useCallback(
@@ -614,20 +617,38 @@ export function App() {
     setSelected(c.id);
     setSnoozeFor(null);
     if (rowActions(c).length) setMoreFor(c.id);
+    else if (c.actions?.includes("request_changes")) flash("Request changes is in its review: Enter");
     else flash(`Nothing more to do on GitHub for ${shortRef(c)}`);
   }
 
   // A More menu write, from a row or a review (head: the commit the review showed).
   async function github(c: Card, action: GitHubAction, head?: string) {
     setMoreFor(null);
+    // A row's close or merge leaves at once, as Done does, so closing a batch of old PRs never waits on GitHub.
+    const leaves = !head && (action === "close" || action === "merge");
+    if (leaves) {
+      const i = flat.findIndex((x) => x.id === c.id);
+      setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
+      if (expanded === c.id) setExpanded(null);
+      setLeaving((s) => new Set(s).add(c.id));
+      flash(`${action === "close" ? "Closing" : "Merging"} ${shortRef(c)} on GitHub…`);
+    }
     try {
       await api.github(c.id, action, head ? { head_oid: head } : {});
       undoSeq.current = null;
+      if (leaves) setView((v) => v && removeCard(v, c.id));
       const to = action === "close" && c.kind === "pr" ? "reopen" : action === "draft" ? "ready" : null;
       undoWrite.current = to && { id: c.id, to };
       flash(`${DID[action]}: ${shortRef(c)}`, false, !!to);
     } catch (e) {
       flash(message(e), true);
+    } finally {
+      if (leaves)
+        setLeaving((s) => {
+          const next = new Set(s);
+          next.delete(c.id);
+          return next;
+        });
     }
     refresh(0);
   }

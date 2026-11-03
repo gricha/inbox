@@ -11,7 +11,7 @@ const KEYS: [string[], string][] = [
   [["e", "d"], "Done: it comes back when someone else acts"],
   [["s"], "Snooze, then 1 to 5 to pick how long"],
   [["m"], "Someone else's: mute or unmute"],
-  [["."], "More, on GitHub: close (c c), convert to draft (d) or merge (m m) your PR; reopen it (r); close an issue (c c)"],
+  [["."], "More on GitHub: close, draft, reopen, or merge now without the coordinator"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter; on Later, back to the queue"],
   [["?"], "This list"],
@@ -51,7 +51,7 @@ const REVIEW_KEYS: [string[], string][] = [
   [["a"], "Approve on GitHub, or your draft ready for review: press a, then a again within 3 seconds"],
   [["m", "b"], "Your own PR: hand it off for merge (m twice), or back to desk"],
   [["d"], "Done"],
-  [["."], "More, on GitHub: close, draft or merge yours; request changes on someone else's (x, then send twice)"],
+  [["."], "More on GitHub: close, draft or merge now without the coordinator; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
   [["c"], "Copy a review prompt for Claude"],
@@ -118,7 +118,9 @@ function Keys({ keys }: { keys: [string[], string][] }) {
         <div key={v} className="fact">
           <dt>
             {ks.map((k) => (
-              <kbd key={k}>{k}</kbd>
+              <kbd key={k} className={k === "." ? "dot-key" : undefined}>
+                {k}
+              </kbd>
             ))}
           </dt>
           <dd>{v}</dd>

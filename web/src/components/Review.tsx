@@ -469,13 +469,13 @@ export function Review({
               run={run}
               disabled={!canApprove || busy === "approve"}
               title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-              className={cls("primary", armed > 0 && "armed")}
+              className={cls(!changes && "primary", armed > 0 && "armed")}
             />
           )}
           {/* While you owe replies, Send is the one filled button. */}
           {mine && <HandKey card={card} run={run} armed={armedKey} primary={card.cta !== "reply"} />}
-          {/* "GitHub" alone leaves room for More, so the row stays one line beside the sidebar. */}
-          <KeyButton k="o" label="GitHub" title="Open it on GitHub" run={run} />
+          {/* Shorter beside More, so the row stays one line at 900px with the sidebar folded. */}
+          <KeyButton k="o" label={card.actions?.length ? "GitHub" : "Open on GitHub"} title="Open on GitHub" run={run} />
           {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
           {!flying && (open || view.ai) && (
             <KeyButton
@@ -487,7 +487,7 @@ export function Review({
           )}
           <KeyButton
             k="f"
-            label={side ? "Hide sidebar" : view.stack ? "Stack and files" : "Files"}
+            label={side ? "Hide sidebar" : view.stack ? "Stack" : "Files"}
             title="The sidebar: the stack, the files and recent activity"
             run={run}
           />
