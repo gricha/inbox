@@ -10,6 +10,7 @@ import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
+import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -1361,7 +1362,7 @@ function itemOf(r: Rec): Item {
     review_requests: reviewer ? [{ reviewer, type, codeowner: !!s.owner }] : [],
     request_events:
       s.by && reviewer ? [{ at: iso(s.wait ?? s.age), actor: s.by, actor_bot: isBot(s.by), reviewer, reviewer_type: type }] : [],
-    reviews: (s.reviews ?? []).map(([author, state, h]) => ({ author, author_bot: false, state, at: iso(h), commit: "" })),
+    reviews: (s.reviews ?? []).map(([author, state, h]) => ({ author, author_bot: false, trusted: true, state, at: iso(h), commit: "" })),
     comments: [],
     comments_total: s.comments ?? 0,
     threads_total: s.threads?.[1] ?? 0,
@@ -1497,6 +1498,7 @@ function cardOf(r: Rec, p: Placement): Card {
   const stack = stackRef(stacks(), r.id);
   const me = sig.me;
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
+  const st = stage(itemOf(r), me.author ? ME : s.author);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
     id: r.id,
@@ -1507,6 +1509,8 @@ function cardOf(r: Rec, p: Placement): Card {
     url: sig.item.url,
     author: s.author,
     author_bot: sig.author.bot,
+    by: me.author ? "you" : s.author,
+    ...(st && { stage: st }),
     bucket: p.bucket,
     why: s.resolved ?? p.why,
     demoted: p.demoted,

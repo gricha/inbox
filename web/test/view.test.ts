@@ -42,6 +42,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     url: "",
     author: "dana",
     author_bot: false,
+    by: "dana",
     bucket: "now",
     why: "",
     board: "b",
