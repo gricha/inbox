@@ -63,6 +63,7 @@ export const api = {
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   ready: (id: string) => call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, {}),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
+  wakeCoordinator: () => call<{ ok: true }>("POST", "/api/coordinator/wake", {}),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   config: () => call<ConfigDoc>("GET", "/api/config"),

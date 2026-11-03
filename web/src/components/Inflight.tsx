@@ -1,4 +1,4 @@
-import type { InflightRow, InflightView } from "../../../src/types.ts";
+import type { CoordinatorView, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
 
@@ -47,6 +47,7 @@ export function Inflight({
   };
   return (
     <div className="queue lane">
+      <Coordinator c={view.coordinator} />
       {open.length ? (
         rows(open)
       ) : (
@@ -64,6 +65,39 @@ export function Inflight({
         </section>
       )}
     </div>
+  );
+}
+
+// One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
+function Coordinator({ c }: { c: CoordinatorView }) {
+  if (c.state === "off") return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
+  if (!c.id || c.state === "not started")
+    return (
+      <p className="lane-coord">
+        The coordinator starts on your first hand-off; <kbd>w</kbd> starts it now.
+      </p>
+    );
+  return (
+    <p className="lane-coord">
+      <Dots
+        parts={[
+          `Coordinator ${c.state}`,
+          ...(c.url
+            ? [
+                <a key="url" href={c.url} target="_blank" rel="noreferrer">
+                  Watch on claude.ai
+                </a>,
+              ]
+            : []),
+          <span key="attach">
+            <kbd>c</kbd> copy <code>claude attach {c.id}</code>
+          </span>,
+          <span key="wake">
+            <kbd>w</kbd> wake it
+          </span>,
+        ]}
+      />
+    </p>
   );
 }
 

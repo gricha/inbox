@@ -718,6 +718,14 @@ export interface InflightRow {
 export interface InflightView {
   rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days; a stack's rows together, bottom first
   stacks: Record<string, Stack>; // by id: each stack with a row here (current: its first row)
+  coordinator: CoordinatorView;
+}
+
+// The background Claude Code session the desk starts and wakes (README → Coordinator).
+export interface CoordinatorView {
+  state: "off" | "not started" | "idle" | "working";
+  id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take
+  url: string | null; // its Remote Control page on claude.ai
 }
 
 // GET /api/config

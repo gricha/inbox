@@ -1323,6 +1323,18 @@ kbd {
 /* Merging --------------------------------------------------------------------
    Your PRs the coordinator is getting merged, one line each like the main page's, all ink and pencil. */
 
+/* The coordinator's state, where to watch it and its keys, above the rows. */
+.lane-coord {
+  margin: 0 0 12px;
+  padding: 0 12px;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.lane-coord a {
+  color: inherit;
+}
+
 /* A stack's rows together, bottom first, under one quiet line. */
 .lane-stack {
   margin: 6px 0;

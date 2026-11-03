@@ -157,6 +157,11 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     return c.json({ ok: true, ...desk.handBack(c.req.param("id"), await line(c, "why")) });
   });
+  app.post("/api/coordinator/wake", async (c) => {
+    ready();
+    await desk.wakeCoordinator();
+    return c.json({ ok: true });
+  });
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));

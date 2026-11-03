@@ -586,6 +586,23 @@ export function App() {
     else if (k === "b" && r.state === "open") void back(c);
   }
 
+  // c copies `claude attach <id>`; w starts the coordinator, or has it look at Merging now.
+  async function coordinatorKey(k: "c" | "w") {
+    const id = lane?.coordinator.id;
+    try {
+      if (k === "w") {
+        await api.wakeCoordinator();
+        flash(id ? "Asked the coordinator to look at Merging." : "Started the coordinator.");
+        refresh(0);
+      } else if (id) {
+        await copyText(`claude attach ${id}`);
+        flash("Copied. Run it in a terminal to open the coordinator.");
+      } else flash("The coordinator isn't started yet: w starts it.");
+    } catch (e) {
+      flash(message(e), true);
+    }
+  }
+
   function moveLane(d: number) {
     if (!laneRows.length) return;
     const i = laneRows.findIndex((r) => r.card.id === laneCur?.card.id);
@@ -713,6 +730,9 @@ export function App() {
       } else if (laneCur && (k === "Enter" || k === "o" || k === "b")) {
         e.preventDefault();
         laneRun(laneCur, k === "Enter" ? "enter" : k);
+      } else if (k === "c" || k === "w") {
+        e.preventDefault();
+        void coordinatorKey(k);
       }
     } else if (k === "/") {
       e.preventDefault();

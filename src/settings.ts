@@ -38,7 +38,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "agent",
     title: "Agents",
-    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill, which the coordinator (README → Coordinator) works with.",
+    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill, which the coordinator works with.",
   },
   {
     id: "policy",
@@ -123,6 +123,14 @@ export const SETTINGS = [
     min: 0,
     max: 100,
     help: "Items, in the desk's order; the rest sit behind one line you can open. 0 shows them all.",
+  },
+  {
+    key: "agent.coordinator",
+    section: "agent",
+    label: "Coordinator",
+    type: "boolean",
+    default: true,
+    help: "A background Claude Code session that gets the PRs you hand off merged. The desk starts it on your first hand-off and wakes it when something changes on a PR in Merging. Off: it's stopped and nothing wakes it.",
   },
   {
     key: "policy.judge",

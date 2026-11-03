@@ -143,6 +143,7 @@ const inflightView: InflightView = {
     },
   ],
   stacks: {},
+  coordinator: { state: "idle", id: "c0ffee01", url: "https://claude.ai/code/session_01Fake" },
 };
 
 const boardView: BoardView = {

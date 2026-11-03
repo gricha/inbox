@@ -366,7 +366,7 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
 // ---------------------------------------------------------------- the agents
 
 // Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
-const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
+export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
 // Where it runs, the answer's shape, and a signal that kills the run (the desk stopping).
 export interface AskOpts {
@@ -375,7 +375,7 @@ export interface AskOpts {
   signal?: AbortSignal;
 }
 
-const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
+export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
 
 // One empty directory under the desk's home for its tool-less claude calls, so they share one ~/.claude/projects entry.
 export function agentDir(home: string): string {

@@ -54,6 +54,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, owesReply } from "./conversation.ts";
+import { Coordinator, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -160,6 +161,7 @@ export class Desk {
   policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
   convos: Conversations;
+  coordinator: Coordinator;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -202,6 +204,7 @@ export class Desk {
     this.connectors = [this.gh];
     this.judge = new Judge(this);
     this.convos = new Conversations(this);
+    this.coordinator = new Coordinator(this);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -268,6 +271,7 @@ export class Desk {
     for (const c of this.connectors) c.stop();
     this.judge.stop();
     this.convos.stop();
+    this.coordinator.close();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -383,7 +387,9 @@ export class Desk {
     const poll = this.settings["github.poll_seconds"];
     const agent = agentKey(this.settings);
     const searches = searchKey(this.settings);
+    const coordinator = this.settings["agent.coordinator"];
     this.settings = this.readSettings();
+    if (coordinator && !this.settings["agent.coordinator"]) void this.coordinator.stop();
     // Sync now only when the searches change; other settings apply to what the desk already has.
     if (this.configText) this.reloadConfig(searchKey(this.settings) !== searches);
     else this.changed();
@@ -604,6 +610,10 @@ export class Desk {
     if (!events.length) return;
     this.store.addActivity(events.map((e) => ({ ...e, source })));
     for (const wake of this.waiters) wake();
+    for (const e of events) {
+      const what = wakeFor(e);
+      if (what && this.store.state(e.item_id).inflight_at) this.coordinator.wake(e.item_id, what);
+    }
   }
 
   resolutionOf(item: Item): Resolution | null {
@@ -1485,6 +1495,7 @@ export class Desk {
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
     this.changed();
+    if (action === "inflight") this.coordinator.wake(id, "handed off");
     const { snoozed_at: _, acked_at: __, ...state } = s;
     return { state, undo_seq: seq };
   }
@@ -1566,7 +1577,15 @@ export class Desk {
         lane.map((r) => r.card),
         snap,
       ),
+      coordinator: this.coordinator.view(),
     };
+  }
+
+  // POST /api/coordinator/wake: w in Merging starts it, or has it look now.
+  async wakeCoordinator(): Promise<void> {
+    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
+    await this.coordinator.now();
+    if (!this.coordinator.saved()) throw new DeskError(502, "the coordinator didn't start; the desk's log says why");
   }
 
   merging(id: string): Merging {
