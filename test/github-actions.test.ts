@@ -89,6 +89,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
     myPr(5, { ci: "green", draft: true }),
     myPr(6, { ...READY, mergeable: "conflict" }),
     myPr(8, { ...READY, merge_method: undefined }),
+    myPr(9, { ...READY, base: "feature-x", default_branch: "main" }),
     makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" }),
   ]);
   t.desk.act("web#8", "inflight");
@@ -100,6 +101,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   assert.deepEqual(actions("web#6"), ["close", "draft"], "GitHub says it conflicts");
   assert.deepEqual(actions("web#8"), undefined, "in Merging the coordinator has it");
   assert.deepEqual(actions("api#7"), ["close"], "your issue");
+  assert.deepEqual(actions("web#9"), ["close", "draft"], "stacked: it waits on the PR below");
   const view = await t.desk.reviewView("web#4");
   assert.deepEqual(view.card.actions, ["close", "draft", "merge"], "the review's card says the same");
 
@@ -231,4 +233,17 @@ test("a refused write says why, and nothing is logged; an agent's /api/act can't
   );
   assert.deepEqual(writes(t, "acme/web#3"), []);
   assert.throws(() => t.desk.act("web#3", "close" as never, undefined, "agent"), /unknown action/);
+});
+
+test("a write whose refresh fails isn't offered again until a read shows the change", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(4, READY)]);
+  const details = t.gh.details.bind(t.gh);
+  t.gh.details = () => Promise.reject(new Error("GitHub is down"));
+  await t.desk.githubAct("web#4", "close");
+  assert.equal(t.desk.item("web#4").card.actions, undefined, "the snapshot still says open, but nothing is offered");
+  await assert.rejects(t.desk.githubAct("web#4", "merge"), /409|can't/);
+  assert.deepEqual(w.calls, [["close", "PR_acme/web_4"]]);
+  t.gh.details = details;
+  await t.desk.sync();
+  assert.deepEqual(t.desk.item("web#4").card.actions, ["reopen"], "a read shows it closed");
 });

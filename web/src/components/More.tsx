@@ -146,6 +146,10 @@ export function RequestChanges({
   const [text, setText] = useState("");
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "nearest" }); // at 900px and below it opens under the fold
+  }, []);
   useEffect(() => {
     const t = armed
       ? setTimeout(() => {
@@ -178,7 +182,7 @@ export function RequestChanges({
   }
 
   return (
-    <div className="rv-changes">
+    <div ref={box} className="rv-changes">
       <textarea
         className="cv-reply"
         aria-label="What needs to change"

@@ -32,6 +32,13 @@ test("a failed open isn't joined", async () => {
   assert.deepEqual(f.calls, ["x"]);
 });
 
+test("a refresh after the open has answered asks the desk again", async () => {
+  const f = fakeGet();
+  await reviewOf("r", f.get, 0);
+  await reviewOf("r", f.get, 1300);
+  assert.deepEqual(f.calls, ["r", "r"]);
+});
+
 test("resting on a row fetches its review ahead after a short pause; passing over one doesn't", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const f = fakeGet();

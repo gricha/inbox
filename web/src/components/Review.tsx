@@ -132,6 +132,8 @@ export function Review({
   const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
   const [more, setMore] = useState(false); // the More menu (.)
   const [changes, setChanges] = useState(false); // Request changes, being written
+  // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
+  const [read, setRead] = useState("");
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
@@ -149,7 +151,10 @@ export function Review({
     void (async () => {
       try {
         const r = await reviewOf(id);
-        if (n === seq.current) setView(r);
+        if (n === seq.current) {
+          setView(r);
+          setRead((h) => h || r.item.head_oid);
+        }
       } catch (e) {
         // Keep what's on screen if a refresh fails.
         if (n === seq.current) setView((cur) => (cur && typeof cur === "object" ? cur : message(e)));
@@ -326,7 +331,7 @@ export function Review({
     setArmed(0);
     setBusy("approve");
     try {
-      await api.approve(v.card.id, v.item.head_oid);
+      await api.approve(v.card.id, read);
       setApproved(v.card.id);
       flash(`Approved ${shortRef(v.card)} on GitHub`);
     } catch (e) {
@@ -505,7 +510,7 @@ export function Review({
                   actions={card.actions}
                   pick={(a) => {
                     if (a === "request_changes") setChanges(true);
-                    else onGithub(card, a, item.head_oid);
+                    else onGithub(card, a, read);
                   }}
                   onClose={() => {
                     setMore(false);
@@ -521,7 +526,7 @@ export function Review({
         {changes && (
           <RequestChanges
             card={card}
-            head={item.head_oid}
+            head={read}
             flash={flash}
             onClose={() => {
               setChanges(false);

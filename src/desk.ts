@@ -199,6 +199,7 @@ export class Desk {
   warming = false;
   warmAgain = false; // a sync landed while warming: go round once more
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
+  wrote = new Map<string, string>(); // a More menu write's item → its updated_at then: nothing more till a read shows the change
   sending = new Set<string>(); // conversations a reply is on its way to
 
   constructor(opts: DeskOptions) {
@@ -1474,7 +1475,7 @@ export class Desk {
   actions(e: Entry): GitHubAction[] {
     const it = e.item;
     const me = e.analysis.signals.me;
-    if (!this.writer || e.inflight) return [];
+    if (!this.writer || e.inflight || this.wrote.get(it.id) === it.updated_at) return [];
     // The real author: a bot's "via" line is anyone's to edit, so it never unlocks a write.
     const mine = it.author.toLowerCase() === this.me().toLowerCase();
     if (it.kind === "issue") return it.state === "open" && (mine || me.assignee) ? ["close"] : [];
@@ -1485,7 +1486,8 @@ export class Desk {
     return [
       "close",
       ...(it.draft ? [] : (["draft"] as const)),
-      ...(readyToMerge(it) && it.merge_method && it.head_oid ? (["merge"] as const) : []),
+      // Stacked: it would merge into the PR below, which Merging says it waits on.
+      ...(readyToMerge(it) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
     ];
   }
 
@@ -1525,6 +1527,8 @@ export class Desk {
       // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
       // since actions() reads the snapshot this refresh replaces.
       await this.gh.refresh(id);
+      // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
+      if (action !== "request_changes") this.wrote.set(id, it.updated_at);
       return { url };
     } finally {
       this.approving.delete(id);

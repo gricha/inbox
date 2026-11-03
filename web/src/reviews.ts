@@ -1,7 +1,7 @@
 import type { ReviewView } from "../../src/types.ts";
 import { api } from "./api.ts";
 
-const JOIN_MS = 2_000; // opens this close together (StrictMode's second effect) share one GET
+const JOIN_MS = 2_000; // an open while the last one's GET is still out (StrictMode's second effect) shares it
 const DWELL_MS = 150; // the cursor or the pointer rests this long on a row before its review is fetched ahead
 
 let last: { id: string; at: number; p: Promise<ReviewView> } | null = null;
@@ -11,9 +11,10 @@ export function reviewOf(id: string, get = api.review, now = Date.now()): Promis
   if (last?.id === id && now - last.at < JOIN_MS) return last.p;
   const p = get(id);
   last = { id, at: now, p };
-  p.catch(() => {
+  const settled = () => {
     if (last?.p === p) last = null;
-  });
+  };
+  p.then(settled, settled); // once it answers, a refresh asks again
   return p;
 }
 

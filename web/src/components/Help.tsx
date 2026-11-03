@@ -51,7 +51,7 @@ const REVIEW_KEYS: [string[], string][] = [
   [["a"], "Approve on GitHub, or your draft ready for review: press a, then a again within 3 seconds"],
   [["m", "b"], "Your own PR: hand it off for merge (m twice), or back to desk"],
   [["d"], "Done"],
-  [["."], "More on GitHub: close, draft or merge now without the coordinator; request changes on someone else's"],
+  [["."], "More on GitHub: close, draft, reopen or merge now without the coordinator; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
   [["c"], "Copy a review prompt for Claude"],

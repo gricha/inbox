@@ -146,7 +146,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         {card.cta === "reply" && !why && (
           <button
             type="button"
-            className={cls("act line-cta", sel && "primary")}
+            className={cls("act line-cta line-reply", sel && "primary")}
             title="Someone waits on your answer: Enter opens the review, with a reply ready"
             onClick={() => {
               ctx.click(card);

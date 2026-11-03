@@ -1778,7 +1778,7 @@ kbd {
 
 /* Wide enough for "again to mark ready", so arming a review's or a row's call to action never moves what's beside it. */
 .rv-actions .act.primary,
-.line .line-cta {
+.line .line-cta:not(.line-reply) {
   justify-content: center;
   min-width: 152px;
 }
