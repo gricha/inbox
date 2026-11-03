@@ -3420,6 +3420,7 @@ kbd {
   box-shadow: 0 0 0 1px var(--rule);
   font-size: 12px;
   line-height: 19px;
+  animation: sk-in 200ms ease-out 150ms both;
 }
 
 .sk-code .sk {

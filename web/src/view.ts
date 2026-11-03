@@ -120,6 +120,11 @@ export function drawUpTo(list: { hunks: Pick<ReviewHunk, "patch">[] }[], from: n
   return i;
 }
 
+// The rows a diff of these hunks draws at least: its context, added and removed lines.
+export function diffRows(hunks: Pick<ReviewHunk, "patch">[]): number {
+  return hunks.reduce((n, h) => n + h.patch.split("\n").filter((l) => /^[ +-]/.test(l)).length, 0);
+}
+
 // Whether a note sits on one of these hunks' lines; one that doesn't is about the whole file, above its diff.
 export function onLines(hunks: Pick<ReviewHunk, "header">[], n: Pick<ReviewNote, "side" | "line">): boolean {
   return hunks.some((h) => {

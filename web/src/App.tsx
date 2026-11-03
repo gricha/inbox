@@ -12,7 +12,7 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
-import { forgetReviews, restOn } from "./reviews.ts";
+import { restOn } from "./reviews.ts";
 import { adoptTheme } from "./theme.ts";
 import {
   armOf,
@@ -168,7 +168,6 @@ export function App() {
     const r = routeRef.current;
     const exp = expandedRef.current;
     const n = ++loadSeq.current;
-    forgetReviews(); // the desk changed: a review fetched before it is stale
     if (r.name === "settings") void loadSettings();
     try {
       const [ov, v, d, l] = await Promise.all([

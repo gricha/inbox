@@ -9,6 +9,7 @@ import {
   cardFacts,
   currentFile,
   DEFAULT_OPEN,
+  diffRows,
   drawUpTo,
   draftOf,
   foldOf,
@@ -590,4 +591,10 @@ test("a big diff draws a screenful of files first, then the rest a chunk at a ti
   assert.equal(drawUpTo(list, 4, 400), 6);
   assert.equal(drawUpTo(list, 6, 400), 6, "all drawn");
   assert.equal(drawUpTo([sec(5), sec(5)], 0), 2, "a small PR draws whole");
+});
+
+test("a diff's height is held at its context, added and removed lines until Pierre draws it", () => {
+  const h = (patch: string) => ({ patch });
+  assert.equal(diffRows([h("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n\\ No newline at end of file"), h("@@ -9 +10 @@\n x\n")]), 5);
+  assert.equal(diffRows([]), 0);
 });

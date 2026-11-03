@@ -14,8 +14,20 @@ import type {
 } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
-import { keptReview, reviewOf } from "../reviews.ts";
-import { currentFile, drawUpTo, filePatch, onLines, resolvedHead, routeHash, says, sections, splitPath, type Section } from "../view.ts";
+import { reviewOf } from "../reviews.ts";
+import {
+  currentFile,
+  diffRows,
+  drawUpTo,
+  filePatch,
+  onLines,
+  resolvedHead,
+  routeHash,
+  says,
+  sections,
+  splitPath,
+  type Section,
+} from "../view.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
@@ -42,6 +54,7 @@ const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", re
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
 const NARROW = 1100; // px: below it the sidebar opens over the diff, so it starts folded
+const ROW = 19; // px: .rv-diff's --diffs-line-height
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded
 
 function sideSaved(): boolean {
@@ -127,20 +140,9 @@ export function Review({
     if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
     shown.current = id;
     const n = ++seq.current;
-    let opened = false;
-    // The last view fetched (resting on its row fetches it) draws at once; the open's own GET starts its AI review.
-    void (async () => {
-      try {
-        const r = await keptReview(id);
-        if (r && n === seq.current && !opened) setView(r);
-      } catch {
-        // the open's own GET says what went wrong
-      }
-    })();
     void (async () => {
       try {
         const r = await reviewOf(id);
-        opened = true;
         if (n === seq.current) setView(r);
       } catch (e) {
         // Keep what's on screen if a refresh fails.
@@ -645,9 +647,13 @@ function rowFacts(c: Card): Fact[] {
 function Shell({ card, me, now, row, side }: { card: Card | null; me: string; now: number; row: InflightRow | null; side: boolean }) {
   const isMine = !!card && !!me && card.author.toLowerCase() === me.toLowerCase();
   const pf = card?.preflight;
-  const read = pf?.state === "ready" && pf.verdict && pf.risk && pf.summary;
-  const ai = read ? { verdict: pf.verdict!, risk: pf.risk!, summary: pf.summary!, since: pf.since, concerns: pf.concerns ?? [] } : null;
-  const writing = pf?.state === "running" || pf?.state === "queued";
+  const ai =
+    pf?.verdict && pf.risk && pf.summary
+      ? { verdict: pf.verdict, risk: pf.risk, summary: pf.summary, since: pf.since, concerns: pf.concerns ?? [] }
+      : null;
+  // Opening it starts the review unless AI reviews are off or paused.
+  const writing = pf?.state === "running" || pf?.state === "queued" || pf?.state === "stale";
+  const none = !ai && (pf?.state === "off" || pf?.state === "paused");
   return (
     <div className={cls("review", side && "side-open")} aria-busy="true">
       <div className="rv-main">
@@ -676,8 +682,8 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
             </header>
           )}
           <SkLines count={1} className="rv-convo sk-short" />
-          {ai || writing ? (
-            <AiSection ai={ai} stale={false} busy={!ai && writing} error={null} open notes={pf?.notes ?? 0} />
+          {ai || writing || none ? (
+            <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} />
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
@@ -999,6 +1005,8 @@ function SectionView({
       {fileDiff && (
         <FileDiff<NoteMeta>
           className="rv-diff"
+          // Pierre draws a frame or more after the page; its height held meanwhile, nothing below it jumps.
+          style={{ minHeight: diffRows(x.hunks) * ROW }}
           fileDiff={fileDiff}
           options={diffOptions()}
           lineAnnotations={annotations}

@@ -107,6 +107,8 @@ const release = (glob: string) => async (page: Page) => {
   for (const r of held.splice(0)) await r.continue().catch(() => {}); // a reload dropped it
   await fresh(page);
 };
+// Puts back what queueAs, reviewAs and the like changed; a live update refetching mid-handler just then fulfills too late.
+const unroute = (page: Page) => page.unrouteAll({ behavior: "ignoreErrors" });
 // A review as the mock serves it, changed in the browser.
 const reviewAs = (change: (v: ReviewView) => void) => async (page: Page) => {
   await page.route("**/api/review/**", async (route) => {
@@ -205,7 +207,7 @@ const SHOTS: Shot[] = [
       await top(page);
     },
     after: async (page) => {
-      await page.unroute("**/api/queue");
+      await unroute(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
@@ -292,7 +294,7 @@ const SHOTS: Shot[] = [
       await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
     },
     after: async (page) => {
-      await page.unroute("**/api/review/**");
+      await unroute(page);
       await fresh(page);
     },
   },
@@ -436,7 +438,7 @@ const SHOTS: Shot[] = [
       await at("#/later")(page);
     },
     after: async (page) => {
-      await page.unroute("**/api/queue");
+      await unroute(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
@@ -455,7 +457,7 @@ const SHOTS: Shot[] = [
       await at("#/inflight")(page);
     },
     after: async (page) => {
-      await page.unroute("**/api/inflight");
+      await unroute(page);
     },
   },
   {

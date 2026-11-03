@@ -70,7 +70,7 @@ export function Conversation({
   if (!view.conversation.length)
     return (
       <section className="rv-convo" aria-label="Conversation">
-        <p className="quiet">No comments yet.</p>
+        <p className="quiet">Nothing from reviewers yet.</p>
       </section>
     );
 
