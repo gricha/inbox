@@ -551,6 +551,15 @@ const SHOTS: Shot[] = [
       },
       after: systemTheme,
     },
+    {
+      name: `theme-${id}-inflight`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await at("#/inflight")(page);
+        await page.keyboard.press("j");
+      },
+      after: systemTheme,
+    },
   ]),
   // Last: its "press a again" toast would sit over the next shot.
   { name: "review-approve", go: review("acme/api#4127", ["a"]) },

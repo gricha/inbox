@@ -356,9 +356,11 @@ test("the queue's order within Now or Today: handed back, close looks, then the 
     card(7, { demoted: "3 from PRs to review are urgent already" }),
     card(8, { preflight: { state: "ready", verdict: "skim", risk: "high" } }),
     card(9, { author: "me", handed_back: true, why: "handed back: Dana wants a redesign" }),
+    // An AI review you asked for on your own PR says skip: handed back, it still comes first.
+    card(10, { author: "me", handed_back: true, preflight: { state: "ready", verdict: "skip" } }),
   ];
   assert.deepEqual(
     queueOrder(cards, "me").map((c) => c.id.split("#")[1]),
-    ["9", "4", "8", "3", "7", "5", "2", "6", "1"],
+    ["9", "10", "4", "8", "3", "7", "5", "2", "6", "1"],
   );
 });

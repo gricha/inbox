@@ -1,6 +1,6 @@
 ---
 name: review-desk
-description: Use when the user mentions Review Desk or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Review Desk is the user's local GitHub review queue (Now, Today, sorted away), reached through the review-desk MCP tools (desk_*) or the desk CLI.
+description: Use when the user mentions Review Desk or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Review Desk is the user's local GitHub review queue (the queue, Merging, and what's sorted away under Later), reached through the review-desk MCP tools (desk_*) or the desk CLI.
 ---
 
 # Review Desk
@@ -9,7 +9,7 @@ Review Desk is a desktop app on the user's machine that turns their GitHub revie
 
 - **The queue**: one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
 - **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted).
-- **Merging**: the user's own open PRs they've handed off for merge (`m m` in the desk). The coordinator (below) gets them merged; they never show in Now. One it can't get merged it hands back to their desk, at the top of Now, with the reason.
+- **Merging**: the user's own open PRs they've handed off for merge (`m m` in the desk). The coordinator (below) gets them merged; they never show on the queue. One it can't get merged it hands back to their desk, at the top of the queue, with the reason.
 
 Rules decide where each item lands. A board is one or more GitHub searches plus ordered rules; the first rule whose `when` is true sets the bucket and a `why` ("alice asked you directly"). Every board feeds the same queue, and an item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket with a note.
 
@@ -29,7 +29,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ---------------  | --------------------------------------------------------------------------------------------------------------------------------                         |
 | `desk_overview`  | Get counts per board, sync status and config errors. Start here if unsure.                                                                               |
-| `desk_list`      | List cards. Default: Focus (Now and Today). Pass `board` and `buckets` (`later`, `fyi`, `hide`, `cleared`) for the rest.                                 |
+| `desk_list`      | List cards. Default: the queue, in order. Pass `board` and `buckets` (`later`, `fyi`, `hide`, `cleared`) for the rest.                                   |
 | `desk_item`      | See one item: facts, bucket and why on each board, the rule trace, its AI review, and the hand-off prompt.                                               |
 | `desk_act`       | `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`. Local only. Returns an undo `seq`.                                         |
 | `desk_undo`      | Undo an action by `seq`. Without `seq` it undoes the latest action from anyone, so always pass it.                                                       |
@@ -38,7 +38,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 | `desk_events`    | Read what happened (asked, approved, pushed, CI red, merged, resolved). Pass `last_seq` back as `after`; `wait` up to 60 s.                              |
 | `desk_merging`   | The user's PRs in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base (stacked or not), the repo's merge method, the last note. |
 | `desk_note`      | A status line on a PR in Merging (`ref`, `text`), shown on its row with its age. Only the latest shows.                                                  |
-| `desk_hand_back` | Give a PR in Merging back to the user (`ref`, `why`, one line): it leaves Merging for the top of Now with that reason.                                   |
+| `desk_hand_back` | Give a PR in Merging back to the user (`ref`, `why`, one line): it leaves Merging for the top of the queue with that reason.                             |
 | `desk_policy`    | `get` the policy (fenced) with its hash and the judge's status; `set` with the whole new `text` and `base` = that hash.                                  |
 | `desk_config`    | `get` config.toml with its hash; `preview` a full new text (what moves, nothing saved); `save` it with `base` = the hash.                                |
 
@@ -55,7 +55,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 - **Triage is local and undoable.** Do done, snooze, mute and pin when the user asks. After each one, say what you did and give the undo seq, e.g. "Snoozed sentry#101 until tomorrow (undo: seq 42)". For a batch, list every item with its seq.
 - **Rules change only with the user's OK.** Before proposing a rules change, run a preview (`desk_config preview`) and show what would move. Never save `config.toml` (`desk_config save`, `PUT /api/config` or by editing the file) until the user says yes. The same goes for settings.
 - **The policy is the user's words.** Change it when they ask: show the new text, then `desk_policy set` with the hash you read. A stale hash fails: read it again and redo the edit rather than overwriting theirs.
-- **AI reviews cost a model call.** PRs in Now and Today usually have one already. For others, ask when the user asks, or for a handful of PRs they're deciding between, not for the whole queue.
+- **AI reviews cost a model call.** PRs on the queue usually have one already. For others, ask when the user asks, or for a handful of PRs they're deciding between, not for the whole queue.
 
 ## Workflows
 
@@ -65,11 +65,11 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 2. Answer with the queue in order, urgent (`now`) first, as one list: ref, a short title, and the why. Then one line for what's sorted away, from the overview ("12 later, 30 FYI").
 3. Don't paste JSON. If nothing is urgent, say so plainly.
 
-### "Why is X here?" (or "why isn't it in Now?")
+### "Why is X here?" (or "why isn't it on the queue?")
 
 1. `desk_item` with the ref.
 2. Explain per board: the bucket, the rule that matched (the first ✓ in the trace) and its why. Mention a demotion by a cap if there is one. If it's on no board, a board's `filter` drops it or no search returns it.
-3. If the user wants it elsewhere, offer a rule change (next workflow) or a one-off: pin (what they pin stays in Today or above), snooze, mute.
+3. If the user wants it elsewhere, offer a rule change (next workflow) or a one-off: pin (what they pin stays on the queue), snooze, mute.
 
 ### "Clear the noise from Y" (a bot, repo, team, label, author)
 

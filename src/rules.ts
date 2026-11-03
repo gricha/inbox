@@ -120,8 +120,8 @@ export function queueOrder(cards: Card[], me: string): Card[] {
   const weight = (c: Card) => {
     const p = c.preflight;
     const mine = c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
-    if (p?.verdict === "skip") return 7;
     if (c.handed_back) return 0;
+    if (p?.verdict === "skip") return 7;
     if (!mine && c.kind === "pr" && c.ci === "red") return 6;
     if (p?.risk === "high" || p?.verdict === "look") return p.state === "ready" ? 1 : 2;
     if (c.demoted) return 3;

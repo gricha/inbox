@@ -111,7 +111,7 @@ desk ls                 # the queue in the terminal (now, then today); `--all` f
 desk show seer#8463     # why it's there, with the rule trace
 desk done seer#8463     # also: snooze, mute, pin, restore, undo, sync, prompt, brief
 desk settings           # list settings; `desk settings set review.auto_ai false`
-desk status --short     # "desk 10 ●2" (10 in the queue, 2 urgent), for a status line
+desk status --short     # "desk 10 +2" (10 in the queue, 2 new), for a status line
 ```
 
 `bin/desk` is the CLI (`bin/desk.cmd` on Windows). To use `desk` from anywhere, link it onto your PATH: `ln -sf ~/code/review-desk/bin/desk ~/.local/bin/desk`.

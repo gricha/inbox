@@ -300,7 +300,8 @@ export function Rules({
             <h3 className="s-sub">Hard rules</h3>
             {hard.length ? (
               <p className="muted small">
-                What they match stays at least in their bucket (Today for Now), whatever Claude, quiet days or caps say.
+                What they match stays at least in their bucket (<code>today</code> for a <code>now</code> rule), whatever Claude, quiet days
+                or caps say.
               </p>
             ) : (
               <p className="muted small">
@@ -465,8 +466,8 @@ export function Rules({
               <div className="fact">
                 <dt>hard</dt>
                 <dd>
-                  <code>hard = true</code> on a rule: a floor. What it matches never sorts below its bucket (Today for Now); Claude sorts
-                  within it, and everything else with the rule's bucket as its hint
+                  <code>hard = true</code> on a rule: a floor. What it matches never sorts below its bucket (<code>today</code> for a{" "}
+                  <code>now</code> rule); Claude sorts within it, and everything else with the rule's bucket as its hint
                 </dd>
               </div>
             </dl>

@@ -71,7 +71,7 @@ test("a PR in Merging stays there whatever it waits on: never in the queue, focu
   const q = t.desk.queue();
   const shown = [q.sections, t.desk.focus().sections].flatMap((x) => Object.values(x).flat());
   assert.deepEqual([...new Set([...shown, ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id))], ["acme/api#1"]);
-  assert.equal(t.desk.status().text, "desk 1 ●1");
+  assert.equal(t.desk.status().text, "desk 1");
   assert.deepEqual([t.desk.item("web#3").card.bucket, t.desk.item("web#3").card.why], ["fyi", "merging"]);
   assert.deepEqual(t.desk.overview().inflight, { total: 3 });
 });

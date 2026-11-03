@@ -2,7 +2,7 @@ import type { InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
 
-// Merging: your PRs handed off for merge, what each waits on and the coordinator's latest note on it.
+// Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
 export function Inflight({
   view,
   now,
@@ -29,12 +29,12 @@ export function Inflight({
       else parts.push([r]);
     }
     return (
-      <div className="rows cards">
+      <div className="lines">
         {parts.map((p) => {
           const s = p.length > 1 && p[0]!.card.stack;
           if (!s) return p.map(row);
           return (
-            <div key={s.id} className="rows cards lane-stack" aria-label={`Stack of ${s.size}`}>
+            <div key={s.id} className="lines lane-stack" aria-label={`Stack of ${s.size}`}>
               <p className="lane-stack-head">
                 Stack on {view.stacks[s.id]?.base ?? "its base"} · {s.size} open
               </p>
@@ -46,27 +46,17 @@ export function Inflight({
     );
   };
   return (
-    <div className="queue deck lane">
+    <div className="queue lane">
       {open.length ? (
-        <section className="group" aria-labelledby="h-inflight">
-          <h2 id="h-inflight" className="group-head">
-            <span>Merging</span>
-            <span className="count">{open.length}</span>
-          </h2>
-          <p className="lane-intro">The coordinator is getting these merged. What it can't get merged comes back to your queue.</p>
-          {rows(open)}
-        </section>
+        rows(open)
       ) : (
-        <h2 className="group-head">
-          <span>Merging</span>
-          <span className="group-none">
-            Nothing yet: press <kbd>m</kbd> on one of your PRs when you're done with it.
-          </span>
-        </h2>
+        <p className="queue-empty">
+          Nothing in Merging yet: press <kbd>m</kbd> twice on one of your PRs when you're done with it.
+        </p>
       )}
       {landed.length > 0 && (
         <section className="group" aria-labelledby="h-landed">
-          <h3 id="h-landed" className="group-head sub">
+          <h3 id="h-landed" className="group-head">
             <span>Merged</span>
             <span className="count">{landed.length}</span>
           </h3>
@@ -77,7 +67,8 @@ export function Inflight({
   );
 }
 
-// The title and its age; the ref and what it waits on; the coordinator's latest note and its age; the selected row's keys.
+// One line: the title, quietly its ref and place in its stack, what it waits on and the coordinator's latest note, its age.
+// Selected, the note whole with its age, and its keys.
 function Row({
   row: r,
   now,
@@ -98,43 +89,44 @@ function Row({
   };
   const since = c.resolved_at ?? c.waiting_since;
   return (
-    <div className={cls("row", "card", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
-      <div className="row-line">
-        <button
-          type="button"
-          className="row-main"
-          onClick={() => {
-            select(c.id);
-          }}
-          onDoubleClick={() => {
-            run(r, "enter");
-          }}
-          onFocus={() => {
-            select(c.id);
-          }}
-        >
-          <span className="title-line">
-            <span className="title">{c.title}</span>
+    <div className={cls("line", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
+      <button
+        type="button"
+        className="row-main line-main"
+        onClick={() => {
+          select(c.id);
+        }}
+        onDoubleClick={() => {
+          run(r, "enter");
+        }}
+        onFocus={() => {
+          select(c.id);
+        }}
+      >
+        <span className="line-title">{c.title}</span>
+        {/* A long repo name gives way before the title; the number never does. */}
+        <span className="line-ref" title={`${c.repo}#${c.number}`}>
+          {c.repo.split("/")[1]}
+        </span>
+        <span className="line-num">#{c.number}</span>
+        {c.stack && (
+          <span className="line-stack" title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>
+            {c.stack.pos}/{c.stack.size}
           </span>
-          <span className="age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
-            {age(since, now)}
-          </span>
-          <span className="card-line">
-            <span className="meta">
-              <span className="ref" title={`${c.repo}#${c.number}`}>
-                <span className="ref-ink">
-                  <span className="ref-repo">{c.repo.split("/")[1]}</span>#{c.number}
-                </span>
-              </span>
-              {c.stack && <span title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>{`${c.stack.pos}/${c.stack.size}`}</span>}
-              <span>{r.waits_on ?? r.state}</span>
-            </span>
-          </span>
-          {r.note && <Dots className="gist lane-note" parts={[r.note.text, age(r.note.at, now)]} />}
-        </button>
-      </div>
+        )}
+        <span className="line-note">{live ? <Dots parts={[r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])]} /> : r.state}</span>
+        <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
+          {age(since, now)}
+        </span>
+      </button>
       {on && (
-        <div className="more">
+        <div className="lane-more">
+          {/* The row cuts a long note short: here it's whole. */}
+          {live && r.note && (
+            <p className="lane-why">
+              <Dots parts={[r.note.text, age(r.note.at, now)]} />
+            </p>
+          )}
           <div className="actions card-keys">
             <KeyButton k="enter" label="Review" run={keys} />
             <KeyButton k="o" label="Open on GitHub" run={keys} />

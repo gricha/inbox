@@ -12,6 +12,7 @@ import type {
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
+import { adoptTheme } from "./theme.ts";
 import {
   armOf,
   DEFAULT_OPEN,
@@ -41,6 +42,7 @@ interface Toast {
   text: string;
   error?: boolean;
   undo?: boolean;
+  arm?: boolean; // "Press m again…": it goes when the arm lapses
 }
 
 const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
@@ -77,6 +79,7 @@ const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 if (desktop) {
   document.documentElement.dataset.shell = "desktop";
   document.documentElement.dataset.platform = desktop.platform;
+  adoptTheme();
 }
 
 export function App() {
@@ -127,9 +130,13 @@ export function App() {
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
   const pending = useRef<{ id: string; until: number } | null>(null);
 
-  const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000) => {
+  const armedRef = useRef(armed);
+  armedRef.current = armed;
+  // An armed Send or hand-off needs its toast on screen: another toast replacing it disarms it.
+  const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, arm = false) => {
     clearTimeout(toastTimer.current);
-    setToast({ id: Date.now(), text, error, undo: canUndo });
+    if (!arm && armedRef.current) setArmed(null);
+    setToast({ id: Date.now(), text, error, undo: canUndo, arm });
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
     }, ms);
@@ -285,6 +292,7 @@ export function App() {
           setArmed(null);
         }, ARM_MS)
       : undefined;
+    if (!armed) setToast((x) => (x?.arm ? null : x)); // lapsed (Esc, another key, time): its "press again" goes with it
     return () => {
       clearTimeout(t);
     };
@@ -501,7 +509,7 @@ export function App() {
     const id = armOf("m", c.id);
     if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
       setArmed({ id, at: Date.now() });
-      flash(`Press m again to hand off ${shortRef(c)} for merge`, false, false, ARM_MS);
+      flash(`Press m again to hand off ${shortRef(c)} for merge`, false, false, ARM_MS, true);
       return;
     }
     setArmed(null);
@@ -555,7 +563,7 @@ export function App() {
     const id = armOf("a", c.id);
     if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
       setArmed({ id, at: Date.now() });
-      flash(`Press a again to mark ${shortRef(c)} ready for review`, false, false, ARM_MS);
+      flash(`Press a again to mark ${shortRef(c)} ready for review`, false, false, ARM_MS, true);
       return;
     }
     setArmed(null);
@@ -635,8 +643,10 @@ export function App() {
 
   // A group's "n more" line opens in place; the cursor goes on to the first card it showed.
   function unfold(k: GroupKey) {
-    const shown = groups.find((g) => g.key === k)?.cards.length ?? 0;
-    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true }).find((g) => g.key === k)?.cards[shown];
+    const shown = new Set(groups.find((g) => g.key === k)?.cards.map((c) => c.id));
+    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true })
+      .find((g) => g.key === k)
+      ?.cards.find((c) => !shown.has(c.id));
     setUnfolded((u) => ({ ...u, [k]: true }));
     if (first) {
       setSelected(first.id);

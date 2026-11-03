@@ -5,10 +5,10 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 ## Principles
 
 - **Only what needs you on the main page.** If it's on the main page, you need to act on it: one list, what the desk put in now and then today, in the desk's order (`src/desk.ts` orders it; the page only renders it, so the tray, MCP and notifications say the same). No now-vs-today split, no headings.
-- **One line per item.** The title (17px), then quietly its repo#number (and a stack's place, "3/20"), at most one call to action naming the action, its age on the right. No why, AI gist, concerns, verdict, chips or "sorted by Claude": Enter opens the review (or an issue in place), where all that is, and the keys are in the help overlay (`?`). The call to action is the desk's (`cta` on the card), in ink-2 before the age: your own open draft's "**a** Ready for review" (`a` arms it, "**a** again to mark ready", in ink semibold, and a toast; a second `a` within 3 s marks it ready on GitHub), or "Reply" on your own PR whose only action is answering someone (Enter opens its review, with the reply ready).
+- **One line per item.** The title (17px), then quietly its repo#number (a long repo name is cut short, the number never; and a stack's place, "3/20"), at most one call to action naming the action, its age on the right. No why, AI gist, concerns, verdict, chips or "sorted by Claude": Enter opens the review (or an issue in place), where all that is, and the keys are in the help overlay (`?`). The call to action is the desk's (`cta` on the card), in ink-2 before the age: your own open draft's "**a** Ready for review" (`a` arms it, "**a** again to mark ready", in ink semibold, and a toast; a second `a` within 3 s marks it ready on GitHub), or "Reply" on your own PR whose only action is answering someone (Enter opens its review, with the reply ready).
 - **Merging is the coordinator's.** A PR you handed off (`m m`) never shows on the main page. The coordinator, your own Claude Code session in your Claude app's sidebar, gets it merged; only a PR it hands back comes back to the main page, on top.
 - **Calm, informational.** No highlighter. Ink and pencil grey on the paper; colour only where it carries information: "CI failing" red, "changes requested" and "merge conflict" amber, the same words and colours in a review. Merging is all ink and pencil. Sentence case, no chips or boxed badges, no all-caps, no monospace outside code. The selected row is a neutral fill, nothing more.
-- **Themes are per device.** Tokens live on `:root` in `web/src/styles.css`: the light set, the dark set under `prefers-color-scheme` (System), and `[data-theme]` sets for Light, Dark, Sand (warm paper) and Slate (blue-grey dark). Settings → Appearance picks one for this device (`web/src/theme.ts`, in localStorage, never a desk setting), and `index.html` applies it before the first paint. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only. Check every change in light and dark and each theme (`npm run shots`).
+- **Themes are per device.** Tokens live on `:root` in `web/src/styles.css`: the light set, the dark set under `prefers-color-scheme` (System), and `[data-theme]` sets for Light, Dark, Sand (warm paper) and Slate (blue-grey dark). Settings → Appearance picks one for this device (`web/src/theme.ts`, never a desk setting): the desktop app keeps it in its own data (the UI's origin changes when it runs from a checkout), and paints the window and its start page in that theme's paper; a browser keeps it in localStorage. `index.html` applies it before the first paint. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only. Check every change in light and dark and each theme (`npm run shots`).
 
 ## Layout
 
@@ -26,7 +26,7 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 ```
 
 - A 232px sidebar: GitHub (the main page, with how many need you), Later (no count: nothing there needs you), Merging (no count either: nothing there needs you; the tooltip has how many are merging) and Settings. The active item is a neutral filled pill; a review is under the page it was opened from. At 820px and below it hides; the top bar then names the page and carries quiet "Later" and "Merging 2" links.
-- The main page, Later and a review use the window's width, with the page's side padding; Merging keeps an 880px column.
+- The main page, Later, Merging and a review use the window's width, with the page's side padding.
 - Every page ends near the window's bottom: below its last line there's only the room j/k leave under a row (84px), never empty paper to scroll into. `npm run shots` checks the queue, a review, Merging and Settings scrolled to the bottom.
 - The main page: its first `queue.cards` rows (10), then one pencil line, "11 more", which j/k stop on and Enter (or a click) opens in place; it folds only when two or more would go behind it. Empty, it's one line: "Nothing needs you right now." While Claude can't log in, one line above the rows says so once: "**Claude is paused:** Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`." (or "**AI reviews are paused:**" and why).
 - A stack of PRs is one line, the one the desk sends for it (the lowest member in the most urgent place), with its place among the stack's open PRs quietly after its repo#number: "api#4154 3/6". A row under Later in a stack says it the same way.
@@ -85,13 +85,13 @@ The main page is what needs you: one ordered list, one line per item. A PR's rev
 
 ## Merging
 
-`#/inflight`: your own open PRs you handed off with `m m`, which the coordinator is getting merged. Its heading says how many ("Merging 4"), then one pencil line: "The coordinator is getting these merged. What it can't get merged comes back to your queue." Open ones first, the latest activity on top; merged and closed ones sit under Merged for 3 days, flat pencil rows like Resolved's.
+`#/inflight`: your own open PRs you handed off with `m m`, which the coordinator is getting merged, one line each like the main page's, at the window's width. Open ones first, the latest activity on top; merged and closed ones sit under Merged for 3 days, pencil rows like Resolved's.
 
-- A stack's rows sit together, bottom first, under one quiet line ("Stack on main · 6 open") when two or more of its PRs are here; each says its place after its ref ("2/6").
-- Each row: the title and its age, then the ref and what it waits on, the desk's words ("waits on a CI fix", "waits on a second look from dana", "waits on a review from sam, @backend and 4 more", "ready to merge"), then the coordinator's latest note and its age ("Pushed 4be71c2 for dana's 3 comments · 24m"). All ink and pencil, problems included: the coordinator has it. No highlighter.
-- The selected row's keys: Review, Open on GitHub, Back to desk.
+- Each row: the title (17px), its ref, a stack's place ("2/6"), one phrase, its age. The phrase is what it waits on, the desk's words ("waits on a CI fix", "waits on a second look from dana", "ready to merge"), then the coordinator's latest note ("Pushed 4be71c2 for dana's 3 comments"); it stays on one line and gives way at its end. All ink and pencil, problems included: the coordinator has it. No highlighter.
+- A stack's rows sit together, bottom first, under one quiet line ("Stack on main · 6 open") when two or more of its PRs are here.
+- The selected row shows the note whole with its age, then its keys: Review, Open on GitHub, Back to desk.
 - Nothing here reaches the main page. Only a PR the coordinator hands back goes there, on top, and leaves Merging.
-- Empty, the page is one line: "**Merging** Nothing yet: press m on one of your PRs when you're done with it."
+- Empty, the page is one line: "Nothing in Merging yet: press m twice on one of your PRs when you're done with it."
 
 ## Keys
 

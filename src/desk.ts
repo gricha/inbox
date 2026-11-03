@@ -451,8 +451,8 @@ export class Desk {
   }
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
-  // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched
-  // lately on the desk (migrateDrafts).
+  // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
+  // on the desk (migrateDrafts).
   migrateRules(): void {
     const due = [
       { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
@@ -652,15 +652,15 @@ export class Desk {
     }
   }
 
-  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin); a hand-back is on it, in Now.
-  // Per PR, not the queue's one line per stack: a member that comes to stand for its stack isn't news.
+  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin, nor your own draft: you just
+  // opened it); a hand-back is on it, in Now. Per PR, not the one line per stack: a member coming to stand for it isn't news.
   notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
-    const snap = this.snapshot();
-    const { now, today } = this.top(snap, new Set());
+    const { now, today } = this.top(this.snapshot(), new Set());
+    const me = this.me().toLowerCase();
     const queued = [...now, ...today]
-      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin")
+      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin" && !(c.draft && c.author.toLowerCase() === me))
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     const fresh = this.freshSince("notified_queue", queued);
     if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
@@ -914,7 +914,7 @@ export class Desk {
     };
   }
 
-  // Your PRs the coordinator handed back, at the top of Now.
+  // Your PRs the coordinator handed back, at the top of the queue.
   needsCards(snap: Snapshot, seen: Set<string>): Card[] {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
@@ -1740,7 +1740,7 @@ export class Desk {
 
   status(): { now: number; today: number; new: number; text: string } {
     const f = this.overview().focus;
-    const parts = [`${f.now + f.today}`, f.now ? `●${f.now}` : "", f.new ? `+${f.new}` : ""].filter(Boolean);
+    const parts = [`${f.now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
     return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
   }
 }

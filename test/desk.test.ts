@@ -43,7 +43,7 @@ test("sync fills boards, focus and status", async () => {
   const focus = t.desk.focus();
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
   assert.deepEqual(focus.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk 2 ●1");
+  assert.equal(t.desk.status().text, "desk 2");
   const ov = t.desk.overview();
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 1);
@@ -186,6 +186,32 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
   t.desk.notifyNew();
   assert.equal(t.notes.length, 1, "your pin put it there");
+  t.cleanup();
+});
+
+test("your own new drafts never notify, and the queue lists a stack of them once", async () => {
+  const t = await setup([reviewAsk(1)], { settings: { "notify.quiet": "", "policy.judge": false } });
+  await t.desk.sync();
+  // Four drafts, each based on the one before, and two that make a stack of two.
+  const stack = [10, 11, 12, 13].map((n) => myPr(n, { draft: true, ci: "none", head_ref: `s${n}`, base: n === 10 ? "main" : `s${n - 1}` }));
+  const pair = [20, 21].map((n) => myPr(n, { draft: true, ci: "none", head_ref: `p${n}`, base: n === 20 ? "main" : "p20" }));
+  for (const p of [...stack, ...pair]) t.gh.items.set(p.id, p);
+  await t.desk.sync();
+  const cards = [...t.desk.focus().sections.now, ...t.desk.focus().sections.today];
+  assert.deepEqual(t.notes, [], "you just opened them");
+  assert.deepEqual(
+    cards
+      .filter((c) => c.draft)
+      .map((c) => [c.id, c.stack?.pos, c.stack?.size])
+      .toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    [
+      ["acme/web#10", 1, 4],
+      ["acme/web#20", 1, 2],
+    ],
+  );
+  t.gh.items.set("acme/api#31", reviewAsk(31));
+  await t.desk.sync();
+  assert.deepEqual(t.notes, ["api#31 · carol asked you directly"]);
   t.cleanup();
 });
 

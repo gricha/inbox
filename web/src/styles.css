@@ -658,23 +658,20 @@ kbd {
 
 .queue {
   display: grid;
-  gap: 30px;
+  gap: 10px;
 }
 
-/* The queue and Later use the window's width. */
-.col:has(.queue:not(.lane)) {
+/* The queue, Later and Merging use the window's width. */
+.col:has(.queue) {
   --col-w: 100%;
 }
 
 /* minmax(0, 1fr): a long unwrapped row truncates instead of widening the page. */
-.queue:not(.lane),
+.queue,
 .later .group,
+.lane .group,
 .lines {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.queue:not(.lane) {
-  gap: 10px;
 }
 
 .queue-empty {
@@ -736,6 +733,8 @@ kbd {
 }
 
 .line-ref,
+.line-num,
+.line-stack,
 .line-note,
 .line-age {
   color: var(--pencil);
@@ -744,12 +743,26 @@ kbd {
   white-space: nowrap;
 }
 
+/* The title is what you read: a long repo name is cut short (its title attribute has it whole), the number never. */
 .line-ref {
+  flex: none;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right after its repo, as one "repo#number". */
+.line-num {
+  flex: none;
+  margin-left: -14px;
+}
+
+.line-stack {
   flex: none;
 }
 
 .line-note {
-  flex: 0 100 auto;
+  flex: 0 10000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1308,19 +1321,7 @@ kbd {
 }
 
 /* Merging --------------------------------------------------------------------
-   Your PRs Claude is getting merged. Grey while Claude has one; one waiting on you has its why in ink and its problems their colour. */
-
-.lane-intro {
-  margin: -2px 0 10px;
-  padding: 0 18px;
-  color: var(--pencil);
-  font-size: 13px;
-}
-
-/* Merged sits one group gap below the open rows, as Sorted away does below the queue. */
-.lane .group-head.sub {
-  margin-top: 0;
-}
+   Your PRs the coordinator is getting merged, one line each like the main page's, all ink and pencil. */
 
 /* A stack's rows together, bottom first, under one quiet line. */
 .lane-stack {
@@ -1329,26 +1330,26 @@ kbd {
 
 .lane-stack-head {
   margin: 0;
-  padding: 0 18px;
+  padding: 0 12px;
   color: var(--pencil);
   font-size: 13px;
 }
 
-/* Merged reads like Resolved: a flat row on the paper, its title regular and pencil. */
-.lane .dim.card {
-  background: none;
-  box-shadow: none;
+.lane .group {
+  display: grid;
+  gap: 4px;
+  margin-top: 20px;
 }
 
-.lane .dim .title {
-  color: var(--pencil);
-  font-weight: 400;
+/* The selected row's note and keys, under its title. */
+.lane-more {
+  padding: 2px 12px 10px;
 }
 
-/* The coordinator's latest note on a PR in Merging, and its age. */
-.gist.lane-note {
-  color: var(--pencil);
-  font-size: 13px;
+.lane-why {
+  margin: 4px 0 8px;
+  color: var(--ink-2);
+  font-size: 14px;
 }
 
 .keys-head.lane-keys {

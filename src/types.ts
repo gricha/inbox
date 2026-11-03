@@ -282,6 +282,10 @@ export interface JudgeStatus {
 export interface DesktopBridge {
   platform: string; // process.platform
   version: string;
+  // This device's theme, kept by the app (the UI's origin, and so its localStorage, changes when it runs from a checkout);
+  // null until picked in this app, absent from an older app.
+  theme?: string | null;
+  setTheme?(id: string): Promise<void>;
   // source: absent from an app older than Run from a checkout.
   status(): Promise<{ hotkey: { accelerator: string; ok: boolean; error?: string }; open_at_login: boolean; source?: SourceStatus | null }>;
 }

@@ -8,10 +8,11 @@
     <meta name="theme-color" content="#151618" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <!-- This device's theme (web/src/theme.ts), before the first paint so it never flashes the other one. -->
+    <!-- This device's theme (web/src/theme.ts): the desktop app's, else this browser's, before the first paint. -->
     <script>
       try {
-        const t = localStorage.getItem("desk.theme");
+        const app = window.desktop && window.desktop.theme;
+        const t = typeof app === "string" ? app : localStorage.getItem("desk.theme");
         if (["light", "dark", "sand", "slate"].includes(t)) document.documentElement.dataset.theme = t;
       } catch {}
     </script>

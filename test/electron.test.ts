@@ -18,6 +18,7 @@ import {
   isGitHubUrl,
   isHttpsUrl,
   isHttpUrl,
+  isTheme,
   menuLabel,
   mergePath,
   parseNotice,
@@ -28,6 +29,7 @@ import {
   SHELL_PATH_COMMAND,
   sourceDir,
   sourceEnv,
+  themeColors,
   trayTitle,
   trayTooltip,
   viteArgs,
@@ -195,10 +197,21 @@ test("sourceEnv: the desk's port and home, exactly the UI's origin, and no DESK_
   });
 });
 
+test("the window's colours before the UI paints follow this device's theme, else the OS", () => {
+  assert.equal(themeColors("slate", false).paper, "#1b2028");
+  assert.equal(themeColors("sand", true).paper, "#f3eee5");
+  assert.equal(themeColors("system", true).paper, "#151618");
+  assert.equal(themeColors(null, false).paper, "#f7f7f5");
+  assert.deepEqual(
+    ["system", "slate", "toString", "", 3].map((t) => isTheme(t)),
+    [true, true, false, false, false],
+  );
+});
+
 test("tray title and tooltip", () => {
-  assert.equal(trayTitle("desk 7 ●2 +3"), "7 ●2 +3");
+  assert.equal(trayTitle("desk 7 +3"), "7 +3");
   assert.equal(trayTitle(""), "");
-  assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the queue, 2 urgent");
+  assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the queue");
   assert.equal(trayTooltip({ now: 0, today: 5 }), "Review Desk: 5 in the queue");
   assert.equal(trayTooltip(null), "Review Desk");
 });
