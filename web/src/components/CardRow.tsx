@@ -4,7 +4,7 @@ import { age, clearedText, cls, SNOOZE } from "../format.ts";
 import { armOf, type Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a t).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
@@ -94,6 +94,20 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
           )}
           {note && <span className="line-note">{note}</span>}
         </button>
+        {/* Under the cursor only: the quiet way to tell the coordinator something about it. */}
+        {sel && !why && (
+          <button
+            type="button"
+            className="act line-ask"
+            title="Tell or ask your coordinator something about it"
+            onClick={() => {
+              ctx.run(card, "t");
+            }}
+          >
+            <kbd>t</kbd>
+            Ask
+          </button>
+        )}
         {/* Filled and with its key only under the cursor, since that's the row the key acts on. */}
         {card.cta === "ready" && !why && (
           <button

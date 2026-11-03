@@ -19,6 +19,7 @@ const KEYS: [string[], string][] = [
 const MORE_KEYS: [string, string][] = [
   ["p", "pin"],
   ["u", "undo"],
+  ["t", "ask the coordinator"],
   ["c", "copy a prompt"],
   ["i", "AI review"],
   ["w", "rule trace"],

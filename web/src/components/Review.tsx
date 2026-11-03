@@ -8,6 +8,7 @@ import { currentFile, filePatch, onLines, resolvedHead, routeHash, says, section
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
+import { Asks, type Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
 
 interface NoteMeta {
@@ -68,6 +69,8 @@ export function Review({
   row,
   armed: armedKey,
   onBack,
+  onAsk,
+  onThread,
 }: {
   id: string;
   loads: number; // bumped on every refresh, so the review follows the server's updates
@@ -79,6 +82,8 @@ export function Review({
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   armed: string | null; // armOf("m", id) after a first m
   onBack: () => void;
+  onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
+  onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
@@ -418,7 +423,8 @@ export function Review({
               </p>
             )}
           </header>
-          <Conversation view={view} now={now} flash={flash} />
+          <Conversation view={view} now={now} flash={flash} onThread={onThread} onAsk={onAsk} />
+          <Asks asks={view.asks} now={now} />
           {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
           {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
             <AiSection view={view} asking={busy === "ai"} notes={notes.length} />

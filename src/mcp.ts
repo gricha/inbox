@@ -455,6 +455,20 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
   );
 
   server.registerTool(
+    "desk_answer",
+    {
+      description:
+        "Answer the user's ask (a wake message from the desk gives its id): what you did or found, in a sentence or two. It shows under their ask in the desk, and they get a notification.",
+      inputSchema: {
+        ask_id: z.string().describe("The ask's id, from the wake message"),
+        text: z.string().min(1).max(2000),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    ({ ask_id, text: answer }) => run(async () => (await api.answer(ask_id, answer), `answered ask ${ask_id}`)),
+  );
+
+  server.registerTool(
     "desk_sync",
     {
       description: "Start a GitHub sync now (read only).",

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls } from "../format.ts";
+import type { Thread } from "./Composer.tsx";
 
 const ARM_MS = 3000;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -17,10 +18,14 @@ export function Conversation({
   view,
   now,
   flash,
+  onThread,
+  onAsk,
 }: {
   view: ReviewView;
   now: number;
   flash: (text: string, error?: boolean, ms?: number) => void;
+  onThread: (t: Thread) => void;
+  onAsk: (t: Thread) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
   const [sent, setSent] = useState<Record<string, string>>({}); // until the sync shows your reply: its url
@@ -50,6 +55,16 @@ export function Conversation({
   }, [view]);
 
   const waiting = view.conversation.filter((c) => c.waiting_on_you && !(c.id in sent));
+  // What an ask to the coordinator is about: "dana's thread on src/auth.ts:42".
+  const threadOf = (c: Convo): Thread => ({
+    item: view.card.id,
+    id: c.id,
+    url: c.url,
+    label: `${c.comments[0]?.author ?? "their"}'s ${c.kind}${c.path ? ` on ${where(c)}` : ""}`,
+  });
+  const on = (c: Convo) => {
+    onThread(threadOf(c));
+  };
   const rest = view.conversation.filter((c) => !c.waiting_on_you);
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
   if (!view.conversation.length) return null;
@@ -114,6 +129,9 @@ export function Conversation({
               aria-label={`Reply to ${last.author}`}
               placeholder={`Reply to ${last.author}`}
               value={text}
+              onFocus={() => {
+                on(c);
+              }}
               onChange={(e) => {
                 setDrafts((d) => ({ ...d, [c.id]: e.target.value }));
                 if (armed === c.id) setArmed(null);
@@ -143,6 +161,17 @@ export function Conversation({
               <a className="act" href={c.url} target="_blank" rel="noreferrer">
                 Open on GitHub
               </a>
+              <button
+                type="button"
+                className="act"
+                title="Tell or ask your coordinator something about this conversation (t)"
+                onClick={() => {
+                  on(c);
+                  onAsk(threadOf(c));
+                }}
+              >
+                Ask coordinator
+              </button>
             </div>
           </article>
         );
@@ -169,7 +198,13 @@ export function Conversation({
         rest.map((c) => {
           const [first, last] = [c.comments[0]!, c.comments.at(-1)!];
           return (
-            <details key={c.id} className="cv-quiet">
+            <details
+              key={c.id}
+              className="cv-quiet"
+              onToggle={(e) => {
+                if (e.currentTarget.open) on(c);
+              }}
+            >
               <summary>
                 <span className="cv-author">{first.author}</span>
                 <span>{where(c)}</span>

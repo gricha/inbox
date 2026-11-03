@@ -831,6 +831,24 @@ kbd {
   margin-left: 0;
 }
 
+/* The selected row's quiet way to the coordinator, before its call to action, at its height. */
+.line .line-ask {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  align-self: center;
+  height: 32px;
+  margin: -4px 0 -4px auto;
+}
+
+.line-ask + .line-cta {
+  margin-left: -8px;
+}
+
+.line-ask + .line-age {
+  margin-left: 0;
+}
+
 .dim .line-title {
   color: var(--ink-2);
   font-weight: 400;
@@ -1947,6 +1965,129 @@ kbd {
 .toast-btn kbd {
   color: inherit;
   opacity: 0.7;
+}
+
+/* A word with the coordinator, over the page's bottom where the toast shows, as calm as a card. */
+.composer {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  z-index: 35;
+  display: grid;
+  gap: 8px;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  animation: rise 160ms ease-out;
+}
+
+.app:has(.composer) .main {
+  padding-bottom: 200px;
+}
+
+.composer-about {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+.composer-about > span {
+  color: var(--ink-2);
+}
+
+.composer-about > span::before {
+  margin-right: 6px;
+  color: var(--faint);
+  content: "·";
+}
+
+.composer-row {
+  display: flex;
+  gap: 6px;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 14px var(--sans);
+}
+
+.composer-input:focus {
+  border-color: var(--pencil);
+  outline: none;
+}
+
+.composer-input::placeholder {
+  color: var(--pencil);
+}
+
+.composer-note {
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+/* Your asks and the coordinator's answers: in the composer, and quietly in the item's review. */
+.asks {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask {
+  display: grid;
+  gap: 2px;
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid var(--rule-strong);
+}
+
+.ask-q {
+  color: var(--ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ask-age {
+  margin-left: 6px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.ask-a {
+  color: var(--ink-2);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.rv-asks {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  max-width: 780px;
+  padding: 0 12px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.rv-asks .d-head {
+  margin: 0;
 }
 
 @keyframes rise {

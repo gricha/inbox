@@ -4,6 +4,7 @@ import type {
   Action,
   ActivityPage,
   AiReview,
+  Ask,
   BoardView,
   ConfigDoc,
   ConfigError,
@@ -119,6 +120,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     inflight: () => call<InflightView>("GET", "/api/inflight"),
     note: (id: string, text: string) => call<{ ok: true; text: string }>("POST", `/api/inflight/${q(id)}/note`, { text }),
     handBack: (id: string, why: string) => call<{ ok: true; reason: string }>("POST", `/api/inflight/${q(id)}/handback`, { why }),
+    answer: (id: string, text: string) => call<{ ok: true; ask: Ask }>("POST", `/api/asks/${q(id)}/answer`, { text }),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));

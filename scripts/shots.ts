@@ -412,6 +412,67 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // t on a selected row: the composer to the coordinator, about that row.
+    name: "ask-row",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.keyboard.press("t");
+      await page.locator(".composer-input").waitFor();
+      await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
+      await page.waitForTimeout(300); // its rise in has run
+    },
+  },
+  {
+    // In a review, about the conversation you were on: sent, it waits for the answer under it.
+    name: "ask-review",
+    go: async (page) => {
+      await page.route("**/api/ask", (route) =>
+        route.fulfill({
+          json: {
+            ok: true,
+            ask: {
+              id: "shot0001",
+              at: new Date().toISOString(),
+              text: "Confirm we addressed priya's question so I can reply",
+              item_id: "me/notes-app#12",
+              thread_id: "IC_freeze",
+              thread_url: null,
+              answer: null,
+            },
+          },
+        }),
+      );
+      await review("me/notes-app#12")(page);
+      await page.locator(".cv-reply").nth(1).focus();
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("t");
+      await page.locator(".composer-input").waitFor();
+      await page.keyboard.type("Confirm we addressed priya's question so I can reply");
+      await page.keyboard.press("Enter");
+      await page.locator(".composer .ask").waitFor();
+      await page.waitForTimeout(300); // its rise in has run
+    },
+    after: async (page) => {
+      await page.unroute("**/api/ask");
+    },
+  },
+  {
+    // The coordinator off: the composer says so and sends nothing.
+    name: "ask-off",
+    go: async (page) => {
+      await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));
+      await at("#/inflight")(page);
+      await page.keyboard.press("j");
+      await page.keyboard.press("t");
+      await page.locator(".composer-note").waitFor();
+      await page.waitForTimeout(300); // its rise in has run
+    },
+    after: async (page) => {
+      await page.unroute("**/api/asks");
+    },
+  },
+  {
     name: "help",
     go: async (page) => {
       await at("#/")(page);

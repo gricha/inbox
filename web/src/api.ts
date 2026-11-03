@@ -2,6 +2,8 @@ import type {
   Action,
   AgentStatus,
   AiReview,
+  Ask,
+  AsksView,
   ConfigDoc,
   ConfigError,
   FieldDoc,
@@ -64,6 +66,9 @@ export const api = {
   ready: (id: string) => call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, {}),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
   wakeCoordinator: () => call<{ ok: true }>("POST", "/api/coordinator/wake", {}),
+  asks: () => call<AsksView>("GET", "/api/asks"),
+  ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }) =>
+    call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   config: () => call<ConfigDoc>("GET", "/api/config"),

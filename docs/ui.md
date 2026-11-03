@@ -104,7 +104,13 @@ In a review: `n/p` next and previous change, in reading order · `N/P` next and 
 
 In Merging: `j/k` move · `Enter` review · `o` GitHub · `b` back to desk · `c` copy `claude attach <id>` · `w` wake the coordinator · `Esc` the main page. `e`, `s` and `m` don't apply there: the coordinator has it, so `b` brings it back first.
 
+On every page: `t` opens the composer to the coordinator (below).
+
 Tab focus and the j/k cursor are the same thing: focusing a row selects it.
+
+## Asking the coordinator
+
+`t` anywhere, or a quiet **t Ask** on the selected row's line (before its call to action), **Ask coordinator** under each conversation waiting on you in a review (the action line is full), and **t Ask coordinator** under a selected row in Merging, opens a small bar at the window's bottom, over the page. One pencil line says what it's about: the open review's PR and the conversation you were last on in it ("dana's thread on src/auth.ts:42"), the selected row, or nothing. Enter (or **↵ Send**) sends it, Esc (or **esc Close**) closes it, from wherever focus is. What you sent shows above it, each with the coordinator's answer under it once it lands ("Waiting for its answer" until then). With the coordinator off, the bar says so and sends nothing. A PR's review lists your asks about it and their answers under "You asked the coordinator", the latest three and "n earlier" for the rest.
 
 ## Files
 

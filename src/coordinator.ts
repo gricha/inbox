@@ -1,15 +1,17 @@
 // The coordinator: one background Claude Code session (`claude --bg`) the desk starts on the first hand-off and wakes with
-// one line per batch of what changed on PRs in Merging. Claude's own daemon runs it, so a desk restart leaves it be.
+// one line per batch of what changed on PRs in Merging, or at once with the owner's ask. Claude's own daemon runs it, so a
+// desk restart leaves it be.
 import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Desk } from "./desk.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
-import type { ActivityEvent, CoordinatorView } from "./types.ts";
+import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
 
 const NAME = "Review Desk coordinator";
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
 const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
+const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 // It reads CI logs and comments anyone can write; these keep injected text from posting or rewriting as the owner.
 // gh api whole: it POSTs whenever a field is passed, with no -X.
@@ -23,7 +25,7 @@ const DENY = [
   "Bash(git push --force:*)",
   "Bash(git push -f:*)",
 ];
-// Every message is one line of ids, URLs and kinds: never PR text, and an argument cmd.exe can pass (see claudeSpawn).
+// Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
   "You are my Review Desk coordinator: the desk started you and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the review-desk skill.";
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
@@ -49,6 +51,15 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+// The owner's words as they wrote them (they're trusted); what they were on only as its id and URLs.
+export function askLine(a: Ask, url: string | null): string {
+  const about = [
+    a.item_id ? `about ${a.item_id}${url ? ` (${url})` : ""}` : "",
+    a.thread_url ? `on the thread ${a.thread_url}` : "",
+  ].filter(Boolean);
+  return `My ask ${a.id}${about.length ? `, ${about.join(", ")}` : ""}: "${a.text}" Answer it with desk_answer.`;
+}
 
 // What wakes it, in its words; null for what doesn't (its own pushes, CI starting).
 export function wakeFor(e: Pick<ActivityEvent, "kind" | "data">): string | null {
@@ -85,6 +96,10 @@ export class Coordinator {
     return (this.desk.store.get(NEWS) as [string, string][] | null) ?? [];
   }
 
+  asks(): string[] {
+    return (this.desk.store.get(ASKS) as string[] | null) ?? [];
+  }
+
   // The desk home's coordinator directory, with the deny list as its project settings unless the owner wrote their own.
   dir(): string {
     const dir = path.join(this.desk.home, "coordinator");
@@ -110,6 +125,17 @@ export class Coordinator {
     this.schedule();
   }
 
+  // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle.
+  tell(line: string): void {
+    claudeSpawn(claudeCommand(), [line]); // throws on what cmd.exe can't pass
+    this.desk.store.set(ASKS, [...this.asks(), line]);
+    void (async () => {
+      await this.flushing;
+      this.close();
+      await this.flush();
+    })();
+  }
+
   // w in Merging: start it, or have it look now.
   now(): Promise<void> {
     if (this.flushing) return this.flushing; // a second w while one runs would wake it twice
@@ -121,7 +147,7 @@ export class Coordinator {
 
   // Also on desk start, for news a restart or a failed start left waiting.
   schedule(): void {
-    if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asked)) return;
+    if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asks().length || this.asked)) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush();
@@ -137,6 +163,7 @@ export class Coordinator {
   // Turned off in Settings: stopped, its history kept for when it's turned on again.
   async stop(): Promise<void> {
     this.desk.store.set(NEWS, null);
+    this.desk.store.set(ASKS, null);
     this.asked = false;
     if (!this.saved()) return;
     try {
@@ -168,10 +195,11 @@ export class Coordinator {
 
   async check(): Promise<void> {
     const news = this.news();
+    const asks = this.asks();
     let a = await this.find();
     // Busy, in a shell or waiting on a permission: it stays queued.
-    if ((news.length || this.asked) && this.on && (!a?.status || a.status === "idle")) {
-      const text = this.message(news);
+    if ((news.length || asks.length || this.asked) && this.on && (!a?.status || a.status === "idle")) {
+      const text = this.message(news, asks);
       this.asked = false;
       if (!a) await this.launch(["--bg", "--name", NAME, "--remote-control", NAME, `${ROLE} ${text}`]);
       else {
@@ -181,6 +209,7 @@ export class Coordinator {
         await this.launch(["--resume", a.sessionId, "--bg", text]);
       }
       this.desk.store.set(NEWS, this.news().slice(news.length));
+      this.desk.store.set(ASKS, this.asks().slice(asks.length));
       a = await this.find();
       this.desk.changed();
     }
@@ -193,14 +222,15 @@ export class Coordinator {
     }
   }
 
-  message(news: [string, string][]): string {
+  message(news: [string, string][], asks: string[]): string {
     const by = new Map<string, Set<string>>();
     for (const [id, what] of news) by.set(id, (by.get(id) ?? new Set()).add(what));
     const lines = [...by].map(([id, what]) => {
       const [, repo, n] = PR.exec(id)!;
       return `${id} (https://github.com/${repo}/pull/${n}): ${[...what].join(", ")}`;
     });
-    return lines.length ? `In Merging: ${lines.join("; ")}.` : "I'd like you to look at Merging now.";
+    const parts = [...asks, ...(lines.length ? [`In Merging: ${lines.join("; ")}.`] : [])];
+    return parts.length ? parts.join(" ") : "I'd like you to look at Merging now.";
   }
 
   // Keeps the id claude says it backgrounded: a copy's, if it made one.

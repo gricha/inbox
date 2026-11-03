@@ -28,6 +28,7 @@ import {
   type Route,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
+import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
@@ -109,6 +110,8 @@ export function App() {
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // armOf(key, card) after a first m or a
   const [reviewFrom, setReviewFrom] = useState<"queue" | "later" | "inflight">("queue"); // where Esc goes back to from a review
+  const [asking, setAsking] = useState<About | null>(null); // the composer to the coordinator, open
+  const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -577,11 +580,22 @@ export function App() {
     })();
   }
 
-  // Merging's keys: enter review, o GitHub, b back to desk.
+  // t: a word with the coordinator about what you're on: the review's PR and its conversation, a row, or nothing.
+  function openAsk(id?: string, t?: Thread) {
+    const r = routeRef.current;
+    const item = id ?? (r.name === "review" ? r.id : r.name === "inflight" ? laneCur?.card.id : r.name === "settings" ? null : current?.id);
+    setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(".composer-input")?.focus();
+    });
+  }
+
+  // Merging's keys: enter review, o GitHub, b back to desk, t ask the coordinator.
   function laneRun(r: InflightRow, k: string) {
     const c = r.card;
     setLaneSel(c.id);
-    if (k === "enter") go({ name: "review", id: c.id });
+    if (k === "t") openAsk(c.id);
+    else if (k === "enter") go({ name: "review", id: c.id });
     else if (k === "o") window.open(c.url, "_blank", "noopener,noreferrer");
     else if (k === "b" && r.state === "open") void back(c);
   }
@@ -615,6 +629,7 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "esc") setExpanded(null);
+    else if (k === "t") openAsk(c.id);
     // From its review: a PR in Merging is the coordinator's.
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
       flash(`${shortRef(c)} is in Merging, so the coordinator has it. b brings it back to the desk.`);
@@ -715,7 +730,10 @@ export function App() {
     }
     if (k === "g") gAt.current = Date.now();
     else if (k === "?") setHelp(true);
-    else if (k === ",") go({ name: "settings", section: "github" });
+    else if (k === "t") {
+      e.preventDefault();
+      openAsk();
+    } else if (k === ",") go({ name: "settings", section: "github" });
     else if (k === "r") void sync();
     else if (k === "u") void undo();
     else if (route.name === "settings") {
@@ -758,6 +776,13 @@ export function App() {
   // The key after g is the chord's, whatever it means on its own (i in a review, b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
+    // Esc closes the composer, wherever focus is, before a review or a page reads it as "go back".
+    if (asking && e.key === "Escape" && !e.isComposing) {
+      setAsking(null);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     // Esc with a hand-off armed only lets it lapse; here, so the review never reads it as "go back".
     if (armed && e.key === "Escape") {
       setArmed(null);
@@ -912,6 +937,10 @@ export function App() {
               onBack={() => {
                 go({ name: reviewFrom });
               }}
+              onAsk={(t) => {
+                openAsk(t.item, t);
+              }}
+              onThread={setThread}
             />
           )}
           {route.name === "inflight" && !broken && (
@@ -937,6 +966,17 @@ export function App() {
           )}
         </main>
       </div>
+      {asking && (
+        <Composer
+          key={`${asking.item ?? ""} ${asking.thread?.id ?? ""}`} // another item or thread starts afresh
+          about={asking}
+          loads={loads}
+          now={now}
+          onClose={() => {
+            setAsking(null);
+          }}
+        />
+      )}
       {toast && (
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader announces <output> as a live region; role=status is
         <div key={toast.id} className={cls("toast", toast.error && "error")} role="status">

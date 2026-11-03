@@ -56,6 +56,7 @@ test("lists the tools", async () => {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     "desk_act",
+    "desk_answer",
     "desk_brief",
     "desk_config",
     "desk_events",
@@ -247,6 +248,15 @@ test("desk_note and desk_hand_back post to the PR in Merging, nothing else", asy
   assert.equal((await call("desk_note", { text: "no ref" })).isError, true);
 });
 
+test("desk_answer answers the owner's ask by its id", async () => {
+  assert.deepEqual(await call("desk_answer", { ask_id: "a1b2c3d4", text: "Done: dismissed it" }), {
+    text: "answered ask a1b2c3d4",
+    isError: false,
+  });
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/asks/a1b2c3d4/answer", body: { text: "Done: dismissed it" } });
+  assert.equal((await call("desk_answer", { ask_id: "a1b2c3d4" })).isError, true);
+});
+
 test("desk_undo says what was undone", async () => {
   assert.deepEqual(await call("desk_undo", { seq: 7 }), { text: "undid done on getsentry/seer#8949", isError: false });
   assert.deepEqual(lastCall(), { method: "POST", path: "/api/undo", body: { seq: 7 } });
@@ -289,7 +299,7 @@ test("`desk mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 13);
+    assert.equal((await c.listTools()).tools.length, 14);
     const r = await c.callTool({ name: "desk_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

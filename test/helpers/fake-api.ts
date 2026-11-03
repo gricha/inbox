@@ -337,6 +337,8 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, { ok: true, text: body.text });
     case `POST /api/inflight/${encodeURIComponent(MINE.id)}/handback`:
       return reply(200, { ok: true, reason: body.why });
+    case "POST /api/asks/a1b2c3d4/answer":
+      return reply(200, { ok: true, ask: { id: "a1b2c3d4", answer: { text: body.text, at: ago(0) } } });
     case "GET /api/fields":
       return reply(200, [{ path: "me.requested_direct", type: "boolean", doc: "asked by name" }]);
     case "GET /api/settings":

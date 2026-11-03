@@ -19,6 +19,7 @@ import type {
   AgentStatus,
   Areas,
   AiReview,
+  Ask,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -1827,6 +1828,51 @@ function inflight(): InflightView {
 // The coordinator session, with its claude.ai link; w has it look now.
 const coordinator: CoordinatorView = { on: true, id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator" };
 
+// Your asks to the coordinator: one answered, one it's still on. A new one gets a canned answer a few seconds later.
+const ASKS: Ask[] = [
+  {
+    id: "a1f0c2e9",
+    at: iso(3),
+    text: "kai's naming nit is done in 3e1f0a2, right? Tell me before I resolve it",
+    item_id: "me/notes-app#12",
+    thread_id: "PRRT_name",
+    thread_url: "https://github.com/me/notes-app/pull/12#discussion_r2",
+    answer: { text: "Yes: 3e1f0a2 renames lamport() to nextClock() everywhere, and the tests pass on it.", at: iso(2.9) },
+  },
+  {
+    id: "b7d3e410",
+    at: iso(0.2),
+    text: "i think we addressed azulus's tombstone point in the follow-up PR, can you confirm so I can reply",
+    item_id: "me/notes-app#12",
+    thread_id: "PRRT_tomb",
+    thread_url: "https://github.com/me/notes-app/pull/12#discussion_r1",
+    answer: null,
+  },
+];
+let askN = 0;
+function addAsk(b: Record<string, unknown>): Ask {
+  if (!setting("agent.coordinator")) throw new HttpError(409, "the coordinator is off: Settings → Agents");
+  const text = textOf(b).trim();
+  if (!text) throw new HttpError(400, "the ask is empty");
+  const str = (k: string) => (typeof b[k] === "string" && b[k] ? b[k] : null);
+  const a: Ask = {
+    id: `mock${++askN}`,
+    at: new Date().toISOString(),
+    text,
+    item_id: str("item_id"),
+    thread_id: str("thread_id"),
+    thread_url: str("thread_url"),
+    answer: null,
+  };
+  ASKS.push(a);
+  setTimeout(() => {
+    a.answer = { text: "Done: I checked it and took care of it. Nothing's left for you there.", at: new Date().toISOString() };
+    bump();
+  }, 4000);
+  bump();
+  return a;
+}
+
 // ---------------------------------------------------------------------------
 // The event log: each seed's story (first seen, the ask, reviews, its `log`), numbered oldest first.
 
@@ -2254,6 +2300,7 @@ function reviewView(r: Rec): ReviewView {
     conversation_error: null,
     reading: false,
     reading_error: null,
+    asks: ASKS.filter((a) => a.item_id === r.id),
   };
 }
 
@@ -2870,6 +2917,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/inflight") return inflight();
   if (route === "POST /api/coordinator/wake") return { ok: true };
+  if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS };
+  if (route === "POST /api/ask") return { ok: true, ask: addAsk(await readBody(req)) };
   if (route === "POST /api/undo") {
     const body = await readBody(req);
     return { ok: true, id: undo(body.seq as number | undefined) };

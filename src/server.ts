@@ -32,7 +32,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// The desk's own page, for its GitHub writes (approve, a reply, ready for review) and hand-offs: a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, a reply, ready for review), hand-offs and asks: a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -162,6 +162,23 @@ export function createApp(desk: Desk, port: number): Hono {
     await desk.wakeCoordinator();
     return c.json({ ok: true });
   });
+  // Your words to the coordinator, from the desk's own window only: it's woken with them at once.
+  app.post("/api/ask", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "ask the coordinator from the desk's window (t)");
+    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const str = (k: string) => {
+      const v = b[k] ?? undefined;
+      if (v === undefined || typeof v === "string") return v;
+      throw new DeskError(400, `${k} must be a string`);
+    };
+    if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
+    const ask = desk.ask({ text: b.text, item_id: str("item_id"), thread_id: str("thread_id"), thread_url: str("thread_url") });
+    return c.json({ ok: true, ask });
+  });
+  app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks() }));
+  // desk_answer: local only, so agents may call it.
+  app.post("/api/asks/:id/answer", async (c) => c.json({ ok: true, ask: desk.answer(c.req.param("id"), await line(c, "text")) }));
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));

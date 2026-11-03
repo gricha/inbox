@@ -14,7 +14,7 @@ export function Inflight({
   now: number;
   selected: string | null;
   select: (id: string) => void;
-  run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b
+  run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b t
 }) {
   if (!view) return <p className="quiet-note">Loading…</p>;
   const open = view.rows.filter((r) => r.state === "open");
@@ -165,6 +165,7 @@ function Row({
             <KeyButton k="enter" label="Review" run={keys} />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
+            <KeyButton k="t" label="Ask coordinator" title="Tell or ask your coordinator something about it" run={keys} />
           </div>
         </div>
       )}

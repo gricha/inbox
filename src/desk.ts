@@ -1,4 +1,5 @@
 // The desk: runs the connectors, keeps the event log, and serves the classified views and local actions.
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { stopAll } from "./children.ts";
@@ -13,6 +14,7 @@ import type {
   ActivityPage,
   AgentStatus,
   AiReview,
+  Ask,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -54,7 +56,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, owesReply } from "./conversation.ts";
-import { Coordinator, wakeFor } from "./coordinator.ts";
+import { askLine, Coordinator, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -81,6 +83,8 @@ const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays the
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_LINE = 300; // a hand-back's why, a note
 const MAX_REPLY = 5_000;
+const MAX_ASK = 2_000; // an ask or its answer
+const ASKS_KEPT = 200;
 
 export class DeskError extends Error {
   status: number;
@@ -1238,6 +1242,7 @@ export class Desk {
       approve: this.canApprove(e),
       activity: d.activity,
       stack: d.stack,
+      asks: this.asks(id),
       ...(await talk),
     };
   }
@@ -1602,11 +1607,11 @@ export class Desk {
   }
 
   // One plain line from an agent, whatever it sent.
-  line(text: string, what: string): string {
+  line(text: string, what: string, max = MAX_LINE): string {
     // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
     const t = text.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
     if (!t) throw new DeskError(400, `the ${what} is empty`);
-    return t.length > MAX_LINE ? `${t.slice(0, MAX_LINE - 1)}…` : t;
+    return t.length > max ? `${t.slice(0, max - 1)}…` : t;
   }
 
   // desk_note: the coordinator's latest status line on a PR in Merging, shown on its row.
@@ -1633,6 +1638,50 @@ export class Desk {
     this.changed();
     this.notifyNew();
     return { reason };
+  }
+
+  asks(item?: string): Ask[] {
+    const all = (this.store.get("asks") as Ask[] | null) ?? [];
+    return item === undefined ? all : all.filter((a) => a.item_id === item);
+  }
+
+  // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread) you were on.
+  ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }): Ask {
+    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
+    const item = b.item_id ? this.snapshot().entries.get(this.resolve(b.item_id))!.item : null;
+    if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) throw new DeskError(400, "thread_url must be a GitHub URL");
+    const a: Ask = {
+      id: randomBytes(4).toString("hex"),
+      at: this.now().toISOString(),
+      text: this.line(b.text, "ask", MAX_ASK),
+      item_id: item?.id ?? null,
+      thread_id: item && b.thread_id ? b.thread_id : null,
+      thread_url: item && b.thread_url ? b.thread_url : null,
+      answer: null,
+    };
+    try {
+      this.coordinator.tell(askLine(a, item?.url ?? null));
+    } catch (err) {
+      throw new DeskError(400, (err as Error).message);
+    }
+    this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
+    this.changed();
+    return a;
+  }
+
+  // desk_answer: the coordinator's answer to one of your asks, under it in the desk, and a notification.
+  answer(id: string, text: string): Ask {
+    const all = this.asks();
+    const a = all.find((x) => x.id === id);
+    if (!a) throw new DeskError(404, `no ask "${id}"`);
+    const done: Ask = { ...a, answer: { text: this.line(text, "answer", MAX_ASK), at: this.now().toISOString() } };
+    this.store.set(
+      "asks",
+      all.map((x) => (x === a ? done : x)),
+    );
+    this.changed();
+    if (this.settings["notify.enabled"]) this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
+    return done;
   }
 
   // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your keypress. One of the desk's GitHub writes.

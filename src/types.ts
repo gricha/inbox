@@ -633,6 +633,7 @@ export interface ReviewView {
   conversation_error: string | null; // it couldn't be fetched
   reading: boolean; // Claude is reading the ones waiting on you
   reading_error: string | null; // its last try on this PR failed
+  asks: Ask[]; // yours to the coordinator about it, oldest first
 }
 
 // One conversation on a PR: a review thread, a comment on the PR, or a review's body. Every text is untrusted GitHub text.
@@ -726,6 +727,23 @@ export interface CoordinatorView {
   on: boolean;
   id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take; null until it's started
   url: string | null; // its Remote Control page on claude.ai
+}
+
+// Your words to the coordinator from the desk's window (t), about what you were on, and its answer (desk_answer).
+export interface Ask {
+  id: string;
+  at: string;
+  text: string;
+  item_id: string | null;
+  thread_id: string | null; // a conversation in the PR's review
+  thread_url: string | null;
+  answer: { text: string; at: string } | null; // untrusted: an agent wrote it
+}
+
+// GET /api/asks
+export interface AsksView {
+  on: boolean; // the coordinator setting: off, nothing is sent
+  asks: Ask[]; // oldest first
 }
 
 // GET /api/config

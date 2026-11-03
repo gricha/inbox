@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
+import type { Ask } from "../src/types.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 
@@ -373,4 +374,128 @@ test("w says so when claude can't start it", async (c) => {
     logs.join("\n"),
   );
   assert.equal(t.desk.inflight().coordinator.id, null);
+});
+
+const ROLE =
+  "You are my Review Desk coordinator: the desk started you and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the review-desk skill.";
+const OWNER = { origin: "http://localhost:49401", "sec-fetch-site": "same-origin" };
+
+function asking(t: Awaited<ReturnType<typeof coordinated>>) {
+  const app = createApp(t.desk, 49401);
+  return {
+    ask: (body: unknown, headers: Record<string, string> = OWNER) =>
+      app.request("http://127.0.0.1:49401/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      }),
+    answer: (id: string, text: string) =>
+      app.request(`http://127.0.0.1:49401/api/asks/${id}/answer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      }),
+    list: async () => (await app.request("http://127.0.0.1:49401/api/asks")).json() as Promise<{ on: boolean; asks: Ask[] }>,
+  };
+}
+
+test(
+  "an ask is kept and wakes the coordinator at once: the owner's words, the item's id and URL and the thread's, no PR text",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    t.desk.coordinator.batch = 60_000; // an ask doesn't wait for it
+    const api = asking(t);
+    const thread = "https://github.com/acme/web/pull/3#discussion_r9";
+    const res = await api.ask({
+      text: "i think we addressed it in follow up,\nyou can dismiss this item",
+      item_id: "web#3",
+      thread_id: "PRRT_9",
+      thread_url: thread,
+    });
+    assert.equal(res.status, 200);
+    const { ask } = (await res.json()) as { ask: Ask };
+    assert.deepEqual(
+      { ...ask, id: "", at: "" },
+      {
+        id: "",
+        at: "",
+        text: "i think we addressed it in follow up, you can dismiss this item",
+        item_id: "acme/web#3",
+        thread_id: "PRRT_9",
+        thread_url: thread,
+        answer: null,
+      },
+    );
+    await until(() => t.fake.sessions().length === 1);
+    assert.equal(
+      t.fake.sessions()[0]!.prompts[0],
+      `${ROLE} My ask ${ask.id}, about acme/web#3 (https://github.com/acme/web/pull/3), on the thread ${thread}: "i think we addressed it in follow up, you can dismiss this item" Answer it with desk_answer.`,
+    );
+    assert.ok(!t.fake.calls().flat().join(" ").includes("Ignore previous"), "never PR text");
+    assert.deepEqual(await api.list(), { on: true, asks: [ask] });
+    await settle();
+
+    // Running and idle, the next one resumes it right away; with no item, it's only the words.
+    const next = ((await (await api.ask({ text: "and confirm marco's comment is addressed" })).json()) as { ask: Ask }).ask;
+    await until(() => t.fake.sessions()[0]?.prompts.length === 2);
+    assert.equal(
+      t.fake.sessions()[0]!.prompts[1],
+      `My ask ${next.id}: "and confirm marco's comment is addressed" Answer it with desk_answer.`,
+    );
+    assert.equal(starts(t.fake.calls()).length, 1);
+
+    // Busy, it waits like news does, then goes with it in one message.
+    await settle();
+    t.desk.coordinator.batch = 30;
+    t.fake.busy(true);
+    const later = ((await (await api.ask({ text: "snooze web#4 until monday" })).json()) as { ask: Ask }).ask;
+    t.desk.act("web#4", "inflight");
+    await settle();
+    assert.equal(resumes(t.fake.calls()).length, 1, "nothing reaches it while it works");
+    t.fake.busy(false);
+    await until(() => t.fake.sessions()[0]?.prompts.length === 3);
+    assert.equal(
+      t.fake.sessions()[0]!.prompts[2],
+      `My ask ${later.id}: "snooze web#4 until monday" Answer it with desk_answer. In Merging: acme/web#4 (https://github.com/acme/web/pull/4): handed off.`,
+    );
+    assert.equal((await t.desk.reviewView("web#3")).asks.length, 1, "the PR's review shows its own asks");
+  },
+);
+
+test("an ask comes only from the desk's own window, and only while the coordinator is on", posix, async (c) => {
+  const t = await coordinated(c);
+  const api = asking(t);
+  const body = { text: "dismiss it", item_id: "web#3" };
+  assert.equal((await api.ask(body, {})).status, 403, "curl, the CLI and agents");
+  assert.equal((await api.ask(body, { ...OWNER, origin: "https://evil.example" })).status, 403);
+  assert.equal((await api.ask(body, { ...OWNER, "sec-fetch-site": "none" })).status, 403, "an Origin alone isn't the desk's page");
+  assert.equal((await api.ask({ text: "  " }, OWNER)).status, 400);
+  assert.equal((await api.ask({ text: "hi", item_id: "web#99" }, OWNER)).status, 404);
+  assert.equal((await api.ask({ text: "hi", item_id: "web#3", thread_url: "https://evil.example/x" }, OWNER)).status, 400);
+  t.desk.putSettings({ set: { "agent.coordinator": false } });
+  assert.equal((await api.ask(body)).status, 409);
+  assert.deepEqual(await api.list(), { on: false, asks: [] });
+  await settle();
+  assert.deepEqual(t.fake.calls(), [], "nothing started or woke it");
+});
+
+test("desk_answer keeps the answer on its ask and notifies the owner; an unknown ask is a 404", posix, async (c) => {
+  const t = await coordinated(c);
+  const api = asking(t);
+  const { ask } = (await (await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" })).json()) as { ask: Ask };
+  await until(() => t.fake.sessions().length === 1);
+  const rev = t.desk.rev;
+  const res = await api.answer(ask.id, "Yes: 4be71c2 handles the\nempty list, with a test.");
+  assert.equal(res.status, 200);
+  assert.deepEqual(((await res.json()) as { ask: Ask }).ask.answer, {
+    text: "Yes: 4be71c2 handles the empty list, with a test.",
+    at: NOW.toISOString(),
+  });
+  assert.ok(t.desk.rev > rev, "the window hears of it");
+  assert.deepEqual(t.notes, ["acme/web#3: Yes: 4be71c2 handles the empty list, with a test."]);
+  assert.deepEqual((await api.list()).asks[0]!.answer?.text, "Yes: 4be71c2 handles the empty list, with a test.");
+  assert.equal((await api.answer("nope", "hi")).status, 404);
+  assert.equal((await api.answer(ask.id, " ")).status, 400);
+  assert.equal(t.notes.length, 1);
 });
