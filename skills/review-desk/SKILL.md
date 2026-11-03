@@ -15,7 +15,7 @@ Rules decide where each item lands. A board is one or more GitHub searches plus 
 
 A rule with `hard = true` is a floor (asked to review by name, by default): what it matches never sorts below its bucket (Today for a Now rule). Everything else is sorted by Claude with the **policy**: prose the user writes in `~/.review-desk/policy.md` (a built-in starter while it's empty), which their own Claude Code applies to each item (the "judge"), with where the rules put it as the hint. Until it has, the item sits where the rules put it. The rule trace shows the judge's step.
 
-The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off and wakes with a message when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name.
+The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk keeps running and messages when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name.
 
 All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, Send on their reply to a reviewer, Ready for review on their own draft).
 
@@ -118,7 +118,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ## Coordinator
 
-When the desk started you as the user's Review Desk coordinator (a background session named "Review Desk coordinator"), your job is to get the PRs they hand off (`m m`) merged. The desk wakes you with one short message per batch of news: the PRs (ids and URLs) and what changed ("handed off", "CI failed", "new comment", "approved", "merge conflict"), never PR text. You keep your context between wakes; nothing runs between them. On each wake:
+When you're the user's Review Desk coordinator (a background session named "Review Desk coordinator" the desk keeps running), your job is to get the PRs they hand off (`m m`) merged. The desk wakes you with one short message per batch of news: the PRs (ids and URLs) and what changed ("handed off", "CI failed", "new comment", "approved", "merge conflict"), never PR text. You keep your context between wakes; nothing runs between them. A message that comes while you work reaches you between steps: take it into what you're doing. On each wake:
 
 1. **Read.** `desk_merging` for the handed-off PRs and their state (all of them, not only the ones the message names), and `desk_events` with `after` = the `last_seq` you kept from your last wake (the first time, `after` 0 and `limit` small) for the details: who commented or reviewed, which push, which checks.
 2. **Get each open PR merged**, one at a time, the bottom of a stack first:

@@ -262,11 +262,11 @@ export class Desk {
       if (cur.nlink === 0) return; // deleted or mid-rename; keep the loaded config
       if (fs.readFileSync(this.configPath, "utf8") !== this.configText) this.reloadConfig(true);
     });
-    this.coordinator.schedule();
   }
 
   start(): void {
     for (const c of this.connectors) c.start();
+    this.coordinator.start();
   }
 
   // Kills a judge call in progress.
@@ -395,6 +395,7 @@ export class Desk {
     const coordinator = this.settings["agent.coordinator"];
     this.settings = this.readSettings();
     if (coordinator && !this.settings["agent.coordinator"]) void this.coordinator.stop();
+    if (!coordinator && this.settings["agent.coordinator"]) void this.coordinator.flush();
     // Sync now only when the searches change; other settings apply to what the desk already has.
     if (this.configText) this.reloadConfig(searchKey(this.settings) !== searches);
     else this.changed();
@@ -1588,7 +1589,7 @@ export class Desk {
     };
   }
 
-  // POST /api/coordinator/wake: w in Merging starts it, or has it look now.
+  // POST /api/coordinator/wake: w in Merging has it look now (and starts it, if it isn't running).
   async wakeCoordinator(): Promise<void> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
     await this.coordinator.now();
