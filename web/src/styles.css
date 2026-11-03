@@ -3217,3 +3217,11 @@ pre,
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.crashed {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 48px;
+  color: var(--ink);
+}
