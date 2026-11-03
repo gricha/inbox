@@ -265,10 +265,12 @@ export function HandKey({
   card,
   run,
   armed,
+  primary,
 }: {
   card: Pick<Card, "id" | "inflight" | "draft">;
   run: (k: string) => void;
   armed: string | null;
+  primary?: boolean;
 }) {
   if (card.inflight) return <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
   if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
@@ -278,7 +280,7 @@ export function HandKey({
       k="m"
       label={on ? "again to hand off" : "Hand off for merge"}
       title="Press m twice. The coordinator gets it merged: it fixes CI, addresses comments and merges it once it's approved"
-      className={cls(on && "armed")}
+      className={cls(primary && "primary", on && "armed")}
       run={run}
     />
   );

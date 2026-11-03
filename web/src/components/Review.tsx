@@ -425,7 +425,7 @@ export function Review({
           )}
         </div>
 
-        {/* One order on every surface: what finishes it (a), then o and the rest, m or b last. */}
+        {/* What finishes it first (a, or m or b on yours), then o and the rest. */}
         <div className="actions rv-actions">
           {readying && (
             <KeyButton
@@ -434,7 +434,7 @@ export function Review({
               run={run}
               disabled={busy === "ready"}
               title="Mark it ready for review on GitHub: press a twice"
-              className={cls(armed > 0 && "armed")}
+              className={cls("primary", armed > 0 && "armed")}
             />
           )}
           {/* Only someone else's open PR is yours to approve. */}
@@ -445,9 +445,11 @@ export function Review({
               run={run}
               disabled={!canApprove || busy === "approve"}
               title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-              className={cls(armed > 0 && "armed")}
+              className={cls("primary", armed > 0 && "armed")}
             />
           )}
+          {/* While you owe replies, Send is the one filled button. */}
+          {mine && <HandKey card={card} run={run} armed={armedKey} primary={card.cta !== "reply"} />}
           <KeyButton k="o" label="Open on GitHub" run={run} />
           {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
           {!flying && (open || view.ai) && (
@@ -464,7 +466,6 @@ export function Review({
             title="The sidebar: the stack, the files and recent activity"
             run={run}
           />
-          {mine && <HandKey card={card} run={run} armed={armedKey} />}
         </div>
 
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}

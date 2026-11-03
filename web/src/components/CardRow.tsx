@@ -63,48 +63,68 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
       className={cls("line", sel && "sel", open && "open", ctx.leaving.has(card.id) && "leaving", variant !== "active" && "dim")}
       data-id={card.id}
     >
-      {/* Focus selects (Tab and j/k are one cursor); not on mousedown, so a click opens without selecting first. */}
-      <button
-        type="button"
-        className="row-main line-main"
-        aria-expanded={open}
-        onMouseDown={(e) => {
-          e.preventDefault();
-        }}
-        onClick={() => {
-          ctx.click(card);
-        }}
-        onFocus={() => {
-          ctx.select(card);
-        }}
-      >
-        <span className="line-title">{card.title}</span>
-        {/* A long repo name gives way before the title; the number never does. */}
-        <span className="line-ref" title={`${card.repo}#${card.number}`}>
-          {card.repo.split("/")[1]}
-        </span>
-        <span className="line-num">#{card.number}</span>
-        {/* One line stands for its stack: where it sits in what's still to land. */}
-        {card.stack && (
-          <span className="line-stack" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
-            {card.stack.pos}/{card.stack.size}
+      {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
+      <div className="line-main line-row">
+        {/* Focus selects (Tab and j/k are one cursor); not on mousedown, so a click opens without selecting first. */}
+        <button
+          type="button"
+          className="row-main line-btn"
+          aria-expanded={open}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
+          onClick={() => {
+            ctx.click(card);
+          }}
+          onFocus={() => {
+            ctx.select(card);
+          }}
+        >
+          <span className="line-title">{card.title}</span>
+          {/* A long repo name gives way before the title; the number never does. */}
+          <span className="line-ref" title={`${card.repo}#${card.number}`}>
+            {card.repo.split("/")[1]}
           </span>
-        )}
-        {note && <span className="line-note">{note}</span>}
+          <span className="line-num">#{card.number}</span>
+          {/* One line stands for its stack: where it sits in what's still to land. */}
+          {card.stack && (
+            <span className="line-stack" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
+              {card.stack.pos}/{card.stack.size}
+            </span>
+          )}
+          {note && <span className="line-note">{note}</span>}
+        </button>
+        {/* Filled and with its key only under the cursor, since that's the row the key acts on. */}
         {card.cta === "ready" && !why && (
-          <span className={cls("line-cta", armed && "armed")} title="Mark it ready for review on GitHub: press a twice">
-            <kbd>a</kbd> {armed ? "again to mark ready" : "Ready for review"}
-          </span>
+          <button
+            type="button"
+            className={cls("act line-cta", sel && "primary", armed && "armed")}
+            title="Mark it ready for review on GitHub: press a twice"
+            onClick={() => {
+              ctx.run(card, "a");
+            }}
+          >
+            {sel && <kbd>a</kbd>}
+            {armed ? "again to mark ready" : "Ready for review"}
+          </button>
         )}
         {card.cta === "reply" && !why && (
-          <span className="line-cta" title="Someone waits on your answer: Enter opens the review, with a reply ready">
+          <button
+            type="button"
+            className={cls("act line-cta", sel && "primary")}
+            title="Someone waits on your answer: Enter opens the review, with a reply ready"
+            onClick={() => {
+              ctx.click(card);
+            }}
+          >
+            {sel && <kbd>enter</kbd>}
             Reply
-          </span>
+          </button>
         )}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}
         </span>
-      </button>
+      </div>
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
       {/* Under the row, so it never covers the row itself. */}
       {ctx.snoozeFor === card.id && (
