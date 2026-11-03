@@ -20,7 +20,7 @@ import type {
   ReviewView,
   SettingsView,
 } from "../../src/types.ts";
-import { CLAUDE_PAUSED, NOTED_WHY, parseReview } from "../../src/review.ts";
+import { CLAUDE_PAUSED, parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -351,7 +351,7 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
   }
   // The test file's note keeps it in the reading list, after what Claude ranked.
   assert.deepEqual(
-    v.order.chunks.map((h) => [h.rank, h.level, h.path, h.why === NOTED_WHY]),
+    v.order.chunks.map((h) => [h.rank, h.level, h.path, h.why === ""]),
     [
       [1, "look", "src/planner/plan.ts", false],
       [2, "look", "src/routes/query.ts", false],
@@ -359,15 +359,20 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
       [4, "skim", "test/planner/stream.test.ts", true],
     ],
   );
+  // What Claude left out stays in view, marked Skip; only the desk's own calls fold.
   assert.deepEqual(
-    v.order.rest.map((r) => r.path),
-    ["src/planner/plan.ts", "docs/api/query.md"],
+    v.order.skipped.map((h) => [h.level, h.path]),
+    [
+      ["skip", "src/planner/plan.ts"],
+      ["skip", "docs/api/query.md"],
+    ],
   );
+  assert.deepEqual(v.order.rest, []);
   assert.equal(new Set(v.order.notes).size, v.ai!.notes.length, "every note once");
   assert.ok(py.order.rest.some((r) => r.why.startsWith("no text diff") && !r.hunks.length));
 
   const big = await view("acme/worker#879");
-  assert.deepEqual([big.order.capped, big.order.chunks.length, big.order.unread.length], [true, 20, 5]);
+  assert.deepEqual([big.order.chunks.length, big.order.unread.length], [20, 5]);
   const none = await view("oss/calendar-ui#310");
   assert.deepEqual([none.order.ranked, none.order.chunks.length], [true, 0]);
   const old = await view("friends/garden-sensors#18");
@@ -418,10 +423,7 @@ test("stacks: the queue lists each once with its chain, and a member no board li
     "a fork off the bottom, asked of nobody",
   );
   const mine = q.stacks["acme/api#4150"]!;
-  assert.deepEqual(
-    [mine.current, mine.up, mine.down, mine.needs_you, mine.forks],
-    ["acme/api#4154", "acme/api#4155", "acme/api#4153", 1, []],
-  );
+  assert.deepEqual([mine.current, mine.up, mine.down, mine.forks], ["acme/api#4154", "acme/api#4155", "acme/api#4153", []]);
   assert.deepEqual(
     mine.line.map((m) => [m.number, m.state, m.draft, m.ci, m.review, m.bucket]),
     [
@@ -463,16 +465,16 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
     ],
   );
   assert.deepEqual(
-    lane.stacks["acme/api#4150"]?.line.map((m) => [m.number, m.state, m.inflight, m.current]),
+    lane.stacks["acme/api#4150"]?.line.map((m) => [m.number, m.state, m.current]),
     [
-      [4150, "merged", false, false],
-      [4151, "merged", false, false],
-      [4152, "open", true, true],
-      [4153, "open", true, false],
-      [4154, "open", false, false],
-      [4155, "open", false, false],
-      [4156, "open", false, false],
-      [4157, "open", false, false],
+      [4150, "merged", false],
+      [4151, "merged", false],
+      [4152, "open", true],
+      [4153, "open", false],
+      [4154, "open", false],
+      [4155, "open", false],
+      [4156, "open", false],
+      [4157, "open", false],
     ],
   );
   assert.equal(row("acme/worker#871").state, "merged");

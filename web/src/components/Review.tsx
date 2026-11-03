@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import type { ActivityEvent, Card, InflightRow, ReviewFile, ReviewNote, ReviewView, Stack, StackMember } from "../../../src/types.ts";
@@ -19,9 +19,10 @@ const ARM_MS = 3000;
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
-const LEVEL: Partial<Record<NonNullable<Section["level"]>, string>> = { look: "Look", skim: "Skim", unread: "Not read" };
+const LEVEL: Record<NonNullable<Section["level"]>, string> = { look: "Look", skim: "Skim", unread: "Not read", skip: "Skip" };
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
-const REST = "Not worth reviewing"; // the fold's line, which each file under it then doesn't repeat
+const REST = "Not worth reviewing"; // the fold's line
+const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
 const NARROW = 1100; // px: below it the sidebar opens over the diff, so it starts folded
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded
 
@@ -457,6 +458,12 @@ export function Review({
               disabled={view.generating || busy === "ai"}
             />
           )}
+          <KeyButton
+            k="f"
+            label={side ? "Hide sidebar" : view.stack ? "Stack and files" : "Files"}
+            title="The sidebar: the stack, the files and recent activity"
+            run={run}
+          />
           {mine && <HandKey card={card} run={run} armed={armedKey} />}
         </div>
 
@@ -475,7 +482,6 @@ export function Review({
                 }}
               >
                 {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
-                {order.capped && " · Claude ranked as many as it may, so some may still be worth a look"}
               </button>
             )}
             {visible.slice(rest).map((x, i) => section(x, rest + i))}
@@ -511,11 +517,11 @@ export function Review({
                         }}
                       >
                         <span className="rv-fname">
-                          {dir && <ListDir path={dir} />}
+                          {dir && <Dir path={dir} />}
                           <span className="rv-base">{breakable(name)}</span>
                         </span>
                         {list.some((y) => y.path === x.path && y.notes.length > 0) && <span className="rv-nn" title="AI notes" />}
-                        {x.level && <span className="rv-lvl">{x.level === "skip" ? "Skip" : LEVEL[x.level]}</span>}
+                        {x.level && <span className="rv-lvl">{LEVEL[x.level]}</span>}
                       </button>
                     </li>
                   );
@@ -533,8 +539,17 @@ export function Review({
 
 const NODE: Record<StackMember["state"], string> = { open: "○", merged: "●", closed: "×" };
 
-// The stack bottom first, the PR on screen marked; each member's state as calm glyphs, words in its tooltip.
+// The stack's open PRs bottom first, the PR on screen marked; each member's state as calm glyphs, words in its tooltip. A
+// long one shows the PRs around this one, and the rest behind one line.
 function StackList({ stack }: { stack: Stack }) {
+  const [all, setAll] = useState(false);
+  const live = (ms: StackMember[]) => ms.filter((m) => m.state === "open" || m.current);
+  const line = live(stack.line);
+  const forks = live(stack.forks);
+  const at = Math.max(0, line.findIndex((m) => m.current) - 1);
+  const more = line.length - STACK_SHOWN;
+  // Folds only when two or more would go behind it, as the queue does.
+  const shown = all || more < 2 ? line : line.slice(Math.min(at, more), Math.min(at, more) + STACK_SHOWN);
   const member = (m: StackMember) => {
     const state = m.state === "open" && m.draft ? "draft" : m.state;
     const words = [`#${m.number} ${state}`, ...(m.state === "open" ? [`CI ${CI[m.ci]}`, REVIEW[m.review]] : [])].join(" · ");
@@ -547,15 +562,14 @@ function StackList({ stack }: { stack: Stack }) {
           title={`${words}\n${m.title}`}
         >
           <span className="rv-node" aria-hidden="true">
-            {state === "draft" ? "◌" : NODE[m.state]}
+            {NODE[m.state]}
           </span>
           <span className="rv-mnum">#{m.number}</span>
           <span className="rv-mtitle">{m.title}</span>
-          {/* Passing and waiting on a review are no news; what's wrong, running or approved is. */}
+          {/* Passing, running and waiting on a review are no news; what's wrong or approved is. */}
           {m.state === "open" && (
             <span className="rv-marks" aria-label={words}>
               {m.ci === "red" && <span className="t-bad">✗</span>}
-              {m.ci === "pending" && <span>◔</span>}
               {m.review === "changes_requested" && <span className="t-warn">±</span>}
               {m.review === "approved" && <span>✓</span>}
             </span>
@@ -568,15 +582,31 @@ function StackList({ stack }: { stack: Stack }) {
     <section className="rv-stack" aria-label="Stack">
       <h2 className="rv-side-head">
         <span>Stack on {stack.base}</span>
-        <span className="rv-keys" title="Up and down the stack">
+        <span className="rv-keys" title="Next and previous PR in the stack">
           <kbd>N</kbd> <kbd>P</kbd>
         </span>
       </h2>
-      <ol>{stack.line.map(member)}</ol>
-      {stack.forks.length > 0 && (
+      <ol>
+        {shown.map(member)}
+        {more >= 2 && (
+          <li>
+            <button
+              type="button"
+              className="rv-more"
+              aria-expanded={all}
+              onClick={() => {
+                setAll(!all);
+              }}
+            >
+              {all ? "Fewer" : `${more} more`}
+            </button>
+          </li>
+        )}
+      </ol>
+      {forks.length > 0 && (
         <>
           <h3 className="rv-side-head">Other branches</h3>
-          <ol>{stack.forks.map(member)}</ol>
+          <ol>{forks.map(member)}</ol>
         </>
       )}
     </section>
@@ -692,44 +722,6 @@ const breakable = (name: string) =>
     </span>
   ));
 
-// In the file list a long folder gives way a whole segment at a time from its start ("…/kind/"), measured against the room
-// its row leaves, so no folder is cut mid-word and every row starts on the same edge.
-function ListDir({ path }: { path: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [shown, setShown] = useState(path);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    const row = el?.parentElement;
-    const base = el?.nextElementSibling;
-    const ctx = document.createElement("canvas").getContext("2d");
-    const fit = () => {
-      if (!ctx || !el || !row || !base) return;
-      ctx.font = getComputedStyle(el).font;
-      const room = row.clientWidth - base.getBoundingClientRect().width;
-      const parts = path.split("/").filter(Boolean);
-      for (let i = 0; i < parts.length; i++) {
-        const text = `${i ? "…/" : ""}${parts.slice(i).join("/")}/`;
-        if (ctx.measureText(text).width <= room) {
-          setShown(text);
-          return;
-        }
-      }
-      setShown("…/");
-    };
-    fit();
-    const watch = new ResizeObserver(fit);
-    if (row) watch.observe(row);
-    return () => {
-      watch.disconnect();
-    };
-  }, [path]);
-  return (
-    <span ref={ref} className="rv-dir" title={path}>
-      {shown}
-    </span>
-  );
-}
-
 // A long directory gives way from its start, so the file's own name stays whole and every name sits right after its folder.
 function Dir({ path }: { path: string }) {
   return (
@@ -783,7 +775,6 @@ function SectionView({
   const [dir, name] = splitPath(x.path);
   const status = STATUS[file.status];
   const level = x.level && LEVEL[x.level];
-  const why = x.level === "skip" && says(REST, x.why ?? "") ? null : x.why;
   const adds = x.hunks.reduce((n, h) => n + h.additions, 0);
   const dels = x.hunks.reduce((n, h) => n + h.deletions, 0);
   return (
@@ -794,9 +785,9 @@ function SectionView({
           {dir && <Dir path={dir} />}
           <span className="rv-base">{name}</span>
         </span>
-        {why && (
-          <span className="rv-why" title={why}>
-            {why}
+        {x.why && (
+          <span className="rv-why" title={x.why}>
+            {x.why}
           </span>
         )}
         {status && (

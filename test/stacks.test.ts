@@ -19,7 +19,7 @@ const seats =
   (b: Record<number, Bucket>) =>
   (x: string): Seat => {
     const bucket = b[Number(x.split("#")[1])] ?? null;
-    return { bucket, why: bucket ? `in ${bucket}` : "", new: false, inflight: false };
+    return { bucket, why: bucket ? `in ${bucket}` : "" };
   };
 
 test("a stack links PRs by branch, across authors; a fork's branch is no parent, and a PR alone is no stack", () => {
@@ -57,12 +57,12 @@ test("forks: the line takes the branch with open PRs, then the longest, then the
   assert.deepEqual(stackRef(s, id(9)), { id: id(1), pos: 2, size: 2 }, "#8 is closed: it doesn't count");
   const v = stackView(s, id(4), seats({ 4: "now", 9: "today", 5: "later" }))!;
   assert.deepEqual(
-    v.line.map((m) => [m.number, m.current, m.bucket, m.needs_you]),
+    v.line.map((m) => [m.number, m.current, m.bucket]),
     [
-      [1, false, null, false],
-      [3, false, null, false],
-      [4, true, "now", true],
-      [6, false, null, false],
+      [1, false, null],
+      [3, false, null],
+      [4, true, "now"],
+      [6, false, null],
     ],
   );
   assert.deepEqual(
@@ -73,7 +73,7 @@ test("forks: the line takes the branch with open PRs, then the longest, then the
       [9, id(8), "open"],
     ],
   );
-  assert.deepEqual([v.id, v.base, v.up, v.down, v.needs_you], [id(1), "main", id(6), id(3), 2]);
+  assert.deepEqual([v.id, v.base, v.up, v.down], [id(1), "main", id(6), id(3)]);
   assert.equal(stackView(s, id(2), seats({})), null, "a dead branch is in no stack");
 
   const tie = buildStacks([pr(1, "main"), pr(3, 1), pr(2, 1)]);
@@ -96,7 +96,7 @@ test("merged PRs stay below: on their branches, or before GitHub moved the PR ab
     pr(31, "main"),
     pr(32, "main", { retargeted: { from: "b31", at: merged } }), // moved off an open PR's branch by hand
   ]);
-  const v = stackView(s, id(13), (x) => ({ bucket: null, why: x === id(11) ? "merged" : "", new: false, inflight: false }))!;
+  const v = stackView(s, id(13), (x) => ({ bucket: null, why: x === id(11) ? "merged" : "" }))!;
   assert.deepEqual(
     v.line.map((m) => [m.number, m.state, m.why]),
     [
@@ -245,14 +245,14 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
   assert.deepEqual(Object.keys(q.stacks), [id(1)]);
   const v = q.stacks[id(1)]!;
   assert.deepEqual(
-    v.line.map((m) => [m.number, m.author, m.draft, m.current, m.bucket, m.needs_you]),
+    v.line.map((m) => [m.number, m.author, m.draft, m.current, m.bucket]),
     [
-      [1, "carol", false, true, "now", true],
-      [2, "carol", false, false, null, false],
-      [3, "dave", true, false, null, false],
+      [1, "carol", false, true, "now"],
+      [2, "carol", false, false, null],
+      [3, "dave", true, false, null],
     ],
   );
-  assert.deepEqual([v.up, v.down, v.needs_you], [id(2), null, 1]);
+  assert.deepEqual([v.up, v.down], [id(2), null]);
   assert.equal(q.sections.now.find((c) => c.id === id(9))?.stack, undefined);
 
   const top = await t.desk.reviewView(id(3));
@@ -350,11 +350,11 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
   assert.deepEqual(order.slice(at5, at5 + 3), [web(5), web(6), web(7)]);
   assert.deepEqual(Object.keys(lane.stacks), [web(5)]);
   assert.deepEqual(
-    lane.stacks[web(5)]!.line.map((m) => [m.number, m.inflight, m.current]),
+    lane.stacks[web(5)]!.line.map((m) => [m.number, m.current]),
     [
-      [5, true, true],
-      [6, true, false],
-      [7, true, false],
+      [5, true],
+      [6, false],
+      [7, false],
     ],
   );
   assert.deepEqual(lane.rows.find((r) => r.card.id === web(7))?.card.stack, { id: web(5), pos: 3, size: 3 });

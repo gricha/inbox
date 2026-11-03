@@ -28,7 +28,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "github",
     title: "GitHub",
-    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR or mark your own draft ready for review.",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR, send a reply or mark your own draft ready for review.",
   },
   {
     id: "queue",
@@ -234,7 +234,7 @@ export function checkSetting(key: string, value: unknown): string | null {
   throw new Error("unknown setting type");
 }
 
-// Settings that no longer exist: ignored when read, and gone from the file on the next save.
+// Settings that no longer exist: ignored when read, but kept in the file, so an older desk still sees the owner's choice.
 const REMOVED = new Set([
   "analyze.model",
   "analyze.command",
@@ -267,13 +267,13 @@ export function readSettings(file: string): {
     return { overrides: {}, errors: [{ path: "settings.json", message: "must be a JSON object" }], raw: null };
   const overrides: Record<string, SettingValue> = {};
   const errors: ConfigError[] = [];
-  const kept = Object.entries(raw).filter(([k]) => !REMOVED.has(k));
-  for (const [k, v] of kept) {
+  for (const [k, v] of Object.entries(raw)) {
+    if (REMOVED.has(k)) continue;
     const err = checkSetting(k, v);
     if (err) errors.push({ path: k, message: err });
     else overrides[k] = v as SettingValue;
   }
-  return { overrides, errors, raw: Object.fromEntries(kept) };
+  return { overrides, errors, raw: raw as Record<string, unknown> };
 }
 
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });

@@ -68,7 +68,6 @@ const CHORDS: Record<string, Route> = {
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
   m: { name: "inflight" },
-  i: { name: "inflight" },
 };
 // g l, g f, g d, g h, g x: Later, with that group open.
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };

@@ -800,7 +800,6 @@ export class Desk {
     if (it.review_decision === "changes_requested") chips.push("changes requested");
     if (it.review_decision === "approved") chips.push("approved");
     if (it.threads_unresolved > 0) chips.push(`${it.threads_unresolved} unresolved`);
-    if (it.auto_merge && it.state === "open") chips.push("auto-merge on");
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
     const me = e.analysis.signals.me;
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
@@ -839,7 +838,8 @@ export class Desk {
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
-      ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
+      // A red draft needs finishing first; its why says so.
+      ...(it.kind === "pr" && it.draft && it.state === "open" && it.ci !== "red" && me.author && this.writer && { cta: "ready" as const }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
     };
@@ -849,12 +849,7 @@ export class Desk {
   seat(id: string, snap: Snapshot): Seat {
     const e = snap.entries.get(id)!;
     const p = snap.best.get(id);
-    return {
-      bucket: p?.bucket ?? null,
-      why: e.resolved?.reason ?? p?.why ?? "",
-      new: e.isNew && !e.resolved && e.status === "active",
-      inflight: e.inflight,
-    };
+    return { bucket: p?.bucket ?? null, why: e.resolved?.reason ?? p?.why ?? "" };
   }
 
   stack(id: string, snap: Snapshot): Stack | null {
@@ -1218,7 +1213,7 @@ export class Desk {
     // A PR the desk would have reviewed on its own says why it didn't.
     const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
     return {
-      card: d.card,
+      card: this.replyOnly(e) ? { ...d.card, cta: "reply" } : d.card,
       item: d.item,
       handoff_prompt: d.handoff_prompt,
       files,
@@ -1406,13 +1401,16 @@ export class Desk {
 
   // ---------------------------------------------------------------- actions
 
-  act(ref: string, action: Action, until?: string): { state: ItemState; undo_seq: number } {
+  // `agent`: not the desk's own window. Hand-offs are yours.
+  act(ref: string, action: Action, until?: string, agent?: string): { state: ItemState; undo_seq: number } {
     const id = this.resolve(ref);
     if (action === "undo") {
       const ev = this.store.lastActionFor(id);
       if (!ev) throw new DeskError(404, `nothing to undo for ${id}`);
-      return { state: this.undo(ev.seq).state, undo_seq: 0 };
+      return { state: this.undo(ev.seq, agent).state, undo_seq: 0 };
     }
+    // The coordinator merges what's in Merging, so only you put a PR there.
+    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off with m twice in the desk");
     const now = this.now();
     const before = this.store.state(id);
     const s: StateRow = { ...before };
@@ -1470,6 +1468,8 @@ export class Desk {
         if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
           throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
+        // Ready for review is yours, so a draft in Merging would wait on you there.
+        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready first (a a)`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
@@ -1489,14 +1489,14 @@ export class Desk {
     return { state, undo_seq: seq };
   }
 
-  // `agent`: an agent asks, not you. Hand-offs are yours.
+  // `agent`: not the desk's own window. Hand-offs are yours.
   undo(seq?: number, agent?: string): { id: string; state: ItemState; action: Action } {
     const ev = this.store.lastAction(seq);
     if (!ev) throw new DeskError(404, "nothing to undo");
     if (agent && (ev.action === "inflight" || ev.action === "takeback"))
       throw new DeskError(
         409,
-        `only the user undoes ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"}`,
+        `undo ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"} in the desk's window`,
       );
     if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
     const cur = this.store.state(ev.item_id);
@@ -1522,11 +1522,12 @@ export class Desk {
       if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
       if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
       const verdicts = new Map<string, Item["reviews"][number]>();
+      // The coordinator merges on an approval, so only a collaborator's counts; anyone's change request still holds it.
       for (const r of it.reviews)
         if (
           !r.author_bot &&
           r.author.toLowerCase() !== me &&
-          (r.state === "approved" || r.state === "changes_requested" || r.state === "dismissed")
+          (r.state === "changes_requested" || r.state === "dismissed" || (r.state === "approved" && r.trusted))
         )
           verdicts.set(r.author.toLowerCase(), r);
       const by = (state: string) => [...verdicts.values()].filter((r) => r.state === state).map((r) => r.author);
@@ -1768,7 +1769,6 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
-  if (r.draft) return "waits on ready for review";
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;

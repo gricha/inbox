@@ -32,7 +32,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// The desk's own page, for its GitHub writes (approve, a reply, ready for review): a browser marks the request same-origin and sends an Origin, which
+// The desk's own page, for its GitHub writes (approve, a reply, ready for review) and hand-offs: a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
@@ -101,7 +101,7 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     const body = await c.req.json<{ id?: string; action?: Action; until?: string }>();
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
-    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until) });
+    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, fromDesk(c) ? undefined : "agent") });
   });
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
@@ -159,8 +159,8 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/undo", async (c) => {
     ready();
-    const body = await c.req.json<{ seq?: number; agent?: unknown }>().catch((): { seq?: number; agent?: unknown } => ({}));
-    const { id, action } = desk.undo(body.seq, body.agent === true ? "agent" : undefined);
+    const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));
+    const { id, action } = desk.undo(body.seq, fromDesk(c) ? undefined : "agent");
     return c.json({ ok: true, id, action });
   });
   app.post("/api/sync", (c) => {

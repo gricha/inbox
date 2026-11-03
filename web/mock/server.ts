@@ -245,7 +245,6 @@ interface Seed {
   log?: [ActivityKind, string, number, ActivityEvent["data"]?][]; // extra events: kind, actor, hours ago, data
   judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
   fly?: Flight; // your PR, in Merging (with st.inflight_at)
-  automerge?: boolean; // your PR: GitHub's auto-merge is on
   back?: string; // your PR, handed back from Merging: the coordinator's reason
   checks?: string[]; // your PR: its failing checks' names
   optional?: string[]; // those of them the base branch doesn't require
@@ -615,7 +614,6 @@ const SEEDS: Seed[] = [
     fresh: true,
     on: { "work-mine": ["cr"] },
     st: { inflight_at: iso(26) },
-    automerge: true,
     fly: { note: ["Pushed 4be71c2 for dana's 3 comments: the cursor stays the row id, with a test pinning its format", 0.4] },
   },
   {
@@ -711,7 +709,6 @@ const SEEDS: Seed[] = [
     size: [45, 120, 9],
     on: { "work-mine": [] },
     st: { inflight_at: iso(28) },
-    automerge: true,
     // A CODEOWNERS-sized list of teams, so the lane's "waiting on" has to stay short.
     fly: { waiting: ["sam", "@backend", "@issue-detection-backend", "@issues-feed", "@security", "@owners-auth"] },
   },
@@ -1484,7 +1481,6 @@ function chips(r: Rec): string[] {
   if (sig.pr.review === "changes_requested") out.push("changes requested");
   if (sig.pr.review === "approved") out.push("approved");
   if (sig.pr.unresolved_threads) out.push(`${sig.pr.unresolved_threads} unresolved`);
-  if (r.seed.automerge && !r.seed.resolved) out.push("auto-merge on");
   if (sig.item.kind === "pr") out.push(`+${sig.pr.additions} −${sig.pr.deletions}`);
   return out;
 }
@@ -1532,7 +1528,7 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
-    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
+    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && sig.pr.ci !== "red" && { cta: "ready" as const }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),
   };
@@ -1541,13 +1537,11 @@ function cardOf(r: Rec, p: Placement): Card {
 // As Desk.seat(): where a stack's member is on the queue.
 function seat(id: string): Seat {
   const r = recs.find((x) => x.id === id)!;
-  const facts = { new: r.fresh && !r.seed.resolved && status(r) === "active", inflight: inFlight(r) };
-  if (r.seed.resolved) return { bucket: null, why: r.seed.resolved, ...facts };
-  if (laneOwned(r)) return { bucket: null, why: "", ...facts };
-  if (status(r) !== "active") return { bucket: null, why: "", ...facts };
+  if (r.seed.resolved) return { bucket: null, why: r.seed.resolved };
+  if (laneOwned(r) || status(r) !== "active") return { bucket: null, why: "" };
   const placed = config.boards.flatMap((b) => boardPlacements(b).filter((x) => x.r === r && x.p.bucket !== "hide")).map((x) => x.p);
   const best = placed.toSorted((a, b) => RANK[a.bucket] - RANK[b.bucket])[0];
-  return { bucket: best?.bucket ?? null, why: best?.why ?? "", ...facts };
+  return { bucket: best?.bucket ?? null, why: best?.why ?? "" };
 }
 
 const stackOf = (id: string): Stack | null => stackView(stacks(), id, seat);
@@ -1662,6 +1656,13 @@ function queue(): QueueView {
   };
 }
 
+// As Desk.replyOnly(): someone waits on your answer, and nothing else needs doing.
+function replyOnly(r: Rec): boolean {
+  const sig = signals(r);
+  const only = sig.pr.ci !== "red" && sig.pr.mergeable !== "conflict" && sig.pr.review !== "changes_requested" && !sig.item.draft;
+  return r.seed.author === ME && only && !laneOwned(r) && !!TALK.get(r.id)?.some((x) => x.waiting_on_you);
+}
+
 // As Desk.queueCard(): a Now or Today card, with its AI review or, for your own PR, what to do next.
 function top(c: Card): Card {
   const r = recs.find((x) => x.id === c.id)!;
@@ -1679,10 +1680,7 @@ function top(c: Card): Card {
     // As Desk.card(): who last spoke on it.
     const spoke = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
     if (spoke) out.last_event = spoke;
-    // As Desk.replyOnly(): someone waits on your answer, and nothing else needs doing.
-    const sig = signals(r);
-    const only = sig.pr.ci !== "red" && sig.pr.mergeable !== "conflict" && sig.pr.review !== "changes_requested" && !sig.item.draft;
-    if (only && !laneOwned(r) && TALK.get(r.id)?.some((x) => x.waiting_on_you)) out.cta = "reply";
+    if (replyOnly(r)) out.cta = "reply";
   }
   if (s.kind === "issue") {
     const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
@@ -1783,7 +1781,6 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const names = (xs: string[]) => (xs.length > 2 ? `${xs.slice(0, 2).join(", ")} and ${xs.length - 2} more` : xs.join(", "));
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
-  if (r.draft) return "waits on ready for review";
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
@@ -1934,6 +1931,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     if (r.seed.author !== ME || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
       throw new HttpError(409, `only your own open PRs are handed off for merge; ${r.id} isn't one`);
     if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
+    if (r.seed.draft) throw new HttpError(409, `${r.id} is a draft: mark it ready first (a a)`);
     st.inflight_at = now;
     r.seed.back = undefined;
   } else if (action === "takeback") {
@@ -2227,7 +2225,7 @@ function reviewView(r: Rec): ReviewView {
   const mine = d.card.author === ME;
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   return {
-    card: d.card,
+    card: replyOnly(r) ? { ...d.card, cta: "reply" } : d.card,
     item: d.item,
     handoff_prompt: d.handoff_prompt,
     files,

@@ -312,14 +312,14 @@ test("the review reads in the desk's order: a file's hunks next to each other at
   });
   const ranked: ReviewOrder = {
     ranked: true,
-    capped: false,
     chunks: [
       hunk("h3", "b.ts", "look", "unchecked input", [1]),
       hunk("h1", "a.ts", "skim", "rename"),
       hunk("h2", "a.ts", "skim", "rename"),
     ],
     unread: [hunk("h5", "b.ts", "unread", "its file was too long to read whole")],
-    rest: [{ path: "a.ts", file: 0, why: "not worth reviewing", hunks: [hunk("h4", "a.ts", "skip", null)], notes: [] }],
+    skipped: [hunk("h6", "b.ts", "skip", null)],
+    rest: [{ path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip", null)], notes: [] }],
     notes: [1, 0],
   };
   const { list, rest } = sections(ranked);
@@ -329,16 +329,17 @@ test("the review reads in the desk's order: a file's hunks next to each other at
       ["b.ts", "look", ["h3"], [1]],
       ["a.ts", "skim", ["h1", "h2"], []],
       ["b.ts", "unread", ["h5"], []],
-      ["a.ts", "skip", ["h4"], []],
+      ["b.ts", "skip", ["h6"], []],
+      ["a.lock", "skip", ["h4"], []],
     ],
   );
-  assert.equal(rest, 3, "the fold starts at the files not worth reviewing");
+  assert.equal(rest, 4, "what Claude left out is in view; the fold starts at what the desk folds");
   // Without a ranking: file by file, and a file with no text diff is no fold of its own.
   const plain = sections({
     ranked: false,
-    capped: false,
     chunks: [hunk("h1", "a.ts", null, null, [0]), hunk("h2", "a.ts", null, null), hunk("h3", "b.ts", null, null)],
     unread: [],
+    skipped: [],
     rest: [{ path: "logo.png", file: 2, why: "no text diff: binary or too large", hunks: [], notes: [2] }],
     notes: [0, 2],
   });

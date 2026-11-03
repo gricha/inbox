@@ -77,16 +77,16 @@ export interface Section {
   key: string;
   path: string;
   file: number; // index in ReviewView.files
-  level: ReviewHunk["level"]; // skip: under a ranked review's fold; null: no ranking
-  why: string | null; // Claude's few words, why it wasn't read, or why the file isn't worth reviewing
+  level: ReviewHunk["level"]; // skip: Claude left it out, or under a ranked review's fold; null: no ranking
+  why: string | null; // Claude's few words, why it wasn't read, or why the desk folded the file
   hunks: ReviewHunk[]; // none for a file with no text diff
   notes: number[]; // indices into ai.notes, in reading order
 }
 
-// The desk's reading order as sections: ranked, then unread, then from `rest` on, the files not worth reviewing.
+// The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
 export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
   const list: Section[] = [];
-  for (const h of [...o.chunks, ...o.unread]) {
+  for (const h of [...o.chunks, ...o.unread, ...o.skipped]) {
     const last = list.at(-1);
     if (last?.path === h.path && last.level === h.level && last.why === h.why) {
       last.hunks.push(h);

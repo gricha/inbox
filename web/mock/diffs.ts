@@ -1,5 +1,4 @@
 // Realistic diffs and AI reviews for the mock API, so the review view (and npm run shots) has real-looking code to show.
-import { NOTED_WHY } from "../../src/review.ts";
 import type { AiReview, ReviewFile } from "../../src/types.ts";
 
 type Canned = { files: ReviewFile[]; ai: Omit<AiReview, "head_oid" | "at" | "model"> | null };
@@ -283,7 +282,7 @@ const CANNED: Record<string, Canned> = {
           { id: "h3", path: "src/planner/plan.ts", level: "look", why: "budget checked only between batches" },
           { id: "h4", path: "src/routes/query.ts", level: "look", why: "?budget= read unchecked" },
           { id: "h1", path: "src/planner/stream.ts", level: "skim", why: "new batching generator" },
-          { id: "h5", path: "test/planner/stream.test.ts", level: "skim", why: NOTED_WHY },
+          { id: "h5", path: "test/planner/stream.test.ts", level: "skim", why: "" },
         ],
         unread: [],
         capped: false,

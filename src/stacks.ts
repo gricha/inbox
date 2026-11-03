@@ -21,8 +21,6 @@ export interface Stacks {
 export interface Seat {
   bucket: Bucket | null;
   why: string;
-  new: boolean;
-  inflight: boolean;
 }
 
 export interface Probe {
@@ -209,14 +207,13 @@ export function stackView(s: Stacks, current: string, seat: (id: string) => Seat
       current: id === current,
       bucket: at.bucket,
       why: at.why,
-      needs_you: at.bucket === "now" || at.bucket === "today",
-      new: at.new,
-      inflight: at.inflight,
     };
   };
   const members = line.map(member);
   const forks = all.filter((id) => !on.has(id)).map(member);
-  const i = line.indexOf(current);
+  // N and P step over merged and closed PRs, as the review's stack list leaves them out.
+  const open = line.filter((x) => x === current || s.nodes.get(x)!.item.state === "open");
+  const i = open.indexOf(current);
   return {
     id: n.root,
     repo: root.item.repo,
@@ -224,9 +221,8 @@ export function stackView(s: Stacks, current: string, seat: (id: string) => Seat
     line: members,
     forks,
     current,
-    up: line[i + 1] ?? null,
-    down: line[i - 1] ?? null,
-    needs_you: [...members, ...forks].filter((m) => m.needs_you).length,
+    up: open[i + 1] ?? null,
+    down: open[i - 1] ?? null,
   };
 }
 

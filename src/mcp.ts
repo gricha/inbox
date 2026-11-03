@@ -405,7 +405,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     },
     ({ seq }) =>
       run(async () => {
-        const r = await api.undo(seq, true);
+        const r = await api.undo(seq);
         return `undid ${r.action} on ${r.id}`;
       }),
   );

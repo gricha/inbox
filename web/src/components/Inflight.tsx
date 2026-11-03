@@ -68,7 +68,7 @@ export function Inflight({
 }
 
 // One line: the title, quietly its ref and place in its stack, what it waits on and the coordinator's latest note, its age.
-// Selected, the note whole with its age, and its keys.
+// Selected, that phrase moves whole under the row, with the note's age, and its keys.
 function Row({
   row: r,
   now,
@@ -88,6 +88,7 @@ function Row({
     run(r, k);
   };
   const since = c.resolved_at ?? c.waiting_since;
+  const phrase = [r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])];
   return (
     <div className={cls("line", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
       <button
@@ -114,17 +115,16 @@ function Row({
             {c.stack.pos}/{c.stack.size}
           </span>
         )}
-        <span className="line-note">{live ? <Dots parts={[r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])]} /> : r.state}</span>
+        {!(on && live) && <span className="line-note">{live ? <Dots parts={phrase} /> : r.state}</span>}
         <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, now)}
         </span>
       </button>
       {on && (
         <div className="lane-more">
-          {/* The row cuts a long note short: here it's whole. */}
-          {live && r.note && (
+          {live && (
             <p className="lane-why">
-              <Dots parts={[r.note.text, age(r.note.at, now)]} />
+              <Dots parts={r.note ? [...phrase, age(r.note.at, now)] : phrase} />
             </p>
           )}
           <div className="actions card-keys">

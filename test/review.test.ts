@@ -17,7 +17,6 @@ import {
   claudeSpawn,
   CLAUDE_PAUSED,
   generateReview,
-  NOTED_WHY,
   numberPatch,
   parseFiles,
   parseReview,
@@ -429,7 +428,7 @@ test("a hunk Claude wrote a note on but didn't rank stays in the reading list, a
   );
   assert.deepEqual(r.chunks!.ranked, [
     { id: "h4", path: "src/b.ts", level: "look", why: "the fix" },
-    { id: "h2", path: "src/planner/plan.ts", level: "skim", why: NOTED_WHY },
+    { id: "h2", path: "src/planner/plan.ts", level: "skim", why: "" },
   ]);
   const o = reviewOrder(files, aiOf({ notes: r.notes, chunks: r.chunks }), false);
   assert.deepEqual(
@@ -440,19 +439,22 @@ test("a hunk Claude wrote a note on but didn't rank stays in the reading list, a
     ],
   );
   assert.deepEqual(
-    o.rest.map((x) => [x.path, x.why, x.hunks.map((h) => h.id)]),
+    o.skipped.map((h) => [h.id, h.level]),
     [
-      ["src/planner/plan.ts", "not worth reviewing", ["h1"]],
-      ["package-lock.json", "lockfile or generated", ["h3"]],
-      ["src/b.ts", "not worth reviewing", ["h5"]],
+      ["h1", "skip"],
+      ["h5", "skip"],
     ],
+  );
+  assert.deepEqual(
+    o.rest.map((x) => [x.path, x.why, x.hunks.map((h) => h.id)]),
+    [["package-lock.json", "lockfile or generated", ["h3"]]],
   );
 
   // A note on no line of a file nothing was ranked in brings in the file's first hunk, which then carries it.
   const whole = parseReview({ summary: "x", chunks: [], notes: [note(FILE.path, 0)] }, files);
   assert.deepEqual(
     whole.chunks!.ranked.map((c) => [c.id, c.level, c.why]),
-    [["h1", "skim", NOTED_WHY]],
+    [["h1", "skim", ""]],
   );
   assert.deepEqual(
     reviewOrder(files, aiOf({ notes: whole.notes, chunks: whole.chunks }), false).chunks.map((h) => [h.id, h.notes]),
@@ -550,7 +552,7 @@ test(
   },
 );
 
-test("the review order: ranked chunks across files, then unread, then the rest by file and why; notes follow their hunks", () => {
+test("the review order: ranked chunks across files, then unread, then what Claude left out, then the desk's fold; notes follow their hunks", () => {
   const renamed: ReviewFile = {
     path: "src/new.ts",
     previous_path: "src/old.ts",
@@ -581,7 +583,6 @@ test("the review order: ranked chunks across files, then unread, then the rest b
   });
   const o = reviewOrder(files, ai, false);
   assert.equal(o.ranked, true);
-  assert.equal(o.capped, false);
   assert.deepEqual(
     o.chunks.map((h) => [h.id, h.path, h.file, h.index, h.rank, h.level, h.why, h.notes]),
     [
@@ -595,10 +596,14 @@ test("the review order: ranked chunks across files, then unread, then the rest b
     o.unread.map((h) => [h.id, h.level, h.rank]),
     [["h5", "unread", null]],
   );
+  // Diff text can't steer a hunk out of view: what Claude left out is shown, marked Skip; only the desk folds.
+  assert.deepEqual(
+    o.skipped.map((h) => [h.id, h.level, h.rank, h.why, h.notes]),
+    [["h2", "skip", null, null, [2]]],
+  );
   assert.deepEqual(
     o.rest.map((r) => [r.path, r.file, r.why, r.hunks.map((h) => [h.id, h.level, h.notes]), r.notes]),
     [
-      ["src/planner/plan.ts", 0, "not worth reviewing", [["h2", "skip", [2]]], []],
       ["package-lock.json", 1, "lockfile or generated", [["h3", "skip", []]], []],
       ["logo.png", 3, "no text diff: binary or too large", [], [4]],
       ["src/new.ts", 4, "renamed without changes", [], []],
@@ -615,15 +620,15 @@ test("without a ranking for this commit the order is today's: every hunk file by
   ];
   const old = reviewOrder(files, aiOf({ notes }), false);
   assert.deepEqual(
-    [old.ranked, old.capped, old.chunks.map((h) => [h.id, h.level, h.rank, h.notes]), old.unread, old.notes],
+    [old.ranked, old.chunks.map((h) => [h.id, h.level, h.rank, h.notes]), old.unread, old.skipped, old.notes],
     [
-      false,
       false,
       [
         ["h1", null, null, [1]],
         ["h2", null, null, [0]],
         ["h3", null, null, []],
       ],
+      [],
       [],
       [1, 0],
     ],
@@ -962,7 +967,7 @@ test("the review view sends the desk's reading order, and the card counts what's
       true,
       [
         ["h2", 1, "look", "swaps old for fresh", []],
-        ["h1", 2, "skim", NOTED_WHY, [0]],
+        ["h1", 2, "skim", "", [0]],
       ],
       [],
     ],

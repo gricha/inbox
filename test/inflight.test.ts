@@ -59,7 +59,37 @@ test("a hand-off puts your own open PR in Merging: it leaves the queue, and undo
   assert.ok(all().includes("acme/web#3"));
   t.desk.undo(back.undo_seq);
   assert.equal(t.desk.inflight().rows.length, 1);
-  assert.throws(() => t.desk.undo(undefined, "agent"), /only the user undoes/);
+  assert.throws(() => t.desk.undo(undefined, "agent"), /in the desk's window/);
+});
+
+test("only the desk's own window hands a PR off or undoes a hand-off or Back to desk: the coordinator merges what's there", async (c) => {
+  const t = await setup([myPr(3, { ci: "pending" })]);
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const post = client(t);
+  const desk = "http://localhost:47823";
+  const act = (action: string, origin?: string, site?: string) => post("/api/act", { id: "acme/web#3", action }, origin, site);
+  assert.equal((await act("inflight")).status, 403, "curl, the CLI or an agent");
+  assert.equal((await act("inflight", desk, "none")).status, 403, "an Origin alone isn't the desk's page");
+  assert.equal(t.desk.inflight().rows.length, 0);
+  assert.equal((await act("inflight", desk)).status, 200);
+  const back = (await (await act("takeback", desk)).json()) as { undo_seq: number };
+  assert.equal((await post("/api/undo", { seq: back.undo_seq })).status, 409, "an agent can't put it back in Merging");
+  assert.equal((await act("undo")).status, 409, "nor through /api/act");
+  assert.equal(t.desk.inflight().rows.length, 0);
+  assert.equal((await post("/api/undo", { seq: back.undo_seq }, desk)).status, 200);
+  assert.equal(t.desk.inflight().rows.length, 1);
+});
+
+test("a draft isn't handed off: Ready for review is yours, so it would wait on you in Merging", async (c) => {
+  const t = await setup([myPr(3, { ci: "green", draft: true })]);
+  c.after(t.cleanup);
+  await t.desk.sync();
+  assert.throws(
+    () => t.desk.act("web#3", "inflight"),
+    (e: Error & { status: number }) => e.status === 409 && e.message.includes("mark it ready first (a a)"),
+  );
+  assert.equal(t.desk.inflight().rows.length, 0);
 });
 
 test("a PR in Merging stays there whatever it waits on: never in the queue, focus or the status line", async (c) => {
@@ -114,8 +144,9 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
   const green = { ci: "green" as const, mergeable: "clean" as const };
   const approved = {
     ...green,
-    reviews: [{ author: "marco", author_bot: false, state: "approved" as const, at: hoursAgo(1), commit: "c1" }],
+    reviews: [{ author: "marco", author_bot: false, trusted: true, state: "approved" as const, at: hoursAgo(1), commit: "c1" }],
   };
+  const outsider = { author: "drive-by", author_bot: false, trusted: false, state: "approved" as const, at: hoursAgo(1), commit: "c1" };
   const t = await setup([
     myPr(1, { ci: "red", mergeable: "conflict" }),
     myPr(2, { ...green, mergeable: "conflict" }),
@@ -125,7 +156,7 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
     myPr(6, { ...green, review_requests: [{ reviewer: "backend", type: "team", codeowner: true }] }),
     myPr(7, { ...approved, base: "feat/a", default_branch: "main" }),
     myPr(8, approved),
-    myPr(9, { ...green, draft: true }),
+    myPr(9, { ...green, reviews: [outsider] }),
   ]);
   c.after(t.cleanup);
   await t.desk.sync();
@@ -140,8 +171,9 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
     6: "waits on a review from @backend",
     7: "waits on feat/a to merge first",
     8: "ready to merge",
-    9: "waits on ready for review",
+    9: "waits on a review",
   });
+  assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 9)!.approved_by, [], "the coordinator merges on it");
   assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 7)!.stacked, true, "the coordinator sees it sits on another PR");
 });
 
@@ -206,11 +238,20 @@ test("desk_hand_back: the PR leaves Merging for the top of Now with the why, wri
 
 test("your own open draft carries one call to action, Ready for review; a a marks it ready on GitHub, once, from the desk's window", async (c) => {
   const w = fakeWriter();
-  const t = await setup([reviewAsk(1), myPr(3, { ci: "green", draft: true }), myPr(4, { ci: "green" })], { desk: { writer: w.writer } });
+  const t = await setup(
+    [reviewAsk(1), myPr(3, { ci: "green", draft: true }), myPr(4, { ci: "green" }), myPr(5, { ci: "red", draft: true })],
+    {
+      desk: { writer: w.writer },
+    },
+  );
   c.after(t.cleanup);
   await t.desk.sync();
   const cta = (ref: string) => t.desk.item(ref).card.cta;
-  assert.deepEqual([cta("web#3"), cta("web#4"), cta("api#1")], ["ready", undefined, undefined]);
+  assert.deepEqual(
+    [cta("web#3"), cta("web#4"), cta("api#1"), cta("web#5")],
+    ["ready", undefined, undefined, undefined],
+    "a red draft is finished first",
+  );
   const post = client(t);
   const ready = (ref: string, origin?: string, site?: string) => post(`/api/review/${encodeURIComponent(ref)}/ready`, {}, origin, site);
   assert.equal((await ready("acme/web#3")).status, 403, "MCP and the CLI can't");

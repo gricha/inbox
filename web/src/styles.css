@@ -2530,6 +2530,12 @@ kbd {
   color: var(--pencil);
 }
 
+/* "16 more": in line with the members' numbers. */
+.rv-stack .rv-more {
+  padding: 4px 8px 4px calc(16px + 1em);
+  font-size: 13px;
+}
+
 .back {
   display: inline-flex;
   align-items: center;
@@ -2800,6 +2806,10 @@ kbd {
   color: var(--ink);
   font: 13.5px/1.5 var(--sans);
   resize: vertical;
+
+  /* All of it in view before Send twice: Claude's draft was written from untrusted comments. */
+  field-sizing: content;
+  min-height: calc(3lh + 18px);
 }
 
 .cv-reply:focus {
@@ -2900,16 +2910,9 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* In the file list a long name wraps instead of losing its end, and a folder that gives way still shows "…/". */
+/* In the file list a long name wraps instead of losing its end; its folder gives way from its start, as in a file's header. */
 .rv-file .rv-fname {
   align-items: baseline;
-}
-
-/* Its text is already cut to whole segments that fit (ListDir), so it neither shrinks nor flips direction. */
-.rv-file .rv-dir {
-  flex: none;
-  direction: ltr;
-  white-space: nowrap;
 }
 
 .rv-file .rv-base {
@@ -2996,7 +2999,8 @@ kbd {
   font-weight: 550;
 }
 
-.l-unread {
+.l-unread,
+.l-skip {
   color: var(--pencil);
   font-weight: 500;
 }

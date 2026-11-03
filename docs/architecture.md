@@ -1,6 +1,6 @@
 # Architecture
 
-One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process or from a checkout, or `desk serve` runs it headless. It polls GitHub read-only (its writes are approving a PR and marking your own draft ready for review, each when you press `a a`), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file (and what they leave open by a prose policy your agent judges), keeps your PRs handed off for merge in Merging for the coordinator (your own Claude Code session, outside the desk) to get merged, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
+One local process owns everything: the desk server. The desktop app (`electron/main.ts`) runs it in-process or from a checkout, or `desk serve` runs it headless. It polls GitHub read-only (its writes are approving a PR and marking your own draft ready for review, each when you press `a a`, and your reply to a conversation, when you press Send twice), keeps a SQLite cache and your local triage state, classifies items with rules from a TOML file (and what they leave open by a prose policy your agent judges), keeps your PRs handed off for merge in Merging for the coordinator (your own Claude Code session, outside the desk) to get merged, and serves the web UI and a JSON API on `127.0.0.1:47823`. The desktop window, the CLI (`desk …`) and `desk mcp` are all clients of that API, and it serves MCP for agents at `/mcp`. The full reference for routes, events and MCP tools is [api.md](api.md). If the app finds a desk already running on the port, it attaches to it instead of starting another.
 
 ```
 GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src/connectors/github.ts
@@ -8,7 +8,7 @@ GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src
                                                                    ▼
                                                      src/store.ts (node:sqlite: items, activity, ...)
 gh api (a PR's files) ──────────> src/review.ts ──> claude -p / codex exec (the AI review)
-your a a keypress ──> src/github/write.ts ──(approve, ready for review: the only API writes)──> GitHub
+your a a / Send twice ──> src/github/write.ts ──(approve, reply, ready for review: the only API writes)──> GitHub
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
 settings.json ──> src/settings.ts ──┘    ▲           src/resolve.ts (resolved or not)
@@ -69,7 +69,7 @@ FIELDS: FieldDoc[]                                     // every signal path, typ
 
 Read only: only `query` operations, never `mutation`, and REST only through `get()`, which refuses any method but GET. Token from `gh auth token` (or `GITHUB_TOKEN`), held in memory. Fetches `https://api.github.com/graphql` (and `/notifications`) directly. The sync logic that uses it (searches, details, the notifications feed, context) lives in the connector, `src/connectors/github.ts`.
 
-The one exception is `src/github/write.ts`: an allowlist with exactly two mutations. `addPullRequestReview(event: APPROVE)` pinned to the commit the view showed (`commitOID`), sent only by `POST /api/review/:id/approve` (the review view's `a a`); and `markPullRequestReadyForReview`, sent only by `POST /api/review/:id/ready` (Ready for review, `a a` on your own open draft), both only from the desk's own window. It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
+The one exception is `src/github/write.ts`: an allowlist with exactly four mutations. `addPullRequestReview(event: APPROVE)` pinned to the commit the view showed (`commitOID`), sent only by `POST /api/review/:id/approve` (the review view's `a a`); `addPullRequestReviewThreadReply` and `addComment`, sent only by `POST /api/review/:id/reply` (Send twice on your reply to one of the PR's conversations); and `markPullRequestReadyForReview`, sent only by `POST /api/review/:id/ready` (Ready for review, `a a` on your own open draft), all only from the desk's own window. It reads its own token for each write, never retries, logs the write, and the desk records it in the action log as something undo can't take back. No MCP tool or CLI command reaches it.
 
 Your own PRs' details also carry the head branch, where it lives, the failing check names and the repo's merge method.
 

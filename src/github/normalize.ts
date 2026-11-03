@@ -45,7 +45,7 @@ export interface RawHit {
 }
 
 export interface RawNode extends RawHit {
-  repository: { nameWithOwner: string; autoMergeAllowed?: boolean; viewerDefaultMergeMethod?: string };
+  repository: { nameWithOwner: string; viewerDefaultMergeMethod?: string };
   title: string;
   url: string;
   state: string;
@@ -68,7 +68,6 @@ export interface RawNode extends RawHit {
   mergedBy?: { login: string } | null;
   files?: Conn<{ path: string }> | null;
   mergeable?: string;
-  autoMergeRequest?: { enabledAt: string | null } | null;
   checks?: Conn<{ commit: { statusCheckRollup: { contexts: Conn<RawCheck | null> } | null } }>;
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
   timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
@@ -197,8 +196,6 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     ...(n.files && { paths: n.files.nodes.map((f) => f.path) }),
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),
-    ...(n.autoMergeRequest !== undefined && { auto_merge: n.autoMergeRequest !== null }),
-    ...(n.repository.autoMergeAllowed !== undefined && { auto_merge_allowed: n.repository.autoMergeAllowed }),
     ...(MERGE_METHODS.has(n.repository.viewerDefaultMergeMethod ?? "") && {
       merge_method: n.repository.viewerDefaultMergeMethod as NonNullable<Item["merge_method"]>,
     }),

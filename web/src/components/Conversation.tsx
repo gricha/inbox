@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, cls } from "../format.ts";
@@ -26,6 +26,7 @@ export function Conversation({
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [more, setMore] = useState(false);
+  const replied = useRef(""); // the PR whose reply box was focused for its Reply row
 
   useEffect(() => {
     const t = armed
@@ -37,6 +38,15 @@ export function Conversation({
       clearTimeout(t);
     };
   }, [armed]);
+
+  // Opened from a Reply row: the first reply box is ready to type in (⌘↩ twice sends it, Esc leaves it).
+  useEffect(() => {
+    if (view.card.cta !== "reply" || replied.current === view.card.id) return;
+    const box = document.querySelector<HTMLTextAreaElement>(".cv-reply");
+    if (!box) return;
+    replied.current = view.card.id;
+    box.focus();
+  }, [view]);
 
   const waiting = view.conversation.filter((c) => c.waiting_on_you && !(c.id in sent));
   const rest = view.conversation.filter((c) => !c.waiting_on_you);
@@ -102,13 +112,13 @@ export function Conversation({
               className="cv-reply"
               aria-label={`Reply to ${last.author}`}
               placeholder={`Reply to ${last.author}`}
-              rows={Math.min(8, Math.max(2, text.split("\n").length + 1))}
               value={text}
               onChange={(e) => {
                 setDrafts((d) => ({ ...d, [c.id]: e.target.value }));
                 if (armed === c.id) setArmed(null);
               }}
               onKeyDown={(e) => {
+                if (e.repeat) return; // a held ⌘↩ would arm and send
                 if (e.key === "Escape") e.currentTarget.blur();
                 else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();

@@ -51,8 +51,6 @@ export interface Item {
   paths?: string[]; // PR only: its changed files' paths, the first 50 (changed_files counts all); absent on items stored before it was fetched
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
-  auto_merge?: boolean; // GitHub's auto-merge is on for it; PRs you authored only
-  auto_merge_allowed?: boolean; // the repo allows auto-merge; PRs you authored only
   merge_method?: "MERGE" | "SQUASH" | "REBASE"; // the repo's default merge method for you; PRs you authored only
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
@@ -437,9 +435,6 @@ export interface StackMember {
   current: boolean; // the PR the view is about
   bucket: Bucket | null; // where the queue has it; null off the queue (merged, closed, cleared, in Merging, on no board)
   why: string; // its card's why ("merged" for a merged one), "" when the desk has none
-  needs_you: boolean; // in Now or Today: one of the stack's PRs you act on
-  new: boolean; // activity since you last looked
-  inflight: boolean; // your PR in Merging
 }
 
 // A whole stack, as one view shows it.
@@ -450,9 +445,8 @@ export interface Stack {
   line: StackMember[]; // bottom first, through the current PR; above a fork it takes the branch with open PRs, then the longest
   forks: StackMember[]; // the members on other branches of a fork, each with its parent; bottom first
   current: string; // the PR the view is about: the reviewed one, or the one card the queue lists for the stack
-  up: string | null; // the PR above the current one on the line (the review view's key up the stack)
-  down: string | null; // ...and below it
-  needs_you: number; // members in Now or Today
+  up: string | null; // the next open PR above the current one on the line (the review view's N)
+  down: string | null; // ...and below it (P)
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
@@ -583,24 +577,25 @@ export interface ReviewHunk {
   deletions: number;
   level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking for this commit
   rank: number | null; // 1 = read it first; look and skim only
-  why: string | null; // look and skim: Claude's few words, or "has a note, though not ranked"; unread: which was too long, the PR or its file
+  why: string | null; // look and skim: Claude's few words ("" on a hunk it noted but didn't rank); unread: which was too long, the PR or its file
   notes: number[]; // indices into ai.notes to show with it, in reading order: the file's own notes (line 0) on its first hunk in the order
 }
 
-// The order the review view reads in, decided by the desk: what to look at across files, then the rest, folded.
+// The order the review view reads in, decided by the desk: what to look at across files, then the rest; only the desk's own
+// calls (lockfiles, no text diff) are folded.
 export interface ReviewOrder {
   ranked: boolean; // false: no ranking for this commit (none yet, one written before ranking, or a newer push): `chunks` is every hunk, file by file
-  capped: boolean; // Claude ranked as many as it may: something in `rest` may still be worth a look
   chunks: ReviewHunk[]; // read these, in this order: Claude's (most worth first; a re-review, what changed since you looked first), then hunks it noted but didn't rank
   unread: ReviewHunk[]; // Claude didn't see these (the PR or their file was too long to read whole), file by file
-  rest: ReviewRest[]; // not worth reviewing, by file
+  skipped: ReviewHunk[]; // Claude saw these and left them out (level "skip"), file by file
+  rest: ReviewRest[]; // folded, by file: lockfiles and generated files, and files with no text diff
   notes: number[]; // ai.notes in reading order: what ] and [ step through; empty when the review is for an older commit
 }
 
 export interface ReviewRest {
   path: string;
   file: number; // index in ReviewView.files
-  why: string; // "not worth reviewing", "lockfile or generated", "no text diff: binary or too large", "renamed without changes"
+  why: string; // "lockfile or generated", "no text diff: binary or too large", "renamed without changes"
   hunks: ReviewHunk[]; // level "skip"; none for a file with no text diff
   notes: number[]; // the file's own notes when it has no hunks to carry them
 }

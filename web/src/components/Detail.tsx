@@ -261,8 +261,17 @@ export function Dots({ parts, className }: { parts: ReactNode[]; className?: str
 export const BACK_TITLE = "Out of Merging and back on your desk; the coordinator leaves it alone";
 
 // Your own open PR: m twice hands it off for merge, b brings it back from Merging. The same on a card, an opened item and a review.
-export function HandKey({ card, run, armed }: { card: Pick<Card, "id" | "inflight">; run: (k: string) => void; armed: string | null }) {
+export function HandKey({
+  card,
+  run,
+  armed,
+}: {
+  card: Pick<Card, "id" | "inflight" | "draft">;
+  run: (k: string) => void;
+  armed: string | null;
+}) {
   if (card.inflight) return <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
+  if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
   const on = armed === armOf("m", card.id);
   return (
     <KeyButton

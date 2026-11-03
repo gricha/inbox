@@ -249,8 +249,7 @@ test("desk_note and desk_hand_back post to the PR in Merging, nothing else", asy
 
 test("desk_undo says what was undone", async () => {
   assert.deepEqual(await call("desk_undo", { seq: 7 }), { text: "undid done on getsentry/seer#8949", isError: false });
-  // From an agent: the desk keeps the user's in-flight marks.
-  assert.deepEqual(lastCall(), { method: "POST", path: "/api/undo", body: { seq: 7, agent: true } });
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/undo", body: { seq: 7 } });
 });
 
 test("desk_sync", async () => {

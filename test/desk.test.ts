@@ -402,15 +402,13 @@ test("settings: saving changes the live config; bad values write nothing", async
   t.cleanup();
 });
 
-test("a stored Claude model from before is ignored: no settings problem, and the next save drops it", async () => {
-  const t = await setup([reviewAsk(1)], { settings: { "analyze.model": "sonnet", "notify.enabled": false } });
+test("a removed setting is ignored: no settings problem, and a save keeps it for an older desk", async () => {
+  const old = { "analyze.model": "sonnet", "inflight.babysit": false, "inflight.auto_merge": false, "notify.enabled": false };
+  const t = await setup([reviewAsk(1)], { settings: old });
   assert.deepEqual(t.desk.getSettings().errors, []);
   assert.equal(t.desk.settings["notify.enabled"], false);
   assert.equal(t.desk.putSettings({ set: { "github.poll_seconds": 120 } }).ok, true);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), {
-    "github.poll_seconds": 120,
-    "notify.enabled": false,
-  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), { ...old, "github.poll_seconds": 120 });
   t.cleanup();
 });
 

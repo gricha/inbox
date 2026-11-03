@@ -1,6 +1,6 @@
 # Review Desk
 
-A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m m` hands it off for merge: the coordinator, one Claude Code session in your Claude app's sidebar, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to the queue only when it can't. Approving someone's PR and marking your own draft ready for review are the only things the desk writes to GitHub.
+A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. Enter on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one key (pressed twice) to approve. When you're done with a PR of your own, `m m` hands it off for merge: the coordinator, one Claude Code session in your Claude app's sidebar, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to the queue only when it can't. Approving someone's PR, sending your reply to a reviewer and marking your own draft ready for review are the only things the desk writes to GitHub.
 
 Runs on macOS, Linux and Windows.
 
@@ -133,11 +133,29 @@ It needs the desk's MCP tools and skill (Settings → Agents → Connect). Start
 /loop You are my Review Desk coordinator. Follow the "Coordinator" section of the review-desk skill: each tick, read my handed-off PRs (desk_merging) and the desk's events since your last tick, get each PR merged or hand it back, note progress with desk_note, then schedule your next tick.
 ```
 
-`/loop` with no interval lets it pace itself: about 5 minutes while something is in Merging, 20 to 30 when nothing is. It runs with your own Claude Code permissions, so allow or approve `git`, `gh pr merge` and your test commands as you like. Pin it in the sidebar; stop it like any session.
+`/loop` with no interval lets it pace itself: about 5 minutes while something is in Merging, 20 to 30 when nothing is. It runs with your own Claude Code permissions, so allow or approve `git`, `gh pr merge` and your test commands as you like. It reads CI logs and comments anyone can write, so deny what would let injected text post or rewrite as you, in the session's `.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh api -X:*)",
+      "Bash(gh api --method:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  }
+}
+```
+
+Pin it in the sidebar; stop it like any session.
 
 ## Never
 
-- Its writes to GitHub are approving a PR, when you press `a` twice in its review, and marking your own draft ready for review, when you press `a` twice on its row or in its review. They go through `src/github/write.ts`, whose allowlist holds only those two mutations; agents can't reach it, and `m`, `b` and a hand-back write nothing. The coordinator is your own Claude Code session: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
+- Its writes to GitHub are approving a PR, when you press `a` twice in its review; your reply to a conversation, when you press Send twice under it in a PR's review; and marking your own draft ready for review, when you press `a` twice on its row or in its review. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it, and `m`, `b` and a hand-back write nothing. The coordinator is your own Claude Code session: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
 - It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
 - It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools.
 

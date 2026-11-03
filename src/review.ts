@@ -508,8 +508,6 @@ export function parseReview(parsed: unknown, files: ReviewFile[]): Omit<AiReview
   };
 }
 
-export const NOTED_WHY = "has a note, though not ranked";
-
 // Only hunks the prompt showed can be ranked, each once, in Claude's order; no list at all is no ranking, which isn't "nothing worth a look".
 function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[]): ChunkRanking | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -534,10 +532,7 @@ function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[]): Ch
     if (h && read.has(h.id) && !ids.has(h.id)) noted.add(h.id);
   }
   return {
-    ranked: [
-      ...kept,
-      ...hunks.filter((h) => noted.has(h.id)).map((h) => ({ id: h.id, path: h.path, level: "skim" as const, why: NOTED_WHY })),
-    ],
+    ranked: [...kept, ...hunks.filter((h) => noted.has(h.id)).map((h) => ({ id: h.id, path: h.path, level: "skim" as const, why: "" }))],
     unread: hunks.filter((h) => !read.has(h.id) && !NOISE.test(h.path)).map((h) => h.id),
     capped: ranked.length >= MAX_CHUNKS,
     total: hunks.length,
@@ -567,7 +562,8 @@ function noteSpots(hunks: Hunk[], notes: ReviewNote[]): ({ hunk: Hunk; at: numbe
 
 // ---------------------------------------------------------------- the order
 
-// Every hunk once, in reading order: ranked, unread, then the rest by file; without a ranking for this commit, file by file.
+// Every hunk once, in reading order: ranked, unread, what Claude left out, then what the desk folds away by file; without a
+// ranking for this commit, file by file.
 export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boolean): ReviewOrder {
   const hunks = hunksOf(files);
   const fresh = ai && !stale ? ai : null;
@@ -612,21 +608,22 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
   const unreadWhy = (h: Hunk) =>
     hunks.some((x) => x.file === h.file && !unread.has(x.id)) ? "its file was too long to read whole" : "the PR was too long to read whole";
   const left = ranking ? hunks.filter((h) => unread.has(h.id) && !ranked.has(h.id)).map((h) => view(h, "unread", null, unreadWhy(h))) : [];
+  // Only the desk folds code away (lockfiles, no text diff): what Claude left out stays in view, so diff text can't hide a hunk.
+  const out = (h: Hunk) => !ranked.has(h.id) && !unread.has(h.id);
+  const skipped = ranking ? hunks.filter((h) => out(h) && !NOISE.test(h.path)).map((h) => view(h, "skip", null, null)) : [];
   const rest: ReviewRest[] = [];
   const byFile = perFile(files, hunks);
   for (const [i, f] of files.entries()) {
     const own = byFile[i]!;
-    const skipped = ranking ? own.filter((h) => !ranked.has(h.id) && !unread.has(h.id)) : [];
-    if (own.length && !skipped.length) continue;
-    const why = !own.length
-      ? (f.status === "renamed" || f.status === "copied") && !f.additions && !f.deletions
+    const folded = ranking && NOISE.test(f.path) ? own.filter(out) : [];
+    if (own.length && !folded.length) continue;
+    const why = own.length
+      ? "lockfile or generated"
+      : (f.status === "renamed" || f.status === "copied") && !f.additions && !f.deletions
         ? "renamed without changes"
-        : "no text diff: binary or too large"
-      : NOISE.test(f.path)
-        ? "lockfile or generated"
-        : "not worth reviewing";
-    const hs = skipped.map((h) => view(h, "skip", null, null));
+        : "no text diff: binary or too large";
+    const hs = folded.map((h) => view(h, "skip", null, null));
     rest.push({ path: f.path, file: i, why, hunks: hs, notes: own.length ? [] : take(f.path, []) });
   }
-  return { ranked: !!ranking, capped: ranking?.capped ?? false, chunks, unread: left, rest, notes: order };
+  return { ranked: !!ranking, chunks, unread: left, skipped, rest, notes: order };
 }
