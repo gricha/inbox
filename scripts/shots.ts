@@ -656,7 +656,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Your own draft's one call to action, Ready for review, and armed after a first a.
+    // Your own draft's one call to action, Ready for review.
     name: "draft-cta",
     after: refold,
     go: async (page) => {
@@ -666,16 +666,19 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
+  // a on its row: off the list at once, a spinner while GitHub (here never) answers. Held, as review-ready-sent's, so the
+  // mock's draft stays a draft for the next size's shots.
   {
-    name: "draft-cta-armed",
-    after: refold,
+    name: "draft-cta-sent",
     go: async (page) => {
+      await page.route("**/ready", () => {});
       await at("#/")(page);
       await unfold(page);
       await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
       await page.keyboard.press("a");
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(300);
     },
+    after: reload,
   },
   {
     // A PR the policy judge placed: w opens it in place; its rule trace ends with the policy step.
