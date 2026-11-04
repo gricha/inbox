@@ -21,7 +21,7 @@ interface Session {
   startedAt: number;
   pid: number; // its process while it runs
   said: string[]; // each prompt it was started or resumed with; a copy starts with its original's
-  mode: string; // its saved --permission-mode
+  mode: string;
 }
 
 // A claude that emulates --bg, --resume <id> --bg, agents --json, stop, rm and logs over a state file, as 2.1.317 does:
@@ -475,6 +475,7 @@ test("w in Merging starts it now; off in Settings stops it and nothing wakes it;
 
 const NAME = "Review Desk coordinator";
 const ids = (t: Awaited<ReturnType<typeof coordinated>>) => t.fake.sessions().map((s) => [s.id, s.mode, s.running]);
+const copying = (id: string) => ["--resume", `${id}-1111-2222`, "--bg", "--name", NAME, "--remote-control", NAME, "--permission-mode"];
 
 test("bypass on: it starts in bypass mode, and wakes resume it with no flags, so it keeps that mode", posix, async (c) => {
   const t = await coordinated(c, { "agent.coordinator_bypass": true });
@@ -524,7 +525,7 @@ test(
     t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
     await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
     assert.deepEqual(stops(t.fake.calls()), [["stop", "c0ffee01"]]);
-    assert.deepEqual(resumes(t.fake.calls()), [["--resume", "c0ffee01-1111-2222", "--bg", "--permission-mode", "bypassPermissions"]]);
+    assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions"]]);
     assert.deepEqual(ids(t), [
       ["c0ffee01", "default", false],
       ["c0ffee02", "bypassPermissions", true],
@@ -537,7 +538,7 @@ test(
 
     t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
     await until(() => t.desk.coordinator.saved()?.id === "c0ffee03");
-    assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee02-1111-2222", "--bg", "--permission-mode", "default"]);
+    assert.deepEqual(resumes(t.fake.calls()).at(-1), [...copying("c0ffee02"), "default"]);
     t.event(3, "ci", { from: "pending", to: "red" });
     await until(() => t.said().length === 3);
     assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee03-1111-2222", "--bg", t.said()[2]]);
@@ -573,8 +574,48 @@ test("bypass turned on: a busy coordinator is left to work; one waiting on a per
   assert.deepEqual([...stops(t.fake.calls()), ...resumes(t.fake.calls())], []);
   t.fake.busy("waiting");
   await t.desk.coordinator.flush(); // the 5-minute check
-  assert.deepEqual(resumes(t.fake.calls()), [["--resume", "c0ffee01-1111-2222", "--bg", "--permission-mode", "bypassPermissions"]]);
+  const nudge = "I'd like you to look at Merging now.";
+  assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions", nudge]]);
   assert.equal(t.desk.coordinator.saved()?.id, "c0ffee02");
+  assert.deepEqual(t.said().slice(1), [nudge], "the copy picks its cut-off work back up");
+});
+
+test("claude rm of the coordinator after bypass changes starts a fresh one, not a copy a change left stopped", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
+  await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
+  await t.desk.coordinator.flushing;
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+  await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee03");
+  await t.desk.coordinator.flushing;
+  t.fake.owner("rm", "c0ffee03");
+  t.event(3, "commented");
+  await until(() => t.desk.coordinator.saved()?.id === "c0ffee04");
+  assert.deepEqual(ids(t), [
+    ["c0ffee01", "default", false],
+    ["c0ffee02", "bypassPermissions", false],
+    ["c0ffee04", "default", true],
+  ]);
+  assert.deepEqual(t.said(), [`${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new comment.`]);
+  assert.equal(t.desk.coordinator.saved()?.mode, "default");
+});
+
+test("a running coordinator the desk didn't see start gets the setting's mode on its next launch", posix, async (c) => {
+  const t = await coordinated(c, { "agent.coordinator_bypass": true });
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  t.desk.store.set("coordinator_bg", null); // the desk stopped before claude said it backgrounded it
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+  await until(() => t.desk.coordinator.saved()?.id === "c0ffee02");
+  assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "default"]]);
+  assert.deepEqual(ids(t), [
+    ["c0ffee01", "bypassPermissions", false],
+    ["c0ffee02", "default", true],
+  ]);
 });
 
 test("a refused bypass shows in Merging and notifies once; turning it off resumes the old one as it was", posix, async (c) => {

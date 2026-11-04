@@ -98,8 +98,8 @@ export class Coordinator {
   }
 
   // A record from before the bypass setting has no mode: that session was started in default.
-  saved(): { id: string; url?: string; mode?: Mode } | null {
-    return this.desk.store.get(KEY) as { id: string; url?: string; mode?: Mode } | null;
+  saved(): { id: string; url?: string; mode?: Mode | "unknown" } | null {
+    return this.desk.store.get(KEY) as { id: string; url?: string; mode?: Mode | "unknown" } | null;
   }
 
   // [PR id, what changed], oldest first; only appended to until delivered.
@@ -223,7 +223,7 @@ export class Coordinator {
     return this.flushing;
   }
 
-  // After the run in progress: it may have read the asks or settings before they changed.
+  // The run in progress may have read the asks or settings before they changed.
   async again(): Promise<void> {
     await this.flushing;
     await this.flush();
@@ -243,8 +243,12 @@ export class Coordinator {
       const flags = ["--permission-mode", PERMISSION[mode]];
       // A resumed session keeps the mode it started with; passing one makes claude start a copy with its history, so only to change it.
       const switching = !!a && (this.saved()?.mode ?? "default") !== mode;
+      // A copy may not keep its original's name and Remote Control, so the switch passes them again.
+      const resume = a ? ["--resume", a.sessionId, "--bg", ...(switching ? ["--name", NAME, "--remote-control", NAME, ...flags] : [])] : [];
+      // Stuck on a permission prompt is why bypass gets turned on: it switches now, and the copy gets a turn to carry on.
+      const stuck = switching && a?.status === "waiting";
       // Busy, in a shell or waiting on a permission: it stays queued.
-      if (waiting && idle) {
+      if ((waiting && idle) || stuck) {
         const text = this.message(news, asks);
         this.asked = false;
         // Created only with something to deliver: a scratch desk's would reach the owner's desk through its MCP tools.
@@ -255,14 +259,13 @@ export class Coordinator {
           );
         else {
           await this.halt(a);
-          await this.launch(["--resume", a.sessionId, "--bg", ...(switching ? flags : []), text], mode);
+          await this.launch([...resume, text], mode);
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
-      } else if (a && (!a.pid || (switching && (idle || a.status === "waiting")))) {
-        // Stuck on a permission prompt is the case bypass is turned on for, so that one switches too.
+      } else if (a && (!a.pid || (switching && idle))) {
         await this.halt(a);
-        await this.launch(["--resume", a.sessionId, "--bg", ...(switching ? flags : [])], mode); // no prompt, so no turn
+        await this.launch(resume, mode); // no prompt, so no turn
       }
       const s = this.saved();
       if (s && !s.url) {
@@ -314,7 +317,7 @@ export class Coordinator {
     this.desk.log(`coordinator: ${args[0] === "--bg" ? "created" : "resumed"} ${id}${note ? ` (${note})` : ""}`);
   }
 
-  // Its row in claude agents: the id the desk keeps, else the latest in its directory (a start the desk didn't see finish).
+  // Its row in claude agents: the id it keeps, else the latest running one here (a start it didn't see finish; not one a switch stopped).
   async find(): Promise<Agent | null> {
     const all = (JSON.parse(await claude(["agents", "--json", "--all"])) as Agent[]).filter((a) => a.kind === "background");
     const dir = this.dir();
@@ -323,12 +326,13 @@ export class Coordinator {
     const a =
       all.find((x) => x.id === saved?.id) ??
       all
-        .filter((x) => here.has(x.cwd))
+        .filter((x) => here.has(x.cwd) && x.pid)
         .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
         .at(-1) ??
       null;
     if (a?.id !== saved?.id) {
-      this.desk.store.set(KEY, a && { id: a.id });
+      // The desk didn't see its mode, so the next launch sets the setting's.
+      this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
       this.desk.changed();
     }
     this.checked = Date.now();

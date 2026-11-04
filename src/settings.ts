@@ -138,7 +138,7 @@ export const SETTINGS = [
     label: "Coordinator skips permission prompts",
     type: "boolean",
     default: false,
-    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list (no comments, reviews or force pushes as you) still applies. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
+    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list is then the only fence: it blocks gh pr comment, gh pr review and gh api, but gh pr close --comment, gh pr create or a force push with the flag after the branch runs without asking. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
   },
   {
     key: "policy.judge",
