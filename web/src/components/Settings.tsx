@@ -328,17 +328,20 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   return (
     <div className={cls("setting", `st-${def.type}`)}>
       <div className="s-label-col">
-        {def.type === "boolean" ? (
-          <span className="s-label" id={`${id}-label`}>
-            {def.label}
-          </span>
-        ) : (
-          <label className="s-label" htmlFor={id}>
-            {def.label}
-          </label>
-        )}
+        {/* Reset sits on the label's line, so it never reads as the setting's help. */}
+        <div className="s-label-row">
+          {def.type === "boolean" ? (
+            <span className="s-label" id={`${id}-label`}>
+              {def.label}
+            </span>
+          ) : (
+            <label className="s-label" htmlFor={id}>
+              {def.label}
+            </label>
+          )}
+          {reset}
+        </div>
         {def.help && <p className="s-help">{def.help}</p>}
-        {reset}
       </div>
       <div className="s-control">
         {control}

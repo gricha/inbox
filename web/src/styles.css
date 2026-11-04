@@ -865,6 +865,11 @@ kbd {
   align-self: center;
   height: 32px;
   margin: -4px 0 -4px auto;
+  padding: 0 6px;
+}
+
+.more-dots {
+  display: none;
 }
 
 .line-ask + .line-cta,
@@ -946,10 +951,9 @@ kbd {
   cursor: pointer;
 }
 
-/* Folded, a group steps back. */
+/* Folded, a group steps back in colour, but keeps a heading's weight. */
 .group-toggle[aria-expanded="false"] {
   color: var(--pencil);
-  font-weight: 500;
 }
 
 .group-toggle:disabled {
@@ -964,6 +968,10 @@ kbd {
 /* Clearly more space before a heading than after it, so each sits with its own rows. */
 .later.queue {
   gap: 20px;
+}
+
+.later .group-head {
+  margin-bottom: 0;
 }
 
 .quiet-note {
@@ -1552,7 +1560,15 @@ kbd {
 
 .lane-row .line-title {
   flex: 0 1 auto;
-  width: 48cqi;
+  width: 44cqi;
+}
+
+.lane-row .lane-ref {
+  display: flex;
+  flex: none;
+  gap: 14px;
+  min-width: 7.5em;
+  font-size: var(--meta-size);
 }
 
 .lane-row .line-note {
@@ -1906,21 +1922,37 @@ kbd {
   color: var(--on-accent);
 }
 
-/* Only a call to action is a shape; the rest are text that fills on hover. */
+/* Only a call to action is a shape; the rest are text that fills on hover, and while the menu it opened is open. */
 .line .line-ask,
 .line .line-more,
 .lane-more .act:not(.primary, .armed),
-.review .actions .act:not(.primary, .armed) {
+.review .actions .act:not(.primary, .armed),
+.composer .act:not(.primary, .armed) {
   border-color: transparent;
   background: none;
 }
 
 .line .line-ask:hover:not(:disabled),
 .line .line-more:hover:not(:disabled),
+.line .line-more[aria-expanded="true"],
 .lane-more .act:not(.primary, .armed):hover:not(:disabled),
-.review .actions .act:not(.primary, .armed):hover:not(:disabled) {
+.review .actions .act:not(.primary, .armed):hover:not(:disabled),
+.review .actions .act[aria-expanded="true"]:not(.primary, .armed),
+.composer .act:not(.primary, .armed):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+/* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
+.review .actions > .act:first-child:not(.primary, .armed),
+.lane-more .actions > .act:first-child:not(.primary, .armed) {
+  margin-left: -9px;
+}
+
+/* Nothing to send yet: Send is text until there is. */
+.composer .act.primary:disabled {
+  border-color: transparent;
+  background: none;
 }
 
 .trace-toggle {
@@ -2219,7 +2251,11 @@ kbd {
   border: 1px solid var(--rule-strong);
   border-radius: 12px;
   background: var(--sheet);
-  box-shadow: var(--shadow);
+
+  /* The page's text under its top edge fades out rather than being sliced through a line. */
+  box-shadow:
+    var(--shadow),
+    0 -20px 20px -4px var(--paper);
   transform: translateX(-50%);
   animation: rise 160ms ease-out;
 }
@@ -2457,6 +2493,10 @@ kbd {
   margin-top: 24px;
 }
 
+.s-section > h2 + .s-fields {
+  margin-top: 4px;
+}
+
 /* One column at every width: the label, its help at a reading measure, then its control. */
 .setting {
   display: grid;
@@ -2472,6 +2512,7 @@ kbd {
 }
 
 .setting.st-boolean .s-msg {
+  position: static;
   margin: 0;
 }
 
@@ -2494,14 +2535,22 @@ kbd {
   line-height: 1.45;
 }
 
-.s-label-col .link-btn {
-  justify-self: start;
-  margin-top: 4px;
+.s-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+/* Under its control, in the setting's padding: it reserves no line, and showing it moves nothing. */
+.s-control {
+  position: relative;
 }
 
 .s-msg {
-  min-height: 18px;
-  margin-top: 6px;
+  position: absolute;
+  top: 100%;
+  margin-top: 3px;
   font-size: 12.5px;
 }
 
@@ -3092,6 +3141,7 @@ kbd {
   font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.015em;
+  text-wrap: balance;
   overflow-wrap: anywhere;
 }
 
@@ -3130,6 +3180,7 @@ kbd {
 /* A PR in Merging: what it waits on and the coordinator's note, in pencil as there. */
 .rv-lane {
   color: var(--pencil);
+  text-wrap: pretty;
 }
 
 /* Recent activity: a few quiet lines, the time after the same "·" as the facts; the rest behind "n more". */
@@ -3553,9 +3604,6 @@ kbd {
   --diffs-deletion-color-override: var(--red);
   --diffs-bg-separator-override: var(--paper);
 
-  /* No inset above the first line, so a diff that starts folded starts with its band at the frame's edge. */
-  --diffs-gap-block: 0px;
-
   display: block;
   overflow: hidden;
   border-radius: 8px;
@@ -3581,14 +3629,19 @@ kbd {
   max-width: 100%;
 }
 
+/* The call to action's shape, then the rest as text, as the loaded row has them. */
 .sk-key {
-  width: 112px;
-  height: 34px;
-  border-radius: 9px;
+  align-self: center;
+  width: 88px;
+  height: 12px;
+  margin: 0 10px;
 }
 
 .sk-key:first-child {
   width: 152px;
+  height: 34px;
+  margin: 0;
+  border-radius: 9px;
 }
 
 .rv-fhead .sk {
@@ -3701,6 +3754,14 @@ kbd {
   :root[data-shell="desktop"][data-platform="darwin"] .topbar {
     padding-left: 86px;
   }
+
+  .line .more-word {
+    display: none;
+  }
+
+  .line .more-dots {
+    display: inline;
+  }
 }
 
 @media (width <= 640px) {
@@ -3803,9 +3864,10 @@ pre,
   color: var(--ink);
 }
 
-/* A lone dot for a key: heavier and larger, so it reads as a key and not a speck. */
+/* A lone dot for a key: heavier, larger and raised to the x-height, so it reads as a key and not a full stop. */
 kbd.dot-key {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1;
+  translate: 0 -0.2em;
 }

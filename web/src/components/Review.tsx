@@ -79,6 +79,10 @@ const DIFF: FileDiffOptions<NoteMeta, undefined> = {
   overflow: "wrap",
   disableFileHeader: true,
   lineHoverHighlight: "disabled",
+  // A band that starts or ends the file sits on the frame's edge; its words start where the line numbers do (2ch of the code).
+  unsafeCSS: `[data-separator-first] { margin-top: calc(-1 * var(--diffs-gap-block, var(--diffs-gap-fallback))); }
+[data-separator-last] { margin-bottom: calc(-1 * max(0px, var(--diffs-gap-block, var(--diffs-gap-fallback)) - var(--diffs-scrollbar-gutter))); }
+[data-separator=line-info-basic] [data-separator-content] { padding-inline: calc(1.2 * var(--diffs-font-size)); }`,
 };
 
 // One object per theme, so a re-render doesn't hand Pierre new options (and a fresh highlight) each time.
@@ -500,6 +504,7 @@ export function Review({
           {!!card.actions?.length && (
             <span className="more-wrap">
               <MoreButton
+                open={more}
                 onClick={() => {
                   run(".");
                 }}
@@ -628,8 +633,7 @@ function Head({
   const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
   const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   // What it waits on and the coordinator's latest note, as Merging says it.
-  const lane =
-    row?.state === "open" ? [row.waits_on ?? "", row.note?.text ?? "", row.note ? age(row.note.at, now) : ""].filter(Boolean) : [];
+  const lane = row?.state === "open" && (row.waits_on || row.note) ? row : null;
   return (
     // Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour.
     <header
@@ -670,11 +674,16 @@ function Head({
           {card.resolved_at && <span>{sinceText(card.resolved_at, now)}</span>}
         </p>
       )}
-      {lane.length > 0 && (
+      {lane && (
         <p className="rv-meta rv-lane">
-          {lane.map((p) => (
-            <span key={p}>{p}</span>
-          ))}
+          {lane.waits_on && <span>{lane.waits_on}</span>}
+          {/* No space before the age, so a wrap takes the note's last word with it and the age never sits alone. */}
+          {lane.note && (
+            <span>
+              {lane.note.text}
+              <span className="rv-age">{age(lane.note.at, now)}</span>
+            </span>
+          )}
         </p>
       )}
     </header>

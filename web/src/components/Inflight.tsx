@@ -4,7 +4,7 @@ import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-// Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
+// Merging: your PRs handed off for merge, one line each like the main page's: what each waits on; the selected one's coordinator note.
 export function Inflight({
   view,
   now,
@@ -114,8 +114,8 @@ function Coordinator({ c }: { c: CoordinatorView }) {
   );
 }
 
-// One line: the title, quietly its ref and place in its stack, what it waits on and the coordinator's latest note, its age.
-// Selected, that phrase moves whole under the row, with the note's age, and its keys.
+// One line: the title, quietly its ref and place in its stack, what it waits on, its age.
+// Selected, that phrase moves under the row with the coordinator's latest note and its age, then its keys.
 function Row({
   row: r,
   now,
@@ -135,7 +135,7 @@ function Row({
     run(r, k);
   };
   const since = c.resolved_at ?? c.waiting_since;
-  const phrase = [r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])];
+  const waits = r.waits_on ?? "merging";
   return (
     <div className={cls("line", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
       <button
@@ -152,17 +152,20 @@ function Row({
         }}
       >
         <span className="line-title">{c.title}</span>
-        {/* A long repo name gives way before the title; the number never does. */}
-        <span className="line-ref" title={`${c.repo}#${c.number}`}>
-          {c.repo.split("/")[1]}
-        </span>
-        <span className="line-num">#{c.number}</span>
-        {c.stack && (
-          <span className="line-stack" title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>
-            {c.stack.pos}/{c.stack.size}
+        {/* One width for every ref, so what each waits on starts in one column. */}
+        <span className="lane-ref">
+          {/* A long repo name gives way before the title; the number never does. */}
+          <span className="line-ref" title={`${c.repo}#${c.number}`}>
+            {c.repo.split("/")[1]}
           </span>
-        )}
-        {!(on && live) && <span className="line-note">{live ? <Dots parts={phrase} /> : r.state}</span>}
+          <span className="line-num">#{c.number}</span>
+          {c.stack && (
+            <span className="line-stack" title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>
+              {c.stack.pos}/{c.stack.size}
+            </span>
+          )}
+        </span>
+        {!(on && live) && <span className="line-note">{live ? waits : r.state}</span>}
         <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, now)}
         </span>
@@ -171,7 +174,7 @@ function Row({
         <div className="lane-more">
           {live && (
             <p className="lane-why">
-              <Dots parts={r.note ? [...phrase, age(r.note.at, now)] : phrase} />
+              <Dots parts={r.note ? [waits, r.note.text, age(r.note.at, now)] : [waits]} />
             </p>
           )}
           <div className="actions card-keys">

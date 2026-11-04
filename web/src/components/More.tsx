@@ -19,17 +19,20 @@ const MORE: Record<GitHubAction, { key: string; label: string; verb?: string }> 
 // A row has no room to write in: requesting changes is in the PR's review.
 export const rowActions = (c: Card) => (c.actions ?? []).filter((a) => a !== "request_changes");
 
-// The quiet button that opens it, with its key.
-export function MoreButton({ className, onClick }: { className?: string; onClick: () => void }) {
+// The quiet button that opens it, with its key; a row below 1000px says "…", so selecting it never cuts its title shorter.
+export function MoreButton({ className, open, onClick }: { className?: string; open: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       className={cls("act", className)}
       title="More on GitHub: close, convert to draft, merge now, …"
       aria-label="More on GitHub"
+      aria-expanded={open}
       onClick={onClick}
     >
-      <kbd className="dot-key">.</kbd>More
+      <kbd className="dot-key">.</kbd>
+      <span className="more-word">More</span>
+      <span className="more-dots">…</span>
     </button>
   );
 }

@@ -124,6 +124,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         {sel && (!card.cta || !!why) && rowActions(card).length > 0 && (
           <MoreButton
             className="line-more"
+            open={ctx.moreFor === card.id}
             onClick={() => {
               ctx.run(card, ".");
             }}
