@@ -204,7 +204,7 @@ export class GitHubConnector implements Connector {
         }
       }
       const meta = desk.store.itemMeta();
-      // Your open pins no search returns (desk_add's) count as hits; no search says when one changed, so it's refreshed often.
+      // An open pin no search returns (desk_add's) would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.
       const off = [...desk.store.states().values()].filter((s) => s.pinned && !hits.has(s.id) && meta.has(s.id)).map((s) => s.id);
       const pinned = [...desk.store.itemsById(off).values()].filter((i) => i.state === "open").map((i) => hitOf(i.id, meta.get(i.id)!));
       const need = [...hits.values(), ...pinned].filter((h) => {

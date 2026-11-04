@@ -9,6 +9,7 @@ import { claudeSpawn } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
 const SKILL = fileURLToPath(new URL("../skills/review-desk", import.meta.url));
+export const SKILL_MD = path.join(SKILL, "SKILL.md");
 
 interface Driver {
   bin: string;

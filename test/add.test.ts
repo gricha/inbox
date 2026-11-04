@@ -5,6 +5,9 @@ import { createApp } from "../src/server.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
+// Adding starts Claude's read: never the real claude, even when run without the no-agent preload.
+process.env.DESK_CLAUDE = "/nonexistent/claude";
+
 const DAY = 24 * 3_600_000;
 const ID = "acme/other#9";
 // Someone else's PR no board's search returns: only desk_add brings it in.
@@ -52,7 +55,7 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
   assert.equal(r.item.state.pinned, true);
   assert.ok(r.undo_seq > 0);
   assert.equal(r.item.generating, true, "its AI review is being written");
-  // The read fails on the no-agent helper's missing claude: it started, and no real agent ran.
+  // The read fails on the missing claude: it started, and no real agent ran.
   await until(() => f.started.length > 0 && t.desk.convos.errors.has(ID));
   assert.deepEqual(f.started, [ID]);
   assert.deepEqual(f.fetched, [ID], "the diff once: the AI review joins the fetch add started");
@@ -140,4 +143,31 @@ test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't
   assert.equal((await add({ id: "web#5" })).status, 400, "a short ref finds only what the desk holds");
   assert.equal((await add({ id: "acme/api#999" })).status, 404);
   assert.deepEqual(t.gh.lookupCalls, ["acme/api#999"]);
+});
+
+test("adding a done, snoozed or muted item brings it back, and its one undo puts that back too", async (c) => {
+  const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const onDesk = () => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === "acme/api#1");
+  for (const action of ["done", "snooze", "mute"] as const) {
+    t.desk.act("api#1", action);
+    assert.equal(onDesk(), false, action);
+    const before = t.desk.item("api#1").state;
+    const r = await t.desk.add("acme/api#1");
+    assert.equal(r.item.card.status, "active", action);
+    assert.ok(onDesk(), `${action}: on the main page`);
+    t.desk.undo(r.undo_seq);
+    assert.deepEqual(t.desk.item("api#1").state, before, `${action}: one undo`);
+  }
+});
+
+test("adding several PRs at once starts their AI reviews two at a time, as the background ones run", async (c) => {
+  const f = fakeReview();
+  const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  for (const n of [9, 10, 11]) t.gh.items.set(`acme/other#${n}`, makeItem({ repo: "acme/other", number: n, author: "dave" }));
+  await Promise.all([9, 10, 11].map((n) => t.desk.add(`acme/other#${n}`)));
+  assert.equal(t.desk.generating.size, 2);
 });

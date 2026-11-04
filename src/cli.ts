@@ -1,7 +1,7 @@
 // `desk`: a thin CLI over the local desk API.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, watchFile } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
@@ -449,11 +449,16 @@ async function serve(x: Ctx): Promise<number> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`bad port: ${raw}`);
   const { startServer } = await import("./server.ts");
   const srv = await startServer({ port, open: !!x.opts.open });
-  try {
-    for (const f of agents.refreshSkills(srv.desk.home)) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
-  } catch (e) {
-    srv.desk.log(`couldn't refresh the Review Desk skill: ${(e as Error).message}`);
-  }
+  const refresh = () => {
+    try {
+      for (const f of agents.refreshSkills(srv.desk.home)) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
+    } catch (e) {
+      srv.desk.log(`couldn't refresh the Review Desk skill: ${(e as Error).message}`);
+    }
+  };
+  refresh();
+  // The checkout's desk restarts on src/ changes only, so a skill-only merge would wait for an unrelated one.
+  watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, refresh);
   await new Promise<void>((resolve) => {
     process.once("SIGINT", resolve);
     process.once("SIGTERM", resolve);

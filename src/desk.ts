@@ -129,7 +129,7 @@ interface Snapshot {
   stacks: Stacks;
 }
 
-// Your pins no board places (desk_add's, or one a board's search dropped) sit here, so a pin keeps anything on your desk.
+// Without it a pin no board places (desk_add's, or one a board's search dropped) would be on no page at all.
 const ADDED: CompiledBoard = {
   config: { id: "added", space: "", name: "Added", queries: [], rules: [], default: "today", default_why: "you added it", sort: "updated" },
   filter: null,
@@ -1662,7 +1662,6 @@ export class Desk {
     return { id: ev.item_id, state, action: ev.action as Action };
   }
 
-  // POST /api/add (desk_add, `desk add`): a pin keeps it on your desk, and a PR's pre-review starts now so it's ready when you open it.
   async add(ref: string): Promise<{ item: ItemDetail; undo_seq: number }> {
     this.requireConfig();
     const r = normRef(ref);
@@ -1682,14 +1681,17 @@ export class Desk {
       this.changed();
       id = got;
     }
-    const { undo_seq } = this.act(id, "pin");
-    const snap = this.snapshot();
-    const e = snap.entries.get(id)!;
-    if (e.item.kind === "pr") {
+    // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
+    const before = this.store.state(id);
+    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snoozed_at: null, muted: false });
+    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
+    this.changed();
+    if (this.snapshot().entries.get(id)!.item.kind === "pr") {
       void this.prText(id).catch(() => {});
       void this.convos.warm([id]);
-      if (this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
     }
+    // Not generate() as opening a review does: an agent may add many at once, and the pump keeps to AI_AT_ONCE.
+    this.pumpAi();
     this.judge.pump();
     return { item: this.item(id), undo_seq };
   }

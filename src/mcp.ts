@@ -227,7 +227,6 @@ async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[nu
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
 }
 
-// What desk_add started is the agent's next step: desk_brief waits on a review being written, and has one that's written.
 async function addText(api: DeskClient, ref: string): Promise<string> {
   const r = await api.add(ref);
   const d = r.item;
@@ -238,7 +237,7 @@ async function addText(api: DeskClient, ref: string): Promise<string> {
         ? " Its AI review is being written; desk_brief waits for it."
         : d.ai && !d.ai_stale
           ? " Its AI review is ready: desk_brief."
-          : " No AI review started (the user's own PR, or review.auto_ai is off); desk_brief writes one.";
+          : " Its AI review isn't being written (queued behind others, the user's own PR, or review.auto_ai is off); desk_brief writes one now.";
   return `added ${d.card.id} to the user's desk, pinned.${ai} Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n${itemText(d)}`;
 }
 

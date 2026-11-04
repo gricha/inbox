@@ -69,8 +69,8 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 
 ### "Add X to my review" (or "put it on my desk")
 
-1. `desk_add` with the ref: `owner/repo#123` or its URL (`repo#123` only finds what the desk holds already). It fetches what the desk doesn't hold (read only), pins it so it stays on their main page, and for a PR starts the standard pre-review: its diff and conversations fetched, its AI review and Claude's read of what waits on them.
-2. For a PR, `desk_brief` once the AI review is ready; desk_add says whether it's being written. While it is, wait on `desk_brief` (a minute or two) or say it's being written and will be ready in the desk.
+1. `desk_add` with the ref: `owner/repo#123` or its URL (`repo#123` only finds what the desk holds already). It fetches what the desk doesn't hold (read only), pins it so it stays on their main page (bringing it back if it was done, snoozed or muted), and for a PR starts the standard pre-review: its diff and conversations fetched, its AI review and Claude's read of what waits on them.
+2. For a PR, `desk_brief` once the AI review is ready; desk_add says whether it's ready or being written. While it is, wait on `desk_brief` (a minute or two) or say it's being written and will be ready in the desk. When adding several, don't `desk_brief` each: the desk writes them two at a time.
 3. Report in a line with the undo seq: "Added sentry#123 to your desk; AI review: skim, low risk (undo: seq 42)". Adding writes nothing to GitHub: never request a review, assign or comment to get it there.
 
 ### "Why is X here?" (or "why isn't it on the queue?")

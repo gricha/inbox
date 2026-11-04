@@ -74,7 +74,7 @@ export interface GitHub {
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
   // open PRs based on it.
   branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
-  lookup(repo: string, number: number): Promise<SearchHit | null>; // one PR or issue by number; null when GitHub has none
+  lookup(repo: string, number: number): Promise<SearchHit | null>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
