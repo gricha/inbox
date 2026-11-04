@@ -20,13 +20,15 @@ interface Session {
   running: boolean;
   startedAt: number;
   pid: number; // its process while it runs
-  said: string[]; // each prompt it was started or resumed with
+  said: string[]; // each prompt it was started or resumed with; a copy starts with its original's
+  mode: string; // its saved --permission-mode
 }
 
 // A claude that emulates --bg, --resume <id> --bg, agents --json, stop, rm and logs over a state file, as 2.1.317 does:
-// --resume with any other flag, or while the session's process is alive, starts a copy; with no prompt it starts no turn;
-// stop returns before that process exits. Each running session is a detached process (claude's daemon runs the real ones),
-// and while `busy` exists every running session is busy.
+// a session keeps the --permission-mode it started with; --resume with any other flag, or while the session's process is
+// alive, starts a copy with its history (and those flags); with no prompt it starts no turn; stop returns before that
+// process exits. Each running session is a detached process (claude's daemon runs the real ones), and while `busy` exists
+// every running session has the status it holds.
 function fakeClaude() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-coord-"));
   const bin = path.join(dir, "claude");
@@ -39,8 +41,9 @@ const f = path.join(__dirname, "state.json");
 const st = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : { sessions: [], n: 0 };
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(__dirname, "calls"), JSON.stringify(args) + "\\n");
-const busy = fs.existsSync(path.join(__dirname, "busy"));
+const busy = fs.existsSync(path.join(__dirname, "busy")) ? fs.readFileSync(path.join(__dirname, "busy"), "utf8") : null;
 const fail = fs.existsSync(path.join(__dirname, "fail"));
+const nobypass = fs.existsSync(path.join(__dirname, "nobypass"));
 const cp = require("node:child_process");
 const alive = (pid) => {
   try {
@@ -50,11 +53,19 @@ const alive = (pid) => {
     return false;
   }
 };
-const start = (name) => {
+const start = (name, mode, said = []) => {
   const id = "c0ffee" + String(++st.n).padStart(2, "0");
-  const s = { id, sessionId: id + "-1111-2222", cwd: process.cwd(), name, running: false, startedAt: Date.now() + st.n, said: [] };
+  const s = { id, sessionId: id + "-1111-2222", cwd: process.cwd(), name, running: false, startedAt: Date.now() + st.n, said: [...said], mode };
   st.sessions.push(s);
   return s;
+};
+const parse = (from) => {
+  const o = { flags: {}, prompt: undefined };
+  for (let i = from; i < args.length; i++)
+    if (args[i] === "--bg") continue;
+    else if (args[i].startsWith("--")) o.flags[args[i]] = args[++i];
+    else o.prompt = args[i];
+  return o;
 };
 const bg = (s, prompt) => {
   const p = cp.spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
@@ -65,7 +76,7 @@ const bg = (s, prompt) => {
 };
 if (args[0] === "agents") {
   const row = (s) => ({ id: s.id, sessionId: s.sessionId, cwd: s.cwd, kind: "background", name: s.name, startedAt: s.startedAt, state: "done" });
-  console.log(JSON.stringify(st.sessions.map((s) => (s.running ? { ...row(s), pid: s.pid, status: busy ? "busy" : "idle" } : row(s)))));
+  console.log(JSON.stringify(st.sessions.map((s) => (s.running ? { ...row(s), pid: s.pid, status: busy ?? "idle" } : row(s)))));
 } else if (args[0] === "stop") {
   const s = st.sessions.find((x) => x.id === args[1]);
   s.running = false;
@@ -78,13 +89,27 @@ if (args[0] === "agents") {
 } else if (fail && args.includes("--bg")) {
   console.error("Not logged in");
   process.exitCode = 1;
+} else if (nobypass && args.includes("bypassPermissions")) {
+  console.error("Bypass permissions mode is disabled");
+  process.exitCode = 1;
 } else if (args[0] === "--resume") {
   const s = st.sessions.find((x) => x.sessionId === args[1]);
-  if (args[2] !== "--bg" || args.length > 4 || s.running || alive(s.pid)) {
+  const o = parse(2);
+  if (Object.keys(o.flags).length) {
+    const copy = start(s.name, o.flags["--permission-mode"] ?? s.mode, s.said);
+    console.log("note: background session " + s.id + " keeps its own saved options, so the flags you passed started a copy as " + copy.id + ". Without flags, the same command continues " + s.id + " itself.");
+    bg(copy, o.prompt);
+  } else if (s.running || alive(s.pid)) {
     console.log("note: started a copy");
-    bg(start(s.name), args[3]);
-  } else bg(s, args[3]);
-} else if (args.includes("--bg")) bg(start(args[args.indexOf("--name") + 1]), args.at(-1));
+    bg(start(s.name, s.mode, s.said), o.prompt);
+  } else {
+    console.log("note: woke session " + s.id + " with its saved options (--name, --permission-mode, --model).");
+    bg(s, o.prompt);
+  }
+} else if (args.includes("--bg")) {
+  const o = parse(0);
+  bg(start(o.flags["--name"], o.flags["--permission-mode"] ?? "default"), o.prompt);
+}
 // Only what changes it writes it, so the desk's looking can't undo the owner's stop.
 if (args[0] !== "agents" && args[0] !== "logs") {
   fs.writeFileSync(f + ".tmp", JSON.stringify(st));
@@ -118,13 +143,18 @@ if (args[0] !== "agents" && args[0] !== "logs") {
             .split("\n")
             .map((l) => JSON.parse(l) as string[])
         : [],
-    busy: (on: boolean) => {
-      if (on) fs.writeFileSync(path.join(dir, "busy"), "");
+    busy: (on: boolean | "waiting") => {
+      if (on) fs.writeFileSync(path.join(dir, "busy"), on === true ? "busy" : on);
       else fs.rmSync(path.join(dir, "busy"), { force: true });
     },
     fail: (on: boolean) => {
       if (on) fs.writeFileSync(path.join(dir, "fail"), "");
       else fs.rmSync(path.join(dir, "fail"), { force: true });
+    },
+    // A managed disableBypassPermissionsMode, or bypass mode never accepted.
+    nobypass: (on: boolean) => {
+      if (on) fs.writeFileSync(path.join(dir, "nobypass"), "");
+      else fs.rmSync(path.join(dir, "nobypass"), { force: true });
     },
     // The owner's own claude stop or rm, or a crash, which the desk doesn't see.
     owner: (cmd: "stop" | "rm", id: string) => {
@@ -441,6 +471,127 @@ test("w in Merging starts it now; off in Settings stops it and nothing wakes it;
     ["--resume", "c0ffee01-1111-2222", "--bg"],
   ]);
   assert.equal(t.said().length, 1, "what came while it was off is dropped, and a resume with no prompt starts no turn");
+});
+
+const NAME = "Review Desk coordinator";
+const ids = (t: Awaited<ReturnType<typeof coordinated>>) => t.fake.sessions().map((s) => [s.id, s.mode, s.running]);
+
+test("bypass on: it starts in bypass mode, and wakes resume it with no flags, so it keeps that mode", posix, async (c) => {
+  const t = await coordinated(c, { "agent.coordinator_bypass": true });
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  assert.deepEqual(starts(t.fake.calls()), [
+    [
+      "--bg",
+      "--name",
+      NAME,
+      "--remote-control",
+      NAME,
+      "--permission-mode",
+      "bypassPermissions",
+      `${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): handed off.`,
+    ],
+  ]);
+  assert.equal(t.desk.coordinator.saved()?.mode, "bypass");
+  t.event(3, "commented");
+  await until(() => t.said().length === 2);
+  assert.deepEqual(resumes(t.fake.calls()), [
+    ["--resume", "c0ffee01-1111-2222", "--bg", "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new comment."],
+  ]);
+  assert.deepEqual(ids(t), [["c0ffee01", "bypassPermissions", true]]);
+});
+
+test(
+  "toggling bypass makes one copy in the new mode with its history, right away, and wakes resume the copy flag-free",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    t.desk.act("web#3", "inflight");
+    await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+    await t.desk.coordinator.flushing;
+    assert.deepEqual(
+      starts(t.fake.calls())[0]!.slice(0, 6),
+      [
+        "--bg",
+        "--name",
+        NAME,
+        "--remote-control",
+        NAME,
+        `${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): handed off.`,
+      ],
+      "off: no mode passed",
+    );
+    t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
+    await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
+    assert.deepEqual(stops(t.fake.calls()), [["stop", "c0ffee01"]]);
+    assert.deepEqual(resumes(t.fake.calls()), [["--resume", "c0ffee01-1111-2222", "--bg", "--permission-mode", "bypassPermissions"]]);
+    assert.deepEqual(ids(t), [
+      ["c0ffee01", "default", false],
+      ["c0ffee02", "bypassPermissions", true],
+    ]);
+    assert.deepEqual(t.desk.coordinator.saved(), { id: "c0ffee02", mode: "bypass", url: "https://claude.ai/code/session_01Fakec0ffee02" });
+    assert.equal(t.said().length, 1, "its history, and no turn");
+    t.event(3, "commented");
+    await until(() => t.said().length === 2);
+    assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee02-1111-2222", "--bg", t.said()[1]]);
+
+    t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+    await until(() => t.desk.coordinator.saved()?.id === "c0ffee03");
+    assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee02-1111-2222", "--bg", "--permission-mode", "default"]);
+    t.event(3, "ci", { from: "pending", to: "red" });
+    await until(() => t.said().length === 3);
+    assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee03-1111-2222", "--bg", t.said()[2]]);
+    assert.deepEqual(ids(t).at(-1), ["c0ffee03", "default", true]);
+    assert.equal(t.fake.sessions().length, 3, "one copy per change");
+  },
+);
+
+test("a coordinator saved before the bypass setting is default: resumed with no flags", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  const { mode: _, ...old } = t.desk.coordinator.saved()!;
+  t.desk.store.set("coordinator_bg", old);
+  t.event(3, "commented");
+  await until(() => t.said().length === 2);
+  await t.desk.coordinator.flushing;
+  assert.deepEqual(resumes(t.fake.calls()), [["--resume", "c0ffee01-1111-2222", "--bg", t.said()[1]]]);
+  assert.deepEqual(ids(t), [["c0ffee01", "default", true]]);
+  assert.equal(t.desk.coordinator.saved()?.mode, "default");
+});
+
+test("bypass turned on: a busy coordinator is left to work; one waiting on a permission prompt switches", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  t.fake.busy(true);
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
+  await settle();
+  await t.desk.coordinator.flushing;
+  assert.deepEqual([...stops(t.fake.calls()), ...resumes(t.fake.calls())], []);
+  t.fake.busy("waiting");
+  await t.desk.coordinator.flush(); // the 5-minute check
+  assert.deepEqual(resumes(t.fake.calls()), [["--resume", "c0ffee01-1111-2222", "--bg", "--permission-mode", "bypassPermissions"]]);
+  assert.equal(t.desk.coordinator.saved()?.id, "c0ffee02");
+});
+
+test("a refused bypass shows in Merging and notifies once; turning it off resumes the old one as it was", posix, async (c) => {
+  const t = await coordinated(c, { "notify.quiet": "" });
+  t.desk.act("web#3", "inflight");
+  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  t.fake.nobypass(true);
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
+  await until(() => t.desk.inflight().coordinator.error === "Bypass permissions mode is disabled");
+  await t.desk.coordinator.flush();
+  assert.equal(resumes(t.fake.calls()).length, 2, "it tried again");
+  assert.deepEqual(t.notes, ["Bypass permissions mode is disabled"], "notified once");
+  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+  await until(() => t.desk.inflight().coordinator.error === null);
+  assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee01-1111-2222", "--bg"]);
+  assert.deepEqual(ids(t), [["c0ffee01", "default", true]]);
 });
 
 test("w says so when claude can't start it", async (c) => {

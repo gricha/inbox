@@ -133,6 +133,14 @@ export const SETTINGS = [
     help: "A background Claude Code session that gets the PRs you hand off merged. The desk starts it on your first hand-off, keeps it running and wakes it when something changes on a PR in Merging. Off: it's stopped and nothing wakes it.",
   },
   {
+    key: "agent.coordinator_bypass",
+    section: "agent",
+    label: "Coordinator skips permission prompts",
+    type: "boolean",
+    default: false,
+    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list (no comments, reviews or force pushes as you) still applies. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
+  },
+  {
     key: "policy.judge",
     section: "policy",
     label: "Let Claude sort everything on your desk",

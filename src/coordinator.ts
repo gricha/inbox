@@ -31,6 +31,8 @@ const DENY = [
 const ROLE =
   "You are my Review Desk coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the review-desk skill.";
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
+const PERMISSION = { bypass: "bypassPermissions", default: "default" } as const;
+type Mode = keyof typeof PERMISSION;
 // The desk's news for the owner's PR that's ready to merge but conflicts: it's in Merging only until GitHub sees it mergeable.
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
@@ -95,8 +97,9 @@ export class Coordinator {
     return this.desk.settings["agent.coordinator"];
   }
 
-  saved(): { id: string; url?: string } | null {
-    return this.desk.store.get(KEY) as { id: string; url?: string } | null;
+  // A record from before the bypass setting has no mode: that session was started in default.
+  saved(): { id: string; url?: string; mode?: Mode } | null {
+    return this.desk.store.get(KEY) as { id: string; url?: string; mode?: Mode } | null;
   }
 
   // [PR id, what changed], oldest first; only appended to until delivered.
@@ -163,10 +166,7 @@ export class Coordinator {
   tell(line: string): Promise<void> {
     claudeSpawn(claudeCommand(), [line]); // throws on what cmd.exe can't pass
     this.desk.store.set(ASKS, [...this.asks(), line]);
-    return (async () => {
-      await this.flushing;
-      await this.flush();
-    })();
+    return this.again();
   }
 
   untell(line: string): void {
@@ -223,6 +223,12 @@ export class Coordinator {
     return this.flushing;
   }
 
+  // After the run in progress: it may have read the asks or settings before they changed.
+  async again(): Promise<void> {
+    await this.flushing;
+    await this.flush();
+  }
+
   // A failure keeps what's waiting for the next wake or check.
   async run(): Promise<void> {
     try {
@@ -232,24 +238,37 @@ export class Coordinator {
       const news = this.news(); // after looking, so a wake that came meanwhile isn't left to the next check
       const asks = this.asks();
       const waiting = news.length > 0 || asks.length > 0 || this.asked;
+      const idle = !a?.status || a.status === "idle";
+      const mode: Mode = this.desk.settings["agent.coordinator_bypass"] ? "bypass" : "default";
+      const flags = ["--permission-mode", PERMISSION[mode]];
+      // A resumed session keeps the mode it started with; passing one makes claude start a copy with its history, so only to change it.
+      const switching = !!a && (this.saved()?.mode ?? "default") !== mode;
       // Busy, in a shell or waiting on a permission: it stays queued.
-      if (waiting && (!a?.status || a.status === "idle")) {
+      if (waiting && idle) {
         const text = this.message(news, asks);
         this.asked = false;
         // Created only with something to deliver: a scratch desk's would reach the owner's desk through its MCP tools.
-        if (!a) await this.launch(["--bg", "--name", NAME, "--remote-control", NAME, `${ROLE} ${text}`]);
+        if (!a)
+          await this.launch(
+            ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : []), `${ROLE} ${text}`],
+            mode,
+          );
         else {
           await this.halt(a);
-          await this.launch(["--resume", a.sessionId, "--bg", text]);
+          await this.launch(["--resume", a.sessionId, "--bg", ...(switching ? flags : []), text], mode);
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
-      } else if (a && !a.pid) await this.launch(["--resume", a.sessionId, "--bg"]); // no prompt, so no turn
+      } else if (a && (!a.pid || (switching && (idle || a.status === "waiting")))) {
+        // Stuck on a permission prompt is the case bypass is turned on for, so that one switches too.
+        await this.halt(a);
+        await this.launch(["--resume", a.sessionId, "--bg", ...(switching ? flags : [])], mode); // no prompt, so no turn
+      }
       const s = this.saved();
       if (s && !s.url) {
         const url = /https:\/\/claude\.ai\/code\/session_\w+/.exec(await claude(["logs", s.id]).catch(() => ""))?.[0];
         if (url) {
-          this.desk.store.set(KEY, { id: s.id, url });
+          this.desk.store.set(KEY, { ...s, url });
           this.desk.changed();
         }
       }
@@ -282,12 +301,13 @@ export class Coordinator {
   }
 
   // Keeps the id claude says it backgrounded: a copy's, if it made one.
-  async launch(args: string[]): Promise<void> {
+  async launch(args: string[], mode: Mode): Promise<void> {
     const out = await claude(args, this.dir());
     const id = /backgrounded\W+([\w-]+)/.exec(out)?.[1];
     if (!id) throw new Error(`claude didn't background it: ${out.trim().split("\n").at(-1) ?? ""}`);
-    if (id !== this.saved()?.id) {
-      this.desk.store.set(KEY, { id });
+    const s = this.saved();
+    if (id !== s?.id || mode !== s.mode) {
+      this.desk.store.set(KEY, id === s?.id ? { ...s, mode } : { id, mode });
       this.desk.changed();
     }
     const note = /^note: .*/m.exec(out)?.[0];
