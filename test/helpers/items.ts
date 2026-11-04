@@ -155,6 +155,14 @@ export class FakeGitHub implements GitHub {
     return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [] });
   }
 
+  lookupCalls: string[] = [];
+
+  lookup(repo: string, number: number): Promise<SearchHit | null> {
+    this.lookupCalls.push(`${repo}#${number}`);
+    const it = [...this.items.values()].find((i) => i.repo.toLowerCase() === repo.toLowerCase() && i.number === number);
+    return Promise.resolve(it ? { node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author } : null);
+  }
+
   rateLimit() {
     return null;
   }

@@ -373,6 +373,39 @@ test("branchPrs: one aliased query per 40 probes a repo; up drops a fork's PR on
   assert.doesNotMatch(calls[0]!.query, /mutation/);
 });
 
+test("lookup: one PR or issue by number, as a search hit; null when the repo or number doesn't exist", async () => {
+  const { gh, calls } = fakeGitHub((b) => {
+    if (b.variables.name === "gone")
+      return { data: { rateLimit: RL, repository: null }, errors: [{ type: "NOT_FOUND", message: "no repo" }] };
+    const node =
+      b.variables.number === 7
+        ? {
+            __typename: "Issue",
+            id: "I_7",
+            number: 7,
+            title: "Flaky",
+            updatedAt: "2026-11-02T00:00:00Z",
+            repository: { nameWithOwner: "getsentry/sentry" },
+            author: { __typename: "User", login: "dave" },
+          }
+        : null;
+    return { data: { rateLimit: RL, repository: { issueOrPullRequest: node } } };
+  });
+  assert.deepEqual(await gh.lookup("getsentry/sentry", 7), {
+    node_id: "I_7",
+    id: "getsentry/sentry#7",
+    kind: "issue",
+    updated_at: "2026-11-02T00:00:00Z",
+    author: "dave",
+    author_bot: false,
+    title: "Flaky",
+  });
+  assert.deepEqual([calls[0]!.variables.owner, calls[0]!.variables.name, calls[0]!.variables.number], ["getsentry", "sentry", 7]);
+  assert.doesNotMatch(calls[0]!.query, /mutation/);
+  assert.equal(await gh.lookup("getsentry/sentry", 8), null);
+  assert.equal(await gh.lookup("getsentry/gone", 1), null);
+});
+
 test("prContext: a PR's threads with ids and the code they're on, reviews, comments and recent commits, in one query", async () => {
   const who = (login: string, bot = false) => ({ __typename: bot ? "Bot" : "User", login });
   const { gh, calls } = fakeGitHub(() => ({

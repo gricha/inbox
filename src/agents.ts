@@ -88,16 +88,31 @@ function run(bin: string, args: string[], command: string): Promise<void> {
   });
 }
 
+function copySkill(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(SKILL)) fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(SKILL, f)));
+}
+
+// Connect's copy goes stale whenever the skill changes. Only on ~/.review-desk: a scratch or test desk never writes to ~/.claude.
+export function refreshSkills(deskHome: string): string[] {
+  const home = os.homedir();
+  if (path.resolve(deskHome) !== path.join(home, ".review-desk")) return [];
+  const done: string[] = [];
+  for (const d of Object.values(DRIVERS)) {
+    const dir = path.join(d.skills(home), "review-desk");
+    if (skillState(dir) !== "outdated") continue; // missing: an agent you didn't connect
+    copySkill(dir);
+    done.push(path.join(dir, "SKILL.md"));
+  }
+  return done;
+}
+
 // Installs or refreshes the skill, then registers the MCP server if it isn't yet.
 export async function connect(driver: string, url: string): Promise<AgentStatus> {
   const d = DRIVERS[driver];
   const s = status(driver, url);
   if (!d || !s.mcp || !s.skill) return s;
-  if (s.skill.state !== "installed") {
-    const dir = path.dirname(s.skill.path);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const f of fs.readdirSync(SKILL)) fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(SKILL, f)));
-  }
+  if (s.skill.state !== "installed") copySkill(path.dirname(s.skill.path));
   if (!s.mcp.connected) await run(d.bin, d.add(url), s.mcp.command);
   return status(driver, url);
 }

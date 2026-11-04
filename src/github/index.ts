@@ -10,6 +10,7 @@ import {
   detailsMine,
   FILES_SEARCH,
   LIGHT_SEARCH,
+  LOOKUP,
   PR_CONTEXT,
   TEAMS,
   VIEWER,
@@ -73,6 +74,7 @@ export interface GitHub {
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
   // open PRs based on it.
   branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
+  lookup(repo: string, number: number): Promise<SearchHit | null>; // one PR or issue by number; null when GitHub has none
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
@@ -318,6 +320,13 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     return [...out.values()];
   }
 
+  async function lookup(repo: string, number: number): Promise<SearchHit | null> {
+    const [owner, name] = repo.split("/");
+    const data = await client.query<{ repository: { issueOrPullRequest: RawHit | null } | null }>(LOOKUP, { owner, name, number });
+    const n = data.repository?.issueOrPullRequest;
+    return n ? toHit(n) : null;
+  }
+
   async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
@@ -351,6 +360,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     notifications,
     prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
     branchPrs,
+    lookup,
     rateLimit: () => client.rateLimit(),
   };
 }

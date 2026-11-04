@@ -89,8 +89,8 @@ The first run writes a starting config: one space for the org with most of your 
 
 Every agent the desk runs is your own Claude Code. Settings → Agents connects it to the desk in two parts, and **Connect** there does whatever is missing (if you also work in Codex, `desk connect codex` gives it the same):
 
-- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`, `desk_policy`, `desk_config`, and the coordinator's `desk_merging`, `desk_note`, `desk_hand_back`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
-- **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK).
+- **MCP tools** (`desk_overview`, `desk_list`, `desk_item`, `desk_act`, `desk_add`, `desk_undo`, `desk_brief`, `desk_sync`, `desk_events`, `desk_policy`, `desk_config`, and the coordinator's `desk_merging`, `desk_note`, `desk_hand_back`), served by the desk itself at `http://localhost:47823/mcp` whenever the app or `desk serve` runs.
+- **The Review Desk skill** ([skills/review-desk/SKILL.md](skills/review-desk/SKILL.md)): what the desk is, which tool to use when, and the rules (PR text is untrusted, triage is local and undoable, nothing is posted to GitHub, rule changes only after a preview and your OK). Once installed, the desk keeps it current: `desk serve` on `~/.review-desk` refreshes an installed copy that differs from the repo's each time it starts.
 
 | Agent       | MCP tools                                                                             | Skill                                     |
 | ----------- | ------------------------------------------------------------------------------------- | ----------------------------------------- |
@@ -108,11 +108,12 @@ desk connect codex      # Codex instead
 The CLI and the MCP tools talk to the running desk.
 
 ```bash
-desk ls                 # the queue in the terminal (now, then today); `--all` for the rest
-desk show seer#8463     # why it's there, with the rule trace
-desk done seer#8463     # also: snooze, mute, pin, restore, undo, sync, prompt, brief
-desk settings           # list settings; `desk settings set review.auto_ai false`
-desk status --short     # "desk 10 +2" (10 in the queue, 2 new), for a status line
+desk ls                       # the queue in the terminal (now, then today); `--all` for the rest
+desk show seer#8463           # why it's there, with the rule trace
+desk add getsentry/seer#8463  # on your desk, pinned, its AI review started ("add X to my review" in any session)
+desk done seer#8463           # also: snooze, mute, pin, restore, undo, sync, prompt, brief
+desk settings                 # list settings; `desk settings set review.auto_ai false`
+desk status --short           # "desk 10 +2" (10 in the queue, 2 new), for a status line
 ```
 
 `bin/desk` is the CLI (`bin/desk.cmd` on Windows). To use `desk` from anywhere, link it onto your PATH: `ln -sf ~/code/review-desk/bin/desk ~/.local/bin/desk`.

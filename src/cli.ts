@@ -30,6 +30,7 @@ const USAGE = `usage: desk <command>
   status [--short]                    counts per board; --short prints the status-line text
   ls [board|focus] [--all] [--json]   list cards (default focus); --all adds later and fyi
   show <ref> [--json]                 one item: why, facts, rule trace
+  add <ref>                           put a PR or issue on your desk (fetched if new, pinned) and start its pre-review
   done|mute|unmute|pin|unpin|restore <ref>
   snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, or ISO time
   undo [seq]                          undo the last action (or the one with that number)
@@ -90,6 +91,7 @@ const ARITY: Record<string, [number, number]> = {
   connect: [0, 1],
   install: [0, 0],
   uninstall: [0, 0],
+  add: [1, 1],
   done: [1, 1],
   mute: [1, 1],
   unmute: [1, 1],
@@ -248,6 +250,14 @@ const act =
     x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
     return 0;
   };
+
+async function add(x: Ctx): Promise<number> {
+  const r = await api.add(x.args[0]!);
+  const d = r.item;
+  const ai = d.generating ? ", AI review started" : "";
+  x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${ai}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
+  return 0;
+}
 
 async function status(x: Ctx): Promise<number> {
   if (x.opts.short) {
@@ -439,6 +449,11 @@ async function serve(x: Ctx): Promise<number> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`bad port: ${raw}`);
   const { startServer } = await import("./server.ts");
   const srv = await startServer({ port, open: !!x.opts.open });
+  try {
+    for (const f of agents.refreshSkills(srv.desk.home)) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
+  } catch (e) {
+    srv.desk.log(`couldn't refresh the Review Desk skill: ${(e as Error).message}`);
+  }
   await new Promise<void>((resolve) => {
     process.once("SIGINT", resolve);
     process.once("SIGTERM", resolve);
@@ -457,6 +472,7 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
   config,
   settings,
   connect,
+  add,
   done: act("done"),
   mute: act("mute"),
   unmute: act("unmute"),

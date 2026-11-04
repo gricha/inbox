@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { connect, status } from "../src/agents.ts";
+import { connect, refreshSkills, status } from "../src/agents.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "review-desk", "SKILL.md"), "utf8");
 const MCP = "http://localhost:47961/mcp";
@@ -109,4 +109,19 @@ test("connect says what to run when the CLI is missing or fails", { skip: proces
   await assert.rejects(connect("codex", MCP), {
     message: `codex failed: config.toml: bad TOML. Run it yourself: codex mcp add review-desk --url ${MCP}`,
   });
+});
+
+test("the owner's desk refreshes an installed skill that's out of date, never installs one, and a scratch desk touches neither", () => {
+  const old = SKILL.replace("Review Desk", "Old Desk");
+  write(join(".claude", "skills", "review-desk", "SKILL.md"), old);
+  const codexSkill = join(home, ".agents", "skills", "review-desk", "SKILL.md");
+
+  assert.deepEqual(refreshSkills(join(home, "scratch-desk")), []);
+  assert.deepEqual(refreshSkills(join(tmpdir(), ".review-desk")), [], "a .review-desk outside HOME isn't the owner's");
+  assert.equal(readFileSync(claudeSkill(), "utf8"), old, "a scratch or test desk leaves it alone");
+
+  assert.deepEqual(refreshSkills(join(home, ".review-desk")), [claudeSkill()]);
+  assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
+  assert.equal(existsSync(codexSkill), false, "a missing one is Connect's to install");
+  assert.deepEqual(refreshSkills(join(home, ".review-desk") + "/"), [], "current: nothing to do");
 });

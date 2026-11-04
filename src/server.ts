@@ -103,6 +103,13 @@ export function createApp(desk: Desk, port: number): Hono {
     if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
     return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, fromDesk(c) ? undefined : "agent") });
   });
+  // desk_add and `desk add`: a pin plus GitHub reads, so agents may call it.
+  app.post("/api/add", async (c) => {
+    ready();
+    const { id } = await c.req.json<{ id?: unknown }>().catch((): { id?: unknown } => ({}));
+    if (typeof id !== "string" || !id) throw new DeskError(400, "need { id }: owner/repo#123 or a GitHub URL");
+    return c.json({ ok: true, ...(await desk.add(id)) });
+  });
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
     ready();

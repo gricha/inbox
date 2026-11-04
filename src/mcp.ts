@@ -7,7 +7,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createClient, type DeskClient } from "./client.ts";
 import { judgeText } from "./judge.ts";
-import type { ActivityEvent, Card, InflightRow, JudgeStatus, Placement, Stack } from "./types.ts";
+import type { ActivityEvent, Card, InflightRow, ItemDetail, JudgeStatus, Placement, Stack } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
 const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
@@ -171,8 +171,7 @@ async function listText(api: DeskClient, board: string | undefined, buckets: Lis
   return head + "\n" + untrusted([...cards.map(cardLine), json(cards.map(compact))]);
 }
 
-async function itemText(api: DeskClient, ref: string): Promise<string> {
-  const d = await api.item(ref);
+function itemText(d: ItemDetail): string {
   const c = d.card;
   // Merging: the user's own PR, which the coordinator has; desk_act's done, snooze and mute don't apply.
   const flight = c.inflight ? " · merging: the user's PR, handed off for merge (desk_merging)" : "";
@@ -226,6 +225,21 @@ async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[nu
         ? ` until ${s.snooze_until}${s.snooze_on_activity ? " or activity" : ""}`
         : "";
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
+}
+
+// What desk_add started is the agent's next step: desk_brief waits on a review being written, and has one that's written.
+async function addText(api: DeskClient, ref: string): Promise<string> {
+  const r = await api.add(ref);
+  const d = r.item;
+  const ai =
+    d.card.kind !== "pr"
+      ? ""
+      : d.generating
+        ? " Its AI review is being written; desk_brief waits for it."
+        : d.ai && !d.ai_stale
+          ? " Its AI review is ready: desk_brief."
+          : " No AI review started (the user's own PR, or review.auto_ai is off); desk_brief writes one.";
+  return `added ${d.card.id} to the user's desk, pinned.${ai} Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n${itemText(d)}`;
 }
 
 // A PR in Merging's state, as the coordinator needs it to get it merged.
@@ -297,7 +311,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
       inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
       annotations: readOnly,
     },
-    ({ ref }) => run(() => itemText(api, ref)),
+    ({ ref }) => run(async () => itemText(await api.item(ref))),
   );
 
   server.registerTool(
@@ -313,6 +327,17 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ ref, action, until }) => run(() => actText(api, ref, action, until)),
+  );
+
+  server.registerTool(
+    "desk_add",
+    {
+      description:
+        "Add a PR or issue to the user's desk (\"add X to my review\"): fetched read only if the desk doesn't hold it, and pinned so it stays on their main page. For a PR it also starts the pre-review, as opening it in the desk would: its diff and conversations fetched, its AI review and Claude's read of what waits on the user. Local only; nothing is sent to GitHub. Returns the item and an undo seq.",
+      inputSchema: { ref: z.string().describe("owner/repo#123 or a GitHub URL; repo#123 only for an item already on the desk") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    ({ ref }) => run(() => addText(api, ref)),
   );
 
   server.registerTool(
