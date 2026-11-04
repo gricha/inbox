@@ -1715,7 +1715,7 @@ kbd {
   margin: 8px 0 0 14px;
 }
 
-/* Risk scales low → medium → high in colour and in a three-step meter, so medium reads at a glance, not only high. */
+/* The meter tells medium from high without colour: in light and sand, amber and red are the same lightness. */
 .risk {
   display: inline-flex;
   align-items: baseline;
@@ -1832,7 +1832,7 @@ kbd {
   color: inherit;
 }
 
-/* A row's call to action off the cursor: tinted, so every row's one action shows without competing with the filled one. */
+/* Tinted off the cursor, so each row's action shows without competing with the filled one. */
 .line .line-cta:not(.primary) {
   border-color: transparent;
   background: var(--accent-wash);
@@ -3129,15 +3129,6 @@ kbd {
   font-size: 13.5px;
 }
 
-.rv-ai .d-head {
-  margin: 0;
-}
-
-.rv-ai h3.d-head {
-  margin-top: 6px;
-}
-
-/* The AI section has no heading: its verdict leads it, a step under the PR's title. */
 .rv-verdict {
   display: flex;
   flex-wrap: wrap;
@@ -3151,13 +3142,14 @@ kbd {
   letter-spacing: -0.01em;
 }
 
-.rv-verdict .v-skim {
-  color: var(--ink-2);
-  font-weight: 600;
+.rv-verdict .v-skim,
+.rv-verdict .v-skip {
+  font-size: 15px;
+  font-weight: 500;
 }
 
-.rv-verdict .v-skip {
-  font-weight: 550;
+.rv-verdict .v-skim {
+  color: var(--ink-2);
 }
 
 .sk-verdict {

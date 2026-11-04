@@ -867,7 +867,6 @@ function AiSection({
 }) {
   return (
     <section className="rv-ai" aria-label="AI review">
-      {/* Not "reading it": that's the conversations' line, and no heading says which section this is. */}
       {busy && <p className="quiet">Claude is reviewing it. The notes land in the code below in a minute or two.</p>}
       {!busy && error && (
         <p>
