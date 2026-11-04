@@ -53,6 +53,10 @@
   --ref-w: 124px;
   --gap: 14px;
 
+  /* A row's type grows with the window: its floor at 780px, its cap past 1600px. */
+  --title-size: clamp(17px, 15px + 0.25vw, 19px);
+  --meta-size: clamp(14px, 12.5px + 0.2vw, 15px);
+
   color-scheme: light;
 }
 
@@ -439,7 +443,7 @@ kbd {
 }
 
 /* With the sidebar showing, the filter starts on the queue column's edge. */
-@media (width > 820px) {
+@media (width > 1000px) {
   .topbar {
     padding-left: max(20px, calc((100% - var(--col-w)) / 2 + 24px));
   }
@@ -454,13 +458,6 @@ kbd {
   .topbar .icon.to-settings,
   .topbar .tb-flight {
     display: none;
-  }
-}
-
-/* Without the sidebar, the desktop app on macOS draws its traffic lights over the top bar. */
-@media (width <= 820px) {
-  :root[data-shell="desktop"][data-platform="darwin"] .topbar {
-    padding-left: 86px;
   }
 }
 
@@ -776,7 +773,7 @@ kbd {
   min-width: calc-size(max-content, min(size, 40%, 24ch));
   overflow: hidden;
   color: var(--ink);
-  font-size: 17px;
+  font-size: var(--title-size);
   font-weight: 500;
   letter-spacing: -0.008em;
   text-overflow: ellipsis;
@@ -791,7 +788,7 @@ kbd {
 .line-note,
 .line-age {
   color: var(--pencil);
-  font-size: 14px;
+  font-size: var(--meta-size);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -931,6 +928,11 @@ kbd {
   box-shadow: none;
 }
 
+/* The fill is its cursor, as on a row. */
+.queue .fold:focus-visible {
+  outline: none;
+}
+
 /* Later's groups open and close on their heading. */
 .group-toggle {
   display: inline-flex;
@@ -944,8 +946,10 @@ kbd {
   cursor: pointer;
 }
 
+/* Folded, a group steps back. */
 .group-toggle[aria-expanded="false"] {
-  color: var(--ink-2);
+  color: var(--pencil);
+  font-weight: 500;
 }
 
 .group-toggle:disabled {
@@ -955,6 +959,11 @@ kbd {
 .later .group {
   display: grid;
   gap: 4px;
+}
+
+/* Clearly more space before a heading than after it, so each sits with its own rows. */
+.later.queue {
+  gap: 20px;
 }
 
 .quiet-note {
@@ -1023,7 +1032,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 48px;
+  height: calc(22px + 1.5 * var(--title-size));
   padding: 0 12px;
 }
 
@@ -1057,7 +1066,7 @@ kbd {
   margin: 0 0 6px;
   padding: 0 12px;
   color: var(--ink);
-  font-size: 17px;
+  font-size: var(--title-size);
   font-weight: 650;
   letter-spacing: -0.01em;
   scroll-margin-top: 64px;
@@ -1528,7 +1537,26 @@ kbd {
 }
 
 .lane-coord-error {
+  color: var(--ink-2);
+}
+
+.lane-coord-error b {
   color: var(--red);
+  font-weight: 600;
+}
+
+/* Each row's title takes one width, so its ref and what it waits on start in one column, selected or not. */
+.lane-row .line-main {
+  container-type: inline-size;
+}
+
+.lane-row .line-title {
+  flex: 0 1 auto;
+  width: 48cqi;
+}
+
+.lane-row .line-note {
+  flex: 1 1 0;
 }
 
 /* A stack's rows together, bottom first, under one quiet line. */
@@ -1549,15 +1577,24 @@ kbd {
   margin-top: 20px;
 }
 
-/* The selected row's note and keys, under its title. */
+/* The selected row's note and keys, under its title, on the row's fill. */
+.lane-row.sel {
+  background: var(--sel);
+}
+
 .lane-more {
   padding: 2px 12px 10px;
+}
+
+.lane-more .card-keys {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .lane-why {
   margin: 4px 0 8px;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: var(--meta-size);
 }
 
 .keys-head.lane-keys {
@@ -1869,6 +1906,23 @@ kbd {
   color: var(--on-accent);
 }
 
+/* Only a call to action is a shape; the rest are text that fills on hover. */
+.line .line-ask,
+.line .line-more,
+.lane-more .act:not(.primary, .armed),
+.review .actions .act:not(.primary, .armed) {
+  border-color: transparent;
+  background: none;
+}
+
+.line .line-ask:hover:not(:disabled),
+.line .line-more:hover:not(:disabled),
+.lane-more .act:not(.primary, .armed):hover:not(:disabled),
+.review .actions .act:not(.primary, .armed):hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
 .trace-toggle {
   margin-top: 8px;
 }
@@ -1961,6 +2015,7 @@ kbd {
 
 .input {
   width: 100%;
+  max-width: 480px;
   height: 34px;
   padding: 0 11px;
   border: 1px solid var(--control);
@@ -2353,9 +2408,10 @@ kbd {
   font-size: 12.5px;
 }
 
+/* Under the top bar's rule, so a jump to a section shows one hairline, not two. */
 .s-section {
   padding: 36px 0 12px;
-  scroll-margin-top: 60px;
+  scroll-margin-top: 51px;
 }
 
 .s-section + .s-section {
@@ -2399,24 +2455,13 @@ kbd {
 
 .s-fields {
   margin-top: 24px;
-  border-top: 1px solid var(--rule);
 }
 
+/* One column at every width: the label, its help at a reading measure, then its control. */
 .setting {
   display: grid;
-  grid-template-columns: minmax(0, 250px) minmax(0, 1fr);
-  gap: 10px 32px;
+  gap: 8px;
   padding: 20px 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-/* The next section's top rule closes the last one; two hairlines 13px apart read as a double rule. */
-.s-fields .setting:last-child {
-  border-bottom: 0;
-}
-
-.setting.st-text {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .setting.st-boolean .s-control {
@@ -2438,13 +2483,14 @@ kbd {
 
 .s-label {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 550;
 }
 
 .s-help {
+  max-width: 64ch;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -2632,7 +2678,7 @@ kbd {
   margin-top: 6px;
 }
 
-/* Below 820px, where the sidebar's Merging entry is hidden: the same, in pencil. */
+/* Below 1000px, where the sidebar's Merging entry is hidden: the same, in pencil. */
 .tb-flight {
   display: inline-flex;
   align-items: center;
@@ -3018,7 +3064,7 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 14px;
-  font-size: 13px;
+  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
 }
 
 /* The header has room for the whole ref, so nothing truncates. */
@@ -3042,7 +3088,7 @@ kbd {
 .rv-title {
   margin: 0;
   color: var(--ink);
-  font-size: 22px;
+  font-size: clamp(22px, 18px + 0.5vw, 26px);
   font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.015em;
@@ -3058,7 +3104,7 @@ kbd {
   margin-left: -18px;
   clip-path: inset(0 0 0 18px);
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
 }
 
 .rv-meta > span {
@@ -3126,7 +3172,7 @@ kbd {
   gap: 8px;
   max-width: 780px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: clamp(13.5px, 12px + 0.2vw, 15px);
 }
 
 .rv-verdict {
@@ -3137,14 +3183,24 @@ kbd {
 }
 
 .rv-verdict .verdict {
-  font-size: 18px;
+  font-size: clamp(18px, 16px + 0.25vw, 20px);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 
+/* Next to the verdict at nearly its size, so a medium or high risk is the first colour you see. */
+.rv-verdict .risk {
+  font-size: clamp(15.5px, 14px + 0.2vw, 17px);
+}
+
+.rv-verdict .meter > span {
+  width: 5px;
+  height: 13px;
+}
+
 .rv-verdict .v-skim,
 .rv-verdict .v-skip {
-  font-size: 15px;
+  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
   font-weight: 500;
 }
 
@@ -3153,7 +3209,7 @@ kbd {
 }
 
 .sk-verdict {
-  font-size: 18px;
+  font-size: clamp(18px, 16px + 0.25vw, 20px);
 }
 
 .sk-verdict .sk {
@@ -3163,7 +3219,7 @@ kbd {
 
 .rv-summary {
   color: var(--ink);
-  font-size: 14.5px;
+  font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.5;
 }
 
@@ -3181,7 +3237,6 @@ kbd {
   padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule-strong);
   color: var(--ink-2);
-  font-size: 13.5px;
 }
 
 /* What reviewers said: each one waiting on you is a margin note with Claude's read and a reply box; the rest fold into one line. */
@@ -3192,7 +3247,7 @@ kbd {
   max-width: 780px;
   padding: 0 12px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: clamp(13.5px, 12px + 0.2vw, 15px);
 }
 
 .rv-convo .d-head {
@@ -3230,7 +3285,7 @@ kbd {
 
 .cv-gist {
   color: var(--ink);
-  font-size: 14.5px;
+  font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.45;
 }
 
@@ -3493,6 +3548,14 @@ kbd {
   --diffs-light-bg: var(--sheet);
   --diffs-dark-bg: var(--sheet);
 
+  /* The theme's own red and green, which Pierre mixes into each changed line; its own are louder than anything else here. */
+  --diffs-addition-color-override: var(--green);
+  --diffs-deletion-color-override: var(--red);
+  --diffs-bg-separator-override: var(--paper);
+
+  /* No inset above the first line, so a diff that starts folded starts with its band at the frame's edge. */
+  --diffs-gap-block: 0px;
+
   display: block;
   overflow: hidden;
   border-radius: 8px;
@@ -3622,14 +3685,6 @@ kbd {
     height: 60vh;
   }
 
-  .setting {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-  }
-}
-
-/* Narrow windows: no sidebar; Settings sections become one dropdown, not a strip of tabs. */
-@media (width <= 820px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3640,6 +3695,11 @@ kbd {
 
   .settings {
     padding: 0;
+  }
+
+  /* Without the sidebar, the desktop app on macOS draws its traffic lights over the top bar. */
+  :root[data-shell="desktop"][data-platform="darwin"] .topbar {
+    padding-left: 86px;
   }
 }
 

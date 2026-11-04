@@ -1,6 +1,7 @@
 import type { CoordinatorView, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
+import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
@@ -80,7 +81,7 @@ function Coordinator({ c }: { c: CoordinatorView }) {
   if (c.error)
     return (
       <p className="lane-coord lane-coord-error">
-        The coordinator can't run: {c.error} <kbd>w</kbd> tries again.
+        <b>The coordinator can't run:</b> {withCode(c.error)} <kbd>w</kbd> tries again.
       </p>
     );
   if (!c.id)
@@ -101,8 +102,8 @@ function Coordinator({ c }: { c: CoordinatorView }) {
                 </a>,
               ]
             : []),
-          <span key="attach">
-            <kbd>c</kbd> copy <code>claude attach {c.id}</code>
+          <span key="attach" title={`claude attach ${c.id}`}>
+            <kbd>c</kbd> copy attach command
           </span>,
           <span key="wake">
             <kbd>w</kbd> wake it

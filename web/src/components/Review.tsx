@@ -75,7 +75,7 @@ const DIFF: FileDiffOptions<NoteMeta, undefined> = {
   diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word-alt",
-  hunkSeparators: "line-info",
+  hunkSeparators: "line-info-basic",
   overflow: "wrap",
   disableFileHeader: true,
   lineHoverHighlight: "disabled",
@@ -731,7 +731,9 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
               </p>
             </header>
           )}
-          <SkLines count={1} className="rv-convo sk-short" />
+          {(card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
+            <SkLines count={1} className="rv-convo sk-short" />
+          )}
           {ai || writing || none ? (
             <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} />
           ) : (
@@ -915,7 +917,7 @@ function AiSection({
             ))}
           {!stale && notes > 0 && (
             <p className="quiet">
-              {notes} {notes === 1 ? "note" : "notes"} on the changes below: <kbd>]</kbd> next, <kbd>[</kbd> previous.
+              {notes} {notes === 1 ? "note" : "notes"} in the code below.
             </p>
           )}
         </>

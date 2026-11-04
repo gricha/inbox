@@ -29,7 +29,7 @@ export function MoreButton({ className, onClick }: { className?: string; onClick
       aria-label="More on GitHub"
       onClick={onClick}
     >
-      <kbd className="dot-key">.</kbd>…
+      <kbd className="dot-key">.</kbd>More
     </button>
   );
 }

@@ -98,7 +98,7 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 820px the sidebar is gone: Later and Merging are reachable from here. */}
+        {/* Below 1000px the sidebar is gone: Later and Merging are reachable from here. */}
         {route.name !== "later" && (
           <a className="tb-flight" href="#/later" title="Sorted away (g l)">
             Later
