@@ -25,26 +25,26 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 
 **MCP tools** (preferred). `ref` is `owner/repo#123`, `repo#123` when unique, or a GitHub URL.
 
-| Tool             | Use it to                                                                                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ---------------  | --------------------------------------------------------------------------------------------------------------------------------                         |
-| `desk_overview`  | Get counts per board, sync status and config errors. Start here if unsure.                                                                               |
-| `desk_list`      | List cards. Default: the queue, in order. Pass `board` and `buckets` (`later`, `fyi`, `hide`, `cleared`) for the rest.                                   |
-| `desk_item`      | See one item: facts, bucket and why on each board, the rule trace, its AI review, and the hand-off prompt.                                               |
-| `desk_act`       | `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`. Local only. Returns an undo `seq`.                                         |
-| `desk_add`       | Add a PR or issue to the user's desk: fetched if new, pinned, and a PR's pre-review started (AI review, Claude's read). Local. Returns an undo `seq`.    |
-| `desk_undo`      | Undo an action by `seq`. Without `seq` it undoes the latest action from anyone, so always pass it.                                                       |
-| `desk_brief`     | A PR's AI review: look / skim / skip, risk, summary, concerns, notes. Often ready already; else a model call, cached per commit.                         |
-| `desk_sync`      | Sync with GitHub now (read only). The desk also syncs on its own every minute or two.                                                                    |
-| `desk_events`    | Read what happened (asked, approved, pushed, CI red, merged, resolved). Pass `last_seq` back as `after`; `wait` up to 60 s.                              |
-| `desk_merging`   | The user's PRs in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base (stacked or not), the repo's merge method, the last note. |
-| `desk_note`      | A status line on a PR in Merging (`ref`, `text`), shown on its row with its age. Only the latest shows.                                                  |
-| `desk_hand_back` | Give a PR in Merging back to the user (`ref`, `why`, one line): it leaves Merging for the top of the queue with that reason.                             |
-| `desk_answer`    | Answer the user's ask (`ask_id` from the wake, `text`): it shows under their ask in the desk and notifies them.                                          |
-| `desk_inquire`   | Ask the user a question in their desk instead of in chat (`question`, `context`, `options`, `from`): a row on their main page and a notification.        |
-| `desk_inquiry`   | The user's answer to your `desk_inquire` (`id`, `wait` up to 60 s): their answer, none yet, or that they dismissed it.                                   |
-| `desk_policy`    | `get` the policy (fenced) with its hash and the judge's status; `set` with the whole new `text` and `base` = that hash.                                  |
-| `desk_config`    | `get` config.toml with its hash; `preview` a full new text (what moves, nothing saved); `save` it with `base` = the hash.                                |
+| Tool             | Use it to                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ---------------  | --------------------------------------------------------------------------------------------------------------------------------                                                                       |
+| `desk_overview`  | Get counts per board, sync status and config errors. Start here if unsure.                                                                                                                             |
+| `desk_list`      | List cards. Default: the queue, in order. Pass `board` and `buckets` (`later`, `fyi`, `hide`, `cleared`) for the rest.                                                                                 |
+| `desk_item`      | See one item: facts, bucket and why on each board, the rule trace, its AI review, and the hand-off prompt.                                                                                             |
+| `desk_act`       | `done`, `snooze` (`until` a time, `activity`, or `ci`/`push`/`approved`/`ready`/`conflict` from the card's `wake_on`), `mute`, `unmute`, `pin`, `unpin`, `restore`. Local only. Returns an undo `seq`. |
+| `desk_add`       | Add a PR or issue to the user's desk: fetched if new, pinned, and a PR's pre-review started (AI review, Claude's read). Local. Returns an undo `seq`.                                                  |
+| `desk_undo`      | Undo an action by `seq`. Without `seq` it undoes the latest action from anyone, so always pass it.                                                                                                     |
+| `desk_brief`     | A PR's AI review: look / skim / skip, risk, summary, concerns, notes. Often ready already; else a model call, cached per commit.                                                                       |
+| `desk_sync`      | Sync with GitHub now (read only). The desk also syncs on its own every minute or two.                                                                                                                  |
+| `desk_events`    | Read what happened (asked, approved, pushed, CI red, merged, resolved). Pass `last_seq` back as `after`; `wait` up to 60 s.                                                                            |
+| `desk_merging`   | The user's PRs in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base (stacked or not), the repo's merge method, the last note.                                               |
+| `desk_note`      | A status line on a PR in Merging (`ref`, `text`), shown on its row with its age. Only the latest shows.                                                                                                |
+| `desk_hand_back` | Give a PR in Merging back to the user (`ref`, `why`, one line): it leaves Merging for the top of the queue with that reason.                                                                           |
+| `desk_answer`    | Answer the user's ask (`ask_id` from the wake, `text`): it shows under their ask in the desk and notifies them.                                                                                        |
+| `desk_inquire`   | Ask the user a question in their desk instead of in chat (`question`, `context`, `options`, `from`): a row on their main page and a notification.                                                      |
+| `desk_inquiry`   | The user's answer to your `desk_inquire` (`id`, `wait` up to 60 s): their answer, none yet, or that they dismissed it.                                                                                 |
+| `desk_policy`    | `get` the policy (fenced) with its hash and the judge's status; `set` with the whole new `text` and `base` = that hash.                                                                                |
+| `desk_config`    | `get` config.toml with its hash; `preview` a full new text (what moves, nothing saved); `save` it with `base` = the hash.                                                                              |
 
 `until`: `1h`, `3h`, `2d`, `tomorrow` (09:00), `monday` (09:00), `activity` (until someone else acts), `YYYY-MM-DD`, or an ISO time. `done` also lasts until someone else acts.
 

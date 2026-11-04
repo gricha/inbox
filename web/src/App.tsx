@@ -14,7 +14,7 @@ import type {
   SettingsView,
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
-import { cls, copyText, shortId, shortRef, SNOOZE } from "./format.ts";
+import { cls, copyText, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { adoptTheme } from "./theme.ts";
 import {
@@ -40,6 +40,7 @@ import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { rowActions } from "./components/More.tsx";
+import { RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
@@ -111,6 +112,8 @@ export function App() {
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [moreFor, setMoreFor] = useState<string | null>(null); // the row whose More menu is open
+  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number } | null>(null); // a row's right-click menu
+  const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
   const [answers, setAnswers] = useState<Record<string, string>>({}); // what you're writing to each, kept if a send fails
@@ -325,6 +328,8 @@ export function App() {
   useEffect(() => {
     actedRef.current = {};
     setActed({});
+    stay.current = null;
+    setMenuAt(null);
   }, [route]);
   const onLater = route.name === "later";
   const onArchive = route.name === "archive";
@@ -358,6 +363,51 @@ export function App() {
   const knownRef = useRef(known);
   knownRef.current = known;
 
+  // The cards of the rows on screen: Merging's on its page, else the list's, so a stale Merging card never stands in.
+  const onScreen = useMemo(
+    () => (onLane ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
+    [onLane, laneRows, page],
+  );
+  // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu.
+  function rowMenu(x: number, y: number, target: Element | null): boolean {
+    const id = target?.closest<HTMLElement>(".line[data-id]")?.dataset.id;
+    const c = onScreen.find((card) => card.id === id);
+    if (!c) {
+      stay.current = null;
+      setMenuAt(null);
+      return false;
+    }
+    stay.current = c.id;
+    if (onLane) setLaneSel(c.id);
+    else setSelected(c.id);
+    setSnoozeFor(null);
+    setMoreFor(null);
+    setMenuAt({ id: c.id, x, y });
+    return true;
+  }
+  const rowMenuRef = useRef(rowMenu);
+  rowMenuRef.current = rowMenu;
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (t?.closest(".ctx, .scrim-clear")) return; // the open menu's own
+      if (rowMenuRef.current(e.clientX, e.clientY, t)) e.preventDefault();
+    };
+    window.addEventListener("contextmenu", h);
+    return () => {
+      window.removeEventListener("contextmenu", h);
+    };
+  }, []);
+  const menuCard = menuAt ? onScreen.find((c) => c.id === menuAt.id) : undefined;
+  const closeMenu = useCallback(() => {
+    stay.current = null;
+    setMenuAt(null);
+  }, []);
+  // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
+  useEffect(() => {
+    if (menuAt && !menuCard) closeMenu();
+  }, [menuAt, menuCard, closeMenu]);
+
   // The PR row you rest on, by j/k or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
     route.name === "inflight"
@@ -381,7 +431,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (onLane && laneCur) document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
+    if (onLane && laneCur && stay.current !== laneCur.card.id)
+      document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [onLane, laneCur]);
 
   // Keep the selection by id across refreshes; if its card is gone, take whatever now sits at its old position.
@@ -412,7 +463,7 @@ export function App() {
 
   // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
-    if (!selected || (route.name !== "queue" && route.name !== "later")) return;
+    if (!selected || (route.name !== "queue" && route.name !== "later") || stay.current === selected) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
     const head = el?.closest(".group")?.querySelector(".group-head");
     if (!el) return;
@@ -479,7 +530,7 @@ export function App() {
         await sleep(Math.max(0, 200 - (Date.now() - started)));
         setView((v) => v && removeCard(v, c.id));
       }
-      const verb = action === "snooze" ? `Snoozed ${SNOOZE.find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
+      const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
       flash(`${verb}: ${shortRef(c)}`, false, true);
     } catch (e) {
       flash(message(e), true);
@@ -902,11 +953,11 @@ export function App() {
       return;
     }
     if (snoozeFor) {
-      const o = SNOOZE.find((x) => x.key === k);
       const c = flat.find((x) => x.id === snoozeFor);
       if (!c)
         setSnoozeFor(null); // its card left the list; don't hold the keyboard
       else {
+        const o = snoozeOptions(c).find((x) => x.key === k);
         if (o) void act(c, "snooze", o.until);
         else if (k === "Escape" || k === "s") setSnoozeFor(null);
         e.preventDefault();
@@ -970,6 +1021,7 @@ export function App() {
   // The key after g is the chord's, whatever it means on its own (i in a review, b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
+    if (menuAt) return; // a row's menu has the keyboard, Esc included
     // Esc closes the composer, wherever focus is, before a review or a page reads it as "go back".
     if (asking && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
@@ -1233,6 +1285,27 @@ export function App() {
             </button>
           )}
         </div>
+      )}
+      {menuAt && menuCard && (
+        <RowMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          card={menuCard}
+          x={menuAt.x}
+          y={menuAt.y}
+          me={me}
+          run={run}
+          act={(c, a, until) => {
+            void act(c, a, until);
+          }}
+          github={(c, a) => {
+            void github(c, a);
+          }}
+          reopen={(x, y) => {
+            const under = document.elementsFromPoint(x, y).find((n) => !n.closest(".ctx, .scrim-clear"));
+            rowMenu(x, y, under ?? null);
+          }}
+          onClose={closeMenu}
+        />
       )}
       {help && (
         <Help

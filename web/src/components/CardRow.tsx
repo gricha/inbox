@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Card, GitHubAction, ItemDetail } from "../../../src/types.ts";
-import { age, clearedText, cls, SNOOZE } from "../format.ts";
+import { age, clearedText, cls, snoozeOptions } from "../format.ts";
 import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
@@ -175,6 +175,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
       {/* Under the row, so it never covers the row itself. */}
       {ctx.snoozeFor === card.id && (
         <SnoozeMenu
+          card={card}
           onPick={(until) => {
             ctx.snooze(card, until);
           }}
@@ -185,7 +186,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   );
 }
 
-function SnoozeMenu({ onPick, onClose }: { onPick: (until: string) => void; onClose: () => void }) {
+function SnoozeMenu({ card, onPick, onClose }: { card: Card; onPick: (until: string) => void; onClose: () => void }) {
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     menu.current?.scrollIntoView({ block: "nearest" });
@@ -195,12 +196,12 @@ function SnoozeMenu({ onPick, onClose }: { onPick: (until: string) => void; onCl
       <div className="scrim-clear" role="presentation" onClick={onClose} />
       <div ref={menu} className="popover" role="menu" aria-label="Snooze">
         <div className="pop-title">Snooze</div>
-        {SNOOZE.map((o) => (
+        {snoozeOptions(card).map((o) => (
           <button
             key={o.key}
             type="button"
             role="menuitem"
-            className="pop-item"
+            className={cls("pop-item", o.key === "6" && "pop-sep")}
             onClick={() => {
               onPick(o.until);
             }}

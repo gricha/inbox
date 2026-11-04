@@ -2323,6 +2323,95 @@ kbd {
   background: var(--wash);
 }
 
+/* The snooze menu's times, then what this item can wait on. */
+.pop-item.pop-sep {
+  position: relative;
+  margin-top: 9px;
+}
+
+.pop-sep::before,
+.ctx-sep::before {
+  position: absolute;
+  top: -5px;
+  right: 8px;
+  left: 8px;
+  border-top: 1px solid var(--rule);
+  content: "";
+}
+
+/* A row's right-click menu, at the pointer; Snooze opens to its side. */
+.ctx {
+  position: fixed;
+  outline: none;
+  z-index: 30;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+}
+
+.ctx-group + .ctx-group {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--rule);
+}
+
+.ctx-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-item > span:first-child {
+  flex: 1;
+}
+
+.ctx-item:hover,
+.ctx-item:focus-visible,
+.ctx-item.on {
+  outline: none;
+  background: var(--wash);
+}
+
+.ctx-caret {
+  margin-left: -4px;
+  color: var(--pencil);
+}
+
+.ctx-subwrap {
+  position: relative;
+}
+
+.ctx-sub {
+  position: absolute;
+  top: -6px;
+  left: calc(100% + 6px);
+  min-width: 250px;
+}
+
+.ctx.flip .ctx-sub {
+  right: calc(100% + 6px);
+  left: auto;
+}
+
+.ctx-item.ctx-sep {
+  margin-top: 9px;
+}
+
 /* Letters differ in width too: m would push its label past c's and d's. */
 .more-pop .pop-item kbd {
   min-width: 1.6ch;

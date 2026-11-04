@@ -131,6 +131,7 @@ test("desk_item shows the trace and the hand-off prompt inside the fence", async
   );
   assert.match(r.text, /hand-off prompt:\nReview https:\/\/github\.com\/getsentry\/seer\/pull\/8949\n/);
   assert.equal(lastCall().path, "/api/item?id=seer%238949");
+  assert.deepEqual(jsonBlock(r.text).card.wake_on, ["ci", "push"], "what desk_act's snooze can wait on");
 
   const amb = await call("desk_item", { ref: "sentry#1" });
   assert.equal(amb.isError, true);
@@ -153,6 +154,12 @@ test("desk_act posts local triage", async () => {
     (await call("desk_act", { ref: "seer#8949", action: "snooze", until: "activity" })).text,
     /^snooze getsentry\/seer#8949 until someone else acts\. /,
   );
+  assert.match(
+    (await call("desk_act", { ref: "seer#8949", action: "snooze", until: "ci" })).text,
+    /^snooze getsentry\/seer#8949 until CI passes\. /,
+  );
+  // Still snoozed until CI passes, but the mute isn't what lasts that long.
+  assert.match((await call("desk_act", { ref: "seer#8949", action: "mute" })).text, /^mute getsentry\/seer#8949\. Local state only/);
   await call("desk_act", { ref: "seer#8949", action: "done", until: "3h" });
   assert.deepEqual(lastCall().body, { id: "seer#8949", action: "done" });
 

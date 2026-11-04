@@ -311,6 +311,7 @@ export interface ItemState {
   done_at: string | null; // hidden until someone else acts after this time
   snooze_until: string | null;
   snooze_on_activity: boolean; // also wake on activity
+  snooze_when: string | null; // snoozed until this happens instead: an Until ("push:<sha>": a head past that commit)
   muted: boolean;
   pinned: boolean;
   seen_at: string | null;
@@ -331,7 +332,16 @@ export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
 export type GitHubAction = "close" | "draft" | "merge" | "reopen" | "request_changes";
 export const GITHUB_ACTIONS: GitHubAction[] = ["close", "draft", "merge", "reopen", "request_changes"];
-// snooze `until`: "1h" | "3h" | "tomorrow" (09:00) | "monday" (09:00) | "activity" | ISO time
+// snooze `until`: "1h" | "3h" | "tomorrow" (09:00) | "monday" (09:00) | "activity" | ISO time | an Until
+// What a snooze can wait on instead of a time: the item stays in Later until it happens.
+export type Until = "ci" | "push" | "approved" | "ready" | "conflict";
+export const UNTIL: Record<Until, string> = {
+  ci: "CI passes",
+  push: "new commits",
+  approved: "it's approved",
+  ready: "it's ready for review",
+  conflict: "the merge conflict is fixed",
+};
 
 // ---------------------------------------------------------------------------
 // Classification
@@ -407,6 +417,8 @@ export interface Card {
   pinned: boolean;
   status: Status;
   snooze_until: string | null;
+  snooze_when: Until | null; // snoozed until this happens
+  wake_on?: Until[]; // what a snooze can wait on now; absent when nothing
   done_at?: string; // when you marked it done, or did what took it off your desk; only while it's done
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only

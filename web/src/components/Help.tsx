@@ -9,12 +9,13 @@ const KEYS: [string[], string][] = [
   [["a"], "The row's call to action: your draft, ready for review on GitHub"],
   [["m"], "Your own PR: hand it off for merge. The coordinator gets it merged"],
   [["e", "d"], "Done: it comes back when someone else acts"],
-  [["s"], "Snooze, then 1 to 5 to pick how long"],
+  [["s"], "Snooze: 1 to 5 for how long, 6 on until CI passes, new commits, an approval…"],
   [["m"], "Someone else's: mute or unmute"],
   [["."], "More on GitHub: close, draft, reopen, or merge now without the coordinator"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter; on Later, back to the queue"],
   [["?"], "This list"],
+  [["right-click"], "The row's actions in a menu"],
 ];
 
 const MORE_KEYS: [string, string][] = [

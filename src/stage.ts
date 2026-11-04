@@ -15,13 +15,18 @@ export function verdicts(it: Item, self: string): { approved_by: string[]; chang
   return { approved_by: by("approved"), changes_by: by("changes_requested") };
 }
 
+// Approved as the desk says it: a collaborator approved, nobody asks for changes, and GitHub wants no other approval.
+export function approved(it: Item, self: string): boolean {
+  const v = verdicts(it, self);
+  return !v.changes_by.length && v.approved_by.length > 0 && it.review_decision !== "required";
+}
+
 // `self` is the person whose own review doesn't count: the PR's author, or you on yours.
 export function stage(it: Item, self: string): Stage | undefined {
   if (it.kind !== "pr") return undefined;
   if (it.state !== "open") return it.state;
   if (it.draft) return "draft";
-  const v = verdicts(it, self);
-  if (v.changes_by.length) return "changes requested";
+  if (verdicts(it, self).changes_by.length) return "changes requested";
   // GitHub says "required" while the branch still wants another approval or a code owner's.
-  return v.approved_by.length && it.review_decision !== "required" ? "approved" : "waiting for review";
+  return approved(it, self) ? "approved" : "waiting for review";
 }

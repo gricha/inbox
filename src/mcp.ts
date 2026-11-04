@@ -7,7 +7,17 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createClient, type DeskClient } from "./client.ts";
 import { judgeText } from "./judge.ts";
-import type { ActivityEvent, Card, InflightRow, ItemDetail, JudgeStatus, Placement, Stack } from "./types.ts";
+import {
+  UNTIL,
+  type ActivityEvent,
+  type Card,
+  type InflightRow,
+  type ItemDetail,
+  type JudgeStatus,
+  type Placement,
+  type Stack,
+  type Until,
+} from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
 const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
@@ -47,6 +57,8 @@ const compact = (c: Card) => ({
   new: c.new,
   pinned: c.pinned,
   boards: c.boards,
+  ...(c.snooze_when && { snooze_when: c.snooze_when }),
+  ...(c.wake_on && { wake_on: c.wake_on }), // what desk_act's snooze can wait on now
   ...(c.stack && { stack: c.stack }),
 });
 
@@ -175,7 +187,7 @@ function itemText(d: ItemDetail): string {
   const c = d.card;
   // Merging: the user's own PR, which the coordinator has; desk_act's done, snooze and mute don't apply.
   const flight = c.inflight ? " · merging: the user's PR, handed off for merge (desk_merging)" : "";
-  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}\n${c.url}`;
+  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_when ? ` · snoozed until ${UNTIL[c.snooze_when]}` : c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}\n${c.url}`;
   return (
     head +
     "\n" +
@@ -221,9 +233,11 @@ async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[nu
   const when =
     u === "activity"
       ? " until someone else acts"
-      : u && s.snooze_until
-        ? ` until ${s.snooze_until}${s.snooze_on_activity ? " or activity" : ""}`
-        : "";
+      : u && s.snooze_when
+        ? ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`
+        : u && s.snooze_until
+          ? ` until ${s.snooze_until}${s.snooze_on_activity ? " or activity" : ""}`
+          : "";
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
 }
 
@@ -321,7 +335,12 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
       inputSchema: {
         ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
         action: z.enum(ACTIONS),
-        until: z.string().optional().describe("snooze only: 1h, 3h, tomorrow (default), monday, activity, or an ISO time"),
+        until: z
+          .string()
+          .optional()
+          .describe(
+            "snooze only: 1h, 3h, tomorrow (default), monday, activity, an ISO time, or until it happens: ci (CI passes), push (new commits), approved, ready (out of draft), conflict (fixed); the item's card lists which in wake_on",
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },

@@ -41,14 +41,14 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `m`       | your own PR: hand off for merge; `b` brings it back to desk    |
 | `.`       | more, on GitHub: close, convert to draft, merge now, reopen    |
 | `e` / `d` | done: hidden until someone else comments, reviews or pushes    |
-| `s`       | snooze: 1h, 3h, tomorrow, Monday, or until activity            |
+| `s`       | snooze: for a while, or until CI passes, new commits, approval |
 | `m` / `p` | someone else's: mute / pin                                     |
 | `u`       | undo                                                           |
 | `c`       | copy a review prompt to paste into a Claude session            |
 | `i`       | AI review: look / skim / skip, summary, concerns, notes        |
 | `/`       | filter · `r` sync · `,` settings · `g l` later · `?` all keys  |
 
-Done, snooze, mute and pin are local. Nothing is sent to GitHub.
+Right-click a row for the same actions in a menu. Snooze waits in Later until a time, until someone acts, or until the PR changes as you need: CI passes, new commits, it's approved, out of draft, the merge conflict fixed; then it's back on your desk. Done, snooze, mute and pin are local. Nothing is sent to GitHub.
 
 ## Rules
 

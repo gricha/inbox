@@ -1,6 +1,7 @@
 // Turns a GitHub item plus facts about you into the signals rules can test.
 import { areaFiles } from "./areas.ts";
-import type { Config, Context, FieldDoc, Item, ReviewState, Signals } from "./types.ts";
+import { approved } from "./stage.ts";
+import type { Config, Context, FieldDoc, Item, ReviewState, Signals, Until } from "./types.ts";
 
 export const FIELDS: FieldDoc[] = [
   { path: "item.kind", type: "string", doc: '"pr" or "issue"' },
@@ -222,4 +223,28 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
     others_at: others,
     waiting_since: requested && requestEvent ? requestEvent.at : item.created_at,
   };
+}
+
+// What a snooze can wait on for this item now: only what hasn't happened yet. `me`: you, whose own review doesn't approve.
+export function waitable(s: Signals, item: Item, me: string): Until[] {
+  if (s.item.kind !== "pr" || s.item.state !== "open") return [];
+  const out: Until[] = [];
+  if (s.pr.ci === "red" || s.pr.ci === "pending") out.push("ci");
+  if (!s.me.author && item.head_oid) out.push("push");
+  if (s.me.author && !approved(item, me)) out.push("approved");
+  if (!s.me.author && s.item.draft) out.push("ready");
+  if (s.pr.mergeable === "conflict") out.push("conflict");
+  return out;
+}
+
+// Whether what a snooze waits on has happened. Not while it's closed: it's in the Archive then, and reopened it still waits.
+export function happened(when: string, s: Signals, item: Item, me: string): boolean {
+  if (s.item.state !== "open") return false;
+  const [k, sha] = when.split(":");
+  if (k === "ci") return s.pr.ci === "green";
+  if (k === "push") return item.head_oid !== sha;
+  if (k === "approved") return approved(item, me);
+  if (k === "ready") return !s.item.draft;
+  if (k === "conflict") return s.pr.mergeable === "clean";
+  return true;
 }

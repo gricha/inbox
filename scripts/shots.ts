@@ -831,6 +831,20 @@ const SHOTS: Shot[] = [
   ]),
   // The More menu open in a review, its keys on it.
   { name: "more-menu", go: review("acme/worker#875", ["."]) },
+  // Right-click a row: its actions at the pointer, Snooze open to the side with what this PR can wait on.
+  {
+    name: "row-menu",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".line", { hasText: "Drop the legacy v1 auth" }).locator(".row-main").click({ button: "right" });
+      await page.locator(".ctx-has-sub").hover();
+      await page.locator(".ctx-sub").waitFor();
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+    },
+  },
   // a approves at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
   // answers. Last: its toast would sit over the next shot.
   {

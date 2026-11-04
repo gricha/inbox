@@ -11,7 +11,7 @@ import { DeskApiError, DeskDownError } from "./client.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { openCommand } from "./notify.ts";
-import type { Action, Bucket, Card, SettingDef, SettingValue } from "./types.ts";
+import { UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue, type Until } from "./types.ts";
 
 export interface Out {
   write(s: string): unknown;
@@ -32,7 +32,7 @@ const USAGE = `usage: desk <command>
   show <ref> [--json]                 one item: why, facts, rule trace
   add <ref>                           put a PR or issue on your desk (fetched if new, pinned) and start its pre-review
   done|mute|unmute|pin|unpin|restore <ref>
-  snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, or ISO time
+  snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, ISO time, or ci|push|approved|ready|conflict
   undo [seq]                          undo the last action (or the one with that number)
   sync                                sync with GitHub now (read only)
   prompt <ref>                        print the review hand-off prompt
@@ -152,7 +152,7 @@ function printCards(x: Ctx, groups: [Bucket, Card[], string?][]): void {
       const [t, w] = fit(plain(k.title), plain(k.why), x.width - refW - 4);
       const note =
         k.status !== "active"
-          ? `  [${k.status}${k.snooze_until ? ` until ${localTime(k.snooze_until)}` : ""}]`
+          ? `  [${k.status}${k.snooze_when ? ` until ${UNTIL[k.snooze_when]}` : k.snooze_until ? ` until ${localTime(k.snooze_until)}` : ""}]`
           : k.demoted
             ? `  (${k.demoted})`
             : "";
@@ -204,9 +204,11 @@ async function show(x: Ctx): Promise<number> {
   const k = d.card;
   const st = d.state;
   const statusText =
-    k.status === "snoozed"
-      ? `snoozed${st.snooze_until ? ` until ${localTime(st.snooze_until)}` : ""}${st.snooze_on_activity ? `${st.snooze_until ? " or" : " until"} activity` : ""}`
-      : k.status;
+    k.status === "snoozed" && k.snooze_when
+      ? `snoozed until ${UNTIL[k.snooze_when]}`
+      : k.status === "snoozed"
+        ? `snoozed${st.snooze_until ? ` until ${localTime(st.snooze_until)}` : ""}${st.snooze_on_activity ? `${st.snooze_until ? " or" : " until"} activity` : ""}`
+        : k.status;
   x.out(`${x.c.bold(k.id)}  ${plain(k.title)}`);
   x.out(x.c.dim(k.url));
   x.out(
@@ -244,9 +246,11 @@ const act =
     const when =
       until === "activity"
         ? " until someone else acts"
-        : until && s.snooze_until
-          ? ` until ${localTime(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`
-          : "";
+        : until && s.snooze_when
+          ? ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`
+          : until && s.snooze_until
+            ? ` until ${localTime(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`
+            : "";
     x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
     return 0;
   };

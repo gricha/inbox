@@ -6,7 +6,7 @@ const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 // The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does
 // it; u undoes a close or a draft. x only opens the box to write in.
-const MORE: Record<GitHubAction, { key: string; label: string }> = {
+export const MORE: Record<GitHubAction, { key: string; label: string }> = {
   close: { key: "c", label: "Close" },
   draft: { key: "d", label: "Convert to draft" },
   merge: { key: "m", label: "Merge now" },

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
 import type { ActivityEvent, Card, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, modelName, shortId, shortRef, tilde } from "../src/format.ts";
+import { age, ago, clearedText, eventText, modelName, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
   authProblem,
@@ -60,6 +60,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     pinned: false,
     status: "active",
     snooze_until: null,
+    snooze_when: null,
     verdict: null,
     resolved: null,
     resolved_at: null,
@@ -537,6 +538,14 @@ test("formatting", () => {
   assert.equal(shortId("getsentry/seer#9085"), "seer#9085");
   assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_until: null })), "snoozed until activity");
   assert.equal(clearedText(card("a/b#1", { status: "muted" })), "muted");
+  assert.equal(clearedText(card("a/b#1", { status: "snoozed", snooze_when: "ci" })), "snoozed until CI passes");
+  // The times keep 1 to 5; what the item can wait on follows from 6.
+  assert.deepEqual(
+    snoozeOptions(card("a/b#1", { wake_on: ["ci", "push"] }))
+      .map((o) => `${o.key} ${o.label}`)
+      .slice(4),
+    ["5 Until activity", "6 Until CI passes", "7 Until new commits"],
+  );
   // Times read as the snooze menu writes them.
   const sat = new Date(2026, 9, 31, 9, 0).toISOString();
   assert.match(clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat })), /^snoozed until .*\b9:00 or new activity$/);

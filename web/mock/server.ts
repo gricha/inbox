@@ -10,6 +10,7 @@ import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
+import { waitable } from "../../src/signals.ts";
 import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
@@ -61,7 +62,9 @@ import type {
   Stack,
   Status,
   TraceStep,
+  Until,
 } from "../../src/types.ts";
+import { UNTIL } from "../../src/types.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -561,6 +564,20 @@ const SEEDS: Seed[] = [
     size: [3, 410, 18],
     on: { "work-review": [] },
     st: { snooze_until: new Date(T0 + 20 * HOUR).toISOString() },
+  },
+  {
+    repo: "acme/web",
+    n: 2231,
+    title: "Swap the date picker for the native input",
+    author: "jordan",
+    age: 30,
+    wait: 26,
+    by: "jordan",
+    team: "frontend",
+    size: [140, 210, 7],
+    ci: "red",
+    on: { "work-review": [] },
+    st: { snooze_when: "ci" },
   },
   {
     repo: "acme/worker",
@@ -1230,6 +1247,7 @@ const recs: Rec[] = SEEDS.map((s) => {
       done_at: null,
       snooze_until: null,
       snooze_on_activity: false,
+      snooze_when: null,
       muted: false,
       pinned: false,
       seen_at: null,
@@ -1397,6 +1415,7 @@ function status(r: Rec): Status {
   const st = r.state;
   if (st.muted) return "muted";
   if (st.done_at && r.activity_at <= st.done_at) return "done";
+  if (st.snooze_when) return "snoozed";
   if (st.snooze_on_activity && r.activity_at <= r.snoozed_at) return "snoozed";
   if (st.snooze_until && Date.parse(st.snooze_until) > Date.now()) return "snoozed";
   return "active";
@@ -1520,6 +1539,7 @@ function cardOf(r: Rec, p: Placement): Card {
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
   const actions = actionsOf(r);
   const st = stage(itemOf(r), me.author ? ME : s.author);
+  const wake = waitable(sig, itemOf(r), ME);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
     id: r.id,
@@ -1550,6 +1570,8 @@ function cardOf(r: Rec, p: Placement): Card {
     pinned: r.state.pinned,
     status: status(r),
     snooze_until: r.state.snooze_until,
+    snooze_when: status(r) === "snoozed" && r.state.snooze_when ? (r.state.snooze_when.split(":")[0] as Until) : null,
+    ...(wake.length > 0 && !inFlight(r) && { wake_on: wake }),
     ...(status(r) === "done" && r.state.done_at ? { done_at: r.state.done_at } : {}),
     verdict: reviews.get(r.id)?.head_oid === itemOf(r).head_oid ? reviews.get(r.id)!.verdict : null,
     resolved: s.resolved ?? null,
@@ -2061,12 +2083,23 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
   const now = new Date().toISOString();
   const st = r.state;
   if (action === "done") st.done_at = now;
-  else if (action === "snooze") {
-    Object.assign(st, snoozeUntil(until ?? "tomorrow"));
+  else if (action === "snooze" && until && Object.hasOwn(UNTIL, until)) {
+    if (!waitable(signals(r), itemOf(r), ME).includes(until as Until))
+      throw new HttpError(409, `${r.id} can't wait until ${UNTIL[until as Until]}`);
+    Object.assign(st, {
+      snooze_when: until === "push" ? `push:${itemOf(r).head_oid}` : until,
+      snooze_until: null,
+      snooze_on_activity: false,
+      done_at: null,
+    });
+    r.snoozed_at = now;
+  } else if (action === "snooze") {
+    Object.assign(st, snoozeUntil(until ?? "tomorrow"), { snooze_when: null });
     r.snoozed_at = now;
   } else if (action === "mute" || action === "unmute") st.muted = action === "mute";
   else if (action === "pin" || action === "unpin") st.pinned = action === "pin";
-  else if (action === "restore") Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, muted: false });
+  else if (action === "restore")
+    Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
   else if (action === "seen") st.seen_at = now;
   else if (action === "inflight") {
     if (r.seed.author !== ME || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")

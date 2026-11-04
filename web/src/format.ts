@@ -1,4 +1,4 @@
-import type { ActivityEvent, Bucket, Card } from "../../src/types.ts";
+import { UNTIL, type ActivityEvent, type Bucket, type Card } from "../../src/types.ts";
 
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");
@@ -52,6 +52,7 @@ export function modelName(id: string): string {
 export function clearedText(c: Card): string {
   if (c.status === "muted") return "muted";
   if (c.status === "done") return "done until someone else acts";
+  if (c.status === "snoozed" && c.snooze_when) return `snoozed until ${UNTIL[c.snooze_when]}`;
   if (c.status === "snoozed") return c.snooze_until ? `snoozed until ${when(c.snooze_until)} or new activity` : "snoozed until activity";
   return "";
 }
@@ -108,6 +109,12 @@ export const SNOOZE: { key: string; until: string; label: string; toast: string 
   { key: "3", until: "tomorrow", label: "Tomorrow 9:00", toast: "until tomorrow 9:00 (or new activity)" },
   { key: "4", until: "monday", label: "Monday 9:00", toast: "until Monday 9:00 (or new activity)" },
   { key: "5", until: "activity", label: "Until activity", toast: "until someone acts" },
+];
+
+// The times, then what this item can wait on (6 on), as the desk says: it stays in Later until that happens.
+export const snoozeOptions = (c: Card): typeof SNOOZE => [
+  ...SNOOZE,
+  ...(c.wake_on ?? []).map((u, i) => ({ key: String(6 + i), until: u, label: `Until ${UNTIL[u]}`, toast: `until ${UNTIL[u]}` })),
 ];
 
 export async function copyText(text: string): Promise<void> {

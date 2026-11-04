@@ -52,6 +52,7 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     pinned: false,
     status: "active",
     snooze_until: null,
+    snooze_when: null,
     verdict: null,
     resolved: null,
     resolved_at: null,
@@ -65,6 +66,7 @@ export const CARDS = {
     new: true,
     chips: ["CI red", "+120 −30"],
     ci: "red",
+    wake_on: ["ci", "push"],
   }),
   today: card("getsentry/sentry#101", "today", "Fix the flaky snuba test that only fails on Tuesdays", "your team was asked · 1d"),
   later: card("getsentry/sentry#202", "later", "Bump some dependency", "team ask, not close"),
@@ -162,6 +164,7 @@ function state(id: string, patch: Partial<ItemState> = {}): ItemState {
     done_at: null,
     snooze_until: null,
     snooze_on_activity: false,
+    snooze_when: null,
     muted: false,
     pinned: false,
     seen_at: null,
@@ -276,13 +279,16 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
         body.action === "snooze"
           ? body.until === "activity"
             ? { done_at: new Date().toISOString() }
-            : { snooze_until: "2026-10-28T09:00:00.000Z", snooze_on_activity: true }
+            : body.until === "ci"
+              ? { snooze_when: "ci" }
+              : { snooze_until: "2026-10-28T09:00:00.000Z", snooze_on_activity: true }
           : body.action === "done"
             ? { done_at: new Date().toISOString() }
-            : body.action === "mute"
-              ? { muted: true }
+            : // Snoozed until CI passes before: a mute or a pin leaves that as it is.
+              body.action === "mute"
+              ? { muted: true, snooze_when: "ci" }
               : body.action === "pin"
-                ? { pinned: true }
+                ? { pinned: true, snooze_when: "ci" }
                 : {};
       return reply(200, { ok: true, state: state(id, patch), undo_seq: 7 });
     }

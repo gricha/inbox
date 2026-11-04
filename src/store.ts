@@ -33,6 +33,7 @@ export const emptyState = (id: string): StateRow => ({
   done_at: null,
   snooze_until: null,
   snooze_on_activity: false,
+  snooze_when: null,
   snoozed_at: null,
   acked_at: null,
   muted: false,
@@ -68,6 +69,7 @@ export class Store {
     );
     if (!cols.has("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
     if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
+    if (!cols.has("snooze_when")) this.db.exec("ALTER TABLE state ADD COLUMN snooze_when TEXT");
     const hitCols = this.db
       .prepare("PRAGMA table_info(hits)")
       .all()
@@ -261,10 +263,10 @@ export class Store {
   putState(s: StateRow): void {
     this.db
       .prepare(
-        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at, snooze_when) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET done_at = excluded.done_at, snooze_until = excluded.snooze_until, snooze_on_activity = excluded.snooze_on_activity,
            snoozed_at = excluded.snoozed_at, acked_at = excluded.acked_at, muted = excluded.muted, pinned = excluded.pinned, seen_at = excluded.seen_at,
-           inflight_at = excluded.inflight_at`,
+           inflight_at = excluded.inflight_at, snooze_when = excluded.snooze_when`,
       )
       .run(
         s.id,
@@ -277,6 +279,7 @@ export class Store {
         s.pinned ? 1 : 0,
         s.seen_at,
         s.inflight_at ?? null, // undo entries logged before in-flight existed don't carry it
+        s.snooze_when ?? null, // nor, from before snoozing until something happens, this
       );
   }
 
@@ -404,6 +407,7 @@ function rowToState(r: Record<string, unknown>): StateRow {
     done_at: (r.done_at as string) ?? null,
     snooze_until: (r.snooze_until as string) ?? null,
     snooze_on_activity: r.snooze_on_activity === 1,
+    snooze_when: (r.snooze_when as string | null) ?? null,
     snoozed_at: (r.snoozed_at as string) ?? null,
     acked_at: (r.acked_at as string) ?? null,
     muted: r.muted === 1,

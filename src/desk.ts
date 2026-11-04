@@ -49,9 +49,11 @@ import type {
   Signals,
   Stack,
   Status,
+  Until,
 } from "./types.ts";
+import { UNTIL } from "./types.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
-import { analyze, FIELDS, type Analysis } from "./signals.ts";
+import { analyze, FIELDS, happened, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
@@ -785,7 +787,12 @@ export class Desk {
     const items = this.store.items();
     for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
-      const state = states.get(item.id) ?? emptyState(item.id);
+      let state = states.get(item.id) ?? emptyState(item.id);
+      // Once it happens the snooze is over, so CI going red again later doesn't snooze it again.
+      if (state.snooze_when && happened(state.snooze_when, analysis.signals, item, ctx.me)) {
+        state = { ...state, snooze_when: null, snoozed_at: null };
+        this.store.putState(state);
+      }
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
       const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
       const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
@@ -891,6 +898,7 @@ export class Desk {
     if (it.threads_unresolved > 0) chips.push(`${it.threads_unresolved} unresolved`);
     if (it.kind === "pr") chips.push(`+${it.additions} −${it.deletions}`);
     const me = e.analysis.signals.me;
+    const wake = e.inflight ? [] : waitable(e.analysis.signals, it, this.me());
     const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
     const by = p && !e.inflight ? placedBy(p) : undefined; // your PR in Merging is the coordinator's
     const stack = stackRef(snap.stacks, it.id);
@@ -927,6 +935,8 @@ export class Desk {
       pinned: e.state.pinned,
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
+      snooze_when: e.status === "snoozed" && e.state.snooze_when ? (e.state.snooze_when.split(":")[0] as Until) : null,
+      ...(wake.length > 0 && { wake_on: wake }),
       ...(e.status === "done" && e.state.done_at ? { done_at: e.state.done_at } : {}),
       verdict: snap.reviews.get(it.id)?.head_oid === it.head_oid ? snap.reviews.get(it.id)!.verdict : null,
       resolved: e.resolved?.reason ?? null,
@@ -1600,6 +1610,7 @@ export class Desk {
         s.done_at = now.toISOString();
         s.acked_at = seen;
         s.snooze_until = null;
+        s.snooze_when = null;
         s.snoozed_at = null;
         break;
       case "snooze": {
@@ -1608,8 +1619,25 @@ export class Desk {
           s.done_at = now.toISOString();
           s.acked_at = seen;
           s.snooze_until = null;
+          s.snooze_when = null;
           break;
         }
+        if (Object.hasOwn(UNTIL, u)) {
+          const can = waitable(entry.analysis.signals, entry.item, this.me());
+          if (!can.includes(u as Until))
+            throw new DeskError(
+              409,
+              `${id} can't wait until ${UNTIL[u as Until]}${can.length ? `; it can until ${can.map((x) => UNTIL[x]).join(", ")}` : ""}`,
+            );
+          s.snooze_when = u === "push" ? `push:${entry.item.head_oid}` : u;
+          s.snooze_until = null;
+          s.snoozed_at = now.toISOString();
+          s.acked_at = seen;
+          s.snooze_on_activity = false;
+          s.done_at = null;
+          break;
+        }
+        s.snooze_when = null;
         s.snooze_until = parseUntil(u, now).toISOString();
         s.snoozed_at = now.toISOString();
         s.acked_at = seen;
@@ -1635,6 +1663,7 @@ export class Desk {
       case "restore":
         s.done_at = null;
         s.snooze_until = null;
+        s.snooze_when = null;
         s.snoozed_at = null;
         s.muted = false;
         break;
@@ -1647,7 +1676,7 @@ export class Desk {
         if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first (a)`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
-        Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
+        Object.assign(s, { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
         this.store.set(`sitter:${id}`, null); // a fresh start: no hand-back or note from last time
         break;
       case "takeback":
@@ -1706,7 +1735,7 @@ export class Desk {
     }
     // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
     const before = this.store.state(id);
-    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snoozed_at: null, muted: false });
+    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
     const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
     this.changed();
     if (this.snapshot().entries.get(id)!.item.kind === "pr") {
@@ -2189,6 +2218,7 @@ function countsOf(r: BoardResult): Record<Bucket, number> {
 function statusOf(s: StateRow, activityAt: string, now: Date): Status {
   if (s.muted) return "muted";
   if (s.done_at && activityAt <= (s.acked_at ?? s.done_at)) return "done";
+  if (s.snooze_when) return "snoozed"; // compute() ends it once it happens
   if (s.snooze_until && now.toISOString() < s.snooze_until && !(s.snooze_on_activity && activityAt > (s.acked_at ?? s.snoozed_at ?? "")))
     return "snoozed";
   return "active";
