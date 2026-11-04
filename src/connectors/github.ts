@@ -204,10 +204,13 @@ export class GitHubConnector implements Connector {
         }
       }
       const meta = desk.store.itemMeta();
-      const need = [...hits.values()].filter((h) => {
+      // An open pin no search returns (desk_add's) would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.
+      const off = [...desk.store.states().values()].filter((s) => s.pinned && !hits.has(s.id) && meta.has(s.id)).map((s) => s.id);
+      const pinned = [...desk.store.itemsById(off).values()].filter((i) => i.state === "open").map((i) => hitOf(i.id, meta.get(i.id)!));
+      const need = [...hits.values(), ...pinned].filter((h) => {
         const m = meta.get(h.id);
         if (!m || m.quiet || m.updated_at !== h.updated_at) return true;
-        const ttl = h.author.toLowerCase() === me ? 3 * 60_000 : 30 * 60_000;
+        const ttl = h.author.toLowerCase() === me || pinned.includes(h) ? 3 * 60_000 : 30 * 60_000;
         return now.getTime() - Date.parse(m.detail_at) > ttl;
       });
       const backfill = [...hits.values()].filter((h) => meta.get(h.id)?.lacks && !need.includes(h)).slice(0, BACKFILL);
@@ -233,12 +236,13 @@ export class GitHubConnector implements Connector {
         const kept = [...(listed.get(q) ?? [])].filter((id) => gone.has(id) && keep(id));
         desk.store.setHits(q, r.ids, r.total, iso, kept);
       }
-      desk.store.touchItems([...hits.keys()], iso);
+      const listedIds = new Set([...hits.keys(), ...pinned.map((h) => h.id)]);
+      desk.store.touchItems([...listedIds], iso);
       if (!desk.store.get("baseline_at")) desk.store.set("baseline_at", iso);
       const [firstError] = errors;
       if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
       desk.store.set("reconciled_at", iso);
-      const { fetched: filled, members } = await this.fillStacks(new Set(hits.keys()));
+      const { fetched: filled, members } = await this.fillStacks(listedIds);
       desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
       this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
       desk.store.set("synced_at", this.syncedAt);
@@ -319,6 +323,16 @@ export class GitHubConnector implements Connector {
       desk.store.set("stack_probes", asked);
     }
     return { fetched, members };
+  }
+
+  // Not stored quietly like a stack's members: you added it, so its events count and the notifications feed follows it.
+  async fetchOne(repo: string, number: number): Promise<string | null> {
+    const hit = await this.api.lookup(repo, number);
+    if (!hit) return null;
+    const [item] = await this.api.details([hit], this.desk.me());
+    if (!item) throw new Error(`couldn't fetch ${hit.id} from GitHub; try again`); // details skips a batch that failed
+    this.desk.ingest(this, [item]);
+    return item.id;
   }
 
   // One item's details now, outside the loops: after you approve it, so it resolves in seconds, not at the next pass.

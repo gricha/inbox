@@ -56,6 +56,7 @@ test("lists the tools", async () => {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     "desk_act",
+    "desk_add",
     "desk_answer",
     "desk_brief",
     "desk_config",
@@ -156,6 +157,19 @@ test("desk_act posts local triage", async () => {
   const bad = await call("desk_act", { ref: "seer#8949", action: "merge" });
   assert.equal(bad.isError, true);
   assert.notEqual(lastCall().body?.action, "merge");
+});
+
+test("desk_add says what it started and how to undo it, then the item as desk_item has it", async () => {
+  const r = await call("desk_add", { ref: "seer#8949" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/add", body: { id: "seer#8949" } });
+  assert.match(
+    r.text,
+    /^added getsentry\/seer#8949 to the user's desk, pinned\. Its AI review is being written; desk_brief waits for it\. Local state only; nothing was sent to GitHub\. Undo with desk_undo seq=8\.\ngetsentry\/seer#8949 · pr by octo · status active · pinned\n/,
+  );
+  assertFenced(r.text, "title: Flag provider client calls in unchecked paths");
+  const missing = await call("desk_add", { ref: "nope#1" });
+  assert.equal(missing.isError, true);
 });
 
 test("desk_policy: get fences the text and gives the hash; set needs that hash as base", async () => {
@@ -299,7 +313,7 @@ test("`desk mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 14);
+    assert.equal((await c.listTools()).tools.length, 15);
     const r = await c.callTool({ name: "desk_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

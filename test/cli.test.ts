@@ -197,6 +197,14 @@ test("done/mute/pin post the action", async () => {
   }
 });
 
+test("add posts the ref and says what it started", async () => {
+  const r = await run(["add", "seer#8949"]);
+  assert.equal(r.code, 0);
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/add", body: { id: "seer#8949" } });
+  assert.equal(r.out, "✓ added getsentry/seer#8949 to your desk, pinned, AI review started  (desk undo 8 to revert)\n");
+  assert.equal((await run(["add"])).code, 2);
+});
+
 test("snooze defaults to tomorrow and passes an explicit until", async () => {
   const r = await run(["snooze", "seer#8949"]);
   assert.equal(r.code, 0);

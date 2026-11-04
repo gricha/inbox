@@ -28,6 +28,11 @@ export interface ActResult {
   state: ItemState;
   undo_seq: number;
 }
+export interface AddResult {
+  ok: true;
+  item: ItemDetail;
+  undo_seq: number;
+}
 export interface StatusInfo {
   now: number;
   today: number;
@@ -103,6 +108,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
     undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
+    add: (ref: string) => call<AddResult>("POST", "/api/add", { id: ref }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
     getConfig: () => call<ConfigDoc>("GET", "/api/config"),
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
@@ -138,6 +144,7 @@ export const {
   item,
   act,
   undo,
+  add,
   sync,
   getConfig,
   previewConfig,

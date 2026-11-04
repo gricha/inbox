@@ -50,7 +50,7 @@ import type {
 } from "./types.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, type Analysis } from "./signals.ts";
-import { classify, placedBy, queueOrder, type BoardResult } from "./rules.ts";
+import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
@@ -128,6 +128,18 @@ interface Snapshot {
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
   stacks: Stacks;
 }
+
+// Without it a pin no board places (desk_add's, or one a board's search dropped) would be on no page at all.
+const ADDED: CompiledBoard = {
+  config: { id: "added", space: "", name: "Added", queries: [], rules: [], default: "today", default_why: "you added it", sort: "updated" },
+  filter: null,
+  priority: null,
+  rules: [],
+};
+const boardsOf = (loaded: LoadedConfig) => [...loaded.boards, ADDED];
+
+const normRef = (ref: string) => ref.trim().replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
+const REF = /^(?:(?:([\w.-]+)\/)?([\w.-]+)#|#)?(\d+)$/;
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
@@ -720,7 +732,7 @@ export class Desk {
     }
   }
 
-  // New on the queue once placed (not while Claude hasn't sorted it, nor by your own pin, nor your own draft: you just
+  // New on the queue once placed (not while Claude hasn't sorted it, nor what you pinned or added, nor your own draft: you just
   // opened it); a hand-back is on it, in Now. Per PR, not the one line per stack: a member coming to stand for it isn't news.
   notifyNew(): void {
     const cfg = this.loaded?.config;
@@ -728,7 +740,10 @@ export class Desk {
     const { now, today } = this.top(this.snapshot(), new Set());
     const me = this.me().toLowerCase();
     const queued = [...now, ...today]
-      .filter((c) => c.placed_by !== "pending" && c.placed_by !== "pin" && !(c.draft && c.author.toLowerCase() === me))
+      .filter(
+        (c) =>
+          c.placed_by !== "pending" && c.placed_by !== "pin" && c.board !== ADDED.config.id && !(c.draft && c.author.toLowerCase() === me),
+      )
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     const fresh = this.freshSince("notified_queue", queued);
     if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
@@ -805,10 +820,12 @@ export class Desk {
           return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
-    for (const board of loaded.boards) {
+    for (const board of boardsOf(loaded)) {
       const queries = this.gh.queriesFor(loaded, board);
       const ids = new Set<string>();
       for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
+      if (board === ADDED)
+        for (const [id, by] of pins) if (by === "them" && ![...boards.values()].some((b) => b.result.placements.has(id))) ids.add(id);
       // A kept item is only there to show as resolved.
       const list = [...ids]
         .map((id) => entries.get(id))
@@ -1110,7 +1127,7 @@ export class Desk {
     const loaded = this.requireConfig();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
     for (const bucket of ["now", "today"] as const) {
-      for (const board of loaded.boards) {
+      for (const board of boardsOf(loaded)) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
           const p = snap.best.get(id);
           if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
@@ -1130,7 +1147,7 @@ export class Desk {
     const sections: QueueView["sections"] = { ...this.top(snap, seen), later: [], fyi: [] };
     const hidden: Card[] = [];
     for (const bucket of ["later", "fyi", "hide"] as const) {
-      for (const board of loaded.boards) {
+      for (const board of boardsOf(loaded)) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
           const p = snap.best.get(id);
           if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
@@ -1152,7 +1169,7 @@ export class Desk {
         !!e.state.seen_at ||
         e.resolved?.reason === "no longer requested" ||
         e.resolved?.actor.toLowerCase() === this.me().toLowerCase());
-    for (const board of loaded.boards) {
+    for (const board of boardsOf(loaded)) {
       const b = snap.boards.get(board.config.id)!;
       for (const id of b.result.inactive) {
         if (seen.has(id)) continue;
@@ -1211,8 +1228,7 @@ export class Desk {
     this.requireConfig();
     const ids = [...this.snapshot().entries.keys()];
     if (ids.includes(ref)) return ref;
-    const r = ref.trim().replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
-    const m = /^(?:(?:([\w.-]+)\/)?([\w.-]+)#|#)?(\d+)$/.exec(r);
+    const m = REF.exec(normRef(ref));
     if (!m) throw new DeskError(404, `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL`);
     const [, owner, name, num] = m;
     const found = ids.filter((id) => {
@@ -1231,7 +1247,7 @@ export class Desk {
     const snap = this.snapshot();
     const id = this.resolve(ref);
     const e = snap.entries.get(id)!;
-    const placements = loaded.boards
+    const placements = boardsOf(loaded)
       .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
       .filter((p): p is Placement => p !== undefined);
     const { snoozed_at: _, acked_at: __, ...state } = e.state;
@@ -1646,6 +1662,40 @@ export class Desk {
     this.changed();
     const { snoozed_at: _, acked_at: __, ...state } = restored;
     return { id: ev.item_id, state, action: ev.action as Action };
+  }
+
+  async add(ref: string): Promise<{ item: ItemDetail; undo_seq: number }> {
+    this.requireConfig();
+    const r = normRef(ref);
+    if (!REF.test(r)) throw new DeskError(400, `can't read "${ref}"; use owner/repo#123 or a GitHub URL`);
+    let id: string;
+    try {
+      id = this.resolve(r);
+    } catch (e) {
+      if (!(e instanceof DeskError) || e.status !== 404) throw e;
+      const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
+      if (repo === undefined || num === undefined)
+        throw new DeskError(400, `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`);
+      const got = await this.gh.fetchOne(repo, Number(num)).catch((err: unknown) => {
+        throw new DeskError(502, (err as Error).message);
+      });
+      if (got === null) throw new DeskError(404, `GitHub has no PR or issue ${r}`);
+      this.changed();
+      id = got;
+    }
+    // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
+    const before = this.store.state(id);
+    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snoozed_at: null, muted: false });
+    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
+    this.changed();
+    if (this.snapshot().entries.get(id)!.item.kind === "pr") {
+      void this.prText(id).catch(() => {});
+      void this.convos.warm([id]);
+    }
+    // Not generate() as opening a review does: an agent may add many at once, and the pump keeps to AI_AT_ONCE.
+    this.pumpAi();
+    this.judge.pump();
+    return { item: this.item(id), undo_seq };
   }
 
   // ---------------------------------------------------------------- merging (in flight)

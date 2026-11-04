@@ -285,6 +285,12 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
                 : {};
       return reply(200, { ok: true, state: state(id, patch), undo_seq: 7 });
     }
+    case "POST /api/add": {
+      const r = resolve(body.id);
+      if (r.status !== 200) return reply(r.status, r.body);
+      const d = r.body as ItemDetail;
+      return reply(200, { ok: true, item: { ...d, card: { ...d.card, pinned: true }, generating: true }, undo_seq: 8 });
+    }
     case "POST /api/undo":
       return reply(200, { ok: true, id: CARDS.now.id, action: "done" });
     case "POST /api/sync":

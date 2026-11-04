@@ -107,6 +107,18 @@ export function branchPrs(dirs: ("up" | "down")[]): string {
 fragment B on PullRequest { __typename id number title updatedAt repository { nameWithOwner } author { __typename login } headRepository { nameWithOwner } }`;
 }
 
+// desk_add's way in for a PR or issue no search returned: the details query wants its node id.
+export const LOOKUP = `query($owner: String!, $name: String!, $number: Int!) {
+  ${RATE}
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on PullRequest { id number title updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on Issue { id number title updatedAt repository { nameWithOwner } author { __typename login } }
+    }
+  }
+}`;
+
 // A PR's conversation: its review threads (with ids to reply to), reviews, comments and recent commits.
 export const PR_CONTEXT = `query($id: ID!) {
   ${RATE}
