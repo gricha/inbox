@@ -13,12 +13,13 @@ function fakeFetch(reply: { status?: number; body: unknown }) {
   return { fetch: fn, calls };
 }
 
-test("the allowlist is exactly these mutations: approve, a reply or comment, ready for review, and the More menu's", () => {
+test("the allowlist is exactly these mutations: approve, a reply or comment, ready for review with its reviewers, and the More menu's", () => {
   assert.deepEqual(Object.keys(ALLOWED), [
     "approve",
     "reply",
     "comment",
     "ready",
+    "request_reviews",
     "close",
     "draft",
     "merge",
@@ -36,6 +37,10 @@ test("the allowlist is exactly these mutations: approve, a reply or comment, rea
   );
   assert.match(ALLOWED.comment, /^mutation DeskComment[^{]*\{\s*addComment\(input: \{ subjectId: \$subject, body: \$body \}\)/);
   assert.match(ALLOWED.ready, /^mutation DeskReady[^{]*\{\s*markPullRequestReadyForReview\(input: \{ pullRequestId: \$pr \}\)/);
+  assert.match(
+    ALLOWED.request_reviews,
+    /^mutation DeskRequestReviews[^{]*\{\s*requestReviews\(input: \{ pullRequestId: \$pr, userIds: \$users, teamIds: \$teams, union: true \}\)/,
+  );
   assert.match(ALLOWED.close, /^mutation DeskClose[^{]*\{\s*closePullRequest\(input: \{ pullRequestId: \$pr \}\)/);
   assert.match(ALLOWED.draft, /^mutation DeskDraft[^{]*\{\s*convertPullRequestToDraft\(input: \{ pullRequestId: \$pr \}\)/);
   assert.match(

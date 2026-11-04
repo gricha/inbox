@@ -406,6 +406,27 @@ test("lookup: one PR or issue by number, as a search hit; null when the repo or 
   assert.equal(await gh.lookup("getsentry/gone", 1), null);
 });
 
+test("reviewers: GitHub's suggestions that match what you typed first, then people and the org's teams, each once", async () => {
+  const u = (id: string, login: string, name: string | null = null) => ({ id, login, name });
+  const { gh, calls } = fakeGitHub(() => ({
+    data: {
+      rateLimit: RL,
+      repository: {
+        pullRequest: { suggestedReviewers: [{ reviewer: u("U_dana", "dana", "Dana Lee") }, { reviewer: u("U_sam", "sam") }] },
+        assignableUsers: { nodes: [u("U_dan", "dan"), u("U_dana", "dana", "Dana Lee")] },
+      },
+      organization: { teams: { nodes: [{ id: "T_1", slug: "data", name: "Data" }] } },
+    },
+  }));
+  assert.deepEqual(await gh.reviewers("acme/api", 7, "da"), [
+    { id: "U_dana", login: "dana", name: "Dana Lee", team: false, suggested: true },
+    { id: "U_dan", login: "dan", name: "", team: false, suggested: false },
+    { id: "T_1", login: "data", name: "Data", team: true, suggested: false },
+  ]);
+  assert.deepEqual(calls[0]!.variables, { owner: "acme", name: "api", number: 7, q: "da" });
+  assert.doesNotMatch(calls[0]!.query, /mutation/);
+});
+
 test("prContext: a PR's threads with ids and the code they're on, reviews, comments and recent commits, in one query", async () => {
   const who = (login: string, bot = false) => ({ __typename: bot ? "Bot" : "User", login });
   const { gh, calls } = fakeGitHub(() => ({

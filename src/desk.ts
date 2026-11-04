@@ -41,6 +41,7 @@ import type {
   PreviewResult,
   QueueView,
   ReviewFile,
+  Reviewer,
   ReviewView,
   SettingsView,
   SettingValue,
@@ -1931,8 +1932,9 @@ export class Desk {
     return { url };
   }
 
-  // POST /api/review/:id/ready: your own draft's "Ready for review" (a a), one of the desk's GitHub writes, on your keypress.
-  async markReady(ref: string): Promise<void> {
+  // POST /api/review/:id/ready: your own draft's "Ready for review" (a), one of the desk's GitHub writes, on your keypress,
+  // then a review request to whoever you picked with it (node ids from reviewers()).
+  async markReady(ref: string, ask?: { users: string[]; teams: string[] }): Promise<void> {
     const e = this.pr(ref);
     const id = e.item.id;
     if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
@@ -1941,15 +1943,38 @@ export class Desk {
     if (this.approving.has(id)) throw new DeskError(409, `already marking ${id} ready`);
     this.approving.add(id);
     try {
-      await this.writer.ready(e.item.node_id);
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't mark it ready: ${(err as Error).message}`);
+      try {
+        await this.writer.ready(e.item.node_id);
+      } catch (err) {
+        throw new DeskError(502, `GitHub didn't mark it ready: ${(err as Error).message}`);
+      }
+      this.store.logWrite(id, "ready", this.now().toISOString());
+      this.log(`marked ${id} ready for review on GitHub`);
+      const users = ask?.users ?? [];
+      const teams = ask?.teams ?? [];
+      const n = users.length + teams.length;
+      if (n > 0) {
+        try {
+          await this.writer.requestReviews(e.item.node_id, users, teams);
+        } catch (err) {
+          throw new DeskError(502, `Marked it ready, but GitHub didn't ask for the reviews: ${(err as Error).message}`);
+        }
+        this.store.logWrite(id, "request_reviews", this.now().toISOString());
+        this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+      }
     } finally {
       this.approving.delete(id);
+      void this.gh.refresh(id);
     }
-    this.store.logWrite(id, "ready", this.now().toISOString());
-    this.log(`marked ${id} ready for review on GitHub`);
-    void this.gh.refresh(id);
+  }
+
+  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first. Read only.
+  async reviewers(ref: string, q: string): Promise<Reviewer[]> {
+    const e = this.pr(ref);
+    if (!e.analysis.signals.me.author) throw new DeskError(409, `${e.item.id} isn't your PR`);
+    const me = this.me().toLowerCase();
+    const list = await this.gh.api.reviewers(e.item.repo, e.item.number, q.trim());
+    return list.filter((r) => r.team || r.login.toLowerCase() !== me);
   }
 
   // ---------------------------------------------------------------- config

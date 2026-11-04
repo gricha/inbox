@@ -1,7 +1,7 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
 import { buildAreas, type AreaPr } from "../areas.ts";
-import type { Areas, Context, Item, ReviewState } from "../types.ts";
+import type { Areas, Context, Item, Reviewer, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
 import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
 import {
@@ -12,6 +12,7 @@ import {
   LIGHT_SEARCH,
   LOOKUP,
   PR_CONTEXT,
+  REVIEWERS,
   TEAMS,
   VIEWER,
 } from "./queries.ts";
@@ -75,6 +76,7 @@ export interface GitHub {
   // open PRs based on it.
   branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
   lookup(repo: string, number: number): Promise<SearchHit | null>;
+  reviewers(repo: string, number: number, q: string): Promise<Reviewer[]>; // GitHub's suggestions first, then users, then teams
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
@@ -327,6 +329,31 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     return n ? toHit(n) : null;
   }
 
+  async function reviewers(repo: string, number: number, q: string): Promise<Reviewer[]> {
+    const [owner, name] = repo.split("/");
+    type U = { id: string; login: string; name: string | null };
+    const data = await client.query<{
+      repository: { pullRequest: { suggestedReviewers: { reviewer: U }[] } | null; assignableUsers: { nodes: U[] } } | null;
+      organization: { teams: { nodes: { id: string; slug: string; name: string }[] } } | null;
+    }>(REVIEWERS, { owner, name, number, q: q || null });
+    const user = (u: U, suggested: boolean): Reviewer => ({ id: u.id, login: u.login, name: u.name ?? "", team: false, suggested });
+    const needle = q.toLowerCase();
+    const suggested = (data.repository?.pullRequest?.suggestedReviewers ?? [])
+      .map((s) => user(s.reviewer, true))
+      .filter((r) => !needle || r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle));
+    const users = (data.repository?.assignableUsers.nodes ?? []).map((u) => user(u, false));
+    const teams = (data.organization?.teams.nodes ?? []).map((t) => ({
+      id: t.id,
+      login: t.slug,
+      name: t.name,
+      team: true,
+      suggested: false,
+    }));
+    const out = new Map<string, Reviewer>();
+    for (const r of [...suggested, ...users, ...teams]) if (!out.has(r.id)) out.set(r.id, r);
+    return [...out.values()];
+  }
+
   async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
@@ -361,6 +388,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
     branchPrs,
     lookup,
+    reviewers,
     rateLimit: () => client.rateLimit(),
   };
 }

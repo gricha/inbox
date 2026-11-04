@@ -1,4 +1,4 @@
-import type { Areas, Context, Item } from "../../src/types.ts";
+import type { Areas, Context, Item, Reviewer } from "../../src/types.ts";
 import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
@@ -153,6 +153,15 @@ export class FakeGitHub implements GitHub {
   prContext(nodeId: string): Promise<PrContext> {
     this.contextCalls.push(nodeId);
     return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [] });
+  }
+
+  // Who a test offers as reviewers, and what each search asked.
+  reviewerList: Reviewer[] = [];
+  reviewerCalls: string[] = [];
+
+  reviewers(repo: string, number: number, q: string): Promise<Reviewer[]> {
+    this.reviewerCalls.push(`${repo}#${number} ${q}`);
+    return Promise.resolve(this.reviewerList);
   }
 
   lookupCalls: string[] = [];

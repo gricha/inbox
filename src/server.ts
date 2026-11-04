@@ -110,6 +110,11 @@ export function createApp(desk: Desk, port: number): Hono {
     if (typeof id !== "string" || !id) throw new DeskError(400, "need { id }: owner/repo#123 or a GitHub URL");
     return c.json({ ok: true, ...(await desk.add(id)) });
   });
+  // Who you can ask to review your PR, as you type: a path of its own, since the review's GET takes any id.
+  app.get("/api/reviewers/:id{.+}", async (c) => {
+    ready();
+    return c.json(await desk.reviewers(c.req.param("id"), c.req.query("q") ?? ""));
+  });
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
     ready();
@@ -141,8 +146,16 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your own draft's Ready for review, from the desk's own window only.
   app.post("/api/review/:id{.+}/ready", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a a)");
-    await desk.markReady(c.req.param("id"));
+    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a)");
+    const b = await c.req.json<{ users?: unknown; teams?: unknown }>().catch((): { users?: unknown; teams?: unknown } => ({}));
+    const ids = (v: unknown): string[] | null => {
+      if (v === undefined) return [];
+      return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
+    };
+    const users = ids(b.users);
+    const teams = ids(b.teams);
+    if (!users || !teams) throw new DeskError(400, "users and teams are lists of node ids");
+    await desk.markReady(c.req.param("id"), { users, teams });
     return c.json({ ok: true });
   });
   // The More menu's GitHub writes (close, draft, merge, reopen, request changes), from the desk's own window only.

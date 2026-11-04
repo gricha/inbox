@@ -33,7 +33,7 @@ export interface Group {
 
 // The cursor's stop on a group's "n more" line.
 export const foldOf = (k: GroupKey) => `fold:${k}`;
-export const armOf = (key: "m" | "a", id: string) => `${key}:${id}`; // what a first m (hand off) or a (ready for review) armed
+export const armOf = (key: "m", id: string) => `${key}:${id}`; // what a first m (hand off) armed
 export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];

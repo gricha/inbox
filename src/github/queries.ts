@@ -138,6 +138,17 @@ export const PR_CONTEXT = `query($id: ID!) {
   }
 }`;
 
+// Who you can ask to review your PR: GitHub's suggestions, then people and the owner org's teams matching what you typed.
+// A user's repo has no org: that part comes back null.
+export const REVIEWERS = `query($owner: String!, $name: String!, $number: Int!, $q: String) {
+  ${RATE}
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { suggestedReviewers { reviewer { id login name } } }
+    assignableUsers(first: 20, query: $q) { nodes { id login name } }
+  }
+  organization(login: $owner) { teams(first: 10, query: $q) { nodes { id slug name } } }
+}`;
+
 export const TEAMS = `query($me: String!) {
   ${RATE}
   viewer { name organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }

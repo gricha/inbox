@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve or post.
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
 // reply and comment: your reply to a conversation in a PR's review, when you press Send.
-// ready: your own draft's "Ready for review" (a a on its row).
+// ready: your own draft's "Ready for review" (a on its row or in its review); request_reviews: the reviewers you picked with
+// it, added to any already asked (union).
 // The rest are the More menu's (.): close, draft, merge and reopen your own PR, request changes on someone else's, close an issue.
 // expectedHeadOid pins a merge to the commit the desk judged ready, so a push since then isn't merged unseen.
 export const ALLOWED = {
@@ -26,6 +27,9 @@ export const ALLOWED = {
 }`,
   ready: `mutation DeskReady($pr: ID!) {
   markPullRequestReadyForReview(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
+}`,
+  request_reviews: `mutation DeskRequestReviews($pr: ID!, $users: [ID!], $teams: [ID!]) {
+  requestReviews(input: { pullRequestId: $pr, userIds: $users, teamIds: $teams, union: true }) { pullRequest { id } }
 }`,
   close: `mutation DeskClose($pr: ID!) {
   closePullRequest(input: { pullRequestId: $pr }) { pullRequest { state } }
@@ -52,6 +56,7 @@ export interface GitHubWriter {
   reply(threadId: string, body: string): Promise<{ url: string }>; // to a review thread
   comment(prNodeId: string, body: string): Promise<{ url: string }>; // on the PR
   ready(prNodeId: string): Promise<void>; // a draft, ready for review
+  requestReviews(prNodeId: string, users: string[], teams: string[]): Promise<void>; // node ids
   close(prNodeId: string): Promise<void>;
   draft(prNodeId: string): Promise<void>; // back to draft
   merge(prNodeId: string, head: string, method: "MERGE" | "SQUASH" | "REBASE"): Promise<void>;
@@ -116,6 +121,9 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
     },
     ready: async (pr) => {
       await send("ready", pr, { pr });
+    },
+    requestReviews: async (pr, users, teams) => {
+      await send("request_reviews", pr, { pr, users, teams });
     },
     close: async (pr) => {
       await send("close", pr, { pr });

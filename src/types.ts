@@ -317,6 +317,15 @@ export interface ItemState {
   inflight_at: string | null; // your own PR, handed off for merge with m: the coordinator takes it from here
 }
 
+// Someone you can ask for a review of your PR: a user (login) or a team (its slug). id is the node id a review request takes.
+export interface Reviewer {
+  id: string;
+  login: string;
+  name: string;
+  team: boolean;
+  suggested: boolean; // GitHub's own pick for this PR
+}
+
 export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
 // The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Card, GitHubAction, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls, SNOOZE } from "../format.ts";
-import { armOf, type Variant } from "../view.ts";
+import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
 
@@ -11,7 +11,8 @@ export interface RowCtx {
   me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
-  armed: string | null; // what a first m or a armed (armOf): a second one hands it off, or marks it ready
+  armed: string | null; // what a first m armed (armOf): a second one hands it off
+  readied: Record<string, "sending" | "sent" | undefined>; // rows marked ready: shown done at once, sending until GitHub has it
   leaving: Set<string>;
   snoozeFor: string | null;
   showSignals: boolean;
@@ -60,7 +61,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
-  const armed = ctx.armed === armOf("a", card.id);
+  const readied = ctx.readied[card.id];
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -128,14 +129,16 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         {card.cta === "ready" && !why && (
           <button
             type="button"
-            className={cls("act line-cta", sel && "primary", armed && "armed")}
-            title="Mark it ready for review on GitHub: press a twice"
+            className={cls("act line-cta", readied ? "done" : sel && "primary")}
+            title={readied ? "Marked ready for review" : "Mark it ready for review on GitHub"}
+            disabled={!!readied}
             onClick={() => {
               ctx.run(card, "a");
             }}
           >
-            {sel && <kbd>a</kbd>}
-            {armed ? "again to mark ready" : "Ready for review"}
+            {sel && !readied && <kbd>a</kbd>}
+            {readied ? "✓ Ready for review" : "Ready for review"}
+            {readied === "sending" && <span className="busy" aria-label="sending" />}
           </button>
         )}
         {card.cta === "reply" && !why && (

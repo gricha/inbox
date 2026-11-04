@@ -294,6 +294,7 @@ export function KeyButton({
   disabled,
   title,
   className,
+  busy,
 }: {
   k: string;
   label: string;
@@ -301,6 +302,7 @@ export function KeyButton({
   disabled?: boolean;
   title?: string;
   className?: string;
+  busy?: boolean; // sent and shown done, until GitHub has it
 }) {
   return (
     <button
@@ -314,6 +316,7 @@ export function KeyButton({
     >
       {k && <kbd>{k}</kbd>}
       {label}
+      {busy && <span className="busy" aria-label="sending" />}
     </button>
   );
 }

@@ -51,6 +51,7 @@ import type {
   ReviewDecision,
   ReviewFile,
   ReviewNote,
+  Reviewer,
   ReviewView,
   ReviewState,
   SettingsView,
@@ -215,6 +216,17 @@ let config: Config = {
 // ---------------------------------------------------------------------------
 // Seeds
 
+// Who the mock offers as reviewers: GitHub's two suggestions, the rest found by name.
+const ROSTER: Reviewer[] = [
+  { id: "U_dana", login: "dana", name: "Dana Okafor", team: false, suggested: true },
+  { id: "U_sam", login: "sam", name: "Sam Whitfield", team: false, suggested: true },
+  { id: "U_priya", login: "priya", name: "Priya Raman", team: false, suggested: false },
+  { id: "U_marco", login: "marco", name: "Marco Bellini", team: false, suggested: false },
+  { id: "U_danny", login: "danny-k", name: "Danny Kim", team: false, suggested: false },
+  { id: "T_backend", login: "backend", name: "Backend", team: true, suggested: false },
+  { id: "T_data", login: "data-platform", name: "Data platform", team: true, suggested: false },
+];
+
 interface Seed {
   repo: string;
   n: number;
@@ -228,6 +240,7 @@ interface Seed {
   by?: string; // who requested the review
   direct?: boolean;
   team?: string;
+  asked?: string[]; // logins and team slugs asked with Ready for review
   owner?: boolean;
   assignee?: boolean;
   ci?: Ci;
@@ -1326,7 +1339,7 @@ function itemOf(r: Rec): Item {
   const s = r.seed;
   const sig = signals(r);
   const reviewer = s.direct ? ME : (s.team ?? "");
-  const type = s.direct ? "user" : "team";
+  const type: "user" | "team" = s.direct ? "user" : "team";
   return {
     id: r.id,
     node_id: `PR_mock${s.n}`,
@@ -1360,7 +1373,12 @@ function itemOf(r: Rec): Item {
     head_oid: ((s.n + r.pushes * 7919) * 2654435761).toString(16).padStart(40, "0"),
     head_committed_at: sig.item.kind === "pr" ? iso(s.upd ?? s.age) : null,
     head_author: s.author,
-    review_requests: reviewer ? [{ reviewer, type, codeowner: !!s.owner }] : [],
+    review_requests: [
+      ...(reviewer ? [{ reviewer, type, codeowner: !!s.owner }] : []),
+      ...(s.asked ?? []).map(
+        (a) => ({ reviewer: a, type: ROSTER.find((x) => x.login === a)?.team ? "team" : "user", codeowner: false }) as const,
+      ),
+    ],
     request_events:
       s.by && reviewer ? [{ at: iso(s.wait ?? s.age), actor: s.by, actor_bot: isBot(s.by), reviewer, reviewer_type: type }] : [],
     reviews: (s.reviews ?? []).map(([author, state, h]) => ({ author, author_bot: false, trusted: true, state, at: iso(h), commit: "" })),
@@ -2886,14 +2904,25 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
   }
-  // Ready for review on your own draft: the mock only remembers it.
+  // Ready for review on your own draft, and the reviewers picked with it: the mock only remembers them.
   const ready = /^\/api\/review\/(.+)\/ready$/.exec(url.pathname);
   if (ready && req.method === "POST") {
     const r = resolve(decodeURIComponent(ready[1]!));
     if (r.seed.author !== ME || !r.seed.draft || r.seed.resolved) throw new HttpError(409, `${r.id} isn't an open draft of yours`);
+    const body = await readBody(req);
+    const ids = [...((body.users as string[] | undefined) ?? []), ...((body.teams as string[] | undefined) ?? [])];
     r.seed.draft = false;
+    r.seed.asked = ids.map((id) => ROSTER.find((x) => x.id === id)?.login ?? id);
     bump();
     return { ok: true };
+  }
+  // Who you can ask to review your PR: GitHub's two suggestions, or everyone matching what you typed.
+  const asking = /^\/api\/reviewers\/(.+)$/.exec(url.pathname);
+  if (asking && req.method === "GET") {
+    const r = resolve(decodeURIComponent(asking[1]!));
+    if (r.seed.author !== ME) throw new HttpError(409, `${r.id} isn't your PR`);
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    return ROSTER.filter((x) => (q ? x.login.includes(q) || x.name.toLowerCase().includes(q) : x.suggested));
   }
   // The More menu's writes: the mock only remembers, as GitHub would answer.
   if (route === "POST /api/github") {

@@ -9,6 +9,7 @@ import type {
   InflightRow,
   ReviewFile,
   ReviewNote,
+  Reviewer,
   ReviewView,
   Stack,
   StackMember,
@@ -35,6 +36,7 @@ import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 import { Asks, type Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, RequestChanges } from "./More.tsx";
+import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
 interface NoteMeta {
@@ -106,6 +108,8 @@ export function Review({
   onGithub,
   row,
   armed: armedKey,
+  readied,
+  onReady,
   onBack,
   onAsk,
   onThread,
@@ -121,6 +125,8 @@ export function Review({
   onGithub: (c: Card, action: GitHubAction, head: string) => void; // the More menu's writes but request changes, which is here
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   armed: string | null; // armOf("m", id) after a first m
+  readied: "sending" | "sent" | undefined; // Ready for review sent for it, from here or its row
+  onReady: (c: Card, picked: Reviewer[]) => void; // a on your own draft: App sends it, as from its row
   onBack: () => void;
   onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
   onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
@@ -130,10 +136,11 @@ export function Review({
   const [noteIdx, setNoteIdx] = useState<number | null>(null); // a place in order.notes
   const [restOpen, setRestOpen] = useState(false);
   const [side, setSide] = useState(sideSaved);
-  const [armed, setArmed] = useState(0); // when `a` was pressed once
-  const [busy, setBusy] = useState<"approve" | "ready" | "ai" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
-  const [approved, setApproved] = useState<string | null>(null); // until the sync shows it, so a second a a doesn't approve twice
+  // The PR your approval went out for: shown done at once, and until the sync shows it, so a second a doesn't send it twice.
+  const [approved, setApproved] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu (.)
   const [changes, setChanges] = useState(false); // Request changes, being written
   // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
@@ -143,8 +150,8 @@ export function Review({
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok && approved !== v.card.id;
-  // Your own open draft: a a marks it ready for review instead of approving.
-  const readying = v?.card.cta === "ready" && approved !== v.card.id;
+  // Your own open draft: a marks it ready for review instead of approving.
+  const readying = v?.card.cta === "ready";
   // A PR in Merging is the coordinator's: no prompt to copy or AI review to ask for.
   const flying = !!row && row.state === "open";
 
@@ -209,17 +216,6 @@ export function Review({
       window.removeEventListener("scroll", onScroll);
     };
   }, []);
-
-  useEffect(() => {
-    const t = armed
-      ? setTimeout(() => {
-          setArmed(0);
-        }, ARM_MS)
-      : undefined;
-    return () => {
-      clearTimeout(t);
-    };
-  }, [armed]);
 
   // The sidebar scrolls on its own to keep the current file in sight; the page doesn't move.
   useEffect(() => {
@@ -300,45 +296,20 @@ export function Review({
     }
   }
 
-  // a, then a again: your own draft is marked ready for review on GitHub.
-  async function markReady() {
-    if (!v || busy === "ready") return;
-    if (!armed || Date.now() - armed > ARM_MS) {
-      setArmed(Date.now());
-      flash(`Press a again to mark ${shortRef(v.card)} ready for review`, false, ARM_MS);
-      return;
-    }
-    setArmed(0);
-    setBusy("ready");
-    try {
-      await api.ready(v.card.id);
-      setApproved(v.card.id);
-      flash(`Marked ${shortRef(v.card)} ready for review on GitHub`);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy(null);
-    }
-  }
-
+  // a: approved on GitHub. Shown done at once; a refusal undoes that.
   async function approve() {
     if (!v || busy === "approve") return;
     if (!canApprove) {
       flash(`Can't approve: ${approved === v.card.id ? "you just did" : (v.approve.reason ?? "not allowed")}`, true);
       return;
     }
-    if (!armed || Date.now() - armed > ARM_MS) {
-      setArmed(Date.now());
-      flash(`Press a again to approve ${shortRef(v.card)}`, false, ARM_MS);
-      return;
-    }
-    setArmed(0);
+    setApproved(v.card.id);
     setBusy("approve");
     try {
       await api.approve(v.card.id, read);
-      setApproved(v.card.id);
       flash(`Approved ${shortRef(v.card)} on GitHub`);
     } catch (e) {
+      setApproved(null);
       flash(message(e), true);
     } finally {
       setBusy(null);
@@ -367,7 +338,8 @@ export function Review({
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
     else if (k === "c" && !flying) void copyPrompt();
     else if (k === "i" && !flying) void askAi();
-    else if (k === "a") void (readying ? markReady() : approve());
+    else if (k === "a" && readying && v) onReady(v.card, picked);
+    else if (k === "a") void approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) {
       if (v.card.actions?.length) setMore(true);
@@ -376,15 +348,17 @@ export function Review({
   }
 
   const onKey = (e: KeyboardEvent) => {
-    if (inert || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+    // Option types @ on some layouts.
+    if (inert || e.metaKey || e.ctrlKey || (e.altKey && e.key !== "@") || e.isComposing) return;
     if (e.repeat && !["n", "p", "]", "["].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (armed && e.key !== "a" && e.key !== "Escape") setArmed(0); // any other key lets the approval lapse
     if (e.key === "Escape") {
-      if (armed) setArmed(0);
       // Esc with a hand-off armed never reaches here: App lets it lapse first.
-      else onBack();
+      onBack();
+    } else if (e.key === "@" && readying && !readied) {
+      e.preventDefault();
+      document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
     } else if (("npoci[]admbfNP.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
       e.preventDefault();
       run(e.key);
@@ -459,27 +433,42 @@ export function Review({
           )}
         </div>
 
+        {readying && (
+          <Reviewers
+            id={card.id}
+            asked={item.review_requests.map((r) => r.reviewer)}
+            picked={picked}
+            setPicked={setPicked}
+            disabled={!!readied}
+          />
+        )}
         {/* What finishes it first (a, or m or b on yours), then o and the rest. */}
         <div className="actions rv-actions">
           {readying && (
             <KeyButton
-              k="a"
-              label={busy === "ready" ? "Marking ready…" : armed ? "again to mark ready" : "Ready for review"}
+              k={readied ? "" : "a"}
+              label={readied ? "✓ Ready for review" : "Ready for review"}
               run={run}
-              disabled={busy === "ready"}
-              title="Mark it ready for review on GitHub: press a twice"
-              className={cls("primary", armed > 0 && "armed")}
+              disabled={!!readied}
+              busy={readied === "sending"}
+              title={
+                picked.length
+                  ? `Mark it ready for review on GitHub and ask ${picked.map((p) => p.login).join(", ")}`
+                  : "Mark it ready for review on GitHub"
+              }
+              className={readied ? "done" : "primary"}
             />
           )}
           {/* Only someone else's open PR is yours to approve. */}
           {open && !isMine && (
             <KeyButton
-              k="a"
-              label={busy === "approve" ? "Approving…" : armed ? "again to approve" : "Approve"}
+              k={approved === card.id ? "" : "a"}
+              label={approved === card.id ? "✓ Approved" : "Approve"}
               run={run}
-              disabled={!canApprove || busy === "approve"}
-              title={approved === card.id ? "You just approved it" : (view.approve.reason ?? "Approve on GitHub: press a twice")}
-              className={cls(!changes && "primary", armed > 0 && "armed")}
+              disabled={!canApprove}
+              busy={busy === "approve"}
+              title={approved === card.id ? "You approved it" : (view.approve.reason ?? "Approve on GitHub")}
+              className={approved === card.id ? "done" : cls("go", !changes && "primary")}
             />
           )}
           {/* While you owe replies, Send is the one filled button. */}

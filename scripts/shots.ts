@@ -309,6 +309,34 @@ const SHOTS: Shot[] = [
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
+  // @ opens GitHub's suggested reviewers for your draft.
+  {
+    name: "review-reviewers",
+    go: async (page) => {
+      await review("acme/web#2303")(page);
+      await page.keyboard.press("@");
+      await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
+    },
+  },
+  // Picked by typing, then a: Ready for review shows done at once, its spinner while GitHub (here never) answers. The held
+  // request stays held: unrouting would let it through to the mock, and each size starts a page of its own.
+  {
+    name: "review-ready-sent",
+    go: async (page) => {
+      await page.route("**/ready", () => {});
+      await review("acme/web#2303")(page);
+      const box = page.locator(".rv-reviewers-input");
+      for (const q of ["da", "back"]) {
+        await box.fill(q);
+        await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
+        await page.waitForTimeout(250);
+        await box.press("Enter");
+      }
+      await box.press("Escape");
+      await page.keyboard.press("a");
+      await page.waitForTimeout(200);
+    },
+  },
   { name: "review-mine", go: review("oss/tinyhttp#205") },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
   {
@@ -777,10 +805,16 @@ const SHOTS: Shot[] = [
       after: systemTheme,
     },
   ]),
-  // Close armed in a review's More menu: a second c closes it. Its toast goes under the next one's.
-  { name: "more-armed", go: review("acme/worker#875", [".", "c"]) },
-  // Last: its "press a again" toast would sit over the next shot.
-  { name: "review-approve", go: review("acme/api#4127", ["a"]) },
+  // Merge armed in a review's More menu: nothing undoes it, so a second m merges. Its toast goes under the next one's.
+  { name: "more-armed", go: review("acme/worker#875", [".", "m"]) },
+  // a approves at once: done in green, its spinner while GitHub (here never) answers. Last: its toast would sit over the next shot.
+  {
+    name: "review-approve",
+    go: async (page) => {
+      await page.route("**/approve", () => {});
+      await review("acme/api#4127", ["a"])(page);
+    },
+  },
 ];
 const SIZES = [
   { name: "wide", width: 1280, height: 820, mac: false },

@@ -10,13 +10,17 @@ import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 
-function fakeWriter(refuse = false) {
-  const calls: string[][] = [];
+function fakeWriter(refuse = false, refuseReviews = false) {
+  const calls: (string | string[])[][] = [];
   const writer: GitHubWriter = {
     ...refuseWrites(),
     ready: (pr) => {
       calls.push(["ready", pr]);
       return refuse ? Promise.reject(new Error("Resource not accessible")) : Promise.resolve();
+    },
+    requestReviews: (pr, users, teams) => {
+      calls.push(["request_reviews", pr, users, teams]);
+      return refuseReviews ? Promise.reject(new Error("Could not resolve to a node")) : Promise.resolve();
     },
   };
   return { writer, calls };
@@ -397,6 +401,67 @@ test("your own open draft carries one call to action, Ready for review; a a mark
   t.gh.items.set(it.id, { ...it, draft: false, updated_at: hoursAgo(0) });
   await t.desk.sync();
   assert.equal(cta("web#3"), undefined);
+});
+
+test("Ready for review asks the reviewers you picked with it, after marking it ready, and logs both", async (c) => {
+  const w = fakeWriter();
+  const t = await setup([myPr(3, { ci: "green", draft: true }), myPr(4, { ci: "green", draft: true })], { desk: { writer: w.writer } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const post = client(t);
+  const ready = (ref: string, body: unknown) => post(`/api/review/${encodeURIComponent(ref)}/ready`, body, "http://localhost:47823");
+  assert.equal((await ready("acme/web#3", { users: "U_dana" })).status, 400, "a list of node ids, not one");
+  assert.equal((await ready("acme/web#3", { users: [""] })).status, 400);
+  assert.deepEqual(w.calls, []);
+  assert.equal((await ready("acme/web#3", { users: ["U_dana"], teams: ["T_backend"] })).status, 200);
+  assert.equal((await ready("acme/web#4", {})).status, 200, "nobody picked: only marked ready");
+  assert.deepEqual(w.calls, [
+    ["ready", "PR_acme/web_3"],
+    ["request_reviews", "PR_acme/web_3", ["U_dana"], ["T_backend"]],
+    ["ready", "PR_acme/web_4"],
+  ]);
+  const logged = t.desk.store.db.prepare("SELECT item_id, action FROM events WHERE undone = 1 ORDER BY seq").all();
+  assert.deepEqual(
+    logged.map((r) => `${String(r.item_id)} ${String(r.action)}`),
+    ["acme/web#3 ready", "acme/web#3 request_reviews", "acme/web#4 ready"],
+  );
+});
+
+test("a review request GitHub refuses after Ready for review says it's ready anyway", async (c) => {
+  const w = fakeWriter(false, true);
+  const t = await setup([myPr(3, { ci: "green", draft: true })], { desk: { writer: w.writer } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  await assert.rejects(
+    t.desk.markReady("web#3", { users: ["U_x"], teams: [] }),
+    (e: Error & { status: number }) =>
+      e.status === 502 && e.message === "Marked it ready, but GitHub didn't ask for the reviews: Could not resolve to a node",
+  );
+  const logged = t.desk.store.db.prepare("SELECT action FROM events WHERE item_id = 'acme/web#3' AND undone = 1").all();
+  assert.deepEqual(
+    logged.map((r) => r.action),
+    ["ready"],
+  );
+});
+
+test("reviewers to pick from are GitHub's for your own PR, without you; anyone else's PR has none", async (c) => {
+  const t = await setup([reviewAsk(1), myPr(3, { draft: true })]);
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.gh.reviewerList = [
+    { id: "U_dana", login: "dana", name: "Dana", team: false, suggested: true },
+    { id: "U_me", login: "Me", name: "", team: false, suggested: false },
+    { id: "T_backend", login: "backend", name: "Backend", team: true, suggested: false },
+  ];
+  const app = createApp(t.desk, 47823);
+  const res = await app.request(`http://127.0.0.1:47823/api/reviewers/${encodeURIComponent("acme/web#3")}?q=%20da`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    ((await res.json()) as { login: string }[]).map((r) => r.login),
+    ["dana", "backend"],
+  );
+  assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 da"]);
+  await assert.rejects(t.desk.reviewers("api#1", ""), (e: Error & { status: number }) => e.status === 409);
 });
 
 test("a refused Ready for review says why, and nothing is logged", async (c) => {

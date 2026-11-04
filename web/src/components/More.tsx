@@ -6,13 +6,14 @@ import { cls, shortRef } from "../format.ts";
 const ARM_MS = 3000;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
-// The More menu's keys, read only while it's open. Each write takes a second press, so a slipped d (Done) writes nothing;
-// x only opens the box to write in. `verb`: what the second press does to % (the item).
+// The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does it,
+// and u undoes a close or a draft; merge, which nothing undoes, takes a second press. x only opens the box to write in.
+// `verb`: what merge's second press does to % (the item).
 const MORE: Record<GitHubAction, { key: string; label: string; verb?: string }> = {
-  close: { key: "c", label: "Close", verb: "close %" },
-  draft: { key: "d", label: "Convert to draft", verb: "convert % to a draft" },
+  close: { key: "c", label: "Close" },
+  draft: { key: "d", label: "Convert to draft" },
   merge: { key: "m", label: "Merge now", verb: "merge % now" },
-  reopen: { key: "r", label: "Reopen", verb: "reopen %" },
+  reopen: { key: "r", label: "Reopen" },
   request_changes: { key: "x", label: "Request changes" },
 };
 

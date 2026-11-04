@@ -9,6 +9,7 @@ import type {
   ItemDetail,
   Overview,
   QueueView,
+  Reviewer,
   SettingsView,
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
@@ -74,7 +75,7 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
-const ARM_MS = 3000; // a first m (or a) arms a hand-off (or Ready for review), a second one within this goes
+const ARM_MS = 3000; // a first m arms a hand-off, a second one within this goes
 const CHORDS: Record<string, Route> = {
   r: { name: "settings", section: "rules" },
   s: { name: "settings", section: "github" },
@@ -107,6 +108,8 @@ export function App() {
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [moreFor, setMoreFor] = useState<string | null>(null); // the row whose More menu is open
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
+  // Drafts marked ready, from a row or a review: shown done at once. One state for both, so neither sends it twice.
+  const [readied, setReadied] = useState<Record<string, "sending" | "sent" | undefined>>({});
   // Later's groups other than its own open only when asked (g f, …), and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
   const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
@@ -120,7 +123,7 @@ export function App() {
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
-  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // armOf(key, card) after a first m or a
+  const [armed, setArmed] = useState<{ id: string; at: number } | null>(null); // armOf("m", card) after a first m
   const [reviewFrom, setReviewFrom] = useState<"queue" | "later" | "inflight">("queue"); // where Esc goes back to from a review
   const [asking, setAsking] = useState<About | null>(null); // the composer to the coordinator, open
   const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
@@ -147,7 +150,7 @@ export function App() {
 
   const armedRef = useRef(armed);
   armedRef.current = armed;
-  // An armed hand-off or Ready for review needs its toast on screen: another toast replacing it disarms it. A GitHub
+  // An armed hand-off needs its toast on screen: another toast replacing it disarms it. A GitHub
   // write's u lasts as long as its toast, so a stray u hours later can't reopen or un-draft anything.
   const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, arm = false) => {
     clearTimeout(toastTimer.current);
@@ -344,6 +347,13 @@ export function App() {
     for (const r of laneRows) m.set(r.card.id, r.card);
     return m;
   }, [view, laneRows]);
+  // Once a read shows it isn't ready for review any more, "sent" has done its job: a draft again offers it afresh.
+  useEffect(() => {
+    setReadied((r) => {
+      const stale = Object.keys(r).filter((id) => r[id] === "sent" && known.get(id)?.cta !== "ready");
+      return stale.length ? { ...r, ...Object.fromEntries(stale.map((id) => [id, undefined])) } : r;
+    });
+  }, [known]);
   const knownRef = useRef(known);
   knownRef.current = known;
 
@@ -619,21 +629,26 @@ export function App() {
     refresh(0);
   }
 
-  // a arms the row's Ready for review; a second a within 3 s marks it ready on GitHub, any other key lets it lapse.
-  function readyArmed(c: Card) {
-    const id = armOf("a", c.id);
-    if (!armed || armed.id !== id || Date.now() - armed.at > ARM_MS) {
-      setArmed({ id, at: Date.now() });
-      flash(`Press a again to mark ${shortRef(c)} ready for review`, false, false, ARM_MS, true);
-      return;
-    }
-    setArmed(null);
+  // a: Ready for review on GitHub, from its row or its review (asking whoever was picked there). Shown done at once, with
+  // a spinner until GitHub has it; a refusal undoes that, but not when only the review request failed: it's ready.
+  function markReady(c: Card, picked?: Reviewer[]) {
+    if (readied[c.id]) return;
+    const set = (to: "sending" | "sent" | undefined) => {
+      setReadied((r) => ({ ...r, [c.id]: to }));
+    };
+    const who = picked ?? [];
+    const names = who.map((p) => p.login).join(", ");
+    const ask = { users: who.filter((p) => !p.team).map((p) => p.id), teams: who.filter((p) => p.team).map((p) => p.id) };
+    set("sending");
     void (async () => {
       try {
-        await api.ready(c.id);
-        flash(`Marked ${shortRef(c)} ready for review on GitHub`);
+        await api.ready(c.id, ask);
+        set("sent");
+        flash(`Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub`);
       } catch (e) {
-        flash(message(e), true);
+        const ready = message(e).startsWith("Marked it ready");
+        set(ready ? "sent" : undefined);
+        flash(ready ? `${message(e)}. Ask ${names} on GitHub.` : message(e), true);
       }
       refresh(0);
     })();
@@ -735,7 +750,7 @@ export function App() {
       flash(`${shortRef(c)} is in Merging, so the coordinator has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
     else if (k === ".") openMore(c);
-    else if (k === "a" && c.cta === "ready") readyArmed(c);
+    else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOffArmed(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
@@ -811,7 +826,7 @@ export function App() {
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
-    // Any other key lets an armed hand-off or Ready for review lapse (Esc does only that, in onChord).
+    // Any other key lets an armed hand-off lapse (Esc does only that, in onChord).
     if (armed && k !== armed.id.split(":")[0] && !["Shift", "Meta", "Control", "Alt"].includes(k)) setArmed(null);
     if (help) {
       if (k === "Escape" || k === "?") setHelp(false);
@@ -928,6 +943,7 @@ export function App() {
     selected,
     expanded,
     armed: armed?.id ?? null,
+    readied,
     leaving,
     snoozeFor,
     showSignals,
@@ -1049,6 +1065,8 @@ export function App() {
               }}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               armed={armed?.id ?? null}
+              readied={readied[route.id]}
+              onReady={markReady}
               onBack={() => {
                 go({ name: reviewFrom });
               }}

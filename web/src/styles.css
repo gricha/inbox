@@ -40,6 +40,8 @@
   --amber: #8d5c00;
   --amber-wash: #f8eed8;
   --green: #28703f;
+  --go: #1f7a3c;
+  --on-go: #fff;
   --accent: #2f5fd0;
   --accent-ink: #2a56c4;
   --accent-wash: #e8eefb;
@@ -84,6 +86,8 @@
     --amber: #e3b45e;
     --amber-wash: #2f2614;
     --green: #7dcb98;
+    --go: #2a8a48;
+    --on-go: #fff;
     --accent: #3a6be0;
     --accent-ink: #8fb0ff;
     --accent-wash: #1c2438;
@@ -119,6 +123,8 @@
   --amber: #e3b45e;
   --amber-wash: #2f2614;
   --green: #7dcb98;
+  --go: #2a8a48;
+  --on-go: #fff;
   --accent: #3a6be0;
   --accent-ink: #8fb0ff;
   --accent-wash: #1c2438;
@@ -154,6 +160,8 @@
   --amber: #80570c;
   --amber-wash: #f1e4c8;
   --green: #3b6a37;
+  --go: #3b7536;
+  --on-go: #fbf8f2;
   --accent: #3352c0;
   --accent-ink: #3352c0;
   --accent-wash: #e3e4f1;
@@ -189,6 +197,8 @@
   --amber: #dfb468;
   --amber-wash: #352c1c;
   --green: #86c99c;
+  --go: #2f8a50;
+  --on-go: #fff;
   --accent: #4d63d9;
   --accent-ink: #9db4ff;
   --accent-wash: #252e4a;
@@ -1909,8 +1919,9 @@ kbd {
   color: var(--faint);
 }
 
-/* Wide enough for "again to mark ready", so arming a review's or a row's call to action never moves what's beside it. */
+/* Wide enough for "✓ Ready for review" and its spinner, so sending it never moves what's beside it. */
 .rv-actions .act.primary,
+.rv-actions .act.done,
 .line .line-cta:not(.line-reply) {
   justify-content: center;
   min-width: 152px;
@@ -1928,6 +1939,40 @@ kbd {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 88%, #000);
   color: var(--on-accent);
+}
+
+/* Approve is green: the one call to action that says yes. */
+.act.primary.go {
+  border-color: var(--go);
+  background: var(--go);
+  color: var(--on-go);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--go) 35%, transparent);
+}
+
+.act.primary.go:hover:not(:disabled) {
+  border-color: var(--go);
+  background: color-mix(in srgb, var(--go) 88%, #000);
+  color: var(--on-go);
+}
+
+/* Sent: shown done at once, in green, with a spinner until GitHub has it. */
+.review .actions .act.done:disabled,
+.line .line-cta.done:disabled {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  color: var(--green);
+  font-weight: 600;
+}
+
+.busy {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin-left: 2px;
+  border: 1.5px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 /* Full strength: any fade on the accent drops the key below AA in the dark themes. */
@@ -1976,7 +2021,7 @@ kbd {
 .line .line-ask,
 .line .line-more,
 .lane-more .act:not(.primary, .armed),
-.review .actions .act:not(.primary, .armed),
+.review .actions .act:not(.primary, .armed, .done),
 .composer .act:not(.primary, .armed) {
   border-color: transparent;
   background: none;
@@ -1994,7 +2039,7 @@ kbd {
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
-.review .actions > .act:first-child:not(.primary, .armed),
+.review .actions > .act:first-child:not(.primary, .armed, .done),
 .lane-more .actions > .act:first-child:not(.primary, .armed) {
   margin-left: -9px;
 }
@@ -3133,6 +3178,136 @@ kbd {
 .rv-files-err,
 .rv-nofiles {
   padding: 0 12px;
+}
+
+/* Your draft's reviewers, on one line above Ready for review: who's asked, who you picked, and a box to add more. */
+.rv-reviewers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 18px;
+  padding: 0 12px;
+  font-size: 13.5px;
+}
+
+.rv-reviewers-label {
+  margin-right: 4px;
+  color: var(--pencil);
+}
+
+.rv-reviewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.rv-reviewer.asked {
+  padding-right: 10px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.rv-reviewer-team,
+.rv-reviewer-name,
+.rv-reviewer-why {
+  color: var(--pencil);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.rv-reviewer-x {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--pencil);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rv-reviewer-x:hover:not(:disabled) {
+  background: var(--rule-strong);
+  color: var(--ink);
+}
+
+.rv-reviewers-add {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rv-reviewers-input {
+  width: 180px;
+  height: 28px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+}
+
+.rv-reviewers-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rv-reviewers-key {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+}
+
+.rv-reviewers-pop {
+  left: 0;
+  width: 300px;
+}
+
+.rv-reviewers-pop .pop-item {
+  gap: 8px;
+}
+
+.rv-reviewers-pop .pop-item.hi {
+  background: var(--wash);
+}
+
+.rv-reviewer-login {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.rv-reviewer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rv-reviewer-why {
+  margin-left: auto;
+}
+
+.rv-reviewers-note {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--pencil);
+}
+
+.rv-reviewers-note.err {
+  color: var(--red);
 }
 
 /* As quiet as the review's other empty lines. */
