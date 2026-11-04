@@ -13,12 +13,28 @@ import type {
 } from "../../src/types.ts";
 import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
 
-// The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, and Settings (with the rules).
+// The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, the Archive (what's done), and
+// Settings (with the rules).
 export type Route =
-  { name: "queue" } | { name: "review"; id: string } | { name: "later" } | { name: "inflight" } | { name: "settings"; section: string };
-// The queue is one list: what the rules and Claude put in now, then today, in the desk's order. The rest is under Later.
-export type GroupKey = "queue" | "later" | "fyi" | "resolved" | "hidden" | "cleared";
-export type Variant = "active" | "hidden" | "cleared" | "resolved";
+  | { name: "queue" }
+  | { name: "review"; id: string }
+  | { name: "later" }
+  | { name: "inflight" }
+  | { name: "archive" }
+  | { name: "settings"; section: string };
+// What a write that finished your part did, and where the item went: the Archive, or Merging.
+export interface Acted {
+  what: string;
+  where: "archive" | "inflight";
+  sending?: boolean;
+}
+
+// A list page a review was opened from, and goes back to.
+export type ListPage = "queue" | "later" | "inflight" | "archive";
+// The queue is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is under
+// Later; what's done (yours, or resolved by the world) is in the Archive.
+export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive";
+export type Variant = "active" | "hidden" | "cleared" | "archive";
 
 export interface Group {
   key: GroupKey;
@@ -37,7 +53,13 @@ export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 export const inquiryOf = (id: string) => `ask:${id}`; // an agent's question on the main page
 export const isInquiry = (id: string | null) => !!id?.startsWith("ask:");
 
-export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "resolved", "hidden", "cleared"];
+export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
+// The groups each list page shows.
+export const PAGE_GROUPS: Record<"queue" | "later" | "archive", GroupKey[]> = {
+  queue: ["queue"],
+  later: SORTED_AWAY,
+  archive: ["archive"],
+};
 
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
@@ -45,6 +67,7 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };
+  if (hash === "#/archive") return { name: "archive" };
   const review = /^#\/review\/(.+)$/.exec(hash);
   if (review) {
     try {
@@ -59,7 +82,7 @@ export function parseRoute(hash: string): Route {
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
   if (r.name === "review") return `#/review/${encodeURIComponent(r.id)}`;
-  return r.name === "inflight" ? "#/inflight" : r.name === "later" ? "#/later" : "#/";
+  return r.name === "queue" ? "#/" : `#/${r.name}`;
 }
 
 // ---------------------------------------------------------------- review
@@ -174,18 +197,18 @@ export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   queue: true,
   later: true,
   fyi: false,
-  resolved: false,
   hidden: false,
   cleared: false,
+  archive: true,
 };
 
 const LABEL: Record<GroupKey, string> = {
   queue: "Queue",
   later: "Later",
   fyi: "FYI",
-  resolved: "Resolved",
   hidden: "Hidden by rules",
-  cleared: "Cleared",
+  cleared: "Snoozed or muted",
+  archive: "Archive",
 };
 
 // The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
@@ -219,9 +242,20 @@ export function groupsOf(
     group("queue", [...s.now, ...s.today], "active", view.cards),
     group("later", s.later),
     group("fyi", s.fyi),
-    group("resolved", view.resolved, "resolved"),
     group("hidden", view.hidden, "hidden"),
-    group("cleared", view.cleared, "cleared"),
+    group(
+      "cleared",
+      view.cleared.filter((c) => c.status !== "done"),
+      "cleared",
+    ),
+    // What you did that took it off your desk, and what the world dealt with: newest first.
+    group(
+      "archive",
+      [...view.cleared.filter((c) => c.status === "done"), ...view.resolved].sort((a, b) =>
+        (b.resolved_at ?? b.done_at ?? "").localeCompare(a.resolved_at ?? a.done_at ?? ""),
+      ),
+      "archive",
+    ),
   ];
 }
 

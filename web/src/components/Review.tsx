@@ -28,6 +28,7 @@ import {
   says,
   sections,
   splitPath,
+  type Acted,
   type Section,
 } from "../view.ts";
 import { diffTheme } from "../theme.ts";
@@ -106,6 +107,7 @@ export function Review({
   onCard,
   onGithub,
   row,
+  acted,
   onApprove,
   onReady,
   onComment,
@@ -121,12 +123,13 @@ export function Review({
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
-  onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => void; // the More menu's writes, and Request changes
+  onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Promise<boolean>; // the More menu's writes, and Request changes
+  acted: Acted | undefined; // what you did on it from here: shown in place of the key you pressed
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   // a: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
   onApprove: (c: Card, head: string) => void;
   onReady: (c: Card, picked: Reviewer[]) => void;
-  onComment: (c: Card, body: string) => void; // w: your comment on the PR
+  onComment: (c: Card, body: string) => Promise<boolean>; // w: your comment on the PR; true once GitHub has it
   onBack: () => void;
   onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
   onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
@@ -327,7 +330,8 @@ export function Review({
       requestAnimationFrame(() => {
         document.querySelector<HTMLTextAreaElement>(".rv-changes textarea")?.focus();
       });
-    } else if (k === "a" && readying && v) onReady(v.card, picked);
+    } else if (k === "a" && acted) flash(`${acted.what}: ${v ? shortRef(v.card) : ""} is off your desk`);
+    else if (k === "a" && readying && v) onReady(v.card, picked);
     else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) {
@@ -420,10 +424,20 @@ export function Review({
           )}
         </div>
 
-        {readying && <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />}
+        {readying && !acted && (
+          <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />
+        )}
+        {/* Done from here: what you did and where it went, above what's left to do. */}
+        {acted && (
+          <p className="rv-acted">
+            <span className="rv-acted-what">✓ {acted.what}</span>
+            {acted.sending && <span className="busy" aria-label="sending" />}
+            <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>{acted.where === "inflight" ? "in Merging" : "in Archive"}</a>
+          </p>
+        )}
         {/* What finishes it first (a, or m or b on yours), then o and the rest. */}
         <div className="actions rv-actions">
-          {readying && (
+          {readying && !acted && (
             <KeyButton
               k="a"
               label="Ready for review"
@@ -437,7 +451,7 @@ export function Review({
             />
           )}
           {/* Only someone else's open PR is yours to approve. */}
-          {open && !isMine && (
+          {open && !isMine && !acted && (
             <KeyButton
               k="a"
               label="Approve"
@@ -448,7 +462,9 @@ export function Review({
             />
           )}
           {/* While you owe replies, Send is the one filled button. */}
-          {mine && <HandKey card={card} run={run} primary={card.cta !== "reply"} />}
+          {mine && !(acted?.where === "inflight" && !card.inflight) && (
+            <HandKey card={card} run={run} primary={card.cta !== "reply" && !acted} />
+          )}
           {open && <KeyButton k="w" label="Comment" title="Comment on the PR, as you" run={run} />}
           {/* Shorter beside More, so the row stays one line at 900px with the sidebar folded. */}
           <KeyButton k="o" label={card.actions?.length ? "GitHub" : "Open on GitHub"} title="Open on GitHub" run={run} />
@@ -481,7 +497,7 @@ export function Review({
                   actions={card.actions}
                   pick={(a) => {
                     if (a === "request_changes") setWriting("changes");
-                    else onGithub(card, a, read);
+                    else void onGithub(card, a, read);
                   }}
                   onClose={() => {
                     setMore(false);
@@ -496,8 +512,10 @@ export function Review({
             label={writing === "comment" ? "Comment" : "Request changes"}
             placeholder={writing === "comment" ? `Comment on ${shortRef(card)}` : "What needs to change"}
             onSend={(body) => {
-              if (writing === "comment") onComment(card, body);
-              else onGithub(card, "request_changes", read, body);
+              void (async () => {
+                const ok = await (writing === "comment" ? onComment(card, body) : onGithub(card, "request_changes", read, body));
+                if (ok) setWriting(null);
+              })();
             }}
             onClose={() => {
               setWriting(null);

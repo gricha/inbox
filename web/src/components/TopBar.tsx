@@ -1,10 +1,10 @@
 import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
-import type { Route } from "../view.ts";
+import type { ListPage, Route } from "../view.ts";
 
-const BACK = { queue: "the queue", later: "Later", inflight: "Merging" };
-const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging" };
+const BACK = { queue: "the queue", later: "Later", inflight: "Merging", archive: "the Archive" };
+const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging", archive: "Archive" };
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
@@ -31,7 +31,7 @@ export function TopBar({
   offline: boolean;
   now: number;
   route: Route;
-  from: "queue" | "later" | "inflight"; // where a review goes back to
+  from: ListPage; // where a review goes back to
   filter: string;
   setFilter: (s: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
@@ -98,7 +98,7 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 1000px the sidebar is gone: Later and Merging are reachable from here. */}
+        {/* Below 1000px the sidebar is gone: Later, Merging and the Archive are reachable from here. */}
         {route.name !== "later" && (
           <a className="tb-flight" href="#/later" title="Sorted away (g l)">
             Later
@@ -107,6 +107,11 @@ export function TopBar({
         {!!o?.inflight.total && route.name !== "inflight" && (
           <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging (g m)`}>
             Merging
+          </a>
+        )}
+        {route.name !== "archive" && (
+          <a className="tb-flight" href="#/archive" title="What's done (g a)">
+            Archive
           </a>
         )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">

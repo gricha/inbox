@@ -1550,6 +1550,7 @@ function cardOf(r: Rec, p: Placement): Card {
     pinned: r.state.pinned,
     status: status(r),
     snooze_until: r.state.snooze_until,
+    ...(status(r) === "done" && r.state.done_at ? { done_at: r.state.done_at } : {}),
     verdict: reviews.get(r.id)?.head_oid === itemOf(r).head_oid ? reviews.get(r.id)!.verdict : null,
     resolved: s.resolved ?? null,
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event

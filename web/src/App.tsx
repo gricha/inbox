@@ -27,7 +27,10 @@ import {
   parseRoute,
   removeCard,
   routeHash,
+  PAGE_GROUPS,
   SORTED_AWAY,
+  type Acted,
+  type ListPage,
   stops,
   type GroupKey,
   type Route,
@@ -83,8 +86,8 @@ const CHORDS: Record<string, Route> = {
   q: { name: "queue" },
   m: { name: "inflight" },
 };
-// g l, g f, g d, g h, g x: Later, with that group open.
-const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", d: "resolved", h: "hidden", x: "cleared" };
+// g l, g f, g h, g x: Later, with that group open; g a (or g d): the Archive.
+const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared", a: "archive", d: "archive" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
 const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
@@ -111,6 +114,9 @@ export function App() {
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
   const [answers, setAnswers] = useState<Record<string, string>>({}); // what you're writing to each, kept if a send fails
+  // What you did on an item from this page, until you leave it: a review shows it in place of the key you pressed.
+  const [acted, setActed] = useState<Record<string, Acted | undefined>>({});
+  const actedRef = useRef(acted);
   // Later's groups other than its own open only when asked (g f, …), and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
   const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
@@ -124,7 +130,7 @@ export function App() {
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
-  const [reviewFrom, setReviewFrom] = useState<"queue" | "later" | "inflight">("queue"); // where Esc goes back to from a review
+  const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
   const [asking, setAsking] = useState<About | null>(null); // the composer to the coordinator, open
   const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
   const rulesDirty = useRef(false);
@@ -248,7 +254,7 @@ export function App() {
   const onLane = route.name === "inflight";
   // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
   useEffect(() => {
-    if (route.name !== "review") setReviewFrom(route.name === "inflight" || route.name === "later" ? route.name : "queue");
+    if (route.name !== "review") setReviewFrom(route.name === "settings" ? "queue" : route.name);
   }, [route.name]);
   useEffect(() => {
     if (!onLane) return;
@@ -315,10 +321,19 @@ export function App() {
   }, []);
 
   const me = overview?.me ?? "";
+  // A new page starts with nothing done on it.
+  useEffect(() => {
+    actedRef.current = {};
+    setActed({});
+  }, [route]);
   const onLater = route.name === "later";
+  const onArchive = route.name === "archive";
   const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
   // j/k and the selection go through the page on screen: the queue, or Later's groups.
-  const page = useMemo(() => groups.filter((g) => SORTED_AWAY.includes(g.key) === onLater), [groups, onLater]);
+  const page = useMemo(() => {
+    const keys = PAGE_GROUPS[onLater ? "later" : onArchive ? "archive" : "queue"];
+    return groups.filter((g) => keys.includes(g.key));
+  }, [groups, onLater, onArchive]);
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
   // Agents' questions lead the main page (one waits on each); the filter reads them too.
   const inquiries = useMemo(() => {
@@ -344,7 +359,12 @@ export function App() {
   knownRef.current = known;
 
   // The PR row you rest on, by j/k or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
-  const onRow = route.name === "inflight" ? (laneCur?.card ?? null) : route.name === "queue" || route.name === "later" ? current : null;
+  const onRow =
+    route.name === "inflight"
+      ? (laneCur?.card ?? null)
+      : route.name === "queue" || route.name === "later" || route.name === "archive"
+        ? current
+        : null;
   const restingPr = onRow?.kind === "pr" ? onRow.id : null;
   useEffect(() => {
     restOn(restingPr);
@@ -525,21 +545,33 @@ export function App() {
     refresh(0);
   }
 
-  // A write that finishes your part leaves your desk at once (a review goes back to its list), with a spinner in the toast
-  // until GitHub has it; a refusal brings it back. `error` on what it returns: done, but with something to say. `words`:
-  // what you wrote goes with it, so the review stays until GitHub has it, and a refusal leaves your words in their box.
-  async function finish(c: Card, sending: string, write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>, words = false) {
-    const from = routeRef.current.name === "review" ? reviewFrom : null;
-    if (from && !words) go({ name: from });
+  // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
+  // refusal brings it back. A review stays open, saying what you did and where it went (`did`). `error` on what the write
+  // returns: done, but with something to say. True once GitHub has it.
+  async function finish(
+    c: Card,
+    sending: string,
+    did: Acted,
+    write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>,
+  ): Promise<boolean> {
+    if (actedRef.current[c.id]) return false; // sent already from this page
+    const mark = (to: Acted | null) => {
+      actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
+      setActed(actedRef.current);
+    };
+    mark({ ...did, sending: true });
     hide(c);
     flash(sending, false, false, 60_000, true);
     try {
       const r = await write();
-      if (from && words && routeRef.current.name === "review") go({ name: from });
+      mark({ ...did, sending: false });
       setView((v) => v && removeCard(v, c.id));
       flash(r.text, r.error, r.undo);
+      return true;
     } catch (e) {
+      mark(null);
       flash(message(e), true);
+      return false;
     } finally {
       unhide(c.id);
       refresh(0);
@@ -637,7 +669,7 @@ export function App() {
 
   // m: your own open PR goes to Merging (you're done; the coordinator gets it merged). Not undone with u: b brings it back.
   function handOff(c: Card) {
-    void finish(c, `Handing off ${shortRef(c)}…`, async () => {
+    void finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, async () => {
       await api.act(c.id, "inflight");
       undoSeq.current = null;
       return { text: `Handed off for merge: ${shortRef(c)}. The coordinator gets it merged.` };
@@ -666,7 +698,7 @@ export function App() {
   function markReady(c: Card, picked: Reviewer[] = []) {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
-    void finish(c, `Marking ${shortRef(c)} ready for review…`, async () => {
+    void finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, async () => {
       try {
         await api.ready(c.id, ask);
       } catch (e) {
@@ -677,22 +709,17 @@ export function App() {
     });
   }
 
-  // w in a review: your comment on the PR.
-  function comment(c: Card, body: string) {
-    void finish(
-      c,
-      `Commenting on ${shortRef(c)}…`,
-      async () => {
-        await api.comment(c.id, body);
-        return { text: `Commented on ${shortRef(c)} on GitHub` };
-      },
-      true,
-    );
+  // w in a review: your comment on the PR. True once GitHub has it, so its box closes; a refusal keeps your words in it.
+  function comment(c: Card, body: string): Promise<boolean> {
+    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, async () => {
+      await api.comment(c.id, body);
+      return { text: `Commented on ${shortRef(c)} on GitHub` };
+    });
   }
 
   // a in a review: approved on GitHub, pinned to the commit the review showed.
   function approve(c: Card, head: string) {
-    void finish(c, `Approving ${shortRef(c)}…`, async () => {
+    void finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, async () => {
       await api.approve(c.id, head);
       return { text: `Approved ${shortRef(c)} on GitHub` };
     });
@@ -709,7 +736,7 @@ export function App() {
 
   // A More menu write, from a row or a review (head: the commit the review showed; body: Request changes' words). Close,
   // merge and Request changes finish your part, so it leaves your desk at once; draft and reopen keep it where it is.
-  async function github(c: Card, action: GitHubAction, head?: string, body?: string) {
+  async function github(c: Card, action: GitHubAction, head?: string, body?: string): Promise<boolean> {
     setMoreFor(null);
     const write = async () => {
       await api.github(c.id, action, { ...(head ? { head_oid: head } : {}), ...(body ? { body } : {}) });
@@ -720,16 +747,19 @@ export function App() {
     };
     if (action === "close" || action === "merge" || action === "request_changes") {
       const verb = action === "close" ? "Closing" : action === "merge" ? "Merging" : "Requesting changes on";
-      await finish(c, `${verb} ${shortRef(c)} on GitHub…`, write, action === "request_changes");
-      return;
+      const what = action === "close" ? "Closed" : action === "merge" ? "Merged" : "Requested changes";
+      return finish(c, `${verb} ${shortRef(c)} on GitHub…`, { what, where: "archive" }, write);
     }
     try {
       const r = await write();
       flash(r.text, false, r.undo);
+      return true;
     } catch (e) {
       flash(message(e), true);
+      return false;
+    } finally {
+      refresh(0);
     }
-    refresh(0);
   }
 
   // t: a word with the coordinator about what you're on: the review's PR and its conversation, a row, or nothing.
@@ -846,11 +876,13 @@ export function App() {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
-  // A chord opens its group on Later, and scrolls to it; pressed again there, it closes it.
+  // A chord opens its group on Later (or the Archive), and scrolls to it; pressed again there, it closes it.
   function chordGroup(k: GroupKey) {
-    if (!onLater || !open[k]) setOpen((o) => ({ ...o, [k]: true }));
+    const target = k === "archive" ? "archive" : "later";
+    const here = route.name === target;
+    if (!here || !open[k]) setOpen((o) => ({ ...o, [k]: true }));
     else toggleGroup(k);
-    if (!onLater) go({ name: "later" });
+    if (!here) go({ name: target });
     requestAnimationFrame(() => {
       document.querySelector(`.g-${k}`)?.scrollIntoView({ block: "start" });
     });
@@ -911,7 +943,7 @@ export function App() {
     } else if (k === "Escape") {
       if (expanded) setExpanded(null);
       else if (filter) setFilter("");
-      else if (onLater) go({ name: "queue" });
+      else if (onLater || onArchive) go({ name: "queue" });
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
@@ -1102,7 +1134,28 @@ export function App() {
               }}
             />
           )}
-          {route.name === "later" && !broken && <Later view={view} groups={groups} ctx={ctx} filter={filter} toggle={toggleGroup} />}
+          {route.name === "later" && !broken && (
+            <Later
+              view={view}
+              groups={groups}
+              keys={SORTED_AWAY}
+              empty="Nothing sorted away."
+              ctx={ctx}
+              filter={filter}
+              toggle={toggleGroup}
+            />
+          )}
+          {route.name === "archive" && !broken && (
+            <Later
+              view={view}
+              groups={groups}
+              keys={PAGE_GROUPS.archive}
+              empty="Nothing here yet: what you finish, and what's dealt with, lands here."
+              ctx={ctx}
+              filter={filter}
+              toggle={toggleGroup}
+            />
+          )}
           {route.name === "review" && !broken && (
             <Review
               key={route.id} // a different PR starts fresh: first file, no note
@@ -1114,9 +1167,8 @@ export function App() {
               inert={help}
               flash={reviewFlash}
               onCard={run}
-              onGithub={(c, a, head, body) => {
-                void github(c, a, head, body);
-              }}
+              onGithub={(c, a, head, body) => github(c, a, head, body)}
+              acted={acted[route.id]}
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               onApprove={approve}
               onReady={markReady}

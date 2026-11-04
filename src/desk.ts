@@ -927,6 +927,7 @@ export class Desk {
       pinned: e.state.pinned,
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
+      ...(e.status === "done" && e.state.done_at ? { done_at: e.state.done_at } : {}),
       verdict: snap.reviews.get(it.id)?.head_oid === it.head_oid ? snap.reviews.get(it.id)!.verdict : null,
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,

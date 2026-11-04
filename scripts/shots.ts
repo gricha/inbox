@@ -163,6 +163,7 @@ const sideDefault = async (page: Page) => {
 };
 // A fresh page, for a shot that left a write held: the queue as the mock has it.
 const reload = async (page: Page) => {
+  await page.evaluate(`location.hash = "#/"`);
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
@@ -338,8 +339,8 @@ const SHOTS: Shot[] = [
       await box.press("Escape");
     },
   },
-  // a: it's off your desk at once, back on the queue, a spinner in the toast while GitHub (here never) answers. The held
-  // request stays held (unrouting would let it through to the mock); a reload brings the row back for the shots after.
+  // a: it's off your desk at once; the review stays, saying what you did and where it went, its spinner while GitHub (here
+  // never) answers. The held request stays held (unrouting would let it through to the mock); a reload brings the row back.
   {
     name: "review-ready-sent",
     go: async (page) => {
@@ -426,27 +427,22 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // g d: Later, with the Resolved group open and scrolled into view.
-    name: "resolved",
+    // g a: the Archive, what you finished and what resolved, newest first.
+    name: "archive",
     go: async (page) => {
       await at("#/")(page);
       await page.keyboard.press("g");
-      await page.keyboard.press("d");
-      await page.waitForTimeout(300);
-      await page.locator(".g-resolved").scrollIntoViewIfNeeded();
+      await page.keyboard.press("a");
+      await page.locator(".g-archive").waitFor();
       await page.waitForTimeout(200);
     },
   },
   {
-    // Enter on a resolved PR: its review says why it resolved, and when, under the facts.
+    // Enter on a resolved PR in the Archive: its review says why it resolved, and when, under the facts.
     name: "review-resolved",
     go: async (page) => {
-      await at("#/later")(page);
-      const row = page.locator(".g-resolved .line", { hasText: "Tighten the CSP" }).locator(".row-main");
-      if (!(await row.isVisible())) {
-        await page.keyboard.press("g");
-        await page.keyboard.press("d");
-      }
+      await at("#/archive")(page);
+      const row = page.locator(".g-archive .line", { hasText: "Tighten the CSP" }).locator(".row-main");
       await row.click();
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
@@ -754,7 +750,7 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Cleared: what was snoozed, done or muted, with until when.
+    // Snoozed or muted, under Later, with until when.
     name: "cleared",
     go: async (page) => {
       await at("#/later")(page);
@@ -835,8 +831,8 @@ const SHOTS: Shot[] = [
   ]),
   // The More menu open in a review, its keys on it.
   { name: "more-menu", go: review("acme/worker#875", ["."]) },
-  // a approves at once: back on the queue without it, a spinner in the toast while GitHub (here never) answers. Last: its
-  // toast would sit over the next shot.
+  // a approves at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
+  // answers. Last: its toast would sit over the next shot.
   {
     name: "review-approve",
     go: async (page) => {

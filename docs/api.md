@@ -203,6 +203,7 @@ interface Card {
   pinned: boolean;
   status: "active" | "done" | "snoozed" | "muted";
   snooze_until: string | null;
+  done_at?: string; // while it's done: when (you marked it done, or acted on it in the desk); the Archive's time
   verdict: "look" | "skim" | "skip" | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   next?: string; // your own PR in Now or Today: "merge conflict with main: m hands it off for merge"; none in Merging or approved and green

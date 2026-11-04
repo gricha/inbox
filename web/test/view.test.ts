@@ -145,10 +145,11 @@ test("auth problems are told apart from other GitHub errors", () => {
   assert.ok(!authProblem("1 search(es) failed: author not found"));
 });
 
-const away = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key !== "queue");
+const away = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key !== "queue" && g.key !== "archive");
+const archive = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "archive");
 const main = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "queue");
 
-test("the queue and Later are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
+test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
   assert.deepEqual(
     groups.map((g) => [g.key, g.open, g.total]),
@@ -156,12 +157,17 @@ test("the queue and Later are pages of their own: Later's own group opens with i
       ["queue", true, 2],
       ["later", true, 1],
       ["fyi", false, 0],
-      ["resolved", false, 1],
       ["hidden", false, 1],
       ["cleared", false, 1],
+      ["archive", true, 1],
     ],
   );
-  assert.equal(groups.find((g) => g.key === "resolved")?.variant, "resolved");
+  assert.equal(groups.find((g) => g.key === "archive")?.variant, "archive");
+  assert.deepEqual(
+    navigable(archive(groups), new Set()).map((c) => c.id),
+    ["acme/api#6"],
+    "what resolved is in the Archive",
+  );
   assert.deepEqual(
     navigable(main(groups), new Set()).map((c) => c.id),
     ["acme/api#1", "acme/web#2"],
@@ -175,19 +181,19 @@ test("the queue and Later are pages of their own: Later's own group opens with i
     ["acme/api#3"],
   );
   assert.deepEqual(
-    navigable(away(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, "")), new Set()).map((c) => c.id),
-    ["acme/api#3", "acme/api#6"],
+    navigable(away(groupsOf(queue(), { ...DEFAULT_OPEN, cleared: true }, "")), new Set()).map((c) => c.id),
+    ["acme/api#3", "acme/api#5"],
   );
 
-  const filtered = groupsOf(queue(), { ...DEFAULT_OPEN, later: false }, "api#6");
+  const filtered = groupsOf(queue(), { ...DEFAULT_OPEN, later: false }, "api#5");
   assert.deepEqual(
     navigable(away(filtered), new Set()).map((c) => c.id),
-    ["acme/api#6"],
+    ["acme/api#5"],
   );
   assert.deepEqual(navigable(main(filtered), new Set()), []);
   // Opened by the filter, not by you: the toggle is off-limits until the filter clears.
-  assert.deepEqual([filtered.find((g) => g.key === "resolved")?.open, filtered.find((g) => g.key === "resolved")?.forced], [true, true]);
-  assert.equal(groupsOf(queue(), { ...DEFAULT_OPEN, resolved: true }, "api#6").find((g) => g.key === "resolved")?.forced, false);
+  assert.deepEqual([filtered.find((g) => g.key === "cleared")?.open, filtered.find((g) => g.key === "cleared")?.forced], [true, true]);
+  assert.equal(groupsOf(queue(), { ...DEFAULT_OPEN, cleared: true }, "api#5").find((g) => g.key === "cleared")?.forced, false);
   assert.deepEqual(
     navigable(groupsOf(queue(), DEFAULT_OPEN, "PRIYA"), new Set()).map((c) => c.id),
     ["acme/web#2"],
@@ -599,4 +605,19 @@ test("a diff's height is held at its context, added and removed lines until Pier
   const h = (patch: string) => ({ patch });
   assert.equal(diffRows([h("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n\\ No newline at end of file"), h("@@ -9 +10 @@\n x\n")]), 5);
   assert.equal(diffRows([]), 0);
+});
+
+test("the Archive is what you did that took it off your desk and what resolved, newest first; snoozed and muted stay in Later", () => {
+  const v = queue();
+  v.cleared = [card("acme/api#7", { status: "done", done_at: "2026-11-04T10:00:00Z" }), card("acme/api#8", { status: "snoozed" })];
+  v.resolved = [card("acme/api#6", { resolved: "you approved", resolved_at: "2026-11-04T11:00:00Z" })];
+  const groups = groupsOf(v, DEFAULT_OPEN, "");
+  assert.deepEqual(
+    navigable(archive(groups), new Set()).map((c) => c.id),
+    ["acme/api#6", "acme/api#7"],
+  );
+  assert.deepEqual(
+    groups.find((g) => g.key === "cleared")?.cards.map((c) => c.id),
+    ["acme/api#8"],
+  );
 });

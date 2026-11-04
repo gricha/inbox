@@ -1,12 +1,12 @@
 import type { Inquiry, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { foldOf, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
+import { foldOf, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
+const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", hidden: "g h", cleared: "g x", archive: "g a" };
 
 // The main page: only what needs you, one line each, in the desk's order; agents' questions first, since one waits on each.
 export function Queue({
@@ -81,16 +81,21 @@ export function Queue({
   );
 }
 
-// Later: what Claude and the rules sorted away, and what you cleared or what resolved. Each group opens on its heading.
+// Later: what Claude and the rules sorted away, and what you snoozed or muted; the Archive: what's done. Each group opens on
+// its heading.
 export function Later({
   view,
   groups,
+  keys,
+  empty,
   ctx,
   filter,
   toggle,
 }: {
   view: QueueView | null;
   groups: Group[];
+  keys: GroupKey[]; // the groups this page shows
+  empty: string;
   ctx: RowCtx;
   filter: string;
   toggle: (k: GroupKey) => void;
@@ -102,10 +107,10 @@ export function Later({
       </div>
     );
   const filtering = !!filter.trim();
-  const away = groups.filter((g) => SORTED_AWAY.includes(g.key) && (filtering ? g.cards.length : g.total));
+  const away = groups.filter((g) => keys.includes(g.key) && (filtering ? g.cards.length : g.total));
   return (
     <div className="queue later">
-      {!away.length && <p className="queue-empty">{filtering ? "No matches." : "Nothing sorted away."}</p>}
+      {!away.length && <p className="queue-empty">{filtering ? "No matches." : empty}</p>}
       {away.map((g) => (
         <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
           <h2 id={`h-${g.key}`} className="group-head">

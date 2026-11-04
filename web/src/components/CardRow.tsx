@@ -44,11 +44,12 @@ export function Owed({ why, tone }: { why: string; tone?: string | undefined }) 
   );
 }
 
-// What a row under Later says after its ref: why it's there. The queue's rows say nothing more: being there is the why.
+// What a row under Later or in the Archive says after its ref: why it's there. The queue's rows say nothing more: being
+// there is the why.
 function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);
   if (variant === "hidden") return card.why || "hidden by your rules";
-  if (variant === "resolved") return card.resolved ?? card.why;
+  if (variant === "archive") return card.resolved ?? "done: back when someone else acts";
   return card.demoted ?? card.why;
 }
 
@@ -59,7 +60,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
   // A resolved item isn't waiting any more: its time is when it resolved.
-  const since = card.resolved_at ?? card.waiting_since;
+  const since = card.resolved_at ?? card.done_at ?? card.waiting_since;
   return (
     <div
       className={cls("line", sel && "sel", open && "open", ctx.leaving.has(card.id) && "leaving", variant !== "active" && "dim")}
@@ -153,7 +154,10 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         {!why && (
           <span className={cls("line-stage", card.stage === "changes requested" && card.by === "you" && "t-warn")}>{card.stage}</span>
         )}
-        <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
+        <span
+          className="line-age"
+          title={`${card.resolved_at ? "resolved" : card.done_at ? "done" : "waiting since"} ${new Date(since).toLocaleString()}`}
+        >
           {age(since, ctx.now)}
         </span>
       </div>

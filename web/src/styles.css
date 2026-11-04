@@ -2004,6 +2004,22 @@ kbd {
   color: var(--on-accent);
 }
 
+/* Done from the review, which stays open: what you did, in green, and where it went, on its own line above the keys. */
+.rv-acted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0 12px;
+  color: var(--green);
+  font: 600 14px var(--sans);
+}
+
+.rv-acted a {
+  color: var(--pencil);
+  font-weight: 500;
+}
+
 /* Approve is green: the one call to action that says yes. */
 .act.primary.go {
   border-color: var(--go);

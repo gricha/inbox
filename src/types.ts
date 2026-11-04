@@ -407,6 +407,7 @@ export interface Card {
   pinned: boolean;
   status: Status;
   snooze_until: string | null;
+  done_at?: string; // when you marked it done, or did what took it off your desk; only while it's done
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"

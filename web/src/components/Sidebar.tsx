@@ -1,6 +1,6 @@
 import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import type { Route } from "../view.ts";
+import type { ListPage, Route } from "../view.ts";
 
 // Sources of work, one entry each (just GitHub for now), what was sorted away, your PRs in Merging, and Settings in the footer.
 export function Sidebar({
@@ -11,7 +11,7 @@ export function Sidebar({
   inert,
 }: {
   route: Route;
-  from: "queue" | "later" | "inflight"; // where a review was opened from: it stays that page's
+  from: ListPage; // where a review was opened from: it stays that page's
   view: QueueView | null;
   overview: Overview | null;
   inert?: boolean;
@@ -19,6 +19,7 @@ export function Sidebar({
   const onQueue = route.name === "queue" || (route.name === "review" && from === "queue");
   const onLater = route.name === "later" || (route.name === "review" && from === "later");
   const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
+  const onArchive = route.name === "archive" || (route.name === "review" && from === "archive");
   const onSettings = route.name === "settings";
   const now = (view?.sections.now.length ?? 0) + (view?.inquiries.length ?? 0); // an agent's question waits on you too
   const today = view?.sections.today.length ?? 0;
@@ -68,6 +69,15 @@ export function Sidebar({
           title={flight ? `${flight.total} merging (g m)` : "Your PRs the coordinator is getting merged (g m)"}
         >
           <span className="side-name">Merging</span>
+        </a>
+        {/* What you finished, and what was dealt with: no count, nothing there needs you. */}
+        <a
+          href="#/archive"
+          className={cls("side-item", onArchive && "on")}
+          aria-current={onArchive ? "page" : undefined}
+          title="What's done: what you acted on and what resolved (g a)"
+        >
+          <span className="side-name">Archive</span>
         </a>
       </nav>
       <a href="#/settings" className={cls("side-item", "side-foot", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>
