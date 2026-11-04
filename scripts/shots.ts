@@ -161,6 +161,11 @@ const toBottom = (name: string) => async (page: Page) => {
 const sideDefault = async (page: Page) => {
   await page.evaluate(`localStorage.removeItem("desk.review.side")`);
 };
+// A fresh page, for a shot that left a write held: the queue as the mock has it.
+const reload = async (page: Page) => {
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
@@ -318,12 +323,10 @@ const SHOTS: Shot[] = [
       await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
     },
   },
-  // Picked by typing, then a: Ready for review shows done at once, its spinner while GitHub (here never) answers. The held
-  // request stays held: unrouting would let it through to the mock, and each size starts a page of its own.
+  // Reviewers picked by typing: a person GitHub suggested and a team.
   {
-    name: "review-ready-sent",
+    name: "review-reviewers-picked",
     go: async (page) => {
-      await page.route("**/ready", () => {});
       await review("acme/web#2303")(page);
       const box = page.locator(".rv-reviewers-input");
       for (const q of ["da", "back"]) {
@@ -333,9 +336,18 @@ const SHOTS: Shot[] = [
         await box.press("Enter");
       }
       await box.press("Escape");
-      await page.keyboard.press("a");
-      await page.waitForTimeout(200);
     },
+  },
+  // a: it's off your desk at once, back on the queue, a spinner in the toast while GitHub (here never) answers. The held
+  // request stays held (unrouting would let it through to the mock); a reload brings the row back for the shots after.
+  {
+    name: "review-ready-sent",
+    go: async (page) => {
+      await page.route("**/ready", () => {});
+      await review("acme/web#2303", ["a"])(page);
+      await page.waitForTimeout(300);
+    },
+    after: reload,
   },
   { name: "review-mine", go: review("oss/tinyhttp#205") },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
@@ -526,12 +538,28 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A first m on your own PR only arms the hand-off: a toast says press it again.
-    name: "handoff-armed",
+    // m on your own PR hands it off at once: the row leaves, a spinner in the toast while the desk (here never) answers.
+    name: "handoff-sent",
     go: async (page) => {
+      await page.route("**/api/act", async (route) => {
+        if ((route.request().postDataJSON() as { action?: string }).action !== "inflight") await route.continue();
+      });
       await at("#/")(page);
       await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
       await page.keyboard.press("m");
+      await page.waitForTimeout(300);
+    },
+    after: reload,
+  },
+  {
+    // An agent's question leads the main page; Enter opens it to answer: its context, the answers it offers, a box.
+    name: "queue-inquiry",
+    go: async (page) => {
+      await at("#/")(page);
+      await top(page);
+      await page.locator(".queue .line.inq .row-main").first().focus();
+      await page.keyboard.press("Enter");
+      await page.locator(".inq-open").waitFor();
       await page.waitForTimeout(200);
     },
   },
@@ -805,9 +833,10 @@ const SHOTS: Shot[] = [
       after: systemTheme,
     },
   ]),
-  // Merge armed in a review's More menu: nothing undoes it, so a second m merges. Its toast goes under the next one's.
-  { name: "more-armed", go: review("acme/worker#875", [".", "m"]) },
-  // a approves at once: done in green, its spinner while GitHub (here never) answers. Last: its toast would sit over the next shot.
+  // The More menu open in a review, its keys on it.
+  { name: "more-menu", go: review("acme/worker#875", ["."]) },
+  // a approves at once: back on the queue without it, a spinner in the toast while GitHub (here never) answers. Last: its
+  // toast would sit over the next shot.
   {
     name: "review-approve",
     go: async (page) => {

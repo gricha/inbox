@@ -103,6 +103,9 @@ export class Coordinator {
   flushing: Promise<void> | null = null;
   stopping: Promise<void> | null = null;
   checked = 0;
+  status: CoordinatorView["status"] = null;
+  watching: NodeJS.Timeout | null = null;
+  watchEvery = 10_000; // while an ask of yours waits on its answer
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -160,7 +163,14 @@ export class Coordinator {
   view(): CoordinatorView {
     const s = this.saved();
     if (s && !s.url && this.on && Date.now() - this.checked > FRESH) void this.flush();
-    return { on: this.on, id: s?.id ?? null, url: s?.url ?? null, error: this.on ? this.error() : null };
+    return {
+      on: this.on,
+      id: s?.id ?? null,
+      url: s?.url ?? null,
+      error: this.on ? this.error() : null,
+      status: this.on ? this.status : null,
+      queued: this.asks().flatMap((l) => /^My ask (\w+)/.exec(l)?.[1] ?? []),
+    };
   }
 
   // Desk start: the one it has is picked up, and checked every few minutes so one that crashed or was stopped comes back.
@@ -171,6 +181,7 @@ export class Coordinator {
     }, this.every);
     this.ticker.unref();
     void this.flush();
+    this.watch(); // an ask from before a restart still waits
   }
 
   // A hand-off, or news on a PR in Merging.
@@ -185,7 +196,24 @@ export class Coordinator {
   tell(line: string): Promise<void> {
     claudeSpawn(claudeCommand(), [line]); // throws on what cmd.exe can't pass
     this.desk.store.set(ASKS, [...this.asks(), line]);
+    this.watch();
     return this.again();
+  }
+
+  // While one of your asks waits on its answer, what it's doing is looked at often, so the composer can say: on it,
+  // waiting on a permission, or stopped without answering. One `claude agents`, no turn.
+  watch(): void {
+    if (this.watching || this.desk.stopped) return;
+    this.watching = setInterval(() => {
+      const since = new Date(Date.now() - 30 * 60_000).toISOString();
+      if (!this.on || !this.desk.asks().some((a) => !a.answer && a.at > since)) {
+        clearInterval(this.watching!);
+        this.watching = null;
+        return;
+      }
+      if (!this.flushing) void this.find().catch(() => null);
+    }, this.watchEvery);
+    this.watching.unref();
   }
 
   untell(line: string): void {
@@ -214,8 +242,10 @@ export class Coordinator {
   close(): void {
     if (this.timer) clearTimeout(this.timer);
     if (this.ticker) clearInterval(this.ticker);
+    if (this.watching) clearInterval(this.watching);
     this.timer = null;
     this.ticker = null;
+    this.watching = null;
   }
 
   // Turned off in Settings: stopped, its history kept for when it's turned on again.
@@ -254,6 +284,7 @@ export class Coordinator {
       await this.stopping; // on again right after off: its process must be gone first, or the resume starts a copy
       if (!this.on) return;
       const a = await this.find();
+      this.checked = Date.now(); // here, not in find(): the watch's looks mustn't hold off the link lookup
       const news = this.news(); // after looking, so a wake that came meanwhile isn't left to the next check
       const asks = this.asks();
       const waiting = news.length > 0 || asks.length > 0 || this.asked;
@@ -282,6 +313,7 @@ export class Coordinator {
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
+        this.saw("busy"); // it has a turn now; the next look says how it goes
       } else if (a && (!a.pid || (switching && idle))) {
         await this.halt(a);
         await this.launch(resume, mode); // no prompt, so no turn
@@ -354,7 +386,13 @@ export class Coordinator {
       this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
       this.desk.changed();
     }
-    this.checked = Date.now();
+    this.saw(a ? (a.pid ? ((a.status as CoordinatorView["status"]) ?? "idle") : "stopped") : null);
     return a;
+  }
+
+  saw(status: CoordinatorView["status"]): void {
+    if (status === this.status) return;
+    this.status = status;
+    this.desk.changed();
   }
 }

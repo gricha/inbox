@@ -104,7 +104,7 @@ const overview: Overview = {
   config_errors: [],
   connectors: [{ id: "github", name: "GitHub", status: "ok", synced_at: ago(0.05), error: null }],
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
-  focus: { now: 1, today: 1, new: 1 },
+  focus: { now: 1, today: 1, new: 1, asks: 0 },
   inflight: { total: 0 },
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
@@ -112,6 +112,7 @@ const overview: Overview = {
 const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, cards: 10, paused: null };
 
 const queueView: QueueView = {
+  inquiries: [],
   sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
@@ -145,7 +146,7 @@ const inflightView: InflightView = {
     },
   ],
   stacks: {},
-  coordinator: { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fake", error: null },
+  coordinator: { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fake", error: null, status: "idle", queued: [] },
 };
 
 const boardView: BoardView = {

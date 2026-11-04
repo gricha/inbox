@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { Card, GitHubAction } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
-import { cls, shortRef } from "../format.ts";
+import { cls } from "../format.ts";
 
-const ARM_MS = 3000;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
-// The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does it,
-// and u undoes a close or a draft; merge, which nothing undoes, takes a second press. x only opens the box to write in.
-// `verb`: what merge's second press does to % (the item).
-const MORE: Record<GitHubAction, { key: string; label: string; verb?: string }> = {
+// The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does
+// it; u undoes a close or a draft. x only opens the box to write in.
+const MORE: Record<GitHubAction, { key: string; label: string }> = {
   close: { key: "c", label: "Close" },
   draft: { key: "d", label: "Convert to draft" },
-  merge: { key: "m", label: "Merge now", verb: "merge % now" },
+  merge: { key: "m", label: "Merge now" },
   reopen: { key: "r", label: "Reopen" },
   request_changes: { key: "x", label: "Request changes" },
 };
@@ -44,39 +41,20 @@ export function MoreMenu({
   actions,
   pick,
   onClose,
-  flash,
   className,
 }: {
   card: Card;
   actions: GitHubAction[];
   pick: (a: GitHubAction) => void;
   onClose: () => void;
-  flash: (text: string) => void;
   className?: string;
 }) {
-  const [armed, setArmed] = useState<GitHubAction | null>(null);
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     menu.current?.scrollIntoView({ block: "nearest" });
   }, []);
-  useEffect(() => {
-    const t = armed
-      ? setTimeout(() => {
-          setArmed(null);
-        }, ARM_MS)
-      : undefined;
-    return () => {
-      clearTimeout(t);
-    };
-  }, [armed]);
 
   function choose(a: GitHubAction) {
-    const m = MORE[a];
-    if (m.verb && armed !== a) {
-      setArmed(a);
-      flash(`Press ${m.key} again to ${m.verb.replace("%", shortRef(card))} on GitHub`);
-      return;
-    }
     onClose();
     pick(a);
   }
@@ -88,9 +66,7 @@ export function MoreMenu({
     if (e.repeat) return;
     const a = actions.find((x) => MORE[x].key === e.key);
     if (a) choose(a);
-    else if (e.key === "Escape" && armed) setArmed(null);
     else if (e.key === "Escape" || e.key === ".") onClose();
-    else setArmed(null);
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
@@ -115,19 +91,13 @@ export function MoreMenu({
             key={a}
             type="button"
             role="menuitem"
-            className={cls("pop-item", armed === a && "armed")}
+            className="pop-item"
             onClick={() => {
               choose(a);
             }}
           >
             <kbd>{MORE[a].key}</kbd>
-            <span>
-              {armed === a
-                ? `again to ${MORE[a].verb!.replace(" %", "")}`
-                : a === "close" && card.kind === "issue"
-                  ? "Close issue"
-                  : MORE[a].label}
-            </span>
+            <span>{a === "close" && card.kind === "issue" ? "Close issue" : MORE[a].label}</span>
           </button>
         ))}
       </div>
@@ -135,90 +105,59 @@ export function MoreMenu({
   );
 }
 
-// Request changes, in a PR's review: what you write is the review's body, sent with the button (or ⌘↵) twice.
-export function RequestChanges({
-  card,
-  head,
-  flash,
+// What you write on a PR in its review, a comment or Request changes' body, sent with the button (or ⌘↵).
+export function WriteBox({
+  label,
+  placeholder,
+  onSend,
   onClose,
 }: {
-  card: Card;
-  head: string;
-  flash: (text: string, error?: boolean, ms?: number) => void;
+  label: string;
+  placeholder: string;
+  onSend: (body: string) => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
-  const [armed, setArmed] = useState(false);
-  const [busy, setBusy] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     box.current?.scrollIntoView({ block: "nearest" }); // at 900px and below it opens under the fold
   }, []);
-  useEffect(() => {
-    const t = armed
-      ? setTimeout(() => {
-          setArmed(false);
-        }, ARM_MS)
-      : undefined;
-    return () => {
-      clearTimeout(t);
-    };
-  }, [armed]);
 
-  async function send() {
-    if (!text.trim() || busy) return;
-    if (!armed) {
-      setArmed(true);
-      flash(`Press Request changes again to post it on ${shortRef(card)}`, false, ARM_MS);
-      return;
-    }
-    setArmed(false);
-    setBusy(true);
-    try {
-      await api.github(card.id, "request_changes", { head_oid: head, body: text });
-      flash(`Requested changes on GitHub: ${shortRef(card)}`);
-      onClose();
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy(false);
-    }
+  function send() {
+    if (text.trim()) onSend(text);
   }
 
   return (
     <div ref={box} className="rv-changes">
       <textarea
         className="cv-reply"
-        aria-label="What needs to change"
-        placeholder="What needs to change"
-        // oxlint-disable-next-line jsx-a11y/no-autofocus -- you picked Request changes to write this
+        aria-label={placeholder}
+        placeholder={placeholder}
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- you picked it to write this
         autoFocus
         value={text}
         onChange={(e) => {
           setText(e.target.value);
-          setArmed(false);
         }}
         onKeyDown={(e) => {
           if (e.repeat) return;
           if (e.key === "Escape") e.currentTarget.blur();
           else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            void send();
+            send();
           }
         }}
       />
       <div className="actions">
         <button
           type="button"
-          className={cls("act primary", armed && "armed")}
-          title={`Request changes on GitHub, as you: press it twice, or ${MOD}↵ twice`}
-          disabled={!text.trim() || busy}
-          onClick={() => {
-            void send();
-          }}
+          className="act primary"
+          title={`${label} on GitHub, as you: the button or ${MOD}↵`}
+          disabled={!text.trim()}
+          onClick={send}
         >
           <kbd>{MOD}↵</kbd>
-          {busy ? "Requesting…" : armed ? "again to request" : "Request changes"}
+          {label}
         </button>
         <button type="button" className="act" onClick={onClose}>
           Cancel

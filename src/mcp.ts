@@ -125,7 +125,7 @@ async function overviewText(api: DeskClient): Promise<string> {
   const lines = [
     `me: ${o.me} · synced: ${o.synced_at ?? "never"}${o.syncing ? " (syncing)" : ""}${o.sync_error ? ` · sync error: ${o.sync_error}` : ""}`,
     `sources: ${o.connectors.map((c) => `${c.name} ${c.status}`).join(", ")}`,
-    `focus: ${o.focus.now} now, ${o.focus.today} today, ${o.focus.new} new`,
+    `focus: ${o.focus.now} now, ${o.focus.today} today, ${o.focus.new} new${o.focus.asks ? `, ${o.focus.asks} questions from agents` : ""}`,
     `merging: ${o.inflight.total} of your PRs (desk_merging lists them)`,
   ];
   for (const s of o.spaces) {
@@ -491,6 +491,54 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     ({ ask_id, text: answer }) => run(async () => (await api.answer(ask_id, answer), `answered ask ${ask_id}`)),
+  );
+
+  server.registerTool(
+    "desk_inquire",
+    {
+      description:
+        "Ask the user a question in their Review Desk instead of in chat: anything you need them to decide or tell you. It's a row on their main page and a notification; they answer there. Lead with the question in one line, put why in context, and offer the likely answers as options (they can always write their own). Then call desk_inquiry with the id to read the answer.",
+      inputSchema: {
+        question: z.string().min(1).max(300).describe("One line: what you need from them"),
+        context: z.string().max(2000).optional().describe("A few lines on why you ask and what each answer would do"),
+        options: z.array(z.string().min(1).max(80)).max(6).optional().describe("Likely answers, your pick first"),
+        from: z.string().max(60).optional().describe("Who asks, as the user knows this session: its task in a few words"),
+        item: z.string().optional().describe("The PR or issue it's about, owner/repo#123"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    (b) =>
+      run(async () => {
+        const { inquiry } = await api.inquire(b);
+        return `asked as inquiry ${inquiry.id}; call desk_inquiry with id "${inquiry.id}" (wait up to 60 s at a time) for the answer`;
+      }),
+  );
+
+  server.registerTool(
+    "desk_inquiry",
+    {
+      description:
+        "The user's answer to a question you asked with desk_inquire. With wait, it returns as soon as they answer, or after that many seconds with no answer yet; call it again to keep waiting.",
+      inputSchema: {
+        id: z.string().describe("The inquiry's id, from desk_inquire"),
+        wait: z.number().int().min(0).max(60).optional().describe("Seconds to wait for an answer (default 0)"),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ id, wait }) =>
+      run(async () => {
+        const end = Date.now() + (wait ?? 0) * 1000;
+        let q = await api.inquiry(id);
+        while (!q.answer && Date.now() < end) {
+          await new Promise((r) => {
+            setTimeout(r, 1000);
+          });
+          q = await api.inquiry(id);
+        }
+        if (!q.answer) return `no answer yet to "${oneLine(q.question)}"`;
+        if (q.answer.dismissed) return `the user dismissed "${oneLine(q.question)}" without answering: decide yourself, or ask differently`;
+        return `the user answered: ${q.answer.text}`;
+      }),
   );
 
   server.registerTool(

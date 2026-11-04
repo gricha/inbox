@@ -20,7 +20,7 @@ export function Sidebar({
   const onLater = route.name === "later" || (route.name === "review" && from === "later");
   const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
   const onSettings = route.name === "settings";
-  const now = view?.sections.now.length ?? 0;
+  const now = (view?.sections.now.length ?? 0) + (view?.inquiries.length ?? 0); // an agent's question waits on you too
   const today = view?.sections.today.length ?? 0;
   const flight = overview?.inflight;
   return (

@@ -127,7 +127,7 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk (a a)");
+    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk (a)");
     const { head_oid, body } = await c.req
       .json<{ head_oid?: unknown; body?: unknown }>()
       .catch((): { head_oid?: unknown; body?: unknown } => ({}));
@@ -142,6 +142,14 @@ export function createApp(desk: Desk, port: number): Hono {
     const b = await c.req.json<{ id?: unknown; body?: unknown }>().catch((): { id?: unknown; body?: unknown } => ({}));
     if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") throw new DeskError(400, "need { id, body }");
     return c.json({ ok: true, ...(await desk.reply(c.req.param("id"), b.id, b.body)) });
+  });
+  // Your comment on the PR, from the desk's own window only.
+  app.post("/api/review/:id{.+}/comment", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
+    const b = await c.req.json<{ body?: unknown }>().catch((): { body?: unknown } => ({}));
+    if (typeof b.body !== "string") throw new DeskError(400, "need { body }");
+    return c.json({ ok: true, ...(await desk.comment(c.req.param("id"), b.body)) });
   });
   // Your own draft's Ready for review, from the desk's own window only.
   app.post("/api/review/:id{.+}/ready", async (c) => {
@@ -170,7 +178,7 @@ export function createApp(desk: Desk, port: number): Hono {
     if (b.body !== undefined && typeof b.body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.githubAct(b.id, b.action as GitHubAction, { head: b.head_oid, body: b.body })) });
   });
-  // Merging: your own PRs you handed off (m m, b through /api/act), which the coordinator gets merged.
+  // Merging: your own PRs you handed off (m, b through /api/act), which the coordinator gets merged.
   app.get("/api/inflight", (c) => {
     ready();
     return c.json(desk.inflight());
@@ -191,7 +199,8 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/coordinator/wake", async (c) => {
     ready();
-    await desk.wakeCoordinator();
+    const { ask } = await c.req.json<{ ask?: unknown }>().catch((): { ask?: unknown } => ({}));
+    await desk.wakeCoordinator(typeof ask === "string" ? ask : undefined);
     return c.json({ ok: true });
   });
   // Your words to the coordinator, from the desk's own window only: it's woken with them at once.
@@ -208,9 +217,36 @@ export function createApp(desk: Desk, port: number): Hono {
     const ask = await desk.ask({ text: b.text, item_id: str("item_id"), thread_id: str("thread_id"), thread_url: str("thread_url") });
     return c.json({ ok: true, ask });
   });
-  app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks() }));
+  app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
   // desk_answer: local only, so agents may call it.
   app.post("/api/asks/:id/answer", async (c) => c.json({ ok: true, ask: desk.answer(c.req.param("id"), await line(c, "text")) }));
+  // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.
+  app.post("/api/inquiries", async (c) => {
+    ready();
+    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const str = (k: string) => {
+      const v = b[k] ?? undefined;
+      if (v === undefined || typeof v === "string") return v;
+      throw new DeskError(400, `${k} must be a string`);
+    };
+    if (typeof b.question !== "string") throw new DeskError(400, "need { question }");
+    const options = b.options ?? [];
+    if (!Array.isArray(options) || !options.every((o) => typeof o === "string"))
+      throw new DeskError(400, "options must be a list of strings");
+    return c.json({
+      ok: true,
+      inquiry: desk.inquire({ question: b.question, from: str("from"), context: str("context"), options, item: str("item") }),
+    });
+  });
+  app.get("/api/inquiries/:id", (c) => c.json(desk.inquiry(c.req.param("id"))));
+  // Your answer, from the desk's own window only: an agent can't answer its own question.
+  app.post("/api/inquiries/:id/answer", async (c) => {
+    if (!fromDesk(c)) throw new DeskError(403, "answer it in the desk's window");
+    const b = await c.req.json<{ text?: unknown; dismiss?: unknown }>().catch((): { text?: unknown; dismiss?: unknown } => ({}));
+    if (b.dismiss === true) return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), "", true) });
+    if (typeof b.text !== "string") throw new DeskError(400, "need { text } or { dismiss: true }");
+    return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), b.text) });
+  });
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));

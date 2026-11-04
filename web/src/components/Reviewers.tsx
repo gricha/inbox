@@ -10,13 +10,11 @@ export function Reviewers({
   asked,
   picked,
   setPicked,
-  disabled,
 }: {
   id: string;
   asked: string[]; // logins and team slugs already asked on GitHub
   picked: Reviewer[];
   setPicked: (r: Reviewer[]) => void;
-  disabled: boolean;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -93,7 +91,6 @@ export function Reviewers({
             type="button"
             className="rv-reviewer-x"
             aria-label={`Don't ask ${p.login}`}
-            disabled={disabled}
             onClick={() => {
               setPicked(picked.filter((x) => x.id !== p.id));
             }}
@@ -108,7 +105,6 @@ export function Reviewers({
           value={q}
           placeholder={picked.length || asked.length ? "Add another" : "Add reviewers"}
           aria-label="Add a reviewer"
-          disabled={disabled}
           onChange={(e) => {
             setQ(e.target.value);
             setHi(0);
@@ -121,7 +117,7 @@ export function Reviewers({
           }}
           onKeyDown={onKeyDown}
         />
-        {!open && !disabled && <kbd className="rv-reviewers-key">@</kbd>}
+        {!open && <kbd className="rv-reviewers-key">@</kbd>}
         {open && (
           <div className="popover rv-reviewers-pop" aria-label="Reviewers">
             {typeof found === "string" ? (

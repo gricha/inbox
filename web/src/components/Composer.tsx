@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Ask, AsksView } from "../../../src/types.ts";
+import type { Ask, AsksView, CoordinatorView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, shortId } from "../format.ts";
 
@@ -84,7 +84,7 @@ export function Composer({ about, loads, now, onClose }: { about: About; loads: 
       {mine.length > 0 && (
         <ol className="asks">
           {mine.map((a) => (
-            <AskItem key={a.id} a={a} now={now} />
+            <AskItem key={a.id} a={a} now={now} live={view?.coordinator} />
           ))}
         </ol>
       )}
@@ -163,13 +163,73 @@ export function Asks({ asks, now }: { asks: Ask[]; now: number }) {
   );
 }
 
-function AskItem({ a, now }: { a: Ask; now: number }) {
+function AskItem({ a, now, live }: { a: Ask; now: number; live?: CoordinatorView | undefined }) {
   return (
     <li className="ask">
       <p className="ask-q">
         {a.text} <span className="ask-age">{age(a.at, now)}</span>
       </p>
-      {a.answer ? <p className="ask-a">{a.answer.text}</p> : <p className="ask-a quiet">Waiting for its answer</p>}
+      {a.answer ? <p className="ask-a">{a.answer.text}</p> : <Waiting key={live?.status ?? "none"} ask={a.id} live={live} />}
     </li>
+  );
+}
+
+// What the coordinator is doing about an ask it hasn't answered: on it, queued behind what it's on, stuck on a permission,
+// or stopped without answering, with a way to see it or wake it.
+function Waiting({ ask, live }: { ask: string; live?: CoordinatorView | undefined }) {
+  const [woke, setWoke] = useState<string | null>(null);
+  const watch = live?.url && (
+    <a href={live.url} target="_blank" rel="noreferrer">
+      Watch it on claude.ai
+    </a>
+  );
+  if (!live) return <p className="ask-a quiet">Waiting for its answer</p>;
+  if (live.error) return <p className="ask-a quiet t-bad">It can't run: {live.error}</p>;
+  if (live.status === "waiting")
+    return (
+      <p className="ask-a quiet ask-live">
+        Waiting on a permission prompt{" "}
+        {live.url && (
+          <a href={live.url} target="_blank" rel="noreferrer">
+            Answer it on claude.ai
+          </a>
+        )}
+      </p>
+    );
+  if (live.queued.includes(ask))
+    return (
+      <p className="ask-a quiet ask-live">
+        <span className="busy" aria-hidden="true" />
+        Queued: it gets this when it's done with what it's on {watch}
+      </p>
+    );
+  if (live.status === "busy" || live.status === "shell")
+    return (
+      <p className="ask-a quiet ask-live">
+        <span className="busy" aria-hidden="true" />
+        On it {watch}
+      </p>
+    );
+  return (
+    <p className="ask-a quiet ask-live">
+      {woke ?? "It stopped without answering"}{" "}
+      <button
+        type="button"
+        className="act ask-wake"
+        onClick={() => {
+          void (async () => {
+            try {
+              await api.wakeCoordinator(ask);
+              setWoke("Asked it again");
+            } catch (e) {
+              setWoke(message(e));
+            }
+          })();
+        }}
+      >
+        Wake it
+      </button>{" "}
+      {watch}
+    </p>
   );
 }

@@ -5,6 +5,7 @@ import type {
   ActivityPage,
   AiReview,
   Ask,
+  Inquiry,
   BoardView,
   ConfigDoc,
   ConfigError,
@@ -127,6 +128,10 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     note: (id: string, text: string) => call<{ ok: true; text: string }>("POST", `/api/inflight/${q(id)}/note`, { text }),
     handBack: (id: string, why: string) => call<{ ok: true; reason: string }>("POST", `/api/inflight/${q(id)}/handback`, { why }),
     answer: (id: string, text: string) => call<{ ok: true; ask: Ask }>("POST", `/api/asks/${q(id)}/answer`, { text }),
+    // An agent's question for the user, and their answer once they give it.
+    inquire: (b: { question: string; from?: string; context?: string; options?: string[]; item?: string }) =>
+      call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
+    inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));

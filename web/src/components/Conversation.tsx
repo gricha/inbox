@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls } from "../format.ts";
+import { age } from "../format.ts";
 import type { Thread } from "./Composer.tsx";
 
-const ARM_MS = 3000;
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
@@ -29,23 +28,11 @@ export function Conversation({
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
   const [sent, setSent] = useState<Record<string, string>>({}); // until the sync shows your reply: its url
-  const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const replied = useRef(""); // the PR whose reply box was focused for its Reply row
 
-  useEffect(() => {
-    const t = armed
-      ? setTimeout(() => {
-          setArmed(null);
-        }, ARM_MS)
-      : undefined;
-    return () => {
-      clearTimeout(t);
-    };
-  }, [armed]);
-
-  // Opened from a Reply row: the first reply box is ready to type in (⌘↩ twice sends it, Esc leaves it).
+  // Opened from a Reply row: the first reply box is ready to type in (⌘↩ sends it, Esc leaves it).
   useEffect(() => {
     if (view.card.cta !== "reply" || replied.current === view.card.id) return;
     const box = document.querySelector<HTMLTextAreaElement>(".cv-reply");
@@ -69,16 +56,10 @@ export function Conversation({
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
   if (!view.conversation.length) return null;
 
-  // Sending is yours: Send (or ⌘↩) twice.
+  // Sending is yours: Send (or ⌘↩).
   async function send(c: Convo, text: string) {
     const to = c.comments.at(-1)?.author ?? "them";
     if (!text.trim() || busy) return;
-    if (armed !== c.id) {
-      setArmed(c.id);
-      flash(`Press Send again to post your reply to ${to}`, false, ARM_MS);
-      return;
-    }
-    setArmed(null);
     setBusy(c.id);
     try {
       const { url } = await api.reply(view.card.id, c.id, text);
@@ -134,10 +115,9 @@ export function Conversation({
               }}
               onChange={(e) => {
                 setDrafts((d) => ({ ...d, [c.id]: e.target.value }));
-                if (armed === c.id) setArmed(null);
               }}
               onKeyDown={(e) => {
-                if (e.repeat) return; // a held ⌘↩ would arm and send
+                if (e.repeat) return; // a held ⌘↩ would send it again
                 if (e.key === "Escape") e.currentTarget.blur();
                 else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -148,15 +128,15 @@ export function Conversation({
             <div className="actions">
               <button
                 type="button"
-                className={cls("act primary", armed === c.id && "armed")}
-                title={`Post this reply on GitHub, as you: Send twice, or ${MOD}↵ twice`}
+                className="act primary"
+                title={`Post this reply on GitHub, as you: Send, or ${MOD}↵`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {
                   void send(c, text);
                 }}
               >
                 <kbd>{MOD}↵</kbd>
-                {busy === c.id ? "Sending…" : armed === c.id ? "Send again to post" : "Send"}
+                {busy === c.id ? "Sending…" : "Send"}
               </button>
               <a className="act" href={c.url} target="_blank" rel="noreferrer">
                 Open on GitHub

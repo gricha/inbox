@@ -35,7 +35,7 @@ import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
 import { Asks, type Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
-import { MoreButton, MoreMenu, RequestChanges } from "./More.tsx";
+import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -49,7 +49,6 @@ interface Fact {
   tone: string; // t-bad, t-warn, or "" for pencil
 }
 
-const ARM_MS = 3000;
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
@@ -107,9 +106,9 @@ export function Review({
   onCard,
   onGithub,
   row,
-  armed: armedKey,
-  readied,
+  onApprove,
   onReady,
+  onComment,
   onBack,
   onAsk,
   onThread,
@@ -122,11 +121,12 @@ export function Review({
   inert: boolean;
   flash: (text: string, error?: boolean, ms?: number) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
-  onGithub: (c: Card, action: GitHubAction, head: string) => void; // the More menu's writes but request changes, which is here
+  onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => void; // the More menu's writes, and Request changes
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
-  armed: string | null; // armOf("m", id) after a first m
-  readied: "sending" | "sent" | undefined; // Ready for review sent for it, from here or its row
-  onReady: (c: Card, picked: Reviewer[]) => void; // a on your own draft: App sends it, as from its row
+  // a: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
+  onApprove: (c: Card, head: string) => void;
+  onReady: (c: Card, picked: Reviewer[]) => void;
+  onComment: (c: Card, body: string) => void; // w: your comment on the PR
   onBack: () => void;
   onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
   onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
@@ -136,20 +136,18 @@ export function Review({
   const [noteIdx, setNoteIdx] = useState<number | null>(null); // a place in order.notes
   const [restOpen, setRestOpen] = useState(false);
   const [side, setSide] = useState(sideSaved);
-  const [busy, setBusy] = useState<"approve" | "ai" | null>(null);
+  const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
-  // The PR your approval went out for: shown done at once, and until the sync shows it, so a second a doesn't send it twice.
-  const [approved, setApproved] = useState<string | null>(null);
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu (.)
-  const [changes, setChanges] = useState(false); // Request changes, being written
+  const [writing, setWriting] = useState<"comment" | "changes" | null>(null); // a comment or Request changes, being written
   // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
   const [read, setRead] = useState("");
   const seq = useRef(0);
   const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
   const v = typeof view === "object" ? view : null;
-  const canApprove = !!v?.approve.ok && approved !== v.card.id;
+  const canApprove = !!v?.approve.ok;
   // Your own open draft: a marks it ready for review instead of approving.
   const readying = v?.card.cta === "ready";
   // A PR in Merging is the coordinator's: no prompt to copy or AI review to ask for.
@@ -296,24 +294,10 @@ export function Review({
     }
   }
 
-  // a: approved on GitHub. Shown done at once; a refusal undoes that.
-  async function approve() {
-    if (!v || busy === "approve") return;
-    if (!canApprove) {
-      flash(`Can't approve: ${approved === v.card.id ? "you just did" : (v.approve.reason ?? "not allowed")}`, true);
-      return;
-    }
-    setApproved(v.card.id);
-    setBusy("approve");
-    try {
-      await api.approve(v.card.id, read);
-      flash(`Approved ${shortRef(v.card)} on GitHub`);
-    } catch (e) {
-      setApproved(null);
-      flash(message(e), true);
-    } finally {
-      setBusy(null);
-    }
+  function approve() {
+    if (!v) return;
+    if (!canApprove) flash(`Can't approve: ${v.approve.reason ?? "not allowed"}`, true);
+    else onApprove(v.card, read);
   }
 
   async function copyPrompt() {
@@ -338,8 +322,13 @@ export function Review({
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
     else if (k === "c" && !flying) void copyPrompt();
     else if (k === "i" && !flying) void askAi();
-    else if (k === "a" && readying && v) onReady(v.card, picked);
-    else if (k === "a") void approve();
+    else if (k === "w" && v?.item.state === "open") {
+      setWriting("comment");
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(".rv-changes textarea")?.focus();
+      });
+    } else if (k === "a" && readying && v) onReady(v.card, picked);
+    else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) {
       if (v.card.actions?.length) setMore(true);
@@ -353,13 +342,11 @@ export function Review({
     if (e.repeat && !["n", "p", "]", "["].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (e.key === "Escape") {
-      // Esc with a hand-off armed never reaches here: App lets it lapse first.
-      onBack();
-    } else if (e.key === "@" && readying && !readied) {
+    if (e.key === "Escape") onBack();
+    else if (e.key === "@" && readying) {
       e.preventDefault();
       document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
-    } else if (("npoci[]admbfNP.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
+    } else if (("npoci[]admbfwNP.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
       e.preventDefault();
       run(e.key);
     }
@@ -433,46 +420,36 @@ export function Review({
           )}
         </div>
 
-        {readying && (
-          <Reviewers
-            id={card.id}
-            asked={item.review_requests.map((r) => r.reviewer)}
-            picked={picked}
-            setPicked={setPicked}
-            disabled={!!readied}
-          />
-        )}
+        {readying && <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />}
         {/* What finishes it first (a, or m or b on yours), then o and the rest. */}
         <div className="actions rv-actions">
           {readying && (
             <KeyButton
-              k={readied ? "" : "a"}
-              label={readied ? "✓ Ready for review" : "Ready for review"}
+              k="a"
+              label="Ready for review"
               run={run}
-              disabled={!!readied}
-              busy={readied === "sending"}
               title={
                 picked.length
                   ? `Mark it ready for review on GitHub and ask ${picked.map((p) => p.login).join(", ")}`
                   : "Mark it ready for review on GitHub"
               }
-              className={readied ? "done" : "primary"}
+              className="primary"
             />
           )}
           {/* Only someone else's open PR is yours to approve. */}
           {open && !isMine && (
             <KeyButton
-              k={approved === card.id ? "" : "a"}
-              label={approved === card.id ? "✓ Approved" : "Approve"}
+              k="a"
+              label="Approve"
               run={run}
               disabled={!canApprove}
-              busy={busy === "approve"}
-              title={approved === card.id ? "You approved it" : (view.approve.reason ?? "Approve on GitHub")}
-              className={approved === card.id ? "done" : cls("go", !changes && "primary")}
+              title={view.approve.reason ?? "Approve on GitHub"}
+              className={cls("go", !writing && "primary")}
             />
           )}
           {/* While you owe replies, Send is the one filled button. */}
-          {mine && <HandKey card={card} run={run} armed={armedKey} primary={card.cta !== "reply"} />}
+          {mine && <HandKey card={card} run={run} primary={card.cta !== "reply"} />}
+          {open && <KeyButton k="w" label="Comment" title="Comment on the PR, as you" run={run} />}
           {/* Shorter beside More, so the row stays one line at 900px with the sidebar folded. */}
           <KeyButton k="o" label={card.actions?.length ? "GitHub" : "Open on GitHub"} title="Open on GitHub" run={run} />
           {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
@@ -503,27 +480,27 @@ export function Review({
                   card={card}
                   actions={card.actions}
                   pick={(a) => {
-                    if (a === "request_changes") setChanges(true);
+                    if (a === "request_changes") setWriting("changes");
                     else onGithub(card, a, read);
                   }}
                   onClose={() => {
                     setMore(false);
-                  }}
-                  flash={(text) => {
-                    flash(text, false, ARM_MS);
                   }}
                 />
               )}
             </span>
           )}
         </div>
-        {changes && (
-          <RequestChanges
-            card={card}
-            head={read}
-            flash={flash}
+        {writing && (
+          <WriteBox
+            label={writing === "comment" ? "Comment" : "Request changes"}
+            placeholder={writing === "comment" ? `Comment on ${shortRef(card)}` : "What needs to change"}
+            onSend={(body) => {
+              if (writing === "comment") onComment(card, body);
+              else onGithub(card, "request_changes", read, body);
+            }}
             onClose={() => {
-              setChanges(false);
+              setWriting(null);
             }}
           />
         )}
@@ -913,11 +890,6 @@ function AiSection({
             ) : (
               <p className="quiet">No concerns.</p>
             ))}
-          {!stale && notes > 0 && (
-            <p className="quiet">
-              {notes} {notes === 1 ? "note" : "notes"} in the code below.
-            </p>
-          )}
         </>
       )}
     </section>

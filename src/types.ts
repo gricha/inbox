@@ -497,7 +497,7 @@ export interface Overview {
   config_errors: ConfigError[];
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
-  focus: { now: number; today: number; new: number };
+  focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
   inflight: { total: number }; // your open PRs in Merging
   rate_limit: { remaining: number; reset_at: string } | null;
 }
@@ -532,6 +532,7 @@ export interface Paused {
 
 // Every item once, at its best placement across boards: the app's main surface.
 export interface QueueView {
+  inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
@@ -746,6 +747,10 @@ export interface CoordinatorView {
   id: string | null; // what `claude attach`, `logs`, `stop` and `rm` take; null until it's started
   url: string | null; // its Remote Control page on claude.ai
   error: string | null; // why claude last couldn't start or resume it, until it does
+  // What it's doing, as `claude agents` last said: working ("busy", "shell"), on a permission prompt ("waiting"), idle,
+  // stopped (no process), or null (none yet). Looked at every 10 s while one of your asks waits on its answer.
+  status: "busy" | "shell" | "waiting" | "idle" | "stopped" | null;
+  queued: string[]; // your asks not handed over yet: it gets them once it's done with what it's on
 }
 
 // Your words to the coordinator from the desk's window (t), about what you were on, and its answer (desk_answer).
@@ -759,10 +764,24 @@ export interface Ask {
   answer: { text: string; at: string } | null; // untrusted: an agent wrote it
 }
 
+// A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it.
+// Everything but the answer is untrusted: an agent wrote it.
+export interface Inquiry {
+  id: string;
+  at: string;
+  from: string; // the session that asks, as it names itself
+  question: string;
+  context: string; // why it asks, a few lines; may be empty
+  options: string[]; // answers to pick from; you can always write your own
+  item_id: string | null; // the PR or issue it's about
+  answer: { text: string; at: string; dismissed: boolean } | null;
+}
+
 // GET /api/asks
 export interface AsksView {
   on: boolean; // the coordinator setting: off, nothing is sent
   asks: Ask[]; // oldest first
+  coordinator: CoordinatorView; // what it's doing, for an ask that waits on its answer
 }
 
 // GET /api/config

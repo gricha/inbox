@@ -1156,8 +1156,11 @@ test("approve goes through the write client, lands in the action log, and undo s
     [
       ["pin", 0],
       ["approve", 1],
+      ["done", 0],
     ],
   );
+  assert.equal(t.desk.item("api#1").card.status, "done", "approving it in the desk takes it off your desk at once");
+  assert.equal(t.desk.undo().action, "done", "u puts it back");
   assert.equal(t.desk.undo().action, "pin", "undo walks past the approval");
 
   assert.deepEqual((await t.desk.reviewView("web#4")).approve, { ok: false, reason: "it's your PR" });

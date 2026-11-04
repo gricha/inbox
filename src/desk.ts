@@ -16,6 +16,7 @@ import type {
   AgentStatus,
   AiReview,
   Ask,
+  Inquiry,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -97,6 +98,8 @@ const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
 };
 const MAX_ASK = 2_000; // an ask or its answer
 const ASKS_KEPT = 200;
+const INQUIRIES_KEPT = 100;
+const MAX_CONTEXT = 2_000; // an inquiry's context
 
 export class DeskError extends Error {
   status: number;
@@ -995,6 +998,7 @@ export class Desk {
         now: focus.sections.now.length,
         today: focus.sections.today.length,
         new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
+        asks: this.inquiries().filter((q) => !q.answer).length,
       },
       inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
       rate_limit: this.gh.api.rateLimit(),
@@ -1184,6 +1188,7 @@ export class Desk {
       }
     }
     return {
+      inquiries: this.inquiries().filter((q) => !q.answer),
       sections,
       hidden,
       cleared,
@@ -1484,7 +1489,7 @@ export class Desk {
     }
     this.store.logWrite(id, "approve", this.now().toISOString());
     this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
-    this.changed();
+    this.doneAfterWrite(id);
     // The PR itself first, so it resolves as "you approved" within seconds; the search index lags, so a full pass alone wouldn't see it.
     void this.gh.refresh(id).then(() => this.sync());
     return { url };
@@ -1510,7 +1515,7 @@ export class Desk {
     ];
   }
 
-  // POST /api/github: a More menu write, on your keypress in the desk's window (each pressed twice). A change request needs `head`
+  // POST /api/github: a More menu write, on your keypress in the desk's window. A change request needs `head`
   // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
   async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
     this.requireConfig();
@@ -1542,6 +1547,13 @@ export class Desk {
       }
       this.store.logWrite(id, action, this.now().toISOString());
       this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
+      // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish.
+      if (action === "reopen") {
+        // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
+        const ev = this.store.lastActionFor(id);
+        if (ev?.action === "done") this.undo(ev.seq);
+        else if (this.store.state(id).done_at) this.act(id, "restore");
+      } else if (action !== "draft") this.doneAfterWrite(id);
       this.changed();
       // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
       // since actions() reads the snapshot this refresh replaces.
@@ -1556,6 +1568,13 @@ export class Desk {
 
   // ---------------------------------------------------------------- actions
 
+  // You acted on it in the desk, so your part is done: it leaves the desk at once, as d does, and comes back when someone
+  // else acts. A PR in Merging stays the coordinator's.
+  private doneAfterWrite(id: string): void {
+    if (this.snapshot().entries.get(id)?.inflight) return;
+    this.act(id, "done");
+  }
+
   // `agent`: not the desk's own window. Hand-offs are yours.
   act(ref: string, action: Action, until?: string, agent?: string): { state: ItemState; undo_seq: number } {
     const id = this.resolve(ref);
@@ -1565,7 +1584,7 @@ export class Desk {
       return { state: this.undo(ev.seq, agent).state, undo_seq: 0 };
     }
     // The coordinator merges what's in Merging, so only you put a PR there.
-    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off with m twice in the desk");
+    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off with m in the desk");
     const now = this.now();
     const before = this.store.state(id);
     const s: StateRow = { ...before };
@@ -1624,7 +1643,7 @@ export class Desk {
           throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
         // Ready for review is yours, so a draft in Merging would wait on you there.
-        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready first (a a)`);
+        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first (a)`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snoozed_at: null, muted: false });
@@ -1750,9 +1769,14 @@ export class Desk {
   }
 
   // POST /api/coordinator/wake: w in Merging has it look now (and starts it, if it isn't running).
-  async wakeCoordinator(): Promise<void> {
+  // w, or Wake it under an ask it stopped without answering: that ask goes to it again, your words as you wrote them.
+  async wakeCoordinator(askId?: string): Promise<void> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
-    await this.coordinator.now();
+    const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
+    if (a) {
+      const url = a.item_id ? (this.snapshot().entries.get(a.item_id)?.item.url ?? null) : null;
+      await this.coordinator.tell(askLine(a, url));
+    } else await this.coordinator.now();
     if (!this.coordinator.saved()) throw new DeskError(502, "the coordinator didn't start; the desk's log says why");
   }
 
@@ -1884,6 +1908,62 @@ export class Desk {
     return a;
   }
 
+  inquiries(): Inquiry[] {
+    return (this.store.get("inquiries") as Inquiry[] | null) ?? [];
+  }
+
+  inquiry(id: string): Inquiry {
+    const q = this.inquiries().find((x) => x.id === id);
+    if (!q) throw new DeskError(404, `no inquiry "${id}"`);
+    return q;
+  }
+
+  // desk_inquire: an agent session's question for you, a row on your main page and a notification, until you answer it.
+  inquire(b: { question: string; from?: string; context?: string; options?: string[]; item?: string }): Inquiry {
+    const options = (b.options ?? []).map((o) => this.line(o, "option", 80));
+    if (options.length > 6) throw new DeskError(400, "at most 6 options");
+    const context = (b.context ?? "").trim();
+    const q: Inquiry = {
+      id: randomBytes(4).toString("hex"),
+      at: this.now().toISOString(),
+      from: b.from?.trim() ? this.line(b.from, "from", 60) : "an agent",
+      question: this.line(b.question, "question", 300),
+      context: context.length > MAX_CONTEXT ? `${context.slice(0, MAX_CONTEXT - 1)}…` : context,
+      options,
+      item_id: b.item ? this.itemId(b.item) : null,
+      answer: null,
+    };
+    // Only answered ones age out: a question still waiting on you never goes unseen.
+    const all = [...this.inquiries(), q];
+    const answered = all.filter((x) => x.answer);
+    const drop = new Set(answered.slice(0, Math.max(0, all.length - INQUIRIES_KEPT)));
+    this.store.set(
+      "inquiries",
+      all.filter((x) => !drop.has(x)),
+    );
+    this.log(`${q.from} asks: ${q.question}`);
+    this.changed();
+    if (this.settings["notify.enabled"] && !inQuietHours(this.settings["notify.quiet"], this.now()))
+      this.notify(`${q.from} asks`, q.question);
+    return q;
+  }
+
+  // POST /api/inquiries/:id/answer, from the desk's window: your answer, for the agent to read; it leaves your desk.
+  answerInquiry(id: string, text: string, dismissed = false): Inquiry {
+    const q = this.inquiry(id);
+    if (q.answer) throw new DeskError(409, "already answered");
+    const answer = dismissed ? "" : text.trim();
+    if (!dismissed && !answer) throw new DeskError(400, "the answer is empty");
+    if (answer.length > MAX_ASK) throw new DeskError(400, `keep an answer under ${MAX_ASK} characters`);
+    const done: Inquiry = { ...q, answer: { text: answer, at: this.now().toISOString(), dismissed } };
+    this.store.set(
+      "inquiries",
+      this.inquiries().map((x) => (x.id === id ? done : x)),
+    );
+    this.changed();
+    return done;
+  }
+
   // desk_answer: the coordinator's answer to one of your asks, under it in the desk, and a notification.
   answer(id: string, text: string): Ask {
     const all = this.asks();
@@ -1926,8 +2006,39 @@ export class Desk {
     }
     this.store.logWrite(id, c.kind === "thread" ? "reply" : "comment", this.now().toISOString());
     this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
+    // Answering was all it asked of you, and nobody else waits on you there: it's done.
+    const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
+    const only = this.replyOnly(e);
     this.convos.forget(id);
+    if (only && last) this.doneAfterWrite(id);
     this.changed();
+    void this.gh.refresh(id).then(() => this.sync());
+    return { url };
+  }
+
+  // POST /api/review/:id/comment: your comment on the PR itself (w in its review), on your keypress. One of the desk's GitHub
+  // writes; it's yours done, so it leaves your desk until someone answers.
+  async comment(ref: string, body: string): Promise<{ url: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const text = body.trim();
+    if (!text) throw new DeskError(400, "the comment is empty");
+    if (text.length > MAX_REPLY) throw new DeskError(400, `keep a comment under ${MAX_REPLY} characters`);
+    if (!this.writer) throw new DeskError(409, "commenting isn't available in this desk");
+    if (this.sending.has(id)) throw new DeskError(409, "already sending a comment there");
+    this.sending.add(id);
+    let url: string;
+    try {
+      ({ url } = await this.writer.comment(e.item.node_id, text));
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
+    } finally {
+      this.sending.delete(id);
+    }
+    this.store.logWrite(id, "comment", this.now().toISOString());
+    this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
+    this.convos.forget(id);
+    this.doneAfterWrite(id);
     void this.gh.refresh(id).then(() => this.sync());
     return { url };
   }
@@ -1950,6 +2061,7 @@ export class Desk {
       }
       this.store.logWrite(id, "ready", this.now().toISOString());
       this.log(`marked ${id} ready for review on GitHub`);
+      this.doneAfterWrite(id);
       const users = ask?.users ?? [];
       const teams = ask?.teams ?? [];
       const n = users.length + teams.length;
@@ -2049,10 +2161,12 @@ export class Desk {
     return { ok: true, errors: [], warnings };
   }
 
+  // The tray's and the dock's count: an agent's question waiting on you counts as now.
   status(): { now: number; today: number; new: number; text: string } {
     const f = this.overview().focus;
-    const parts = [`${f.now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
-    return { ...f, text: f.now || f.today ? `desk ${parts.join(" ")}` : "" };
+    const now = f.now + f.asks;
+    const parts = [`${now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
+    return { now, today: f.today, new: f.new, text: now || f.today ? `desk ${parts.join(" ")}` : "" };
   }
 }
 

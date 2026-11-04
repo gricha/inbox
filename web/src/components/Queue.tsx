@@ -1,18 +1,21 @@
-import type { Overview, QueueView } from "../../../src/types.ts";
+import type { Inquiry, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import { foldOf, SORTED_AWAY, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
+import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", resolved: "g d", hidden: "g h", cleared: "g x" };
 
-// The main page: only what needs you, one line each, in the desk's order.
+// The main page: only what needs you, one line each, in the desk's order; agents' questions first, since one waits on each.
 export function Queue({
   view,
   overview,
   groups,
   ctx,
+  inquiries,
+  inq,
   filter,
   unfold,
   selectFold,
@@ -21,6 +24,8 @@ export function Queue({
   overview: Overview | null;
   groups: Group[];
   ctx: RowCtx;
+  inquiries: Inquiry[];
+  inq: InquiryCtx;
   filter: string;
   unfold: (k: GroupKey) => void;
   selectFold: (k: GroupKey) => void;
@@ -41,9 +46,12 @@ export function Queue({
           <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
-      {g && g.cards.length > 0 ? (
+      {inquiries.length > 0 || (g && g.cards.length > 0) ? (
         <div className="lines" aria-label="Needs you">
-          {g.cards.map((c) => (
+          {inquiries.map((q) => (
+            <InquiryRow key={q.id} q={q} ctx={inq} />
+          ))}
+          {g?.cards.map((c) => (
             <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
           ))}
         </div>

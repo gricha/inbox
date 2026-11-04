@@ -98,6 +98,8 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_config",
       "desk_events",
       "desk_hand_back",
+      "desk_inquire",
+      "desk_inquiry",
       "desk_item",
       "desk_list",
       "desk_merging",

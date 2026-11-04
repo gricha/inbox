@@ -9,6 +9,7 @@ import type {
   FieldDoc,
   GitHubAction,
   InflightView,
+  Inquiry,
   ItemDetail,
   ItemState,
   Overview,
@@ -64,17 +65,22 @@ export const api = {
   // The calls that write to GitHub: the review view's approve key and replies, and Ready for review on your own draft.
   approve: (id: string, head_oid: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
+  comment: (id: string, body: string) => call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/comment`, { body }),
   reply: (id: string, convo: string, body: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   // With the reviewers you picked (node ids), asked right after it's marked ready.
   ready: (id: string, ask?: { users: string[]; teams: string[] }) =>
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
+  // Your answer to an agent's question, or leaving it unanswered.
+  answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
+    call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),
   reviewers: (id: string, q: string) => call<Reviewer[]>("GET", `/api/reviewers/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`),
   // The More menu's: close, draft, merge, reopen, request changes (with a body, pinned to the head you read).
   github: (id: string, action: GitHubAction, more: { head_oid?: string; body?: string } = {}) =>
     call<{ ok: true; url: string }>("POST", "/api/github", { id, action, ...more }),
   inflight: () => call<InflightView>("GET", "/api/inflight"),
-  wakeCoordinator: () => call<{ ok: true }>("POST", "/api/coordinator/wake", {}),
+  // With an ask it stopped without answering: that ask goes to it again.
+  wakeCoordinator: (ask?: string) => call<{ ok: true }>("POST", "/api/coordinator/wake", ask ? { ask } : {}),
   asks: () => call<AsksView>("GET", "/api/asks"),
   ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }) =>
     call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),

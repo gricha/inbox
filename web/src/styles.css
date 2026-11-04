@@ -736,6 +736,58 @@ kbd {
   }
 }
 
+/* An agent's question: its label in the accent, since one waits on your answer; opened, it's answered under its title. */
+.line.inq .line-kind {
+  color: var(--accent-ink);
+}
+
+.line .inq-from {
+  max-width: 28ch;
+}
+
+.inq-open {
+  display: grid;
+  gap: 12px;
+  padding: 2px 14px 16px calc(14px + 2.9 * 11.5px + 14px);
+}
+
+.inq-context {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.inq-options {
+  flex-wrap: wrap;
+}
+
+.inq-write {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inq-input {
+  flex: 1 1 auto;
+  max-width: 520px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.inq-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 /* A Merging stack sits inside its table. */
 .lines .lines {
   border: 0;
@@ -948,9 +1000,21 @@ kbd {
   font-weight: 400;
 }
 
+/* Leaving: it fades, then gives up its room, so a write still on its way to GitHub leaves no gap in the table. */
 .line.leaving {
+  interpolate-size: allow-keywords;
+  overflow: hidden;
   pointer-events: none;
-  animation: leave 200ms ease forwards;
+  animation:
+    leave 200ms ease forwards,
+    fold 160ms ease 200ms forwards;
+}
+
+@keyframes fold {
+  to {
+    height: 0;
+    border-top-width: 0;
+  }
 }
 
 /* Opened in place (an issue, or w): under the title's edge. */
@@ -1886,7 +1950,7 @@ kbd {
   gap: 6px;
 }
 
-/* Narrow enough that a review's action row, armed or not, stays one line beside its sidebar. */
+/* Narrow enough that a review's action row stays one line beside its sidebar. */
 .act {
   display: inline-flex;
   align-items: center;
@@ -1919,9 +1983,8 @@ kbd {
   color: var(--faint);
 }
 
-/* Wide enough for "✓ Ready for review" and its spinner, so sending it never moves what's beside it. */
+/* One width for the filled call to action, so the row's other actions start in one place whichever it is. */
 .rv-actions .act.primary,
-.rv-actions .act.done,
 .line .line-cta:not(.line-reply) {
   justify-content: center;
   min-width: 152px;
@@ -1953,15 +2016,6 @@ kbd {
   border-color: var(--go);
   background: color-mix(in srgb, var(--go) 88%, #000);
   color: var(--on-go);
-}
-
-/* Sent: shown done at once, in green, with a spinner until GitHub has it. */
-.review .actions .act.done:disabled,
-.line .line-cta.done:disabled {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--green) 14%, transparent);
-  color: var(--green);
-  font-weight: 600;
 }
 
 .busy {
@@ -2006,23 +2060,12 @@ kbd {
   color: var(--pencil);
 }
 
-/* Armed, a second press does it: a ring of the accent around it, since amber is for problems. */
-.act.armed {
-  border-color: var(--accent);
-  color: var(--ink);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-.act.primary.armed {
-  color: var(--on-accent);
-}
-
 /* Only a call to action is a shape; the rest are text that fills on hover, and while the menu it opened is open. */
 .line .line-ask,
 .line .line-more,
-.lane-more .act:not(.primary, .armed),
-.review .actions .act:not(.primary, .armed, .done),
-.composer .act:not(.primary, .armed) {
+.lane-more .act:not(.primary),
+.review .actions .act:not(.primary),
+.composer .act:not(.primary) {
   border-color: transparent;
   background: none;
 }
@@ -2030,17 +2073,17 @@ kbd {
 .line .line-ask:hover:not(:disabled),
 .line .line-more:hover:not(:disabled),
 .line .line-more[aria-expanded="true"],
-.lane-more .act:not(.primary, .armed):hover:not(:disabled),
-.review .actions .act:not(.primary, .armed):hover:not(:disabled),
-.review .actions .act[aria-expanded="true"]:not(.primary, .armed),
-.composer .act:not(.primary, .armed):hover:not(:disabled) {
+.lane-more .act:not(.primary):hover:not(:disabled),
+.review .actions .act:not(.primary):hover:not(:disabled),
+.review .actions .act[aria-expanded="true"]:not(.primary),
+.composer .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
-.review .actions > .act:first-child:not(.primary, .armed, .done),
-.lane-more .actions > .act:first-child:not(.primary, .armed) {
+.review .actions > .act:first-child:not(.primary),
+.lane-more .actions > .act:first-child:not(.primary) {
   margin-left: -9px;
 }
 
@@ -2270,12 +2313,6 @@ kbd {
   text-align: center;
 }
 
-/* A second press closes or merges it: the accent's ring, as on an armed button. */
-.pop-item.armed {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--ink);
-}
-
 /* Digits differ in width: a fixed key column starts every label on one edge. */
 .pop-item kbd {
   min-width: 1ch;
@@ -2442,6 +2479,23 @@ kbd {
   color: var(--ink-2);
   font-size: 13.5px;
   overflow-wrap: anywhere;
+}
+
+/* An ask that waits: what the coordinator is doing about it, a spinner while it works, and where to watch it. */
+.ask-live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.ask-live a {
+  color: var(--pencil);
+}
+
+.ask-live .act.ask-wake {
+  height: 26px;
+  padding: 0 8px;
 }
 
 .rv-asks {

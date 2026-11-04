@@ -62,6 +62,8 @@ test("lists the tools", async () => {
     "desk_config",
     "desk_events",
     "desk_hand_back",
+    "desk_inquire",
+    "desk_inquiry",
     "desk_item",
     "desk_list",
     "desk_merging",
@@ -313,7 +315,7 @@ test("`desk mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 15);
+    assert.equal((await c.listTools()).tools.length, 17);
     const r = await c.callTool({ name: "desk_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

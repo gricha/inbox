@@ -92,7 +92,7 @@ test("a draft isn't handed off: Ready for review is yours, so it would wait on y
   await t.desk.sync();
   assert.throws(
     () => t.desk.act("web#3", "inflight"),
-    (e: Error & { status: number }) => e.status === 409 && e.message.includes("mark it ready first (a a)"),
+    (e: Error & { status: number }) => e.status === 409 && e.message.includes("mark it ready for review first (a)"),
   );
   assert.equal(t.desk.inflight().rows.length, 0);
 });

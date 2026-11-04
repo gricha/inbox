@@ -50,6 +50,7 @@ import type {
   PreviewResult,
   ReviewDecision,
   ReviewFile,
+  Inquiry,
   ReviewNote,
   Reviewer,
   ReviewView,
@@ -1686,6 +1687,7 @@ function queue(): QueueView {
   const clearedCards = [...cleared.values()].filter((c) => !best.has(c.id));
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
   return {
+    inquiries: INQUIRIES.filter((q) => !q.answer),
     sections,
     hidden,
     cleared: clearedCards,
@@ -1866,7 +1868,50 @@ function inflight(): InflightView {
 }
 
 // The coordinator session, with its claude.ai link; w has it look now.
-const coordinator: CoordinatorView = { on: true, id: "4be71c2a", url: "https://claude.ai/code/session_01MockCoordinator", error: null };
+const coordinator: CoordinatorView = {
+  on: true,
+  id: "4be71c2a",
+  url: "https://claude.ai/code/session_01MockCoordinator",
+  error: null,
+  status: "busy",
+  queued: [],
+};
+
+// Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page.
+const INQUIRIES: Inquiry[] = [
+  {
+    id: "q1c0ffee",
+    at: iso(0.4),
+    from: "review-desk: queue redesign",
+    question: "Keep the PR/Issue label as text, or switch to GitHub's icons?",
+    context:
+      "Text reads plainly and needs no legend; the icons are what GitHub shows and take less room, but a draft and an open PR look alike at 13px.",
+    options: ["Keep the text", "Switch to icons", "Both: icon and text"],
+    item_id: null,
+    answer: null,
+  },
+  {
+    id: "q2bead00",
+    at: iso(1.5),
+    from: "sentry: ViewerContext rollout",
+    question: "Which PR in the stack should land first after the deploy freeze lifts?",
+    context: "#129146 is the core change; the per-team PRs depend on it but each could ship behind its own flag.",
+    options: [],
+    item_id: null,
+    answer: null,
+  },
+];
+function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
+  const q = INQUIRIES.find((x) => x.id === id);
+  if (!q) throw new HttpError(404, `no inquiry "${id}"`);
+  if (q.answer) throw new HttpError(409, "already answered");
+  const dismissed = b.dismiss === true;
+  const text = typeof b.text === "string" ? b.text.trim() : "";
+  if (!dismissed && !text) throw new HttpError(400, "the answer is empty");
+  q.answer = { text: dismissed ? "" : text, at: new Date().toISOString(), dismissed };
+  bump();
+  return q;
+}
 
 // Your asks to the coordinator: one answered, one it's still on. A new one gets a canned answer a few seconds later.
 const ASKS: Ask[] = [
@@ -1965,7 +2010,12 @@ function overview(): Overview {
       { id: "github", name: "GitHub", status: syncing ? "syncing" : syncError ? "error" : "ok", synced_at: syncedAt, error: syncError },
     ],
     spaces: config.spaces.map((s) => ({ id: s.id, name: s.name, boards: config.boards.filter((b) => b.space === s.id).map(summary) })),
-    focus: { now: f.sections.now.length, today: f.sections.today.length, new: all.filter((c) => c.new).length },
+    focus: {
+      now: f.sections.now.length,
+      today: f.sections.today.length,
+      new: all.filter((c) => c.new).length,
+      asks: INQUIRIES.filter((q) => !q.answer).length,
+    },
     inflight: { total: recs.filter(inFlight).length },
     rate_limit: rateLimit(),
   };
@@ -2916,6 +2966,15 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     bump();
     return { ok: true };
   }
+  // A comment on the PR: the mock only remembers that you acted.
+  const commented = /^\/api\/review\/(.+)\/comment$/.exec(url.pathname);
+  if (commented && req.method === "POST") {
+    const r = resolve(decodeURIComponent(commented[1]!));
+    const { body } = await readBody(req);
+    if (typeof body !== "string" || !body.trim()) throw new HttpError(400, "the comment is empty");
+    bump();
+    return { ok: true, url: `${urlOf(r.seed)}#issuecomment-mock` };
+  }
   // Who you can ask to review your PR: GitHub's two suggestions, or everyone matching what you typed.
   const asking = /^\/api\/reviewers\/(.+)$/.exec(url.pathname);
   if (asking && req.method === "GET") {
@@ -2984,7 +3043,9 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/inflight") return inflight();
   if (route === "POST /api/coordinator/wake") return { ok: true };
-  if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS };
+  if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS, coordinator };
+  const inq = /^\/api\/inquiries\/([^/]+)(\/answer)?$/.exec(url.pathname);
+  if (inq && req.method === "POST" && inq[2]) return { ok: true, inquiry: answerInquiry(inq[1]!, await readBody(req)) };
   if (route === "POST /api/ask") return { ok: true, ask: addAsk(await readBody(req)) };
   if (route === "POST /api/undo") {
     const body = await readBody(req);

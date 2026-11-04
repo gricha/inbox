@@ -11,8 +11,6 @@ export interface RowCtx {
   me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
-  armed: string | null; // what a first m armed (armOf): a second one hands it off
-  readied: Record<string, "sending" | "sent" | undefined>; // rows marked ready: shown done at once, sending until GitHub has it
   leaving: Set<string>;
   snoozeFor: string | null;
   showSignals: boolean;
@@ -26,7 +24,6 @@ export interface RowCtx {
   moreFor: string | null; // the row whose More menu (.) is open
   closeMore: () => void;
   github: (c: Card, action: GitHubAction) => void; // a More menu write, after its second press where it takes one
-  flash: (text: string) => void;
 }
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
@@ -61,7 +58,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
-  const readied = ctx.readied[card.id];
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
   return (
@@ -129,16 +125,14 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         {card.cta === "ready" && !why && (
           <button
             type="button"
-            className={cls("act line-cta", readied ? "done" : sel && "primary")}
-            title={readied ? "Marked ready for review" : "Mark it ready for review on GitHub"}
-            disabled={!!readied}
+            className={cls("act line-cta", sel && "primary")}
+            title="Mark it ready for review on GitHub"
             onClick={() => {
               ctx.run(card, "a");
             }}
           >
-            {sel && !readied && <kbd>a</kbd>}
-            {readied ? "✓ Ready for review" : "Ready for review"}
-            {readied === "sending" && <span className="busy" aria-label="sending" />}
+            {sel && <kbd>a</kbd>}
+            Ready for review
           </button>
         )}
         {card.cta === "reply" && !why && (
@@ -172,7 +166,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             ctx.github(card, a);
           }}
           onClose={ctx.closeMore}
-          flash={ctx.flash}
         />
       )}
       {/* Under the row, so it never covers the row itself. */}

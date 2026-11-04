@@ -59,7 +59,7 @@ export function Inflight({
         rows(open)
       ) : (
         <p className="queue-empty">
-          Nothing in Merging yet: press <kbd>m</kbd> twice on one of your PRs when you're done with it.
+          Nothing in Merging yet: press <kbd>m</kbd> on one of your PRs when you're done with it.
         </p>
       )}
       {landed.length > 0 && (

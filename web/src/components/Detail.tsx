@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
-import { armOf, cardFacts, judgeStepText, says } from "../view.ts";
+import { cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -135,7 +135,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <div className="actions card-keys">
           <KeyButton k="esc" label="Close" run={run} />
           <KeyButton k="o" label="Open on GitHub" run={run} />
-          {mine && <HandKey card={card} run={run} armed={ctx.armed} />}
+          {mine && <HandKey card={card} run={run} />}
           <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
           <KeyButton k="s" label="Snooze" run={run} />
           {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
@@ -196,7 +196,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       <div className="actions card-keys">
         {pr && <KeyButton k="enter" label={card.inflight ? "Show in Merging" : "Review"} run={run} />}
         <KeyButton k="o" label="Open on GitHub" run={run} />
-        {mine && <HandKey card={card} run={run} armed={ctx.armed} />}
+        {mine && <HandKey card={card} run={run} />}
         <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
         <KeyButton k="s" label="Snooze" run={run} />
         {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
@@ -261,27 +261,25 @@ export function Dots({ parts, className }: { parts: ReactNode[]; className?: str
 
 export const BACK_TITLE = "Out of Merging and back on your desk; the coordinator leaves it alone";
 
-// Your own open PR: m twice hands it off for merge, b brings it back from Merging. The same on a card, an opened item and a review.
+// Your own open PR: m hands it off for merge (green: a yes, like Approve), b brings it back from Merging. The same on a
+// card, an opened item and a review.
 export function HandKey({
   card,
   run,
-  armed,
   primary,
 }: {
   card: Pick<Card, "id" | "inflight" | "draft">;
   run: (k: string) => void;
-  armed: string | null;
   primary?: boolean;
 }) {
   if (card.inflight) return <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
   if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
-  const on = armed === armOf("m", card.id);
   return (
     <KeyButton
       k="m"
-      label={on ? "again to hand off" : "Hand off for merge"}
-      title="Press m twice. The coordinator gets it merged: it fixes CI, addresses comments and merges it once it's approved"
-      className={cls(primary && "primary", on && "armed")}
+      label="Hand off for merge"
+      title="The coordinator gets it merged: it fixes CI, addresses comments and merges it once it's approved"
+      className={cls(primary && "primary go")}
       run={run}
     />
   );

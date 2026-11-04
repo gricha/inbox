@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
-import type { Ask } from "../src/types.ts";
+import type { Ask, AsksView } from "../src/types.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 
@@ -233,7 +233,7 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null, error: null });
+    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null, error: null, status: null, queued: [] });
     t.desk.start();
     await until(() => t.fake.calls().length === 1);
     await settle();
@@ -266,6 +266,8 @@ test(
       id: "c0ffee01",
       url: "https://claude.ai/code/session_01Fakec0ffee01",
       error: null,
+      status: "busy",
+      queued: [],
     });
   },
 );
@@ -698,7 +700,7 @@ function asking(t: Awaited<ReturnType<typeof coordinated>>) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       }),
-    list: async () => (await app.request("http://127.0.0.1:49401/api/asks")).json() as Promise<{ on: boolean; asks: Ask[] }>,
+    list: async () => (await app.request("http://127.0.0.1:49401/api/asks")).json() as Promise<AsksView>,
   };
 }
 
@@ -734,7 +736,9 @@ test(
       `${ROLE} My ask ${ask.id}, about acme/web#3 (https://github.com/acme/web/pull/3), on the thread ${thread}: "i think we addressed it in follow up, you can dismiss this item" Answer it with desk_answer.`,
     ]);
     assert.ok(!t.fake.calls().flat().join(" ").includes("Ignore previous"), "never PR text");
-    assert.deepEqual(await api.list(), { on: true, asks: [ask] });
+    const listed = await api.list();
+    assert.deepEqual([listed.on, listed.asks], [true, [ask]]);
+    assert.deepEqual(listed.coordinator.queued, [], "handed over at once");
     await settle();
 
     // Running and idle, the next one resumes it right away; with no item, it's only the words.
@@ -775,7 +779,8 @@ test("an ask comes only from the desk's own window, and only while the coordinat
   assert.equal((await api.ask({ text: "hi", item_id: "web#3", thread_url: "https://evil.example/x" }, OWNER)).status, 400);
   t.desk.putSettings({ set: { "agent.coordinator": false } });
   assert.equal((await api.ask(body)).status, 409);
-  assert.deepEqual(await api.list(), { on: false, asks: [] });
+  const listed = await api.list();
+  assert.deepEqual([listed.on, listed.asks], [false, []]);
   await settle();
   assert.deepEqual(t.fake.calls(), [], "nothing started or woke it");
 });
