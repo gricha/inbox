@@ -1,4 +1,4 @@
-// npm run shots [-- --url http://localhost:47823] [--out .shots]: visual QA.
+// npm run shots [-- --url http://localhost:47823] [--out .shots] [--only queue,review]: visual QA.
 // Screenshots every key state in light and dark at four window sizes, and each theme, and fails on sideways scrolling and
 // console errors.
 // Without --url it starts the mock API and Vite, so the data is the same on every run.
@@ -794,8 +794,10 @@ const files: string[] = [];
 try {
   const real = arg("--url");
   const url = real ?? (await start());
-  const shots = real ? SHOTS.filter((s) => !s.writes) : SHOTS;
-  fs.rmSync(out, { recursive: true, force: true });
+  // --only keeps the shots whose names contain one of its words, for a quick loop on one page.
+  const only = arg("--only")?.split(",");
+  const shots = SHOTS.filter((s) => !(real && s.writes) && (!only || only.some((o) => s.name.includes(o))));
+  if (!only) fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ channel: "chrome" });
   for (const theme of ["light", "dark"] as const) {

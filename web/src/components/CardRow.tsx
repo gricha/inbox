@@ -54,14 +54,12 @@ function noteOf(card: Card, variant: Variant): string {
   return card.demoted ?? card.why;
 }
 
-// One line: the title, quietly its repo#number, who it's from and a PR's stage, its one call to action, its age on the
-// right. Enter opens an issue (or `w` any item) in place under it.
+// One line: whether it's a PR or an issue, the title, quietly its repo#number, its one call to action, then who it's from,
+// a PR's stage and its age in columns on the right. Enter opens an issue (or `w` any item) in place under it.
 export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
-  // Under Later the note is the row's why; the stage is the queue's.
-  const stage = why ? undefined : card.stage;
   const armed = ctx.armed === armOf("a", card.id);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = card.resolved_at ?? card.waiting_since;
@@ -87,6 +85,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             ctx.select(card);
           }}
         >
+          <span className="line-kind">{card.kind === "pr" ? "PR" : "Issue"}</span>
           <span className="line-title">{card.title}</span>
           {/* A long repo name gives way before the title; the number never does. */}
           <span className="line-ref" title={`${card.repo}#${card.number}`}>
@@ -99,11 +98,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
               {card.stack.pos}/{card.stack.size}
             </span>
           )}
-          {/* One span, so a tight row cuts the stage before who it's from; amber only on yours, where it's work for you. */}
-          <span className="line-by">
-            by {card.by}
-            {stage && <span className={cls("line-stage", stage === "changes requested" && card.by === "you" && "t-warn")}>{stage}</span>}
-          </span>
           {note && <span className="line-note">{note}</span>}
         </button>
         {/* Under the cursor only: the quiet way to tell the coordinator something about it. */}
@@ -156,6 +150,11 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             {sel && <kbd>enter</kbd>}
             Reply
           </button>
+        )}
+        {/* Columns on the right, so who and what stage line up from row to row; amber only on yours, where it's work for you. */}
+        <span className={cls("line-by", card.by === "you" && "mine")}>by {card.by}</span>
+        {!why && (
+          <span className={cls("line-stage", card.stage === "changes requested" && card.by === "you" && "t-warn")}>{card.stage}</span>
         )}
         <span className="line-age" title={`${card.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, ctx.now)}

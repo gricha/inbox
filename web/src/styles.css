@@ -53,9 +53,9 @@
   --ref-w: 124px;
   --gap: 14px;
 
-  /* A row's type grows with the window: its floor at 780px, its cap past 1600px. */
-  --title-size: clamp(17px, 15px + 0.25vw, 19px);
-  --meta-size: clamp(14px, 12.5px + 0.2vw, 15px);
+  /* A row's type: compact, so a table of them reads at a glance. */
+  --title-size: 15px;
+  --meta-size: 13px;
 
   color-scheme: light;
 }
@@ -697,16 +697,58 @@ kbd {
   font-size: 16px;
 }
 
-/* One line each: the title, quietly its repo#number, its age on the right. Selected, a neutral fill. */
+/* One line each, as one table: a sheet with a hairline between rows. Selected, a neutral fill. */
 .lines {
+  --row-hover: color-mix(in oklab, var(--ink) 3.5%, var(--sheet));
+  --row-sel: color-mix(in oklab, var(--ink) 7.5%, var(--sheet));
+
   display: grid;
-  gap: 1px;
+  container-type: inline-size;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+}
+
+.lines > * + * {
+  border-top: 1px solid var(--rule);
+}
+
+/* A tight table drops the stage column first, then who it's from; a review still shows both. */
+@container (width < 760px) {
+  .line-row .line-stage {
+    display: none;
+  }
+}
+
+@container (width < 520px) {
+  .line-row .line-by {
+    display: none;
+  }
+}
+
+/* A Merging stack sits inside its table. */
+.lines .lines {
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
 
 .line {
   position: relative;
-  border-radius: 8px;
   scroll-margin: 72px 0 84px;
+}
+
+/* The table's corners: its first and last rows' fills round with it. */
+.lines > .line:first-child,
+.lines > .line:first-child > .line-main {
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
+
+.lines > .line:last-child,
+.lines > .line:last-child > .line-main:last-child {
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 9px;
 }
 
 /* .line for weight: the button is a .row-main too (j/k focus it), whose grid is the Merging card's. */
@@ -716,16 +758,16 @@ kbd {
   gap: 14px;
   width: 100%;
   min-width: 0;
-  padding: 11px 12px;
+  padding: 10px 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: none;
   text-align: left;
   cursor: pointer;
 }
 
 .line .line-main:hover {
-  background: var(--hover);
+  background: var(--row-hover);
 }
 
 /* A queue row's button: its ::after covers the whole line, under the call to action. */
@@ -735,10 +777,11 @@ kbd {
 
 .line .line-btn {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   align-items: baseline;
   gap: 14px;
   min-width: 0;
+  overflow: clip;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -751,7 +794,6 @@ kbd {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 8px;
 }
 
 .line .line-btn:focus-visible {
@@ -759,7 +801,7 @@ kbd {
 }
 
 .line.sel > .line-main {
-  background: var(--sel);
+  background: var(--row-sel);
 }
 
 /* The fill is the cursor; a ring on top of it would be a second one. */
@@ -767,9 +809,19 @@ kbd {
   outline: none;
 }
 
+/* A PR or an issue: a small label in its own column, so the titles start in one. */
+.line-kind {
+  flex: none;
+  width: 2.9em;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 /* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
 .line-title {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: calc-size(max-content, min(size, 40%, 24ch));
   overflow: hidden;
   color: var(--ink);
@@ -795,7 +847,8 @@ kbd {
 
 /* The title is what you read: a long repo name is cut short (its title attribute has it whole), the number never. */
 .line-ref {
-  flex: none;
+  flex: 0 100 auto;
+  min-width: calc-size(max-content, min(size, 4ch));
   max-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -811,15 +864,21 @@ kbd {
   flex: none;
 }
 
+/* Who and what stage: columns of one width on every row, so they read down the table. */
 .line-by {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: none;
+  width: 7.5em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.line-by.mine {
+  color: var(--ink-2);
+}
+
 .line-stage {
-  margin-left: 14px;
+  flex: none;
+  width: 9.5em;
 }
 
 .line-stage.t-warn {
@@ -852,10 +911,6 @@ kbd {
   margin: -4px 0 -4px auto;
 }
 
-.line-cta + .line-age {
-  margin-left: 0;
-}
-
 /* The selected row's quiet way to the coordinator and its More menu, before its call to action, at its height. */
 .line .line-ask,
 .line .line-more {
@@ -876,11 +931,6 @@ kbd {
 .line-ask + .line-more,
 .line-more + .line-cta {
   margin-left: -8px;
-}
-
-.line-ask + .line-age,
-.line-more + .line-age {
-  margin-left: 0;
 }
 
 .dim .line-title {
@@ -924,7 +974,7 @@ kbd {
 }
 
 .queue .fold {
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
   font-size: 14px;
 }
@@ -1040,8 +1090,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 14px;
-  height: calc(22px + 1.5 * var(--title-size));
-  padding: 0 12px;
+  height: calc(21px + 1.5 * var(--title-size));
+  padding: 0 14px;
 }
 
 .sk-row .sk {
@@ -1595,7 +1645,7 @@ kbd {
 
 /* The selected row's note and keys, under its title, on the row's fill. */
 .lane-row.sel {
-  background: var(--sel);
+  background: var(--row-sel);
 }
 
 .lane-more {
