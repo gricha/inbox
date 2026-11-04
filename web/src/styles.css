@@ -3723,6 +3723,11 @@ kbd {
 /* Narrow windows ----------------------------------------------------------- */
 
 @media (width <= 1000px) {
+  /* No room for the coordinator's note on a Merging row; the selected row still shows it. */
+  .lane-row .line-note .dots > :not(:first-child) {
+    display: none;
+  }
+
   .rules,
   .policy {
     grid-template-columns: minmax(0, 1fr);
