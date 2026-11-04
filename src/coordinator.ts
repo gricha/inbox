@@ -26,6 +26,17 @@ const DENY = [
   "Bash(gh api:*)",
   "Bash(git push --force:*)", // same as "git push --force *", so --force-with-lease passes
   "Bash(git push -f:*)",
+  "Bash(git push * -f*)", // the flag after the branch; " --f" isn't matched, so --force-with-lease still passes
+  "Bash(git push * --force)",
+  "Bash(git push * --force *)",
+  "Bash(git push * +*)", // a +branch refspec forces too
+  "Bash(gh pr close:*)", // close and reopen take --comment
+  "Bash(gh pr reopen:*)",
+  "Bash(gh pr create:*)",
+  "Bash(gh issue close:*)",
+  "Bash(gh issue reopen:*)",
+  "Bash(gh issue create:*)",
+  "Bash(gh issue edit:*)",
 ];
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
@@ -36,6 +47,10 @@ type Mode = keyof typeof PERMISSION;
 // The desk's news for the owner's PR that's ready to merge but conflicts: it's in Merging only until GitHub sees it mergeable.
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
+
+interface Settings {
+  permissions?: { deny?: string[] };
+}
 
 interface Agent {
   id: string;
@@ -127,13 +142,17 @@ export class Coordinator {
       this.desk.notify("Coordinator can't run", why);
   }
 
-  // The desk home's coordinator directory, with the deny list as its project settings unless the owner wrote their own.
+  // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.
   dir(): string {
     const dir = path.join(this.desk.home, "coordinator");
     const file = path.join(dir, ".claude", "settings.json");
-    if (!fs.existsSync(file)) {
+    const s = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Settings) : {};
+    const deny = s.permissions?.deny ?? [];
+    const missing = DENY.filter((r) => !deny.includes(r));
+    if (missing.length > 0) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify({ permissions: { deny: DENY } }, null, 2) + "\n");
+      const next = { ...s, permissions: { ...s.permissions, deny: [...deny, ...missing] } };
+      fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
     }
     return dir;
   }

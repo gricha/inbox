@@ -253,7 +253,14 @@ test(
     assert.ok(!t.fake.calls().flat().join(" ").includes("Ignore previous"), "never PR text");
     const deny = (JSON.parse(fs.readFileSync(path.join(dir, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
       .permissions.deny;
-    assert.ok(deny.includes("Bash(gh pr comment:*)") && deny.includes("Bash(git push --force:*)"));
+    for (const r of [
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr close:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * +*)",
+    ])
+      assert.ok(deny.includes(r), r);
     assert.deepEqual(t.desk.inflight().coordinator, {
       on: true,
       id: "c0ffee01",
@@ -262,6 +269,25 @@ test(
     });
   },
 );
+
+test("settings the owner wrote in the coordinator's folder keep their own rules and gain the deny rules they lack", posix, async (c) => {
+  const t = await coordinated(c);
+  const file = path.join(t.home, "coordinator", ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const old = { permissions: { additionalDirectories: ["/src"], deny: ["Bash(gh pr comment:*)", "Bash(rm:*)"] }, model: "x" };
+  fs.writeFileSync(file, JSON.stringify(old));
+  t.desk.act("web#3", "inflight");
+  await until(() => t.fake.sessions().length === 1);
+  const s = JSON.parse(fs.readFileSync(file, "utf8")) as {
+    permissions: { additionalDirectories: string[]; deny: string[] };
+    model: string;
+  };
+  assert.deepEqual(s.permissions.additionalDirectories, ["/src"]);
+  assert.equal(s.model, "x");
+  assert.deepEqual(s.permissions.deny.slice(0, 2), ["Bash(gh pr comment:*)", "Bash(rm:*)"]);
+  assert.ok(s.permissions.deny.includes("Bash(gh pr close:*)") && s.permissions.deny.includes("Bash(git push * --force)"));
+  assert.equal(s.permissions.deny.filter((r) => r === "Bash(gh pr comment:*)").length, 1);
+});
 
 test("news on a PR in Merging wakes the same session with one line per batch; news elsewhere doesn't", posix, async (c) => {
   const t = await coordinated(c);
