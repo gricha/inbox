@@ -737,7 +737,7 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
-                <h2 className="d-head">AI review</h2>
+                <SkLines count={1} className="sk-verdict" />
                 <SkLines count={3} className="rv-summary" />
               </section>
             )
@@ -867,21 +867,12 @@ function AiSection({
 }) {
   return (
     <section className="rv-ai" aria-label="AI review">
-      <h2 className="d-head">
-        AI review{" "}
-        {ai?.model && ai.at && (
-          <span className="quiet">
-            from {modelName(ai.model)}, {when(ai.at)}
-            {stale ? ", on an earlier commit" : ""}
-          </span>
-        )}
-      </h2>
-      {busy && <p className="quiet">Claude is reading it. The notes land in the code below in a minute or two.</p>}
+      {busy && <p className="quiet">Claude is reviewing it. The notes land in the code below in a minute or two.</p>}
       {!busy && error && (
         <p>
           {withCode(error)}{" "}
           <span className="quiet">
-            Press <kbd>i</kbd> to try again.
+            Press <kbd>i</kbd> to try the AI review again.
           </span>
         </p>
       )}
@@ -893,9 +884,17 @@ function AiSection({
       )}
       {ai && (
         <>
-          <p className="rv-verdict">
+          <p className="rv-verdict" title={ai.model && ai.at ? `AI review by ${modelName(ai.model)}, ${when(ai.at)}` : undefined}>
             <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict]}</span>
-            <span className={cls("risk", ai.risk === "high" && "t-bad")}>{ai.risk} risk</span>
+            <span className={`risk r-${ai.risk}`}>
+              <span className="meter" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              {ai.risk} risk
+            </span>
+            {stale && <span className="quiet">on an earlier commit</span>}
           </p>
           <p className="rv-summary">{ai.summary}</p>
           {ai.since && (
