@@ -174,7 +174,7 @@ function Row({
             </p>
           )}
           <div className="actions card-keys">
-            <KeyButton k="enter" label="Review" run={keys} />
+            <KeyButton k="enter" label="Review" run={keys} className="primary" />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
             <KeyButton k="t" label="Ask coordinator" title="Tell or ask your coordinator something about it" run={keys} />

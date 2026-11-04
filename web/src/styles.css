@@ -1,7 +1,7 @@
 /* Review Desk: an informational app. Ink and pencil grey on calm paper; colour only where it carries information (CI failing,
-   a merge conflict, changes requested), and one calm accent on the primary action. Themes are token sets: the system's
-   light or dark by default, or one picked per device in Settings → Appearance (data-theme on <html>, set before the first
-   paint). */
+   a merge conflict, changes requested, an AI review's risk), and the accent on calls to action: filled on the one to press,
+   tinted on a row's. Themes are token sets: the system's light or dark by default, or one picked per device in Settings →
+   Appearance (data-theme on <html>, set before the first paint). */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -40,7 +40,9 @@
   --amber: #8d5c00;
   --amber-wash: #f8eed8;
   --green: #28703f;
-  --accent: #33609a;
+  --accent: #2f5fd0;
+  --accent-ink: #2a56c4;
+  --accent-wash: #e8eefb;
   --on-accent: #fff;
   --scrim: rgb(27 29 33 / 30%);
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
@@ -78,8 +80,10 @@
     --amber: #e3b45e;
     --amber-wash: #2f2614;
     --green: #7dcb98;
-    --accent: #42679e;
-    --on-accent: #f3f6fb;
+    --accent: #3a6be0;
+    --accent-ink: #8fb0ff;
+    --accent-wash: #1c2438;
+    --on-accent: #fff;
     --scrim: rgb(0 0 0 / 55%);
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
     --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -111,8 +115,10 @@
   --amber: #e3b45e;
   --amber-wash: #2f2614;
   --green: #7dcb98;
-  --accent: #42679e;
-  --on-accent: #f3f6fb;
+  --accent: #3a6be0;
+  --accent-ink: #8fb0ff;
+  --accent-wash: #1c2438;
+  --on-accent: #fff;
   --scrim: rgb(0 0 0 / 55%);
   --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
   --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -144,7 +150,9 @@
   --amber: #80570c;
   --amber-wash: #f1e4c8;
   --green: #3b6a37;
-  --accent: #355d80;
+  --accent: #3352c0;
+  --accent-ink: #3352c0;
+  --accent-wash: #e3e4f1;
   --on-accent: #fbf8f2;
   --scrim: rgb(42 37 31 / 30%);
   --shadow: 0 1px 2px rgb(42 37 31 / 7%), 0 10px 30px rgb(42 37 31 / 13%);
@@ -177,8 +185,10 @@
   --amber: #dfb468;
   --amber-wash: #352c1c;
   --green: #86c99c;
-  --accent: #3f6599;
-  --on-accent: #f1f4f8;
+  --accent: #4d63d9;
+  --accent-ink: #9db4ff;
+  --accent-wash: #252e4a;
+  --on-accent: #fff;
   --scrim: rgb(0 0 0 / 50%);
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
   --card-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
@@ -1705,14 +1715,11 @@ kbd {
   margin: 8px 0 0 14px;
 }
 
-/* Below high, risk is a fact, not a second verdict. */
+/* The meter tells medium from high without colour: in light and sand, amber and red are the same lightness. */
 .risk {
-  color: var(--pencil);
-  font-weight: 400;
-}
-
-.risk.t-bad {
-  color: var(--red);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
   font-weight: 600;
 }
 
@@ -1726,6 +1733,25 @@ kbd {
 
 .r-low {
   color: var(--green);
+  font-weight: 500;
+}
+
+.meter {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.meter > span {
+  width: 4px;
+  height: 11px;
+  border-radius: 1px;
+  background: color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+.r-low .meter > :first-child,
+.r-medium .meter > :not(:last-child),
+.r-high .meter > span {
+  background: currentcolor;
 }
 
 .reasons {
@@ -1756,8 +1782,8 @@ kbd {
   padding: 0 8px;
   border: 1px solid var(--rule-strong);
   border-radius: 9px;
-  background: none;
-  color: var(--ink-2);
+  background: var(--sheet);
+  color: var(--ink);
   font: 500 13px var(--sans);
   white-space: nowrap;
   cursor: pointer;
@@ -1765,7 +1791,7 @@ kbd {
 
 .act:hover:not(:disabled) {
   border-color: var(--faint);
-  background: var(--hover);
+  background: var(--wash);
   color: var(--ink);
   text-decoration: none;
 }
@@ -1792,6 +1818,7 @@ kbd {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .act.primary:hover:not(:disabled) {
@@ -1800,21 +1827,35 @@ kbd {
   color: var(--on-accent);
 }
 
+/* Full strength: any fade on the accent drops the key below AA in the dark themes. */
 .act.primary kbd {
   color: inherit;
-  opacity: 0.85;
+}
+
+/* Tinted off the cursor, so each row's action shows without competing with the filled one. */
+.line .line-cta:not(.primary) {
+  border-color: transparent;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.line .line-cta:not(.primary):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-ink) 45%, transparent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .act.primary:disabled {
   border-color: var(--rule-strong);
-  background: none;
+  background: var(--sheet);
   color: var(--pencil);
   font-weight: 500;
+  box-shadow: none;
 }
 
 .act.primary:disabled kbd {
   color: var(--pencil);
-  opacity: 1;
 }
 
 /* Armed, a second press does it: a ring of the accent around it, since amber is for problems. */
@@ -3088,17 +3129,36 @@ kbd {
   font-size: 13.5px;
 }
 
-.rv-ai .d-head {
-  margin: 0;
-}
-
-.rv-ai h3.d-head {
-  margin-top: 6px;
-}
-
 .rv-verdict {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+}
+
+.rv-verdict .verdict {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.rv-verdict .v-skim,
+.rv-verdict .v-skip {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.rv-verdict .v-skim {
+  color: var(--ink-2);
+}
+
+.sk-verdict {
+  font-size: 18px;
+}
+
+.sk-verdict .sk {
+  width: 14em;
+  max-width: 100%;
 }
 
 .rv-summary {
