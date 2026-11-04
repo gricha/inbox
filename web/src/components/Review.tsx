@@ -903,15 +903,17 @@ function AiSection({
               <b>Since your review:</b> {ai.since}
             </p>
           )}
-          {ai.concerns.length > 0 ? (
-            <ul className="rv-concerns" aria-label="Concerns">
-              {ai.concerns.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quiet">No concerns.</p>
-          )}
+          {/* Each concern is also a note in the code; listed here only when the notes can't sit there. */}
+          {(stale || notes === 0) &&
+            (ai.concerns.length > 0 ? (
+              <ul className="rv-concerns" aria-label="Concerns">
+                {ai.concerns.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="quiet">No concerns.</p>
+            ))}
           {!stale && notes > 0 && (
             <p className="quiet">
               {notes} {notes === 1 ? "note" : "notes"} on the changes below: <kbd>]</kbd> next, <kbd>[</kbd> previous.
