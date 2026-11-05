@@ -9,6 +9,8 @@ import type {
   FieldDoc,
   GitHubAction,
   InflightView,
+  Automation,
+  AutomationView,
   Inquiry,
   InquiryView,
   ItemDetail,
@@ -74,6 +76,11 @@ export const api = {
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
   // Your answer to an agent's question, or leaving it unanswered.
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
+  automations: () => call<AutomationView[]>("GET", "/api/automations"),
+  setAutomation: (id: string, b: { name: string; schedule: string; prompt: string; on: boolean }) =>
+    call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}`, b),
+  deleteAutomation: (id: string) => call<{ ok: true }>("DELETE", `/api/automations/${encodeURIComponent(id)}`),
+  runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${encodeURIComponent(id)}/run`),
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),
   reviewers: (id: string, q: string) => call<Reviewer[]>("GET", `/api/reviewers/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`),

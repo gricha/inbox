@@ -806,6 +806,40 @@ export interface InquiryLink {
   url: string; // http(s), or claude: for a Claude session
 }
 
+// An automation (Settings → Automations): your instruction, run on its schedule by your own Claude Code, read only. What a
+// run finds that needs you goes on your desk with its why. An agent may draft or edit one; it's off until you turn it on.
+export interface Automation {
+  id: string; // a slug: "warden-issues"
+  name: string;
+  schedule: string; // "daily 09:00", "weekdays 09:00", "mon,thu 17:30": local time
+  prompt: string; // the instruction, in your words
+  on: boolean;
+  by: "you" | "an agent"; // who last changed what it does
+  updated_at: string;
+}
+
+export interface AutomationRun {
+  id: string;
+  automation: string;
+  trigger: "schedule" | "now";
+  at: string;
+  done_at: string | null; // null while it runs
+  error: string | null;
+  summary: string; // the agent's: untrusted
+  // added: it's on your desk now; kept: it was already; left: you'd dealt with it (done, snoozed, muted, in Merging), so it
+  // stays that way; resolved: nobody needs it now (closed, merged, approved by someone else); failed: the desk couldn't
+  // take it (error says why)
+  items: { item_id: string; why: string; outcome: "added" | "kept" | "left" | "resolved" | "failed"; error?: string }[];
+  session: string | null; // the run's Claude Code session: claude --resume <id> shows what it did
+}
+
+// GET /api/automations
+export interface AutomationView extends Automation {
+  next_at: string | null; // while it's on
+  running: boolean;
+  runs: AutomationRun[]; // newest first, the last 10
+}
+
 // GET /api/asks
 export interface AsksView {
   on: boolean; // the coordinator setting: off, nothing is sent

@@ -17,7 +17,7 @@ const ERROR = "coordinator_error"; // why it last couldn't run; kept so a desk r
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 // It reads CI logs and comments anyone can write; these keep injected text from posting or rewriting as the owner.
 // gh api whole: it POSTs whenever a field is passed, with no -X.
-const DENY = [
+export const DENY = [
   "Bash(gh pr comment:*)",
   "Bash(gh pr review:*)",
   "Bash(gh pr ready:*)",

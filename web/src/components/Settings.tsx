@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type
 import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { ago, cls, tilde, when } from "../format.ts";
+import { Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -643,6 +644,7 @@ export function Settings({
             {x.id === "agent" && <AgentLink active={active} loads={loads} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
+            {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
             {x.id === "appearance" && <Appearance />}
             {view && defs.length > 0 && (
               <div className="s-fields">

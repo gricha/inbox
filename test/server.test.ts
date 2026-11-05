@@ -94,6 +94,7 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_act",
       "desk_add",
       "desk_answer",
+      "desk_automations",
       "desk_brief",
       "desk_config",
       "desk_events",

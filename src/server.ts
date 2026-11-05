@@ -269,6 +269,34 @@ export function createApp(desk: Desk, port: number): Hono {
     if (typeof b.text !== "string") throw new DeskError(400, "need { text } or { dismiss: true }");
     return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), b.text) });
   });
+  // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
+  // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one.
+  app.get("/api/automations", (c) => c.json(desk.automations.view()));
+  app.put("/api/automations/:id", async (c) => {
+    ready();
+    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    if (
+      typeof b.name !== "string" ||
+      typeof b.schedule !== "string" ||
+      typeof b.prompt !== "string" ||
+      (b.on !== undefined && typeof b.on !== "boolean")
+    )
+      throw new DeskError(400, "need { name, schedule, prompt, on? }");
+    const a = desk.automations.set(c.req.param("id"), { name: b.name, schedule: b.schedule, prompt: b.prompt, on: b.on }, fromDesk(c));
+    return c.json({ ok: true, automation: a });
+  });
+  app.delete("/api/automations/:id", (c) => {
+    if (!fromDesk(c)) throw new DeskError(403, "delete it in the desk's window: Settings → Automations");
+    desk.automations.remove(c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  app.post("/api/automations/:id/run", (c) => {
+    ready();
+    const a = desk.automations.get(c.req.param("id"));
+    if (!a.on && !fromDesk(c)) throw new DeskError(409, `"${a.name}" is off: the owner turns it on in Settings → Automations`);
+    void desk.automations.run(a.id, "now");
+    return c.json({ ok: true, running: a.id });
+  });
   app.post("/api/undo", async (c) => {
     ready();
     const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));

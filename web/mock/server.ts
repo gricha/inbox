@@ -22,6 +22,9 @@ import type {
   Areas,
   AiReview,
   Ask,
+  Automation,
+  AutomationRun,
+  AutomationView,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -1963,6 +1966,66 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   return q;
 }
 
+// Your automations: one on, whose last run put two things on your desk; one an agent drafted, off until you turn it on.
+const AUTOMATIONS: Automation[] = [
+  {
+    id: "warden-issues",
+    name: "Warden and dotagents issues",
+    schedule: "weekdays 09:00",
+    prompt:
+      "Look at the issues opened or active in getsentry/warden and getsentry/dotagents since the last run. Put on my desk the ones that need me: a regression, a question to me, anything touching the config loader I own. Nothing needs me? Say so.",
+    on: true,
+    by: "you",
+    updated_at: iso(200),
+  },
+  {
+    id: "sdk-releases",
+    name: "SDK release blockers",
+    schedule: "mon,thu 17:30",
+    prompt: "Check the open release-blocker issues in getsentry/sentry-javascript and put the ones assigned to my team on my desk.",
+    on: false,
+    by: "an agent",
+    updated_at: iso(1),
+  },
+];
+const RUNS: AutomationRun[] = [
+  {
+    id: "r1",
+    automation: "warden-issues",
+    trigger: "schedule",
+    at: iso(26),
+    done_at: iso(25.9),
+    error: null,
+    summary: "Read 9 issues across both repos. Nothing new needs you: two are questions dana already answered.",
+    items: [],
+    session: "4f1c2a9e-0d1b-4c7e-9a51-2f1e8c0b7d31",
+  },
+  {
+    id: "r2",
+    automation: "warden-issues",
+    trigger: "schedule",
+    at: iso(2),
+    done_at: iso(1.9),
+    error: null,
+    summary:
+      "Read 14 new or active issues. Two need you: a config regression since 0.9 that three people hit, and a question to you about the loader's precedence. The rest are feature asks with owners.",
+    items: [
+      { item_id: "getsentry/warden#412", why: "config regression since 0.9: three reports that .warden.toml is ignored", outcome: "added" },
+      { item_id: "getsentry/dotagents#88", why: "nina asks you whether env vars beat the file in the loader", outcome: "added" },
+      { item_id: "getsentry/warden#398", why: "still waiting on your answer from last week", outcome: "left" },
+    ],
+    session: "8a2d0c4b-77e1-4f2a-b0c3-5d9e1f6a2b44",
+  },
+];
+function automationsView(): AutomationView[] {
+  return AUTOMATIONS.map((a) => ({
+    ...a,
+    next_at: a.on ? new Date(Date.now() + 18 * HOUR).toISOString() : null,
+    running: false,
+    runs: RUNS.filter((r) => r.automation === a.id).toReversed(),
+  }));
+}
+
 // Your asks to the coordinator: one answered, one it's still on. A new one gets a canned answer a few seconds later.
 const ASKS: Ask[] = [
   {
@@ -3105,6 +3168,35 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/inflight") return inflight();
   if (route === "POST /api/coordinator/wake") return { ok: true };
   if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS, coordinator };
+  if (route === "GET /api/automations") return automationsView();
+  const auto = /^\/api\/automations\/([^/]+)(\/run)?$/.exec(url.pathname);
+  if (auto) {
+    const id = decodeURIComponent(auto[1]!);
+    const i = AUTOMATIONS.findIndex((a) => a.id === id);
+    if (req.method === "PUT") {
+      const b = await readBody(req);
+      const a: Automation = {
+        id,
+        name: String(b.name),
+        schedule: String(b.schedule),
+        prompt: String(b.prompt),
+        on: b.on !== false,
+        by: "you",
+        updated_at: new Date().toISOString(),
+      };
+      if (i >= 0) AUTOMATIONS[i] = a;
+      else AUTOMATIONS.push(a);
+      bump();
+      return { ok: true, automation: a };
+    }
+    if (i < 0) throw new HttpError(404, `no automation "${id}"`);
+    if (req.method === "DELETE") {
+      AUTOMATIONS.splice(i, 1);
+      bump();
+      return { ok: true };
+    }
+    if (req.method === "POST" && auto[2]) return { ok: true, running: id };
+  }
   const inq = /^\/api\/inquiries\/([^/]+)(\/answer)?$/.exec(url.pathname);
   if (inq && req.method === "POST" && inq[2]) return { ok: true, inquiry: answerInquiry(inq[1]!, await readBody(req)) };
   if (inq && req.method === "GET" && !inq[2]) {

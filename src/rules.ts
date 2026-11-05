@@ -32,6 +32,7 @@ export interface Entry {
   activity_at: string;
   pinned: boolean;
   floor?: Bucket; // your pin keeps it at least here
+  floor_why?: string; // why, when the floor is what puts it there: an automation's pin says its own
   active: boolean; // not done, snoozed or muted; only active items count toward caps
   kept?: boolean; // gone from the board's searches but shown as resolved: the filter judged it while it was there
   ai?: "look" | "skim" | "skip"; // the AI review's call on its current commit (high risk is "look"); none yet: undefined
@@ -76,12 +77,13 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
   const judged = (rule: number | null, ruled: Bucket, why: string, hard?: Bucket): Placement => {
     const floor = e.floor ? atLeast(e.floor, hard) : hard;
     const bucket = atLeast(ruled, floor);
+    const lifted = (from: Bucket, to: Bucket) => (to !== from ? e.floor_why : undefined);
     const p: Placement = {
       board: cfg.id,
       bucket,
       rule_bucket: bucket,
       rule,
-      why: renderTemplate(why, s),
+      why: lifted(ruled, bucket) ?? renderTemplate(why, s),
       trace,
       ...(hard && { hard: true }),
       ...(floor && { floor }),
@@ -91,7 +93,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     const hint = { bucket: ruled, why: p.why };
     if (j.bucket === null) return { ...p, judge: j, hint };
     const to = atLeast(j.bucket, floor);
-    const own = to === j.bucket && j.why.trim() ? j.why : p.why;
+    const own = to === j.bucket && j.why.trim() ? j.why : (lifted(j.bucket, to) ?? p.why);
     return { ...p, bucket: to, rule_bucket: to, why: own, judge: j, hint };
   };
   for (const [i, c] of board.rules.entries()) {

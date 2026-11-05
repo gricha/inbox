@@ -3130,6 +3130,175 @@ kbd {
   margin-top: 6px;
 }
 
+/* Automations: one table of them, each its switch, name and schedule, its keys, and its last run under it. */
+.au {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.au-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+  list-style: none;
+}
+
+.au-item {
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+}
+
+.au-item + .au-item {
+  border-top: 1px solid var(--rule);
+}
+
+.au-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.au-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.au-name {
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.au-when {
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.au-item.off .au-name {
+  color: var(--ink-2);
+}
+
+.au-last {
+  margin: 0 0 0 calc(36px + 12px);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.au-runs {
+  display: grid;
+  gap: 14px;
+  margin: 10px 0 4px calc(36px + 12px);
+}
+
+.au-prompt,
+.au-summary {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.au-prompt {
+  padding-left: 10px;
+  border-left: 2px solid var(--rule-strong);
+}
+
+.au-prompt.au-draft {
+  margin: 6px 0 2px calc(36px + 12px);
+}
+
+.au-run {
+  display: grid;
+  gap: 6px;
+}
+
+.au-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--pencil);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.au-run-error {
+  margin: 0;
+  font-size: 13px;
+}
+
+.au-found {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.au-found li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.au-outcome {
+  color: var(--pencil);
+}
+
+.au-why {
+  min-width: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.au-session {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.au-none {
+  margin: 0;
+}
+
+.au-new {
+  justify-self: start;
+}
+
+.au-editor {
+  display: grid;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.au-field {
+  display: grid;
+  gap: 6px;
+}
+
+.au-delete {
+  margin-left: auto;
+}
+
 /* Below 1000px, where the sidebar's Merging entry is hidden: the same, in pencil. */
 .tb-flight {
   display: inline-flex;

@@ -722,6 +722,19 @@ const SHOTS: Shot[] = [
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
   { name: "settings-policy", go: at("#/settings/policy") },
+  { name: "settings-automations", go: at("#/settings/automations") },
+  {
+    // An automation's runs: its instruction, what each run found, and what came of each item.
+    name: "settings-automations-runs",
+    go: async (page) => {
+      await at("#/settings/automations")(page);
+      await page.locator(".au-main").first().click();
+      await page.locator(".au-runs").waitFor();
+      await page.locator(".au-runs").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    after: at("#/"),
+  },
   {
     // policy.md empty: the editor holds the starter, and says so.
     name: "settings-policy-starter",

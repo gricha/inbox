@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { stopAll } from "./children.ts";
+import { DeskError } from "./errors.ts";
+import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
@@ -16,6 +18,8 @@ import type {
   AgentStatus,
   AiReview,
   Ask,
+  Automation,
+  AutomationRun,
   Inquiry,
   InquiryLink,
   InquiryOption,
@@ -108,15 +112,7 @@ const MAX_CONTEXT = 6_000; // an inquiry's context
 const MIN_CONTEXT = 200; // a few sentences: the owner decides from its page alone
 const MAX_LINKS = 12;
 
-export class DeskError extends Error {
-  status: number;
-  candidates?: string[];
-  constructor(status: number, message: string, candidates?: string[]) {
-    super(message);
-    this.status = status;
-    this.candidates = candidates;
-  }
-}
+export { DeskError };
 
 interface Entry {
   item: Item;
@@ -137,6 +133,7 @@ interface Snapshot {
   best: Map<string, Placement>; // best placement across boards, active items only
   needs: Map<string, string>; // PRs the coordinator handed back: why, at the top of the queue
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
+  auto: Map<string, string>; // an automation's pin: "<its name>: <its why>"
   stacks: Stacks;
 }
 
@@ -202,6 +199,7 @@ export class Desk {
   judge: Judge;
   convos: Conversations;
   coordinator: Coordinator;
+  automations: Automations;
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -248,6 +246,7 @@ export class Desk {
     this.judge = new Judge(this);
     this.convos = new Conversations(this);
     this.coordinator = new Coordinator(this);
+    this.automations = new Automations(this);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -306,6 +305,7 @@ export class Desk {
   start(): void {
     for (const c of this.connectors) c.start();
     this.coordinator.start();
+    this.automations.start();
   }
 
   // Kills a judge call in progress.
@@ -316,6 +316,7 @@ export class Desk {
     this.judge.stop();
     this.convos.stop();
     this.coordinator.close();
+    this.automations.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -748,12 +749,17 @@ export class Desk {
   notifyNew(): void {
     const cfg = this.loaded?.config;
     if (!cfg || !this.syncedAt) return;
-    const { now, today } = this.top(this.snapshot(), new Set());
+    const snap = this.snapshot();
+    const { now, today } = this.top(snap, new Set());
     const me = this.me().toLowerCase();
     const queued = [...now, ...today]
       .filter(
         (c) =>
-          c.placed_by !== "pending" && c.placed_by !== "pin" && c.board !== ADDED.config.id && !(c.draft && c.author.toLowerCase() === me),
+          c.placed_by !== "pending" &&
+          c.placed_by !== "pin" &&
+          c.board !== ADDED.config.id &&
+          !(c.draft && c.author.toLowerCase() === me) &&
+          !snap.auto.has(c.id), // its automation's run told you
       )
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     const fresh = this.freshSince("notified_queue", queued);
@@ -815,8 +821,16 @@ export class Desk {
     const best = new Map<string, Placement>();
     const reviews = this.store.prefixed<AiReview>("review:");
     const pins = new Map<string, string>();
-    for (const e of entries.values())
-      if (e.state.pinned) pins.set(e.item.id, this.store.pinnedBy(e.item.id) === "coordinator" ? "the coordinator" : "them");
+    const pushed = this.store.prefixed<{ name: string; why: string }>("pushed:");
+    const auto = new Map<string, string>();
+    for (const e of entries.values()) {
+      if (!e.state.pinned) continue;
+      const by = this.store.pinnedBy(e.item.id);
+      // An automation's pin is yours: you wrote what it does.
+      pins.set(e.item.id, by === "coordinator" ? "the coordinator" : "them");
+      const pu = by?.startsWith("automation:") ? pushed.get(e.item.id) : undefined;
+      if (pu) auto.set(e.item.id, `${pu.name}: ${pu.why}`);
+    }
     // The AI's call on this commit: over a cap, the lightest gives up its slot first, so a close look keeps one.
     const call = (e: Entry) => {
       const ai = reviews.get(e.item.id);
@@ -858,6 +872,7 @@ export class Desk {
           pinned: e.state.pinned,
           // Your pin keeps it on your desk; the coordinator's is an opinion Claude weighs.
           floor: pins.get(e.item.id) === "them" ? "today" : undefined,
+          floor_why: auto.get(e.item.id),
           // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved && !e.inflight,
           kept: kept.has(e.item.id) || recent(e),
@@ -866,6 +881,7 @@ export class Desk {
         judge,
         this.settings["queue.quiet_days"],
       );
+      if (board === ADDED) for (const [id, p] of result.placements) p.why = auto.get(id) ?? p.why;
       const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
       boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
       for (const [id, p] of result.placements) {
@@ -887,7 +903,18 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
-    return { rev, at: now.getTime(), entries, reviews, boards, best, needs, pins, stacks: buildStacks(items) };
+    return {
+      rev,
+      at: now.getTime(),
+      entries,
+      reviews,
+      boards,
+      best,
+      needs,
+      pins,
+      auto,
+      stacks: buildStacks(items),
+    };
   }
 
   card(e: Entry, p: Placement | null, snap: Snapshot): Card {
@@ -1692,6 +1719,9 @@ export class Desk {
       default:
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
+    // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
+    if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.pinnedBy(id)?.startsWith("automation:"))
+      s.pinned = false;
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
     this.changed();
@@ -1720,6 +1750,50 @@ export class Desk {
   }
 
   async add(ref: string): Promise<{ item: ItemDetail; undo_seq: number }> {
+    const id = await this.hold(ref);
+    // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
+    const before = this.store.state(id);
+    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
+    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
+    this.changed();
+    this.warmAdded(id);
+    return { item: this.item(id), undo_seq };
+  }
+
+  // An automation's find: on your desk as desk_add puts it, with its why. One that's on your queue already stays as it is;
+  // one you dealt with (done, snoozed, muted, handed off for merge), or that nobody needs now, stays that way too.
+  async push(ref: string, why: string, a: Automation): Promise<AutomationRun["items"][number]> {
+    const id = await this.hold(ref);
+    const note = this.line(why, "why", 300);
+    this.store.set(`pushed:${id}`, { automation: a.id, name: a.name, why: note, at: this.now().toISOString() });
+    const snap = this.snapshot();
+    const e = snap.entries.get(id)!;
+    const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
+    let outcome: AutomationRun["items"][number]["outcome"] = "kept";
+    if (e.resolved) outcome = "resolved";
+    else if (e.status !== "active" || e.inflight) outcome = "left";
+    else if (!e.state.pinned && !queued) {
+      this.store.putState({ ...e.state, pinned: true });
+      this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
+      outcome = "added";
+      this.warmAdded(id);
+    }
+    this.changed();
+    return { item_id: id, why: note, outcome };
+  }
+
+  // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to AI_AT_ONCE.
+  warmAdded(id: string): void {
+    if (this.snapshot().entries.get(id)!.item.kind === "pr") {
+      void this.prText(id).catch(() => {});
+      void this.convos.warm([id]);
+    }
+    this.pumpAi();
+    this.judge.pump();
+  }
+
+  // The item's id, fetched read only if the desk doesn't hold it.
+  async hold(ref: string): Promise<string> {
     this.requireConfig();
     const r = normRef(ref);
     if (!REF.test(r)) throw new DeskError(400, `can't read "${ref}"; use owner/repo#123 or a GitHub URL`);
@@ -1738,19 +1812,7 @@ export class Desk {
       this.changed();
       id = got;
     }
-    // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
-    const before = this.store.state(id);
-    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
-    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
-    this.changed();
-    if (this.snapshot().entries.get(id)!.item.kind === "pr") {
-      void this.prText(id).catch(() => {});
-      void this.convos.warm([id]);
-    }
-    // Not generate() as opening a review does: an agent may add many at once, and the pump keeps to AI_AT_ONCE.
-    this.pumpAi();
-    this.judge.pump();
-    return { item: this.item(id), undo_seq };
+    return id;
   }
 
   // ---------------------------------------------------------------- merging (in flight)

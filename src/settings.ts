@@ -45,6 +45,11 @@ export const SECTIONS: SettingsSection[] = [
     title: "Policy",
     help: "How you want Claude to sort your desk, in your words. An agent with the desk's tools can change it when you ask.",
   },
+  {
+    id: "automations",
+    title: "Automations",
+    help: "Your instructions, run on a schedule by your own Claude Code, read only: what a run finds that needs you lands on your desk with a line on why, and what you've dealt with stays dealt with. Ask an agent with the desk's tools to write one; an agent's draft stays off until you turn it on here.",
+  },
   { id: "notify", title: "Notifications" },
   { id: "app", title: "Desktop app", help: "Only the desktop app uses these." },
   {

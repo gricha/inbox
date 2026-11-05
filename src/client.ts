@@ -5,6 +5,8 @@ import type {
   ActivityPage,
   AiReview,
   Ask,
+  Automation,
+  AutomationView,
   Inquiry,
   InquiryLink,
   InquiryOption,
@@ -134,6 +136,10 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
       call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
     inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
+    automations: () => call<AutomationView[]>("GET", "/api/automations"),
+    setAutomation: (id: string, b: { name: string; schedule: string; prompt: string }) =>
+      call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${q(id)}`, b),
+    runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${q(id)}/run`),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));
