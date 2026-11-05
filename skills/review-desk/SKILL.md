@@ -15,7 +15,7 @@ Rules decide where each item lands. A board is one or more GitHub searches plus 
 
 A rule with `hard = true` is a floor (asked to review by name, by default): what it matches never sorts below its bucket (Today for a Now rule). Everything else is sorted by Claude with the **policy**: prose the user writes in `~/.review-desk/policy.md` (a built-in starter while it's empty), which their own Claude Code applies to each item (the "judge"), with where the rules put it as the hint. Until it has, the item sits where the rules put it. The rule trace shows the judge's step.
 
-The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off and wakes with a message when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name.
+The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off and wakes with a message when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name; Claude Code delivers it only when both sessions skip permission prompts or neither does.
 
 All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, comment on one, Send on their reply to a reviewer, Ready for review on their own draft with the reviewers they pick, and the More menu's close, draft, merge, reopen and request changes).
 
