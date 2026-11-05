@@ -4244,6 +4244,134 @@ kbd {
   flex: 0 1 auto;
 }
 
+/* The level and name fold the file: the whole left of its header is the button. */
+.rv-fold-btn {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rv-chev {
+  flex: none;
+  width: 10px;
+  color: var(--pencil);
+  transform: rotate(90deg);
+  transition: transform 120ms;
+}
+
+.rv-fold-btn:hover .rv-chev {
+  color: var(--ink);
+}
+
+.shut .rv-chev {
+  transform: none;
+}
+
+/* Folded: the header alone, with a hairline under it; folded files in a row read as one list. */
+.rv-file-sec.shut .rv-fhead {
+  position: static;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rv-file-sec.shut + .rv-file-sec.shut {
+  margin-top: -20px;
+}
+
+/* Your comment on a line, and the review threads on it: on the paper, under the line, like the AI's notes. */
+.rv-inline,
+.rv-thread {
+  margin: 6px 12px 8px 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--paper);
+  font: 13px/1.5 var(--sans);
+  white-space: normal;
+}
+
+/* The box you write in is a line's first annotation, so a thread landing on the file doesn't redraw it. A new comment shows
+   last on its line; a reply right after its thread, before what follows it there. */
+.rv-diff > div:has(> .rv-inline),
+.rv-diff > div:has(> [data-replying]) {
+  order: 1;
+}
+
+.rv-diff > div:has(> .rv-inline-reply) {
+  order: 2;
+}
+
+.rv-diff > div:has(> [data-replying]) ~ div {
+  order: 3;
+}
+
+.rv-orphan {
+  display: grid;
+  gap: 4px;
+  max-width: 732px;
+  padding: 0 12px;
+}
+
+.rv-inline {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+  border-left-color: var(--pencil);
+}
+
+.rv-inline .cv-reply {
+  margin: 0;
+}
+
+.rv-thread {
+  display: grid;
+  gap: 8px;
+}
+
+.rv-tc-who {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.rv-tc-at {
+  margin-left: 8px;
+  color: var(--pencil);
+}
+
+.rv-tc-body {
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-tc-acts {
+  display: flex;
+  gap: 14px;
+  color: var(--pencil);
+}
+
+.rv-tc-reply {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.rv-thread.resolved summary {
+  overflow: hidden;
+  color: var(--pencil);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
 .rv-fhead .rv-delta {
   margin-left: auto;
 }
@@ -4305,6 +4433,10 @@ kbd {
   --diffs-addition-color-override: var(--green);
   --diffs-deletion-color-override: var(--red);
   --diffs-bg-separator-override: var(--paper);
+
+  /* The lines a comment is on: a quiet grey, not Pierre's blue. */
+  --diffs-bg-selection-override: var(--pencil);
+  --diffs-bg-selection-number-override: var(--pencil);
 
   display: block;
   overflow: hidden;

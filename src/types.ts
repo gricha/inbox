@@ -573,6 +573,14 @@ export interface ReviewNote {
   body: string;
 }
 
+// Where your inline comment goes: a line of a PR's diff, or a range from `start` to it.
+export interface InlineAt {
+  path: string;
+  line: number;
+  side: "new" | "old"; // old = a removed line, numbered in the old file
+  start?: { line: number; side: "new" | "old" };
+}
+
 // Written by your own Claude Code from the diff. Untrusted: the diff came from GitHub.
 export interface AiReview {
   verdict: "look" | "skim" | "skip";
@@ -651,6 +659,7 @@ export interface ReviewView {
   item: Item;
   handoff_prompt: string;
   files: ReviewFile[]; // patch repeats order's hunks, which the review UI renders instead
+  diff_head: string; // the commit the diff's own files are at, which can be newer than item.head_oid until the next sync
   files_error: string | null; // the diff couldn't be fetched
   order: ReviewOrder; // every hunk once, in the order to read them
   ai: AiReview | null; // the latest, even if stale
@@ -673,6 +682,7 @@ export interface Conversation {
   kind: "thread" | "comment" | "review"; // a reply to a comment or review is a comment on the PR
   path: string | null; // a review thread's file; null: on the PR
   line: number | null;
+  side: "new" | "old" | null; // a review thread's: old = on a removed line, numbered in the old file
   outdated: boolean; // the code it's on changed since
   resolved: boolean;
   state: ReviewState | null; // a review's

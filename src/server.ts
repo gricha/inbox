@@ -15,7 +15,7 @@ import { createMcpServer } from "./mcp.ts";
 import { openUrl } from "./notify.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
-import { GITHUB_ACTIONS, type Action, type GitHubAction } from "./types.ts";
+import { GITHUB_ACTIONS, type Action, type GitHubAction, type InlineAt } from "./types.ts";
 
 const VERSION = "0.1.0";
 export const DEFAULT_PORT = 47823;
@@ -150,6 +150,33 @@ export function createApp(desk: Desk, port: number): Hono {
     const b = await c.req.json<{ body?: unknown }>().catch((): { body?: unknown } => ({}));
     if (typeof b.body !== "string") throw new DeskError(400, "need { body }");
     return c.json({ ok: true, ...(await desk.comment(c.req.param("id"), b.body)) });
+  });
+  // Your comment on a line of the PR's diff, from the desk's own window only.
+  app.post("/api/review/:id{.+}/inline", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
+    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const line = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
+    const side = (v: unknown): v is "new" | "old" => v === "new" || v === "old";
+    const start = (v: unknown): v is InlineAt["start"] =>
+      v === undefined ||
+      (typeof v === "object" && v !== null && line((v as Record<string, unknown>).line) && side((v as Record<string, unknown>).side));
+    const { path: file, line: at, side: on, start: from, body, head_oid } = b;
+    if (
+      typeof file !== "string" ||
+      !file ||
+      !line(at) ||
+      !side(on) ||
+      !start(from) ||
+      typeof body !== "string" ||
+      typeof head_oid !== "string" ||
+      !head_oid
+    )
+      throw new DeskError(400, "need { path, line, side: new|old, start?: { line, side }, body, head_oid }");
+    return c.json({
+      ok: true,
+      ...(await desk.inlineComment(c.req.param("id"), { path: file, line: at, side: on, ...(from && { start: from }) }, body, head_oid)),
+    });
   });
   // Your own draft's Ready for review, from the desk's own window only.
   app.post("/api/review/:id{.+}/ready", async (c) => {

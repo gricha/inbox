@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 // Every mutation the desk may send. No MCP tool or CLI command reaches this module: agents never approve or post.
 // commitOID pins the approval to the commit you read, not whatever was pushed since.
 // reply and comment: your reply to a conversation in a PR's review, when you press Send.
+// inline_comment: your comment on a line (or lines) of a PR's diff, posted at once like GitHub's "Add single comment", pinned
+// to the commit the review showed.
 // ready: your own draft's "Ready for review" (a on its row or in its review); request_reviews: the reviewers you picked with
 // it, added to any already asked (union).
 // The rest are the More menu's (.): close, draft, merge and reopen your own PR, request changes on someone else's, close an issue.
@@ -24,6 +26,9 @@ export const ALLOWED = {
 }`,
   comment: `mutation DeskComment($subject: ID!, $body: String!) {
   addComment(input: { subjectId: $subject, body: $body }) { commentEdge { node { url } } }
+}`,
+  inline_comment: `mutation DeskInlineComment($pr: ID!, $commit: GitObjectID!, $thread: DraftPullRequestReviewThread!) {
+  addPullRequestReview(input: { pullRequestId: $pr, commitOID: $commit, event: COMMENT, threads: [$thread] }) { pullRequestReview { url comments(first: 1) { nodes { url } } } }
 }`,
   ready: `mutation DeskReady($pr: ID!) {
   markPullRequestReadyForReview(input: { pullRequestId: $pr }) { pullRequest { isDraft } }
@@ -51,10 +56,21 @@ export const ALLOWED = {
 }`,
 } as const;
 
+// GitHub's DraftPullRequestReviewThread: line numbers in the file on that side (LEFT: the old file), the range ending at line.
+export interface InlineThread {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  startLine?: number;
+  startSide?: "LEFT" | "RIGHT";
+  body: string;
+}
+
 export interface GitHubWriter {
   approve(prNodeId: string, commit: string, body?: string): Promise<{ url: string }>;
   reply(threadId: string, body: string): Promise<{ url: string }>; // to a review thread
   comment(prNodeId: string, body: string): Promise<{ url: string }>; // on the PR
+  inlineComment(prNodeId: string, commit: string, thread: InlineThread): Promise<{ url: string }>; // on a line of its diff
   ready(prNodeId: string): Promise<void>; // a draft, ready for review
   requestReviews(prNodeId: string, users: string[], teams: string[]): Promise<void>; // node ids
   close(prNodeId: string): Promise<void>;
@@ -118,6 +134,15 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
         addComment?: { commentEdge?: { node?: { url?: string } | null } | null } | null;
       } | null;
       return { url: data?.addComment?.commentEdge?.node?.url ?? "" };
+    },
+    inlineComment: async (pr, commit, thread) => {
+      const data = (await send("inline_comment", pr, { pr, commit, thread })) as {
+        addPullRequestReview?: { pullRequestReview?: { url?: string; comments?: { nodes?: { url?: string }[] } | null } | null } | null;
+      } | null;
+      const review = data?.addPullRequestReview?.pullRequestReview;
+      // GitHub has answered with no review and no error; better to keep your words than to say it landed.
+      if (!review) throw new Error("GitHub answered without the comment: check the PR before you send it again");
+      return { url: review.comments?.nodes?.[0]?.url ?? review.url ?? "" };
     },
     ready: async (pr) => {
       await send("ready", pr, { pr });

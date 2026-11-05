@@ -49,6 +49,8 @@ const REVIEW_KEYS: [string[], string][] = [
   [["]", "["], "Next and previous AI note"],
   [["N", "P"], "Next and previous PR in the stack"],
   [["f"], "Show or hide the sidebar: the stack, the files and recent activity"],
+  [["z", "Z"], "Fold the file you're in, or every file; its header folds it too"],
+  [["+"], "By a line's number: comment on that line on GitHub, or drag it down several"],
   [["a"], "Approve on GitHub, or your draft ready for review, asking the reviewers you picked"],
   [["@"], "Your draft: add a reviewer, from GitHub's suggestions or by name"],
   [["w"], "Comment on the PR"],

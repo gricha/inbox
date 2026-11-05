@@ -56,6 +56,7 @@ export interface PrContext {
     outdated: boolean;
     path: string;
     line: number | null;
+    side: "new" | "old"; // old: on a removed line, numbered in the old file
     hunk: string; // the diff the thread started on
     comments: Said[];
   }[];
@@ -90,6 +91,7 @@ interface RawPrContext {
         isOutdated: boolean;
         path: string;
         line: number | null;
+        diffSide: "LEFT" | "RIGHT";
         hunk?: { nodes: { diffHunk: string }[] };
         comments: { nodes: RawSaid[] };
       }[];
@@ -118,6 +120,7 @@ function parsePrContext(data: RawPrContext): PrContext {
       outdated: t.isOutdated,
       path: t.path,
       line: t.line,
+      side: t.diffSide === "LEFT" ? "old" : "new",
       hunk: t.hunk?.nodes[0]?.diffHunk ?? "",
       comments: t.comments.nodes.map((c) => said(c)),
     })),

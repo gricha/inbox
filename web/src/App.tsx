@@ -16,6 +16,7 @@ import type {
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
+import { keysHeld } from "./drafts.ts";
 import { adoptTheme } from "./theme.ts";
 import {
   DEFAULT_OPEN,
@@ -1013,6 +1014,12 @@ export function App() {
   // The key after g is the chord's, whatever it means on its own (i in a review, b in Merging), so it never falls
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
+    // A key while the review's comment box is drawn again is the box's: no shortcut runs on it.
+    if (keysHeld()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (menuAt) return; // a row's menu has the keyboard, Esc included
     // Esc on the help sheet closes it, and only it: a review or a page under it would read it as "go back" too.
     if (help && (e.key === "Escape" || e.key === "?") && !e.isComposing) {

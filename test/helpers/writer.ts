@@ -7,6 +7,7 @@ export function refuseWrites(why = "not in this test"): GitHubWriter {
     approve: no,
     reply: no,
     comment: no,
+    inlineComment: no,
     ready: no,
     requestReviews: no,
     close: no,

@@ -13,6 +13,7 @@ import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
 import { stage, verdicts } from "./stage.ts";
 import type {
+  InlineAt,
   Action,
   ActivityPage,
   AgentStatus,
@@ -1335,10 +1336,13 @@ export class Desk {
   async reviewView(ref: string, ahead = false): Promise<ReviewView> {
     const id = this.pr(ref).item.id;
     let files: ReviewFile[] = [];
+    let diffHead: string | null = null;
     let filesError: string | null = null;
     const talk = this.convos.view(id, !ahead);
     try {
-      files = (await this.prText(id)).files;
+      const t = await this.prText(id);
+      files = t.files;
+      diffHead = t.head ?? null;
     } catch (err) {
       filesError = (err as Error).message;
     }
@@ -1355,6 +1359,7 @@ export class Desk {
       item: d.item,
       handoff_prompt: d.handoff_prompt,
       files,
+      diff_head: diffHead ?? e.item.head_oid,
       files_error: filesError,
       order: reviewOrder(files, d.ai, d.ai_stale),
       ai: d.ai,
@@ -2196,6 +2201,43 @@ export class Desk {
     this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
     this.convos.forget(id);
     this.doneAfterWrite(id);
+    void this.gh.refresh(id).then(() => this.sync());
+    return { url };
+  }
+
+  // POST /api/review/:id/inline: your comment on a line (or a range ending at it) of the diff, on your press, pinned to the
+  // commit the review showed so its line numbers are the ones you read. Part of reviewing, not its end: the PR stays put.
+  async inlineComment(ref: string, at: InlineAt, body: string, head: string): Promise<{ url: string }> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    const text = body.trim();
+    if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
+    if (!text) throw new DeskError(400, "the comment is empty");
+    if (text.length > MAX_REPLY) throw new DeskError(400, `keep a comment under ${MAX_REPLY} characters`);
+    if (!this.writer) throw new DeskError(409, "commenting isn't available in this desk");
+    const key = `${id} ${at.path}:${at.line}`;
+    if (this.sending.has(key)) throw new DeskError(409, "already sending a comment there");
+    this.sending.add(key);
+    const side = (s: "new" | "old") => (s === "old" ? "LEFT" : "RIGHT");
+    let url: string;
+    try {
+      ({ url } = await this.writer.inlineComment(e.item.node_id, head, {
+        path: at.path,
+        line: at.line,
+        side: side(at.side),
+        ...(at.start &&
+          !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
+        body: text,
+      }));
+    } catch (err) {
+      throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
+    } finally {
+      this.sending.delete(key);
+    }
+    this.store.logWrite(id, "inline_comment", this.now().toISOString());
+    this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
+    this.convos.forget(id);
+    this.changed();
     void this.gh.refresh(id).then(() => this.sync());
     return { url };
   }

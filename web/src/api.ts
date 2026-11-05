@@ -2,6 +2,7 @@ import type {
   Action,
   AgentStatus,
   AiReview,
+  InlineAt,
   Ask,
   AsksView,
   ConfigDoc,
@@ -69,6 +70,9 @@ export const api = {
   approve: (id: string, head_oid: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/approve`, { head_oid }),
   comment: (id: string, body: string) => call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/comment`, { body }),
+  // head_oid: the commit the review showed, so the line numbers are the ones you read.
+  inline: (id: string, at: InlineAt, body: string, head_oid: string) =>
+    call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/inline`, { ...at, body, head_oid }),
   reply: (id: string, convo: string, body: string) =>
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   // With the reviewers you picked (node ids), asked right after it's marked ready.

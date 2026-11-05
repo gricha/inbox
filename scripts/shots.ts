@@ -313,6 +313,28 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
+  {
+    // The + by a line's number: a box under that line, below the thread already on it.
+    name: "review-inline",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      const plan = page.locator('.rv-file-sec[aria-label="src/planner/plan.ts"]').first();
+      const line = plan.locator('div[data-line="23"]').last();
+      await line.scrollIntoViewIfNeeded();
+      const plus = plan.locator("[data-utility-button]").first();
+      for (let i = 0; i < 10 && !(await plus.count()); i++) {
+        await page.mouse.move(0, 0);
+        await line.hover();
+        await page.waitForTimeout(150);
+      }
+      await plus.click();
+      await page.locator(".rv-inline textarea").waitFor();
+      await page.keyboard.type("Return how many rows the stream had read when the budget ran out?");
+      await page.waitForTimeout(300);
+    },
+  },
+  // Z: every file folded to its header.
+  { name: "review-files-folded", go: review("acme/api#4127", ["Z"]) },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
   // @ opens GitHub's suggested reviewers for your draft.
@@ -454,7 +476,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await review("acme/api#4127")(page);
       if (!(await page.locator(".rv-side").isVisible())) await page.keyboard.press("f"); // folded in a narrow window
-      await page.locator(".rv-more").click();
+      await page.locator(".rv-side .rv-more").click();
       await page.waitForTimeout(200);
     },
     after: sideDefault,

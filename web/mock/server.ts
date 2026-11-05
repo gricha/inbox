@@ -1155,6 +1155,7 @@ const convo = (o: Partial<Conversation> & Pick<Conversation, "id" | "comments">)
   kind: "thread",
   path: null,
   line: null,
+  side: null,
   outdated: false,
   resolved: false,
   state: null,
@@ -1225,6 +1226,26 @@ const TALK = new Map<string, Conversation[]>([
         kind: "review",
         state: "commented",
         comments: [said("r1", "kai", 6, "Read through the merge logic; it looks right to me apart from the naming nit.")],
+      }),
+    ],
+  ],
+  [
+    "acme/api#4127",
+    [
+      convo({
+        id: "PRRT_partial",
+        path: "src/planner/plan.ts",
+        line: 23,
+        side: "new",
+        comments: [
+          said(
+            "pc1",
+            "priya",
+            6,
+            "A slow scan stops here with most rows missing. Should the response say how many it dropped, so the UI can tell people?",
+          ),
+          said("pc2", "dana", 5, "+1, a count is cheap: the stream knows how far it got."),
+        ],
       }),
     ],
   ],
@@ -2494,6 +2515,7 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     item: d.item,
     handoff_prompt: d.handoff_prompt,
     files,
+    diff_head: d.item.head_oid,
     files_error: null,
     order: reviewOrder(files, d.ai, d.ai_stale),
     ai: d.ai,
@@ -3089,6 +3111,22 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     r.seed.asked = ids.map((id) => ROSTER.find((x) => x.id === id)?.login ?? id);
     bump();
     return { ok: true };
+  }
+  // A comment on a line: the mock keeps it as your thread there, as GitHub would show it.
+  const inline = /^\/api\/review\/(.+)\/inline$/.exec(url.pathname);
+  if (inline && req.method === "POST") {
+    const r = resolve(decodeURIComponent(inline[1]!));
+    const b = await readBody(req);
+    if (typeof b.body !== "string" || !b.body.trim()) throw new HttpError(400, "the comment is empty");
+    if (typeof b.path !== "string" || typeof b.line !== "number" || (b.side !== "new" && b.side !== "old"))
+      throw new HttpError(400, "need { path, line, side }");
+    const talk = TALK.get(r.id) ?? [];
+    const id = `PRRT_mine_${talk.length}`;
+    const c = said(id, ME, 0, b.body.trim());
+    talk.push(convo({ id, path: b.path, line: b.line, side: b.side, comments: [c] }));
+    TALK.set(r.id, talk);
+    bump();
+    return { ok: true, url: c.url };
   }
   // A comment on the PR: the mock only remembers that you acted.
   const commented = /^\/api\/review\/(.+)\/comment$/.exec(url.pathname);

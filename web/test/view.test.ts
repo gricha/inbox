@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
+import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
 import { age, ago, clearedText, eventText, modelName, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
@@ -14,6 +14,7 @@ import {
   draftOf,
   foldOf,
   groupsOf,
+  inlineAt,
   judgeStatusText,
   judgeStepText,
   lineOf,
@@ -27,9 +28,11 @@ import {
   says,
   sections,
   stops,
+  threadsOn,
   valueOf,
   type KeyLike,
 } from "../src/view.ts";
+import { keepDraft, keptDraft } from "../src/drafts.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {
   const [repo = "", n] = id.split("#");
@@ -373,6 +376,69 @@ test("a note on a hunk's lines goes on the diff; one on none of them is about th
   assert.equal(onLines(h, { side: "old", line: 13 }), false);
   assert.equal(onLines(h, { side: "new", line: 0 }), false, "line 0: the file itself");
   assert.equal(onLines([{ header: "@@ -0,0 +1 @@" }], { side: "new", line: 1 }), true, "a count of one is left out");
+});
+
+test("a pick in the gutter is GitHub's line and side, earlier row first, a range only within a hunk", () => {
+  // Rows: old 10/new 12 (context), old 11 (removed), new 13, new 14 (added), old 12/new 15; then a second hunk.
+  const hunks = [{ patch: "@@ -10,3 +12,4 @@ fn()\n ctx\n-gone\n+one\n+two\n tail" }, { patch: "@@ -40,1 +43,2 @@\n keep\n+late" }];
+  const at = (start: number, side: "additions" | "deletions", end = start, endSide?: "additions" | "deletions") =>
+    inlineAt("a.ts", hunks, { start, side, end, ...(endSide && { endSide }) });
+  assert.deepEqual(at(13, "additions"), { path: "a.ts", line: 13, side: "new" });
+  assert.deepEqual(at(11, "deletions"), { path: "a.ts", line: 11, side: "old" });
+  assert.deepEqual(at(12, "additions"), { path: "a.ts", line: 12, side: "new" }, "a context line by its new number");
+  assert.deepEqual(at(10, "deletions"), { path: "a.ts", line: 10, side: "old" }, "or its old one");
+  assert.deepEqual(at(11, "deletions", 14, "additions"), {
+    path: "a.ts",
+    line: 14,
+    side: "new",
+    start: { line: 11, side: "old" },
+  });
+  assert.deepEqual(at(14, "additions", 11, "deletions"), at(11, "deletions", 14, "additions"), "dragged up: the same range");
+  assert.deepEqual(at(14, "additions", 44, "additions"), { path: "a.ts", line: 44, side: "new" }, "across hunks: the last line");
+  assert.equal(at(30, "additions"), null, "not a line of the diff");
+  assert.equal(at(13, "deletions"), null, "13 isn't an old line here");
+});
+
+test("unsent words are kept per PR until they're sent or cleared; an empty box keeps nothing", () => {
+  const at = { path: "a.ts", line: 3, side: "new" as const };
+  keepDraft("acme/api#1", { at, thread: null, head: "abc", text: "half a thought" });
+  assert.deepEqual(keptDraft("acme/api#1"), { at, thread: null, head: "abc", text: "half a thought" });
+  assert.equal(keptDraft("acme/api#2"), null);
+  keepDraft("acme/api#1", { at, thread: null, head: "abc", text: "   " });
+  assert.equal(keptDraft("acme/api#1"), null, "cleared to nothing");
+  keepDraft("acme/api#1", { at, thread: "PRRT_1", head: "abc", text: "reply" });
+  keepDraft("acme/api#1", null);
+  assert.equal(keptDraft("acme/api#1"), null, "sent or cancelled");
+});
+
+test("threads show on the lines they're on; outdated ones, other files' and PR comments don't", () => {
+  const t = (id: string, o: Partial<Conversation>): Conversation => ({
+    id,
+    kind: "thread",
+    path: "a.ts",
+    line: 13,
+    side: "new",
+    outdated: false,
+    resolved: false,
+    state: null,
+    comments: [],
+    waiting_on_you: false,
+    url: "",
+    take: null,
+    ...o,
+  });
+  const all = [
+    t("on", {}),
+    t("old-side", { line: 11, side: "old" }),
+    t("off", { line: 30 }),
+    t("outdated", { outdated: true }),
+    t("other", { path: "b.ts" }),
+    t("pr", { kind: "comment", path: null, line: null, side: null }),
+  ];
+  assert.deepEqual(
+    threadsOn(all, "a.ts", [{ header: "@@ -10,3 +12,4 @@" }]).map((c) => c.id),
+    ["on", "old-side"],
+  );
 });
 
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {

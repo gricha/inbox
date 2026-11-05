@@ -163,6 +163,7 @@ export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
 export interface PrText {
   body: string;
   files: ReviewFile[];
+  head?: string; // the commit GitHub's files are at (their own contents_url), which may be newer than the desk's last sync
   since?: { base: string; files: ReviewFile[] }; // what changed since the commit you last reviewed
 }
 
@@ -173,7 +174,7 @@ export async function fetchPr(item: Item, since?: string): Promise<PrText> {
   const repo = `repos/${owner}/${name}`;
   const pr = `${repo}/pulls/${item.number}`;
   const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
-  const fields = "{filename, previous_filename, status, additions, deletions, patch}";
+  const fields = "{filename, previous_filename, status, additions, deletions, patch, contents_url}";
   const [files, body, delta] = await Promise.all([
     gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", `.[] | ${fields}`]),
     gh(["api", pr, "--jq", '.body // ""']),
@@ -181,11 +182,28 @@ export async function fetchPr(item: Item, since?: string): Promise<PrText> {
       ? gh(["api", `${repo}/compare/${since}...${item.head_oid}`, "--jq", `.files[] | ${fields}`]).catch(() => null)
       : null,
   ]);
+  const head = filesHead(files);
+  if (head === null) throw new Error("the PR changed while its diff was fetched: open it again");
   return {
     body: body.trimEnd(),
     files: parseFiles(files),
+    ...(head && { head }),
     ...(since && delta !== null && { since: { base: since, files: parseFiles(delta) } }),
   };
+}
+
+// The commit the files are at, from each one's contents_url (?ref=<sha>): undefined with no files, null when pages
+// fetched across a push disagree.
+export function filesHead(ndjson: string): string | undefined | null {
+  const refs = new Set<string>();
+  for (const l of ndjson.split("\n")) {
+    if (!l.trim()) continue;
+    const url = (JSON.parse(l) as { contents_url?: unknown }).contents_url;
+    const ref = typeof url === "string" ? /[?&]ref=([0-9a-f]{40})\b/.exec(url)?.[1] : undefined;
+    if (ref) refs.add(ref);
+  }
+  if (refs.size > 1) return null;
+  return [...refs][0];
 }
 
 // gh prints one compact JSON object per line.

@@ -441,6 +441,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
               isOutdated: true,
               path: "src/a.ts",
               line: null,
+              diffSide: "LEFT",
               hunk: { nodes: [{ diffHunk: "@@ -1 +1 @@\n-a\n+b" }] },
               comments: {
                 nodes: [
@@ -489,6 +490,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
       outdated: true,
       path: "src/a.ts",
       line: null,
+      side: "old",
       hunk: "@@ -1 +1 @@\n-a\n+b",
       comments: [
         {

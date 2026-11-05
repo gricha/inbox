@@ -30,6 +30,7 @@ const thread = (id: string, comments: ReturnType<typeof say>[], o: Partial<PrCon
   outdated: false,
   path: "src/sync.ts",
   line: 88,
+  side: "new" as const,
   hunk: "@@ -80,3 +80,9 @@\n+  tombstones.push(id)",
   comments,
   ...o,
@@ -41,7 +42,7 @@ const CTX: PrContext = {
     thread("PRRT_answered", [say("c2", "azulus", "Rename this?", 5), say("c3", "me", "Done in abc1234", 4)]),
     thread("PRRT_resolved", [say("c4", "azulus", "Typo", 6)], { resolved: true }),
     thread("PRRT_bot", [say("c5", "cursor[bot]", "This leaks on 404.", 2)]),
-    thread("PRRT_old", [say("c6", "kai", "Why a Map here?", 7)], { outdated: true, line: null }),
+    thread("PRRT_old", [say("c6", "kai", "Why a Map here?", 7)], { outdated: true, line: null, side: "old" }),
   ],
   reviews: [
     { ...say("r1", "kai", "", 7), state: "commented" }, // a thread reply's empty review
@@ -72,8 +73,8 @@ test("on your PR: what a person said after your last word waits on you; resolved
   );
   const open = got[0]!;
   assert.deepEqual(
-    [open.path, open.line, open.outdated, open.resolved, open.url],
-    ["src/sync.ts", 88, false, false, "https://github.com/acme/web/pull/3#c1"],
+    [open.path, open.line, open.side, open.outdated, open.resolved, open.url],
+    ["src/sync.ts", 88, "new", false, false, "https://github.com/acme/web/pull/3#c1"],
   );
   assert.deepEqual(open.comments[0], {
     id: "c1",
@@ -83,8 +84,8 @@ test("on your PR: what a person said after your last word waits on you; resolved
     at: hoursAgo(3),
     url: "https://github.com/acme/web/pull/3#c1",
   });
-  assert.deepEqual([got[1]!.outdated, got[1]!.line], [true, null]);
-  assert.deepEqual([got[2]!.path, got[2]!.state, got[6]!.state], [null, null, "commented"]);
+  assert.deepEqual([got[1]!.outdated, got[1]!.line, got[1]!.side], [true, null, "old"]);
+  assert.deepEqual([got[2]!.path, got[2]!.side, got[2]!.state, got[6]!.state], [null, null, null, "commented"]);
 });
 
 test("on someone else's PR: only a thread you're in, or a comment that @mentions you, waits on you", () => {

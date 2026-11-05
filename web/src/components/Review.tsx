@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { parsePatchFiles } from "@pierre/diffs";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import type {
   ActivityEvent,
   AiReview,
   Card,
+  Conversation as Convo,
   GitHubAction,
   InflightRow,
+  InlineAt,
   ReviewFile,
   ReviewNote,
   Reviewer,
@@ -18,16 +20,32 @@ import { api, message } from "../api.ts";
 import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
 import { reviewOf } from "../reviews.ts";
 import {
+  boxBack,
+  boxGone,
+  holding,
+  holdKeys,
+  isSending,
+  keepDraft,
+  keptDraft,
+  keysHeld,
+  returnDraft,
+  sendingOn,
+  watchKept,
+  type Kept,
+} from "../drafts.ts";
+import {
   currentFile,
   diffRows,
   drawUpTo,
   filePatch,
+  inlineAt,
   onLines,
   resolvedHead,
   routeHash,
   says,
   sections,
   splitPath,
+  threadsOn,
   type Acted,
   type Section,
 } from "../view.ts";
@@ -40,9 +58,28 @@ import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
-interface NoteMeta {
-  index: number; // in reading order, what ] and [ step through
+// What sits under a line of the diff: an AI note (index: its place in reading order, what ] and [ step through), a review
+// thread, the comment you're writing, or one you sent that the conversation doesn't show yet.
+type Meta =
+  | { kind: "note"; index: number; body: string }
+  | { kind: "thread"; id: string }
+  | { kind: "draft" }
+  | { kind: "sent"; body: string; url: string };
+
+// The comment you're writing on a line, or a reply to a review thread on it; its words stay in Review's text ref.
+interface Draft {
+  n: number;
+  at: InlineAt;
+  thread: string | null;
+  head: string; // the commit whose diff the line was picked on: it posts there, even after a push
+  busy: boolean;
+}
+
+interface Sent {
+  at: InlineAt;
+  thread: string | null;
   body: string;
+  url: string;
 }
 
 interface Fact {
@@ -72,7 +109,7 @@ function sideSaved(): boolean {
 }
 
 // Pierre draws the diff in a shadow root; its light or dark follows the app's theme (diffTheme).
-const DIFF: FileDiffOptions<NoteMeta, undefined> = {
+const DIFF: FileDiffOptions<Meta, undefined> = {
   theme: { light: "pierre-light", dark: "pierre-dark" },
   diffStyle: "unified",
   diffIndicators: "bars",
@@ -84,12 +121,15 @@ const DIFF: FileDiffOptions<NoteMeta, undefined> = {
   // A band that starts or ends the file sits on the frame's edge; its words start where the line numbers do (2ch of the code).
   unsafeCSS: `[data-separator-first] { margin-top: calc(-1 * var(--diffs-gap-block, var(--diffs-gap-fallback))); }
 [data-separator-last] { margin-bottom: calc(-1 * max(0px, var(--diffs-gap-block, var(--diffs-gap-fallback)) - var(--diffs-scrollbar-gutter))); }
-[data-separator=line-info-basic] [data-separator-content] { padding-inline: calc(1.2 * var(--diffs-font-size)); }`,
+[data-separator=line-info-basic] [data-separator-content] { padding-inline: calc(1.2 * var(--diffs-font-size)); }
+[data-utility-button] { background-color: var(--ink-2); color: var(--sheet); }
+:host { --diffs-selection-base: var(--pencil); }
+[data-annotation-content] { display: flex; flex-direction: column; }`,
 };
 
 // One object per theme, so a re-render doesn't hand Pierre new options (and a fresh highlight) each time.
-const OPTIONS = new Map<string, FileDiffOptions<NoteMeta, undefined>>();
-function diffOptions(): FileDiffOptions<NoteMeta, undefined> {
+const OPTIONS = new Map<string, FileDiffOptions<Meta, undefined>>();
+function diffOptions(): FileDiffOptions<Meta, undefined> {
   const t = diffTheme();
   const o = OPTIONS.get(t) ?? { ...DIFF, themeType: t };
   OPTIONS.set(t, o);
@@ -144,6 +184,17 @@ export function Review({
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu (.)
   const [writing, setWriting] = useState<"comment" | "changes" | null>(null); // a comment or Request changes, being written
+  const [shut, setShut] = useState<ReadonlySet<string>>(new Set()); // files whose diff you folded, by path
+  const [draft, setDraft] = useState<Draft | null>(() => restored(id, 1));
+  const [sent, setSent] = useState<Sent[]>([]);
+  const draftText = useRef(keptDraft(id)?.text ?? ""); // here, so a box Pierre redraws keeps your words without a render per keystroke
+  const drafts = useRef(1);
+  const alive = useRef(true);
+  const draftSel = useRef<[number, number] | null>(null); // where the caret was, for a box drawn again
+  const [stay, setStay] = useState<number | null>(null); // after a fold: the file you were in, kept in view and the one z means
+  const [focusAsk, setFocusAsk] = useState(0); // bumped to put the cursor in the box; a box drawn again after a fold doesn't take it
+  const focusDone = useRef(0);
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set()); // resolved threads you opened, by id
   // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
   const [read, setRead] = useState("");
   const seq = useRef(0);
@@ -157,7 +208,13 @@ export function Review({
   const flying = !!row && row.state === "open";
 
   useEffect(() => {
-    if (shown.current !== id) window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
+    if (shown.current !== id) {
+      window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
+      setShut(new Set());
+      setDraft(restored(id, ++drafts.current));
+      setSent([]);
+      draftText.current = keptDraft(id)?.text ?? "";
+    }
     shown.current = id;
     const n = ++seq.current;
     void (async () => {
@@ -206,7 +263,11 @@ export function Review({
     const onScroll = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const tops = [...document.querySelectorAll(".rv-file-sec[id]")].map((el) => el.getBoundingClientRect().top); // not the placeholders
+        // Not the placeholders; a folded file is the one you're in once its middle reaches the line, so the next can't steal it.
+        const tops = [...document.querySelectorAll(".rv-file-sec[id]")].map((el) => {
+          const r = el.getBoundingClientRect();
+          return el.classList.contains("shut") ? r.top + r.height / 2 : r.top;
+        });
         const atEnd = scrollY > 0 && scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
         if (tops.length && Date.now() - jumped.current > 400) setSecIdx(currentFile(tops, LINE, atEnd));
       });
@@ -228,6 +289,39 @@ export function Review({
       box.scrollTop = on.offsetTop + on.offsetHeight - box.clientHeight + 8;
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reads the DOM the new secIdx just rendered
   }, [secIdx]);
+
+  // A comment on this PR that GitHub refused after you'd left the review it was sent from comes back here.
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  useEffect(
+    () =>
+      watchKept((pr) => {
+        if (pr !== id || draftNow.current) return;
+        draftText.current = keptDraft(id)?.text ?? "";
+        draftSel.current = null;
+        setDraft(restored(id, ++drafts.current));
+      }),
+    [id],
+  );
+
+  // Leaving the review leaves the keys to the page; the words stay kept for when you're back.
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      holdKeys(false);
+    };
+  }, []);
+
+  // Folding moves what's below; before the page scrolls on its own, the file you were in comes back into view and stays current.
+  useLayoutEffect(() => {
+    if (stay === null) return;
+    jumped.current = Date.now();
+    setSecIdx(stay);
+    const top = document.querySelector(`#rv-s-${stay}`)?.getBoundingClientRect().top;
+    if (top !== undefined && (top < LINE || top > innerHeight)) document.querySelector(`#rv-s-${stay}`)?.scrollIntoView({ block: "start" });
+    setStay(null);
+  }, [stay]);
 
   // To a section, opening the rest when it's there; the scroll waits for the render that shows it.
   function goTo(i: number, el = `#rv-s-${i}`, block: ScrollLogicalPosition = "start") {
@@ -261,14 +355,94 @@ export function Review({
     }
     const n = noteIdx === null ? (d > 0 ? 0 : notes.length - 1) : (noteIdx + d + notes.length) % notes.length;
     setNoteIdx(n);
-    goTo(
-      Math.max(
-        0,
-        list.findIndex((x) => x.notes.includes(notes[n]!)),
-      ),
-      `[data-note="${n}"]`,
-      "center",
+    const i = Math.max(
+      0,
+      list.findIndex((x) => x.notes.includes(notes[n]!)),
     );
+    const path = list[i]?.path;
+    if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
+    goTo(i, `[data-note="${n}"]`, "center");
+  }
+
+  function toggleFold(path: string, at: number) {
+    holdKeys(false); // you've left the box for the fold
+    const next = new Set(shut);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    setShut(next);
+    setStay(list[at]?.path === path ? at : list.findIndex((x) => x.path === path));
+  }
+
+  // Z: all folded, or all open again once they are.
+  function foldAll() {
+    holdKeys(false);
+    const paths = new Set(list.map((x) => x.path));
+    setShut([...paths].every((p) => shut.has(p)) ? new Set() : paths);
+    setStay(Math.max(0, Math.min(secIdx, visible.length - 1)));
+  }
+
+  // To the words you haven't sent, opening their file (or the rest, which goTo opens) if it's folded, with the cursor in them.
+  function backToDraft(d: Draft) {
+    if (!v) return;
+    const i = drawnAt(d, list, v.conversation, v.diff_head);
+    const path = list[i]?.path;
+    if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
+    if (i >= 0) goTo(i, ".rv-inline", "center");
+    else document.querySelector(".rv-orphan")?.scrollIntoView({ block: "center" });
+    setFocusAsk((f) => f + 1);
+    flash("Send or clear the comment you're writing first");
+  }
+
+  // The gutter's + (or a drag down it), or a thread's Reply: a box under that line. Words you haven't sent are never dropped
+  // for another: you're taken to them instead.
+  function openDraft(at: InlineAt, thread: string | null) {
+    if (!v) return;
+    if (draft?.busy || isSending(id)) {
+      flash("Still sending your last comment");
+      return;
+    }
+    if (draft && draftText.current.trim()) {
+      backToDraft(draft);
+      return;
+    }
+    draftText.current = "";
+    draftSel.current = null;
+    setDraft({ n: ++drafts.current, at, thread, head: v.diff_head, busy: false });
+    setFocusAsk((f) => f + 1);
+  }
+
+  async function sendDraft(text: string) {
+    if (!v || !draft || draft.busy || !text.trim()) return;
+    const d = { ...draft, busy: true };
+    const pr = id;
+    const ref = shortRef(v.card);
+    setDraft(d);
+    // Out of what's kept while it's on its way: leave and come back meanwhile, and it isn't there to send twice.
+    keepDraft(pr, null);
+    sendingOn(pr, true);
+    let url: string;
+    try {
+      ({ url } = d.thread ? await api.reply(v.card.id, d.thread, text) : await api.inline(v.card.id, d.at, text, d.head));
+    } catch (e) {
+      sendingOn(pr, false);
+      returnDraft(pr, { at: d.at, thread: d.thread, head: d.head, text });
+      if (!alive.current) {
+        flash(`Your comment on ${ref} didn't post: ${message(e)}. Your words are back on it.`, true);
+        return;
+      }
+      setDraft((cur) => (cur?.n === d.n ? { ...cur, busy: false } : cur));
+      flash(message(e), true);
+      return;
+    }
+    sendingOn(pr, false);
+    flash(d.thread ? `Sent your reply on ${ref} on GitHub` : `Commented on ${lineName(d.at)} on GitHub`);
+    if (!alive.current || shown.current !== pr) return; // a review you've left doesn't touch the one you're on
+    setSent((s) => [...s, { at: d.at, thread: d.thread, body: text.trim(), url }]);
+    setDraft((cur) => (cur?.n === d.n ? null : cur));
+    if (drafts.current === d.n) {
+      draftText.current = "";
+      holdKeys(false);
+    }
   }
 
   function toggleSide() {
@@ -319,6 +493,8 @@ export function Review({
     else if (k === "N" && v?.stack?.up) location.hash = routeHash({ name: "review", id: v.stack.up });
     else if (k === "P" && v?.stack?.down) location.hash = routeHash({ name: "review", id: v.stack.down });
     else if (k === "f") toggleSide();
+    else if (k === "z" && list[secIdx] && !(folded && secIdx >= rest)) toggleFold(list[secIdx].path, secIdx);
+    else if (k === "Z") foldAll();
     else if (k === "Enter" && folded && secIdx >= rest) goTo(rest);
     else if (k === "]") goNote(1);
     else if (k === "[") goNote(-1);
@@ -346,17 +522,28 @@ export function Review({
     if (e.repeat && !["n", "p", "]", "["].includes(e.key)) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    if (keysHeld()) {
+      e.preventDefault();
+      return;
+    }
+    // With words unsent, a key that acts goes back to them, so one that slipped out of the box can't approve.
+    if (draft && draftText.current.trim() && e.key.length === 1 && "admbw.".includes(e.key)) {
+      e.preventDefault();
+      backToDraft(draft);
+      return;
+    }
     if (e.key === "Escape") onBack();
     else if (e.key === "@" && readying) {
       e.preventDefault();
       document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
-    } else if (("npoci[]admbfwNP.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
+    } else if (("npoci[]admbfwzNPZ.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
       e.preventDefault();
       run(e.key);
     }
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       keyRef.current(e);
@@ -399,8 +586,81 @@ export function Review({
     { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
   ];
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
+  // The one box you write in, wherever it's drawn: under its line, or above the diff once a push took its line off it.
+  const composer = (label: string) =>
+    draft && (
+      <InlineBox
+        key={`d${draft.n}`}
+        label={label}
+        busy={draft.busy}
+        text={draftText.current}
+        focus={focusAsk === focusDone.current ? 0 : focusAsk}
+        hadFocus={holding()}
+        sel={draftSel.current}
+        onSel={(s) => {
+          draftSel.current = s;
+        }}
+        onFocused={() => {
+          focusDone.current = focusAsk;
+        }}
+        onFocusChange={holdKeys}
+        onText={(t) => {
+          draftText.current = t;
+          keepDraft(id, { at: draft.at, thread: draft.thread, head: draft.head, text: t });
+        }}
+        onSend={(t) => {
+          void sendDraft(t);
+        }}
+        onCancel={() => {
+          setDraft(null);
+          draftText.current = "";
+          keepDraft(id, null);
+          holdKeys(false);
+        }}
+      />
+    );
+  // A box whose line a refresh took off the diff, or put under the closed rest, is drawn above the diff instead.
+  const orphanAt = draft ? drawnAt(draft, list, view.conversation, view.diff_head) : 0;
+  // Yours from here that the refreshed conversation doesn't have yet.
+  const pending = sent.filter(
+    (s) =>
+      !view.conversation.some((c) =>
+        c.comments.some((k) => (s.url && k.url === s.url) || (k.author.toLowerCase() === me.toLowerCase() && k.body.trim() === s.body)),
+      ),
+  );
   const section = (x: Section, i: number) => (
-    <SectionView key={x.key} section={x} index={i} file={files[x.file]!} notes={view.ai?.notes ?? []} order={notes} current={noteIdx} />
+    <SectionView
+      key={x.key}
+      section={x}
+      index={i}
+      file={files[x.file]!}
+      notes={view.ai?.notes ?? []}
+      order={notes}
+      current={noteIdx}
+      now={now}
+      shut={shut.has(x.path)}
+      onFold={() => {
+        toggleFold(x.path, i);
+      }}
+      conversation={view.conversation}
+      canComment={open}
+      draft={draft}
+      composer={composer}
+      head={view.diff_head}
+      opened={opened}
+      onOpen={(tid, o) => {
+        setOpened((cur) => {
+          const next = new Set(cur);
+          if (o) next.add(tid);
+          else next.delete(tid);
+          return next;
+        });
+      }}
+      sent={pending}
+      onDraft={(at, thread) => {
+        openDraft(at, thread);
+      }}
+    />
   );
   const open = item.state === "open";
 
@@ -523,6 +783,16 @@ export function Review({
           />
         )}
 
+        {draft && (orphanAt < 0 || (folded && orphanAt >= rest)) && (
+          <div className="rv-orphan">
+            <p className="quiet">
+              {draft.thread
+                ? "Your reply: its thread isn't on the diff on screen. It still goes to that thread."
+                : `Your comment on ${lineName(draft.at)}: that line isn't on the diff on screen. It still goes on the line you picked, in the commit you read.`}
+            </p>
+            {composer(draft.thread ? "Reply" : rangeLabel(draft.at))}
+          </div>
+        )}
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
         {!view.files_error && !files.length && <p className="quiet rv-nofiles">No files changed.</p>}
         {list.length > 0 && (
@@ -535,7 +805,10 @@ export function Review({
                 aria-expanded={!folded}
                 onClick={() => {
                   if (folded) goTo(rest);
-                  else setRestOpen(false);
+                  else {
+                    holdKeys(false);
+                    setRestOpen(false);
+                  }
                 }}
               >
                 {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
@@ -971,6 +1244,24 @@ function Dir({ path }: { path: string }) {
   );
 }
 
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+const sideOf = (s: "new" | "old"): "additions" | "deletions" => (s === "old" ? "deletions" : "additions");
+const onSection = (x: Section, at: InlineAt) => at.path === x.path && onLines(x.hunks, at);
+// The draft this window kept for a PR you left with words unsent.
+function restored(id: string, n: number): Draft | null {
+  const k: Kept | null = keptDraft(id);
+  return k && { n, at: k.at, thread: k.thread, head: k.head, busy: false };
+}
+
+// The section a draft's box belongs in; -1 once a push took its line or thread off the diff (it shows above the diff then).
+function drawnAt(d: Draft, list: Section[], conversation: Convo[], head: string): number {
+  if (!d.thread && d.head !== head) return -1; // a push since: the line it posts on isn't the one on screen any more
+  return list.findIndex((x) => (d.thread ? threadsOn(conversation, x.path, x.hunks).some((t) => t.id === d.thread) : onSection(x, d.at)));
+}
+
+const rangeLabel = (at: InlineAt | undefined) => (at?.start ? `Comment on lines ${at.start.line}–${at.line}` : "Comment");
+const lineName = (at: InlineAt) => `${splitPath(at.path)[1]}:${at.start ? `${at.start.line}–` : ""}${at.line}`;
+
 function SectionView({
   section: x,
   index,
@@ -978,6 +1269,18 @@ function SectionView({
   notes,
   order,
   current,
+  now,
+  shut,
+  onFold,
+  conversation,
+  canComment,
+  draft,
+  composer,
+  head,
+  opened,
+  onOpen,
+  sent,
+  onDraft,
 }: {
   section: Section;
   index: number;
@@ -985,13 +1288,27 @@ function SectionView({
   notes: ReviewNote[]; // the AI review's
   order: number[]; // ReviewView.order.notes: a note's place in it is what ] and [ land on
   current: number | null;
+  now: number;
+  shut: boolean; // you folded this file
+  onFold: () => void;
+  conversation: Convo[];
+  canComment: boolean;
+  draft: Draft | null;
+  composer: (label: string) => ReactNode; // the box you write in
+  head: string; // the commit on screen
+  opened: ReadonlySet<string>; // resolved threads you opened: kept here, as Pierre redraws them when a box opens or closes
+  onOpen: (id: string, open: boolean) => void;
+  sent: Sent[]; // yours that the conversation doesn't show yet
+  onDraft: (at: InlineAt, thread: string | null) => void;
 }) {
+  // Pierre keeps a drawn diff by this key: the commit and the hunks, so a push or a regroup draws what a + will post on.
+  const cacheKey = `${head}:${x.hunks.map((h) => h.id).join(",")}`;
   const fileDiff = useMemo(
     () =>
       x.hunks.length
-        ? (parsePatchFiles(filePatch({ ...file, patch: x.hunks.map((h) => h.patch).join("\n") }), x.key)[0]?.files[0] ?? null)
+        ? (parsePatchFiles(filePatch({ ...file, patch: x.hunks.map((h) => h.patch).join("\n") }), cacheKey)[0]?.files[0] ?? null)
         : null,
-    [x, file],
+    [x, file, cacheKey],
   );
   const mine = useMemo(
     () =>
@@ -1001,16 +1318,60 @@ function SectionView({
       }),
     [x, notes, order],
   );
+  const threads = useMemo(() => threadsOn(conversation, x.path, x.hunks), [conversation, x]);
+  const replyTo = draft?.thread ? threads.find((t) => t.id === draft.thread) : undefined;
+  const writing = draft && (draft.thread ? !!replyTo : draft.head === head && onSection(x, draft.at)) ? draft : null;
+  // A reply sits under its thread wherever a push has moved it.
+  const boxLine = replyTo ? (replyTo.line ?? 0) : writing?.at.line;
+  const boxSide = replyTo ? (replyTo.side ?? "new") : writing?.at.side;
   const annotations = useMemo(
-    () =>
-      mine
+    () => [
+      // First, so nothing landing on the file moves it (Pierre keys these by place); its CSS order puts it last on its line.
+      ...(writing && boxLine && boxSide ? [{ side: sideOf(boxSide), lineNumber: boxLine, metadata: { kind: "draft" } as const }] : []),
+      ...mine
         .filter((n) => n.inline)
-        .map((n): DiffLineAnnotation<NoteMeta> => ({
-          side: n.note.side === "old" ? "deletions" : "additions",
+        .map((n): DiffLineAnnotation<Meta> => ({
+          side: sideOf(n.note.side),
           lineNumber: n.note.line,
-          metadata: { index: n.index, body: n.note.body },
+          metadata: { kind: "note", index: n.index, body: n.note.body },
         })),
-    [mine],
+      ...threads.map((t): DiffLineAnnotation<Meta> => ({
+        side: sideOf(t.side ?? "new"),
+        lineNumber: t.line ?? 0,
+        metadata: { kind: "thread", id: t.id },
+      })),
+      ...sent
+        .filter((s) => !s.thread && onSection(x, s.at))
+        .map((s): DiffLineAnnotation<Meta> => ({
+          side: sideOf(s.at.side),
+          lineNumber: s.at.line,
+          metadata: { kind: "sent", body: s.body, url: s.url },
+        })),
+    ],
+    [mine, threads, writing, boxLine, boxSide, sent, x],
+  );
+  // The lines marked only while you drag down the gutter: Pierre's own selection would outlive the box, and pin the + to it.
+  const [dragging, setDragging] = useState<SelectedLineRange | null>(null);
+  const gutter = useRef<(r: SelectedLineRange) => void>(() => {});
+  gutter.current = (r) => {
+    setDragging(null);
+    const at = inlineAt(x.path, x.hunks, r);
+    if (at) onDraft(at, null);
+  };
+  const base = diffOptions();
+  const options = useMemo(
+    (): FileDiffOptions<Meta, undefined> =>
+      canComment
+        ? {
+            ...base,
+            enableGutterUtility: true,
+            onGutterUtilityClick: (r) => {
+              gutter.current(r);
+            },
+            onLineSelectionChange: setDragging,
+          }
+        : base,
+    [base, canComment],
   );
   const [dir, name] = splitPath(x.path);
   const status = STATUS[file.status];
@@ -1018,13 +1379,24 @@ function SectionView({
   const adds = x.hunks.reduce((n, h) => n + h.additions, 0);
   const dels = x.hunks.reduce((n, h) => n + h.deletions, 0);
   return (
-    <section className="rv-file-sec" id={`rv-s-${index}`} aria-label={x.path}>
+    <section className={cls("rv-file-sec", shut && "shut")} id={`rv-s-${index}`} aria-label={x.path}>
       <h3 className="rv-fhead">
-        {level && <span className={`rv-level l-${x.level}`}>{level}</span>}
-        <span className="rv-fname">
-          {dir && <Dir path={dir} />}
-          <span className="rv-base">{name}</span>
-        </span>
+        <button
+          type="button"
+          className="rv-fold-btn"
+          aria-expanded={!shut}
+          title={shut ? "Show this file (z)" : "Fold this file (z)"}
+          onClick={onFold}
+        >
+          <span className="rv-chev" aria-hidden="true">
+            ›
+          </span>
+          {level && <span className={`rv-level l-${x.level}`}>{level}</span>}
+          <span className="rv-fname">
+            {dir && <Dir path={dir} />}
+            <span className="rv-base">{name}</span>
+          </span>
+        </button>
         {x.why && (
           <span className="rv-why" title={x.why}>
             {x.why}
@@ -1038,23 +1410,264 @@ function SectionView({
         )}
         {x.hunks.length > 0 && <span className="rv-delta">{`+${adds} −${dels}`}</span>}
       </h3>
-      {mine
-        .filter((n) => !n.inline)
-        .map((n) => (
-          <Note key={n.index} index={n.index} body={n.note.body} on={current === n.index} />
-        ))}
-      {fileDiff && (
-        <FileDiff<NoteMeta>
+      {!shut &&
+        mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} on={current === n.index} />)}
+      {!shut && fileDiff && (
+        <FileDiff<Meta>
           className="rv-diff"
           // Pierre draws a frame or more after the page; its height held meanwhile, nothing below it jumps.
           style={{ minHeight: diffRows(x.hunks) * ROW }}
           fileDiff={fileDiff}
-          options={diffOptions()}
+          options={options}
+          selectedLines={dragging}
           lineAnnotations={annotations}
-          renderAnnotation={(a) => <Note index={a.metadata.index} body={a.metadata.body} on={current === a.metadata.index} />}
+          renderAnnotation={(a) => {
+            const m = a.metadata;
+            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} on={current === m.index} />;
+            if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
+            if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
+            const t = threads.find((c) => c.id === m.id);
+            if (!t) return null;
+            return (
+              <ThreadNote
+                key={t.id}
+                convo={t}
+                sent={sent.filter((s) => s.thread === t.id)}
+                now={now}
+                replying={draft?.thread === t.id}
+                open={opened.has(t.id) || draft?.thread === t.id}
+                onOpen={(o) => {
+                  onOpen(t.id, o);
+                }}
+                onReply={
+                  canComment && draft?.thread !== t.id
+                    ? () => {
+                        onDraft({ path: x.path, line: t.line ?? 0, side: t.side ?? "new" }, t.id);
+                      }
+                    : null
+                }
+              />
+            );
+          }}
         />
       )}
     </section>
+  );
+}
+
+// What you're writing under a line: ⌘↵ or Send posts it on GitHub, as you; Esc leaves an empty one.
+function InlineBox({
+  label,
+  busy,
+  text,
+  focus,
+  hadFocus,
+  sel,
+  onSel,
+  onFocused,
+  onFocusChange,
+  onText,
+  onSend,
+  onCancel,
+}: {
+  label: string;
+  busy: boolean;
+  text: string;
+  focus: number; // asks for the cursor; 0 leaves it where it is
+  hadFocus: boolean; // drawn again while you were typing in it: it takes the cursor back
+  sel: [number, number] | null; // and puts it back where it was
+  onSel: (sel: [number, number]) => void;
+  onFocused: () => void;
+  onFocusChange: (focused: boolean) => void;
+  onText: (text: string) => void;
+  onSend: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(text);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const focused = useRef(onFocused);
+  focused.current = onFocused;
+  const [keep] = useState(hadFocus); // as it was when this box was drawn
+  const [at] = useState(sel);
+  // In the commit that takes it out, before any key queued meanwhile is handled.
+  useLayoutEffect(
+    () => () => {
+      boxGone();
+    },
+    [],
+  );
+  // Pierre slots it into its diff a frame or two after it mounts, and focus doesn't take until then.
+  useEffect(() => {
+    let frame = 0;
+    let tries = 0;
+    const take = () => {
+      const el = area.current;
+      if (!el) return;
+      if (tries++ > 300) {
+        boxBack();
+        return;
+      }
+      if (el !== document.activeElement) el.focus({ preventScroll: true });
+      if (el !== document.activeElement) {
+        frame = requestAnimationFrame(take);
+        return;
+      }
+      if (keep && at) el.setSelectionRange(at[0], at[1]);
+      else el.setSelectionRange(el.value.length, el.value.length);
+      el.scrollIntoView({ block: "nearest" });
+      boxBack();
+      focused.current();
+    };
+    if (focus || keep) frame = requestAnimationFrame(take);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [focus, keep, at]);
+  const send = () => {
+    if (value.trim() && !busy) onSend(value);
+  };
+  return (
+    <div className={cls("rv-inline", label === "Reply" && "rv-inline-reply")}>
+      <textarea
+        ref={area}
+        className="cv-reply"
+        aria-label={label}
+        placeholder={`${label}, as you`}
+        value={value}
+        readOnly={busy}
+        onFocus={() => {
+          onFocusChange(true);
+        }}
+        onBlur={(e) => {
+          // A box Pierre is drawing again is taken out without your leaving it: only a real blur lets the cursor go.
+          const el = e.currentTarget;
+          requestAnimationFrame(() => {
+            const page = document.activeElement === null || document.activeElement === document.body;
+            if (el !== document.activeElement && (el.isConnected || !page)) onFocusChange(false);
+          });
+        }}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onText(e.target.value);
+          onSel([e.target.selectionStart, e.target.selectionEnd]);
+        }}
+        onSelect={(e) => {
+          onSel([e.currentTarget.selectionStart, e.currentTarget.selectionEnd]);
+        }}
+        onKeyDown={(e) => {
+          if (e.repeat) return;
+          if (e.key === "Escape") {
+            onFocusChange(false); // before a fold that may follow at once draws it again
+            if (value.trim()) e.currentTarget.blur();
+            else onCancel();
+          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            send();
+          }
+        }}
+      />
+      <div className="actions">
+        <button
+          type="button"
+          className="act primary"
+          title={`${label} on GitHub, as you: the button or ${MOD}↵`}
+          disabled={!value.trim() || busy}
+          onClick={send}
+        >
+          <kbd>{MOD}↵</kbd>
+          {label === "Reply" ? "Reply" : "Comment"}
+          {busy && <span className="busy" aria-label="sending" />}
+        </button>
+        <button type="button" className="act" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A review thread where it was left. GitHub text: shown as text, never as markup.
+function ThreadNote({
+  convo,
+  sent,
+  now,
+  replying,
+  open,
+  onOpen,
+  onReply,
+}: {
+  convo: Convo;
+  sent: Sent[];
+  now: number;
+  replying: boolean; // your reply box comes right after it
+  open: boolean;
+  onOpen: (open: boolean) => void;
+  onReply: (() => void) | null;
+}) {
+  const shown = sent.filter((s) => !convo.comments.some((c) => c.url === s.url));
+  const body = (
+    <>
+      {convo.comments.map((c) => (
+        <div key={c.id} className="rv-tc">
+          <span className="rv-tc-who">{c.author}</span>
+          <span className="rv-tc-at">{age(c.at, now)}</span>
+          <div className="rv-tc-body">{c.body}</div>
+        </div>
+      ))}
+      {shown.map((s) => (
+        <Yours key={s.url || s.body} body={s.body} url={s.url} />
+      ))}
+      <div className="rv-tc-acts">
+        {onReply && (
+          <button type="button" className="link-btn rv-tc-reply" onClick={onReply}>
+            Reply
+          </button>
+        )}
+        <a href={convo.url} target="_blank" rel="noopener noreferrer">
+          On GitHub
+        </a>
+      </div>
+    </>
+  );
+  if (!convo.resolved)
+    return (
+      <div className="rv-thread" data-replying={replying || undefined}>
+        {body}
+      </div>
+    );
+  return (
+    <details
+      className="rv-thread resolved"
+      data-replying={replying || undefined}
+      open={open}
+      onToggle={(e) => {
+        if (e.currentTarget.open !== open) onOpen(e.currentTarget.open);
+      }}
+    >
+      <summary>
+        Resolved · {convo.comments[0]?.author}: {convo.comments[0]?.body.split("\n")[0]}
+      </summary>
+      {body}
+    </details>
+  );
+}
+
+// Yours from here, until the refreshed conversation has it.
+function Yours({ body, url }: { body: string; url: string }) {
+  return (
+    <div className="rv-tc rv-tc-mine">
+      <span className="rv-tc-who">You</span>
+      <span className="rv-tc-at">
+        {url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            sent
+          </a>
+        ) : (
+          "sent"
+        )}
+      </span>
+      <div className="rv-tc-body">{body}</div>
+    </div>
   );
 }
 

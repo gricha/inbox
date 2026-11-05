@@ -17,6 +17,7 @@ import {
   claudeSpawn,
   CLAUDE_PAUSED,
   generateReview,
+  filesHead,
   numberPatch,
   parseFiles,
   parseReview,
@@ -84,6 +85,17 @@ test("gh's one-object-per-line files become ReviewFiles", () => {
       ["b.py", "old.py", "renamed", true],
     ],
   );
+});
+
+test("the commit a diff is at comes from its own files, and pages fetched across a push say so", () => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const at = (sha: string, f: string) =>
+    JSON.stringify({ filename: f, contents_url: `https://api.github.com/repos/o/r/contents/${f}?ref=${sha}` });
+  assert.equal(filesHead([at(A, "x.ts"), at(A, "y.ts"), ""].join("\n")), A);
+  assert.equal(filesHead([at(A, "x.ts"), at(B, "y.ts")].join("\n")), null, "a push between pages");
+  assert.equal(filesHead(""), undefined, "no files: the desk's own head");
+  assert.equal(filesHead(JSON.stringify({ filename: "x.ts" })), undefined);
 });
 
 test("parseReview anchors notes to real diff lines and drops what it can't place", () => {

@@ -126,7 +126,7 @@ export const PR_CONTEXT = `query($id: ID!) {
     ... on PullRequest {
       reviewThreads(first: 100) {
         nodes {
-          id isResolved isOutdated path line
+          id isResolved isOutdated path line diffSide
           hunk: comments(first: 1) { nodes { diffHunk } }
           comments(first: 30) { nodes { id author { __typename login } body createdAt url } }
         }

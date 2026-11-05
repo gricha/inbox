@@ -13,11 +13,12 @@ function fakeFetch(reply: { status?: number; body: unknown }) {
   return { fetch: fn, calls };
 }
 
-test("the allowlist is exactly these mutations: approve, a reply or comment, ready for review with its reviewers, and the More menu's", () => {
+test("the allowlist is exactly these mutations: approve, a reply or comment, one on a line, ready for review with its reviewers, and the More menu's", () => {
   assert.deepEqual(Object.keys(ALLOWED), [
     "approve",
     "reply",
     "comment",
+    "inline_comment",
     "ready",
     "request_reviews",
     "close",
@@ -36,6 +37,10 @@ test("the allowlist is exactly these mutations: approve, a reply or comment, rea
     /^mutation DeskReply[^{]*\{\s*addPullRequestReviewThreadReply\(input: \{ pullRequestReviewThreadId: \$thread/,
   );
   assert.match(ALLOWED.comment, /^mutation DeskComment[^{]*\{\s*addComment\(input: \{ subjectId: \$subject, body: \$body \}\)/);
+  assert.match(
+    ALLOWED.inline_comment,
+    /^mutation DeskInlineComment[^{]*\{\s*addPullRequestReview\(input: \{ pullRequestId: \$pr, commitOID: \$commit, event: COMMENT, threads: \[\$thread\] \}\)/,
+  );
   assert.match(ALLOWED.ready, /^mutation DeskReady[^{]*\{\s*markPullRequestReadyForReview\(input: \{ pullRequestId: \$pr \}\)/);
   assert.match(
     ALLOWED.request_reviews,
@@ -74,6 +79,39 @@ test("a reply and a comment send their mutation once and log it", async () => {
   });
   assert.equal((JSON.parse(g.calls[0]!.body) as { query: string }).query, ALLOWED.comment);
   assert.deepEqual(logs, ["github write: reply PRRT_1"]);
+});
+
+test("an inline comment is one COMMENT review with one thread, pinned to the commit, answering with the comment's link", async () => {
+  const url = "https://github.com/a/b/pull/1#discussion_r5";
+  const f = fakeFetch({
+    body: {
+      data: {
+        addPullRequestReview: {
+          pullRequestReview: { url: "https://github.com/a/b/pull/1#pullrequestreview-1", comments: { nodes: [{ url }] } },
+        },
+      },
+    },
+  });
+  const logs: string[] = [];
+  const w = createWriter({
+    token: "t",
+    fetch: f.fetch,
+    log: (m) => {
+      logs.push(m);
+    },
+  });
+  const thread = { path: "src/a.ts", line: 9, side: "RIGHT" as const, startLine: 7, startSide: "RIGHT" as const, body: "Nit" };
+  assert.deepEqual(await w.inlineComment("PR_1", "abc", thread), { url });
+  assert.equal(f.calls.length, 1);
+  const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
+  assert.equal(sent.query, ALLOWED.inline_comment);
+  assert.deepEqual(sent.variables, { pr: "PR_1", commit: "abc", thread });
+  assert.deepEqual(logs, ["github write: inline_comment PR_1 at abc"]);
+  const empty = fakeFetch({ body: { data: { addPullRequestReview: null } } });
+  await assert.rejects(
+    createWriter({ token: "t", fetch: empty.fetch }).inlineComment("PR_1", "abc", thread),
+    /answered without the comment/,
+  );
 });
 
 test("ready sends its mutation once and logs it", async () => {

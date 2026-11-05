@@ -1,6 +1,8 @@
 import type {
   ActivityEvent,
   Card,
+  Conversation,
+  InlineAt,
   JudgeStatus,
   JudgeStep,
   QueueView,
@@ -157,6 +159,63 @@ export function onLines(hunks: Pick<ReviewHunk, "header">[], n: Pick<ReviewNote,
     const [from, count] = n.side === "old" ? [m?.[1], m?.[2]] : [m?.[3], m?.[4]];
     return !!from && n.line >= Number(from) && n.line < Number(from) + Number(count ?? 1);
   });
+}
+
+type Side = "new" | "old";
+
+// The diff's rows in order, each with its hunk and its line number on each side it's on (a context line is on both).
+function rowsOf(hunks: Pick<ReviewHunk, "patch">[]): { hunk: number; old: number | null; new: number | null }[] {
+  const rows: { hunk: number; old: number | null; new: number | null }[] = [];
+  for (const [hunk, h] of hunks.entries()) {
+    const [head = "", ...lines] = h.patch.split("\n");
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(head);
+    if (!m) continue;
+    let o = Number(m[1]);
+    let n = Number(m[2]);
+    for (const l of lines)
+      if (l.startsWith("+")) rows.push({ hunk, old: null, new: n++ });
+      else if (l.startsWith("-")) rows.push({ hunk, old: o++, new: null });
+      else if (l.startsWith(" ")) rows.push({ hunk, old: o++, new: n++ });
+  }
+  return rows;
+}
+
+// Where a comment on the gutter's pick goes: GitHub's line and side, from the earlier row of the pick to the later. GitHub
+// takes a range only within one hunk; across two, the comment is on the last line.
+export function inlineAt(
+  path: string,
+  hunks: Pick<ReviewHunk, "patch">[],
+  pick: { start: number; side?: "additions" | "deletions"; end: number; endSide?: "additions" | "deletions" },
+): InlineAt | null {
+  const rows = rowsOf(hunks);
+  const at = (line: number, s: "additions" | "deletions" | undefined): { i: number; line: number; side: Side } | null => {
+    const side: Side = s === "deletions" ? "old" : "new";
+    const i = rows.findIndex((r) => r[side] === line);
+    return i < 0 ? null : { i, line, side };
+  };
+  const a = at(pick.start, pick.side);
+  const b = at(pick.end, pick.endSide ?? pick.side);
+  if (!a || !b) return null;
+  const [first, last] = a.i <= b.i ? [a, b] : [b, a];
+  return {
+    path,
+    line: last.line,
+    side: last.side,
+    ...(first.i !== last.i && rows[first.i]!.hunk === rows[last.i]!.hunk && { start: { line: first.line, side: first.side } }),
+  };
+}
+
+// The review threads on these hunks' lines, to show where they are; outdated ones are only in the conversation.
+export function threadsOn(conversation: Conversation[], path: string, hunks: Pick<ReviewHunk, "header">[]): Conversation[] {
+  return conversation.filter(
+    (c) =>
+      c.kind === "thread" &&
+      c.path === path &&
+      !c.outdated &&
+      c.line !== null &&
+      !!c.side &&
+      onLines(hunks, { line: c.line, side: c.side }),
+  );
 }
 
 // "src/planner/" and "plan.ts", so the name can stay whole while the folder truncates.
