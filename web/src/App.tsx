@@ -1014,6 +1014,13 @@ export function App() {
   // through to them. Capture phase: this runs before any other keydown listener, the review's included.
   const onChord = (e: KeyboardEvent) => {
     if (menuAt) return; // a row's menu has the keyboard, Esc included
+    // Esc on the help sheet closes it, and only it: a review or a page under it would read it as "go back" too.
+    if (help && (e.key === "Escape" || e.key === "?") && !e.isComposing) {
+      setHelp(false);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     // Esc closes the composer, wherever focus is, before a review or a page reads it as "go back".
     if (asking && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
