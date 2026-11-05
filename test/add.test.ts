@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ReviewDeps } from "../src/desk.ts";
+import { parseReview } from "../src/review.ts";
+import type { AiReview } from "../src/types.ts";
 import { createApp } from "../src/server.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
@@ -13,10 +15,11 @@ const ID = "acme/other#9";
 // Someone else's PR no board's search returns: only desk_add brings it in.
 const unknown = () => makeItem({ repo: "acme/other", number: 9, author: "dave" });
 
-// Diffs and AI reviews that never reach an agent: each review stays "being written".
+// Diffs and AI reviews that never reach an agent: each review is "being written" until finish() writes it.
 function fakeReview() {
   const fetched: string[] = [];
   const started: string[] = [];
+  const done = new Map<string, () => void>();
   const review: ReviewDeps = {
     fetchPr: (item) => {
       fetched.push(item.id);
@@ -24,10 +27,21 @@ function fakeReview() {
     },
     generate: (item) => {
       started.push(item.id);
-      return new Promise(() => {});
+      return new Promise<AiReview>((resolve) => {
+        const ai = parseReview({ verdict: "skim", risk: "low", summary: "fine", notes: [] }, []);
+        done.set(item.id, () => {
+          resolve({ ...ai, head_oid: item.head_oid, model: "fake", at: NOW.toISOString() });
+        });
+      });
     },
   };
-  return { review, fetched, started };
+  const finish = async (id: string) => {
+    done.get(id)!();
+    await new Promise((r) => {
+      setTimeout(r, 20);
+    });
+  };
+  return { review, fetched, started, finish };
 }
 
 async function until(cond: () => boolean): Promise<void> {
@@ -65,8 +79,13 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
     "held with its events from here",
   );
 
-  const row = t.desk.focus().sections.today.find((x) => x.id === ID);
+  const onPage = () => t.desk.focus().sections.today.find((x) => x.id === ID);
+  assert.equal(onPage(), undefined, "not until Claude has reviewed it");
+  assert.equal(t.desk.focus().reviewing, 1);
+  await f.finish(ID);
+  const row = onPage();
   assert.ok(row, "on the main page");
+  assert.equal(t.desk.focus().reviewing, 0);
   assert.equal(row.why, "you added it");
   assert.equal(t.desk.item(ID).placements[0]?.board, "added");
   await t.desk.sync();
@@ -209,6 +228,23 @@ test("adding a done, snoozed or muted item brings it back, and its one undo puts
     t.desk.undo(r.undo_seq);
     assert.deepEqual(t.desk.item("api#1").state, before, `${action}: one undo`);
   }
+});
+
+test("what you pin yourself is on your desk at once, reviewed or not; an agent's add waits for Claude's review", async (c) => {
+  const f = fakeReview();
+  const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const onDesk = (id: string) => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === id);
+  assert.equal(onDesk("acme/api#2"), false, "a team ping is FYI");
+  t.desk.act("api#2", "pin");
+  assert.equal(onDesk("acme/api#2"), true);
+  assert.equal(t.desk.item("api#2").held, false);
+
+  t.gh.items.set(ID, unknown());
+  await t.desk.add(ID, "your call on the token transport", "seer write gate");
+  assert.equal(onDesk(ID), false);
+  assert.equal(t.desk.item(ID).held, true);
 });
 
 test("adding several PRs at once starts their AI reviews two at a time, as the background ones run", async (c) => {

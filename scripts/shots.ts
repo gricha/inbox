@@ -219,6 +219,38 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // PRs held back until Claude has reviewed them: one quiet line under the queue.
+    name: "queue-reviewing",
+    go: async (page) => {
+      await queueAs((q) => {
+        q.reviewing = 3;
+      })(page);
+      await toBottom("queue-reviewing")(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
+    // Nothing on the queue yet, one on its way.
+    name: "queue-empty-reviewing",
+    go: async (page) => {
+      await queueAs((q) => {
+        q.sections.now = [];
+        q.sections.today = [];
+        q.reviewing = 1;
+      })(page);
+      await top(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    },
+  },
+  {
     // The first load while the desk is slow: quiet rows where the rows will be.
     name: "queue-loading",
     go: async (page) => {

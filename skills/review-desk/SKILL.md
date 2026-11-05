@@ -73,7 +73,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 ### "What needs me?"
 
 1. `desk_list` (Focus), and `desk_overview` for the counts per board.
-2. Answer with the queue in order, urgent (`now`) first, as one list: ref, a short title, and the why. Then one line for what's sorted away, from the overview ("12 later, 30 FYI").
+2. Answer with the queue in order, urgent (`now`) first, as one list: ref, a short title, and the why. Then one line for what's sorted away, from the overview ("12 later, 30 FYI"), and for PRs that reach the queue once Claude has reviewed them, when `desk_list` says so ("3 more once Claude has reviewed them").
 3. Don't paste JSON. If nothing is urgent, say so plainly.
 
 ### "Add X to my review" (or "put it on my desk")
@@ -82,13 +82,13 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
    - `why` is the line the desk shows on it as why it's on their desk, so they know what it wants from them before opening it: what to look at or decide, and why now ("needs your call on the token transport before it merges"). When they asked for it, say so ("you asked to review it"). One line, no ref or title: the desk shows those.
    - `from`: your task in a few words ("seer region fix"), so they know which session sent it.
    - Hand them something from your own work the same way, when it needs them (a PR to review, an issue to decide), rather than telling them in chat.
-2. For a PR, `desk_brief` once the AI review is ready; desk_add says whether it's ready or being written. While it is, wait on `desk_brief` (a minute or two) or say it's being written and will be ready in the desk. When adding several, don't `desk_brief` each: the desk writes them two at a time.
+2. For a PR, `desk_brief` once the AI review is ready; desk_add says whether it's ready or being written. While it is, wait on `desk_brief` (a minute or two) or say it's being written and the PR shows on their desk once it's done. When adding several, don't `desk_brief` each: the desk writes them two at a time.
 3. Report in a line with the undo seq: "Added sentry#123 to your desk; AI review: skim, low risk (undo: seq 42)". Adding writes nothing to GitHub: never request a review, assign or comment to get it there.
 
 ### "Why is X here?" (or "why isn't it on the queue?")
 
 1. `desk_item` with the ref.
-2. Explain per board: the bucket, the rule that matched (the first ✓ in the trace) and its why. Mention a demotion by a cap if there is one. If it's on no board, a board's `filter` drops it or no search returns it.
+2. Explain per board: the bucket, the rule that matched (the first ✓ in the trace) and its why. Mention a demotion by a cap if there is one. If it's on no board, a board's `filter` drops it or no search returns it. Someone else's PR in Now or Today that `desk_item` says is off the queue until Claude has reviewed it shows once that review is written.
 3. If the user wants it elsewhere, offer a rule change (next workflow) or a one-off: pin (what they pin stays on the queue), snooze, mute.
 
 ### "Clear the noise from Y" (a bot, repo, team, label, author)

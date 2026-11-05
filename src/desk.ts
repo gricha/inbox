@@ -626,6 +626,7 @@ export class Desk {
     this.store.pruneKv("judge:", kept);
     this.store.pruneKv("sitter:", kept);
     this.store.pruneKv("added:", kept);
+    this.store.pruneKv("shown:", kept);
     this.store.pruneKv("take:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
@@ -759,6 +760,12 @@ export class Desk {
     if (!cfg || !this.syncedAt) return;
     const snap = this.snapshot();
     const { now, today } = this.top(snap, new Set());
+    const all = this.top(snap, new Set(), true);
+    const shown = new Set([...now, ...today].map((c) => c.id));
+    // Once on your desk it stays: a PR shown without its review (paused, or it failed) isn't held again.
+    for (const c of [...now, ...today])
+      if (c.kind === "pr" && !snap.reviews.has(c.id) && !this.store.get(`shown:${c.id}`)) this.store.set(`shown:${c.id}`, true);
+    const held = [...all.now, ...all.today].map((c) => c.id).filter((id) => !shown.has(id));
     const me = this.me().toLowerCase();
     const queued = [...now, ...today]
       .filter(
@@ -770,7 +777,9 @@ export class Desk {
           !snap.auto.has(c.id), // its automation's run told you
       )
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
-    const fresh = this.freshSince("notified_queue", queued);
+    // Held on the first pass, they were there before you looked, as the rest were.
+    const prev = this.store.get("notified_queue") as string[] | null;
+    const fresh = this.freshSince("notified_queue", queued, prev === null ? held : held.filter((id) => prev.includes(id)));
     if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
     const [only] = fresh;
     const body =
@@ -778,13 +787,10 @@ export class Desk {
     this.notify("Review Desk", body);
   }
 
-  // What isn't in the last pass's list under `key` (nothing on the first pass), keeping this pass's.
-  freshSince<T extends { id: string }>(key: string, list: T[]): T[] {
+  // What isn't in the last pass's list under `key` (nothing on the first pass), keeping this pass's and `keep`.
+  freshSince<T extends { id: string }>(key: string, list: T[], keep: string[] = []): T[] {
     const prev = this.store.get(key) as string[] | null;
-    this.store.set(
-      key,
-      list.map((x) => x.id),
-    );
+    this.store.set(key, [...list.map((x) => x.id), ...keep]);
     return prev === null ? [] : list.filter((x) => !prev.includes(x.id));
   }
 
@@ -1181,13 +1187,30 @@ export class Desk {
     oneLinePerStack(sections, ["now", "today"], snap.stacks);
     return {
       sections,
+      reviewing: this.reviewing(snap),
       cards: this.settings["queue.cards"],
       paused: this.paused(),
     };
   }
 
-  // Now and Today in the queue's order, which the AI reviews run in too: what was handed back, then each board's.
-  top(snap: Snapshot, seen: Set<string>): FocusView["sections"] {
+  // Someone else's open PR reaches your desk once Claude has reviewed it: until its first AI review is written it waits,
+  // unless AI reviews are off or paused, or this commit's failed. Once shown (`shown:<id>`, or you put it there) it stays.
+  awaitsAi(e: Entry, snap: Snapshot): boolean {
+    const it = e.item;
+    if (!this.autoAi() || it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return false;
+    if (snap.reviews.has(it.id) || this.store.get(`shown:${it.id}`)) return false;
+    return this.aiErrors.get(it.id)?.head_oid !== it.head_oid;
+  }
+
+  // How many would be in Now or Today but for Claude's review.
+  reviewing(snap: Snapshot): number {
+    return [...snap.best].filter(([id, p]) => (p.bucket === "now" || p.bucket === "today") && this.awaitsAi(snap.entries.get(id)!, snap))
+      .length;
+  }
+
+  // Now and Today in the queue's order, which the AI reviews run in too: what was handed back, then each board's. `all` keeps
+  // what waits on Claude's first review (awaitsAi), for the AI reviews and the notifications.
+  top(snap: Snapshot, seen: Set<string>, all = false): FocusView["sections"] {
     const loaded = this.requireConfig();
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
     for (const bucket of ["now", "today"] as const) {
@@ -1196,7 +1219,9 @@ export class Desk {
           const p = snap.best.get(id);
           if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
           seen.add(id);
-          sections[bucket].push(this.queueCard(snap.entries.get(id)!, p, snap));
+          const e = snap.entries.get(id)!;
+          if (!all && this.awaitsAi(e, snap)) continue;
+          sections[bucket].push(this.queueCard(e, p, snap));
         }
       }
     }
@@ -1209,6 +1234,7 @@ export class Desk {
     const snap = this.snapshot();
     const seen = new Set<string>();
     const sections: QueueView["sections"] = { ...this.top(snap, seen), later: [], fyi: [] };
+    const reviewing = this.reviewing(snap);
     const hidden: Card[] = [];
     for (const bucket of ["later", "fyi", "hide"] as const) {
       for (const board of boardsOf(loaded)) {
@@ -1249,6 +1275,7 @@ export class Desk {
     return {
       inquiries: this.inquiries().filter((q) => !q.answer),
       sections,
+      reviewing,
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
@@ -1333,6 +1360,7 @@ export class Desk {
       ai: snap.reviews.get(id) ?? null,
       ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
       generating: this.generating.has(id),
+      held: this.awaitsAi(e, snap) && ["now", "today"].includes(snap.best.get(id)?.bucket ?? ""),
       activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
       stack: this.stack(id, snap),
     };
@@ -1447,6 +1475,7 @@ export class Desk {
       this.generating.delete(id);
       if (this.stopped) return;
       this.changed();
+      this.notifyNew(); // a PR that waited on this review is on your desk now
       if (ok) this.pumpAi(); // after a failure, wait for the next sync
     })();
     return p;
@@ -1513,7 +1542,7 @@ export class Desk {
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi() || this.generating.size >= AI_AT_ONCE) return;
     const snap = this.snapshot();
-    const top = this.top(snap, new Set());
+    const top = this.top(snap, new Set(), true);
     for (const c of [...top.now, ...top.today]) {
       if (this.generating.size >= AI_AT_ONCE) return;
       const e = snap.entries.get(c.id);
@@ -1744,6 +1773,8 @@ export class Desk {
       s.pinned = false;
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
+    // What you bring onto your desk is there now, reviewed or not.
+    if (action === "pin" || action === "restore" || action === "unmute") this.store.set(`shown:${id}`, true);
     this.changed();
     if (action === "inflight") this.coordinator.wake(id, "handed off");
     const { snoozed_at: _, acked_at: __, ...state } = s;
@@ -1801,6 +1832,7 @@ export class Desk {
       this.store.putState({ ...e.state, pinned: true });
       this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
       outcome = "added";
+      this.changed(); // the pump reads the snapshot: it must have the pin
       this.warmAdded(id);
     }
     this.changed();

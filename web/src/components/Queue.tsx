@@ -77,6 +77,13 @@ export function Queue({
           {g.fold} more
         </button>
       )}
+      {view.reviewing > 0 && (
+        <p className="queue-reviewing">
+          {view.reviewing === 1
+            ? "1 more PR reaches you once Claude has reviewed it."
+            : `${view.reviewing} more PRs reach you once Claude has reviewed them.`}
+        </p>
+      )}
     </div>
   );
 }

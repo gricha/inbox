@@ -159,10 +159,12 @@ type ListBucket = (typeof LIST_BUCKETS)[number];
 
 async function listText(api: DeskClient, board: string | undefined, buckets: ListBucket[], limit: number): Promise<string> {
   let pools: [ListBucket, Card[]][];
+  let reviewing = 0;
   if (!board || board === "focus") {
     if (!buckets.some((b) => b === "now" || b === "today"))
       throw new Error("Focus only holds now and today; pass a board id for later, fyi, hide or cleared");
     const f = await api.focus();
+    reviewing = f.reviewing;
     pools = [
       ["now", f.sections.now],
       ["today", f.sections.today],
@@ -180,7 +182,8 @@ async function listText(api: DeskClient, board: string | undefined, buckets: Lis
   }
   const all = pools.filter(([b]) => buckets.includes(b)).flatMap(([, cs]) => cs);
   const cards = all.slice(0, limit);
-  const head = `${board && board !== "focus" ? `board ${board}` : "focus"} · buckets ${buckets.join(",")} · ${cards.length} of ${all.length} shown`;
+  let head = `${board && board !== "focus" ? `board ${board}` : "focus"} · buckets ${buckets.join(",")} · ${cards.length} of ${all.length} shown`;
+  if (reviewing) head += ` · ${reviewing} more once Claude has reviewed them`;
   if (!cards.length) return head;
   return head + "\n" + untrusted([...cards.map(cardLine), json(cards.map(compact))]);
 }
@@ -189,7 +192,8 @@ function itemText(d: ItemDetail): string {
   const c = d.card;
   // Merging: the user's own PR, which the coordinator has; desk_act's done, snooze and mute don't apply.
   const flight = c.inflight ? " · merging: the user's PR, handed off for merge (desk_merging)" : "";
-  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_when ? ` · snoozed until ${UNTIL[c.snooze_when]}` : c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}\n${c.url}`;
+  const held = d.held ? " · off the queue until Claude has reviewed it" : "";
+  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_when ? ` · snoozed until ${UNTIL[c.snooze_when]}` : c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}${held}\n${c.url}`;
   return (
     head +
     "\n" +
@@ -255,7 +259,8 @@ async function addText(api: DeskClient, ref: string, why: string, from: string):
         : d.ai && !d.ai_stale
           ? " Its AI review is ready: desk_brief."
           : " Its AI review isn't being written (queued behind others, the user's own PR, or review.auto_ai is off); desk_brief writes one now.";
-  return `added ${d.card.id} to the user's desk, pinned.${ai} Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n${itemText(d)}`;
+  const held = d.held ? " It reaches their main page once Claude has reviewed it." : "";
+  return `added ${d.card.id} to the user's desk, pinned.${ai}${held} Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n${itemText(d)}`;
 }
 
 // A PR in Merging's state, as the coordinator needs it to get it merged.

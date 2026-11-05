@@ -540,6 +540,7 @@ export interface BoardView {
 
 export interface FocusView {
   sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
+  reviewing: number; // PRs that reach it once Claude's first review of them is written
   cards: number; // queue.cards: the queue shows this many, the rest behind one line; 0 = all
   paused: Paused | null; // said once above the queue instead of on every card
 }
@@ -554,6 +555,7 @@ export interface Paused {
 export interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
+  reviewing: number; // as in FocusView
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
@@ -656,6 +658,7 @@ export interface ItemDetail {
   ai: AiReview | null;
   ai_stale: boolean;
   generating: boolean;
+  held: boolean; // in Now or Today, but kept off the queue until Claude's first review of it is written
   activity: ActivityEvent[]; // the latest events for this item, newest first
   stack: Stack | null; // its stack, with it current
 }

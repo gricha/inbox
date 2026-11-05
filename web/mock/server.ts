@@ -1690,6 +1690,7 @@ function focus(): FocusView {
   oneLinePerStack(sections, ["now", "today"], stacks());
   return {
     sections,
+    reviewing: 0,
     cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
   };
@@ -1736,6 +1737,7 @@ function queue(): QueueView {
   return {
     inquiries: INQUIRIES.filter((q) => !q.answer),
     sections,
+    reviewing: 0,
     hidden,
     cleared: clearedCards,
     resolved: resolvedCards,
@@ -2274,6 +2276,7 @@ function detail(r: Rec): ItemDetail {
     ai,
     ai_stale: !!ai && ai.head_oid !== item.head_oid,
     generating: generating.has(r.id),
+    held: false,
     activity: EVENTS.filter((e) => e.item_id === r.id)
       .toReversed()
       .slice(0, 8),

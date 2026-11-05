@@ -746,7 +746,11 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
     return [];
   });
   const f = fakeDeps(opts.chunks);
-  const desk = new Desk({ home, github: gh, now: () => NOW, notify: () => {}, log: () => {}, review: f.deps, writer: opts.writer });
+  const notes: string[] = [];
+  const notify = (_t: string, body: string) => {
+    notes.push(body);
+  };
+  const desk = new Desk({ home, github: gh, now: () => NOW, notify, log: () => {}, review: f.deps, writer: opts.writer });
   await desk.init();
   // Waits out a sync already running (approve starts one), then runs a fresh one.
   const sync = async () => {
@@ -759,6 +763,7 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
     gh,
     f,
     sync,
+    notes,
     cleanup: () => {
       desk.stop();
       fs.rmSync(home, { recursive: true });
@@ -961,7 +966,7 @@ test("turning auto reviews off and on lifts the pause and tries the failed PRs a
 
 // ---------------------------------------------------------------- pre-flight on the queue's cards
 
-test("every Now and Today card carries its pre-flight: running, queued, ready, stale; your PR says what's next instead", async () => {
+test("someone else's PR reaches the queue once Claude has reviewed it; then its card carries the pre-flight, stale after a push", async () => {
   const issue = makeItem({
     number: 9,
     kind: "issue",
@@ -970,18 +975,24 @@ test("every Now and Today card carries its pre-flight: running, queued, ready, s
   });
   const t = await setup([ask(1), ask(2), ask(3), mine(4), issue]);
   await t.sync();
-  const pf = (id: string) => {
+  const card = (id: string) => {
     const q = t.desk.queue();
-    const c = [...q.sections.now, ...q.sections.today].find((x) => x.id === id)!;
+    return [...q.sections.now, ...q.sections.today].find((x) => x.id === id);
+  };
+  const pf = (id: string) => {
+    const c = card(id)!;
     return { ...c.preflight, next: c.next };
   };
   assert.deepEqual(t.f.started, ["acme/api#3", "acme/api#2"]);
-  assert.deepEqual(pf("acme/api#3"), { state: "running", next: undefined });
-  assert.deepEqual(pf("acme/api#1"), { state: "queued", next: undefined });
+  assert.equal(card("acme/api#3"), undefined, "being reviewed");
+  assert.equal(card("acme/api#1"), undefined, "waiting its turn");
+  assert.equal(t.desk.queue().reviewing, 3);
+  assert.equal(t.desk.focus().reviewing, 3);
   assert.deepEqual(pf("acme/web#4"), { state: "none", next: "CI failing: m hands it off for merge" });
   assert.deepEqual(pf("acme/api#9"), { state: "none", next: undefined }, "an issue");
 
   await t.f.release("acme/api#3");
+  assert.equal(t.desk.queue().reviewing, 2);
   assert.deepEqual(pf("acme/api#3"), {
     state: "ready",
     verdict: "skim",
@@ -1091,7 +1102,65 @@ test("any other failure pauses only AI reviews; a judge that can't log in pauses
   t.cleanup();
 });
 
-test("AI reviews run in the queue's order: Now, then Today from the top, so the cards on screen are ready first", async () => {
+test("a PR that waited for Claude's review notifies once it's on the queue; one it couldn't review, or with AI reviews off, doesn't wait", async (c) => {
+  const t = await setup([ask(1)], { settings: { "notify.quiet": "" } });
+  c.after(t.cleanup);
+  await t.sync();
+  await t.f.release("acme/api#1");
+  t.notes.length = 0;
+  const card = (id: string) => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].find((x) => x.id === id);
+
+  t.gh.items.set("acme/api#2", ask(2));
+  await t.sync();
+  assert.equal(card("acme/api#2"), undefined);
+  assert.deepEqual(t.notes, [], "nothing new on the queue yet");
+  await t.f.release("acme/api#2");
+  assert.ok(card("acme/api#2"));
+  assert.equal(t.notes.length, 1);
+  assert.match(t.notes[0]!, /^api#2 · /);
+
+  t.gh.items.set("acme/api#3", ask(3));
+  await t.sync();
+  assert.equal(card("acme/api#3"), undefined);
+  t.f.setFail("model overloaded");
+  await t.f.release("acme/api#3");
+  t.f.setFail(null);
+  assert.equal(card("acme/api#3")?.preflight?.state, "queued", "Claude couldn't review this commit: on the queue without one");
+
+  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  t.gh.items.set("acme/api#5", ask(5));
+  await t.sync();
+  assert.equal(card("acme/api#5")?.preflight?.state, "off", "AI reviews off: nothing to wait for");
+  assert.equal(t.desk.focus().reviewing, 0);
+});
+
+test("once on the queue, a PR stays: a pause ending, a lost failure or a push doesn't hold it again, nor notify it twice", async (c) => {
+  const t = await setup([ask(1), ask(2), ask(3)], { settings: { "notify.quiet": "" } });
+  c.after(t.cleanup);
+  await t.sync();
+  assert.deepEqual(t.notes, [], "the first pass is quiet, held ones too");
+  const ids = () => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].map((x) => x.id).toSorted();
+  // Two failures in a row pause AI reviews: all three show, without a review.
+  t.f.setFail("Not logged in");
+  await t.f.release("acme/api#3");
+  await t.f.release("acme/api#2");
+  t.f.setFail(null);
+  assert.ok(t.desk.aiPausedNow());
+  assert.deepEqual(ids(), ["acme/api#1", "acme/api#2", "acme/api#3"]);
+  assert.deepEqual(t.notes, [], "they were there before you looked");
+
+  t.desk.aiPaused = null; // the pause is over
+  t.desk.aiErrors.clear(); // as after a restart
+  t.gh.items.set("acme/api#3", { ...ask(3), head_oid: "h3b", updated_at: hoursAgo(0) });
+  await t.sync();
+  assert.deepEqual(ids(), ["acme/api#1", "acme/api#2", "acme/api#3"], "none held again");
+  assert.equal(t.desk.focus().reviewing, 0);
+  for (const id of t.f.started.filter((x) => t.desk.generating.has(x))) await t.f.release(id);
+  await t.sync();
+  assert.deepEqual(t.notes, [], "nor notified again");
+});
+
+test("AI reviews run in the queue's order: Now, then Today from the top, so the cards on screen are ready first", async (c) => {
   // Team asks in your own repo land in Today; the oldest ask sorts first.
   const team = (n: number) =>
     makeItem({
@@ -1103,16 +1172,20 @@ test("AI reviews run in the queue's order: Now, then Today from the top, so the 
       request_events: [{ at: hoursAgo(n), actor: "alice", actor_bot: false, reviewer: "ml-team", reviewer_type: "team" }],
     });
   const t = await setup([team(10), team(11), ask(1), team(12), team(13), ask(2), team(14)], { settings: { "queue.cards": 2 } });
+  c.after(t.cleanup);
   await t.sync();
-  const q = t.desk.queue();
-  assert.equal(q.cards, 2);
+  assert.equal(t.desk.queue().cards, 2);
   assert.equal(t.desk.focus().cards, 2);
-  const order = [...q.sections.now, ...q.sections.today].map((c) => c.id);
-  assert.deepEqual(order, ["acme/api#2", "acme/api#1", "me/api#14", "me/api#13", "me/api#12", "me/api#11", "me/api#10"]);
+  const order = ["acme/api#2", "acme/api#1", "me/api#14", "me/api#13", "me/api#12", "me/api#11", "me/api#10"];
   while (t.f.started.length < order.length || t.desk.generating.size)
     await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
   assert.deepEqual(t.f.started, order);
-  t.cleanup();
+  const q = t.desk.queue();
+  assert.deepEqual(
+    [...q.sections.now, ...q.sections.today].map((x) => x.id),
+    order,
+    "each on the queue once reviewed, in that order",
+  );
 });
 
 test("reviews are for PRs: an issue answers 400", async () => {

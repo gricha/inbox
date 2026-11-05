@@ -193,6 +193,7 @@ async function ls(x: Ctx): Promise<number> {
         [s.fyi.length, "fyi"],
         [v.cleared.length, "cleared"],
         [v.hidden.length, "hidden"],
+        ["reviewing" in v ? v.reviewing : 0, "more once Claude has reviewed them"],
       ];
   const more = counts.filter(([n]) => n).map(([n, l]) => `${n} ${l}`);
   const hint = !x.opts.all && (s.later.length || s.fyi.length) ? `  (desk ls ${which === "focus" ? "" : `${which} `}--all)` : "";

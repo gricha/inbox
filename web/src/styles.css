@@ -1206,6 +1206,14 @@ kbd {
   box-shadow: none;
 }
 
+/* PRs held back until Claude has reviewed them: said once, under the queue, as quiet as its "n more". */
+.queue-reviewing {
+  margin: 0;
+  padding: 0 14px;
+  color: var(--pencil);
+  font-size: 14px;
+}
+
 /* The fill is its cursor, as on a row. */
 .queue .fold:focus-visible {
   outline: none;

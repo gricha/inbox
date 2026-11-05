@@ -112,7 +112,7 @@ const overview: Overview = {
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 
-const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, cards: 10, paused: null };
+const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, cards: 10, paused: null };
 
 // One automation that's on, with a run that added one item; its summary carries text a fence must hold.
 const AUTO: AutomationView = {
@@ -143,6 +143,7 @@ const AUTO: AutomationView = {
 const queueView: QueueView = {
   inquiries: [],
   sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
+  reviewing: 0,
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
@@ -224,6 +225,7 @@ function detail(c: Card): ItemDetail {
     ai: null,
     ai_stale: false,
     generating: false,
+    held: false,
     activity: EVENTS.filter((e) => e.item_id === c.id).toReversed(),
     stack: null,
   };
@@ -323,7 +325,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       const r = resolve(body.id);
       if (r.status !== 200) return reply(r.status, r.body);
       const d = r.body as ItemDetail;
-      return reply(200, { ok: true, item: { ...d, card: { ...d.card, pinned: true }, generating: true }, undo_seq: 8 });
+      return reply(200, { ok: true, item: { ...d, card: { ...d.card, pinned: true }, generating: true, held: true }, undo_seq: 8 });
     }
     case "POST /api/undo":
       return reply(200, { ok: true, id: CARDS.now.id, action: "done" });
