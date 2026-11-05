@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
-import { CLAUDE_PAUSED, parseReview, reviewOrder } from "../../src/review.ts";
+import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { waitable } from "../../src/signals.ts";
@@ -2409,7 +2409,14 @@ const QUEUED = "acme/ml-pipeline#307";
 function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRanking | undefined {
   if (id === "friends/garden-sensors#18") return undefined;
   const pick = (ranked: [number, "look" | "skim", string][]) =>
-    parseReview({ summary: "-", notes, chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })) }, files).chunks!;
+    parseReview(
+      {
+        summary: "-",
+        notes: notes.map((n) => ({ ...n, quote: lineAt(files, n) })),
+        chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })),
+      },
+      files,
+    ).chunks!;
   if (id === "oss/calendar-ui#310") return pick([]);
   if (id === "acme/worker#879") {
     const moved = Array.from({ length: 19 }, (_, i): [number, "skim", string] => [i + 2, "skim", "moved from the scheduler"]);

@@ -98,33 +98,49 @@ test("the commit a diff is at comes from its own files, and pages fetched across
   assert.equal(filesHead(JSON.stringify({ filename: "x.ts" })), undefined);
 });
 
-test("parseReview anchors notes to real diff lines and drops what it can't place", () => {
+test("parseReview anchors notes to real diff lines, keeps only what quotes the diff, and puts each concern on its line", () => {
+  const LIMIT = "const limited = rows.slice(0, q.limit);";
   const r = parseReview(
     {
       verdict: "look",
       risk: "high",
       summary: " Limits planner results. ",
-      concerns: ["a", "", 3, "b", "c", "d", "e", "f", "g"],
+      concerns: [
+        { body: "Drops rows past q.limit with no way to page.", path: "src/planner/plan.ts", side: "new", line: 11, quote: LIMIT },
+        { body: "", path: "src/planner/plan.ts", side: "new", line: 11, quote: LIMIT },
+        { body: "Calls the database twice.", path: "src/planner/plan.ts", side: "new", line: 11, quote: "db.query(q); db.query(q);" },
+        3,
+      ],
       notes: [
-        { path: "src/planner/plan.ts", side: "new", line: 11, body: "Caps the rows." },
-        { path: "plan.ts", side: "old", line: 40, body: "Suffix match, removed line." },
-        { path: "src/planner/plan.ts", side: "old", line: 10, body: "An unchanged line, named by its old number." },
-        { path: "src/planner/plan.ts", side: "new", line: 99, body: "Not in the diff: becomes a file note." },
-        { path: "nope.ts", side: "new", line: 1, body: "Unknown file: dropped." },
-        { path: "src/planner/plan.ts", side: "new", line: 12, body: "" },
+        { path: "src/planner/plan.ts", side: "new", line: 11, quote: `n11 + ${LIMIT}`, body: "Caps the rows." },
+        { path: "plan.ts", side: "old", line: 40, quote: "-old();", body: "Suffix match, removed line." },
+        {
+          path: "src/planner/plan.ts",
+          side: "old",
+          line: 10,
+          quote: "rows = scan(q)",
+          body: "An unchanged line, named by its old number.",
+        },
+        { path: "src/planner/plan.ts", side: "new", line: 99, quote: "return limited;", body: "Not in the diff: becomes a file note." },
+        { path: "nope.ts", side: "new", line: 1, quote: "return limited;", body: "Unknown file: dropped." },
+        { path: "src/planner/plan.ts", side: "new", line: 12, quote: "return limited;", body: "" },
+        { path: "src/planner/plan.ts", side: "new", line: 12, body: "No quote: no evidence, dropped." },
+        { path: "src/planner/plan.ts", side: "new", line: 12, quote: "return rows.filter(ok);", body: "Quotes code that isn't there." },
+        { path: "src/planner/plan.ts", side: "new", line: 13, quote: "();", body: "Quotes code, but nothing that says anything." },
       ],
     },
     [FILE],
   );
   assert.equal(r.summary, "Limits planner results.");
-  assert.deepEqual(r.concerns, ["a", "b", "c", "d", "e", "f"]);
+  assert.deepEqual(r.concerns, ["Drops rows past q.limit with no way to page."]);
   assert.deepEqual(
-    r.notes.map((n) => [n.path, n.side, n.line]),
+    r.notes.map((n) => [n.path, n.side, n.line, n.body]),
     [
-      ["src/planner/plan.ts", "new", 11],
-      ["src/planner/plan.ts", "old", 40],
-      ["src/planner/plan.ts", "new", 10],
-      ["src/planner/plan.ts", "new", 0],
+      ["src/planner/plan.ts", "new", 11, "Drops rows past q.limit with no way to page."],
+      ["src/planner/plan.ts", "new", 11, "Caps the rows."],
+      ["src/planner/plan.ts", "old", 40, "Suffix match, removed line."],
+      ["src/planner/plan.ts", "new", 10, "An unchanged line, named by its old number."],
+      ["src/planner/plan.ts", "new", 0, "Not in the diff: becomes a file note."],
     ],
   );
   assert.equal(parseReview({ summary: "x", verdict: "maybe", risk: 7 }, []).verdict, "skim");
@@ -430,7 +446,13 @@ test("at most 20 chunks are ranked and a full list says so; hunks left out for l
 
 test("a hunk Claude wrote a note on but didn't rank stays in the reading list, as a skim after Claude's own", () => {
   const files = [FILE, LOCK, OTHER];
-  const note = (p: string, line: number, side: "new" | "old" = "new") => ({ path: p, side, line, body: "b" });
+  const note = (p: string, line: number, side: "new" | "old" = "new") => ({
+    path: p,
+    side,
+    line,
+    quote: p === LOCK.path ? "b" : side === "old" ? "old();" : "return limited;",
+    body: "b",
+  });
   const r = parseReview(
     {
       summary: "x",
@@ -515,6 +537,154 @@ test("a hunk that crosses a file's 20 KB shows its start and counts as read; the
   const tight: ReviewFile = { ...FILE, patch: `@@ -0,0 +1,1 @@\n+${"a".repeat(19_995 - head.length)}\n@@ -5,1 +5,1 @@\n-a\n+b` };
   assert.deepEqual(parseReview({ summary: "x", chunks: [] }, [tight]).chunks?.unread, ["h2"]);
 });
+
+test(
+  "a second claude checks each comment against the diff on its own: only what holds is kept, and the review counts what went",
+  { skip: process.platform === "win32" },
+  async () => {
+    const review = {
+      structured_output: {
+        summary: "Caps planner rows at q.limit.",
+        since: "",
+        concerns: [
+          {
+            body: "Drops rows past the limit with no way to page.",
+            path: FILE.path,
+            side: "new",
+            line: 11,
+            quote: "rows.slice(0, q.limit)",
+          },
+        ],
+        chunks: [],
+        notes: [
+          { path: FILE.path, side: "new", line: 12, quote: "return limited;", body: "Returns the capped rows." },
+          { path: FILE.path, side: "new", line: 41, quote: "fresh();", body: "fresh() now throws on empty input." },
+          { path: FILE.path, side: "new", line: 41, quote: "made_up();", body: "Quotes code that is not there." },
+        ],
+        verdict: "look",
+        risk: "medium",
+      },
+      modelUsage: { "claude-opus-5[1m]": {} },
+    };
+    const check = {
+      structured_output: {
+        comments: [
+          { id: "c1", holds: true, why: "slice caps it" },
+          { id: "C2", holds: true, why: "it returns limited" },
+          { id: "c3", holds: false, why: "nothing in the diff shows fresh throwing" },
+        ],
+      },
+    };
+    const f = fakeAgent(
+      "claude",
+      `d="$(dirname "$0")"; echo x >> "$d/calls"; if grep -q "check another reviewer" "$d/stdin"; then echo '${JSON.stringify(check)}'; else echo '${JSON.stringify(review)}'; fi`,
+    );
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const was = process.env.DESK_CLAUDE;
+    process.env.DESK_CLAUDE = f.bin;
+    try {
+      const item = makeItem({ head_oid: "c0ffee" });
+      const ai = await generateReview(item, signalsOf(item), "", { body: "Only admins reach the planner.", files: [FILE] }, agentDir(home));
+      assert.deepEqual(ai.concerns, ["Drops rows past the limit with no way to page."]);
+      assert.deepEqual(
+        ai.notes.map((n) => [n.line, n.body]),
+        [
+          [11, "Drops rows past the limit with no way to page."],
+          [12, "Returns the capped rows."],
+        ],
+      );
+      assert.equal(ai.dropped, 2, "one quoted code that isn't there, one the check didn't bear out");
+      const asked = fs.readFileSync(path.join(f.dir, "stdin"), "utf8");
+      assert.match(asked, /^c2 on src\/planner\/plan\.ts n12: Returns the capped rows\.$/m);
+      assert.match(asked, /^c3 on src\/planner\/plan\.ts n41: fresh\(\) now throws on empty input\.$/m);
+      assert.ok(!asked.includes("Quotes code that is not there"), "a comment the quote check dropped isn't checked");
+      assert.match(asked, /^ {3}quotes: return limited;$/m, "each with the code it quotes");
+      assert.match(asked, /^description:\nOnly admins reach the planner\.$/m, "and what the writer saw");
+      const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
+      assert.ok(args.includes("--tools") && args[args.indexOf("--tools") + 1] === "", "no tools for the check either");
+      const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { required: string[] };
+      assert.deepEqual(schema.required, ["comments"], "the check answers in its own shape");
+      assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, 2);
+    } finally {
+      process.env.DESK_CLAUDE = was;
+      fs.rmSync(f.dir, { recursive: true });
+      fs.rmSync(home, { recursive: true });
+    }
+  },
+);
+
+test(
+  "the caps apply after the check: a concern it drops frees its place for one that holds",
+  { skip: process.platform === "win32" },
+  async () => {
+    const concern = (i: number) => ({ body: `Concern ${i}.`, path: FILE.path, side: "new", line: 12, quote: "return limited;" });
+    const review = {
+      structured_output: {
+        summary: "Caps rows.",
+        since: "",
+        concerns: Array.from({ length: 8 }, (_, i) => concern(i + 1)),
+        chunks: [],
+        notes: [],
+        verdict: "look",
+        risk: "medium",
+      },
+    };
+    const check = {
+      structured_output: { comments: Array.from({ length: 8 }, (_, i) => ({ id: `c${i + 1}`, holds: i >= 2, why: "-" })) },
+    };
+    const f = fakeAgent(
+      "claude",
+      `if grep -q "check another reviewer" "$(dirname "$0")/stdin"; then echo '${JSON.stringify(check)}'; else echo '${JSON.stringify(review)}'; fi`,
+    );
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const was = process.env.DESK_CLAUDE;
+    process.env.DESK_CLAUDE = f.bin;
+    try {
+      const item = makeItem();
+      const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home));
+      assert.deepEqual(ai.concerns, ["Concern 3.", "Concern 4.", "Concern 5.", "Concern 6.", "Concern 7.", "Concern 8."]);
+      assert.equal(ai.dropped, 2, "the check's two, not the cap");
+    } finally {
+      process.env.DESK_CLAUDE = was;
+      fs.rmSync(f.dir, { recursive: true });
+      fs.rmSync(home, { recursive: true });
+    }
+  },
+);
+
+test(
+  "a check that holds nothing up leaves no comments; a review with none asks no second claude",
+  { skip: process.platform === "win32" },
+  async () => {
+    const review = (notes: unknown[]) => ({
+      structured_output: { summary: "Caps rows.", since: "", concerns: [], chunks: [], notes, verdict: "skim", risk: "low" },
+    });
+    const one = [{ path: FILE.path, side: "new", line: 12, quote: "return limited;", body: "Returns the capped rows." }];
+    for (const [notes, check, calls, kept] of [
+      [one, { structured_output: { comments: [] } }, 2, 0],
+      [one, { result: "not json" }, 2, 0],
+      [[], { structured_output: { comments: [] } }, 1, 0],
+    ] as const) {
+      const f = fakeAgent(
+        "claude",
+        `d="$(dirname "$0")"; echo x >> "$d/calls"; if grep -q "check another reviewer" "$d/stdin"; then echo '${JSON.stringify(check)}'; else echo '${JSON.stringify(review([...notes]))}'; fi`,
+      );
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+      const was = process.env.DESK_CLAUDE;
+      process.env.DESK_CLAUDE = f.bin;
+      try {
+        const item = makeItem();
+        const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home));
+        assert.equal(ai.notes.length, kept);
+        assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, calls);
+      } finally {
+        process.env.DESK_CLAUDE = was;
+        fs.rmSync(f.dir, { recursive: true });
+        fs.rmSync(home, { recursive: true });
+      }
+    }
+  },
+);
 
 test(
   "a fake claude ranks by the prompt's ids: generateReview keeps the hunks it can place",
@@ -711,7 +881,7 @@ function fakeDeps(chunks?: unknown) {
       gates.set(item.id, g);
       await g.promise;
       if (fail) throw new Error(fail);
-      const notes = [{ path: FILE.path, side: "new", line: 11, body: "Caps the rows." }];
+      const notes = [{ path: FILE.path, side: "new", line: 11, quote: "rows.slice(0, q.limit)", body: "Caps the rows." }];
       return {
         ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes, chunks }, pr.files),
         head_oid: item.head_oid,

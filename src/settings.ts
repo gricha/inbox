@@ -55,7 +55,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "review",
     title: "AI review",
-    help: "Claude Code reads a PR's diff and writes a summary, concerns and notes on the changes, with your own login, model and settings, so the diff goes to whichever account it's logged in to.",
+    help: "Claude Code reads a PR's diff and writes a summary, concerns and notes on the changes, each quoting the code it's about; a second run checks every one against the diff and drops what it doesn't bear out. With your own login, model and settings, so the diff goes to whichever account it's logged in to.",
   },
   {
     id: "handoff",

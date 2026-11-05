@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type {
+  AiReview,
   ActivityPage,
   AgentStatus,
   BoardView,
@@ -17,10 +18,11 @@ import type {
   PolicyDoc,
   PreviewResult,
   QueueView,
+  ReviewFile,
   ReviewView,
   SettingsView,
 } from "../../src/types.ts";
-import { CLAUDE_PAUSED, parseReview } from "../../src/review.ts";
+import { CLAUDE_PAUSED, lineAt, parseReview } from "../../src/review.ts";
 
 const child = spawn(
   process.execPath,
@@ -317,9 +319,14 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   assert.ok(v.ai && v.ai.notes.length > 2 && !v.ai_stale);
   const { data: py } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/ml-pipeline#311")}`);
   assert.ok(py.ai);
-  // parseReview moves a note it can't place to line 0; every canned note must stay where it was put.
-  assert.deepEqual(parseReview(v.ai, v.files).notes, v.ai.notes);
-  assert.deepEqual(parseReview(py.ai, py.files).notes, py.ai.notes);
+  // parseReview moves a note it can't place to line 0; every canned note, quoting its own line, must stay where it was put.
+  const quoted = (ai: AiReview, files: ReviewFile[]) => ({
+    ...ai,
+    concerns: [],
+    notes: ai.notes.map((n) => ({ ...n, quote: lineAt(files, n) })),
+  });
+  assert.deepEqual(parseReview(quoted(v.ai, v.files), v.files).notes, v.ai.notes);
+  assert.deepEqual(parseReview(quoted(py.ai, py.files), py.files).notes, py.ai.notes);
   for (const f of [...v.files, ...py.files]) {
     for (const h of (f.patch ?? "").matchAll(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@.*\n((?:[ +-].*(?:\n|$))*)/gm)) {
       const lines = h[3]!.split("\n").filter((l) => l !== "");

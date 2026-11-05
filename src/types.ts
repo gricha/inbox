@@ -605,8 +605,9 @@ export interface AiReview {
   risk: "low" | "medium" | "high";
   summary: string;
   since?: string; // a re-review: what changed since your last review, and whether it settles the concerns
-  concerns: string[];
-  notes: ReviewNote[];
+  concerns: string[]; // each also a note on its line (written since evidence: the first notes)
+  notes: ReviewNote[]; // each quoted code in the diff and held up when a second Claude checked it against the diff
+  dropped?: number; // concerns and notes the check took out: their quote wasn't in the diff, or the diff didn't bear them out
   chunks?: ChunkRanking; // absent on reviews written before ranking, or when Claude didn't rank
   head_oid: string; // the commit it read; a newer push makes it stale
   model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
