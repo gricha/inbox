@@ -26,12 +26,28 @@ const WARDEN = {
   prompt: "Look at getsentry/warden's new issues; put the ones that need me on my desk.",
 };
 
-test("a schedule is days and a local time; anything else says how to write it", () => {
-  assert.deepEqual(parseSchedule("daily 09:00"), { days: [0, 1, 2, 3, 4, 5, 6], hour: 9, minute: 0 });
-  assert.deepEqual(parseSchedule(" Weekdays 9:30 "), { days: [1, 2, 3, 4, 5], hour: 9, minute: 30 });
-  assert.deepEqual(parseSchedule("thu,mon 17:30"), { days: [1, 4], hour: 17, minute: 30 });
-  assert.deepEqual(parseSchedule("monday 08:00"), { days: [1], hour: 8, minute: 0 });
-  for (const bad of ["9am", "daily", "daily 25:00", "daily 09:60", "mo 09:00", "funday 09:00", "mon,,thu 09:00"])
+test("a schedule is days and local times, or hourly; anything else says how to write it", () => {
+  assert.deepEqual(parseSchedule("daily 09:00"), { days: [0, 1, 2, 3, 4, 5, 6], times: [540] });
+  assert.deepEqual(parseSchedule(" Weekdays 9:30 "), { days: [1, 2, 3, 4, 5], times: [570] });
+  assert.deepEqual(parseSchedule("thu,mon 17:30"), { days: [1, 4], times: [1050] });
+  assert.deepEqual(parseSchedule("monday 08:00"), { days: [1], times: [480] });
+  assert.deepEqual(parseSchedule("weekdays 13:00,09:00,13:00"), { days: [1, 2, 3, 4, 5], times: [540, 780] });
+  assert.deepEqual(
+    (parseSchedule("daily Hourly") as Schedule).times,
+    Array.from({ length: 24 }, (_, h) => h * 60),
+  );
+  for (const bad of [
+    "9am",
+    "daily",
+    "daily 25:00",
+    "daily 09:60",
+    "mo 09:00",
+    "funday 09:00",
+    "mon,,thu 09:00",
+    "daily 09:00,",
+    "daily 09:00, 13:00",
+    "daily half-hourly",
+  ])
     assert.equal(typeof parseSchedule(bad), "string", bad);
 });
 
@@ -45,6 +61,16 @@ test("it was last due at the latest matching time at or before now, and next at 
   assert.deepEqual(dueAt(s("weekdays 09:00"), sun), new Date(2026, 10, 6, 9, 0), "Friday's");
   assert.deepEqual(nextAt(s("weekdays 09:00"), sun), new Date(2026, 10, 9, 9, 0), "Monday's");
   assert.deepEqual(nextAt(s("daily 10:00"), wed10), new Date(2026, 10, 5, 10, 0), "not the one at now");
+  assert.deepEqual(dueAt(s("weekdays 08:00,09:30,13:00"), wed10), new Date(2026, 10, 4, 9, 30), "the latest of the day's");
+  assert.deepEqual(nextAt(s("weekdays 08:00,09:30,13:00"), wed10), new Date(2026, 10, 4, 13, 0));
+  assert.deepEqual(
+    nextAt(s("weekdays 08:00,09:30"), new Date(2026, 10, 6, 10, 0)),
+    new Date(2026, 10, 9, 8, 0),
+    "Friday's done: Monday's first",
+  );
+  assert.deepEqual(dueAt(s("weekdays hourly"), new Date(2026, 10, 4, 10, 59)), new Date(2026, 10, 4, 10, 0));
+  assert.deepEqual(nextAt(s("weekdays hourly"), new Date(2026, 10, 4, 10, 0)), new Date(2026, 10, 4, 11, 0));
+  assert.deepEqual(dueAt(s("weekdays hourly"), new Date(2026, 10, 8, 12, 0)), new Date(2026, 10, 6, 23, 0), "Sunday: Friday's last");
 });
 
 // A fake claude: records each call's args, cwd and prompt, and answers with `answer`, or a login error while `fail` exists.

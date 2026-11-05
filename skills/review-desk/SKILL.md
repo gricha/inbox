@@ -137,7 +137,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ### Automations
 
-When the user wants something checked on a schedule ("every morning, look at the new issues in getsentry/warden and put what needs me on my desk"), draft it with `desk_automations` `set`, and tell them it's off until they turn it on in Settings → Automations. Write `prompt` as their instruction, in their words, so a run can decide on its own: what to read (repos, searches, other tools they have), what counts as needing them, and that nothing needing them is a fine run. A run reads only and answers with PRs and issues and a why each; the desk adds them, and leaves what they already dealt with alone. `schedule` is local time: `daily 09:00`, `weekdays 09:00`, `mon 09:00` or `mon,thu 17:30`. Change or run one only when they ask; `list` shows each one's last runs.
+When the user wants something checked on a schedule ("every morning, look at the new issues in getsentry/warden and put what needs me on my desk"), draft it with `desk_automations` `set`, and tell them it's off until they turn it on in Settings → Automations. Write `prompt` as their instruction, in their words, so a run can decide on its own: what to read (repos, searches, other tools they have), what counts as needing them, and that nothing needing them is a fine run. A run reads only and answers with PRs and issues and a why each; the desk adds them, and leaves what they already dealt with alone. `schedule` is local time: `daily 09:00`, `weekdays 09:00,13:00`, `mon 09:00`, `mon,thu 17:30`, or `weekdays hourly` (every hour on the hour) for something they want flagged as it happens. Change or run one only when they ask; `list` shows each one's last runs.
 
 ## Coordinator
 

@@ -100,38 +100,53 @@ const SCHEMA = {
 
 export interface Schedule {
   days: number[]; // 0 = Sunday
-  hour: number;
-  minute: number;
+  times: number[]; // minutes after midnight, ascending
 }
 
-// "daily 09:00", "weekdays 09:00", "mon 09:00", "mon,thu 17:30": local time.
+const HOW = 'write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"';
+
+// "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly" (every hour on the hour): local time.
 export function parseSchedule(s: string): Schedule | string {
-  const m = /^\s*([a-z,]+)\s+(\d{1,2}):(\d{2})\s*$/i.exec(s);
-  if (!m) return 'write it as "daily 09:00", "weekdays 09:00" or "mon,thu 17:30"';
-  const hour = Number(m[2]);
-  const minute = Number(m[3]);
-  if (hour > 23 || minute > 59) return `${m[2]}:${m[3]} isn't a time of day`;
+  const m = /^\s*([a-z,]+)\s+(\S+)\s*$/i.exec(s);
+  if (!m) return HOW;
+  const at = m[2]!.toLowerCase();
+  const times: number[] = [];
+  if (at === "hourly") for (let h = 0; h < 24; h++) times.push(h * 60);
+  else
+    for (const t of at.split(",")) {
+      const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+      if (!hm) return HOW;
+      if (Number(hm[1]) > 23 || Number(hm[2]) > 59) return `${t} isn't a time of day`;
+      times.push(Number(hm[1]) * 60 + Number(hm[2]));
+    }
   const word = m[1]!.toLowerCase();
-  if (word === "daily") return { days: [0, 1, 2, 3, 4, 5, 6], hour, minute };
-  if (word === "weekdays") return { days: [1, 2, 3, 4, 5], hour, minute };
+  const sorted = [...new Set(times)].toSorted((x, y) => x - y);
+  if (word === "daily") return { days: [0, 1, 2, 3, 4, 5, 6], times: sorted };
+  if (word === "weekdays") return { days: [1, 2, 3, 4, 5], times: sorted };
   const days = word.split(",").map((d) => (d.length >= 3 ? DAYS.findIndex((full) => full.startsWith(d)) : -1));
   if (days.includes(-1)) return `"${m[1]}" isn't daily, weekdays, or days like mon,thu`;
-  return { days: [...new Set(days)].toSorted((x, y) => x - y), hour, minute };
+  return { days: [...new Set(days)].toSorted((x, y) => x - y), times: sorted };
 }
+
+// Its times on the day `offset` days from now's, on its days only.
+const timesOn = (s: Schedule, now: Date, offset: number) =>
+  s.times
+    .map((t) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, Math.floor(t / 60), t % 60))
+    .filter((d) => s.days.includes(d.getDay()));
 
 // The latest time it was due, at or before `now`; null when it was never due in the last week.
 export function dueAt(s: Schedule, now: Date): Date | null {
   for (let back = 0; back <= 7; back++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back, s.hour, s.minute);
-    if (d <= now && s.days.includes(d.getDay())) return d;
+    const due = timesOn(s, now, -back).findLast((d) => d <= now);
+    if (due) return due;
   }
   return null;
 }
 
 export function nextAt(s: Schedule, now: Date): Date {
   for (let ahead = 0; ; ahead++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ahead, s.hour, s.minute);
-    if (d > now && s.days.includes(d.getDay())) return d;
+    const next = timesOn(s, now, ahead).find((d) => d > now);
+    if (next) return next;
   }
 }
 

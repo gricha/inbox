@@ -338,7 +338,7 @@ function Editor({
             setD({ ...d, schedule: e.target.value });
           }}
         />
-        <span className="s-help">Local time: daily 09:00, weekdays 09:00, mon 09:00 or mon,thu 17:30.</span>
+        <span className="s-help">Local time: daily 09:00, weekdays 09:00,13:00, mon,thu 17:30 or weekdays hourly.</span>
       </label>
       <label className="au-field">
         <span className="s-label">Instruction</span>

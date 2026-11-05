@@ -617,13 +617,13 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
         "list: each one with its schedule, whether it's on and its last runs (what each found and added). " +
         "set: draft a new one or change one (id, name, schedule, prompt). It stays off until the owner turns it on in Settings → Automations, so say so. Draft one only when the owner asks for it. " +
         "Write `prompt` as their instruction, in their words: what to read (repos, searches, other tools), what counts as needing them, and that nothing needing them is a fine run; a run lists PRs and issues (owner/repo#123) with a why, and the desk adds them. " +
-        '`schedule` is local time: "daily 09:00", "weekdays 09:00", "mon 09:00" or "mon,thu 17:30". ' +
+        '`schedule` is local time: "daily 09:00", "weekdays 09:00,13:00", "mon 09:00", "mon,thu 17:30" or "weekdays hourly" (every hour on the hour). ' +
         "run: run one that's on now; it takes a few minutes, and its result shows in Settings → Automations.",
       inputSchema: {
         action: z.enum(["list", "set", "run"]),
         id: z.string().optional().describe('set and run: its id, lowercase letters, digits and -: "warden-issues"'),
         name: z.string().max(80).optional().describe("set: what the owner calls it"),
-        schedule: z.string().optional().describe('set: "daily 09:00", "weekdays 09:00", "mon,thu 17:30"'),
+        schedule: z.string().optional().describe('set: "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly"'),
         prompt: z.string().max(8000).optional().describe("set: the instruction, in the owner's words"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

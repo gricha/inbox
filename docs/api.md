@@ -447,7 +447,7 @@ interface StackMember {
 interface Automation {
   id: string; // a slug: "warden-issues"
   name: string;
-  schedule: string; // "daily 09:00", "weekdays 09:00", "mon,thu 17:30": local time
+  schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time
   prompt: string; // the instruction, in your words
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
