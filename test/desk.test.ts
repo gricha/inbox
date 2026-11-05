@@ -343,6 +343,38 @@ test("hand-off prompt depends on kind: review, your PR, issue", async () => {
   t.cleanup();
 });
 
+test("the main page's parts: a hand-back, what waits on your review, the rest that's someone else's, your PRs; Now and Today each in that order", async (c) => {
+  const t = await setup([reviewAsk(1), myPr(2, { draft: true }), myPr(3), myPr(5, { ci: "green" })], {
+    settings: { "policy.judge": false },
+  });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.gh.items.set("acme/api#9", makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"] }));
+  t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
+  await t.desk.add("acme/api#9");
+  await t.desk.add("acme/api#6"); // someone else's PR nobody asked you to review
+  t.desk.act("web#5", "inflight");
+  t.desk.handBack("web#5", "needs a product call on the retry budget");
+  const f = t.desk.focus();
+  const part = Object.fromEntries([...f.sections.now, ...f.sections.today].map((x) => [x.id, x.group]));
+  assert.deepEqual(part, {
+    "acme/web#5": "back",
+    "acme/api#1": "review",
+    "acme/api#9": "other",
+    "acme/api#6": "other",
+    "acme/web#2": "mine",
+    "acme/web#3": "mine",
+  });
+  assert.equal(f.sections.now[0]?.id, "acme/web#5", "a hand-back tops the queue");
+  const rank = (cs: { group?: string }[]) => cs.map((x) => ["back", "review", "other", "mine"].indexOf(x.group ?? ""));
+  for (const cs of [f.sections.now, f.sections.today])
+    assert.deepEqual(
+      rank(cs),
+      rank(cs).toSorted((a, b) => a - b),
+      "Now, then Today, each by part",
+    );
+});
+
 test("your PR's card says what failed, and leaves out a next step its keys already say", async () => {
   const t = await setup([
     myPr(3, { checks_failed: ["Acceptance", "(Optional) schema diff"], checks_optional: ["(Optional) schema diff"] }),

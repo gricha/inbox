@@ -1255,6 +1255,28 @@ kbd {
   margin-bottom: 0;
 }
 
+/* The main page's parts: a quiet heading each; people waiting on your review lead, in amber. */
+.part {
+  display: grid;
+  gap: 4px;
+}
+
+.part + .part {
+  margin-top: 10px;
+}
+
+.part .group-head {
+  margin-bottom: 0;
+  font-size: 14px;
+}
+
+.part-back .group-head,
+.part-back .group-head .count,
+.part-review .group-head,
+.part-review .group-head .count {
+  color: var(--amber);
+}
+
 .quiet-note {
   padding: 40px 12px;
   color: var(--pencil);

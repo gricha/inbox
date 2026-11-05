@@ -229,6 +229,7 @@ interface Card {
   resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, in Merging
+  group?: "back" | "review" | "other" | "mine"; // a Now or Today card's part of the main page, in this order: your PR handed back; someone else's PR waiting on your review (requested or pushed since your review, not a draft); any other issue or PR not yours; your PR. Desk.top() sorts Now and Today each by it (byPart)
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in Merging
   stack?: StackRef; // an open PR whose line has two or more open PRs (Stacks, below)
 }

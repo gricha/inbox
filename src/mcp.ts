@@ -51,6 +51,7 @@ const compact = (c: Card) => ({
   bucket: c.bucket,
   title: c.title,
   why: c.why,
+  ...(c.group && { group: c.group }),
   ...(c.handoff && { handoff: c.handoff }),
   author: c.author,
   url: c.url,

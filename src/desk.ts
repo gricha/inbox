@@ -60,7 +60,7 @@ import type {
   Status,
   Until,
 } from "./types.ts";
-import { UNTIL } from "./types.ts";
+import { byPart, UNTIL } from "./types.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, happened, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
@@ -1085,6 +1085,10 @@ export class Desk {
     const c = this.card(e, p, snap);
     const it = e.item;
     c.preflight = this.preflight(e, snap);
+    const sig = e.analysis.signals.me;
+    // Waiting on your review: asked of you, or pushed to since your review; not a draft, which nobody waits on yet.
+    const asked = it.kind === "pr" && !it.draft && (sig.requested || sig.pushed_since_review);
+    c.group = c.handed_back ? "back" : it.kind === "pr" && sig.author ? "mine" : asked ? "review" : "other";
     if (it.kind === "pr" && e.analysis.signals.me.author) {
       const next = this.nextStep(e);
       if (next) c.next = next;
@@ -1225,7 +1229,7 @@ export class Desk {
         }
       }
     }
-    return { now: queueOrder(sections.now, this.me()), today: queueOrder(sections.today, this.me()) };
+    return { now: byPart(queueOrder(sections.now, this.me())), today: byPart(queueOrder(sections.today, this.me())) };
   }
 
   // The single surface: every item once, at its best placement across boards.

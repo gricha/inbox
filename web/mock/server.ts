@@ -1758,7 +1758,11 @@ function replyOnly(r: Rec): boolean {
 function top(c: Card): Card {
   const r = recs.find((x) => x.id === c.id)!;
   const s = r.seed;
-  const out: Card = { ...c, preflight: preflightOf(r) };
+  // The part, as Desk.queueCard() says it.
+  const kind = s.kind ?? "pr";
+  const asked = kind === "pr" && !c.draft && signals(r).me.requested;
+  const group = c.handed_back ? "back" : kind === "pr" && s.author === ME ? "mine" : asked ? "review" : "other";
+  const out: Card = { ...c, preflight: preflightOf(r), group };
   if (s.author === ME && (s.kind ?? "pr") === "pr") {
     const next = nextOf(r);
     const failing = s.fly?.failing ?? s.checks ?? [];

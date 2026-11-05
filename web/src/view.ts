@@ -13,6 +13,7 @@ import type {
   SettingDef,
   SettingValue,
 } from "../../src/types.ts";
+import { byPart } from "../../src/types.ts";
 import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
 
 // The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, the Archive (what's done), and
@@ -299,7 +300,8 @@ export function groupsOf(
   };
   const s = view.sections;
   return [
-    group("queue", [...s.now, ...s.today], "active", view.cards),
+    // One part at a time: the desk sorts Now and Today by part, and the page shows each part's Now before its Today.
+    group("queue", byPart([...s.now, ...s.today]), "active", view.cards),
     group("later", s.later),
     group("fyi", s.fyi),
     group("hidden", view.hidden, "hidden"),

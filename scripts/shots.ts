@@ -194,10 +194,11 @@ const SHOTS: Shot[] = [
         await page.keyboard.press(k);
         await page.waitForTimeout(250);
       }
-      const gaps = await page.evaluate<number[]>(`(() => {
-        const rows = [...document.querySelectorAll(".queue .lines > [data-id]")].map((el) => el.getBoundingClientRect());
+      // Within each part's sheet: the parts have room between them.
+      const gaps = await page.evaluate<number[]>(`(() => [...document.querySelectorAll(".queue .lines")].flatMap((sheet) => {
+        const rows = [...sheet.querySelectorAll(":scope > [data-id]")].map((el) => el.getBoundingClientRect());
         return rows.slice(1).map((r, i) => Math.round(r.top - rows[i].bottom));
-      })()`);
+      }))()`);
       if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 1)
         failures.push(`queue-selected: uneven gaps between the queue's rows: ${gaps.join(", ")}px`);
     },

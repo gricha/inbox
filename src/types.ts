@@ -394,6 +394,14 @@ export interface Handoff {
   from: string;
 }
 
+// The main page's parts, in order: your PRs the coordinator handed back, other people's PRs waiting on your review, the
+// rest that's someone else's (issues, PRs that mention you), then your own PRs.
+export type QueueGroup = "back" | "review" | "other" | "mine";
+export const QUEUE_GROUPS: readonly QueueGroup[] = ["back", "review", "other", "mine"];
+// Cards in their parts' order, each part keeping the order it had.
+export const byPart = (cards: Card[]): Card[] =>
+  cards.toSorted((a, b) => QUEUE_GROUPS.indexOf(a.group ?? "other") - QUEUE_GROUPS.indexOf(b.group ?? "other"));
+
 export interface Card {
   id: string;
   kind: "pr" | "issue";
@@ -440,6 +448,7 @@ export interface Card {
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
+  group?: QueueGroup; // a Now or Today card: which part of the main page it's in (QUEUE_GROUPS)
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
   stack?: StackRef; // an open PR whose line has two or more open

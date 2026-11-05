@@ -154,6 +154,31 @@ const away = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key !== "qu
 const archive = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "archive");
 const main = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "queue");
 
+test("the queue shows one part at a time, each part's Now before its Today, in the desk's order", () => {
+  const q = queue();
+  q.sections.now = [
+    card("acme/web#19", { group: "back" }),
+    card("acme/api#21", { group: "review" }),
+    card("acme/web#20", { group: "mine" }),
+  ];
+  q.sections.today = [
+    card("acme/api#23", { group: "review" }),
+    card("acme/api#22", { group: "other" }),
+    card("acme/web#24", { group: "mine" }),
+  ];
+  assert.deepEqual(
+    main(groupsOf(q, DEFAULT_OPEN, ""))[0]?.cards.map((c) => [c.id, c.group]),
+    [
+      ["acme/web#19", "back"],
+      ["acme/api#21", "review"],
+      ["acme/api#23", "review"],
+      ["acme/api#22", "other"],
+      ["acme/web#20", "mine"],
+      ["acme/web#24", "mine"],
+    ],
+  );
+});
+
 test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
   assert.deepEqual(
