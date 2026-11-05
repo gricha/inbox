@@ -4,7 +4,7 @@ import { Dots } from "./Detail.tsx";
 // The keys on the queue's and Later's rows; the rest are one line at the top.
 const KEYS: [string[], string][] = [
   [["j", "k"], "Move down and up"],
-  [["enter"], "Review the PR; an issue opens in place; “n more” shows the rest"],
+  [["enter"], "Review the PR; an agent's question opens its page; an issue opens in place; “n more” shows the rest"],
   [["o"], "Open on GitHub"],
   [["a"], "The row's call to action: your draft, ready for review on GitHub"],
   [["m"], "Your own PR: hand it off for merge. The coordinator gets it merged"],
@@ -61,6 +61,14 @@ const REVIEW_KEYS: [string[], string][] = [
   [["esc"], "Back to where you opened it"],
 ];
 
+const INQUIRY_KEYS: [string[], string][] = [
+  [["1", "6"], "Pick an answer, its pick first"],
+  [["w"], "Write your own answer; ⌘↵ sends it"],
+  [["d"], "Dismiss it: the agent decides itself"],
+  [["o"], "Open what it's about on GitHub"],
+  [["esc"], "Back to the queue"],
+];
+
 export function Help({ onClose }: { onClose: () => void }) {
   const dialog = useRef<HTMLDivElement>(null);
   // Focus the sheet itself (no ring on a button you didn't pick), and give focus back on close.
@@ -101,6 +109,8 @@ export function Help({ onClose }: { onClose: () => void }) {
           <section>
             <h3 className="keys-head">In the queue and Later</h3>
             <Keys keys={KEYS} />
+            <h3 className="keys-head lane-keys">On an agent's question</h3>
+            <Keys keys={INQUIRY_KEYS} />
           </section>
           <section>
             <h3 className="keys-head">In a PR's review</h3>

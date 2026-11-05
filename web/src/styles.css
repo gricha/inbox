@@ -736,8 +736,9 @@ kbd {
   }
 }
 
-/* An agent's question: its label in the accent, since one waits on your answer; opened, it's answered under its title. */
-.line.inq .line-kind {
+/* An agent's question: its label in the accent, since one waits on your answer. */
+.line.inq .line-kind,
+.inq-kind {
   color: var(--accent-ink);
 }
 
@@ -745,47 +746,195 @@ kbd {
   max-width: 28ch;
 }
 
-.inq-open {
+/* A question's page: one reading column, what it's about, all the agent said, its links, then the answers. */
+.inquiry {
   display: grid;
-  gap: 12px;
-  padding: 2px 14px 16px calc(14px + 2.9 * 11.5px + 14px);
+  gap: 24px;
+  max-width: 760px;
+  min-width: 0;
+}
+
+.inq-kind {
+  font-weight: 600;
+}
+
+.inq-about {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+  font-size: 14px;
+}
+
+.inquiry .rv-head {
+  padding: 0;
+}
+
+.inq-about .ref {
+  flex: none;
+  overflow: visible;
+}
+
+.inq-about .ref-ink {
+  max-width: none;
+}
+
+.inq-about-title {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.inq-about-by {
+  color: var(--pencil);
+}
+
+.inq-about-open {
+  margin-left: auto;
+  color: var(--ink-2);
 }
 
 .inq-context {
-  max-width: 72ch;
+  display: grid;
+  gap: 12px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.inq-context p {
   margin: 0;
-  color: var(--ink-2);
-  font-size: 14px;
-  line-height: 1.5;
   white-space: pre-wrap;
 }
 
-.inq-options {
-  flex-wrap: wrap;
+.inq-links ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.inq-write {
+.inq-links li {
   display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.inq-input {
-  flex: 1 1 auto;
-  max-width: 520px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 8px;
-  background: var(--sheet);
-  color: var(--ink);
-  font: inherit;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
   font-size: 14px;
 }
 
-.inq-input:focus {
-  border-color: var(--accent);
-  outline: none;
+.inq-link-where {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pencil);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inq-answer {
+  display: grid;
+  gap: 14px;
+}
+
+/* The answers as one table: each its number, its words, and what the agent does then; its pick says so. */
+.inq-options {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+  list-style: none;
+}
+
+.inq-options > li + li {
+  border-top: 1px solid var(--rule);
+}
+
+.inq-option {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inq-option:hover {
+  background: color-mix(in oklab, var(--ink) 3.5%, var(--sheet));
+}
+
+.inq-options > li:first-child .inq-option {
+  border-radius: 9px 9px 0 0;
+}
+
+.inq-options > li:last-child .inq-option {
+  border-radius: 0 0 9px 9px;
+}
+
+.inq-options > li:only-child .inq-option {
+  border-radius: 9px;
+}
+
+.inq-option kbd {
+  flex: none;
+  width: 1ch;
+}
+
+.inq-option.pick kbd {
+  color: var(--accent-ink);
+}
+
+.inq-option-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inq-option-answer {
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.inq-pick {
+  margin-left: 10px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.inq-next {
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.inquiry .inq-write {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inquiry .inq-answered {
+  margin: 0;
+  padding: 0;
+}
+
+.inq-answered .quiet {
+  font-weight: 500;
 }
 
 /* A Merging stack sits inside its table. */

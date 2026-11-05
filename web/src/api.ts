@@ -10,6 +10,7 @@ import type {
   GitHubAction,
   InflightView,
   Inquiry,
+  InquiryView,
   ItemDetail,
   ItemState,
   Overview,
@@ -72,6 +73,7 @@ export const api = {
   ready: (id: string, ask?: { users: string[]; teams: string[] }) =>
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
   // Your answer to an agent's question, or leaving it unanswered.
+  inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),
   reviewers: (id: string, q: string) => call<Reviewer[]>("GET", `/api/reviewers/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`),

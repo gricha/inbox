@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
-import type { ListPage, Route } from "../view.ts";
+import { routeHash, type ListPage, type Route } from "../view.ts";
 
 const BACK = { queue: "the queue", later: "Later", inflight: "Merging", archive: "the Archive" };
 const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging", archive: "Archive" };
@@ -20,6 +20,7 @@ export function TopBar({
   now,
   route,
   from,
+  question,
   filter,
   setFilter,
   filterRef,
@@ -32,6 +33,7 @@ export function TopBar({
   now: number;
   route: Route;
   from: ListPage; // where a review goes back to
+  question: string | null; // a review opened from an agent's question goes back to it
   filter: string;
   setFilter: (s: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
@@ -53,13 +55,17 @@ export function TopBar({
       </a>
       {inSettings || route.name === "inflight" ? (
         <span className="crumb">{inSettings ? "Settings" : "Merging"}</span>
-      ) : route.name === "review" ? (
-        <a className="back" href={`#/${from === "queue" ? "" : from}`} title={`Back to ${BACK[from]} (esc)`}>
+      ) : route.name === "review" || route.name === "inquiry" ? (
+        <a
+          className="back"
+          href={question ? routeHash({ name: "inquiry", id: question }) : `#/${from === "queue" ? "" : from}`}
+          title={`Back to ${question ? "the question" : BACK[from]} (esc)`}
+        >
           <kbd>esc</kbd>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>{BACK_LABEL[from]}</span>
+          <span>{question ? "Question" : BACK_LABEL[from]}</span>
         </a>
       ) : (
         <label className="search">

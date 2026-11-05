@@ -516,13 +516,43 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_inquire",
     {
       description:
-        "Ask the user a question in their Review Desk instead of in chat: anything you need them to decide or tell you. It's a row on their main page and a notification; they answer there. Lead with the question in one line, put why in context, and offer the likely answers as options (they can always write their own). Then call desk_inquiry with the id to read the answer.",
+        "Ask the user to decide or tell you something, in their Review Desk instead of in chat. It opens as its own page, and they decide from that page alone, without opening anything else or asking you back: so give them everything. " +
+        "`question`: the decision, in one line. " +
+        "`context`: what you're working on and how this came up; what you found, concretely (the facts, numbers, names, file paths, what the code or the thread says now, what you already tried); what the choice turns on; and your pick and why. A few short paragraphs is normal; one sentence is refused. " +
+        "`options`: the answers they'd likely give, your pick first, each with `next`: what you'll do if they pick it and what it costs or risks. They can always write their own. " +
+        "`links`: everything you mention, at its exact place, as https URLs: the review comment or thread, the file and line, the commit, the CI run, the issue, the doc, not just the PR. " +
+        "`item`: the PR or issue it's about (owner/repo#123), shown with its state. " +
+        "`from`: your task in a few words, so they know which session asks. " +
+        "The desk refuses a question without enough context, without an item or a link, or with an option that doesn't say what follows, and refuses (never cuts) text over a limit. Then call desk_inquiry with the id to read the answer; the coordinator instead ends its turn, and the desk wakes it with the answer.",
       inputSchema: {
-        question: z.string().min(1).max(300).describe("One line: what you need from them"),
-        context: z.string().max(2000).optional().describe("A few lines on why you ask and what each answer would do"),
-        options: z.array(z.string().min(1).max(80)).max(6).optional().describe("Likely answers, your pick first"),
-        from: z.string().max(60).optional().describe("Who asks, as the user knows this session: its task in a few words"),
+        question: z.string().min(1).max(300).describe("The decision, in one line"),
+        context: z
+          .string()
+          .min(200)
+          .max(6000)
+          .describe("What you're doing and how it came up, what you found (concretely), what the choice turns on, and your pick and why"),
+        options: z
+          .array(
+            z.object({
+              answer: z.string().min(1).max(80).describe("The answer, as they'd say it"),
+              next: z.string().min(1).max(400).describe("What you'll do if they pick it, and what it costs or risks"),
+            }),
+          )
+          .max(6)
+          .optional()
+          .describe("Likely answers, your pick first"),
+        links: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(80).describe('What it is: "azulus\'s review comment"'),
+              url: z.url({ protocol: /^https$/ }).describe("An https URL"),
+            }),
+          )
+          .max(12)
+          .optional()
+          .describe("Every comment, file, commit, run, issue or doc you mention, at its exact place"),
         item: z.string().optional().describe("The PR or issue it's about, owner/repo#123"),
+        from: z.string().min(1).max(60).describe("Who asks, as the user knows this session: its task in a few words"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },

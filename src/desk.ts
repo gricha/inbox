@@ -17,6 +17,9 @@ import type {
   AiReview,
   Ask,
   Inquiry,
+  InquiryLink,
+  InquiryOption,
+  InquiryView,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -62,7 +65,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, owesReply } from "./conversation.ts";
-import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
+import { askLine, Coordinator, NAME as COORDINATOR, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -101,7 +104,9 @@ const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
 const MAX_ASK = 2_000; // an ask or its answer
 const ASKS_KEPT = 200;
 const INQUIRIES_KEPT = 100;
-const MAX_CONTEXT = 2_000; // an inquiry's context
+const MAX_CONTEXT = 6_000; // an inquiry's context
+const MIN_CONTEXT = 200; // a few sentences: the owner decides from its page alone
+const MAX_LINKS = 12;
 
 export class DeskError extends Error {
   status: number;
@@ -1861,8 +1866,11 @@ export class Desk {
 
   // One plain line from an agent, whatever it sent.
   line(text: string, what: string, max = MAX_LINE): string {
-    // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
-    const t = text.replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+    const t = text
+      .replaceAll(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "") // bidi marks, which make text read as something else
+      // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
+      .replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ")
+      .trim();
     if (!t) throw new DeskError(400, `the ${what} is empty`);
     return t.length > max ? `${t.slice(0, max - 1)}…` : t;
   }
@@ -1938,8 +1946,14 @@ export class Desk {
     return a;
   }
 
+  // Questions asked before options said what follows had plain options and no links.
   inquiries(): Inquiry[] {
-    return (this.store.get("inquiries") as Inquiry[] | null) ?? [];
+    const all =
+      (this.store.get("inquiries") as
+        (Omit<Inquiry, "options" | "links"> & { options: (string | InquiryOption)[]; links?: InquiryLink[] })[] | null) ?? [];
+    return all.map((q) =>
+      Object.assign(q, { options: q.options.map((o) => (typeof o === "string" ? { answer: o, next: "" } : o)), links: q.links ?? [] }),
+    );
   }
 
   inquiry(id: string): Inquiry {
@@ -1948,18 +1962,57 @@ export class Desk {
     return q;
   }
 
-  // desk_inquire: an agent session's question for you, a row on your main page and a notification, until you answer it.
-  inquire(b: { question: string; from?: string; context?: string; options?: string[]; item?: string }): Inquiry {
-    const options = (b.options ?? []).map((o) => this.line(o, "option", 80));
+  // GET /api/inquiries/:id: the question, with its item's card wherever the desk shows it (the queue, Merging, a stack).
+  inquiryView(id: string): InquiryView {
+    const q = this.inquiry(id);
+    let card: Card | null = null;
+    try {
+      card = q.item_id ? this.item(q.item_id).card : null;
+    } catch (e) {
+      if (!(e instanceof DeskError)) throw e; // not on the desk: its ref still links to GitHub
+    }
+    return { ...q, card };
+  }
+
+  // desk_inquire: an agent session's question for you, a row on your main page and a notification, until you answer it. You
+  // decide from its page alone, so it's refused without the context, what each answer leads to, and a link to what it's about.
+  inquire(b: {
+    question: string;
+    from: string;
+    context: string;
+    options?: InquiryOption[];
+    links?: InquiryLink[];
+    item?: string;
+  }): Inquiry {
+    // Refused, not cut: what's past the limit is often what an answer costs.
+    const one = (text: string, what: string, max: number) => {
+      const t = this.line(text, what, Infinity);
+      if (t.length > max) throw new DeskError(400, `keep the ${what} under ${max} characters`);
+      return t;
+    };
+    const from = one(b.from, "from", 60);
+    const question = one(b.question, "question", 300);
+    // oxlint-disable-next-line no-control-regex -- paragraphs stay, anything else invisible goes, bidi marks too
+    const context = b.context.replaceAll(/[\u0000-\u0008\u000b-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+    if (context.length < MIN_CONTEXT)
+      throw new DeskError(
+        400,
+        `context is too thin to decide from (${context.length} of at least ${MIN_CONTEXT} characters): say what you're doing, what you found, what the choice turns on, and why your pick`,
+      );
+    if (context.length > MAX_CONTEXT) throw new DeskError(400, `keep the context under ${MAX_CONTEXT} characters`);
+    const options = b.options ?? [];
     if (options.length > 6) throw new DeskError(400, "at most 6 options");
-    const context = (b.context ?? "").trim();
+    const links = b.links ?? [];
+    if (links.length > MAX_LINKS) throw new DeskError(400, `at most ${MAX_LINKS} links`);
+    if (!b.item && !links.length) throw new DeskError(400, "link what it's about: the PR or issue as item, or links to what you read");
     const q: Inquiry = {
       id: randomBytes(4).toString("hex"),
       at: this.now().toISOString(),
-      from: b.from?.trim() ? this.line(b.from, "from", 60) : "an agent",
-      question: this.line(b.question, "question", 300),
-      context: context.length > MAX_CONTEXT ? `${context.slice(0, MAX_CONTEXT - 1)}…` : context,
-      options,
+      from,
+      question,
+      context,
+      options: options.map((o) => ({ answer: one(o.answer, "option", 80), next: one(o.next, `"next" of "${o.answer}"`, 400) })),
+      links: links.map((l) => ({ label: one(l.label, "link's label", 80), url: linkUrl(l.url) })),
       item_id: b.item ? this.itemId(b.item) : null,
       answer: null,
     };
@@ -1991,6 +2044,18 @@ export class Desk {
       this.inquiries().map((x) => (x.id === id ? done : x)),
     );
     this.changed();
+    // The coordinator ends its turn once it asks; your answer is what wakes it.
+    if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
+      const asked = `your question ${q.id} ("${q.question}")`;
+      const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
+      try {
+        this.coordinator.tell(line).catch((e: unknown) => {
+          this.log(`coordinator: ${(e as Error).message}`);
+        });
+      } catch (e) {
+        this.log(`coordinator: couldn't pass on your answer to ${q.id}: ${(e as Error).message}`);
+      }
+    }
     return done;
   }
 
@@ -2238,6 +2303,19 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
   if (r.stacked) return `waits on ${r.base} to merge first`;
   return "ready to merge";
+}
+
+// A question's link: https, the one scheme the desktop app's window opens; nothing a click would run.
+function linkUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    throw new DeskError(400, `not a link: ${url.slice(0, 80)}`);
+  }
+  if (u.protocol !== "https:") throw new DeskError(400, `a link is https, not ${u.protocol}`);
+  if (u.href.length > 2_000) throw new DeskError(400, "keep a link under 2000 characters");
+  return u.href;
 }
 
 function shortRef(c: { repo: string; number: number }): string {

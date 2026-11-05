@@ -229,16 +229,38 @@ export function createApp(desk: Desk, port: number): Hono {
       if (v === undefined || typeof v === "string") return v;
       throw new DeskError(400, `${k} must be a string`);
     };
-    if (typeof b.question !== "string") throw new DeskError(400, "need { question }");
-    const options = b.options ?? [];
-    if (!Array.isArray(options) || !options.every((o) => typeof o === "string"))
-      throw new DeskError(400, "options must be a list of strings");
+    const pairs = (k: string, a: string, z: string): Record<string, string>[] => {
+      const v = b[k] ?? [];
+      if (
+        Array.isArray(v) &&
+        v.every(
+          (o: unknown) =>
+            !!o &&
+            typeof o === "object" &&
+            typeof (o as Record<string, unknown>)[a] === "string" &&
+            typeof (o as Record<string, unknown>)[z] === "string",
+        )
+      )
+        return v as Record<string, string>[];
+      throw new DeskError(400, `${k} must be a list of { ${a}, ${z} }`);
+    };
+    const question = str("question");
+    const from = str("from");
+    const context = str("context");
+    if (!question || !from || context === undefined) throw new DeskError(400, "need { question, from, context }");
     return c.json({
       ok: true,
-      inquiry: desk.inquire({ question: b.question, from: str("from"), context: str("context"), options, item: str("item") }),
+      inquiry: desk.inquire({
+        question,
+        from,
+        context,
+        options: pairs("options", "answer", "next").map((o) => ({ answer: o.answer!, next: o.next! })),
+        links: pairs("links", "label", "url").map((l) => ({ label: l.label!, url: l.url! })),
+        item: str("item"),
+      }),
     });
   });
-  app.get("/api/inquiries/:id", (c) => c.json(desk.inquiry(c.req.param("id"))));
+  app.get("/api/inquiries/:id", (c) => c.json(desk.inquiryView(c.req.param("id"))));
   // Your answer, from the desk's own window only: an agent can't answer its own question.
   app.post("/api/inquiries/:id/answer", async (c) => {
     if (!fromDesk(c)) throw new DeskError(403, "answer it in the desk's window");

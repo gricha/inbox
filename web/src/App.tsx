@@ -39,6 +39,7 @@ import type { RowCtx } from "./components/CardRow.tsx";
 import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
+import { InquiryPage } from "./components/Inquiry.tsx";
 import { rowActions } from "./components/More.tsx";
 import { RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
@@ -116,7 +117,6 @@ export function App() {
   const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
-  const [answers, setAnswers] = useState<Record<string, string>>({}); // what you're writing to each, kept if a send fails
   // What you did on an item from this page, until you leave it: a review shows it in place of the key you pressed.
   const [acted, setActed] = useState<Record<string, Acted | undefined>>({});
   const actedRef = useRef(acted);
@@ -134,6 +134,7 @@ export function App() {
   const [lane, setLane] = useState<InflightView | null>(null);
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
+  const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
   const [asking, setAsking] = useState<About | null>(null); // the composer to the coordinator, open
   const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
   const rulesDirty = useRef(false);
@@ -257,8 +258,10 @@ export function App() {
   const onLane = route.name === "inflight";
   // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
   useEffect(() => {
-    if (route.name !== "review") setReviewFrom(route.name === "settings" ? "queue" : route.name);
-  }, [route.name]);
+    if (route.name === "review") return;
+    setReviewFrom(route.name === "settings" || route.name === "inquiry" ? "queue" : route.name);
+    setReviewQuestion(route.name === "inquiry" ? route.id : null);
+  }, [route]);
   useEffect(() => {
     if (!onLane) return;
     window.scrollTo(0, 0);
@@ -343,7 +346,7 @@ export function App() {
   // Agents' questions lead the main page (one waits on each); the filter reads them too.
   const inquiries = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    if (route.name !== "queue") return [];
+    if (route.name !== "queue" && route.name !== "inquiry") return []; // on a question's page, the queue's cursor stays on it
     return (view?.inquiries ?? []).filter(
       (q) => !answered.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
     );
@@ -540,19 +543,10 @@ export function App() {
     }
   }
 
-  // Enter on an agent's question: opens it in place, with the box to write in ready when it offers no answers; again closes it.
+  // Enter on an agent's question: its own page, with all it said.
   function openInquiry(q: Inquiry) {
-    const id = inquiryOf(q.id);
-    setSelected(id);
-    if (expanded === id) {
-      setExpanded(null);
-      return;
-    }
-    setExpanded(id);
-    if (!q.options.length)
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLInputElement>(`[data-id="${CSS.escape(id)}"] .inq-input`)?.focus();
-      });
+    setSelected(inquiryOf(q.id));
+    go({ name: "inquiry", id: q.id });
   }
 
   // A row leaving the list: the next one takes the cursor, it fades out, and j/k skip it until unhide().
@@ -572,28 +566,29 @@ export function App() {
     });
   }
 
-  // Your answer to an agent's question (or leaving it unanswered): it leaves the main page at once; a refusal brings it back.
-  async function answerInquiry(q: Inquiry, text: string, dismiss = false) {
+  // Your answer to an agent's question (or leaving it unanswered): it leaves the main page at once while its page stays,
+  // saying so; a refusal brings it back. True once the desk has it.
+  async function answerInquiry(q: Inquiry, text: string, dismiss = false): Promise<boolean> {
     const id = inquiryOf(q.id);
     const i = cursor.indexOf(id);
-    setSelected(cursor[i + 1] ?? cursor[i - 1] ?? null);
-    if (expanded === id) setExpanded(null);
+    if (selected === id) setSelected(cursor[i + 1] ?? cursor[i - 1] ?? null);
     setAnswered((s) => new Set(s).add(q.id));
+    let ok = true;
     try {
       await api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text });
-      setAnswers((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== q.id)));
       flash(dismiss ? `Dismissed ${q.from}'s question` : `Answered ${q.from}`);
     } catch (e) {
+      ok = false;
       setAnswered((s) => {
         const next = new Set(s);
         next.delete(q.id);
         return next;
       });
       setSelected(id);
-      setExpanded(id); // open again, with what you wrote
       flash(message(e), true);
     }
     refresh(0);
+    return ok;
   }
 
   // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
@@ -974,8 +969,8 @@ export function App() {
     else if (k === "u") void undo();
     else if (route.name === "settings") {
       if (k === "Escape") go({ name: "queue" });
-    } else if (route.name === "review") {
-      // The review view reads its own keys.
+    } else if (route.name === "review" || route.name === "inquiry") {
+      // The review and a question's page read their own keys.
     } else if (route.name === "inflight") {
       if (k === "Escape") go({ name: "queue" });
       else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
@@ -1004,9 +999,6 @@ export function App() {
     } else if (asked && (k === "d" || k === "e")) {
       e.preventDefault();
       void answerInquiry(asked, "", true);
-    } else if (asked && expanded === inquiryOf(asked.id) && /^[1-9]$/.test(k) && asked.options[Number(k) - 1]) {
-      e.preventDefault();
-      void answerInquiry(asked, asked.options[Number(k) - 1]!);
     } else if (k === "Enter" && isFold(selected)) {
       e.preventDefault();
       unfold(selected!.slice("fold:".length) as GroupKey);
@@ -1102,6 +1094,7 @@ export function App() {
           now={now}
           route={route}
           from={reviewFrom}
+          question={route.name === "review" ? reviewQuestion : null}
           filter={filter}
           setFilter={setFilter}
           filterRef={filterRef}
@@ -1163,21 +1156,10 @@ export function App() {
               inq={{
                 now,
                 selected,
-                expanded,
                 select: (q) => {
                   setSelected(inquiryOf(q.id));
                 },
                 open: openInquiry,
-                draft: (q) => answers[q.id] ?? "",
-                write: (q, text) => {
-                  setAnswers((a) => ({ ...a, [q.id]: text }));
-                },
-                answer: (q, text) => {
-                  void answerInquiry(q, text);
-                },
-                dismiss: (q) => {
-                  void answerInquiry(q, "", true);
-                },
               }}
               filter={filter}
               unfold={unfold}
@@ -1226,12 +1208,26 @@ export function App() {
               onReady={markReady}
               onComment={comment}
               onBack={() => {
-                go({ name: reviewFrom });
+                go(reviewQuestion ? { name: "inquiry", id: reviewQuestion } : { name: reviewFrom });
               }}
               onAsk={(t) => {
                 openAsk(t.item, t);
               }}
               onThread={setThread}
+            />
+          )}
+          {route.name === "inquiry" && !broken && (
+            <InquiryPage
+              key={route.id}
+              id={route.id}
+              loads={loads}
+              now={now}
+              inert={help}
+              flash={flash}
+              onAnswer={answerInquiry}
+              onBack={() => {
+                go({ name: "queue" });
+              }}
             />
           )}
           {route.name === "inflight" && !broken && (

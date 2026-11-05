@@ -1905,12 +1905,32 @@ const INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
     at: iso(0.4),
-    from: "review-desk: queue redesign",
-    question: "Keep the PR/Issue label as text, or switch to GitHub's icons?",
+    from: "notes-app: sync tombstones",
+    question: "Compact tombstones in #12, or ship #12 and compact them in a follow-up?",
     context:
-      "Text reads plainly and needs no legend; the icons are what GitHub shows and take less room, but a draft and an open PR look alike at 13px.",
-    options: ["Keep the text", "Switch to icons", "Both: icon and text"],
-    item_id: null,
+      "azulus asked on #12 why tombstones never go away: every sync ships the whole list, and on a long-lived notebook it only grows. " +
+      "They're right. Nothing in #12 or on main prunes it; `syncTombstones()` in src/sync/merge.ts:88 sends it whole on every pull.\n\n" +
+      "Compacting is safe once every device has synced past a tombstone. The server already keeps each device's last full sync " +
+      "(`devices.last_full_sync`), so merge() can drop the ones older than the oldest of those. It's about 40 lines and a test.\n\n" +
+      "priya wants #12 before Thursday's mobile freeze. #12 is green, and kai approved it before azulus's comment. " +
+      "I'd do it in #12: it's small, and shipping the growth to every phone first means a second migration later.",
+    options: [
+      {
+        answer: "Compact them in #12",
+        next: "I add the pruning and a test that a week-old delete doesn't come back, push, and ask azulus and kai to look again. A day, likely before Thursday.",
+      },
+      {
+        answer: "Ship #12, compact in a follow-up",
+        next: "I reply to azulus that a follow-up does it, and open that PR today. #12 can merge now; phones carry the growing list until the follow-up ships.",
+      },
+      { answer: "Neither: it's fine for now", next: "I leave it, and tell azulus why. The list keeps growing with every delete." },
+    ],
+    links: [
+      { label: "azulus's comment on #12", url: "https://github.com/me/notes-app/pull/12#discussion_r1874401" },
+      { label: "syncTombstones() in merge.ts", url: "https://github.com/me/notes-app/blob/sync-merge/src/sync/merge.ts#L88" },
+      { label: "priya's question about the freeze", url: "https://github.com/me/notes-app/pull/12#issuecomment-2210" },
+    ],
+    item_id: "me/notes-app#12",
     answer: null,
   },
   {
@@ -1918,8 +1938,15 @@ const INQUIRIES: Inquiry[] = [
     at: iso(1.5),
     from: "sentry: ViewerContext rollout",
     question: "Which PR in the stack should land first after the deploy freeze lifts?",
-    context: "#129146 is the core change; the per-team PRs depend on it but each could ship behind its own flag.",
+    context:
+      "The freeze lifts Monday. #129146 is the core change: it adds the actor to ViewerContext, and the eight per-team PRs read it. " +
+      "Each per-team PR could ship behind its own flag, so they don't strictly wait on the core one, but without it their flags do nothing.\n\n" +
+      "Landing the core first is the safe order; landing a team's first would let that team test its flag earlier. Tell me the order you want.",
     options: [],
+    links: [
+      { label: "The core PR, #129146", url: "https://github.com/getsentry/sentry/pull/129146" },
+      { label: "The stack's tracking issue", url: "https://github.com/getsentry/sentry/issues/128982" },
+    ],
     item_id: null,
     answer: null,
   },
@@ -3080,6 +3107,17 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS, coordinator };
   const inq = /^\/api\/inquiries\/([^/]+)(\/answer)?$/.exec(url.pathname);
   if (inq && req.method === "POST" && inq[2]) return { ok: true, inquiry: answerInquiry(inq[1]!, await readBody(req)) };
+  if (inq && req.method === "GET" && !inq[2]) {
+    const q = INQUIRIES.find((x) => x.id === inq[1]);
+    if (!q) throw new HttpError(404, `no inquiry "${inq[1]}"`);
+    let card: Card | null = null;
+    try {
+      card = q.item_id ? detail(resolve(q.item_id)).card : null;
+    } catch {
+      // not on the desk: its ref still links to GitHub
+    }
+    return { ...q, card };
+  }
   if (route === "POST /api/ask") return { ok: true, ask: addAsk(await readBody(req)) };
   if (route === "POST /api/undo") {
     const body = await readBody(req);

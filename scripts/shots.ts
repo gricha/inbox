@@ -548,16 +548,40 @@ const SHOTS: Shot[] = [
     after: reload,
   },
   {
-    // An agent's question leads the main page; Enter opens it to answer: its context, the answers it offers, a box.
-    name: "queue-inquiry",
+    // An agent's question leads the main page; Enter opens its page: what it's about, all it said, its links, the answers.
+    name: "inquiry",
     go: async (page) => {
       await at("#/")(page);
       await top(page);
       await page.locator(".queue .line.inq .row-main").first().focus();
       await page.keyboard.press("Enter");
-      await page.locator(".inq-open").waitFor();
+      await page.locator(".inquiry .inq-options").waitFor();
       await page.waitForTimeout(200);
     },
+    after: at("#/"),
+  },
+  {
+    // A question with no answers to pick: the box to write in is ready.
+    name: "inquiry-open",
+    go: async (page) => {
+      await at("#/inquiry/q2bead00")(page);
+      await page.locator(".inquiry .inq-write textarea").waitFor();
+      await page.waitForTimeout(200);
+    },
+    after: at("#/"),
+  },
+  {
+    // 1 picks the agent's answer: the page stays and says so while it's sent. Held, so the mock's question waits for the next size.
+    name: "inquiry-answered",
+    go: async (page) => {
+      await page.route("**/api/inquiries/*/answer", () => {});
+      await at("#/inquiry/q1c0ffee")(page);
+      await page.locator(".inquiry .inq-options").waitFor();
+      await page.keyboard.press("1");
+      await page.locator(".inq-answered").waitFor();
+      await page.waitForTimeout(200);
+    },
+    after: reload,
   },
   {
     // Merged and closed ones under Merged, below the fold at every size.

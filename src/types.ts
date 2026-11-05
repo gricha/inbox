@@ -777,17 +777,33 @@ export interface Ask {
   answer: { text: string; at: string } | null; // untrusted: an agent wrote it
 }
 
-// A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it.
-// Everything but the answer is untrusted: an agent wrote it.
+// A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it, and
+// its own page with all you need to decide without opening anything else. Everything but the answer is untrusted: an agent wrote it.
 export interface Inquiry {
   id: string;
   at: string;
   from: string; // the session that asks, as it names itself
   question: string;
-  context: string; // why it asks, a few lines; may be empty
-  options: string[]; // answers to pick from; you can always write your own
+  context: string; // what it's doing, what it found and what the choice turns on, in paragraphs
+  options: InquiryOption[]; // its pick first; you can always write your own
+  links: InquiryLink[]; // what it's about and what it read: comments, files, runs, docs
   item_id: string | null; // the PR or issue it's about
   answer: { text: string; at: string; dismissed: boolean } | null;
+}
+
+// GET /api/inquiries/:id: with the card of the PR or issue it's about, when the desk holds it.
+export interface InquiryView extends Inquiry {
+  card: Card | null;
+}
+
+export interface InquiryOption {
+  answer: string;
+  next: string; // what the agent does next if you pick it, and what that costs or risks; "" on a question asked before it was required
+}
+
+export interface InquiryLink {
+  label: string;
+  url: string; // http(s), or claude: for a Claude session
 }
 
 // GET /api/asks

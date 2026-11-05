@@ -9,7 +9,7 @@ import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
 
-const NAME = "Review Desk coordinator";
+export const NAME = "Review Desk coordinator";
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
 const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
 const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines

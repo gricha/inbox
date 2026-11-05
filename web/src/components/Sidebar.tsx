@@ -16,7 +16,7 @@ export function Sidebar({
   overview: Overview | null;
   inert?: boolean;
 }) {
-  const onQueue = route.name === "queue" || (route.name === "review" && from === "queue");
+  const onQueue = route.name === "queue" || route.name === "inquiry" || (route.name === "review" && from === "queue");
   const onLater = route.name === "later" || (route.name === "review" && from === "later");
   const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
   const onArchive = route.name === "archive" || (route.name === "review" && from === "archive");

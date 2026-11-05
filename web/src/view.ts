@@ -18,6 +18,7 @@ import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
 export type Route =
   | { name: "queue" }
   | { name: "review"; id: string }
+  | { name: "inquiry"; id: string } // an agent's question
   | { name: "later" }
   | { name: "inflight" }
   | { name: "archive" }
@@ -68,10 +69,10 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };
   if (hash === "#/archive") return { name: "archive" };
-  const review = /^#\/review\/(.+)$/.exec(hash);
-  if (review) {
+  const page = /^#\/(review|inquiry)\/(.+)$/.exec(hash);
+  if (page) {
     try {
-      return { name: "review", id: decodeURIComponent(review[1]!) };
+      return { name: page[1] as "review" | "inquiry", id: decodeURIComponent(page[2]!) };
     } catch {
       return { name: "queue" }; // a mangled link
     }
@@ -81,7 +82,7 @@ export function parseRoute(hash: string): Route {
 
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
-  if (r.name === "review") return `#/review/${encodeURIComponent(r.id)}`;
+  if (r.name === "review" || r.name === "inquiry") return `#/${r.name}/${encodeURIComponent(r.id)}`;
   return r.name === "queue" ? "#/" : `#/${r.name}`;
 }
 
