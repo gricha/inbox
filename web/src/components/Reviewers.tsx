@@ -3,8 +3,8 @@ import type { Reviewer } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { cls } from "../format.ts";
 
-// Who Ready for review asks to review your draft: GitHub's suggestions as you focus it, its people and teams as you type.
-// Those already asked show first and stay; @ in the review focuses it.
+// Who Ready for review asks to review your draft: GitHub's suggestions on the line, a click each, and in the list as you
+// focus it, then its people and teams as you type. Those already asked show first and stay; @ in the review focuses it.
 export function Reviewers({
   id,
   asked,
@@ -21,7 +21,24 @@ export function Reviewers({
   // What GitHub found for q; a string is why the search failed.
   const [found, setFound] = useState<{ q: string; list: Reviewer[] } | string | null>(null);
   const [hi, setHi] = useState(0);
+  const [suggested, setSuggested] = useState<Reviewer[]>([]);
   const seq = useRef(0);
+
+  // GitHub's suggestions, on the line before you look for anyone: who you'd likely ask anyway.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const r = await api.reviewers(id, "");
+        if (live) setSuggested(r.filter((x) => x.suggested));
+      } catch {
+        // the list says why when you open it
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [id]);
 
   useEffect(() => {
     const n = ++seq.current;
@@ -50,6 +67,7 @@ export function Reviewers({
           .filter((r) => now || r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle))
           .slice(0, 8)
       : [];
+  const offered = suggested.filter((r) => !taken.has(r.login.toLowerCase())).slice(0, 4);
 
   function add(r: Reviewer) {
     setPicked([...picked, r]);
@@ -147,6 +165,25 @@ export function Reviewers({
           </div>
         )}
       </span>
+      {offered.length > 0 && (
+        <span className="rv-suggested">
+          <span className="rv-reviewers-label">Suggested</span>
+          {offered.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="rv-reviewer suggest"
+              title={`Ask ${r.name || r.login} too: GitHub suggests them for this PR`}
+              onClick={() => {
+                add(r);
+              }}
+            >
+              <span aria-hidden>+</span>
+              {r.login}
+            </button>
+          ))}
+        </span>
+      )}
     </div>
   );
 }

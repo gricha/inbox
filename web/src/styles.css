@@ -3725,6 +3725,31 @@ kbd {
   font-weight: 500;
 }
 
+/* GitHub's suggestions, a click each: quieter than who's picked until you pick them. */
+.rv-suggested {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-left: 8px;
+}
+
+.rv-reviewer.suggest {
+  padding-right: 10px;
+  border: 1px dashed var(--rule-strong);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.rv-reviewer.suggest:hover {
+  border-style: solid;
+  background: var(--wash);
+  color: var(--ink);
+}
+
 .rv-reviewer.asked {
   padding-right: 10px;
   background: none;

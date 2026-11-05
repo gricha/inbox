@@ -508,7 +508,7 @@ Your own open PR, once you're done with it: `m` in the queue, on the open item o
 
 ### Ready for review
 
-Your own open draft carries one call to action on its row and in its review: Ready for review (`cta: "ready"` on its card, set by the desk), whatever its CI says: getting CI green is the coordinator's once it's ready, so the desk doesn't hold this back. The More menu offers it too (`ready`, `a`). `a` sends `markPullRequestReadyForReview` (`POST /api/review/:id/ready`), then, in its review, `requestReviews` for the reviewers you picked above the button (`@` focuses the box; it searches `GET /api/reviewers/:id` as you type, GitHub's suggestions first; those already asked show and stay), logs each and refreshes the PR, after which it sits wherever the rules and Claude put a ready PR. It's one of the desk's GitHub writes ([Security model](#security-model)).
+Your own open draft carries one call to action on its row and in its review: Ready for review (`cta: "ready"` on its card, set by the desk), whatever its CI says: getting CI green is the coordinator's once it's ready, so the desk doesn't hold this back. The More menu offers it too (`ready`, `a`). `a` sends `markPullRequestReadyForReview` (`POST /api/review/:id/ready`), then, in its review, `requestReviews` for the reviewers you picked above the button (GitHub's suggested reviewers sit on the line, a click each, from `GET /api/reviewers/:id` with no query; `@` focuses the box, which searches it as you type, GitHub's suggestions first; those already asked show and stay), logs each and refreshes the PR, after which it sits wherever the rules and Claude put a ready PR. It's one of the desk's GitHub writes ([Security model](#security-model)).
 
 ### More (.)
 
