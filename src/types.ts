@@ -330,8 +330,8 @@ export interface Reviewer {
 export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
 // The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
-export type GitHubAction = "close" | "draft" | "merge" | "reopen" | "request_changes";
-export const GITHUB_ACTIONS: GitHubAction[] = ["close", "draft", "merge", "reopen", "request_changes"];
+export type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes";
+export const GITHUB_ACTIONS: GitHubAction[] = ["close", "draft", "ready", "merge", "reopen", "request_changes"];
 // snooze `until`: "1h" | "3h" | "tomorrow" (09:00) | "monday" (09:00) | "activity" | ISO time | an Until
 // What a snooze can wait on instead of a time: the item stays in Later until it happens.
 export type Until = "ci" | "push" | "approved" | "ready" | "conflict";

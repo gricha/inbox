@@ -198,7 +198,7 @@ export function createApp(desk: Desk, port: number): Hono {
     await desk.markReady(c.req.param("id"), { users, teams });
     return c.json({ ok: true });
   });
-  // The More menu's GitHub writes (close, draft, merge, reopen, request changes), from the desk's own window only.
+  // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
   app.post("/api/github", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window (.)");

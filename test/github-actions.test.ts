@@ -42,6 +42,11 @@ function fakeWriter(t: () => Awaited<ReturnType<typeof setup>>) {
       land(pr, { draft: true });
       return Promise.resolve();
     },
+    ready: (pr) => {
+      calls.push(["ready", pr]);
+      land(pr, { draft: false });
+      return Promise.resolve();
+    },
     merge: (pr, head, method) => {
       calls.push(["merge", pr, head, method]);
       land(pr, { state: "merged", closed_at: hoursAgo(0), merged_by: "me" });
@@ -97,7 +102,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   assert.deepEqual(actions("api#1"), ["request_changes"], "someone else's open PR");
   assert.deepEqual(actions("web#3"), ["close", "draft"], "not approved: no merge");
   assert.deepEqual(actions("web#4"), ["close", "draft", "merge"], "approved, green and mergeable");
-  assert.deepEqual(actions("web#5"), ["close"], "a draft already");
+  assert.deepEqual(actions("web#5"), ["close", "ready"], "a draft: ready for review instead");
   assert.deepEqual(actions("web#6"), ["close", "draft"], "GitHub says it conflicts");
   assert.deepEqual(actions("web#8"), undefined, "in Merging the coordinator has it");
   assert.deepEqual(actions("api#7"), ["close"], "your issue");
@@ -165,7 +170,16 @@ test("draft sends your open PR back to draft, and its card shows it as one; only
   await t.desk.githubAct("web#3", "draft", { head: "a push ago" });
   assert.deepEqual(w.calls, [["draft", "PR_acme/web_3"]]);
   const card = t.desk.item("web#3").card;
-  assert.deepEqual([card.draft, card.cta, card.actions], [true, "ready", ["close"]]);
+  assert.deepEqual([card.draft, card.cta, card.actions], [true, "ready", ["close", "ready"]]);
+});
+
+test("ready in the More menu marks your draft ready, red CI or not, and it leaves your desk as a does", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "red", draft: true })]);
+  assert.equal(t.desk.item("web#3").card.cta, "ready", "the row offers it too");
+  await t.desk.githubAct("web#3", "ready");
+  assert.deepEqual(w.calls, [["ready", "PR_acme/web_3"]]);
+  const d = t.desk.item("web#3");
+  assert.deepEqual([d.item.draft, d.card.status, d.card.actions], [false, "done", ["close", "draft"]]);
 });
 
 test("request changes needs what you wrote, is pinned to the commit you read, and never on your own PR", async (c) => {

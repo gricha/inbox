@@ -378,8 +378,8 @@ test("your own open draft carries one call to action, Ready for review; a a mark
   const cta = (ref: string) => t.desk.item(ref).card.cta;
   assert.deepEqual(
     [cta("web#3"), cta("web#4"), cta("api#1"), cta("web#5")],
-    ["ready", undefined, undefined, undefined],
-    "a red draft is finished first",
+    ["ready", undefined, undefined, "ready"],
+    "a red draft too: CI is the coordinator's once it's ready",
   );
   const post = client(t);
   const ready = (ref: string, origin?: string, site?: string) => post(`/api/review/${encodeURIComponent(ref)}/ready`, {}, origin, site);

@@ -39,7 +39,7 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `o`       | open on GitHub                                                 |
 | `a`       | the row's call to action: your draft, ready for review         |
 | `m`       | your own PR: hand off for merge; `b` brings it back to desk    |
-| `.`       | more, on GitHub: close, convert to draft, merge now, reopen    |
+| `.`       | more, on GitHub: close, ready or draft, merge now, reopen      |
 | `e` / `d` | done: hidden until someone else comments, reviews or pushes    |
 | `s`       | snooze: for a while, or until CI passes, new commits, approval |
 | `m` / `p` | someone else's: mute / pin                                     |

@@ -65,7 +65,10 @@ export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: R
       key("Ask the coordinator", "t"),
       key("Copy a prompt for an agent", "c"),
     ],
-    rowActions(card).map((a) => ({ label: `${MORE[a].label} on GitHub`, do: { github: a } })),
+    // Its call to action is above already.
+    rowActions(card)
+      .filter((a) => !(a === "ready" && card.cta === "ready"))
+      .map((a) => ({ label: `${MORE[a].label} on GitHub`, do: { github: a } })),
   ];
   const entries = groups.flat();
 

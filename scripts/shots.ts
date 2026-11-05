@@ -885,6 +885,18 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Your draft: Ready for review in its More menu too.
+    name: "more-draft",
+    after: refold,
+    go: async (page) => {
+      await at("#/")(page);
+      await unfold(page);
+      await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
+      await page.keyboard.press(".");
+      await page.waitForTimeout(200);
+    },
+  },
+  {
     name: "more-later",
     go: async (page) => {
       await at("#/later")(page);

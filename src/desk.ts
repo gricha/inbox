@@ -104,6 +104,7 @@ const MAX_REPLY = 5_000;
 const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
   close: ["close %", "closed %"],
   draft: ["convert % to a draft", "converted % to a draft"],
+  ready: ["mark % ready for review", "marked % ready for review"],
   merge: ["merge %", "merged %"],
   reopen: ["reopen %", "reopened %"],
   request_changes: ["request changes on %", "requested changes on %"],
@@ -998,7 +999,8 @@ export class Desk {
       inflight: e.inflight,
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
       // A red draft needs finishing first; its why says so.
-      ...(it.kind === "pr" && it.draft && it.state === "open" && it.ci !== "red" && me.author && this.writer && { cta: "ready" as const }),
+      // Red CI too: getting it green is the coordinator's once it's ready, so the desk never holds this back.
+      ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
@@ -1605,7 +1607,7 @@ export class Desk {
     if (it.state !== "open") return [];
     return [
       "close",
-      ...(it.draft ? [] : (["draft"] as const)),
+      ...(it.draft ? (["ready"] as const) : (["draft"] as const)),
       // Stacked: it would merge into the PR below, which Merging says it waits on.
       ...(readyToMerge(it) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
     ];
@@ -1635,6 +1637,7 @@ export class Desk {
       try {
         if (action === "close") await (it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
         else if (action === "draft") await w.draft(it.node_id);
+        else if (action === "ready") await w.ready(it.node_id);
         else if (action === "merge") await w.merge(it.node_id, it.head_oid, it.merge_method!);
         else if (action === "reopen") await w.reopen(it.node_id);
         else ({ url } = await w.requestChanges(it.node_id, it.head_oid, body));

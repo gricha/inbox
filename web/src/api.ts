@@ -88,7 +88,7 @@ export const api = {
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),
   reviewers: (id: string, q: string) => call<Reviewer[]>("GET", `/api/reviewers/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`),
-  // The More menu's: close, draft, merge, reopen, request changes (with a body, pinned to the head you read).
+  // The More menu's: close, draft, ready, merge, reopen, request changes (with a body, pinned to the head you read).
   github: (id: string, action: GitHubAction, more: { head_oid?: string; body?: string } = {}) =>
     call<{ ok: true; url: string }>("POST", "/api/github", { id, action, ...more }),
   inflight: () => call<InflightView>("GET", "/api/inflight"),

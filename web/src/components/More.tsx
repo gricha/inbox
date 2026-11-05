@@ -9,6 +9,7 @@ const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 export const MORE: Record<GitHubAction, { key: string; label: string }> = {
   close: { key: "c", label: "Close" },
   draft: { key: "d", label: "Convert to draft" },
+  ready: { key: "a", label: "Ready for review" },
   merge: { key: "m", label: "Merge now" },
   reopen: { key: "r", label: "Reopen" },
   request_changes: { key: "x", label: "Request changes" },
@@ -23,7 +24,7 @@ export function MoreButton({ className, open, onClick }: { className?: string; o
     <button
       type="button"
       className={cls("act", className)}
-      title="More on GitHub: close, convert to draft, merge now, …"
+      title="More on GitHub: close, ready for review or convert to draft, merge now, …"
       aria-label="More on GitHub"
       aria-expanded={open}
       onClick={onClick}

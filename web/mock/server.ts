@@ -1602,7 +1602,7 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
-    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && sig.pr.ci !== "red" && { cta: "ready" as const }),
+    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),
@@ -1619,7 +1619,7 @@ function actionsOf(r: Rec): GitHubAction[] {
   if (it.state === "closed") return ["reopen"];
   if (it.state !== "open") return [];
   const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
-  return ["close", ...(it.draft ? [] : (["draft"] as const)), ...(ready ? (["merge"] as const) : [])];
+  return ["close", ...(it.draft ? (["ready"] as const) : (["draft"] as const)), ...(ready ? (["merge"] as const) : [])];
 }
 
 // As Desk.seat(): where a stack's member is on the queue.
@@ -3164,6 +3164,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       r.seed.upd = (T0 - Date.now()) / HOUR;
     } else if (action === "reopen") delete r.seed.resolved;
     else if (action === "draft") r.seed.draft = true;
+    else if (action === "ready") r.seed.draft = false;
     bump();
     return { ok: true, url: "" };
   }

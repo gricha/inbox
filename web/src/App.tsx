@@ -71,6 +71,7 @@ const VERB: Partial<Record<Action, string>> = {
 const DID: Record<GitHubAction, string> = {
   close: "Closed on GitHub",
   draft: "Converted to a draft on GitHub",
+  ready: "Marked ready for review on GitHub",
   merge: "Merged on GitHub",
   reopen: "Reopened on GitHub",
   request_changes: "Requested changes on GitHub",
@@ -785,6 +786,11 @@ export function App() {
   // merge and Request changes finish your part, so it leaves your desk at once; draft and reopen keep it where it is.
   async function github(c: Card, action: GitHubAction, head?: string, body?: string): Promise<boolean> {
     setMoreFor(null);
+    // The same as its a: off your desk at once, into the Archive.
+    if (action === "ready") {
+      markReady(c);
+      return true;
+    }
     const write = async () => {
       await api.github(c.id, action, { ...(head ? { head_oid: head } : {}), ...(body ? { body } : {}) });
       undoSeq.current = null;
