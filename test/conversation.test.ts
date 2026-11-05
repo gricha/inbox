@@ -363,3 +363,33 @@ test("a reply goes only from the desk's window, to one of the PR's own conversat
     ["reply", "comment"],
   );
 });
+
+test("an issue on your desk takes your comment, from the desk's window only, and leaves it as a PR's does", async (c) => {
+  const w = fakeWriter();
+  const issue = makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"], node_id: "I_acme/api_9" });
+  const t = await setup([], { settings: JUDGE_OFF, desk: { writer: w.writer } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.gh.items.set("acme/api#9", issue);
+  await t.desk.add("acme/api#9");
+  const app = createApp(t.desk, 47823);
+  const post = (body: unknown, headers: Record<string, string> = {}) =>
+    app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/api#9")}/comment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const desk = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
+  assert.equal((await post({ body: "On it this week." })).status, 403, "curl, the CLI and agents");
+  assert.equal((await post({ body: "  " }, desk)).status, 400);
+  assert.equal(w.calls.length, 0);
+
+  assert.equal((await post({ body: "On it this week." }, desk)).status, 200);
+  assert.deepEqual(w.calls, [["comment", "I_acme/api_9", "On it this week."]]);
+  assert.equal(t.desk.item("api#9").card.status, "done", "your part is done until someone else acts");
+
+  t.gh.items.set("acme/api#9", { ...issue, state: "closed", closed_at: hoursAgo(0), updated_at: hoursAgo(0) });
+  await t.desk.gh.refresh("acme/api#9");
+  assert.equal((await post({ body: "One more thing." }, desk)).status, 409, "closed: as a PR's review offers none");
+  assert.equal(w.calls.length, 1);
+});

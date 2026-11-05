@@ -24,7 +24,7 @@ const MORE_KEYS: [string, string][] = [
   ["t", "ask the coordinator"],
   ["c", "copy a prompt"],
   ["i", "AI review"],
-  ["w", "rule trace"],
+  ["w", "rule trace; an issue opened in place: comment"],
   ["r", "sync"],
   ["g l", "later"],
   ["g f", "FYI"],

@@ -148,7 +148,7 @@ export function createApp(desk: Desk, port: number): Hono {
     if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") throw new DeskError(400, "need { id, body }");
     return c.json({ ok: true, ...(await desk.reply(c.req.param("id"), b.id, b.body)) });
   });
-  // Your comment on the PR, from the desk's own window only.
+  // Your comment on the PR or issue, from the desk's own window only.
   app.post("/api/review/:id{.+}/comment", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");

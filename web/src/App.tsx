@@ -37,6 +37,7 @@ import {
   type Route,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
+import { CommentBar } from "./components/CommentBar.tsx";
 import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
@@ -115,6 +116,7 @@ export function App() {
   const [showSignals, setShowSignals] = useState(false);
   const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
   const [moreFor, setMoreFor] = useState<string | null>(null); // the row whose More menu is open
+  const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (w on it opened in place)
   const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number } | null>(null); // a row's right-click menu
   const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
@@ -757,7 +759,8 @@ export function App() {
     });
   }
 
-  // w in a review: your comment on the PR. True once GitHub has it, so its box closes; a refusal keeps your words in it.
+  // w: your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
+  // refusal keeps your words in it.
   function comment(c: Card, body: string): Promise<boolean> {
     return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, async () => {
       await api.comment(c.id, body);
@@ -819,6 +822,7 @@ export function App() {
   function openAsk(id?: string, t?: Thread) {
     const r = routeRef.current;
     const item = id ?? (r.name === "review" ? r.id : r.name === "inflight" ? laneCur?.card.id : r.name === "settings" ? null : current?.id);
+    setCommenting(null);
     setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
     requestAnimationFrame(() => {
       document.querySelector<HTMLInputElement>(".composer-input")?.focus();
@@ -886,7 +890,15 @@ export function App() {
     else if (k === "c") void copy(c);
     else if (k === "i") void aiReview(c);
     else if (k === "w") {
-      if (expanded === c.id) setShowSignals((s) => !s);
+      // An issue opened in place: w writes a comment, as it does in a PR's review.
+      if (expanded === c.id && c.kind === "issue" && !showSignals && !c.resolved) {
+        setAsking(null);
+        setCommenting(c);
+        // Open already, it takes the keys back: what you type never runs as the page's keys.
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLTextAreaElement>(".composer-text")?.focus();
+        });
+      } else if (expanded === c.id) setShowSignals((s) => !s);
       else {
         toggle(c);
         setShowSignals(true);
@@ -1034,9 +1046,11 @@ export function App() {
       e.stopImmediatePropagation();
       return;
     }
-    // Esc closes the composer, wherever focus is, before a review or a page reads it as "go back".
-    if (asking && e.key === "Escape" && !e.isComposing) {
+    // Esc closes the composer or the comment bar, wherever focus is, before a review or a page reads it as "go back"; a
+    // snooze or More menu over it closes first.
+    if ((asking || commenting) && !snoozeFor && !moreFor && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
+      setCommenting(null);
       e.preventDefault();
       e.stopImmediatePropagation();
       return;
@@ -1273,6 +1287,21 @@ export function App() {
           )}
         </main>
       </div>
+      {commenting && (
+        <CommentBar
+          key={commenting.id}
+          card={commenting}
+          onSend={(body) => {
+            // Each send is new: one earlier on this page doesn't stop it, and the bar can't send twice at once.
+            actedRef.current = { ...actedRef.current, [commenting.id]: undefined };
+            return comment(commenting, body);
+          }}
+          onClose={() => {
+            const id = commenting.id;
+            setCommenting((cur) => (cur?.id === id ? null : cur));
+          }}
+        />
+      )}
       {asking && (
         <Composer
           key={`${asking.item ?? ""} ${asking.thread?.id ?? ""}`} // another item or thread starts afresh

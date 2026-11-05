@@ -2715,6 +2715,16 @@ kbd {
   font: 14px var(--sans);
 }
 
+/* The comment bar's box: a few lines, growing as you write. */
+.composer-text {
+  height: auto;
+  min-height: 34px;
+  max-height: 40vh;
+  padding: 7px 10px;
+  field-sizing: content;
+  resize: none;
+}
+
 .composer-input:focus {
   border-color: var(--pencil);
   outline: none;

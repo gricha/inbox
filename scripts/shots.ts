@@ -309,6 +309,20 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(400);
     },
   },
+  {
+    // w on an issue opened in place: the comment bar at the window's bottom.
+    name: "issue-comment",
+    after: refold,
+    go: async (page) => {
+      await at("#/")(page);
+      await unfold(page);
+      await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
+      await page.waitForTimeout(400);
+      await page.keyboard.press("w");
+      await page.keyboard.type("The OOM is in the batcher: I'll cap the batch at 500 rows today.");
+      await page.waitForTimeout(200);
+    },
+  },
   { name: "review", go: review("acme/api#4127") },
   {
     // Opened while the desk fetches its diff: the row's header and AI read at once, quiet placeholders for the rest.

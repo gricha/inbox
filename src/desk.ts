@@ -2237,12 +2237,14 @@ export class Desk {
     return { url };
   }
 
-  // POST /api/review/:id/comment: your comment on the PR itself (w in its review), on your keypress. One of the desk's GitHub
-  // writes; it's yours done, so it leaves your desk until someone answers.
+  // POST /api/review/:id/comment: your comment on the PR (w in its review) or the issue (w on it opened in place), on your
+  // keypress. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
   async comment(ref: string, body: string): Promise<{ url: string }> {
-    const e = this.pr(ref);
+    this.requireConfig();
+    const e = this.snapshot().entries.get(this.resolve(ref))!;
     const id = e.item.id;
     const text = body.trim();
+    if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
     if (!text) throw new DeskError(400, "the comment is empty");
     if (text.length > MAX_REPLY) throw new DeskError(400, `keep a comment under ${MAX_REPLY} characters`);
     if (!this.writer) throw new DeskError(409, "commenting isn't available in this desk");

@@ -17,7 +17,7 @@ A rule with `hard = true` is a floor (asked to review by name, by default): what
 
 The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off and wakes with a message when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name; Claude Code delivers it only when both sessions skip permission prompts or neither does.
 
-All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, comment on one, Send on their reply to a reviewer, Ready for review on their own draft with the reviewers they pick, and the More menu's close, draft, merge, reopen and request changes).
+All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, comment on one or on an issue, Send on their reply to a reviewer, Ready for review on their own draft with the reviewers they pick, and the More menu's close, draft, merge, reopen and request changes).
 
 ## How to reach it
 

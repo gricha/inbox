@@ -139,6 +139,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         {activity}
         <div className="actions card-keys">
           <KeyButton k="esc" label="Close" run={run} />
+          {card.kind === "issue" && !card.resolved && <KeyButton k="w" label="Comment" run={run} />}
           <KeyButton k="o" label="Open on GitHub" run={run} />
           {mine && <HandKey card={card} run={run} />}
           <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
