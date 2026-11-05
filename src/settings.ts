@@ -137,8 +137,8 @@ export const SETTINGS = [
     section: "agent",
     label: "Coordinator skips permission prompts",
     type: "boolean",
-    default: false,
-    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list is then the only fence: it blocks posting or editing as you with gh, all of gh api, and any force push but one with a lease; anything it doesn't name runs without asking. Turn it on if your own sessions skip permission prompts: Claude Code delivers messages between two sessions only when both skip them or neither does, so until then what it sends your sessions, and they send it, is held and expires. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
+    default: true,
+    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list is then the only fence: it blocks posting or editing as you with gh, all of gh api, and any force push but one with a lease; anything it doesn't name runs without asking. Leave it on if your own sessions skip permission prompts: Claude Code delivers messages between two sessions only when both skip them or neither does, so otherwise what it sends your sessions, and they send it, is held and expires. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
   },
   {
     key: "policy.judge",

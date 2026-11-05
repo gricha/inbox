@@ -201,7 +201,7 @@ const ROLE =
 async function coordinated(c: TestContext, settings: Record<string, unknown> = {}) {
   const fake = fakeClaude();
   const t = await setup([myPr(3, { ci: "pending", title: TITLE }), myPr(4, { ci: "pending" }), myPr(5, { ci: "pending" })], {
-    settings: { "policy.judge": false, "review.auto_ai": false, ...settings },
+    settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, ...settings },
   });
   const desks = [t.desk];
   c.after(() => {
@@ -572,6 +572,30 @@ test(
     assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee03-1111-2222", "--bg", t.said()[2]]);
     assert.deepEqual(ids(t).at(-1), ["c0ffee03", "default", true]);
     assert.equal(t.fake.sessions().length, 3, "one copy per change");
+  },
+);
+
+test(
+  "bypass is the default: one started in default mode becomes a bypass copy when the desk next starts, with no turn",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    t.desk.act("web#3", "inflight");
+    await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+    await t.desk.coordinator.flushing;
+    t.desk.stop();
+    const file = path.join(t.home, "settings.json");
+    const { "agent.coordinator_bypass": _, ...rest } = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    fs.writeFileSync(file, JSON.stringify(rest));
+    const desk = await t.restart();
+    await until(() => desk.coordinator.saved()?.id === "c0ffee02");
+    assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions"]]);
+    assert.deepEqual(ids(t), [
+      ["c0ffee01", "default", false],
+      ["c0ffee02", "bypassPermissions", true],
+    ]);
+    assert.equal(desk.coordinator.saved()?.mode, "bypass");
+    assert.equal(t.said().length, 1, "its history, and no turn");
   },
 );
 
