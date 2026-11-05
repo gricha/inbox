@@ -17,7 +17,7 @@ import type {
   StackMember,
 } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, copyText, eventText, modelName, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, copyText, eventText, handoffLabel, modelName, sinceText, shortRef, when } from "../format.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -925,6 +925,13 @@ function Head({
           </span>
         ))}
       </p>
+      {card.handoff && (
+        <p className="rv-meta rv-handoff">
+          <span>
+            <b>{handoffLabel(card.handoff)}</b> {card.handoff.why}
+          </span>
+        </p>
+      )}
       {resolved && (
         <p className="rv-meta rv-resolved">
           <span>{resolved}</span>

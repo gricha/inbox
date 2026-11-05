@@ -1,4 +1,7 @@
-import { UNTIL, type ActivityEvent, type Bucket, type Card } from "../../src/types.ts";
+import { UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff } from "../../src/types.ts";
+
+// What an agent's hand-off leads with: which task sent it.
+export const handoffLabel = (h: Handoff) => (h.from ? `From ${h.from}:` : "Handed to you:");
 
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");

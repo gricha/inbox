@@ -106,9 +106,14 @@ export function createApp(desk: Desk, port: number): Hono {
   // desk_add and `desk add`: a pin plus GitHub reads, so agents may call it.
   app.post("/api/add", async (c) => {
     ready();
-    const { id } = await c.req.json<{ id?: unknown }>().catch((): { id?: unknown } => ({}));
+    type Body = { id?: unknown; why?: unknown; from?: unknown };
+    const { id, why, from } = await c.req.json<Body>().catch((): Body => ({}));
     if (typeof id !== "string" || !id) throw new DeskError(400, "need { id }: owner/repo#123 or a GitHub URL");
-    return c.json({ ok: true, ...(await desk.add(id)) });
+    const line = (v: unknown) => {
+      if (v !== undefined && typeof v !== "string") throw new DeskError(400, "why and from are lines of text");
+      return v;
+    };
+    return c.json({ ok: true, ...(await desk.add(id, line(why), line(from))) });
   });
   // Who you can ask to review your PR, as you type: a path of its own, since the review's GET takes any id.
   app.get("/api/reviewers/:id{.+}", async (c) => {

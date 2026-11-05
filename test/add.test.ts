@@ -145,6 +145,55 @@ test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't
   assert.deepEqual(t.gh.lookupCalls, ["acme/api#999"]);
 });
 
+test("an agent's hand-off says why it's on your desk, beside the rule's why, until you act on it", async (c) => {
+  const t = await setup([reviewAsk(1), teamPing(2)], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.gh.items.set(ID, unknown());
+  const card = (id: string) => t.desk.item(id).card;
+  const asked = card("acme/api#1").why;
+
+  const first = await t.desk.add("api#1", "  the retry budget\nchanged\u202e  ", "seer retry fix");
+  await t.desk.add(ID, "needs your call on the token transport", "seer write gate");
+  await t.desk.add("api#2", "your sign-off on the schema", "");
+  assert.deepEqual(card("acme/api#1").handoff, { why: "the retry budget changed", from: "seer retry fix" }, "one plain line");
+  assert.equal(card("acme/api#1").why, asked, "the rule's why stays its own");
+  assert.deepEqual(card(ID).handoff, { why: "needs your call on the token transport", from: "seer write gate" });
+  assert.deepEqual(card("acme/api#2").handoff, { why: "your sign-off on the schema", from: "" });
+  assert.deepEqual(t.desk.focus().sections.now.find((x) => x.id === "acme/api#1")?.handoff?.from, "seer retry fix");
+
+  // Dealt with, it's yours: the ask doesn't come back with the item; undo brings it back.
+  const done = t.desk.act("api#1", "done");
+  assert.equal(card("acme/api#1").handoff, undefined);
+  t.desk.undo(done.undo_seq);
+  assert.equal(card("acme/api#1").handoff?.why, "the retry budget changed");
+
+  // Each add's why goes with its own pin: a later one, or yours without a why, stands until it's undone.
+  const second = await t.desk.add("api#1", "now it's a schema change too", "seer retry fix");
+  assert.equal(card("acme/api#1").handoff?.why, "now it's a schema change too");
+  const bare = await t.desk.add("api#1");
+  assert.equal(card("acme/api#1").handoff, undefined);
+  t.desk.undo(bare.undo_seq);
+  t.desk.undo(second.undo_seq);
+  assert.equal(card("acme/api#1").handoff?.why, "the retry budget changed");
+  t.desk.undo(first.undo_seq);
+  assert.equal(card("acme/api#1").handoff, undefined, "unpinned: no hand-off");
+
+  // Your own pin is yours.
+  t.desk.act(ID, "unpin");
+  t.desk.act(ID, "pin");
+  assert.equal(card(ID).handoff, undefined);
+
+  await assert.rejects(t.desk.add("api#2", " \n "), /the why is empty/);
+  const app = createApp(t.desk, 47823);
+  const res = await app.request("http://127.0.0.1:47823/api/add", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "api#2", why: ["not a line"] }),
+  });
+  assert.equal(res.status, 400);
+});
+
 test("adding a done, snoozed or muted item brings it back, and its one undo puts that back too", async (c) => {
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);

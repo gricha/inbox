@@ -317,12 +317,12 @@ export class Store {
     return r ? this.lastAction(r.seq as number) : null;
   }
 
-  // Who pinned it: the agent behind its latest pin still in effect, null for you.
-  pinnedBy(itemId: string): string | null {
+  // Its latest pin still in effect: the agent behind it (null for you) and its seq.
+  lastPin(itemId: string): { agent: string | null; seq: number } | null {
     const r = this.db
-      .prepare("SELECT agent FROM events WHERE item_id = ? AND action = 'pin' AND undone = 0 ORDER BY seq DESC LIMIT 1")
+      .prepare("SELECT agent, seq FROM events WHERE item_id = ? AND action = 'pin' AND undone = 0 ORDER BY seq DESC LIMIT 1")
       .get(itemId);
-    return (r?.agent as string | null | undefined) ?? null;
+    return r ? { agent: (r.agent as string | null) ?? null, seq: Number(r.seq) } : null;
   }
 
   markUndone(seq: number): void {

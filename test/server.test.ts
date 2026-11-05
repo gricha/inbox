@@ -122,9 +122,11 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     assert.deepEqual(await call("desk_undo", { seq }), { text: "undid done on acme/api#7", isError: false });
     assert.equal(t.desk.status().text, "desk 1");
 
-    const added = await call("desk_add", { ref: "api#7" });
+    const added = await call("desk_add", { ref: "api#7", why: "needs your call on the retry budget", from: "seer retry fix" });
     assert.match(added.text, /^added acme\/api#7 to the user's desk, pinned\. .*Undo with desk_undo seq=\d+\./);
     assert.equal(t.desk.item("api#7").state.pinned, true);
+    assert.deepEqual(t.desk.item("api#7").card.handoff, { why: "needs your call on the retry budget", from: "seer retry fix" });
+    assert.equal((await call("desk_add", { ref: "api#7" })).isError, true, "a hand-off says why");
 
     const missing = await call("desk_item", { ref: "api#99" });
     assert.equal(missing.isError, true);

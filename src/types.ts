@@ -388,6 +388,12 @@ export type Status = "active" | "done" | "snoozed" | "muted";
 // ---------------------------------------------------------------------------
 // HTTP API (127.0.0.1:47823). All JSON.
 
+// An agent's hand-off: what it needs from you, and which task sent it ("" when it didn't say).
+export interface Handoff {
+  why: string;
+  from: string;
+}
+
 export interface Card {
   id: string;
   kind: "pr" | "issue";
@@ -401,6 +407,7 @@ export interface Card {
   stage?: Stage; // a PR's, from stage() in src/stage.ts; an issue has none
   bucket: Bucket;
   why: string;
+  handoff?: Handoff; // an agent put it on your desk (desk_add) and said why; gone once you act on it
   demoted?: string;
   board: string;
   boards: string[]; // every board the item is on (for Focus)

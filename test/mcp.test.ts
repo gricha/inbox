@@ -192,16 +192,22 @@ test("desk_act posts local triage", async () => {
 });
 
 test("desk_add says what it started and how to undo it, then the item as desk_item has it", async () => {
-  const r = await call("desk_add", { ref: "seer#8949" });
+  const r = await call("desk_add", { ref: "seer#8949", why: "your call on the provider timeout", from: "flags fix" });
   assert.equal(r.isError, false);
-  assert.deepEqual(lastCall(), { method: "POST", path: "/api/add", body: { id: "seer#8949" } });
+  assert.deepEqual(lastCall(), {
+    method: "POST",
+    path: "/api/add",
+    body: { id: "seer#8949", why: "your call on the provider timeout", from: "flags fix" },
+  });
   assert.match(
     r.text,
     /^added getsentry\/seer#8949 to the user's desk, pinned\. Its AI review is being written; desk_brief waits for it\. Local state only; nothing was sent to GitHub\. Undo with desk_undo seq=8\.\ngetsentry\/seer#8949 · pr by octo · status active · pinned\n/,
   );
   assertFenced(r.text, "title: Flag provider client calls in unchecked paths");
-  const missing = await call("desk_add", { ref: "nope#1" });
+  const missing = await call("desk_add", { ref: "nope#1", why: "x", from: "y" });
   assert.equal(missing.isError, true);
+  const bare = await call("desk_add", { ref: "seer#8949" });
+  assert.equal(bare.isError, true, "no why: refused before it reaches the desk");
 });
 
 test("desk_policy: get fences the text and gives the hash; set needs that hash as base", async () => {

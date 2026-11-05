@@ -30,7 +30,8 @@ const USAGE = `usage: desk <command>
   status [--short]                    counts per board; --short prints the status-line text
   ls [board|focus] [--all] [--json]   list cards (default focus); --all adds later and fyi
   show <ref> [--json]                 one item: why, facts, rule trace
-  add <ref>                           put a PR or issue on your desk (fetched if new, pinned) and start its pre-review
+  add <ref> [why] [--from <task>]     put a PR or issue on your desk (fetched if new, pinned) and start its pre-review;
+                                      why: the line it shows as why it's there
   done|mute|unmute|pin|unpin|restore <ref>
   snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, ISO time, or ci|push|approved|ready|conflict
   undo [seq]                          undo the last action (or the one with that number)
@@ -70,6 +71,7 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   show: { json: { type: "boolean" } },
   settings: { json: { type: "boolean" } },
   connect: { apply: { type: "boolean" } },
+  add: { from: { type: "string" } },
 };
 
 // [min, max] positionals per command.
@@ -91,7 +93,7 @@ const ARITY: Record<string, [number, number]> = {
   connect: [0, 1],
   install: [0, 0],
   uninstall: [0, 0],
-  add: [1, 1],
+  add: [1, 2],
   done: [1, 1],
   mute: [1, 1],
   unmute: [1, 1],
@@ -256,7 +258,7 @@ const act =
   };
 
 async function add(x: Ctx): Promise<number> {
-  const r = await api.add(x.args[0]!);
+  const r = await api.add(x.args[0]!, x.args[1], typeof x.opts.from === "string" ? x.opts.from : undefined);
   const d = r.item;
   const ai = d.generating ? ", AI review started" : "";
   x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${ai}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);

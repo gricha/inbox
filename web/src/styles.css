@@ -3879,6 +3879,13 @@ kbd {
   color: var(--pencil);
 }
 
+/* An agent's hand-off: who sent it leads in ink. */
+.rv-handoff b,
+.d-handoff b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* A PR in Merging: what it waits on and the coordinator's note, in pencil as there. */
 .rv-lane {
   color: var(--pencil);

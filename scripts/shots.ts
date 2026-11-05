@@ -289,6 +289,21 @@ const SHOTS: Shot[] = [
     after: release("**/api/review/**"),
   },
   {
+    // An agent's hand-off: who sent it and what it needs from you, under the why and facts.
+    name: "review-handoff",
+    go: async (page) => {
+      await reviewAs((v) => {
+        v.card.handoff = { why: "needs your call on the token transport before it merges", from: "seer write gate" };
+      })(page);
+      await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
     // Nothing to show yet: no comments, no AI review, no files, one quiet line each.
     name: "review-empty",
     go: async (page) => {

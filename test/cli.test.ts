@@ -203,6 +203,8 @@ test("add posts the ref and says what it started", async () => {
   assert.deepEqual(lastCall(), { method: "POST", path: "/api/add", body: { id: "seer#8949" } });
   assert.equal(r.out, "✓ added getsentry/seer#8949 to your desk, pinned, AI review started  (desk undo 8 to revert)\n");
   assert.equal((await run(["add"])).code, 2);
+  assert.equal((await run(["add", "seer#8949", "your call on the timeout", "--from", "flags fix"])).code, 0);
+  assert.deepEqual(lastCall().body, { id: "seer#8949", why: "your call on the timeout", from: "flags fix" });
 });
 
 test("snooze defaults to tomorrow and passes an explicit until", async () => {

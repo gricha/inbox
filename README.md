@@ -112,6 +112,7 @@ The CLI and the MCP tools talk to the running desk.
 desk ls                       # the queue in the terminal (now, then today); `--all` for the rest
 desk show seer#8463           # why it's there, with the rule trace
 desk add getsentry/seer#8463  # on your desk, pinned, its AI review started ("add X to my review" in any session)
+desk add getsentry/seer#8463 "your call on the retry budget" --from "seer retry fix"  # with the line it shows as why
 desk done seer#8463           # also: snooze, mute, pin, restore, undo, sync, prompt, brief
 desk settings                 # list settings; `desk settings set review.auto_ai false`
 desk status --short           # "desk 10 +2" (10 in the queue, 2 new), for a status line

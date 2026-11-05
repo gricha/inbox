@@ -51,6 +51,7 @@ const compact = (c: Card) => ({
   bucket: c.bucket,
   title: c.title,
   why: c.why,
+  ...(c.handoff && { handoff: c.handoff }),
   author: c.author,
   url: c.url,
   chips: c.chips,
@@ -194,6 +195,7 @@ function itemText(d: ItemDetail): string {
     "\n" +
     untrusted([
       `title: ${oneLine(c.title)}`,
+      ...(c.handoff ? [`handed to the user${c.handoff.from ? ` by ${oneLine(c.handoff.from)}` : ""}: ${oneLine(c.handoff.why)}`] : []),
       `facts: ${c.chips.join(" · ") || "none"}`,
       ...(d.placements.length
         ? d.placements.flatMap(traceLines)
@@ -242,8 +244,8 @@ async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[nu
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
 }
 
-async function addText(api: DeskClient, ref: string): Promise<string> {
-  const r = await api.add(ref);
+async function addText(api: DeskClient, ref: string, why: string, from: string): Promise<string> {
+  const r = await api.add(ref, why, from);
   const d = r.item;
   const ai =
     d.card.kind !== "pr"
@@ -352,11 +354,21 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_add",
     {
       description:
-        "Add a PR or issue to the user's desk (\"add X to my review\"): fetched read only if the desk doesn't hold it, and pinned so it stays on their main page. For a PR it also starts the pre-review, as opening it in the desk would: its diff and conversations fetched, its AI review and Claude's read of what waits on the user. Local only; nothing is sent to GitHub. Returns the item and an undo seq.",
-      inputSchema: { ref: z.string().describe("owner/repo#123 or a GitHub URL; repo#123 only for an item already on the desk") },
+        "Add a PR or issue to the user's desk (\"add X to my review\"), or hand them one from your work: fetched read only if the desk doesn't hold it, and pinned so it stays on their main page. `why` and `from` are what the desk shows on it as why it's there, so they know what it wants from them before opening it. For a PR it also starts the pre-review, as opening it in the desk would: its diff and conversations fetched, its AI review and Claude's read of what waits on the user. Local only; nothing is sent to GitHub. Returns the item and an undo seq.",
+      inputSchema: {
+        ref: z.string().describe("owner/repo#123 or a GitHub URL; repo#123 only for an item already on the desk"),
+        why: z
+          .string()
+          .min(1)
+          .max(300)
+          .describe(
+            'One line: what it needs from the user and why now ("needs your call on the token transport before it merges", "you asked to review it")',
+          ),
+        from: z.string().min(1).max(60).describe('Your task in a few words, so they know which session sent it ("seer region fix")'),
+      },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    ({ ref }) => run(() => addText(api, ref)),
+    ({ ref, why, from }) => run(() => addText(api, ref, why, from)),
   );
 
   server.registerTool(

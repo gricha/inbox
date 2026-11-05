@@ -113,7 +113,8 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
     undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
-    add: (ref: string) => call<AddResult>("POST", "/api/add", { id: ref }),
+    add: (ref: string, why?: string, from?: string) =>
+      call<AddResult>("POST", "/api/add", { id: ref, ...(why !== undefined && { why }), ...(from !== undefined && { from }) }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
     getConfig: () => call<ConfigDoc>("GET", "/api/config"),
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),

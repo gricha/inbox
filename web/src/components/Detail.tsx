@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
-import { age, BUCKET_LABEL, cls, eventText } from "../format.ts";
+import { age, BUCKET_LABEL, cls, eventText, handoffLabel } from "../format.ts";
 import { cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { SkLines } from "./Skeleton.tsx";
@@ -125,6 +125,11 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     return (
       <div className="more opened">
         {card.why && !card.resolved && <p className="d-why">{card.why.charAt(0).toUpperCase() + card.why.slice(1)}</p>}
+        {card.handoff && (
+          <p className="d-why d-handoff">
+            <b>{handoffLabel(card.handoff)}</b> {card.handoff.why}
+          </p>
+        )}
         <p className="card-facts">
           {facts.map((f) => (
             <span key={f}>{f}</span>

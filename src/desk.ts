@@ -35,6 +35,7 @@ import type {
   Context,
   FocusView,
   GitHubAction,
+  Handoff,
   InflightRow,
   InflightView,
   Item,
@@ -96,7 +97,8 @@ const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
-const MAX_LINE = 300; // a hand-back's why, a note
+const MAX_LINE = 300; // a hand-back's why, a note, a hand-off's why
+const MAX_FROM = 60; // which task sends it, as an inquiry's from
 const MAX_REPLY = 5_000;
 // What each More menu write does to % (the item), and what it did.
 const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
@@ -135,6 +137,7 @@ interface Snapshot {
   needs: Map<string, string>; // PRs the coordinator handed back: why, at the top of the queue
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
   auto: Map<string, string>; // an automation's pin: "<its name>: <its why>"
+  handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
   stacks: Stacks;
 }
 
@@ -162,6 +165,9 @@ export interface DeskOptions {
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
   writer?: GitHubWriter; // approve and ready for review; without it they're off
 }
+
+// Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
+type Added = Record<string, Handoff>;
 
 // A PR's Merging record, in kv under the babysitters' old `sitter:` prefix so hand-backs made before survive.
 interface Merging {
@@ -619,6 +625,7 @@ export class Desk {
     this.store.pruneKv("pr:", kept);
     this.store.pruneKv("judge:", kept);
     this.store.pruneKv("sitter:", kept);
+    this.store.pruneKv("added:", kept);
     this.store.pruneKv("take:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
@@ -823,14 +830,20 @@ export class Desk {
     const reviews = this.store.prefixed<AiReview>("review:");
     const pins = new Map<string, string>();
     const pushed = this.store.prefixed<{ name: string; why: string }>("pushed:");
+    const added = this.store.prefixed<Added>("added:");
     const auto = new Map<string, string>();
+    const handed = new Map<string, Handoff>();
     for (const e of entries.values()) {
       if (!e.state.pinned) continue;
-      const by = this.store.pinnedBy(e.item.id);
+      const pin = this.store.lastPin(e.item.id);
+      const by = pin?.agent;
       // An automation's pin is yours: you wrote what it does.
       pins.set(e.item.id, by === "coordinator" ? "the coordinator" : "them");
       const pu = by?.startsWith("automation:") ? pushed.get(e.item.id) : undefined;
       if (pu) auto.set(e.item.id, `${pu.name}: ${pu.why}`);
+      // The why goes with the pin that brought it, until you act on the item: then it's yours, as an automation's pin is.
+      const ad = pin && added.get(e.item.id)?.[pin.seq];
+      if (ad && !this.store.hasLaterAction(e.item.id, pin.seq)) handed.set(e.item.id, ad);
     }
     // The AI's call on this commit: over a cap, the lightest gives up its slot first, so a close look keeps one.
     const call = (e: Entry) => {
@@ -914,6 +927,7 @@ export class Desk {
       needs,
       pins,
       auto,
+      handed,
       stacks: buildStacks(items),
     };
   }
@@ -952,6 +966,7 @@ export class Desk {
       ...(st && { stage: st }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? p?.why ?? "",
+      ...(snap.handed.has(it.id) && { handoff: snap.handed.get(it.id) }),
       demoted: p?.demoted,
       board: p?.board ?? "",
       boards,
@@ -1725,7 +1740,7 @@ export class Desk {
         throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
     }
     // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
-    if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.pinnedBy(id)?.startsWith("automation:"))
+    if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
       s.pinned = false;
     this.store.putState(s);
     const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
@@ -1754,12 +1769,17 @@ export class Desk {
     return { id: ev.item_id, state, action: ev.action as Action };
   }
 
-  async add(ref: string): Promise<{ item: ItemDetail; undo_seq: number }> {
+  // `why` and `from`: an agent's hand-off, what needs you and which task sends it; the item's why while this pin stays.
+  async add(ref: string, why?: string, from?: string): Promise<{ item: ItemDetail; undo_seq: number }> {
+    const note = why === undefined ? null : this.line(why, "why");
+    const who = note === null || !from?.trim() ? "" : this.line(from, "from", MAX_FROM);
     const id = await this.hold(ref);
     // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
     const before = this.store.state(id);
     this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
     const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
+    if (note !== null)
+      this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
     this.changed();
     this.warmAdded(id);
     return { item: this.item(id), undo_seq };
