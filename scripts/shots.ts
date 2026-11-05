@@ -875,8 +875,10 @@ const SHOTS: Shot[] = [
   { name: "more-review", go: review("acme/worker#875", ["."]) },
   {
     name: "more-row",
+    after: refold,
     go: async (page) => {
       await at("#/")(page);
+      await unfold(page); // your PRs come after what waits on your review
       await page.locator('.line[data-id="acme/worker#875"] .row-main').focus();
       await page.keyboard.press(".");
       await page.waitForTimeout(200);
