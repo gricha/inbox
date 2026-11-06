@@ -220,7 +220,6 @@ export interface SettingDef {
   pattern_hint?: string;
   required?: boolean;
   placeholder?: string;
-  desktop?: boolean; // only the desktop app reads it
 }
 
 export interface SettingsSection {

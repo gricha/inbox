@@ -626,15 +626,10 @@ export function Settings({
       )}
       {sections.map((x) => {
         const defs = view ? view.defs.filter((d) => d.section === x.id) : [];
-        const desktopOnly = defs.length > 0 && defs.every((d) => d.desktop);
         return (
           <section key={x.id} id={`s-${x.id}`} className="s-section" aria-labelledby={`s-${x.id}-title`}>
             <h2 id={`s-${x.id}-title`}>{x.title}</h2>
-            {desktopOnly && !desktop ? (
-              <p className="s-intro">Only the desktop app uses these.</p>
-            ) : (
-              x.help && <p className="s-intro">{x.help}</p>
-            )}
+            {x.help && <p className="s-intro">{x.help}</p>}
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
             {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
             {view && x.id === "review" && <PausedLine p={view.paused.ai} label="AI reviews are paused:" now={now} />}
