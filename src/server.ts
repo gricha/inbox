@@ -12,6 +12,7 @@ import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
 import { Desk, DeskError } from "./desk.ts";
 import { createMcpServer } from "./mcp.ts";
+import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
@@ -39,6 +40,7 @@ const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
 
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
+  instrument(app);
   const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
   // Vite's default ports, or DESK_DEV_PORT when it runs on another.
   if (process.env.DESK_DEV)
@@ -464,6 +466,7 @@ export async function startServer(
     opts.log ??
     ((m: string) => {
       console.error(`${new Date().toISOString()} ${m}`);
+      logLine(m);
     });
   const desk = new Desk({
     home,

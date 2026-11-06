@@ -1,6 +1,7 @@
 import { Component, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { reactErrors } from "./sentry.ts";
 import "./styles.css";
 
 const KEY = "desk.crash_reload_at";
@@ -42,7 +43,7 @@ class Reload extends Component<{ children: ReactNode }, { error: Error | null }>
   }
 }
 
-createRoot(document.querySelector("#root")!).render(
+createRoot(document.querySelector("#root")!, reactErrors).render(
   <StrictMode>
     <Reload>
       <App />

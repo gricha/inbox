@@ -61,6 +61,7 @@ import type {
   Until,
 } from "./types.ts";
 import { byPart, UNTIL } from "./types.ts";
+import { report, webSentry } from "./sentry.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, happened, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
@@ -1076,6 +1077,7 @@ export class Desk {
       synced_at: this.syncedAt,
       syncing: this.syncing,
       sync_error: this.syncError,
+      sentry: webSentry(),
       config_errors: this.configErrors,
       connectors: this.connectors.map((c) => c.status()),
       spaces: loaded.config.spaces.map((s) => ({
@@ -1462,6 +1464,7 @@ export class Desk {
       diffHead = t.head ?? null;
     } catch (err) {
       filesError = (err as Error).message;
+      report(err, "diff", id);
     }
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
@@ -1527,7 +1530,7 @@ export class Desk {
     try {
       return await this.generate(e.item.id);
     } catch (err) {
-      throw new DeskError(502, (err as Error).message);
+      throw Object.assign(new DeskError(502, (err as Error).message), { cause: err });
     }
   }
 
@@ -1577,6 +1580,7 @@ export class Desk {
     } catch (err) {
       if (this.stopped) throw err; // killed with the desk
       const message = (err as Error).message;
+      report(err, "ai_review", id);
       this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
       const cause = (err as Error).cause;
       this.log(`AI review of ${id} failed: ${message}${typeof cause === "string" ? ` (${cause})` : ""}`);
@@ -2008,7 +2012,8 @@ export class Desk {
       const url = a.item_id ? (this.snapshot().entries.get(a.item_id)?.item.url ?? null) : null;
       await this.coordinator.tell(askLine(a, url));
     } else await this.coordinator.now();
-    if (!this.coordinator.saved()) throw new DeskError(502, "the coordinator didn't start; the desk's log says why");
+    if (!this.coordinator.saved())
+      throw Object.assign(new DeskError(502, "the coordinator didn't start; the desk's log says why"), { cause: this.coordinator.failure });
   }
 
   merging(id: string): Merging {
@@ -2178,7 +2183,9 @@ export class Desk {
           this.asks().filter((x) => x.id !== a.id),
         );
         this.changed();
-        throw new DeskError(502, "the coordinator didn't start; the desk's log says why");
+        throw Object.assign(new DeskError(502, "the coordinator didn't start; the desk's log says why"), {
+          cause: this.coordinator.failure,
+        });
       }
     }
     return a;

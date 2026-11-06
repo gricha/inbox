@@ -9,6 +9,7 @@ import { DeskError } from "./errors.ts";
 import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { Automation, AutomationRun, AutomationView } from "./types.ts";
+import { detached, report } from "./sentry.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -237,7 +238,9 @@ export class Automations {
     const now = this.desk.now().toISOString();
     for (const r of this.runs()) if (!r.done_at) this.record({ ...r, done_at: now, error: CUT });
     this.timer = setInterval(() => {
-      this.tick();
+      detached(() => {
+        this.tick();
+      });
     }, TICK);
     this.timer.unref();
     this.tick();
@@ -337,6 +340,7 @@ export class Automations {
       if (found.length > ITEMS_MAX) run.summary += ` (It listed ${found.length}; the desk took the first ${ITEMS_MAX}.)`;
     } catch (e) {
       if (stop.aborted) return run;
+      report(e, "automation", a.id);
       run.error = (e as Error).message.trim() || "the run failed";
     }
     run.done_at = this.desk.now().toISOString();

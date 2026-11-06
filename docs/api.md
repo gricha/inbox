@@ -273,6 +273,7 @@ interface Overview {
   focus: { now: number; today: number; new: number };
   inflight: { total: number }; // your open PRs in Merging
   rate_limit: { remaining: number; reset_at: string } | null;
+  sentry?: { dsn: string; release: string | undefined } | null; // the UI's Sentry; null when `desk serve` didn't start Sentry (DESK_SENTRY=0, or the app's in-process desk)
 }
 
 interface Placement {

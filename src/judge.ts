@@ -15,6 +15,7 @@ import {
   type JudgeStep,
   type Signals,
 } from "./types.ts";
+import { detached, report } from "./sentry.ts";
 
 // The policy while policy.md is empty, so Claude sorts from the first sync.
 export const DEFAULT_POLICY = `Less is more. Show me what a person is waiting on me for; when unsure, sort it away.
@@ -416,7 +417,9 @@ export class Judge {
     clearTimeout(this.timer);
     this.timer = setTimeout(
       () => {
-        this.pump();
+        detached(() => {
+          this.pump();
+        });
       },
       Math.max(ms, 1000),
     );
@@ -461,6 +464,7 @@ export class Judge {
       this.failures++;
       this.retryAt = Date.now() + BACKOFF[Math.min(this.failures, BACKOFF.length) - 1]!;
       this.error = (err as Error).message;
+      report(err, "judge");
       const cause = (err as Error).cause;
       desk.log(`judge failed on ${batch.length} items: ${this.error}${typeof cause === "string" ? ` (${cause})` : ""}`);
     } finally {

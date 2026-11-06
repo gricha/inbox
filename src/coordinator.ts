@@ -8,6 +8,7 @@ import type { Desk } from "./desk.ts";
 import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
+import { detached, report } from "./sentry.ts";
 
 export const NAME = "Review Desk coordinator";
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
@@ -106,6 +107,7 @@ export class Coordinator {
   status: CoordinatorView["status"] = null;
   watching: NodeJS.Timeout | null = null;
   watchEvery = 10_000; // while an ask of yours waits on its answer
+  failure: unknown = null; // the last run's, already reported: the routes' "didn't start" carries it
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -177,7 +179,7 @@ export class Coordinator {
   start(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
-      void this.flush();
+      detached(() => void this.flush());
     }, this.every);
     this.ticker.unref();
     void this.flush();
@@ -211,7 +213,7 @@ export class Coordinator {
         this.watching = null;
         return;
       }
-      if (!this.flushing) void this.find().catch(() => null);
+      if (!this.flushing) detached(() => void this.find().catch(() => null));
     }, this.watchEvery);
     this.watching.unref();
   }
@@ -234,7 +236,7 @@ export class Coordinator {
     if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asks().length || this.asked)) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.flush();
+      detached(() => void this.flush());
     }, this.batch);
     this.timer.unref();
   }
@@ -326,10 +328,13 @@ export class Coordinator {
           this.desk.changed();
         }
       }
+      this.failure = null;
       this.failed(null);
       this.schedule();
     } catch (e) {
       this.asked = false;
+      this.failure = e;
+      if (!this.desk.stopped) report(e, "coordinator"); // not when the desk stopping killed it
       this.desk.log(`coordinator: ${(e as Error).message}`);
       this.failed((e as Error).message.trim());
     } finally {

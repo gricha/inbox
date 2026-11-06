@@ -531,6 +531,7 @@ export interface Overview {
   focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
   inflight: { total: number }; // your open PRs in Merging
   rate_limit: { remaining: number; reset_at: string } | null;
+  sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
 }
 
 // A source of items and events: GitHub today.

@@ -7,6 +7,7 @@ import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
 import type { Connector, NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
+import { detached, report } from "../sentry.ts";
 
 const HOUR = 3_600_000;
 const MAX_QUERY = 256; // GitHub search rejects longer queries
@@ -92,7 +93,9 @@ export class GitHubConnector implements Connector {
   arm(): void {
     if (this.timer) clearTimeout(this.timer);
     const wait = Math.max(this.desk.settings["github.poll_seconds"] * 1000, this.pausedUntil - Date.now());
-    this.timer = setTimeout(() => void this.tick(), wait);
+    this.timer = setTimeout(() => {
+      detached(() => void this.tick());
+    }, wait);
   }
 
   async feedTick(): Promise<void> {
@@ -102,7 +105,12 @@ export class GitHubConnector implements Connector {
 
   armFeed(wait: number): void {
     if (this.feedTimer) clearTimeout(this.feedTimer);
-    this.feedTimer = setTimeout(() => void this.feedTick(), Math.max(wait, this.pausedUntil - Date.now()));
+    this.feedTimer = setTimeout(
+      () => {
+        detached(() => void this.feedTick());
+      },
+      Math.max(wait, this.pausedUntil - Date.now()),
+    );
   }
 
   status(): ConnectorStatus {
@@ -253,6 +261,7 @@ export class GitHubConnector implements Connector {
     } catch (e) {
       if (this.stopped) return;
       this.error = (e as Error).message;
+      if (!isRateLimited(e)) report(e, "sync");
       if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
       desk.log(`sync failed: ${this.error}`);
     } finally {
@@ -347,6 +356,7 @@ export class GitHubConnector implements Connector {
       desk.synced();
     } catch (e) {
       if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
+      else report(e, "refresh", id);
       desk.log(`refresh of ${id} failed: ${(e as Error).message}`);
     }
   }
@@ -407,7 +417,10 @@ export class GitHubConnector implements Connector {
       if (unknown) void this.reconcile();
     } catch (e) {
       if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
-      else this.feedError = (e as Error).message;
+      else {
+        this.feedError = (e as Error).message;
+        report(e, "notifications");
+      }
       desk.log(`notifications failed: ${(e as Error).message}`);
     } finally {
       this.polling = false;

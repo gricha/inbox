@@ -5,6 +5,7 @@ import type { Desk } from "./desk.ts";
 import type { PrContext } from "./github/index.ts";
 import { askClaude } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
+import { report } from "./sentry.ts";
 
 const BATCH = 10; // conversations per call
 const BODY = 1500; // characters of each comment
@@ -255,6 +256,7 @@ export class Conversations {
     } catch (err) {
       if (desk.stopped) return;
       this.errors.set(id, { message: (err as Error).message, at: Date.now() });
+      report(err, "conversations", id);
       desk.log(`reading the conversations on ${id} failed: ${(err as Error).message}`);
     }
   }

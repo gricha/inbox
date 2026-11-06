@@ -10,6 +10,7 @@ import * as api from "./client.ts";
 import { DeskApiError, DeskDownError } from "./client.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
+import { startSentry, stopSentry } from "./sentry.ts";
 import { openCommand } from "./notify.ts";
 import { UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue, type Until } from "./types.ts";
 
@@ -454,6 +455,8 @@ async function serve(x: Ctx): Promise<number> {
   const port = Number(raw);
   // Port 0 would pick a random port no client can find.
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`bad port: ${raw}`);
+  // Before the server's modules load, so Sentry instruments them.
+  await startSentry();
   const { startServer } = await import("./server.ts");
   const srv = await startServer({ port, open: !!x.opts.open });
   const refresh = () => {
@@ -471,6 +474,7 @@ async function serve(x: Ctx): Promise<number> {
     process.once("SIGTERM", resolve);
   });
   await srv.close();
+  await stopSentry();
   return 0;
 }
 

@@ -37,6 +37,7 @@ import {
   type Route,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
+import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
 import { Composer, type About, type Thread } from "./components/Composer.tsx";
 import { Help } from "./components/Help.tsx";
@@ -209,6 +210,7 @@ export function App() {
       ]);
       if (n !== loadSeq.current) return;
       setOverview(ov);
+      startSentry(ov.sentry);
       if (l) setLane(l);
       setNow(Date.now());
       setLoads((x) => x + 1);

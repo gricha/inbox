@@ -32,7 +32,7 @@ function freePort(): Promise<number> {
 const step = (msg: string) => {
   console.log(`• ${msg}`);
 };
-const env = { ...process.env, DESK_HOME: home, DESK_PORT: port } as Record<string, string>;
+const env = { ...process.env, DESK_HOME: home, DESK_PORT: port, DESK_SENTRY: "0" } as Record<string, string>;
 delete env.DESK_SOURCE;
 delete env.DESK_DEV;
 
