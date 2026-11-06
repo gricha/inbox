@@ -187,6 +187,15 @@ export async function startSource(o: { dir: string; node: string; port: number; 
           });
         });
 
+  const kill = () => {
+    if (stopping) return;
+    stopping = true;
+    fs.unwatchFile(lock);
+    // node --watch passes one SIGTERM on to the desk, which closes cleanly; a second one to the desk would cut that short.
+    signal(kids.desk?.pid, "SIGTERM", false);
+    signal(kids.vite?.pid, "SIGTERM", true);
+  };
+
   return {
     ui,
     status: () => ({ dir: o.dir, state: failed ? "failed" : "running", detail: failed ? tail.join("\n") : undefined, log: logFile }),
@@ -201,23 +210,13 @@ export async function startSource(o: { dir: string; node: string; port: number; 
     },
     async stop() {
       if (stopping) return;
-      stopping = true;
-      fs.unwatchFile(lock);
+      kill();
       const all = [kids.desk, kids.vite].filter((c): c is ChildProcess => c !== null);
-      // node --watch passes one SIGTERM on to the desk, which closes cleanly; a second one to the desk would cut that short.
-      signal(kids.desk?.pid, "SIGTERM", false);
-      signal(kids.vite?.pid, "SIGTERM", true);
       await Promise.race([Promise.all(all.map(exited)), sleep(5000)]);
       for (const c of all) signal(c.pid, "SIGKILL", true); // whatever they started and left
       write("app", `${new Date().toISOString()} stopped`);
       fs.rmSync(pidFile(o.home), { force: true });
     },
-    kill() {
-      if (stopping) return;
-      stopping = true;
-      fs.unwatchFile(lock);
-      signal(kids.desk?.pid, "SIGTERM", false);
-      signal(kids.vite?.pid, "SIGTERM", true);
-    },
+    kill,
   };
 }
