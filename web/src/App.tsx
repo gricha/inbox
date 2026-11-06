@@ -174,12 +174,6 @@ export function App() {
       undoWrite.current = null;
     }, ms);
   }, []);
-  const reviewFlash = useCallback(
-    (text: string, error = false, ms?: number) => {
-      flash(text, error, false, ms);
-    },
-    [flash],
-  );
 
   const saveSettingsView = useCallback((s: SettingsView) => {
     settingsSeq.current++;
@@ -1259,7 +1253,7 @@ export function App() {
               me={overview?.me ?? ""}
               now={now}
               inert={help}
-              flash={reviewFlash}
+              flash={flash}
               onCard={run}
               onGithub={(c, a, head, body) => github(c, a, head, body)}
               acted={acted[route.id]}

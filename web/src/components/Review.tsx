@@ -162,7 +162,7 @@ export function Review({
   me: string; // your login: m and b are for your own PRs
   now: number;
   inert: boolean;
-  flash: (text: string, error?: boolean, ms?: number) => void;
+  flash: (text: string, error?: boolean) => void;
   onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
   onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Promise<boolean>; // the More menu's writes, and Request changes
   acted: Acted | undefined; // what you did on it from here: shown in place of the key you pressed

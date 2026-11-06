@@ -22,7 +22,7 @@ export function Conversation({
 }: {
   view: ReviewView;
   now: number;
-  flash: (text: string, error?: boolean, ms?: number) => void;
+  flash: (text: string, error?: boolean) => void;
   onThread: (t: Thread) => void;
   onAsk: (t: Thread) => void;
 }) {
