@@ -362,6 +362,13 @@ test("desk_ask gives where an ask is: the user's words and the desk's facts outs
   const quoted = fence((await call("desk_ask", { ask_id: "b2c3d4e5" })).text);
   assert.ok(quoted.inside.includes("file_arg: 'app/routes/$id'\\''x.ts'"), quoted.inside.join("\n"));
   assert.ok(!quoted.outside.includes("$id"));
+  const mine = fence((await call("desk_ask", { ask_id: "c3d4e5f6" })).text);
+  assert.match(mine.outside, /about my PR acme\/web#3 https:\/\/github\.com\/acme\/web\/pull\/3 \(open, not handed off\)\./);
+  assert.match(
+    mine.outside,
+    /\nPush: yes, only to the branch below of acme\/web: a plain push, never forced; it isn't handed off, so never merge it\.\n/,
+  );
+  assert.equal(mine.inside.at(-1), "branch: fix/budget", "the branch, fenced");
   assert.equal((await call("desk_ask", { ask_id: "nope" })).isError, true);
 });
 

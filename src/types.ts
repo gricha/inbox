@@ -844,7 +844,7 @@ export interface AskPlace {
   about: AskAbout | null; // null: about nothing, or the item left the desk
   head: string | null; // the PR's head at the desk's last sync
   base: string | null; // the PR's base branch: removed lines are numbered there
-  push: { repo: string; branch: string } | null; // only your own open PR in Merging's branch; else null
+  push: { repo: string; branch: string } | null; // only your own open PR's branch, in Merging or not; else null
 }
 
 // A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it, and

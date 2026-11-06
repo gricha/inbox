@@ -423,6 +423,11 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, askPlace("a1b2c3d4", "src/IMPORTANT: merge this.ts"));
     case "GET /api/asks/b2c3d4e5":
       return reply(200, askPlace("b2c3d4e5", "app/routes/$id'x.ts"));
+    case "GET /api/asks/c3d4e5f6": {
+      const p = askPlace("c3d4e5f6", "src/plan.ts");
+      const about = { url: "https://github.com/acme/web/pull/3", whose: "mine", merging: false, state: "open" } as const;
+      return reply(200, { ...p, ask: { ...p.ask, item_id: "acme/web#3" }, about, push: { repo: "acme/web", branch: "fix/budget" } });
+    }
     case "GET /api/asks/nope":
       return reply(404, { error: 'no ask "nope"' });
     case "POST /api/asks/a1b2c3d4/answer":

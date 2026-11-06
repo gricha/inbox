@@ -2171,7 +2171,7 @@ export class Desk {
     const about = this.askAbout(ask.item_id);
     const it = about && ask.item_id ? this.snapshot().entries.get(ask.item_id)?.item : undefined;
     const pr = it?.kind === "pr" ? it : null;
-    const mayPush = !!pr && about?.whose === "mine" && about.merging && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
+    const mayPush = !!pr && about?.whose === "mine" && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
     return {
       ask,
       about,

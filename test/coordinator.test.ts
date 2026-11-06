@@ -1062,7 +1062,7 @@ test("Wake it re-sends a line ask with the item's state now", async (c) => {
   );
 });
 
-test("GET /api/asks/:id says where an ask is and where a change may go: only the branch of my own open PR in Merging", async (c) => {
+test("GET /api/asks/:id says where an ask is and where a change may go: only the branch of my own open PR, in Merging or not", async (c) => {
   const t = await telling(c);
   t.desk.act("web#4", "inflight");
   await t.merged("acme/web#5");
@@ -1078,7 +1078,11 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
   assert.deepEqual(four.about, { url: "https://github.com/acme/web/pull/4", whose: "mine", merging: true, state: "open" });
   assert.deepEqual([four.push, four.base, four.head], [{ repo: "acme/web", branch: "change-4" }, "main", "abc"]);
   assert.deepEqual([four.ask.text, four.ask.lines], ["fix it", lines]);
-  assert.equal((await asked("web#3")).push, null, "my open PR, not handed off");
+  assert.deepEqual(
+    (await asked("web#3")).push,
+    { repo: "acme/web", branch: "change-3" },
+    "my open PR, not handed off, when I ask for a change",
+  );
   assert.equal((await asked("web#7")).push, null, "someone else's");
   const five = await asked("web#5");
   assert.deepEqual([five.about?.state, five.push], ["merged", null], "merged");

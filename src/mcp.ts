@@ -683,14 +683,16 @@ function linesWhere(l: AskLines, head: string | null): string {
 
 function pushText(p: AskPlace): string {
   const b = p.about;
-  if (p.push)
+  if (p.push && b?.merging)
     return `Push: yes, only to the branch below of ${oneLine(p.push.repo)}: normally, or --force-with-lease after a rebase, as Working a PR says; never --force or -f.`;
+  if (p.push)
+    return `Push: yes, only to the branch below of ${oneLine(p.push.repo)}: a plain push, never forced; it isn't handed off, so never merge it.`;
   if (!p.ask.item_id) return "Push: no: it isn't about a PR.";
   if (!b) return "Push: no: it isn't on the desk now.";
   if (b.whose === "issue") return "Push: no: it's an issue.";
   if (b.whose === "theirs") return "Push: no. Someone else's PR is read only: never push to it or post on it.";
   if (b.state !== "open") return `Push: no: it's ${b.state}.`;
-  return b.merging ? "Push: no: the desk doesn't know its branch." : "Push: no: it isn't handed off. Answer with the change.";
+  return "Push: no: the desk doesn't know its branch.";
 }
 
 // desk_ask: the desk's own words, ids, URLs, numbers and shas outside the fence, with the owner's words labelled as theirs; file and branch names inside it.
