@@ -2447,20 +2447,6 @@ kbd {
   padding: 0 8px;
 }
 
-.rv-asks {
-  display: grid;
-  gap: 8px;
-  justify-items: start;
-  max-width: 780px;
-  padding: 0 12px;
-  color: var(--ink-2);
-  font-size: 13.5px;
-}
-
-.rv-asks .d-head {
-  margin: 0;
-}
-
 @keyframes rise {
   from {
     opacity: 0;
@@ -3752,7 +3738,8 @@ kbd {
 }
 
 /* What reviewers said: each one waiting on you is a margin note with Claude's read and a reply box; the rest fold into one line. */
-.rv-convo {
+.rv-convo,
+.rv-asks {
   display: grid;
   gap: 14px;
   justify-items: start;
@@ -3762,7 +3749,8 @@ kbd {
   font-size: clamp(13.5px, 12px + 0.2vw, 15px);
 }
 
-.rv-convo .d-head {
+.rv-convo .d-head,
+.rv-asks .d-head {
   margin: 0;
 }
 
@@ -3799,6 +3787,31 @@ kbd {
   color: var(--ink);
   font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.45;
+}
+
+.cv-age {
+  margin-left: 6px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.cv-answer {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.cv-clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Small and pencil, as "What azulus wrote" is. */
+.cv .rv-more {
+  justify-self: start;
+  font-size: 12.5px;
 }
 
 .cv-take b {

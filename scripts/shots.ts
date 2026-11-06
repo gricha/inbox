@@ -489,6 +489,25 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
+  // Your asks to the coordinator, as reviewers' notes are drawn: a long answer shows its first lines, then the whole of it.
+  {
+    name: "review-asks",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      await page.evaluate(`document.querySelector(".rv-asks").scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    name: "review-asks-open",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      const more = page.locator(".rv-asks .rv-more");
+      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
+      await page.evaluate(`document.querySelector(".rv-asks").scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+  },
   // n goes to the next change in reading order; the sidebar lists a file at the repo's root and a long folder.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.

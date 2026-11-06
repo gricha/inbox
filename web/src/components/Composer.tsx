@@ -3,7 +3,7 @@ import type { Ask, AsksView, CoordinatorView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, shortId } from "../format.ts";
 
-const SHOWN = 3; // your latest asks; in a review the older ones are a click away
+const SHOWN = 3; // your latest asks about what the composer is on
 
 // A conversation in a PR's review, the one you were last on.
 export interface Thread {
@@ -131,35 +131,6 @@ export function Composer({ about, loads, now, onClose }: { about: About; loads: 
       {off && <p className="composer-note">The coordinator is off in Settings → Agents, so nothing is sent.</p>}
       {error && <p className="composer-note t-bad">{error}</p>}
     </div>
-  );
-}
-
-// An item's asks in its review: the latest few, the older ones behind one line.
-export function Asks({ asks, now }: { asks: Ask[]; now: number }) {
-  const [all, setAll] = useState(false);
-  if (!asks.length) return null;
-  const more = asks.length - SHOWN;
-  return (
-    <section className="rv-asks" aria-label="Your asks to the coordinator">
-      <h2 className="d-head">You asked the coordinator</h2>
-      {more > 0 && (
-        <button
-          type="button"
-          className="rv-more"
-          aria-expanded={all}
-          onClick={() => {
-            setAll(!all);
-          }}
-        >
-          {all ? "Fewer" : `${more} earlier`}
-        </button>
-      )}
-      <ol className="asks">
-        {(all ? asks : asks.slice(-SHOWN)).map((a) => (
-          <AskItem key={a.id} a={a} now={now} />
-        ))}
-      </ol>
-    </section>
   );
 }
 

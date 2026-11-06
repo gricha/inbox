@@ -4,6 +4,7 @@ import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre
 import type {
   ActivityEvent,
   AiReview,
+  Ask,
   Card,
   Conversation as Convo,
   GitHubAction,
@@ -52,7 +53,7 @@ import {
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
-import { Asks, type Thread } from "./Composer.tsx";
+import type { Thread } from "./Composer.tsx";
 import { Conversation } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
@@ -87,6 +88,7 @@ interface Fact {
   tone: string; // t-bad, t-warn, or "" for pencil
 }
 
+const ASKS_SHOWN = 3; // your latest asks to the coordinator; the older ones are a click away
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
@@ -1218,6 +1220,68 @@ function AiSection({
 export function withCode(text: string) {
   // oxlint-disable-next-line react/no-array-index-key -- a fixed split never reorders, and the same command can appear twice
   return text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
+}
+
+// Your asks to the coordinator about it, drawn as reviewers' notes are: your words, then its answer.
+function Asks({ asks, now }: { asks: Ask[]; now: number }) {
+  const [all, setAll] = useState(false);
+  if (!asks.length) return null;
+  const more = asks.length - ASKS_SHOWN;
+  return (
+    <section className="rv-asks" aria-label="Your asks to the coordinator">
+      <h2 className="d-head">You asked the coordinator</h2>
+      {more > 0 && (
+        <button
+          type="button"
+          className="rv-more"
+          aria-expanded={all}
+          onClick={() => {
+            setAll(!all);
+          }}
+        >
+          {all ? "Fewer" : `${more} earlier`}
+        </button>
+      )}
+      {(all ? asks : asks.slice(-ASKS_SHOWN)).map((a) => (
+        <article key={a.id} className="cv">
+          <p className="cv-gist">
+            {a.text} <span className="cv-age">{age(a.at, now)}</span>
+          </p>
+          {a.answer ? <Answer text={a.answer.text} /> : <p className="quiet">Waiting for its answer</p>}
+        </article>
+      ))}
+    </section>
+  );
+}
+
+// The coordinator's answers run long: the first lines, the rest a click away.
+function Answer({ text }: { text: string }) {
+  const box = useRef<HTMLParagraphElement>(null);
+  const [long, setLong] = useState(false);
+  const [all, setAll] = useState(false);
+  useLayoutEffect(() => {
+    const p = box.current;
+    if (p && !all) setLong(p.scrollHeight > p.clientHeight + 1);
+  }, [all]);
+  return (
+    <>
+      <p ref={box} className={cls("cv-answer", !all && "cv-clamp")}>
+        {withCode(text)}
+      </p>
+      {long && (
+        <button
+          type="button"
+          className="rv-more"
+          aria-expanded={all}
+          onClick={() => {
+            setAll(!all);
+          }}
+        >
+          {all ? "Less" : "The whole answer"}
+        </button>
+      )}
+    </>
+  );
 }
 
 function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {

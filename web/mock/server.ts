@@ -2028,7 +2028,10 @@ const ASKS: Ask[] = [
     item_id: "me/notes-app#12",
     thread_id: "PRRT_name",
     thread_url: "https://github.com/me/notes-app/pull/12#discussion_r2",
-    answer: { text: "Yes: 3e1f0a2 renames lamport() to nextClock() everywhere, and the tests pass on it.", at: iso(2.9) },
+    answer: {
+      text: "Yes: 3e1f0a2 renames `lamport()` to `nextClock()` everywhere, including the two call sites in src/sync/merge.ts kai pointed at, and the tests pass on it (412 passed). The follow-up branch still calls `lamport()` once, in src/sync/replay.ts, so it won't build after a rebase: a one-line fix I can push there once this merges. Nothing else in kai's thread is open, so resolving it is safe.",
+      at: iso(2.9),
+    },
   },
   {
     id: "b7d3e410",
