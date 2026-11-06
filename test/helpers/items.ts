@@ -130,18 +130,19 @@ export class FakeGitHub implements GitHub {
     });
   }
 
-  // Stack probes over the same items, as GitHub answers them; each call is logged as "repo dir branch".
+  // Stack and dependency probes over the same items, as GitHub answers them; each call is logged as "repo dir branch".
   probeCalls: string[] = [];
 
-  branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]> {
+  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]> {
     const hits = new Map<string, SearchHit>();
     for (const p of probes) {
       this.probeCalls.push(`${repo} ${p.dir} ${p.branch}`);
       for (const it of this.items.values()) {
-        if (it.kind !== "pr" || it.repo !== repo) continue;
+        if (it.kind !== "pr" || it.repo.toLowerCase() !== repo.toLowerCase()) continue;
         const up = p.dir === "up" && it.head_ref === p.branch && (it.head_repo ?? repo) === repo;
         const down = p.dir === "down" && it.base === p.branch && it.state === "open";
-        if (up || down) hits.set(it.id, { node_id: it.node_id, id: it.id, kind: "pr", updated_at: it.updated_at, author: it.author });
+        const pr = p.dir === "pr" && it.number === Number(p.branch);
+        if (up || down || pr) hits.set(it.id, { node_id: it.node_id, id: it.id, kind: "pr", updated_at: it.updated_at, author: it.author });
       }
     }
     return Promise.resolve([...hits.values()]);

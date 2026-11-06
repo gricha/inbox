@@ -373,6 +373,44 @@ test("branchPrs: one aliased query per 40 probes a repo; up drops a fork's PR on
   assert.doesNotMatch(calls[0]!.query, /mutation/);
 });
 
+test("branchPrs: a pr probe asks for its number as an Int; a PR comes back, an issue's {} and a missing number's null don't", async () => {
+  const { gh, calls } = fakeGitHub((b) => ({
+    data: {
+      rateLimit: RL,
+      repository: {
+        p0: {
+          __typename: "PullRequest",
+          id: "PR_5",
+          number: 5,
+          title: "Control silo",
+          updatedAt: "2026-11-02T00:00:00Z",
+          repository: { nameWithOwner: "getsentry/sentry" },
+          author: { __typename: "User", login: "carol" },
+          headRepository: { nameWithOwner: "carol/sentry" },
+        },
+        p1: {},
+        p2: null,
+        p3: { nodes: [] },
+      },
+    },
+    errors: b.variables.b2 === 9 ? [{ type: "NOT_FOUND", message: "no issue or PR 9" }] : [],
+  }));
+  const hits = await gh.branchPrs("GetSentry/Sentry", [
+    { dir: "pr", branch: "5" },
+    { dir: "pr", branch: "7" },
+    { dir: "pr", branch: "9" },
+    { dir: "down", branch: "main" },
+  ]);
+  assert.deepEqual(
+    hits.map((h) => h.id),
+    ["getsentry/sentry#5"],
+  );
+  assert.deepEqual([calls[0]!.variables.b0, calls[0]!.variables.b3], [5, "main"]);
+  assert.match(calls[0]!.query, /\$b0: Int!, \$b1: Int!, \$b2: Int!, \$b3: String!/);
+  assert.match(calls[0]!.query, /p0: issueOrPullRequest\(number: \$b0\) \{ \.\.\. on PullRequest \{ \.\.\.B \} \}/);
+  assert.doesNotMatch(calls[0]!.query, /mutation/);
+});
+
 test("lookup: one PR or issue by number, as a search hit; null when the repo or number doesn't exist", async () => {
   const { gh, calls } = fakeGitHub((b) => {
     if (b.variables.name === "gone")

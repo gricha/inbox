@@ -26,7 +26,7 @@ export interface Seat {
 
 export interface Probe {
   repo: string;
-  dir: "up" | "down"; // up: the PR whose head is `branch`; down: open PRs based on it
+  dir: "up" | "down" | "pr"; // up: the PR whose head is `branch`; down: open PRs based on it; pr: the PR numbered `branch`
   branch: string;
   stacked: boolean; // for a stack, or a PR based on another's branch; the rest only look for a stack
 }
@@ -243,44 +243,59 @@ export function grouped<T>(rows: T[], idOf: (row: T) => string, s: Stacks): T[] 
   return slots.flatMap((g) => (g.length > 1 ? g.toSorted((a, b) => below(s, idOf(a), idOf(b))) : g));
 }
 
-// The stored PRs that listed open PRs need merged first (the PR below, and what the description requires), down the chain.
-function needed(items: Item[], s: Stacks, listed: Set<string>): Item[] {
-  const prs = new Map(items.filter((i) => i.kind === "pr").map((i) => [lc(i.id), i]));
-  const out = new Map<string, Item>();
-  let level = [...listed].flatMap((id) => prs.get(lc(id)) ?? []).filter((it) => it.state === "open");
+// What the listed open PRs `from` picks need merged first (the PR below, and what the description requires), down the
+// chain: the PRs the desk stores, and the refs it doesn't hold.
+function needed(items: Item[], s: Stacks, listed: Set<string>, from: (it: Item) => boolean): { held: Item[]; missing: string[] } {
+  const known = new Map(items.map((i) => [lc(i.id), i]));
+  const held = new Map<string, Item>();
+  const missing = new Map<string, string>();
+  let level = [...listed].flatMap((id) => known.get(lc(id)) ?? []).filter((it) => it.kind === "pr" && it.state === "open" && from(it));
   for (let hop = 0; hop < DEPTH && level.length; hop++) {
     const next: Item[] = [];
     for (const x of level)
       for (const ref of [s.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
-        const y = ref ? prs.get(lc(ref)) : undefined;
-        if (!y || out.has(y.id) || listed.has(y.id)) continue;
-        out.set(y.id, y);
+        const y = ref ? known.get(lc(ref)) : undefined;
+        if (ref && !y) missing.set(lc(ref), ref);
+        if (y?.kind !== "pr" || held.has(y.id) || listed.has(y.id)) continue;
+        held.set(y.id, y);
         if (y.state === "open") next.push(y);
       }
     level = next;
   }
-  return [...out.values()];
+  return { held: [...held.values()], missing: [...missing.values()] };
 }
 
-// What to fetch for the stacks of the PRs on the boards (`listed`), which the desk may see only part of. Probes: up, the
-// PR whose branch a bottom PR is based on (or was, before the one below it merged); down, open PRs based on an open PR's
-// branch. Stale: members no board lists, still open as of a fetch before `before`, or before `depBefore` for a PR a listed
-// one needs. Members: every PR in the stacks of listed ones, and the stored PRs they need, merged ones too.
+// What to fetch for the stacks of the PRs on the boards (`listed`), which the desk may see only part of, and for what they
+// need merged first. Probes: up, the PR whose branch a bottom PR is based on (or was, before the one below it merged);
+// down, open PRs based on an open PR's branch; pr, by number, a PR one needs that the desk doesn't hold, unless its probe
+// key is in `misses` or only a bot's own PR needs it. Stale: members no board lists, still open as of a fetch before
+// `before`, or before `depBefore` for a PR a listed one needs. Members: every PR in the stacks of listed ones, and the
+// stored PRs they need, merged ones too.
 export function toFetch(
   items: Item[],
   s: Stacks,
   listed: Set<string>,
   before: string,
   depBefore: string,
+  misses: Set<string>,
 ): { probes: Probe[]; stale: Item[]; members: string[] } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const roots = new Set([...listed].map((id) => s.nodes.get(id)?.root));
   const members = [...s.nodes.values()].filter((n) => roots.has(n.root)).map((n) => n.item.id);
-  const needs = needed(items, s, listed);
-  const ids = new Set([...listed, ...members]);
+  const needs = needed(items, s, listed, () => true).held;
+  const asks = needed(items, s, listed, (it) => !it.author_bot || !!it.via);
+  // An open one's stack is probed too, so the chain goes on below it.
+  const ids = new Set([...listed, ...members, ...asks.held.filter((it) => it.state === "open").map((it) => it.id)]);
   const mainOf = defaults(items);
   const probes = new Map<string, Probe>();
   const add = (p: Probe) => probes.set(probeKey(p), p);
+  for (const ref of asks.missing) {
+    const at = ref.lastIndexOf("#");
+    const n = Number(ref.slice(at + 1));
+    const p: Probe = { repo: ref.slice(0, at), dir: "pr", branch: String(n), stacked: false };
+    // A number past GraphQL's Int fails the whole query, and the repo's stack probes with it.
+    if (n >= 1 && n <= 2 ** 31 - 1 && !misses.has(probeKey(p))) add(p);
+  }
   const stale = new Map<string, Item>();
   for (const it of needs) if (it.state === "open" && it.detail_at < depBefore) stale.set(it.id, it);
   for (const id of ids) {

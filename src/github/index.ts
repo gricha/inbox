@@ -74,8 +74,8 @@ export interface GitHub {
   notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
   prContext(nodeId: string): Promise<PrContext>; // a PR's threads, reviews, comments and recent commits
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
-  // open PRs based on it.
-  branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]>;
+  // open PRs based on it. pr: the PR whose number `branch` holds, any state; none for an issue or a number not there.
+  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]>;
   lookup(repo: string, number: number): Promise<SearchHit | null>;
   reviewers(repo: string, number: number, q: string): Promise<Reviewer[]>; // GitHub's suggestions first, then users, then teams
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
@@ -159,8 +159,10 @@ interface RawFiles {
   changedFiles: number;
   files: { nodes: { path: string }[] } | null;
 }
+type BranchNode = RawHit & { headRepository: { nameWithOwner: string } | null };
 interface BranchData {
-  repository: Record<string, { nodes: ((RawHit & { headRepository: { nameWithOwner: string } | null }) | null)[] } | null> | null;
+  // A page of PRs for up and down; one node for pr, {} when the number is an issue's.
+  repository: Record<string, { nodes: (BranchNode | null)[] } | BranchNode | null> | null;
 }
 interface TeamsData {
   viewer: { name?: string | null; organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
@@ -309,15 +311,16 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     return buildAreas(found.flat());
   }
 
-  async function branchPrs(repo: string, probes: { dir: "up" | "down"; branch: string }[]): Promise<SearchHit[]> {
+  async function branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]> {
     const [owner, name] = repo.split("/");
     const out = new Map<string, SearchHit>();
     for (const part of chunk(probes, PROBES)) {
-      const vars = Object.fromEntries(part.map((p, i) => [`b${i}`, p.branch]));
+      const vars = Object.fromEntries(part.map((p, i) => [`b${i}`, p.dir === "pr" ? Number(p.branch) : p.branch]));
       const data = await client.query<BranchData>(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
       part.forEach((p, i) => {
-        for (const n of data.repository?.[`p${i}`]?.nodes ?? []) {
-          if (!n || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
+        const got = data.repository?.[`p${i}`];
+        for (const n of !got ? [] : "nodes" in got ? got.nodes : [got]) {
+          if (!n?.id || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
           out.set(n.id, toHit(n));
         }
       });

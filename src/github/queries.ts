@@ -94,16 +94,21 @@ export function detailsMine(n: number): string {
 }
 
 // Stack probes in one repo, one alias each: up, the PRs whose head is the branch, any state (a fork's are dropped after);
-// down, the open PRs based on it. Exact branch names, unlike search's head:/base: qualifiers.
-export function branchPrs(dirs: ("up" | "down")[]): string {
-  const one = (d: "up" | "down", i: number) =>
-    d === "up"
-      ? `p${i}: pullRequests(headRefName: $b${i}, states: [OPEN, MERGED, CLOSED], first: 3, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`
-      : `p${i}: pullRequests(baseRefName: $b${i}, states: [OPEN], first: 10, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`;
-  return `query($owner: String!, $name: String!, ${dirs.map((_, i) => `$b${i}: String!`).join(", ")}) {
+// down, the open PRs based on it; pr, the PR of that number, which a PR on the desk needs merged first. Exact branch
+// names, unlike search's head:/base: qualifiers.
+const PROBE = {
+  up: (i: number) =>
+    `p${i}: pullRequests(headRefName: $b${i}, states: [OPEN, MERGED, CLOSED], first: 3, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`,
+  down: (i: number) =>
+    `p${i}: pullRequests(baseRefName: $b${i}, states: [OPEN], first: 10, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...B } }`,
+  pr: (i: number) => `p${i}: issueOrPullRequest(number: $b${i}) { ... on PullRequest { ...B } }`,
+};
+
+export function branchPrs(dirs: (keyof typeof PROBE)[]): string {
+  return `query($owner: String!, $name: String!, ${dirs.map((d, i) => `$b${i}: ${d === "pr" ? "Int" : "String"}!`).join(", ")}) {
   ${RATE}
   repository(owner: $owner, name: $name) {
-    ${dirs.map(one).join("\n    ")}
+    ${dirs.map((d, i) => PROBE[d](i)).join("\n    ")}
   }
 }
 fragment B on PullRequest { __typename ${HIT} headRepository { nameWithOwner } }`;

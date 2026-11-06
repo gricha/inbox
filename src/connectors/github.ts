@@ -23,6 +23,8 @@ const MAX_PROBES = 120; // stack probes a pass
 const RESERVE = 40; // of those, kept from probes that only look for a stack, for the rounds that follow a chain up
 const STACK_ROUNDS = 3; // probe, fetch, probe again: a chain a few PRs deep fills in one pass
 const DEP_TTL = 10 * 60_000; // a stored PR another one needs is refreshed after this
+const MAX_DEP_PROBES = 20; // probes a pass for PRs a listed one needs that the desk doesn't hold, apart from the stacks'
+const DEP_MISS_TTL = 24 * HOUR; // a number that's no PR (an issue, gone, no access) isn't asked again before this
 
 interface Feed {
   since: string | null; // ask for threads updated after this
@@ -283,48 +285,57 @@ export class GitHubConnector implements Connector {
   }
 
   // Stack members no board search returns (the PR below a stack's bottom, PRs stacked on one on the desk) and stored ones
-  // gone stale, with the stored PRs listed ones need, fetched read only and stored without events: they're context, not
-  // news. Returns how many, and the members of the listed PRs' stacks with the PRs they need, which pruning keeps.
+  // gone stale, with the PRs listed ones need, fetched read only and stored without events: they're context, not news.
+  // Returns how many, and the members of the listed PRs' stacks with the PRs they need, which pruning keeps.
   async fillStacks(listed: Set<string>): Promise<{ fetched: number; members: Set<string> }> {
     const desk = this.desk;
     const at = desk.now();
-    const asked = Object.fromEntries(
-      Object.entries((desk.store.get("stack_probes") as Record<string, string> | null) ?? {}).filter(
-        ([, t]) => at.getTime() - Date.parse(t) < PROBE_TTL,
-      ),
-    );
+    const since = (key: string, ttl: number) =>
+      Object.fromEntries(
+        Object.entries((desk.store.get(key) as Record<string, string> | null) ?? {}).filter(([, t]) => at.getTime() - Date.parse(t) < ttl),
+      );
+    const asked = since("stack_probes", PROBE_TTL);
+    const misses = since("dep_misses", DEP_MISS_TTL);
     let budget = MAX_PROBES;
+    let depBudget = MAX_DEP_PROBES;
     let fetched = 0;
     const members = new Set<string>();
     try {
       for (let round = 0; round < STACK_ROUNDS; round++) {
         const stored = desk.store.items();
         const before = new Date(at.getTime() - PROBE_TTL).toISOString();
-        const got = toFetch(stored, buildStacks(stored), listed, before, new Date(at.getTime() - DEP_TTL).toISOString());
+        const depBefore = new Date(at.getTime() - DEP_TTL).toISOString();
+        const got = toFetch(stored, buildStacks(stored), listed, before, depBefore, new Set(Object.keys(misses)));
         for (const id of got.members) members.add(id);
         const due = got.probes.filter((p) => !asked[probeKey(p)]);
-        const stacked = due.filter((p) => p.stacked).slice(0, budget);
-        const scan = due.filter((p) => !p.stacked).slice(0, Math.max(0, budget - stacked.length - RESERVE));
+        const deps = due.filter((p) => p.dir === "pr").slice(0, depBudget);
+        const stacked = due.filter((p) => p.dir !== "pr" && p.stacked).slice(0, budget);
+        const scan = due.filter((p) => p.dir !== "pr" && !p.stacked).slice(0, Math.max(0, budget - stacked.length - RESERVE));
         const old = round === 0 ? got.stale : [];
-        if (!stacked.length && !scan.length && !old.length) break;
+        if (!deps.length && !stacked.length && !scan.length && !old.length) break;
         budget -= stacked.length + scan.length;
+        depBudget -= deps.length;
         const repos = new Map<string, Probe[]>();
-        for (const p of [...stacked, ...scan]) {
+        for (const p of [...deps, ...stacked, ...scan]) {
           asked[probeKey(p)] = at.toISOString();
           repos.set(p.repo, [...(repos.get(p.repo) ?? []), p]);
         }
         const answers = await pool([...repos], 3, async ([repo, ps]) => {
           try {
-            return await this.api.branchPrs(repo, ps);
+            return { ps, hits: await this.api.branchPrs(repo, ps) };
           } catch (e) {
             if (isRateLimited(e)) throw e;
             desk.log(`stack probes in ${repo} failed: ${(e as Error).message}`);
-            return [];
+            return { ps: [], hits: [] }; // nothing learned, so no misses
           }
         });
+        const hits = answers.flatMap((a) => a.hits);
+        const found = new Set(hits.map((h) => h.id.toLowerCase()));
+        for (const p of answers.flatMap((a) => a.ps))
+          if (p.dir === "pr" && !found.has(`${p.repo}#${p.branch}`.toLowerCase())) misses[probeKey(p)] = at.toISOString();
         const meta = desk.store.itemMeta();
         const want = new Map<string, SearchHit>();
-        for (const h of answers.flat()) {
+        for (const h of hits) {
           const m = meta.get(h.id);
           if (!listed.has(h.id) && (m?.updated_at !== h.updated_at || m.lacks)) want.set(h.id, h);
         }
@@ -336,6 +347,7 @@ export class GitHubConnector implements Connector {
       }
     } finally {
       desk.store.set("stack_probes", asked);
+      desk.store.set("dep_misses", misses);
     }
     return { fetched, members };
   }

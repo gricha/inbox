@@ -1,6 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildStacks, grouped, lineOf, oneLinePerStack, stackRef, stackView, toFetch, type Seat, type Stacks } from "../src/stacks.ts";
+import { dependencies } from "../src/deps.ts";
+import {
+  buildStacks,
+  grouped,
+  lineOf,
+  oneLinePerStack,
+  probeKey,
+  stackRef,
+  stackView,
+  toFetch,
+  type Seat,
+  type Stacks,
+} from "../src/stacks.ts";
 import type { Bucket, Card, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
@@ -184,7 +196,7 @@ test("what to fetch: the PR below a bottom, PRs above open ones, stale members; 
   ];
   const listed = new Set([id(2), id(3), id(4), id(5), id(10), id(6, "acme/x")]);
   const s = buildStacks(items);
-  const got = toFetch(items, s, listed, hoursAgo(0.5), hoursAgo(1 / 6));
+  const got = toFetch(items, s, listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set());
   const probes = got.probes.map((p) => `${p.repo} ${p.dir} ${p.branch}`).sort();
   assert.deepEqual(probes, [
     "acme/api down b10",
@@ -203,7 +215,7 @@ test("what to fetch: the PR below a bottom, PRs above open ones, stale members; 
 
   const known = [...items, makeItem({ repo: "acme/x", number: 7, default_branch: "main" })];
   assert.ok(
-    toFetch(known, buildStacks(known), listed, hoursAgo(0.5), hoursAgo(1 / 6)).probes.some(
+    toFetch(known, buildStacks(known), listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set()).probes.some(
       (p) => p.repo === "acme/x" && p.dir === "up" && p.branch === "dev",
     ),
     "the default branch comes from another PR in the repo when this one was stored without it",
@@ -233,15 +245,41 @@ test("toFetch keeps what a listed PR requires from pruning, and refreshes an ope
     pr(50, "main", { detail_at: old }),
   ];
   const listed = new Set(["acme/web#1", "acme/web#2", "acme/web#3", "acme/web#4", id(31)]);
-  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6));
+  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set());
   assert.deepEqual(got.members.toSorted(), [...ids(20, 21, 30, 40, 41, 42, 43, 44, 45)].toSorted());
   assert.deepEqual(
     got.stale.map((i) => i.id).toSorted(),
     ids(20, 40, 41, 42, 43, 44, 45),
     "open, unlisted and fetched over 10 minutes ago; never api#30, which merged",
   );
-  const bare = items.map((it) => Object.assign(structuredClone(it), { requires: [] }));
-  assert.deepEqual(got.probes, toFetch(bare, buildStacks(bare), listed, hoursAgo(0.5), hoursAgo(1 / 6)).probes, "nothing new is probed");
+  assert.deepEqual(
+    got.probes.filter((p) => p.dir === "pr").map(probeKey),
+    ["acme/api pr 404"],
+    "only what the desk doesn't hold is asked for by number",
+  );
+});
+
+test("toFetch probes by number a PR a listed one requires when the desk doesn't hold it", () => {
+  const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
+  const items = [
+    web(1, { requires: ["getsentry/sentry#5", "acme/api#7", "acme/api#2", "acme/api#99999999999", "getsentry/sentry#9"] }),
+    makeItem({ number: 7, kind: "issue" }),
+    pr(2, "main", { requires: ["acme/api#3"] }), // stored, so what it needs is asked too, and PRs stacked on it
+    web(4, { author: "dependabot", author_bot: true, requires: ["getsentry/sentry#6"] }),
+    web(8, { author: "sentry-junior", author_bot: true, via: "greg", requires: ["getsentry/sentry#8"] }),
+  ];
+  const listed = new Set(["acme/web#1", "acme/web#4", "acme/web#8"]);
+  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set(["getsentry/sentry pr 9"]));
+  assert.deepEqual(
+    got.probes.filter((p) => p.dir === "pr"),
+    [
+      { repo: "getsentry/sentry", dir: "pr", branch: "5", stacked: false },
+      { repo: "getsentry/sentry", dir: "pr", branch: "8", stacked: false },
+      { repo: "acme/api", dir: "pr", branch: "3", stacked: false },
+    ],
+    "not the issue, a number past GraphQL's Int, a miss, or what only a bot's own PR needs",
+  );
+  assert.ok(got.probes.some((p) => p.repo === "acme/api" && p.dir === "down" && p.branch === "b2"));
 });
 
 // The desk: what it fetches for stacks and how its views carry them.
@@ -549,6 +587,58 @@ test("a stored PR your PR requires is refreshed every 10 minutes while open, qui
     [],
     "context, not news",
   );
+});
+
+test("a dependency in another repo is fetched quietly and blocks the PR that needs it", async (tc) => {
+  const dep = makeItem({ repo: "getsentry/sentry", number: 5, author: "carol" }); // on no search
+  const t = await setup([myPr(1, { requires: ["GetSentry/Sentry#5"] }), dep]);
+  tc.after(t.cleanup);
+  await t.desk.sync();
+  assert.ok(t.gh.probeCalls.includes("GetSentry/Sentry pr 5"));
+  const items = t.desk.store.items();
+  assert.equal(items.find((i) => i.id === dep.id)?.state, "open");
+  assert.equal(dependencies(items, buildStacks(items)).get("acme/web#1")?.root, dep.id);
+  assert.deepEqual(
+    t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.item_id === dep.id),
+    [],
+    "context, not news",
+  );
+  const probed = t.gh.probeCalls.length;
+  t.setNow(new Date(NOW.getTime() + 40 * 60_000));
+  await t.desk.sync();
+  assert.ok(!t.gh.probeCalls.slice(probed).some((c) => c.includes(" pr ")), "held now: refreshed, not probed");
+});
+
+test("pr probes: at most 20 a sync, and a miss isn't asked again for a day; a failed call isn't a miss", async (tc) => {
+  const refs = (n: number) => Array.from({ length: 10 }, (_, i) => `acme/gone#${n * 100 + i}`);
+  const t = await setup([myPr(1, { requires: refs(1) }), myPr(2, { requires: refs(2) }), myPr(3, { requires: refs(3) })]);
+  tc.after(t.cleanup);
+  const asked = () => t.gh.probeCalls.filter((c) => c.includes(" pr ")).length;
+  const later = (min: number) => {
+    t.setNow(new Date(NOW.getTime() + min * 60_000));
+  };
+  const real = t.gh.branchPrs.bind(t.gh);
+  let failed = 0;
+  t.gh.branchPrs = () => {
+    failed++;
+    return Promise.reject(new Error("GitHub HTTP 500"));
+  };
+  await t.desk.sync();
+  t.gh.branchPrs = real;
+  assert.ok(failed > 0);
+  assert.equal(Object.keys(t.desk.store.get("dep_misses") ?? {}).length, 0, "a failed call learns nothing");
+  later(31);
+  await t.desk.sync();
+  assert.equal(asked(), 20);
+  later(32);
+  await t.desk.sync();
+  assert.equal(asked(), 30, "the rest on the next pass");
+  later(3 * 60);
+  await t.desk.sync();
+  assert.equal(asked(), 30, "no PR there: not asked again today");
+  later(25 * 60 + 31);
+  await t.desk.sync();
+  assert.equal(asked(), 50, "a day on, asked again, 20 a pass");
 });
 
 test("QueueView.stacks has every stack a card in the view carries, cleared ones too", async (tc) => {
