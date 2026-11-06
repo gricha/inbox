@@ -2493,12 +2493,6 @@ kbd {
   white-space: nowrap;
 }
 
-.chat-about > span + span::before {
-  margin: 0 6px;
-  color: var(--faint);
-  content: "\b7";
-}
-
 /* One column that never grows past the panel: a long line of code wraps in its block, not across the log. */
 .chat-log {
   position: relative;
@@ -2613,6 +2607,13 @@ kbd {
 .chat-note {
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+/* The conversation the next ask carries, by the box it goes with. */
+.chat-on {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* An agent's words (web/src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */

@@ -99,15 +99,12 @@ export function Chat({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new turn or a new answer is when to scroll
   }, [mine.length, answered]);
 
-  const what = [about.item && shortId(about.item), about.thread?.label].filter((w): w is string => !!w);
   return (
     <aside className="chat" aria-label="Your chat with the coordinator" inert={inert}>
       <div className="chat-head">
         <h2 className="chat-title">Coordinator</h2>
-        <p className="chat-about" title={what.join(" \u00b7 ")}>
-          {what.map((w) => (
-            <span key={w}>{w}</span>
-          ))}
+        <p className="chat-about" title={about.item ?? undefined}>
+          {about.item && shortId(about.item)}
         </p>
         <button type="button" className="act" onClick={onClose}>
           <kbd>esc</kbd>
@@ -153,6 +150,11 @@ export function Chat({
         )
       )}
       <div className="chat-box">
+        {about.thread && (
+          <p className="chat-hint chat-on" title={about.thread.label}>
+            On {about.thread.label}
+          </p>
+        )}
         <textarea
           className="chat-input"
           rows={2}
