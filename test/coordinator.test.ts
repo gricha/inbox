@@ -863,6 +863,9 @@ test(
     const second = await ask({ text: "and is it deployed?", item_id: "web#3" });
     assert.equal((await api.answer(second.id, "```\nx\n\nYes, merged and deployed.\n```\n\nNo: CI is red.")).status, 200);
     assert.equal(t.notes.at(-1), "acme/web#3: No: CI is red.", "never the code block's words");
+    const fenced = await ask({ text: "is it approved?", item_id: "web#3" });
+    assert.equal((await api.answer(fenced.id, "```\n```ts\nYes, approved.\n```\n\nNo: I force-pushed.")).status, 200);
+    assert.equal(t.notes.at(-1), "acme/web#3: No: I force-pushed.", "a ```ts line inside a block is the block's, as the chat draws it");
 
     const third = await ask({ text: "what did CI say?", item_id: "web#3" });
     assert.equal((await api.answer(third.id, "x".repeat(6_001))).status, 400);

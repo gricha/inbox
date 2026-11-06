@@ -2561,7 +2561,8 @@ function lead(text: string): string {
   const out: string[] = [];
   let fence = false;
   for (const l of text.split("\n")) {
-    if (l.trimStart().startsWith("```")) {
+    // The chat's rule: any ``` line opens a block, only a bare ``` closes it.
+    if (fence ? l.trim() === "```" : l.trimStart().startsWith("```")) {
       if (out.length) break;
       fence = !fence;
     } else if (!fence && l.trim()) out.push(l);
