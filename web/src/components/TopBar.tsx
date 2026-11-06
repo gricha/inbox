@@ -58,7 +58,7 @@ export function TopBar({
       ) : route.name === "review" || route.name === "inquiry" ? (
         <a
           className="back"
-          href={question ? routeHash({ name: "inquiry", id: question }) : `#/${from === "queue" ? "" : from}`}
+          href={routeHash(question ? { name: "inquiry", id: question } : { name: from })}
           title={`Back to ${question ? "the question" : BACK[from]} (esc)`}
         >
           <kbd>esc</kbd>
