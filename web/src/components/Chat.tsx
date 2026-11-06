@@ -6,6 +6,7 @@ import { Prose } from "./Prose.tsx";
 
 const kept = new Map<string, string>(); // what you'd typed to it, per item, in this window
 let seen: AsksView | null = null; // the last asks fetched, so a reopen draws at once
+const OFF = "The coordinator is off in Settings \u2192 Agents, so nothing is sent.";
 
 // A conversation in a PR's review, the one you were last on.
 export interface Thread {
@@ -139,9 +140,10 @@ export function Chat({
             </li>
           ))}
         </ol>
+      ) : off ? (
+        <p className="chat-empty">{OFF}</p>
       ) : (
-        view &&
-        !off && (
+        view && (
           <p className="chat-empty">
             {about.item
               ? `Ask or tell it something about ${shortId(about.item)}: it answers here.`
@@ -177,21 +179,24 @@ export function Chat({
             }
           }}
         />
-        <div className="chat-send">
-          <span className="chat-hint">{"\u21e7\u21b5 new line"}</span>
-          <button
-            type="button"
-            className="act primary"
-            disabled={!text.trim() || busy || off}
-            onClick={() => {
-              void send();
-            }}
-          >
-            <kbd>{"\u21b5"}</kbd>
-            {busy ? "Sending\u2026" : "Send"}
-          </button>
-        </div>
-        {off && <p className="chat-note">{"The coordinator is off in Settings \u2192 Agents, so nothing is sent."}</p>}
+        {off ? (
+          mine.length > 0 && <p className="chat-note">{OFF}</p>
+        ) : (
+          <div className="chat-send">
+            <span className="chat-hint">{"\u21e7\u21b5 new line"}</span>
+            <button
+              type="button"
+              className="act primary"
+              disabled={!text.trim() || busy}
+              onClick={() => {
+                void send();
+              }}
+            >
+              <kbd>{"\u21b5"}</kbd>
+              {busy ? "Sending\u2026" : "Send"}
+            </button>
+          </div>
+        )}
         {error && <p className="chat-note t-bad">{error}</p>}
       </div>
     </aside>

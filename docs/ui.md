@@ -129,7 +129,7 @@ Tab focus and the j/k cursor are the same thing: focusing a row selects it.
 - The box: Enter (or ⌘↵, or **↵ Send**) sends, Shift+Enter is a new line. Esc in the empty box closes the chat; with words in it, Esc leaves the box and keeps them. Esc anywhere else that isn't a text box (the page, the chat's own buttons, links and log) closes the chat before the page reads it as "back"; Esc in any other box (a line comment, a reply, the PR comment, an inquiry's answer, the reviewers box) stays that box's. Focus never leaves the box on its own after a send, so a key typed after Enter can't land on the page and approve; click the page to read on.
 - What you typed and didn't send is kept per item in this window, for when you open the chat about it again.
 - It follows you into another PR's review (N/P, Enter on a row, a link), about that PR, and closes when you leave for any other page.
-- A coordinator that won't start says so where its status goes, and your words stay in the box. With the coordinator off, the box says so and sends nothing.
+- A coordinator that won't start says so where its status goes, and your words stay in the box. With the coordinator off, the chat says so where its history would be (under the box when it has one), and the box is greyed and sends nothing.
 - A PR's review doesn't list your asks: once you've asked about it, **t Coordinator · answered 4m** after More (**t Coordinator · waiting** while your latest has no answer) opens the chat about it.
 
 ## Files

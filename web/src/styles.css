@@ -2596,6 +2596,11 @@ kbd {
   color: var(--pencil);
 }
 
+.chat-input:disabled {
+  border-color: var(--rule);
+  background: var(--wash);
+}
+
 .chat-send {
   display: flex;
   align-items: center;
