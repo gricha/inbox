@@ -54,6 +54,7 @@ interface Shot {
   go: (page: Page) => Promise<void>;
   after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
   writes?: true; // changes the desk's settings, policy or state: only against the mock, never a real desk at --url
+  sizes?: string[]; // only at these of SIZES
 }
 const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
@@ -258,6 +259,19 @@ const systemTheme = async (page: Page) => {
 };
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
+  {
+    // The macOS app between 820 and 880px: the traffic lights' padding, the page links and Ask share the bar.
+    name: "queue-840",
+    sizes: ["mac"],
+    go: async (page) => {
+      await page.setViewportSize({ width: 840, height: 700 });
+      await at("#/")(page);
+    },
+    after: async (page) => {
+      const mac = SIZES.find((s) => s.name === "mac")!;
+      await page.setViewportSize({ width: mac.width, height: mac.height });
+    },
+  },
   // What can't move yet: a chain's rows together, the first saying what its blocker waits on, then a review wait.
   { name: "blocked", go: at("#/blocked") },
   // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
@@ -1417,6 +1431,7 @@ try {
       await page.goto(`${url}/#/`);
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       for (const shot of shots) {
+        if (shot.sizes && !shot.sizes.includes(size.name)) continue;
         await page.keyboard.press("Escape");
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click
@@ -1425,6 +1440,14 @@ try {
         files.push(file);
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
         if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
+        const spill = await page.evaluate<number>(`(() => {
+          const bar = document.querySelector(".topbar");
+          const last = bar && [...bar.querySelectorAll(".tb-right > *")].filter((el) => el.getBoundingClientRect().width).at(-1);
+          if (!last) return 0;
+          const edge = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+          return Math.max(bar.scrollWidth - bar.clientWidth, last.getBoundingClientRect().right - edge);
+        })()`);
+        if (spill > 0.5) failures.push(`${file}: the top bar's right side runs ${spill.toFixed(1)}px past its padding`);
         await shot.after?.(page);
       }
       await page.close();

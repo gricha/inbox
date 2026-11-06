@@ -4653,9 +4653,15 @@ kbd {
   }
 }
 
-/* The macOS app pads the bar for the traffic lights: at its narrowest the sync label gives way to the page links. */
-@media (width <= 820px) {
+/* The macOS app pads the bar for the traffic lights: there the sync label gives way to the page links and Ask sooner. */
+@media (width <= 880px) {
   :root[data-shell="desktop"][data-platform="darwin"] .sync span {
+    display: none;
+  }
+}
+
+@media (width <= 820px) {
+  .sync span {
     display: none;
   }
 
@@ -4679,10 +4685,6 @@ kbd {
   .topbar {
     gap: 8px;
     padding: 0 8px 0 14px;
-  }
-
-  .sync span {
-    display: none;
   }
 
   .main {
