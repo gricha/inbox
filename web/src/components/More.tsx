@@ -40,12 +40,14 @@ export function MoreButton({ className, open, onClick }: { className?: string; o
 export function MoreMenu({
   card,
   actions,
+  links,
   pick,
   onClose,
   className,
 }: {
   card: Card;
   actions: GitHubAction[];
+  links?: { key: string; label: string; run: () => void }[]; // what isn't a write, above them: Open on GitHub
   pick: (a: GitHubAction) => void;
   onClose: () => void;
   className?: string;
@@ -66,8 +68,12 @@ export function MoreMenu({
     e.stopImmediatePropagation();
     if (e.repeat) return;
     const a = actions.find((x) => MORE[x].key === e.key);
+    const l = links?.find((x) => x.key === e.key);
     if (a) choose(a);
-    else if (e.key === "Escape" || e.key === ".") onClose();
+    else if (l) {
+      onClose();
+      l.run();
+    } else if (e.key === "Escape" || e.key === ".") onClose();
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
@@ -87,6 +93,21 @@ export function MoreMenu({
       <div className="scrim-clear" role="presentation" onClick={onClose} />
       <div ref={menu} className={cls("popover more-pop", className)} role="menu" aria-label="More">
         <div className="pop-title">On GitHub</div>
+        {links?.map((l) => (
+          <button
+            key={l.key}
+            type="button"
+            role="menuitem"
+            className="pop-item"
+            onClick={() => {
+              onClose();
+              l.run();
+            }}
+          >
+            <kbd>{l.key}</kbd>
+            <span>{l.label}</span>
+          </button>
+        ))}
         {actions.map((a) => (
           <button
             key={a}

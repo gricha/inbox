@@ -17,7 +17,7 @@ import type {
   StackMember,
 } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, copyText, eventText, handoffLabel, modelName, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, eventText, handoffLabel, modelName, sinceText, shortRef, when } from "../format.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -183,7 +183,9 @@ export function Review({
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu (.)
-  const [writing, setWriting] = useState<"comment" | "changes" | null>(null); // a comment or Request changes, being written
+  const [writing, setWriting] = useState(false); // Request changes, being written
+  // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it.
+  const [comment, setComment] = useState("");
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set()); // files whose diff you folded, by path
   const [draft, setDraft] = useState<Draft | null>(() => restored(id, 1));
   const [sent, setSent] = useState<Sent[]>([]);
@@ -213,6 +215,7 @@ export function Review({
       setShut(new Set());
       setDraft(restored(id, ++drafts.current));
       setSent([]);
+      setComment("");
       draftText.current = keptDraft(id)?.text ?? "";
     }
     shown.current = id;
@@ -477,17 +480,13 @@ export function Review({
     else onApprove(v.card, read);
   }
 
-  async function copyPrompt() {
-    if (!v) return;
-    try {
-      await copyText(v.handoff_prompt);
-      flash("Prompt copied. Paste it into a Claude session.");
-    } catch (e) {
-      flash(`Couldn't copy: ${message(e)}`, true);
-    }
-  }
-
   function run(k: string) {
+    // With your comment unsent, what acts on the PR (a key or a click) goes back to it first.
+    if (comment.trim() && "admb.".includes(k)) {
+      document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
+      flash(`Your comment isn't sent: ${MOD}↵ sends it, or empty the box`);
+      return;
+    }
     if (k === "n") goSec(secIdx + 1);
     else if (k === "p") goSec(secIdx - 1);
     else if (k === "N" && v?.stack?.up) location.hash = routeHash({ name: "review", id: v.stack.up });
@@ -499,21 +498,14 @@ export function Review({
     else if (k === "]") goNote(1);
     else if (k === "[") goNote(-1);
     else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
-    else if (k === "c" && !flying) void copyPrompt();
     else if (k === "i" && !flying) void askAi();
-    else if (k === "w" && v?.item.state === "open") {
-      setWriting("comment");
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLTextAreaElement>(".rv-changes textarea")?.focus();
-      });
-    } else if (k === "a" && acted) flash(`${acted.what}: ${v ? shortRef(v.card) : ""} is off your desk`);
+    else if (k === "w" && v?.item.state === "open") document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
+    else if (k === "a" && acted) flash(`${acted.what}: ${v ? shortRef(v.card) : ""} is off your desk`);
     else if (k === "a" && readying && v) onReady(v.card, picked);
     else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
-    else if (k === "." && v) {
-      if (v.card.actions?.length) setMore(true);
-      else flash(`Nothing more to do on GitHub for ${shortRef(v.card)}`);
-    } else if (k === "esc") onBack();
+    else if (k === "." && v) setMore(true);
+    else if (k === "esc") onBack();
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -667,9 +659,18 @@ export function Review({
   return (
     <div className={cls("review", side && "side-open")}>
       <div className="rv-main">
+        {!side && (
+          <button type="button" className="act rv-side-toggle rv-side-show" title="Show the sidebar (f)" onClick={toggleSide}>
+            <kbd>f</kbd>
+            {view.stack ? "Stack and files" : "Files"}
+          </button>
+        )}
         <div className="rv-top">
           <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
           <Conversation view={view} now={now} flash={flash} onThread={onThread} onAsk={onAsk} />
+          {((open && !acted) || !!comment.trim()) && (
+            <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
+          )}
           <Asks asks={view.asks} now={now} />
           {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
           {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
@@ -725,60 +726,48 @@ export function Review({
           {mine && !(acted?.where === "inflight" && !card.inflight) && (
             <HandKey card={card} run={run} primary={card.cta !== "reply" && !acted} />
           )}
-          {open && <KeyButton k="w" label="Comment" title="Comment on the PR, as you" run={run} />}
-          {/* Shorter beside More, so the row stays one line at 900px with the sidebar folded. */}
-          <KeyButton k="o" label={card.actions?.length ? "GitHub" : "Open on GitHub"} title="Open on GitHub" run={run} />
-          {!flying && <KeyButton k="c" label="Copy prompt" run={run} />}
-          {!flying && (open || view.ai) && (
-            <KeyButton
-              k="i"
-              label={view.ai && !view.ai_stale ? "Redo AI review" : "AI review"}
-              run={run}
-              disabled={view.generating || busy === "ai"}
+          <span className="more-wrap">
+            <MoreButton
+              open={more}
+              onClick={() => {
+                run(".");
+              }}
             />
-          )}
-          <KeyButton
-            k="f"
-            label={side ? "Hide sidebar" : view.stack ? "Stack" : "Files"}
-            title="The sidebar: the stack, the files and recent activity"
-            run={run}
-          />
-          {!!card.actions?.length && (
-            <span className="more-wrap">
-              <MoreButton
-                open={more}
-                onClick={() => {
-                  run(".");
+            {more && (
+              <MoreMenu
+                card={card}
+                actions={card.actions ?? []}
+                links={[
+                  {
+                    key: "o",
+                    label: "Open on GitHub",
+                    run: () => {
+                      run("o");
+                    },
+                  },
+                ]}
+                pick={(a) => {
+                  if (a === "request_changes") setWriting(true);
+                  else void onGithub(card, a, read);
+                }}
+                onClose={() => {
+                  setMore(false);
                 }}
               />
-              {more && (
-                <MoreMenu
-                  card={card}
-                  actions={card.actions}
-                  pick={(a) => {
-                    if (a === "request_changes") setWriting("changes");
-                    else void onGithub(card, a, read);
-                  }}
-                  onClose={() => {
-                    setMore(false);
-                  }}
-                />
-              )}
-            </span>
-          )}
+            )}
+          </span>
         </div>
         {writing && (
           <WriteBox
-            label={writing === "comment" ? "Comment" : "Request changes"}
-            placeholder={writing === "comment" ? `Comment on ${shortRef(card)}` : "What needs to change"}
+            label="Request changes"
+            placeholder="What needs to change"
             onSend={(body) => {
               void (async () => {
-                const ok = await (writing === "comment" ? onComment(card, body) : onGithub(card, "request_changes", read, body));
-                if (ok) setWriting(null);
+                if (await onGithub(card, "request_changes", read, body)) setWriting(false);
               })();
             }}
             onClose={() => {
-              setWriting(null);
+              setWriting(false);
             }}
           />
         )}
@@ -820,6 +809,10 @@ export function Review({
       </div>
       {side && (
         <aside className="rv-side" aria-label="Stack, files and recent activity">
+          <button type="button" className="act rv-side-toggle" title="Hide the sidebar (f)" onClick={toggleSide}>
+            <kbd>f</kbd>
+            Hide
+          </button>
           {view.stack && <StackList stack={view.stack} />}
           {list.length > 0 && (
             <nav className="rv-files" aria-label="Files in reading order">
@@ -1252,6 +1245,64 @@ function Dir({ path }: { path: string }) {
 }
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+
+// Your comment on the PR, under what reviewers said, while it's open (or while it has words): w puts the cursor in it, ⌘↵
+// sends it, Esc leaves it. The words are the review's, so GitHub refusing them leaves them here.
+function CommentBox({
+  card,
+  body,
+  setBody,
+  sending,
+  onComment,
+}: {
+  card: Card;
+  body: string;
+  setBody: (t: string) => void;
+  sending: boolean;
+  onComment: (c: Card, body: string) => Promise<boolean>;
+}) {
+  async function send() {
+    if (!body.trim() || sending) return;
+    if (await onComment(card, body)) setBody("");
+  }
+  return (
+    <div className="rv-comment">
+      <textarea
+        className="rv-comment-input"
+        aria-label={`Your comment on ${shortRef(card)}`}
+        placeholder={`Comment on ${shortRef(card)}… (w)`}
+        value={body}
+        onChange={(e) => {
+          setBody(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.repeat) return;
+          if (e.key === "Escape") e.currentTarget.blur();
+          else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            void send();
+          }
+        }}
+      />
+      {body.trim() && (
+        <div className="actions">
+          <button
+            type="button"
+            className="act primary"
+            title={`Comment on GitHub, as you: the button or ${MOD}↵`}
+            disabled={sending}
+            onClick={() => {
+              void send();
+            }}
+          >
+            <kbd>{MOD}↵</kbd>
+            {sending ? "Sending…" : "Comment"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 const sideOf = (s: "new" | "old"): "additions" | "deletions" => (s === "old" ? "deletions" : "additions");
 const onSection = (x: Section, at: InlineAt) => at.path === x.path && onLines(x.hunks, at);
 // The draft this window kept for a PR you left with words unsent.

@@ -44,7 +44,6 @@ The app runs the desk server itself. If one is already running on port 47823 (`d
 | `s`       | snooze: for a while, or until CI passes, new commits, approval |
 | `m` / `p` | someone else's: mute / pin                                     |
 | `u`       | undo                                                           |
-| `c`       | copy a review prompt to paste into a Claude session            |
 | `i`       | AI review: look / skim / skip, summary, concerns, notes        |
 | `/`       | filter · `r` sync · `,` settings · `g l` later · `?` all keys  |
 

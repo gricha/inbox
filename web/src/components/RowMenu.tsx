@@ -63,7 +63,6 @@ export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: R
           ]),
       { label: card.pinned ? "Unpin" : "Pin", key: "p", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
       key("Ask the coordinator", "t"),
-      key("Copy a prompt for an agent", "c"),
     ],
     // Its call to action is above already.
     rowActions(card)

@@ -22,7 +22,6 @@ const MORE_KEYS: [string, string][] = [
   ["p", "pin"],
   ["u", "undo"],
   ["t", "ask the coordinator"],
-  ["c", "copy a prompt"],
   ["i", "AI review"],
   ["w", "rule trace; an issue opened in place: comment"],
   ["r", "sync"],
@@ -53,13 +52,12 @@ const REVIEW_KEYS: [string[], string][] = [
   [["+"], "By a line's number: comment on that line on GitHub, or drag it down several"],
   [["a"], "Approve on GitHub, or your draft ready for review, asking the reviewers you picked"],
   [["@"], "Your draft: add a reviewer, from GitHub's suggestions or by name"],
-  [["w"], "Comment on the PR"],
+  [["w"], "Your comment on the PR: the box under what reviewers said"],
   [["m", "b"], "Your own PR: hand it off for merge, or back to desk"],
   [["d"], "Done"],
-  [["."], "More on GitHub: close, draft, reopen or merge now without the coordinator; request changes on someone else's"],
+  [["."], "More: open on GitHub; close, draft, reopen or merge now without the coordinator; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
-  [["c"], "Copy a review prompt for Claude"],
   [["esc"], "Back to where you opened it"],
 ];
 

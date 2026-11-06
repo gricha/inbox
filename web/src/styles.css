@@ -2255,11 +2255,11 @@ kbd {
   color: var(--pencil);
 }
 
-/* Only a call to action is a shape; the rest are text that fills on hover, and while the menu it opened is open. */
+/* On a row and in Merging, only a call to action is a shape; the rest are text that fills on hover, and while the menu it
+   opened is open. A review's few actions are all buttons. */
 .line .line-ask,
 .line .line-more,
 .lane-more .act:not(.primary),
-.review .actions .act:not(.primary),
 .composer .act:not(.primary) {
   border-color: transparent;
   background: none;
@@ -2269,15 +2269,12 @@ kbd {
 .line .line-more:hover:not(:disabled),
 .line .line-more[aria-expanded="true"],
 .lane-more .act:not(.primary):hover:not(:disabled),
-.review .actions .act:not(.primary):hover:not(:disabled),
-.review .actions .act[aria-expanded="true"]:not(.primary),
 .composer .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
-.review .actions > .act:first-child:not(.primary),
 .lane-more .actions > .act:first-child:not(.primary) {
   margin-left: -9px;
 }
@@ -3553,6 +3550,7 @@ kbd {
 }
 
 .rv-main {
+  position: relative;
   display: grid;
   gap: 22px;
   min-width: 0;
@@ -3562,6 +3560,31 @@ kbd {
   .review.side-open {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
+}
+
+/* The sidebar's own toggle: Hide at its top, and where it was while it's hidden. */
+.rv-side-toggle {
+  justify-self: end;
+  height: 28px;
+  font-size: 12.5px;
+}
+
+.rv-side-show {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+/* Your comment on the PR, under what reviewers said. */
+.rv-comment {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.rv-comment-input {
+  min-height: 38px;
+  field-sizing: content;
 }
 
 .rv-side {
@@ -3691,6 +3714,7 @@ kbd {
 .rv-head,
 .rv-ai,
 .rv-actions,
+.rv-comment,
 .rv-changes,
 .rv-files-err,
 .rv-nofiles {
@@ -4139,7 +4163,8 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-.cv-reply {
+.cv-reply,
+.rv-comment-input {
   display: block;
   width: 100%;
   margin-top: 4px;
@@ -4156,12 +4181,14 @@ kbd {
   min-height: calc(3lh + 18px);
 }
 
-.cv-reply:focus {
+.cv-reply:focus,
+.rv-comment-input:focus {
   border-color: var(--pencil);
   outline: none;
 }
 
-.cv-reply::placeholder {
+.cv-reply::placeholder,
+.rv-comment-input::placeholder {
   color: var(--pencil);
 }
 

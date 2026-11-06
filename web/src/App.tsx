@@ -675,21 +675,6 @@ export function App() {
     refresh(0);
   }
 
-  async function copy(c: Card) {
-    const cached = details[c.id];
-    const d = typeof cached === "object" ? cached : await fetchDetail(c.id);
-    if (!d) {
-      flash("Couldn't load the prompt", true);
-      return;
-    }
-    try {
-      await copyText(d.handoff_prompt);
-      flash("Prompt copied. Paste it into a Claude session.");
-    } catch (e) {
-      flash(`Couldn't copy: ${message(e)}`, true);
-    }
-  }
-
   // A PR opens its review in place of the queue; an issue opens in place.
   function openCard(c: Card) {
     if (c.kind !== "pr") {
@@ -887,7 +872,6 @@ export function App() {
       setSnoozeFor(c.id);
     } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
-    else if (k === "c") void copy(c);
     else if (k === "i") void aiReview(c);
     else if (k === "w") {
       // An issue opened in place: w writes a comment, as it does in a PR's review.
@@ -1024,7 +1008,7 @@ export function App() {
     } else if (k === "Enter" && current) {
       e.preventDefault();
       openCard(current);
-    } else if (current && k.length === 1 && "oedsmbpcwia.".includes(k)) {
+    } else if (current && k.length === 1 && "oedsmbpwia.".includes(k)) {
       e.preventDefault();
       run(current, k);
     }
