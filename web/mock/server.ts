@@ -10,7 +10,7 @@ import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
-import { waitable } from "../../src/signals.ts";
+import { FIELDS, waitable } from "../../src/signals.ts";
 import { approved as approvedBy, stage, verdicts } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
@@ -35,7 +35,6 @@ import type {
   Config,
   ConfigError,
   Conversation,
-  FieldDoc,
   FocusView,
   GitHubAction,
   GitHubStatus,
@@ -2855,67 +2854,6 @@ function preview(text: string): PreviewResult {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Fields
-
-const FIELDS: FieldDoc[] = (
-  [
-    ["item.kind", "string", '"pr" or "issue"'],
-    ["item.id", "string", '"owner/repo#123"'],
-    ["item.repo", "string", '"owner/repo"'],
-    ["item.owner", "string", "repo owner (org or user)"],
-    ["item.name", "string", "repo name without the owner"],
-    ["item.number", "number", "PR or issue number"],
-    ["item.title", "string", "title (untrusted text)"],
-    ["item.url", "string", "GitHub URL"],
-    ["item.author", "string", "author login"],
-    ["item.state", "string", '"open", "closed" or "merged"'],
-    ["item.draft", "boolean", "PR is a draft"],
-    ["item.labels", "string[]", "label names"],
-    ["item.created_hours", "number", "hours since it was opened"],
-    ["item.updated_hours", "number", "hours since GitHub's updatedAt"],
-    ["item.activity_hours", "number", "hours since the last human activity by someone other than you"],
-    ["item.comments", "number", "issue comment count"],
-    ["pr.size", "number", "additions + deletions"],
-    ["pr.additions", "number", "lines added"],
-    ["pr.deletions", "number", "lines deleted"],
-    ["pr.files", "number", "changed files"],
-    ["pr.ci", "string", '"green", "red", "pending" or "none"'],
-    ["pr.review", "string", '"approved", "changes_requested", "required" or "none"'],
-    ["pr.mergeable", "string", '"clean", "conflict" or "unknown" (known only for your PRs)'],
-    ["pr.approvals", "number", "approving reviews"],
-    ["pr.unresolved_threads", "number", "unresolved review threads"],
-    ["pr.base", "string", "base branch"],
-    ["pr.pushed_hours", "number", "hours since the head commit"],
-    ["pr.my_area_files", "number", "of its changed files (the first 50), how many are in directories you work in, -1 if not known yet"],
-    ["pr.my_area", "boolean", "it changes code you work in (my_area_files >= 1)"],
-    ["me.login", "string", "your login"],
-    ["me.author", "boolean", "you opened it"],
-    ["me.assignee", "boolean", "you're an assignee"],
-    ["me.requested", "boolean", "a review is requested from you or one of your teams"],
-    ["me.requested_direct", "boolean", "a review is requested from you by name"],
-    ["me.requested_team", "string", 'team slug behind the request, "" if none'],
-    ["me.requested_codeowner", "boolean", "the request came from CODEOWNERS"],
-    ["me.requested_by", "string", "who added the request"],
-    ["me.requested_by_bot", "boolean", "a bot added the request"],
-    ["me.requested_hours", "number", "hours since the request, -1 if none"],
-    ["me.reviewed", "boolean", "you've reviewed it"],
-    ["me.review_state", "string", 'your latest review state, "none" if none'],
-    ["me.reviewed_hours", "number", "hours since your latest review, -1 if none"],
-    ["me.pushed_since_review", "boolean", "commits after your latest review"],
-    ["me.commented", "boolean", "you've commented"],
-    ["me.last_action_hours", "number", "hours since your latest comment, review or commit"],
-    ["me.new_activity", "boolean", "someone else acted after your latest action"],
-    ["author.login", "string", "author login"],
-    ["author.bot", "boolean", "author is a bot"],
-    ["author.me", "boolean", "you're the author"],
-    ["author.engaged_90d", "number", "their PRs you reviewed or commented on, last 90 days"],
-    ["author.close", "boolean", "engaged_90d >= signals.close_collaborator_min"],
-    ["repo.name", "string", '"owner/repo"'],
-    ["repo.mine", "boolean", "you own it or it's in signals.my_repos"],
-    ["repo.my_prs_90d", "number", "PRs you opened there, last 90 days"],
-  ] as const
-).map(([path, type, doc]) => ({ path, type, doc }));
 const FIELD_SET = new Set(FIELDS.map((f) => f.path));
 
 // ---------------------------------------------------------------------------
