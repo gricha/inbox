@@ -536,6 +536,7 @@ export interface Overview {
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
   inflight: { total: number }; // your open PRs in Merging
+  agent?: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
 }
@@ -819,7 +820,31 @@ export interface Ask {
   item_id: string | null;
   thread_id: string | null; // a conversation in the PR's review
   thread_url: string | null;
+  lines?: AskLines | null; // absent on asks kept before it; the file's name never goes in the wake line (desk_ask gives it)
   answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by web/src/prose.ts, never as HTML
+}
+
+// Lines of a PR's diff an ask is about, at the commit you read them in: picked with + (or a drag), or the AI note you were on.
+export interface AskLines extends InlineAt {
+  head: string; // 40 hex
+  note?: boolean; // Claude's AI note at these lines (] [), not lines you picked
+}
+
+// What an ask is about, in the desk's words: never PR text.
+export interface AskAbout {
+  url: string;
+  whose: "mine" | "theirs" | "issue"; // the real author, or in Merging (your own m put it there): a bot's "via" alone never makes it yours
+  merging: boolean;
+  state: "open" | "closed" | "merged";
+}
+
+// GET /api/asks/:id (desk_ask): where an ask is, and where a change it asks for may go.
+export interface AskPlace {
+  ask: Ask;
+  about: AskAbout | null; // null: about nothing, or the item left the desk
+  head: string | null; // the PR's head at the desk's last sync
+  base: string | null; // the PR's base branch: removed lines are numbered there
+  push: { repo: string; branch: string } | null; // only your own open PR in Merging's branch; else null
 }
 
 // A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it, and

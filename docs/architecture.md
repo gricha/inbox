@@ -154,8 +154,9 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | GET    | `/api/status`                |                                                        | `{ now, today, new, text }` (`text` e.g. `desk 7 +3`: the queue, new; `""` when 0/0)                                                                         |
 | GET    | `/api/inflight`              |                                                        | `InflightView`: your PRs in Merging, what each waits on and the coordinator's latest note                                                                    |
 | POST   | `/api/coordinator/wake`      |                                                        | Starts the coordinator, or has it look at Merging now (`w`)                                                                                                  |
-| POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url? }`          | `{ ok, ask }`: your words to the coordinator (`t`), sent at once; only from the desk's own page                                                              |
+| POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }`  | `{ ok, ask }`: your words to the coordinator (`t`), sent at once with whose it is; only from the desk's own page                                             |
 | GET    | `/api/asks`                  |                                                        | `AsksView`: `{ on, asks }`                                                                                                                                   |
+| GET    | `/api/asks/:id`              |                                                        | `AskPlace` — `desk_ask`: whose it is, the lines, and the branch a change may go to                                                                           |
 | POST   | `/api/asks/:id/answer`       | `{ text }`                                             | `{ ok, ask }` — `desk_answer`: the coordinator's answer, in paragraphs; the first notifies with its first paragraph                                          |
 | POST   | `/api/inflight/:id/note`     | `{ text }`                                             | `{ ok, text }` — `desk_note`: the PR's status line in Merging                                                                                                |
 | POST   | `/api/inflight/:id/handback` | `{ why }`                                              | `{ ok, reason }` — `desk_hand_back`: the PR leaves Merging for the top of the queue                                                                          |
@@ -210,6 +211,7 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_note({ ref, text })` — the coordinator's status line on a PR in Merging.
 - `desk_hand_back({ ref, why })` — gives a PR in Merging back to you, at the top of the queue with the reason.
 - `desk_answer({ ask_id, text })` — the coordinator's answer to your ask from the desk's window, shown in your chat with it.
+- `desk_ask({ ask_id })` — where an ask is and where a change may go, the file fenced.
 
 Every tool result marks PR titles and bodies as untrusted data; the policy and config come fenced too. No tool writes to GitHub: agents never approve or mark ready through the desk.
 

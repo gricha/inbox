@@ -20,6 +20,9 @@ import type {
   AgentStatus,
   AiReview,
   Ask,
+  AskAbout,
+  AskLines,
+  AskPlace,
   Automation,
   AutomationRun,
   Inquiry,
@@ -1124,6 +1127,7 @@ export class Desk {
         asks: this.inquiries().filter((q) => !q.answer).length,
       },
       inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
+      agent: this.settings["agent.coordinator"],
       rate_limit: this.gh.api.rateLimit(),
     };
   }
@@ -1962,10 +1966,8 @@ export class Desk {
   async wakeCoordinator(askId?: string): Promise<void> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
     const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
-    if (a) {
-      const url = a.item_id ? (this.snapshot().entries.get(a.item_id)?.item.url ?? null) : null;
-      await this.coordinator.tell(askLine(a, url));
-    } else await this.coordinator.now();
+    if (a) await this.coordinator.tell(askLine(a, this.askAbout(a.item_id)));
+    else await this.coordinator.now();
     if (!this.coordinator.saved())
       throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), { cause: this.coordinator.failure });
   }
@@ -2151,10 +2153,49 @@ export class Desk {
     return item === undefined ? all : all.filter((a) => a.item_id === item);
   }
 
-  // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread) you were on.
-  async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }): Promise<Ask> {
+  // What an ask is about, in the desk's words; without GitHub context every PR reads someone else's, which fails closed.
+  askAbout(id: string | null): AskAbout | null {
+    const e = id ? this.snapshot().entries.get(id) : undefined;
+    if (!e) return null;
+    const it = e.item;
+    const me = this.me().toLowerCase();
+    // Only your own m puts a PR in Merging, a bot's opened for you included; elsewhere it's the real author, never a bot's via.
+    const whose = it.kind === "issue" ? "issue" : e.inflight || (me && it.author.toLowerCase() === me) ? "mine" : "theirs";
+    return { url: it.url, whose, merging: e.inflight, state: it.state };
+  }
+
+  // GET /api/asks/:id (desk_ask): where an ask is, and the only branch a change it asks for may be pushed to.
+  askPlace(id: string): AskPlace {
+    const ask = this.asks().find((x) => x.id === id);
+    if (!ask) throw new DeskError(404, `no ask "${id}"`);
+    const about = this.askAbout(ask.item_id);
+    const it = about && ask.item_id ? this.snapshot().entries.get(ask.item_id)?.item : undefined;
+    const pr = it?.kind === "pr" ? it : null;
+    const mayPush = !!pr && about?.whose === "mine" && about.merging && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
+    return {
+      ask,
+      about,
+      head: pr ? pr.head_oid || null : null,
+      base: pr ? pr.base || null : null,
+      push: mayPush ? { repo: pr.head_repo!, branch: pr.head_ref! } : null,
+    };
+  }
+
+  // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread or lines) you were on.
+  async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }): Promise<Ask> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
     const item = b.item_id ? this.snapshot().entries.get(this.resolve(b.item_id))!.item : null;
+    const l = b.lines;
+    if (l) {
+      if (!item) throw new DeskError(400, "lines are on a PR's diff: send its item_id");
+      if (item.kind !== "pr") throw new DeskError(400, "lines are on a PR's diff");
+      if (b.thread_id || b.thread_url) throw new DeskError(400, "an ask is on a thread or on lines, not both");
+      if (!/^[0-9a-f]{40}$/.test(l.head)) throw new DeskError(400, "lines need head: the 40-character commit they were read at");
+      // desk_ask hands the name to a shell, quoted: what could break a line or read as something else is refused, not stripped.
+      // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+      const bad = /[\u0000-\u001f\u2028\u2029]/.test(l.path) || l.path.replaceAll(INVISIBLE, "") !== l.path;
+      if (!l.path || l.path.length > 1000 || bad) throw new DeskError(400, "lines need path: a file name with no control characters");
+    }
     if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) throw new DeskError(400, "thread_url must be a GitHub URL");
     const a: Ask = {
       id: randomBytes(4).toString("hex"),
@@ -2163,9 +2204,20 @@ export class Desk {
       item_id: item?.id ?? null,
       thread_id: item && b.thread_id ? b.thread_id : null,
       thread_url: item && b.thread_url ? b.thread_url : null,
+      // Rebuilt, so keys the window didn't mean to send never reach the store.
+      lines: l
+        ? {
+            path: l.path,
+            line: l.line,
+            side: l.side,
+            ...(l.start && { start: { line: l.start.line, side: l.start.side } }),
+            head: l.head,
+            ...(l.note && { note: true }),
+          }
+        : null,
       answer: null,
     };
-    const line = askLine(a, item?.url ?? null);
+    const line = askLine(a, this.askAbout(a.item_id));
     const started = !!this.coordinator.saved();
     let told: Promise<void>;
     try {

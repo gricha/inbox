@@ -303,5 +303,8 @@ test("Wake it under an ask it stopped without answering hands that ask over agai
   t.desk.store.set("asks", [a]);
   await t.desk.wakeCoordinator("a1");
   assert.equal(told.length, 1);
-  assert.match(told[0]!, /^My ask a1, about acme\/web#3 \(https:\/\/github\.com\/acme\/web\/pull\/3\): "Is it safe to merge\?"/);
+  assert.match(
+    told[0]!,
+    /^My ask a1, about my PR acme\/web#3 \(https:\/\/github\.com\/acme\/web\/pull\/3\), not handed off: "Is it safe to merge\?"/,
+  );
 });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Desk } from "./desk.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
-import { COORDINATOR_NAME, type ActivityEvent, type Ask, type CoordinatorView } from "./types.ts";
+import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
 import { detached, report } from "./sentry.ts";
 
 export const NAME = COORDINATOR_NAME;
@@ -40,7 +40,7 @@ export const DENY = [
 ];
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
-  "You are my Review Desk coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the review-desk skill.";
+  "You are my Review Desk coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the review-desk skill.";
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 const PERMISSION = { bypass: "bypassPermissions", default: "default" } as const;
 type Mode = keyof typeof PERMISSION;
@@ -85,13 +85,37 @@ const alive = (pid: number) => {
   }
 };
 
-// The owner's words as they wrote them (they're trusted), on one line (cmd.exe can't pass a newline); what they were on only as its id and URLs.
-export function askLine(a: Ask, url: string | null): string {
-  const about = [
-    a.item_id ? `about ${a.item_id}${url ? ` (${url})` : ""}` : "",
+const span = (s: "new" | "old") => (s === "old" ? "removed " : "");
+// Where lines are, by number and side only: the file's name is PR text, so desk_ask gives it.
+export function linesText(l: AskLines): string {
+  const s = l.start;
+  const at = !s
+    ? `${span(l.side)}line ${l.line}`
+    : s.side === l.side
+      ? `${span(l.side)}lines ${s.line}-${l.line}`
+      : `${span(s.side)}line ${s.line} to ${span(l.side)}line ${l.line}`;
+  return l.note ? `Claude's note at ${at}` : at;
+}
+const WHOSE = { mine: "my PR ", theirs: "someone else's PR ", issue: "the issue " };
+const READ_ONLY = ", read only: don't push to it or post on it";
+function stateText(b: AskAbout): string {
+  if (b.merging) return ", in Merging";
+  const done = b.state === "open" ? "" : `, ${b.state}`;
+  if (b.whose === "theirs") return `${done}${READ_ONLY}`;
+  return b.whose === "mine" && !done ? ", not handed off" : done;
+}
+// The owner's words as they wrote them (they're trusted), on one line (cmd.exe can't pass a newline); the rest in the desk's words, never PR text.
+export function askLine(a: Ask, about: AskAbout | null): string {
+  const l = a.lines;
+  const parts = [
+    // An item that left the desk fails closed: nothing says it's yours any more.
+    a.item_id
+      ? `about ${about ? `${WHOSE[about.whose]}${a.item_id} (${about.url})${stateText(about)}` : `${a.item_id}, not on the desk now${READ_ONLY}`}`
+      : "",
     a.thread_url ? `on the thread ${a.thread_url}` : "",
+    l ? `on ${linesText(l)} of its diff (desk_ask ${a.id} says where)` : "",
   ].filter(Boolean);
-  return `My ask ${a.id}${about.length ? `, ${about.join(", ")}` : ""}: "${a.text.replaceAll(/\s+/g, " ")}" Answer it with desk_answer.`;
+  return `My ask ${a.id}${parts.length ? `, ${parts.join(", ")}` : ""}: "${a.text.replaceAll(/\s+/g, " ")}" Answer it with desk_answer.`;
 }
 
 // What wakes it, in its words; null for what doesn't (its own pushes, CI starting).

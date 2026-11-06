@@ -16,7 +16,7 @@ import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
-import { GITHUB_ACTIONS, type Action, type GitHubAction, type InlineAt } from "./types.ts";
+import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt } from "./types.ts";
 
 const VERSION = "0.1.0";
 export const DEFAULT_PORT = 47823;
@@ -37,6 +37,18 @@ const TYPES: Record<string, string> = {
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
+
+// A line of a PR's diff, or a range from `start` to it, rebuilt from its parts; null when any of them is bad.
+function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
+  const line = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
+  const side = (v: unknown): v is "new" | "old" => v === "new" || v === "old";
+  const { path: file, line: at, side: on, start } = b;
+  if (typeof file !== "string" || !file || !line(at) || !side(on)) return null;
+  if (start === undefined) return { path: file, line: at, side: on };
+  if (typeof start !== "object" || start === null) return null;
+  const { line: from, side: was } = start as Record<string, unknown>;
+  return line(from) && side(was) ? { path: file, line: at, side: on, start: { line: from, side: was } } : null;
+}
 
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
@@ -161,27 +173,11 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
     const b = await input(c);
-    const line = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
-    const side = (v: unknown): v is "new" | "old" => v === "new" || v === "old";
-    const start = (v: unknown): v is InlineAt["start"] =>
-      v === undefined ||
-      (typeof v === "object" && v !== null && line((v as Record<string, unknown>).line) && side((v as Record<string, unknown>).side));
-    const { path: file, line: at, side: on, start: from, body, head_oid } = b;
-    if (
-      typeof file !== "string" ||
-      !file ||
-      !line(at) ||
-      !side(on) ||
-      !start(from) ||
-      typeof body !== "string" ||
-      typeof head_oid !== "string" ||
-      !head_oid
-    )
+    const at = inlineAtOf(b);
+    const { body, head_oid } = b;
+    if (!at || typeof body !== "string" || typeof head_oid !== "string" || !head_oid)
       throw new DeskError(400, "need { path, line, side: new|old, start?: { line, side }, body, head_oid }");
-    return c.json({
-      ok: true,
-      ...(await desk.inlineComment(c.req.param("id"), { path: file, line: at, side: on, ...(from && { start: from }) }, body, head_oid)),
-    });
+    return c.json({ ok: true, ...(await desk.inlineComment(c.req.param("id"), at, body, head_oid)) });
   });
   const reviewerIds = async (c: { req: { json<T>(): Promise<T> } }) => {
     const b = await input(c);
@@ -254,15 +250,29 @@ export function createApp(desk: Desk, port: number): Hono {
     if (!fromDesk(c)) throw new DeskError(403, "ask your agent from the desk's window (t)");
     const b = await input(c);
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
+    let lines: AskLines | undefined;
+    if (b.lines !== undefined) {
+      const l = typeof b.lines === "object" && b.lines !== null ? (b.lines as Record<string, unknown>) : null;
+      const at = l && inlineAtOf(l);
+      if (!l || !at || typeof l.head !== "string" || (l.note !== undefined && typeof l.note !== "boolean"))
+        throw new DeskError(400, "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }");
+      lines = { ...at, head: l.head, ...(l.note === true && { note: true }) };
+    }
     const ask = await desk.ask({
       text: b.text,
       item_id: str(b, "item_id"),
       thread_id: str(b, "thread_id"),
       thread_url: str(b, "thread_url"),
+      lines,
     });
     return c.json({ ok: true, ask });
   });
   app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
+  // desk_ask: local only, so agents may read where an ask is.
+  app.get("/api/asks/:id", (c) => {
+    ready();
+    return c.json(desk.askPlace(c.req.param("id")));
+  });
   // desk_answer: local only, so agents may call it.
   app.post("/api/asks/:id/answer", async (c) => c.json({ ok: true, ask: desk.answer(c.req.param("id"), await line(c, "text")) }));
   // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.

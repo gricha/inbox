@@ -6,6 +6,7 @@ import {
   type ActivityPage,
   type AiReview,
   type Ask,
+  type AskPlace,
   type Automation,
   type AutomationView,
   type Inquiry,
@@ -141,6 +142,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     note: (id: string, text: string) => call<{ ok: true; text: string }>("POST", `/api/inflight/${q(id)}/note`, { text }),
     handBack: (id: string, why: string) => call<{ ok: true; reason: string }>("POST", `/api/inflight/${q(id)}/handback`, { why }),
     answer: (id: string, text: string) => call<{ ok: true; ask: Ask }>("POST", `/api/asks/${q(id)}/answer`, { text }),
+    askPlace: (id: string) => call<AskPlace>("GET", `/api/asks/${q(id)}`),
     // An agent's question for the user, and their answer once they give it.
     inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
       call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
