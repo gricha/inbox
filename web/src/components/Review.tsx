@@ -382,7 +382,7 @@ export function Review({
     if (next.has(path)) next.delete(path);
     else next.add(path);
     setShut(next);
-    setStay(list[at]?.path === path ? at : list.findIndex((x) => x.path === path));
+    setStay(at);
   }
 
   // Z: all folded, or all open again once they are.
