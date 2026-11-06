@@ -1055,7 +1055,7 @@ export class Desk {
     const cfg = this.requireConfig().config.boards.find((b) => b.id === id)!;
     const b = snap.boards.get(id)!;
     const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!)).length;
-    const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared };
+    const counts = { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0, cleared };
     let fresh = 0;
     for (const bucket of Object.keys(b.result.order) as Bucket[]) {
       counts[bucket] = b.result.order[bucket].length;
@@ -1209,7 +1209,7 @@ export class Desk {
     const loaded = this.requireConfig();
     const snap = this.snapshot();
     const seen = new Set<string>();
-    const sections: QueueView["sections"] = { ...this.top(snap, seen), later: [], fyi: [] };
+    const sections: QueueView["sections"] = { ...this.top(snap, seen), blocked: [], later: [], fyi: [] };
     const reviewing = this.reviewing(snap);
     const hidden: Card[] = [];
     for (const bucket of ["later", "fyi", "hide"] as const) {
@@ -1330,6 +1330,7 @@ export class Desk {
       sections: {
         now: cards(b.result.order.now),
         today: cards(b.result.order.today),
+        blocked: cards(b.result.order.blocked),
         later: cards(b.result.order.later),
         fyi: cards(b.result.order.fyi),
       },
@@ -1924,6 +1925,7 @@ export class Desk {
         mergeable: it.mergeable,
         draft: it.draft,
         rebase: !!m.rebase,
+        blocked_by: null,
       };
       rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
     }
@@ -2513,6 +2515,7 @@ function countsOf(r: BoardResult): Record<Bucket, number> {
   return {
     now: r.order.now.length,
     today: r.order.today.length,
+    blocked: r.order.blocked.length,
     later: r.order.later.length,
     fyi: r.order.fyi.length,
     hide: r.order.hide.length,

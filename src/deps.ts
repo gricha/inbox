@@ -1,4 +1,6 @@
 // What a PR needs merged before it, and who blocks whom: from its description and its git stack. Pure.
+import type { Stacks } from "./stacks.ts";
+import type { Card, Item } from "./types.ts";
 
 // Descriptions are attacker-written: no pattern here has nested or overlapping unbounded quantifiers, so each runs in linear time.
 const REF = String.raw`(?:https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+(?:[^\d\s)\],;][^\s)\],;]*)?|[\w.-]+/[\w.-]+#\d+|(?<![\w/])#\d+)`;
@@ -67,4 +69,110 @@ export function requiresOf(md: string, repo: string, number: number): string[] {
           if (k !== self && !out.has(k)) out.set(k, x);
         }
   return [...out.values()].slice(0, 10);
+}
+
+export interface DepFacts {
+  requires: string[]; // repo#number, any state: the stack parent, then the description's (unknown refs too)
+  open: string[]; // repo#number: open PRs the desk holds that it needs directly, edges that close a loop left out
+  closed: string[]; // repo#number: needs closed without merging
+  merged: { ref: string; at: string }[]; // needs that merged, oldest first
+  root: string | null; // item.id: the open PR at the end of its first open chain; null when nothing open blocks it
+  through: string | null; // repo#number: the need that chain goes through, when the root isn't a direct need
+  blocks: string[]; // repo#number: open PRs that need this one, directly or not
+}
+
+const short = (it: Item) => `${it.repo.split("/")[1]}#${it.number}`;
+
+// Keyed by item.id, open PRs only. Refs the desk doesn't hold, and issues, never block; a loop blocks nobody in it.
+export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFacts> {
+  const prs = new Map(items.filter((i) => i.kind === "pr").map((i) => [i.id.toLowerCase(), i]));
+  const live = [...prs.values()].filter((i) => i.state === "open");
+  const facts = new Map<string, DepFacts>();
+  const edges = new Map<string, Item[]>();
+  for (const x of live) {
+    const f: DepFacts = { requires: [], open: [], closed: [], merged: [], root: null, through: null, blocks: [] };
+    const seen = new Set([x.id.toLowerCase()]);
+    const out: Item[] = [];
+    for (const ref of [stacks.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
+      if (!ref || seen.has(ref.toLowerCase())) continue;
+      seen.add(ref.toLowerCase());
+      const y = prs.get(ref.toLowerCase());
+      f.requires.push(y ? short(y) : ref.slice(ref.indexOf("/") + 1));
+      if (y?.state === "open") out.push(y);
+      else if (y?.state === "closed") f.closed.push(short(y));
+      else if (y) f.merged.push({ ref: short(y), at: y.closed_at ?? y.updated_at });
+    }
+    f.merged.sort((a, b) => a.at.localeCompare(b.at));
+    facts.set(x.id, f);
+    edges.set(x.id, out);
+  }
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set([from]);
+    const todo = [from];
+    for (let i = 0; i < todo.length; i++) {
+      if (todo[i] === to) return true;
+      for (const y of edges.get(todo[i]!)!) {
+        if (seen.has(y.id)) continue;
+        seen.add(y.id);
+        todo.push(y.id);
+      }
+    }
+    return false;
+  };
+  // An edge that closes a loop is dropped, so what's kept has none and rootOf ends.
+  const kept = new Map([...edges].map(([id, ys]) => [id, ys.filter((y) => !reaches(y.id, id))]));
+  const memo = new Map<string, { root: string; through: string | null } | null>();
+  const rootOf = (id: string): { root: string; through: string | null } | null => {
+    if (memo.has(id)) return memo.get(id)!;
+    const [y] = kept.get(id)!;
+    const up = y ? rootOf(y.id) : null;
+    const r = !y ? null : up ? { root: up.root, through: short(y) } : { root: y.id, through: null };
+    memo.set(id, r);
+    return r;
+  };
+  for (const x of live) {
+    const f = facts.get(x.id)!;
+    const r = rootOf(x.id);
+    f.open = kept.get(x.id)!.map(short);
+    f.root = r?.root ?? null;
+    f.through = r?.through ?? null;
+    const reached = new Set<string>();
+    const todo = [...kept.get(x.id)!];
+    for (let y = todo.pop(); y; y = todo.pop()) {
+      if (reached.has(y.id)) continue;
+      reached.add(y.id);
+      const blocks = facts.get(y.id)!.blocks;
+      if (!blocks.includes(short(x))) blocks.push(short(x));
+      todo.push(...kept.get(y.id)!);
+    }
+  }
+  return facts;
+}
+
+// A chain says once what its blocker waits on: on the blocker's own row when it's listed, else on the chain's first row.
+export function blockedOrder(cards: Card[]): Card[] {
+  const key = (c: Card) => c.blocker?.id ?? c.id;
+  const since = new Map<string, string>();
+  for (const c of cards) {
+    const was = since.get(key(c));
+    if (was === undefined || c.waiting_since < was) since.set(key(c), c.waiting_since);
+  }
+  const ids = new Set(cards.map((c) => c.id));
+  const said = new Set<string>();
+  const out = cards.toSorted(
+    (a, b) =>
+      since.get(key(a))!.localeCompare(since.get(key(b))!) ||
+      key(a).localeCompare(key(b)) ||
+      Number(a.id !== key(a)) - Number(b.id !== key(b)) ||
+      a.waiting_since.localeCompare(b.waiting_since),
+  );
+  for (const [i, c] of out.entries()) {
+    if (!c.blocker) continue;
+    const tail = `, which ${c.blocker.waits}`;
+    const k = `${c.blocker.id}\n${tail}`;
+    if (!c.why.endsWith(tail)) continue;
+    if (ids.has(c.blocker.id) || said.has(k)) out[i] = { ...c, why: c.why.slice(0, -tail.length) };
+    said.add(k);
+  }
+  return out;
 }

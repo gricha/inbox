@@ -46,7 +46,7 @@ test('"judge" is a rule bucket, not a board default', () => {
   assert.deepEqual(parseConfig(text).errors, []);
   assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[7]!.bucket, "judge");
   const bad = parseConfig(text.replace(`default = "later"`, `default = "judge"`)).errors;
-  assert.match(bad[0]?.message ?? "", /must be one of now, today, later, fyi, hide/);
+  assert.match(bad[0]?.message ?? "", /must be one of now, today, blocked, later, fyi, hide/);
   assert.match(parseConfig(text.replace(`bucket = "judge"`, `bucket = "maybe"`)).errors[0]?.message ?? "", /or judge/);
 });
 
@@ -425,6 +425,12 @@ test("parseVerdicts keeps known ids with real buckets, one line of why", () => {
   assert.equal(v.get("a#3")?.why, "", "the policy says nothing about it: the rules' why stays");
   assert.equal(v.get("a#4")?.why.length, 80);
   assert.equal(parseVerdicts("nonsense", ["a#1"]).size, 0);
+});
+
+test("Claude can't answer blocked: the schema leaves it out and parseVerdicts drops it", () => {
+  assert.deepEqual(JUDGE_SCHEMA.properties.items.items.properties.bucket.enum, ["now", "today", "later", "fyi", "hide"]);
+  const v = parseVerdicts({ items: [{ id: "a#1", bucket: "blocked", why: "waits on a#2" }] }, ["a#1"]);
+  assert.equal(v.size, 0);
 });
 
 // ---------------------------------------------------------------- the desk, with a fake claude

@@ -1,14 +1,14 @@
 // Shared types: GitHub items, rule signals, config, and the HTTP API shapes.
 
-export type Bucket = "now" | "today" | "later" | "fyi" | "hide";
-export const BUCKETS: Bucket[] = ["now", "today", "later", "fyi", "hide"];
-export const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
+export type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
+export const BUCKETS: Bucket[] = ["now", "today", "blocked", "later", "fyi", "hide"];
+export const RANK: Record<Bucket, number> = { now: 0, today: 1, blocked: 2, later: 3, fyi: 4, hide: 5 };
 
 export type Ci = "green" | "red" | "pending" | "none";
 export type ReviewDecision = "approved" | "changes_requested" | "required" | "none";
 export type Mergeable = "clean" | "conflict" | "unknown";
 export type ReviewState = "approved" | "changes_requested" | "commented" | "dismissed" | "pending";
-export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "merged" | "closed";
+export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "merged" | "closed"; // blocked: only Desk.card() sets it
 
 // ---------------------------------------------------------------------------
 // GitHub item, normalized from GraphQL. Times are ISO strings.
@@ -120,6 +120,15 @@ export interface Signals {
     unresolved_threads: number;
     base: string;
     stacked: boolean; // its base isn't the repo's default branch
+    requires: string[]; // PRs it needs merged first, as repo#number, in any state: the one below it in its stack, then its description's
+    blocked: boolean; // a PR it needs, or one that PR needs in turn, is still open (PRs the desk doesn't hold, and issues, never block)
+    blocked_by: string[]; // the open PRs it needs directly, as repo#number
+    blocker: string; // the open PR at the end of the chain, as repo#number, "(through repo#number)" when it isn't a direct need; "" when not blocked
+    blocker_waits: string; // what that PR waits on, as its pr.waits says it, or "is in Merging"; "" when not blocked
+    blocks: string[]; // open PRs that need this one merged first, directly or through others, as repo#number
+    requires_closed: string[]; // PRs it needs that were closed without merging
+    waiting_on: string[]; // who is asked to review it and hasn't approved: logins and @teams, you and bots left out; empty once approved
+    waits: string; // what it waits on next, in words ("waits on a review from sam", "is ready to merge"); "" once merged or closed
     unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
     pushed_hours: number;
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
@@ -143,6 +152,7 @@ export interface Signals {
     commented: boolean;
     last_action_hours: number; // your latest comment, review, or head commit
     new_activity: boolean; // someone else commented, reviewed or pushed after your latest action
+    owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last; false on others' PRs
   };
   author: {
     login: string;
@@ -171,6 +181,7 @@ export interface Rule {
   why?: string;
   nocap?: boolean; // matched items don't count toward caps and are never demoted
   hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule)
+  final?: boolean; // Claude doesn't re-sort what it matches: it stays in the rule's bucket (a pin's floor still lifts it)
 }
 
 export interface BoardConfig {
@@ -448,6 +459,9 @@ export interface Card {
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
   stack?: StackRef; // an open PR whose line has two or more open
+  // An open PR blocked by another: the item id at the end of the chain, as its why says it ("sentry#129460 (through api#2)"), and what that one waits on
+  blocker?: { id: string; ref: string; waits: string };
+  blocks?: string[]; // open PRs that need this one merged first, directly or not, as repo#number
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +572,7 @@ export interface Paused {
 // Every item once, at its best placement across boards: the app's main surface.
 export interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
+  // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks; a chain's rows together, longest wait first
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
   reviewing: number; // as in FocusView
   hidden: Card[]; // a rule put it in "hide"
@@ -734,7 +749,9 @@ export type ActivityKind =
   | "assigned" // to you
   | "conflict" // your PR started conflicting with its base; data: base
   | "resolved" // data: reason
-  | "unresolved"; // data: was (the reason that stopped holding)
+  | "unresolved" // data: was (the reason that stopped holding)
+  | "blocked" // your PR, blocked by another PR; data: by
+  | "unblocked"; // no longer; data: was, merged (the PR that merged, "" if none)
 
 export interface ActivityEvent {
   seq: number; // increasing; pass the last one you saw as `after`
@@ -769,6 +786,7 @@ export interface InflightRow {
   mergeable: Mergeable;
   draft: boolean; // a draft PR
   rebase: boolean; // the desk gave it to the coordinator only to rebase (ready to merge but conflicts); it leaves once mergeable
+  blocked_by: { ref: string; waits: string } | null; // another PR must merge first: pr.blocker and pr.blocker_waits
   waits_on: string | null; // what it waits on, in Merging's words: "waits on CI", "ready to merge"; null once merged or closed
   note: { text: string; at: string } | null; // the coordinator's latest desk_note on it; untrusted, an agent wrote it
 }

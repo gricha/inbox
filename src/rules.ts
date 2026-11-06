@@ -155,7 +155,7 @@ export const capText = (from: "now" | "today", cap: number, board: string): stri
 export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLookup, quietDays = 0): BoardResult {
   const cfg = board.config;
   const placements = new Map<string, Placement>();
-  const byBucket: Record<Bucket, Entry[]> = { now: [], today: [], later: [], fyi: [], hide: [] };
+  const byBucket: Record<Bucket, Entry[]> = { now: [], today: [], blocked: [], later: [], fyi: [], hide: [] };
   const inactive: string[] = [];
   for (const e of entries) {
     const p = place(board, e, judge);

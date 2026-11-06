@@ -94,7 +94,7 @@ const summary: BoardSummary = {
   id: "reviews",
   name: "PRs to review",
   space: "work",
-  counts: { now: 1, today: 1, later: 1, fyi: 1, hide: 1, cleared: 1 },
+  counts: { now: 1, today: 1, blocked: 0, later: 1, fyi: 1, hide: 1, cleared: 1 },
   new: 1,
 };
 
@@ -141,7 +141,7 @@ const AUTO: AutomationView = {
 
 const queueView: QueueView = {
   inquiries: [],
-  sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
+  sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
   reviewing: 0,
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
@@ -171,6 +171,7 @@ const inflightView: InflightView = {
       mergeable: "clean",
       draft: false,
       rebase: false,
+      blocked_by: null,
       waits_on: "waits on a CI fix",
       note: { text: "Fixing the flaky test", at: ago(0.1) },
     },
@@ -181,7 +182,7 @@ const inflightView: InflightView = {
 
 const boardView: BoardView = {
   board: { ...summary, queries: ["is:open is:pr review-requested:@me"] },
-  sections: { now: [CARDS.now], today: [CARDS.today], later: [CARDS.later], fyi: [CARDS.fyi] },
+  sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
 };

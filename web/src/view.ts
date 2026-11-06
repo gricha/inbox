@@ -394,7 +394,7 @@ export function removeCard(v: QueueView, id: string, ends = false): QueueView {
   const s = v.sections;
   return {
     ...v,
-    sections: { now: drop(s.now), today: drop(s.today), later: drop(s.later), fyi: drop(s.fyi) },
+    sections: { now: drop(s.now), today: drop(s.today), blocked: drop(s.blocked), later: drop(s.later), fyi: drop(s.fyi) },
     hidden: drop(v.hidden),
     ...(ends && { waiting: { reviews: drop(v.waiting.reviews), prs: drop(v.waiting.prs) } }),
   };

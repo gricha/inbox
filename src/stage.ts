@@ -30,3 +30,10 @@ export function stage(it: Item, self: string): Stage | undefined {
   // GitHub says "required" while the branch still wants another approval or a code owner's.
   return approved(it, self) ? "approved" : "waiting for review";
 }
+
+// "a", "a and b", or "a, b and N more", where N counts `extra` too (requests GitHub hides); "" for none.
+export function andMore(xs: string[], extra = 0): string {
+  const shown = xs.slice(0, 2);
+  const more = xs.length - shown.length + extra;
+  return more > 0 && shown.length ? `${shown.join(", ")} and ${more} more` : shown.join(" and ");
+}

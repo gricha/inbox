@@ -74,7 +74,13 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
 
 const queue = (): QueueView => ({
   inquiries: [],
-  sections: { now: [card("acme/api#1")], today: [card("acme/web#2", { author: "priya" })], later: [card("acme/api#3")], fyi: [] },
+  sections: {
+    now: [card("acme/api#1")],
+    today: [card("acme/web#2", { author: "priya" })],
+    blocked: [],
+    later: [card("acme/api#3")],
+    fyi: [],
+  },
   reviewing: 0,
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],

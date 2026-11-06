@@ -53,7 +53,7 @@ const USAGE = `usage: desk <command>
 
 class UsageError extends Error {}
 
-const GLYPH: Record<Bucket, string> = { now: "●", today: "◐", later: "○", fyi: "·", hide: "×" };
+const GLYPH: Record<Bucket, string> = { now: "\u25cf", today: "\u25d0", blocked: "\u2298", later: "\u25cb", fyi: "\u00b7", hide: "\u00d7" };
 const PAST: Record<string, string> = {
   done: "done",
   mute: "muted",

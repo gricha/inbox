@@ -45,6 +45,8 @@ const BACKOFF = [5, 10, 20, 60].map((m) => m * 60_000);
 
 export const textHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
+const JUDGE_BUCKETS = BUCKETS.filter((b) => b !== "blocked"); // only rules fill Blocked, so it stays deterministic
+
 // Strict-mode friendly, like the review's.
 export const JUDGE_SCHEMA = {
   type: "object",
@@ -59,7 +61,7 @@ export const JUDGE_SCHEMA = {
         required: ["id", "bucket", "why"],
         properties: {
           id: { type: "string" },
-          bucket: { type: "string", enum: BUCKETS },
+          bucket: { type: "string", enum: JUDGE_BUCKETS },
           why: { type: "string" },
         },
       },
@@ -300,7 +302,7 @@ export function parseVerdicts(raw: unknown, ids: string[]): Map<string, { bucket
   const list = (raw as { items?: unknown } | null)?.items;
   for (const v of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
     const id = typeof v?.id === "string" ? v.id.trim() : "";
-    const bucket = BUCKETS.find((b) => b === v?.bucket);
+    const bucket = JUDGE_BUCKETS.find((b) => b === v?.bucket);
     if (!want.has(id) || !bucket || out.has(id)) continue;
     const why = typeof v.why === "string" ? oneLine(v.why).slice(0, MAX_WHY) : "";
     out.set(id, { bucket, why });

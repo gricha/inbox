@@ -198,6 +198,15 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       pushed_hours: hours(headAt),
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
+      requires: [],
+      blocked: false,
+      blocked_by: [],
+      blocker: "",
+      blocker_waits: "",
+      blocks: [],
+      requires_closed: [],
+      waiting_on: [],
+      waits: "",
     },
     me: {
       login: ctx.me,
@@ -217,6 +226,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       commented: item.comments.some((c) => isMe(c.author)) || myReviews.length > 0,
       last_action_hours: hours(lastAction),
       new_activity: Boolean(lastAction && others && others > lastAction),
+      owes_reply: false,
     },
     author: {
       login: author,

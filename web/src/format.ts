@@ -104,6 +104,10 @@ export function eventText(e: ActivityEvent, me = ""): string {
       return `resolved: ${String(d.reason)}`;
     case "unresolved":
       return `came back (was ${String(d.was)})`;
+    case "blocked":
+      return `blocked by ${String(d.by)}`;
+    case "unblocked":
+      return d.merged ? `unblocked: ${String(d.merged)} merged` : "unblocked";
   }
   return e.kind;
 }
@@ -111,7 +115,14 @@ export function eventText(e: ActivityEvent, me = ""): string {
 // "~/.review-desk/settings.json" rather than the full home path.
 export const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]:\\Users\\[^\\]+(?=\\)/, "~");
 
-export const BUCKET_LABEL: Record<Bucket, string> = { now: "Now", today: "Today", later: "Later", fyi: "FYI", hide: "Hidden" };
+export const BUCKET_LABEL: Record<Bucket, string> = {
+  now: "Now",
+  today: "Today",
+  blocked: "Blocked",
+  later: "Later",
+  fyi: "FYI",
+  hide: "Hidden",
+};
 
 export const SNOOZE: { key: string; until: string; label: string; toast: string }[] = [
   { key: "1", until: "1h", label: "1 hour", toast: "for an hour (or until new activity)" },

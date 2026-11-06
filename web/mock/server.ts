@@ -1326,6 +1326,15 @@ function signals(r: Rec): Signals {
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
+      requires: [],
+      blocked: false,
+      blocked_by: [],
+      blocker: "",
+      blocker_waits: "",
+      blocks: [],
+      requires_closed: [],
+      waiting_on: [],
+      waits: "",
     },
     me: {
       login: ME,
@@ -1345,6 +1354,7 @@ function signals(r: Rec): Signals {
       commented: !!myReview,
       last_action_hours: myReview?.[2] ?? (mine ? (s.upd ?? s.age) : -1),
       new_activity: r.fresh,
+      owes_reply: false,
     },
     author: {
       login: s.author,
@@ -1627,7 +1637,7 @@ function stacksOf(cards: Card[]): Record<string, Stack> {
 function boardView(b: BoardConfig): BoardView {
   const view: BoardView = {
     board: { ...summary(b), queries: b.queries },
-    sections: { now: [], today: [], later: [], fyi: [] },
+    sections: { now: [], today: [], blocked: [], later: [], fyi: [] },
     hidden: [],
     cleared: [],
   };
@@ -1642,7 +1652,7 @@ function boardView(b: BoardConfig): BoardView {
 }
 
 function summary(b: BoardConfig): BoardSummary {
-  const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0, cleared: 0 };
+  const counts = { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0, cleared: 0 };
   let fresh = 0;
   for (const { r, p } of boardPlacements(b)) {
     if (r.seed.resolved || laneOwned(r)) continue;
@@ -1710,6 +1720,7 @@ function queue(): QueueView {
   const sections = {
     now: queueOrder([...needsCards(), ...of("now")].map(top), ME),
     today: queueOrder(of("today").map(top), ME),
+    blocked: [],
     later: of("later"),
     fyi: of("fyi"),
   };
@@ -1871,6 +1882,7 @@ function laneRow(r: Rec): InflightRow {
     mergeable: sig.pr.mergeable,
     draft: !!s.draft,
     rebase: false,
+    blocked_by: null,
   };
   return { card: cardOf(r, shownAt(r, bestPlacement(r))), ...row, waits_on: waitsOn(row), note: laneNotes.get(r.id) ?? null };
 }
@@ -2842,8 +2854,8 @@ function preview(text: string): PreviewResult {
       boards: cfg.boards.map((b) => {
         const old = saved.boards.find((o) => o.id === b.id);
         const prev = before.get(b.id);
-        const counts = { now: 0, today: 0, later: 0, fyi: 0, hide: 0 };
-        const was = old ? { now: 0, today: 0, later: 0, fyi: 0, hide: 0 } : null;
+        const counts = { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0 };
+        const was = old ? { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0 } : null;
         const moved: PreviewResult["boards"][number]["moved"] = [];
         for (const { r, p } of boardPlacements(b)) {
           if (status(r) !== "active") continue;

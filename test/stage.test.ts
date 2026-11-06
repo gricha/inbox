@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { stage } from "../src/stage.ts";
+import { andMore, stage } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -65,4 +65,14 @@ test("each card says who it's from, you for yours or a bot's for you, and a PR's
       ["carol", undefined],
     ],
   );
+});
+
+test("andMore", () => {
+  assert.equal(andMore(["a"]), "a");
+  assert.equal(andMore(["a", "b"]), "a and b");
+  assert.equal(andMore(["a", "b", "c"]), "a, b and 1 more");
+  assert.equal(andMore(["a", "b", "c", "d"]), "a, b and 2 more");
+  assert.equal(andMore(["a", "b"], 3), "a, b and 3 more", "requests GitHub hides count too");
+  assert.equal(andMore(["a"], 1), "a and 1 more");
+  assert.equal(andMore([]), "");
 });
