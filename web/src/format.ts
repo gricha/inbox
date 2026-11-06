@@ -8,6 +8,10 @@ export const handoffLabel = (h: Handoff) => (h.from ? `From ${h.from}:` : "Hande
 
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");
+export const issueUrl = (id: string) => {
+  const [repo, n] = id.split("#");
+  return `https://github.com/${repo}/issues/${n}`; // GitHub sends a PR's number on to its pull page
+};
 
 const MIN = 60_000;
 

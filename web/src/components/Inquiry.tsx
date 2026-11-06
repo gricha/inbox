@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, MOD } from "../format.ts";
+import { age, cls, issueUrl, MOD } from "../format.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
@@ -85,11 +85,6 @@ const shown = (url: string) => {
   } catch {
     return url;
   }
-};
-
-const issueUrl = (id: string) => {
-  const [repo, num] = id.split("#");
-  return `https://github.com/${repo}/issues/${num}`; // GitHub sends a PR's number on to its pull page
 };
 
 // A link's place, short: the host's path without the noise, so the label leads.

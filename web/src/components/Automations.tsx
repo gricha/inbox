@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import type { AutomationRun, AutomationView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, MOD, when } from "../format.ts";
+import { ago, cls, issueUrl, MOD, when } from "../format.ts";
 
 const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
   added: "Added",
@@ -27,11 +27,6 @@ const slug = (s: string) =>
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/^-+|-+$/g, "")
     .slice(0, 40);
-
-const issueUrl = (id: string) => {
-  const [repo, n] = id.split("#");
-  return `https://github.com/${repo}/issues/${n}`; // GitHub sends a PR's number on to its pull page
-};
 
 // The last run in a line: what it put on your desk, or why it failed.
 function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: boolean } {
