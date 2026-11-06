@@ -959,13 +959,13 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await review("me/notes-app#12")(page);
       const width = page.viewportSize()?.width ?? 0;
-      const bar = await page.evaluate<{ words: string; icon: boolean } | null>(`(() => {
+      const bar = await page.evaluate<{ words: string; icon: boolean; waiting: boolean } | null>(`(() => {
         const b = document.querySelector(".tb-ask");
         const shown = (el) => !!el && getComputedStyle(el).display !== "none";
-        return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".i")) };
+        return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".i")), waiting: b.classList.contains("waiting") };
       })()`);
-      const want = width > 1000 ? "Your agent \u00b7 waiting" : width > 820 ? "Ask" : "";
-      if (!bar || bar.words !== want || (width <= 820 && !bar.icon))
+      const want = width > 1000 ? "Your agent \u00b7 waiting" : width > 820 ? "Asked" : "";
+      if (!bar || bar.words !== want || !bar.waiting || (width <= 820 && !bar.icon))
         failures.push(`ask-top-bar: at ${width}px the top bar's ask is ${JSON.stringify(bar)}, not ${want || "its icon alone"}`);
       const actions = (await page.locator(".rv-actions").textContent()) ?? "";
       if (/Coordinator|agent/.test(actions)) failures.push(`ask-top-bar: the review's actions say ${actions}`);

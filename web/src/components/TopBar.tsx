@@ -134,13 +134,13 @@ export function TopBar({
         {ask && (
           <button
             type="button"
-            className="tb-ask"
+            className={cls("tb-ask", waiting && "waiting")}
             onClick={onAsk}
             title={`Ask your agent about what you're on (t)${waiting ? " \u00b7 waiting for its answer" : ""}`}
           >
             <kbd>t</kbd>
             <span className="tb-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
-            <span className="tb-ask-short">Ask</span>
+            <span className="tb-ask-short">{waiting ? "Asked" : "Ask"}</span>
             <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
             </svg>

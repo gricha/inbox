@@ -4679,6 +4679,11 @@ kbd {
   .tb-ask .i {
     display: block;
   }
+
+  /* Filled while your latest ask waits for its answer. */
+  .tb-ask.waiting .i path {
+    fill: currentcolor;
+  }
 }
 
 @media (width <= 640px) {
