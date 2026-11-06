@@ -1157,17 +1157,14 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
     const q = t.desk.queue();
     return [...q.sections.now, ...q.sections.today].find((x) => x.id === id);
   };
-  const pf = (id: string) => {
-    const c = card(id)!;
-    return { ...c.preflight, next: c.next };
-  };
+  const pf = (id: string) => card(id)!.preflight!;
   assert.deepEqual(t.f.started, ["acme/api#3", "acme/api#2"]);
   assert.equal(card("acme/api#3"), undefined, "being reviewed");
   assert.equal(card("acme/api#1"), undefined, "waiting its turn");
   assert.equal(t.desk.queue().reviewing, 3);
   assert.equal(t.desk.focus().reviewing, 3);
-  assert.deepEqual(pf("acme/web#4"), { state: "none", next: "CI failing: m hands it off for merge" });
-  assert.deepEqual(pf("acme/api#9"), { state: "none", next: undefined }, "an issue");
+  assert.deepEqual(pf("acme/web#4"), { state: "none" }, "your PR");
+  assert.deepEqual(pf("acme/api#9"), { state: "none" }, "an issue");
 
   await t.f.release("acme/api#3");
   assert.equal(t.desk.queue().reviewing, 2);
@@ -1178,8 +1175,6 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
     summary: "Review of acme/api#3",
     concerns: [],
     notes: 1,
-    at: NOW.toISOString(),
-    next: undefined,
   });
   const q = t.desk.queue();
   assert.equal(
@@ -1208,7 +1203,7 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
   t.cleanup();
 });
 
-test("the review view sends the desk's reading order, and the card counts what's worth a look", async () => {
+test("the review view sends the desk's reading order", async () => {
   const t = await setup([ask(1)], { chunks: [{ id: "h2", level: "look", why: "swaps old for fresh" }] });
   await t.sync();
   let v = await t.desk.reviewView("api#1");
@@ -1232,16 +1227,13 @@ test("the review view sends the desk's reading order, and the card counts what's
     ],
   );
   assert.deepEqual(v.order.notes, [0]);
-  const card = t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")!;
-  assert.deepEqual(card.preflight?.chunks, { look: 1, skim: 1, total: 2 });
 
-  // An older review written before ranking keeps working: today's order, its notes in place, no counts on the card.
+  // An older review written before ranking keeps working: today's order, its notes in place.
   const { chunks: _, ...unranked } = t.desk.item("api#1").ai!;
   t.desk.store.set("review:acme/api#1", unranked);
   t.desk.changed();
   v = await t.desk.reviewView("api#1");
   assert.deepEqual([v.order.ranked, v.order.chunks.map((h) => h.id), v.order.notes], [false, ["h1", "h2"], [0]]);
-  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")!.preflight?.chunks, undefined);
   t.cleanup();
 });
 

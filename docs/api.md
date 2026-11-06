@@ -205,7 +205,6 @@ interface Card {
   ci: "green" | "red" | "pending" | "none";
   review: "approved" | "changes_requested" | "required" | "none";
   draft: boolean;
-  size: number;
   created_at: string;
   updated_at: string;
   activity_at: string; // latest activity by someone else
@@ -219,14 +218,9 @@ interface Card {
   done_at?: string; // while it's done: when (you marked it done, or acted on it in the desk); the Archive's time
   verdict: "look" | "skim" | "skip" | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
-  next?: string; // your own PR in Now or Today: "merge conflict with main: m hands it off for merge"; none in Merging or approved and green
-  checks_failed?: string[]; // your own PR in Now or Today: its failing checks
-  checks_optional?: string[]; // those its base branch doesn't require; CI isn't "red" for these alone
   handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged: at the top of the queue, its why says why
   cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: "ready" is Ready for review (a) on your own open draft, whatever its CI; "reviewers" is Add reviewers on your ready PR nobody's asked to review (a opens its review to pick them); "reply" on your own PR whose only action is answering someone (also on its review's card: its first reply box is focused)
   actions?: GitHubAction[]; // the More menu's GitHub writes the desk allows now ("close", "draft", "merge", "reopen", "request_changes"); absent when none
-  last_event?: ActivityEvent; // an issue in Now or Today: its latest event
-  involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, in Merging
@@ -243,8 +237,6 @@ interface Preflight {
   summary?: string;
   concerns?: string[]; // at most 2
   notes?: number;
-  chunks?: { look: number; skim: number; total: number }; // hunks ranked worth a look or a skim, of all in the diff; unset without a ranking
-  at?: string;
 }
 
 interface QueueView {

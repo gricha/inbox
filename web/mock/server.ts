@@ -270,8 +270,6 @@ interface Seed {
   judge?: [Bucket, string]; // Claude's answer where it disagreed with the rules; elsewhere it kept their bucket and why
   fly?: Flight; // your PR, in Merging (with st.inflight_at)
   back?: string; // your PR, handed back from Merging: the coordinator's reason
-  checks?: string[]; // your PR: its failing checks' names
-  optional?: string[]; // those of them the base branch doesn't require
   base?: string; // a PR's base branch, default "main"; another seed's head makes a stack
   head?: string; // its head branch, default "<author>/<n>"
   moved?: [string, number]; // GitHub moved it to main when the PR below merged: the branch it was on, hours ago
@@ -886,7 +884,6 @@ const SEEDS: Seed[] = [
     on: { "personal-mine": ["red"] },
     // The coordinator couldn't fix it, so it's back on your desk.
     back: "the keep-alive test times out on Node 22 only; it needs a decision on the default",
-    checks: ["node 22", "lint"],
   },
   {
     repo: "acme/worker",
@@ -958,14 +955,14 @@ const SEEDS: Seed[] = [
     on: { "work-review": [] },
     st: { snooze_until: new Date(T0 + 20 * HOUR).toISOString() },
   })),
-  // A stack of your own PRs, one per team, all red on the same checks.
+  // A stack of your own PRs, one per team, all red.
   ...(
     [
-      [3051, "billing", 6, ["Acceptance", "(Optional) Shows the difference between the prod and dev schema"]],
-      [3052, "issues", 7, ["Acceptance"]],
-      [3053, "alerts", 8, ["backend (3.13)", "Acceptance"]],
+      [3051, "billing", 6],
+      [3052, "issues", 7],
+      [3053, "alerts", 8],
     ] as const
-  ).map(([n, team, upd, checks]): Seed => ({
+  ).map(([n, team, upd]): Seed => ({
     repo: "acme/api",
     n,
     title: `ref(${team}): Read request.user through acting_user_id()`,
@@ -977,8 +974,6 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [24 + n - 3050, 12, 3],
     on: { "work-mine": ["red"] },
-    checks: [...checks],
-    optional: checks.filter((c) => c.startsWith("(Optional)")),
   })),
   // Its rule says Today (a merge conflict), but nobody has touched it in three weeks: quiet, so it waits in Later.
   {
@@ -1021,7 +1016,6 @@ const SEEDS: Seed[] = [
         "Planner: push filters down into the scan stage",
         {
           ci: "red",
-          checks: ["test (3.12)"],
           on: { "work-mine": ["red"] },
           st: { inflight_at: iso(5) },
           fly: { failing: ["test (3.12)"], note: ["Fixing test (3.12): running pytest tests/planner/test_filters.py", 0.3] },
@@ -1588,7 +1582,6 @@ function cardOf(r: Rec, p: Placement): Card {
     ci: sig.pr.ci,
     review: sig.pr.review,
     draft: !!s.draft,
-    size: sig.pr.size,
     created_at: iso(s.age),
     updated_at: r.activity_at,
     activity_at: r.activity_at,
@@ -1758,7 +1751,7 @@ function replyOnly(r: Rec): boolean {
   return r.seed.author === ME && only && !laneOwned(r) && !!TALK.get(r.id)?.some((x) => x.waiting_on_you);
 }
 
-// As Desk.queueCard(): a Now or Today card, with its AI review or, for your own PR, what to do next.
+// As Desk.queueCard(): a Now or Today card, with its AI review.
 function top(c: Card): Card {
   const r = recs.find((x) => x.id === c.id)!;
   const s = r.seed;
@@ -1767,36 +1760,7 @@ function top(c: Card): Card {
   const asked = kind === "pr" && !c.draft && signals(r).me.requested;
   const group = c.handed_back ? "back" : kind === "pr" && s.author === ME ? "mine" : asked ? "review" : "other";
   const out: Card = { ...c, preflight: preflightOf(r), group };
-  if (s.author === ME && (s.kind ?? "pr") === "pr") {
-    const next = nextOf(r);
-    const failing = s.fly?.failing ?? s.checks ?? [];
-    Object.assign(
-      out,
-      next && { next },
-      failing.length && { checks_failed: failing },
-      s.optional?.length && { checks_optional: s.optional },
-    );
-    // As Desk.card(): who last spoke on it.
-    const spoke = EVENTS.findLast((e) => e.item_id === r.id && (e.kind === "commented" || e.kind === "reviewed"));
-    if (spoke) out.last_event = spoke;
-    if (replyOnly(r)) out.cta = "reply";
-  }
-  if (s.kind === "issue") {
-    const last = EVENTS.findLast((e) => e.item_id === r.id && e.kind !== "new");
-    if (last) out.last_event = last;
-    const me = signals(r).me;
-    const mentioned = EVENTS.some((e) => e.item_id === r.id && e.kind === "mentioned");
-    const involved = me.assignee
-      ? "assigned to you"
-      : me.author
-        ? "your issue"
-        : mentioned
-          ? "you were mentioned"
-          : me.commented
-            ? "you commented"
-            : "";
-    if (involved) out.involved = involved;
-  }
+  if (s.author === ME && kind === "pr" && replyOnly(r)) out.cta = "reply";
   return out;
 }
 
@@ -1812,14 +1776,6 @@ function preflightOf(r: Rec): Preflight {
         ...(ai.since && { since: ai.since }),
         concerns: ai.concerns.slice(0, 2),
         notes: ai.notes.length,
-        ...(ai.chunks && {
-          chunks: {
-            look: ai.chunks.ranked.filter((c) => c.level === "look").length,
-            skim: ai.chunks.ranked.filter((c) => c.level === "skim").length,
-            total: ai.chunks.total,
-          },
-        }),
-        at: ai.at,
       }
     : {};
   const state = (): Preflight["state"] => {
@@ -1830,21 +1786,6 @@ function preflightOf(r: Rec): Preflight {
     return ai ? "stale" : "queued";
   };
   return { state: state(), ...got };
-}
-
-// As Desk.nextStep().
-function nextOf(r: Rec): string | undefined {
-  const sig = signals(r);
-  const ready = sig.pr.review === "approved" && sig.pr.ci === "green" && sig.pr.mergeable === "clean" && !sig.item.draft;
-  if (laneOwned(r) || ready) return undefined;
-  const hand = "m hands it off for merge";
-  if (sig.pr.mergeable === "conflict") return `merge conflict with ${sig.pr.base}: ${hand}`;
-  if (sig.pr.ci === "red") return `CI failing: ${hand}`;
-  if (sig.pr.review === "changes_requested") return `changes requested: ${hand}`;
-  const n = sig.pr.unresolved_threads;
-  if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
-  if (sig.item.draft) return "a draft: mark it ready for review when it is";
-  return `waiting on review: ${hand}`;
 }
 
 // ---------------------------------------------------------------------------

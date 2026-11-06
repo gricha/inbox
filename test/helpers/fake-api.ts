@@ -44,7 +44,6 @@ export function card(id: string, bucket: Bucket, title: string, why: string, ext
     ci: "green",
     review: "required",
     draft: false,
-    size: 150,
     created_at: ago(48),
     updated_at: ago(2),
     activity_at: ago(2),

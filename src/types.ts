@@ -425,7 +425,6 @@ export interface Card {
   ci: Ci;
   review: ReviewDecision;
   draft: boolean;
-  size: number;
   created_at: string;
   updated_at: string;
   activity_at: string; // latest activity by someone else
@@ -439,14 +438,9 @@ export interface Card {
   done_at?: string; // when you marked it done, or did what took it off your desk; only while it's done
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
-  next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"
-  checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
-  checks_optional?: string[]; // those of them its base branch doesn't require
   handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
   cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft (a a), Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
   actions?: GitHubAction[]; // the GitHub writes its More menu (.) offers, as the desk allows them now; absent when none
-  involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
-  last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
@@ -507,8 +501,6 @@ export interface Preflight {
   since?: string; // what changed since your last review: a re-review's gist
   concerns?: string[]; // at most 2
   notes?: number; // notes on the changes, in the review view
-  chunks?: { look: number; skim: number; total: number }; // hunks Claude ranked worth a look or a skim, of all in the diff; unset when it didn't rank
-  at?: string; // when it was written
 }
 
 export interface BoardSummary {

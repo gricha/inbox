@@ -84,7 +84,7 @@ test("overview, focus and every board", async () => {
 });
 
 // Before the tests below act on cards, while the queue is as the mock starts.
-test("the queue's cards carry pre-flight in every state, your PRs say what's next, and the queue folds", async () => {
+test("the queue's cards carry pre-flight in every state, and the queue folds", async () => {
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const top = [...q.sections.now, ...q.sections.today];
   const of = (id: string) => top.find((c) => c.id === id)!;
@@ -107,13 +107,8 @@ test("the queue's cards carry pre-flight in every state, your PRs say what's nex
     ready.some((c) => c.preflight!.summary!.length > 400),
     "one long summary",
   );
-  assert.deepEqual([of("acme/worker#860").preflight, of("acme/worker#860").next], [{ state: "none" }, undefined], "an issue");
+  assert.deepEqual(of("acme/worker#860").preflight, { state: "none" }, "an issue");
   assert.equal(of("me/notes-app#12").preflight?.state, "none");
-  assert.equal(of("me/notes-app#12").next, "3 unresolved threads: m hands it off for merge");
-  // Enter and o are on every card's keys, so a next step that would only name them is left out.
-  assert.equal(of("acme/worker#875").next, undefined);
-  assert.deepEqual([of("acme/api#3051").checks_failed?.length, of("acme/api#3051").checks_optional?.length], [2, 1]);
-  assert.equal(of("acme/worker#860").last_event?.kind, "commented", "an issue's latest event");
 
   const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
   assert.equal(quiet.demoted, "quiet for 3 weeks");
@@ -387,10 +382,6 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
   assert.ok(old.order.chunks.length && old.order.chunks.every((h) => h.level === null));
   const stale = await view("acme/api#4099");
   assert.deepEqual([stale.ai_stale, stale.order.ranked, stale.order.notes], [true, false, []]);
-
-  const { data: q } = await call<QueueView>("GET", "/api/queue");
-  const card = [...q.sections.now, ...q.sections.today].find((c) => c.id === "acme/worker#879");
-  assert.deepEqual(card?.preflight?.chunks, { look: 1, skim: 19, total: 31 });
 });
 
 test("policy: a policy with its judge, saved against its hash", async () => {

@@ -1003,7 +1003,6 @@ export class Desk {
       ci: it.ci,
       review: it.review_decision,
       draft: it.draft,
-      size: it.additions + it.deletions,
       created_at: it.created_at,
       updated_at: it.updated_at,
       activity_at: e.analysis.activity_at,
@@ -1106,7 +1105,7 @@ export class Desk {
     return out;
   }
 
-  // A Now or Today card carries what to skim before opening it: its AI review, or for your own PR what to do next.
+  // A Now or Today card carries its AI review, to skim before opening it.
   queueCard(e: Entry, p: Placement, snap: Snapshot): Card {
     const c = this.card(e, p, snap);
     const it = e.item;
@@ -1115,34 +1114,7 @@ export class Desk {
     // Waiting on your review: asked of you, or pushed to since your review; not a draft, which nobody waits on yet.
     const asked = it.kind === "pr" && !it.draft && (sig.requested || sig.pushed_since_review);
     c.group = c.handed_back ? "back" : it.kind === "pr" && sig.author ? "mine" : asked ? "review" : "other";
-    if (it.kind === "pr" && e.analysis.signals.me.author) {
-      const next = this.nextStep(e);
-      if (next) c.next = next;
-      if (it.checks_failed?.length) c.checks_failed = it.checks_failed;
-      if (it.checks_optional?.length) c.checks_optional = it.checks_optional;
-      // Who last spoke on it: a reviewer's comment or review is the context its threads and next step don't give.
-      const said = this.store
-        .activity({ after: 0, limit: 20, item: it.id, latest: true })
-        .find((x) => x.kind === "commented" || x.kind === "reviewed");
-      if (said) c.last_event = said;
-      if (this.replyOnly(e) && c.cta !== "reviewers") c.cta = "reply"; // asking someone comes first
-    }
-    if (it.kind === "issue") {
-      const recent = this.store.activity({ after: 0, limit: 20, item: it.id, latest: true });
-      const last = recent.find((x) => x.kind !== "new");
-      if (last) c.last_event = last;
-      const me = e.analysis.signals.me;
-      const involved = me.assignee
-        ? "assigned to you"
-        : me.author
-          ? "your issue"
-          : recent.some((x) => x.kind === "mentioned")
-            ? "you were mentioned"
-            : me.commented
-              ? "you commented"
-              : "";
-      if (involved) c.involved = involved;
-    }
+    if (it.kind === "pr" && sig.author && this.replyOnly(e) && c.cta !== "reviewers") c.cta = "reply"; // asking someone comes first
     return c;
   }
 
@@ -1159,14 +1131,6 @@ export class Desk {
           ...(ai.since && { since: ai.since }),
           concerns: ai.concerns.slice(0, 2),
           notes: ai.notes.length,
-          ...(ai.chunks && {
-            chunks: {
-              look: ai.chunks.ranked.filter((c) => c.level === "look").length,
-              skim: ai.chunks.ranked.filter((c) => c.level === "skim").length,
-              total: ai.chunks.total,
-            },
-          }),
-          at: ai.at,
         }
       : {};
     const state = (): Preflight["state"] => {
@@ -1177,21 +1141,6 @@ export class Desk {
       return ai ? "stale" : "queued";
     };
     return { state: state(), ...got };
-  }
-
-  // Your own open PR: what's up with it, and the key that deals with it. Nothing when its why and the card's keys say it all
-  // (in Merging: Enter opens it there; approved and green: o merges it on GitHub).
-  nextStep(e: Entry): string | undefined {
-    const it = e.item;
-    if (e.inflight || readyToMerge(it)) return undefined;
-    const hand = "m hands it off for merge";
-    if (it.ci === "red") return `CI failing: ${hand}`;
-    if (it.review_decision === "changes_requested") return `changes requested: ${hand}`;
-    const n = it.threads_unresolved;
-    if (n) return `${n} unresolved ${n === 1 ? "thread" : "threads"}: ${hand}`;
-    if (it.draft) return "a draft: mark it ready for review when it is";
-    if (it.mergeable === "conflict") return `merge conflict with ${it.base}: ${hand}`;
-    return `waiting on review: ${hand}`;
   }
 
   // Your own open PR whose only action is answering someone: nothing to fix, nothing to merge yet.

@@ -55,7 +55,6 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
     ci: "green",
     review: "required",
     draft: false,
-    size: 1,
     created_at: "",
     updated_at: "",
     activity_at: "",

@@ -375,23 +375,6 @@ test("the main page's parts: a hand-back, what waits on your review, the rest th
     );
 });
 
-test("your PR's card says what failed, and leaves out a next step its keys already say", async () => {
-  const t = await setup([
-    myPr(3, { checks_failed: ["Acceptance", "(Optional) schema diff"], checks_optional: ["(Optional) schema diff"] }),
-    myPr(4, { ci: "green", review_decision: "approved", mergeable: "clean" }),
-  ]);
-  await t.desk.sync();
-  const q = t.desk.queue();
-  const of = (id: string) => [...q.sections.now, ...q.sections.today].find((c) => c.id === id);
-  assert.deepEqual(
-    [of("acme/web#3")?.checks_failed, of("acme/web#3")?.checks_optional],
-    [["Acceptance", "(Optional) schema diff"], ["(Optional) schema diff"]],
-  );
-  assert.ok(of("acme/web#4"), "approved and green is on the queue");
-  assert.equal(of("acme/web#4")?.next, undefined, "o on its keys opens it to merge");
-  t.cleanup();
-});
-
 test("saving config refuses when the file changed since it was loaded", async () => {
   const t = await setup([]);
   const base = t.desk.getConfig().text;
@@ -497,22 +480,11 @@ test("Resolved lists the last day's items that were in Now or Today or asked of 
   t.cleanup();
 });
 
-test("your PR's card carries who last spoke on it; nobody asked you by name says so", async () => {
-  const t = await setup([
-    myPr(3, { ci: "green", threads_unresolved: 2 }),
-    reviewAsk(4, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] }),
-  ]);
-  await t.desk.sync();
-  t.gh.items.set("acme/web#3", {
-    ...t.gh.items.get("acme/web#3")!,
-    comments: [{ author: "priya", author_bot: false, at: hoursAgo(0.2) }],
-    updated_at: hoursAgo(0.2),
-  });
+test("a review asked only of your team says so", async () => {
+  const t = await setup([reviewAsk(4, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] })]);
   await t.desk.sync();
   const q = t.desk.queue();
   const all = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi];
-  const mine = all.find((c) => c.id === "acme/web#3");
-  assert.deepEqual([mine?.last_event?.kind, mine?.last_event?.actor], ["commented", "priya"]);
   assert.equal(all.find((c) => c.id === "acme/api#4")?.team_ask, "CODEOWNERS ping to @ml-team");
   t.cleanup();
 });
@@ -542,8 +514,8 @@ test("quiet items drop out of Now and Today: your old failing PRs go to Later; a
     "the ask came an hour ago, so it isn't quiet whatever updated_at says",
   );
   assert.deepEqual(
-    q.sections.today.map((c) => [c.id, c.next]),
-    [["acme/web#7", "CI failing: m hands it off for merge"]],
+    q.sections.today.map((c) => c.id),
+    ["acme/web#7"],
   );
   assert.deepEqual([t.desk.inflight().rows[0]?.waits_on, t.desk.overview().inflight.total], ["waits on a CI fix", 1]);
 
@@ -555,7 +527,6 @@ test("quiet items drop out of Now and Today: your old failing PRs go to Later; a
       .sort(),
     ["acme/web#20631", "acme/web#548", "acme/web#7"],
   );
-  assert.equal(t.desk.queue().sections.today.find((c) => c.id === "acme/web#7")?.next, "CI failing: m hands it off for merge");
   t.cleanup();
 });
 
