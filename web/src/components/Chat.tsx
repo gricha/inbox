@@ -67,6 +67,9 @@ export function Chat({
     if (!t || busy || off) return;
     setBusy(true);
     setError(null);
+    // Emptied now, so Esc closes at once and a chat reopened before the reply never offers the words again.
+    kept.delete(key);
+    setText("");
     try {
       const { ask } = await api.ask({
         text: t,
@@ -76,9 +79,9 @@ export function Chat({
       });
       seen = seen && { ...seen, asks: [...seen.asks, ask] };
       setView(seen);
-      kept.delete(key);
-      setText("");
     } catch (e) {
+      if (!kept.get(key)) kept.set(key, t);
+      setText((cur) => cur || t);
       setError(message(e));
     } finally {
       setBusy(false);
