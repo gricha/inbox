@@ -1435,11 +1435,6 @@ kbd {
   color: var(--pencil);
 }
 
-.dim .ref-repo {
-  color: var(--pencil);
-  opacity: 1;
-}
-
 .title {
   overflow: hidden;
   color: var(--ink);
@@ -1560,7 +1555,6 @@ kbd {
 }
 
 .lane-row .line-title {
-  flex: 0 1 auto;
   width: 44cqi;
 }
 
@@ -3950,7 +3944,6 @@ kbd {
 }
 
 .rv-file .rv-base {
-  flex: none;
   max-width: calc(100% - 1.8em);
   white-space: normal;
   overflow-wrap: break-word;
