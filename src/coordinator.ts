@@ -48,8 +48,19 @@ type Mode = keyof typeof PERMISSION;
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
 
-interface Settings {
-  permissions?: { deny?: string[] };
+// <home>/<name>, whose project settings keep every rule of deny beside the owner's own.
+export function denyDir(home: string, name: string, deny: string[]): string {
+  const dir = path.join(home, name);
+  const file = path.join(dir, ".claude", "settings.json");
+  const s = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as { permissions?: { deny?: string[] } }) : {};
+  const have = s.permissions?.deny ?? [];
+  const missing = deny.filter((r) => !have.includes(r));
+  if (missing.length > 0) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const next = { ...s, permissions: { ...s.permissions, deny: [...have, ...missing] } };
+    fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+  }
+  return dir;
 }
 
 interface Agent {
@@ -146,17 +157,7 @@ export class Coordinator {
 
   // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.
   dir(): string {
-    const dir = path.join(this.desk.home, "coordinator");
-    const file = path.join(dir, ".claude", "settings.json");
-    const s = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Settings) : {};
-    const deny = s.permissions?.deny ?? [];
-    const missing = DENY.filter((r) => !deny.includes(r));
-    if (missing.length > 0) {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      const next = { ...s, permissions: { ...s.permissions, deny: [...deny, ...missing] } };
-      fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
-    }
-    return dir;
+    return denyDir(this.desk.home, "coordinator", DENY);
   }
 
   view(): CoordinatorView {

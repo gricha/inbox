@@ -1,9 +1,7 @@
 // Automations: your instructions, run on their schedule by your own Claude Code, read only. What a run finds that needs you
 // goes on your desk with its why; nothing else comes of it. Agents may draft one; only you turn it on, in the desk.
-import fs from "node:fs";
-import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { DENY as COORDINATOR_DENY } from "./coordinator.ts";
+import { DENY as COORDINATOR_DENY, denyDir } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
 import { DeskError } from "./errors.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
@@ -369,16 +367,7 @@ export class Automations {
 
   // The desk home's automations directory; its project settings keep the deny list, beside the owner's own.
   dir(): string {
-    const dir = path.join(this.desk.home, "automations");
-    const file = path.join(dir, ".claude", "settings.json");
-    const s = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as { permissions?: { deny?: string[] } }) : {};
-    const deny = s.permissions?.deny ?? [];
-    const missing = DENY.filter((r) => !deny.includes(r));
-    if (missing.length > 0) {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify({ ...s, permissions: { ...s.permissions, deny: [...deny, ...missing] } }, null, 2) + "\n");
-    }
-    return dir;
+    return denyDir(this.desk.home, "automations", DENY);
   }
 }
 
