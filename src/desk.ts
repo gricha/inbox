@@ -788,19 +788,14 @@ export class Desk {
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     // Held on the first pass, they were there before you looked, as the rest were.
     const prev = this.store.get("notified_queue") as string[] | null;
-    const fresh = this.freshSince("notified_queue", queued, prev === null ? held : held.filter((id) => prev.includes(id)));
+    const keep = prev === null ? held : held.filter((id) => prev.includes(id));
+    this.store.set("notified_queue", [...queued.map((x) => x.id), ...keep]);
+    const fresh = prev === null ? [] : queued.filter((x) => !prev.includes(x.id));
     if (!fresh.length || !this.mayNotify()) return;
     const [only] = fresh;
     const body =
       fresh.length === 1 && only ? `${only.ref} · ${only.why}` : `${fresh.length} need you: ${fresh.map((x) => x.ref).join(", ")}`;
     this.notify("Review Desk", body);
-  }
-
-  // What isn't in the last pass's list under `key` (nothing on the first pass), keeping this pass's and `keep`.
-  freshSince<T extends { id: string }>(key: string, list: T[], keep: string[] = []): T[] {
-    const prev = this.store.get(key) as string[] | null;
-    this.store.set(key, [...list.map((x) => x.id), ...keep]);
-    return prev === null ? [] : list.filter((x) => !prev.includes(x.id));
   }
 
   // ---------------------------------------------------------------- classification
