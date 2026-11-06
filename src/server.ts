@@ -185,10 +185,7 @@ export function createApp(desk: Desk, port: number): Hono {
       ...(await desk.inlineComment(c.req.param("id"), { path: file, line: at, side: on, ...(from && { start: from }) }, body, head_oid)),
     });
   });
-  // Your own draft's Ready for review, from the desk's own window only.
-  app.post("/api/review/:id{.+}/ready", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a)");
+  const reviewerIds = async (c: { req: { json<T>(): Promise<T> } }) => {
     const b = await c.req.json<{ users?: unknown; teams?: unknown }>().catch((): { users?: unknown; teams?: unknown } => ({}));
     const ids = (v: unknown): string[] | null => {
       if (v === undefined) return [];
@@ -197,22 +194,20 @@ export function createApp(desk: Desk, port: number): Hono {
     const users = ids(b.users);
     const teams = ids(b.teams);
     if (!users || !teams) throw new DeskError(400, "users and teams are lists of node ids");
-    await desk.markReady(c.req.param("id"), { users, teams });
+    return { users, teams };
+  };
+  // Your own draft's Ready for review, from the desk's own window only.
+  app.post("/api/review/:id{.+}/ready", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a)");
+    await desk.markReady(c.req.param("id"), await reviewerIds(c));
     return c.json({ ok: true });
   });
   // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.
   app.post("/api/review/:id{.+}/reviewers", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "ask reviewers from the desk's window (a in the PR's review)");
-    const b = await c.req.json<{ users?: unknown; teams?: unknown }>().catch((): { users?: unknown; teams?: unknown } => ({}));
-    const ids = (v: unknown): string[] | null => {
-      if (v === undefined) return [];
-      return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
-    };
-    const users = ids(b.users);
-    const teams = ids(b.teams);
-    if (!users || !teams) throw new DeskError(400, "users and teams are lists of node ids");
-    await desk.askReviewers(c.req.param("id"), { users, teams });
+    await desk.askReviewers(c.req.param("id"), await reviewerIds(c));
     return c.json({ ok: true });
   });
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
@@ -232,6 +227,11 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     return c.json(desk.inflight());
   });
+  const str = (b: Record<string, unknown>, k: string) => {
+    const v = b[k] ?? undefined;
+    if (v === undefined || typeof v === "string") return v;
+    throw new DeskError(400, `${k} must be a string`);
+  };
   const line = async (c: { req: { json<T>(): Promise<T> } }, key: string) => {
     const v = (await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({})))[key];
     if (typeof v !== "string") throw new DeskError(400, `need { ${key} }`);
@@ -257,13 +257,13 @@ export function createApp(desk: Desk, port: number): Hono {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "ask the coordinator from the desk's window (t)");
     const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
-    const str = (k: string) => {
-      const v = b[k] ?? undefined;
-      if (v === undefined || typeof v === "string") return v;
-      throw new DeskError(400, `${k} must be a string`);
-    };
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
-    const ask = await desk.ask({ text: b.text, item_id: str("item_id"), thread_id: str("thread_id"), thread_url: str("thread_url") });
+    const ask = await desk.ask({
+      text: b.text,
+      item_id: str(b, "item_id"),
+      thread_id: str(b, "thread_id"),
+      thread_url: str(b, "thread_url"),
+    });
     return c.json({ ok: true, ask });
   });
   app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
@@ -273,11 +273,6 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/inquiries", async (c) => {
     ready();
     const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
-    const str = (k: string) => {
-      const v = b[k] ?? undefined;
-      if (v === undefined || typeof v === "string") return v;
-      throw new DeskError(400, `${k} must be a string`);
-    };
     const pairs = (k: string, a: string, z: string): Record<string, string>[] => {
       const v = b[k] ?? [];
       if (
@@ -293,9 +288,9 @@ export function createApp(desk: Desk, port: number): Hono {
         return v as Record<string, string>[];
       throw new DeskError(400, `${k} must be a list of { ${a}, ${z} }`);
     };
-    const question = str("question");
-    const from = str("from");
-    const context = str("context");
+    const question = str(b, "question");
+    const from = str(b, "from");
+    const context = str(b, "context");
     if (!question || !from || context === undefined) throw new DeskError(400, "need { question, from, context }");
     return c.json({
       ok: true,
@@ -305,7 +300,7 @@ export function createApp(desk: Desk, port: number): Hono {
         context,
         options: pairs("options", "answer", "next").map((o) => ({ answer: o.answer!, next: o.next! })),
         links: pairs("links", "label", "url").map((l) => ({ label: l.label!, url: l.url! })),
-        item: str("item"),
+        item: str(b, "item"),
       }),
     });
   });
