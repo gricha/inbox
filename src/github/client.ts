@@ -15,6 +15,19 @@ const execFileAsync = promisify(execFile);
 const PARTIAL = new Set(["NOT_FOUND", "FORBIDDEN"]);
 export const GH_MISSING = "GitHub CLI (gh) not found: install it from https://cli.github.com and run gh auth login, or set GITHUB_TOKEN";
 
+export async function readToken(token?: string): Promise<string> {
+  if (token) return token;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  try {
+    return (await execFileAsync("gh", ["auth", "token"])).stdout.trim();
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    throw new Error(err.code === "ENOENT" ? GH_MISSING : `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${err.message})`, {
+      cause: e,
+    });
+  }
+}
+
 export class RateLimitedError extends Error {
   resetAt: string;
   constructor(resetAt: string, detail: string) {
@@ -71,19 +84,10 @@ export function createClient(opts: ClientOptions = {}): Client {
   let last: { remaining: number; reset_at: string } | null = null;
 
   const getToken = () =>
-    (token ??= opts.token
-      ? Promise.resolve(opts.token)
-      : process.env.GITHUB_TOKEN
-        ? Promise.resolve(process.env.GITHUB_TOKEN)
-        : execFileAsync("gh", ["auth", "token"]).then(
-            (r) => r.stdout.trim(),
-            (e: NodeJS.ErrnoException) => {
-              token = undefined;
-              throw new Error(
-                e.code === "ENOENT" ? GH_MISSING : `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${e.message})`,
-              );
-            },
-          ));
+    (token ??= readToken(opts.token).catch((e: unknown) => {
+      token = undefined;
+      throw e;
+    }));
 
   async function send(url: string, init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string }) {
     const authorization = `bearer ${await getToken()}`;
