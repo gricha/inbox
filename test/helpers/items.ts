@@ -45,6 +45,7 @@ export function makeItem(o: Partial<Item> & { repo?: string; number?: number } =
     threads_total: 0,
     threads_unresolved: 0,
     thread_last: [],
+    requires: [],
     detail_at: hoursAgo(0),
     ...o,
   };

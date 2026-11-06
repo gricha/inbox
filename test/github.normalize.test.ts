@@ -77,6 +77,17 @@ test("the description's first 600 characters, one paragraph a line, and a PR's c
   assert.equal("paths" in ghost, false);
 });
 
+test("requires comes from the PR's markdown body, past the 600-character cut; an issue has none", () => {
+  const md = `${"Moves the usage reader to service accounts. ".repeat(23)}\n\nRequires https://github.com/getsentry/sentry/pull/129460`;
+  assert.ok(md.indexOf("Requires") > 600);
+  const pr = normalize({ ...fixture("pr-review"), body: md, bodyText: md }, NOW);
+  assert.deepEqual(pr.requires, ["getsentry/sentry#129460"]);
+  assert.ok(pr.body!.length <= 600);
+  assert.deepEqual(normalize(fixture("pr-mine"), NOW).requires, [], "no body: nothing required, and not lacking it");
+  const issue = normalize({ ...fixture("issue"), body: "Requires #1" }, NOW);
+  assert.equal("requires" in issue, false);
+});
+
 test("your PR with red CI, a conflict and unresolved threads (mine fragment)", () => {
   const it = normalize(fixture("pr-mine"), NOW);
   assert.equal(it.id, "acme/infra#77");

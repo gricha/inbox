@@ -40,7 +40,7 @@ const REVIEW = "author { __typename login } authorAssociation state submittedAt 
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
 const PR = `${COMMON}
-  isDraft additions deletions changedFiles baseRefName baseRepository { defaultBranchRef { name } } headRefName headRepository { nameWithOwner }
+  isDraft body additions deletions changedFiles baseRefName baseRepository { defaultBranchRef { name } } headRefName headRepository { nameWithOwner }
   reviewDecision mergedBy { login }
   files(first: 50) { nodes { path } }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }

@@ -9,7 +9,7 @@ export interface ItemMeta {
   updated_at: string;
   detail_at: string;
   last_hit_at: string; // the last time a search returned it
-  lacks: boolean; // a PR stored before the desk asked for what stacks need (head_ref, default_branch, retargeted)
+  lacks: boolean; // a PR stored before the desk asked for what stacks and dependencies need (head_ref, default_branch, retargeted, requires)
   quiet: boolean; // stored without events (a stack's member no board listed) since its events were last logged
 }
 
@@ -121,7 +121,7 @@ export class Store {
       .prepare(
         `SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at,
           json_extract(data, '$.kind') = 'pr' AND (json_type(data, '$.head_ref') IS NULL OR json_type(data, '$.default_branch') IS NULL
-            OR json_type(data, '$.retargeted') IS NULL) AS lacks, said IS NOT NULL AS quiet FROM items`,
+            OR json_type(data, '$.retargeted') IS NULL OR json_type(data, '$.requires') IS NULL) AS lacks, said IS NOT NULL AS quiet FROM items`,
       )
       .all();
     return new Map(

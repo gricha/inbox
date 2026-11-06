@@ -17,7 +17,7 @@ const FEED_RETRY = 10 * 60_000;
 // Notification reasons that mean an item the desk doesn't have yet may belong on it.
 const FRESH_REASONS = new Set(["review_requested", "mention", "team_mention", "assign", "author"]);
 const MENTIONS = new Set(["mention", "team_mention"]);
-const BACKFILL = 40; // stored PRs a pass refetches for fields stacks need that they were stored without
+const BACKFILL = 40; // stored PRs a pass refetches for fields stacks and dependencies need that they were stored without
 const PROBE_TTL = 30 * 60_000; // a stack probe isn't asked again before this; an off-board open member is refreshed after it
 const MAX_PROBES = 120; // stack probes a pass
 const RESERVE = 40; // of those, kept from probes that only look for a stack, for the rounds that follow a chain up

@@ -1,5 +1,6 @@
 // GraphQL nodes -> Item / SearchHit.
 
+import { requiresOf } from "../deps.ts";
 import type { Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
@@ -57,6 +58,7 @@ export interface RawNode extends RawHit {
   comments: Conn<RawComment>;
   // PullRequest only
   isDraft?: boolean;
+  body?: string; // markdown
   additions?: number;
   deletions?: number;
   changedFiles?: number;
@@ -184,6 +186,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
       .replaceAll(/[^\S\n]+/g, " ")
       .trim()
       .slice(0, 600),
+    ...(n.__typename === "PullRequest" && { requires: requiresOf(n.body ?? "", n.repository.nameWithOwner, n.number) }),
     merged_by: n.mergedBy?.login ?? "",
     additions: n.additions ?? 0,
     deletions: n.deletions ?? 0,
