@@ -90,6 +90,7 @@ const HOUR = 3_600_000;
 const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
+const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
 const AI_AT_ONCE = 2;
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
@@ -1763,11 +1764,7 @@ export class Desk {
         s.seen_at = now.toISOString();
         break;
       case "restore":
-        s.done_at = null;
-        s.snooze_until = null;
-        s.snooze_when = null;
-        s.snoozed_at = null;
-        s.muted = false;
+        Object.assign(s, ACTIVE);
         break;
       case "inflight":
         // Handed off for merge: only your own open PR, and the coordinator takes it from here.
@@ -1780,7 +1777,7 @@ export class Desk {
         if (entry.analysis.signals.pr.unasked) throw new DeskError(409, `nobody's asked to review ${id}: add reviewers first (a)`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
-        Object.assign(s, { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
+        Object.assign(s, ACTIVE);
         this.store.set(`sitter:${id}`, null); // a fresh start: no hand-back or note from last time
         break;
       case "takeback":
@@ -1830,7 +1827,7 @@ export class Desk {
     const id = await this.hold(ref);
     // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
     const before = this.store.state(id);
-    this.store.putState({ ...before, pinned: true, done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
+    this.store.putState({ ...before, ...ACTIVE, pinned: true });
     const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
     if (note !== null)
       this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
