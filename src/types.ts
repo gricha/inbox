@@ -536,7 +536,7 @@ export interface Overview {
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
   focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
   inflight: { total: number }; // your open PRs in Merging
-  agent?: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
+  agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
 }

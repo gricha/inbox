@@ -109,6 +109,7 @@ const overview: Overview = {
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
   focus: { now: 1, today: 1, new: 1, asks: 0 },
   inflight: { total: 0 },
+  agent: true,
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 

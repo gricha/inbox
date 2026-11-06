@@ -281,7 +281,7 @@ interface Overview {
   spaces: { id: string; name: string; boards: BoardSummary[] }[]; // BoardSummary: id, name, space, counts per bucket + cleared, new, error?
   focus: { now: number; today: number; new: number };
   inflight: { total: number }; // your open PRs in Merging
-  agent?: boolean; // your agent (agent.coordinator) is on: the window draws its Ask your agent entries
+  agent: boolean; // your agent (agent.coordinator) is on: the window draws its Ask your agent entries
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // the UI's Sentry; null when `desk serve` didn't start Sentry (DESK_SENTRY=0, or the app's in-process desk)
 }
