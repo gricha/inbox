@@ -2404,11 +2404,6 @@ kbd {
   color: var(--pencil);
 }
 
-.composer-note {
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
 /* Your chat with the coordinator: the window's right column, full height; at 1100px and below, over the page's right edge. */
 .chat {
   display: flex;
