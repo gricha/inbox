@@ -48,8 +48,6 @@
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
-  --ref-w: 124px;
-  --gap: 14px;
 
   /* A row's type: compact, so a table of them reads at a glance. */
   --title-size: 15px;
@@ -926,7 +924,6 @@ kbd {
   border-bottom-right-radius: 9px;
 }
 
-/* .line for weight: the button is a .row-main too (j/k focus it), whose grid is the Merging card's. */
 .line .line-main {
   display: flex;
   align-items: baseline;
@@ -1372,7 +1369,6 @@ kbd {
   display: block;
   width: 100%;
   margin-top: 2px;
-  padding: 8px 12px 9px calc(12px + var(--ref-w) + var(--gap));
   border: 0;
   border-radius: 10px;
   background: none;
@@ -1393,25 +1389,6 @@ kbd {
 .fold.sel {
   background: var(--sel);
   box-shadow: inset 0 0 0 1.5px var(--pencil);
-}
-
-.row-main {
-  display: grid;
-  flex: 1;
-  grid-template-columns: var(--ref-w) minmax(0, 1fr) auto;
-  align-items: baseline;
-  column-gap: var(--gap);
-  min-width: 0;
-  padding: 8px 12px 9px;
-  border: 0;
-  border-radius: 10px;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.row-main:focus-visible {
-  outline-offset: -2px;
 }
 
 @keyframes leave {
@@ -1528,15 +1505,11 @@ kbd {
 }
 
 /* The selected card's facts, then its keys under a hairline, as far below it as the facts sit above. */
-.more {
-  padding: 0 18px;
-}
-
 .card-facts {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 14px;
-  margin: -8px 0 10px;
+  margin: -8px 0 0;
   color: var(--pencil);
   font-size: 12.5px;
 }
@@ -1551,10 +1524,6 @@ kbd {
   gap: 12px;
   color: var(--ink-2);
   font-size: 13px;
-}
-
-.more.opened .card-facts {
-  margin-bottom: 0;
 }
 
 .more.opened .trace-toggle {
@@ -1675,8 +1644,6 @@ kbd {
 .detail {
   display: grid;
   gap: 18px;
-  padding: 6px 12px 18px calc(12px + var(--ref-w) + var(--gap));
-  border-radius: 0 0 10px 10px;
   color: var(--ink-2);
   font-size: 13px;
 }
@@ -2167,7 +2134,6 @@ kbd {
 .popover {
   position: absolute;
   top: calc(100% + 4px);
-  left: calc(12px + var(--ref-w) + var(--gap) - 8px);
   z-index: 30;
   width: 230px;
   padding: 6px;
@@ -4413,11 +4379,6 @@ kbd {
 }
 
 @media (width <= 640px) {
-  :root {
-    --ref-w: 0px;
-    --gap: 0px;
-  }
-
   .topbar {
     gap: 8px;
     padding: 0 8px 0 14px;
@@ -4431,18 +4392,8 @@ kbd {
     padding: 18px 12px 84px;
   }
 
-  .row-main {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
   .ref {
-    grid-column: 1;
-    grid-row: 1;
     margin-bottom: 2px;
-  }
-
-  .detail {
-    padding-left: 12px;
   }
 
   .popover {
