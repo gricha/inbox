@@ -565,7 +565,6 @@ async function checkClaims(item: Item, pr: PrText, comments: Placed[], dir: stri
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const list = (v: unknown) => (Array.isArray(v) ? (v as (Record<string, unknown> | undefined)[]) : []);
 
-// Model output: don't trust its field types. Notes keep only paths in the diff; a line that isn't in it becomes a note on the file.
 type Placed = ReviewNote & { quote: string };
 
 // What Claude wrote, its comments placed on the diff and kept only where their quote is code in that file's diff (the

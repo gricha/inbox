@@ -45,7 +45,7 @@ const BACKOFF = [5, 10, 20, 60].map((m) => m * 60_000);
 
 export const textHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
-// Strict-mode friendly, like the review's, so Codex's --output-schema takes it too.
+// Strict-mode friendly, like the review's.
 export const JUDGE_SCHEMA = {
   type: "object",
   additionalProperties: false,
