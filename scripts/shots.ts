@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Route } from "playwright-core";
-import type { InflightView, QueueView, ReviewView } from "../src/types.ts";
+import type { Ask, AsksView, InflightView, QueueView, ReviewView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -743,22 +743,27 @@ const SHOTS: Shot[] = [
     // In a review, about the conversation you were on: sent, it waits for the answer under it.
     name: "ask-review",
     go: async (page) => {
-      await page.route("**/api/ask", (route) =>
-        route.fulfill({
-          json: {
-            ok: true,
-            ask: {
-              id: "shot0001",
-              at: new Date().toISOString(),
-              text: "Confirm we addressed priya's question so I can reply",
-              item_id: "me/notes-app#12",
-              thread_id: "IC_freeze",
-              thread_url: null,
-              answer: null,
-            },
-          },
-        }),
-      );
+      const sent: Ask = {
+        id: "shot0001",
+        at: new Date().toISOString(),
+        text: "Confirm we addressed priya's question so I can reply",
+        item_id: "me/notes-app#12",
+        thread_id: "IC_freeze",
+        thread_url: null,
+        answer: null,
+      };
+      let posted = false;
+      await page.route("**/api/ask", (route) => {
+        posted = true;
+        return route.fulfill({ json: { ok: true, ask: sent } });
+      });
+      // A sync mid-shot refetches the asks: they keep the one sent, as the desk's would.
+      await page.route("**/api/asks", async (route) => {
+        const res = await route.fetch();
+        const v = (await res.json()) as AsksView;
+        if (posted) v.asks.push(sent);
+        await route.fulfill({ response: res, json: v });
+      });
       await review("me/notes-app#12")(page);
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");
@@ -778,6 +783,43 @@ const SHOTS: Shot[] = [
       await unroute(page);
       await closeChat(page);
     },
+  },
+  {
+    // The chat's log at its first turn, an answer's numbered list.
+    name: "ask-top",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      await page.evaluate("document.activeElement.blur()"); // out of the reply box it opens in, so t is the page's
+      // The fetch lands before the scroll: a turn it adds or drops sends the log back to the newest.
+      const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
+      await page.keyboard.press("t");
+      await loaded;
+      await page.locator(".chat .prose ol").waitFor();
+      await page.waitForTimeout(100);
+      await page.evaluate(`document.querySelector(".chat-log").scrollTop = 0`);
+      await page.waitForTimeout(200);
+    },
+    after: closeChat,
+  },
+  {
+    // A PR you've asked about: t Coordinator after More says where your latest ask stands.
+    name: "ask-button",
+    go: async (page) => {
+      await review("me/notes-app#12")(page);
+      await page.evaluate(`document.querySelector(".rv-actions").scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+  },
+  {
+    // t on Settings: the chat about nothing beside the page.
+    name: "ask-settings",
+    go: async (page) => {
+      await at("#/settings/github")(page);
+      await page.keyboard.press("t");
+      await page.locator(".chat-input").waitFor();
+      await page.waitForTimeout(200);
+    },
+    after: closeChat,
   },
   {
     // f with the chat open: the chat closes and the sidebar is back in its place.
@@ -1008,6 +1050,18 @@ const SHOTS: Shot[] = [
       go: async (page) => {
         await pickTheme(id)(page);
         await review("acme/api#4127")(page);
+      },
+      after: systemTheme,
+    },
+    {
+      name: `theme-${id}-ask`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await review("me/notes-app#12")(page);
+        await page.evaluate("document.activeElement.blur()");
+        await page.keyboard.press("t");
+        await page.locator(".chat .prose").first().waitFor();
+        await page.waitForTimeout(200);
       },
       after: systemTheme,
     },
