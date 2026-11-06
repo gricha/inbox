@@ -28,7 +28,6 @@ export interface Entry {
   id: string;
   signals: Signals;
   waiting_since: string;
-  updated_at: string;
   created_at: string;
   activity_at: string;
   pinned: boolean;

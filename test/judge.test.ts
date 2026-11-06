@@ -21,7 +21,6 @@ const entry = (item: Item): Entry => {
     id: item.id,
     signals: a.signals,
     waiting_since: a.waiting_since,
-    updated_at: item.updated_at,
     created_at: item.created_at,
     activity_at: a.activity_at,
     pinned: false,

@@ -886,7 +886,6 @@ export class Desk {
           id: e.item.id,
           signals: e.analysis.signals,
           waiting_since: e.analysis.waiting_since,
-          updated_at: e.item.updated_at,
           created_at: e.item.created_at,
           activity_at: e.analysis.activity_at,
           pinned: e.state.pinned,
