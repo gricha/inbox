@@ -257,7 +257,6 @@ interface Seed {
   reviews?: [string, ReviewState, number][];
   threads?: [number, number]; // unresolved, total
   close?: number;
-  my?: ReviewState;
   pushed?: boolean;
   comments?: number;
   fresh?: boolean;
@@ -341,7 +340,6 @@ const SEEDS: Seed[] = [
     team: "backend",
     size: [341, 802, 22],
     close: 5,
-    my: "changes_requested",
     pushed: true,
     reviews: [
       [ME, "changes_requested", 50],

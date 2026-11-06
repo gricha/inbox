@@ -4,11 +4,11 @@ import type { AiReview, ReviewFile } from "../../src/types.ts";
 type Canned = { files: ReviewFile[]; ai: Omit<AiReview, "head_oid" | "at" | "model"> | null };
 
 // Blank lines below are unchanged blank lines, which a patch writes as a single space.
-const file = (path: string, status: ReviewFile["status"], text: string, previous_path: string | null = null): ReviewFile => {
+const file = (path: string, status: ReviewFile["status"], text: string): ReviewFile => {
   const lines = text.split("\n").map((l) => l || " ");
   return {
     path,
-    previous_path,
+    previous_path: null,
     status,
     additions: lines.filter((l) => l.startsWith("+")).length,
     deletions: lines.filter((l) => l.startsWith("-")).length,
