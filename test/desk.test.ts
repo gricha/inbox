@@ -738,3 +738,100 @@ test("a new sync interval re-arms the pending poll", async (ctx) => {
   assert.ok(t.gh.searches.length > before, "polled after 30s, not the old 90s");
   t.cleanup();
 });
+
+test("Waiting: your open PRs whose next move is someone else's, on reviews or on the PR below, longest wait first", async (c) => {
+  const asked = (reviewer: string, at: number, type: "user" | "team" = "user") => ({
+    review_requests: [{ reviewer, type, codeowner: false }],
+    request_events: [{ at: hoursAgo(at), actor: "me", actor_bot: false, reviewer, reviewer_type: type }],
+  });
+  const review = (author: string, state: "approved" | "changes_requested") => ({
+    author,
+    author_bot: false,
+    trusted: true,
+    state,
+    at: hoursAgo(20),
+    commit: "c",
+  });
+  const t = await setup(
+    [
+      myPr(1, { ci: "green", ...asked("dana", 30) }),
+      myPr(2, {
+        ci: "pending",
+        review_requests: [
+          { reviewer: "sam", type: "user", codeowner: false },
+          { reviewer: "backend", type: "team", codeowner: false },
+          { reviewer: "kai", type: "user", codeowner: false },
+        ],
+      }),
+      myPr(3, { ci: "green", mergeable: "clean", review_decision: "approved", reviews: [review("kofi", "approved")] }),
+      myPr(4, { draft: true, ...asked("dana", 5) }),
+      myPr(5, { ci: "green", reviews: [review("kofi", "changes_requested")] }),
+      myPr(6, { ci: "red", ...asked("dana", 5) }),
+      myPr(7, { ci: "green", ...asked("eve", 10) }),
+      myPr(8, { ci: "green", head_ref: "planner-a", ...asked("dana", 40) }),
+      myPr(9, { ci: "green", head_ref: "planner-b", base: "planner-a", ...asked("sam", 2) }),
+    ],
+    { settings: { "policy.judge": false } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act("web#7", "inflight");
+  const w = t.desk.queue().waiting;
+  assert.deepEqual(
+    w.reviews.map((x) => [x.id, x.why, x.waiting_since]),
+    [
+      ["acme/web#2", "waits on a review from sam, @backend and 1 more", hoursAgo(48)],
+      ["acme/web#8", "waits on a review from dana · blocks web#9", hoursAgo(40)],
+      ["acme/web#1", "waits on a review from dana", hoursAgo(30)],
+      ["acme/web#7", "waits on a review from eve", hoursAgo(10)],
+    ],
+    "the latest ask, else when it was opened; Merging's too",
+  );
+  assert.deepEqual(
+    w.prs.map((x) => [x.id, x.why]),
+    [["acme/web#9", "waits on web#8 to merge first"]],
+    "the PR below it first, asked or not",
+  );
+});
+
+test("Waiting leaves out what's yours to do and what no search holds: changes not re-asked, a reply owed, you asked of yourself", async (c) => {
+  const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
+  const changes = { author: "kofi", author_bot: false, trusted: true, state: "changes_requested" as const, at: hoursAgo(20), commit: "c" };
+  const approve = { ...changes, state: "approved" as const };
+  const said = { author: "priya", author_bot: false, at: hoursAgo(1) }; // after your last word: you owe her a reply
+  const t = await setup(
+    [
+      myPr(1, { ci: "green", review_requests: [user("sam")], reviews: [changes] }),
+      myPr(2, { ci: "green", review_requests: [user("kofi")], reviews: [changes] }),
+      myPr(3, { ci: "green", head_ref: "a", review_requests: [user("sam")] }),
+      myPr(4, { ci: "green", head_ref: "b", base: "a", reviews: [changes] }),
+      reviewAsk(5, { author: "sentry-junior", author_bot: true, via: "@me", ci: "green" }),
+      myPr(6, { ci: "green", review_requests: [user("dana")] }),
+      myPr(7, { ci: "green", review_requests: [user("sam")], comments: [said] }),
+      myPr(8, { ci: "green", review_requests: [user("kofi")], reviews: [changes], review_decision: "changes_requested", comments: [said] }),
+      myPr(9, { ci: "green", head_ref: "c", review_requests: [user("sam")] }),
+      myPr(10, { ci: "green", head_ref: "d", base: "c", review_decision: "approved", reviews: [approve], comments: [said] }),
+      myPr(11, { ci: "green", head_ref: "e", base: "c", review_requests: [] }), // stacked, but nobody's asked: Add reviewers is yours
+    ],
+    { settings: { "policy.judge": false } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const ids = () => [...t.desk.queue().waiting.reviews, ...t.desk.queue().waiting.prs].map((x) => x.id).toSorted();
+  assert.deepEqual(
+    ids(),
+    ["acme/web#2", "acme/web#3", "acme/web#6", "acme/web#9"],
+    "kofi asked again waits; changes not asked again, stacked or not, and a reply you owe, asked again or approved, are yours",
+  );
+  assert.equal(
+    t.desk.queue().waiting.reviews.some((x) => x.why.includes(" me")),
+    false,
+  );
+
+  // A search that stops returning it: it isn't refreshed any more, so it can't say what it waits on.
+  const route = t.gh.route;
+  t.gh.route = (q) => route(q).filter((id) => id !== "acme/web#6");
+  await t.desk.sync();
+  await t.desk.sync();
+  assert.deepEqual(ids(), ["acme/web#2", "acme/web#3", "acme/web#9"]);
+});

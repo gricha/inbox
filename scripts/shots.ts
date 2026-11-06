@@ -183,6 +183,8 @@ const systemTheme = async (page: Page) => {
 };
 const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
+  // Your PRs whose next move is someone else's: on reviews, then on other PRs, longest wait first.
+  { name: "waiting", go: at("#/waiting") },
   {
     // j j from the top: the selected row's calm fill, and the rows stay evenly spaced.
     name: "queue-selected",

@@ -19,6 +19,7 @@ export function Sidebar({
   const onQueue = route.name === "queue" || route.name === "inquiry" || (route.name === "review" && from === "queue");
   const onLater = route.name === "later" || (route.name === "review" && from === "later");
   const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
+  const onWaiting = route.name === "waiting" || (route.name === "review" && from === "waiting");
   const onArchive = route.name === "archive" || (route.name === "review" && from === "archive");
   const onSettings = route.name === "settings";
   const now = (view?.sections.now.length ?? 0) + (view?.inquiries.length ?? 0); // an agent's question waits on you too
@@ -69,6 +70,15 @@ export function Sidebar({
           title={flight ? `${flight.total} merging (g m)` : "Your PRs the coordinator is getting merged (g m)"}
         >
           <span className="side-name">Merging</span>
+        </a>
+        {/* Your PRs whose next move is someone else's: no count, nothing there needs you. */}
+        <a
+          href="#/waiting"
+          className={cls("side-item", onWaiting && "on")}
+          aria-current={onWaiting ? "page" : undefined}
+          title="Your PRs waiting on someone else's review or another PR (g w)"
+        >
+          <span className="side-name">Waiting</span>
         </a>
         {/* What you finished, and what was dealt with: no count, nothing there needs you. */}
         <a

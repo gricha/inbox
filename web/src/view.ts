@@ -23,6 +23,7 @@ export type Route =
   | { name: "review"; id: string }
   | { name: "inquiry"; id: string } // an agent's question
   | { name: "later" }
+  | { name: "waiting" } // your PRs whose next move is someone else's
   | { name: "inflight" }
   | { name: "archive" }
   | { name: "settings"; section: string };
@@ -34,11 +35,11 @@ export interface Acted {
 }
 
 // A list page a review was opened from, and goes back to.
-export type ListPage = "queue" | "later" | "inflight" | "archive";
+export type ListPage = "queue" | "later" | "waiting" | "inflight" | "archive";
 // The queue is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is under
 // Later; what's done (yours, or resolved by the world) is in the Archive.
-export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive";
-export type Variant = "active" | "hidden" | "cleared" | "archive";
+export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "waiting_reviews" | "waiting_prs";
+export type Variant = "active" | "hidden" | "cleared" | "archive" | "waiting";
 
 export interface Group {
   key: GroupKey;
@@ -59,10 +60,11 @@ export const isInquiry = (id: string | null) => !!id?.startsWith("ask:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
 // The groups each list page shows.
-export const PAGE_GROUPS: Record<"queue" | "later" | "archive", GroupKey[]> = {
+export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "waiting", GroupKey[]> = {
   queue: ["queue"],
   later: SORTED_AWAY,
   archive: ["archive"],
+  waiting: ["waiting_reviews", "waiting_prs"],
 };
 
 export function parseRoute(hash: string): Route {
@@ -71,6 +73,7 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };
+  if (hash === "#/waiting") return { name: "waiting" };
   if (hash === "#/archive") return { name: "archive" };
   const page = /^#\/(review|inquiry)\/(.+)$/.exec(hash);
   if (page) {
@@ -261,6 +264,8 @@ export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   hidden: false,
   cleared: false,
   archive: true,
+  waiting_reviews: true,
+  waiting_prs: true,
 };
 
 const LABEL: Record<GroupKey, string> = {
@@ -270,6 +275,8 @@ const LABEL: Record<GroupKey, string> = {
   hidden: "Hidden by rules",
   cleared: "Snoozed or muted",
   archive: "Archive",
+  waiting_reviews: "On reviews",
+  waiting_prs: "On other PRs",
 };
 
 // The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
@@ -318,6 +325,9 @@ export function groupsOf(
       ),
       "archive",
     ),
+    // Your PRs whose next move is someone else's, longest wait first.
+    group("waiting_reviews", view.waiting.reviews, "waiting"),
+    group("waiting_prs", view.waiting.prs, "waiting"),
   ];
 }
 
@@ -378,13 +388,15 @@ export const stops = (groups: Group[], leaving: Set<string>): string[] =>
     g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [foldOf(g.key)] : [])] : [],
   );
 
-export function removeCard(v: QueueView, id: string): QueueView {
+// `ends`: a close or a merge, which takes it off Waiting too; what else you do leaves its wait in place.
+export function removeCard(v: QueueView, id: string, ends = false): QueueView {
   const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);
   const s = v.sections;
   return {
     ...v,
     sections: { now: drop(s.now), today: drop(s.today), later: drop(s.later), fyi: drop(s.fyi) },
     hidden: drop(v.hidden),
+    ...(ends && { waiting: { reviews: drop(v.waiting.reviews), prs: drop(v.waiting.prs) } }),
   };
 }
 

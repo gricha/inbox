@@ -177,7 +177,7 @@ export function Later({
               className="group-toggle"
               aria-expanded={g.open}
               disabled={g.forced}
-              title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"} (${KEY[g.key]})`}
+              title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"}${KEY[g.key] ? ` (${KEY[g.key]})` : ""}`}
               onClick={() => {
                 toggle(g.key);
               }}

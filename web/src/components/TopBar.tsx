@@ -3,8 +3,8 @@ import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
 import { routeHash, type ListPage, type Route } from "../view.ts";
 
-const BACK = { queue: "the queue", later: "Later", inflight: "Merging", archive: "the Archive" };
-const BACK_LABEL = { queue: "Queue", later: "Later", inflight: "Merging", archive: "Archive" };
+const BACK = { queue: "the queue", later: "Later", waiting: "Waiting", inflight: "Merging", archive: "the Archive" };
+const BACK_LABEL = { queue: "Queue", later: "Later", waiting: "Waiting", inflight: "Merging", archive: "Archive" };
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
@@ -104,7 +104,7 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 1000px the sidebar is gone: Later, Merging and the Archive are reachable from here. */}
+        {/* Below 1000px the sidebar is gone: Later, Merging, Waiting and the Archive are reachable from here. */}
         {route.name !== "later" && (
           <a className="tb-flight" href="#/later" title="Sorted away (g l)">
             Later
@@ -113,6 +113,11 @@ export function TopBar({
         {!!o?.inflight.total && route.name !== "inflight" && (
           <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging (g m)`}>
             Merging
+          </a>
+        )}
+        {route.name !== "waiting" && (
+          <a className="tb-flight" href="#/waiting" title="Your PRs waiting on someone else (g w)">
+            Waiting
           </a>
         )}
         {route.name !== "archive" && (

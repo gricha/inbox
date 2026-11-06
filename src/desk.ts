@@ -11,7 +11,7 @@ import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { stage, verdicts } from "./stage.ts";
+import { approved, stage, verdicts } from "./stage.ts";
 import type {
   InlineAt,
   Action,
@@ -1307,10 +1307,56 @@ export class Desk {
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+      waiting: this.waiting(snap),
       cards: this.settings["queue.cards"],
       paused: this.paused(),
       stacks: this.stacksOf([...leads, ...hidden, ...cleared, ...resolved], snap),
     };
+  }
+
+  // Your open PRs whose next move is someone else's: a review you asked for, or the PR below it in a stack merging first.
+  // Merging's too; CI, and what's yours to do (changes asked for, a reply you owe, nobody asked, red CI, a conflict, ready to merge), stay out.
+  waiting(snap: Snapshot): QueueView["waiting"] {
+    const me = this.me();
+    const out: QueueView["waiting"] = { reviews: [], prs: [] };
+    // What a board holds: one no search returns any more isn't refreshed, so it can't say what it waits on.
+    const listed = new Set<string>();
+    for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
+    for (const e of snap.entries.values()) {
+      const it = e.item;
+      if (it.kind !== "pr" || it.state !== "open" || it.draft || e.resolved || !e.analysis.signals.me.author) continue;
+      // A reply you owe, red CI or a conflict: the next move is yours.
+      if (!listed.has(it.id) || it.ci === "red" || it.mergeable === "conflict" || owesReply(it, me)) continue;
+      if (e.analysis.signals.pr.unasked) continue; // nobody's asked to review it: Add reviewers is yours
+      // A bot's PR opened through you can ask you: that's on your desk, not a wait.
+      const asked = it.review_requests.filter((r) => r.type === "team" || r.reviewer.toLowerCase() !== me.toLowerCase());
+      const still = new Set(asked.map((r) => r.reviewer.toLowerCase()));
+      // Changes asked for and not asked again since: the fix is yours.
+      if (verdicts(it, me).changes_by.some((x) => !still.has(x.toLowerCase()))) continue;
+      const node = snap.stacks.nodes.get(it.id);
+      const below = node?.parent ? snap.stacks.nodes.get(node.parent)?.item : undefined;
+      const blocks = (node?.children ?? [])
+        .map((id) => snap.stacks.nodes.get(id)!.item)
+        .filter((c) => c.state === "open")
+        .map(shortRef);
+      let group: keyof QueueView["waiting"];
+      let why: string;
+      let since = it.created_at;
+      if (below?.state === "open") {
+        group = "prs";
+        why = `waits on ${shortRef(below)} to merge first`;
+      } else if (asked.length && !approved(it, me)) {
+        group = "reviews";
+        const who = asked.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer));
+        why = `waits on a review from ${who.length > 2 ? `${who.slice(0, 2).join(", ")} and ${who.length - 2} more` : who.join(" and ")}`;
+        // Since the latest ask of those still asked: a re-request starts the wait again.
+        since = it.request_events.filter((r) => still.has(r.reviewer.toLowerCase())).reduce((a, r) => (r.at > a ? r.at : a), since);
+      } else continue;
+      const c = this.card(e, this.shownAt(e, snap), snap);
+      out[group].push({ ...c, why: blocks.length ? `${why} · blocks ${blocks.join(", ")}` : why, waiting_since: since });
+    }
+    for (const list of Object.values(out)) list.sort((a, b) => a.waiting_since.localeCompare(b.waiting_since));
+    return out;
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).

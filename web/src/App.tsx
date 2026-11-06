@@ -90,6 +90,7 @@ const CHORDS: Record<string, Route> = {
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
   m: { name: "inflight" },
+  w: { name: "waiting" },
 };
 // g l, g f, g h, g x: Later, with that group open; g a (or g d): the Archive.
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared", a: "archive", d: "archive" };
@@ -340,12 +341,14 @@ export function App() {
   }, [route]);
   const onLater = route.name === "later";
   const onArchive = route.name === "archive";
+  const onWaiting = route.name === "waiting";
   const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
-  // j/k and the selection go through the page on screen: the queue, or Later's groups.
+  // j/k and the selection go through the page on screen: the queue, or Later's groups; in a review, the page it came from.
+  const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
-    const keys = PAGE_GROUPS[onLater ? "later" : onArchive ? "archive" : "queue"];
+    const keys = PAGE_GROUPS[list === "later" || list === "archive" || list === "waiting" ? list : "queue"];
     return groups.filter((g) => keys.includes(g.key));
-  }, [groups, onLater, onArchive]);
+  }, [groups, list]);
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
   // Agents' questions lead the main page (one waits on each); the filter reads them too.
   const inquiries = useMemo(() => {
@@ -363,7 +366,16 @@ export function App() {
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
-    if (view) for (const c of [...Object.values(view.sections).flat(), ...view.hidden, ...view.cleared, ...view.resolved]) m.set(c.id, c);
+    if (view)
+      for (const c of [
+        ...Object.values(view.sections).flat(),
+        ...view.hidden,
+        ...view.cleared,
+        ...view.resolved,
+        ...view.waiting.reviews,
+        ...view.waiting.prs,
+      ])
+        m.set(c.id, c);
     for (const r of laneRows) m.set(r.card.id, r.card);
     return m;
   }, [view, laneRows]);
@@ -419,7 +431,7 @@ export function App() {
   const onRow =
     route.name === "inflight"
       ? (laneCur?.card ?? null)
-      : route.name === "queue" || route.name === "later" || route.name === "archive"
+      : route.name === "queue" || route.name === "later" || route.name === "archive" || route.name === "waiting"
         ? current
         : null;
   const restingPr = onRow?.kind === "pr" ? onRow.id : null;
@@ -470,7 +482,7 @@ export function App() {
 
   // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
-    if (!selected || (route.name !== "queue" && route.name !== "later") || stay.current === selected) return;
+    if (!selected || !["queue", "later", "waiting", "archive"].includes(route.name) || stay.current === selected) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
     const head = el?.closest(".group")?.querySelector(".group-head");
     if (!el) return;
@@ -554,8 +566,10 @@ export function App() {
   }
 
   // A row leaving the list: the next one takes the cursor, it fades out, and j/k skip it until unhide().
-  function hide(c: Card) {
+  // `ends`: a close or a merge, which ends a wait too; anything else you do on Waiting leaves the row where it is.
+  function hide(c: Card, ends = false) {
     setSnoozeFor(null);
+    if (list === "waiting" && !ends) return;
     const i = flat.findIndex((x) => x.id === c.id);
     if (i >= 0) setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
     if (expanded === c.id) setExpanded(null);
@@ -603,19 +617,21 @@ export function App() {
     sending: string,
     did: Acted,
     write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>,
+    ends = false,
   ): Promise<boolean> {
-    if (actedRef.current[c.id]) return false; // sent already from this page
+    // Sent already from this review; a list's row that stays (Waiting's) can take the next write.
+    if (actedRef.current[c.id] && routeRef.current.name === "review") return false;
     const mark = (to: Acted | null) => {
       actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
       setActed(actedRef.current);
     };
     mark({ ...did, sending: true });
-    hide(c);
+    hide(c, ends);
     flash(sending, false, false, 60_000, true);
     try {
       const r = await write();
       mark({ ...did, sending: false });
-      setView((v) => v && removeCard(v, c.id));
+      setView((v) => v && removeCard(v, c.id, ends));
       flash(r.text, r.error, r.undo);
       return true;
     } catch (e) {
@@ -799,7 +815,7 @@ export function App() {
     if (action === "close" || action === "merge" || action === "request_changes") {
       const verb = action === "close" ? "Closing" : action === "merge" ? "Merging" : "Requesting changes on";
       const what = action === "close" ? "Closed" : action === "merge" ? "Merged" : "Requested changes";
-      return finish(c, `${verb} ${shortRef(c)} on GitHub…`, { what, where: "archive" }, write);
+      return finish(c, `${verb} ${shortRef(c)} on GitHub…`, { what, where: "archive" }, write, action !== "request_changes");
     }
     try {
       const r = await write();
@@ -1005,7 +1021,7 @@ export function App() {
     } else if (k === "Escape") {
       if (expanded) setExpanded(null);
       else if (filter) setFilter("");
-      else if (onLater || onArchive) go({ name: "queue" });
+      else if (onLater || onArchive || onWaiting) go({ name: "queue" });
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
@@ -1205,6 +1221,17 @@ export function App() {
               groups={groups}
               keys={SORTED_AWAY}
               empty="Nothing sorted away."
+              ctx={ctx}
+              filter={filter}
+              toggle={toggleGroup}
+            />
+          )}
+          {route.name === "waiting" && !broken && (
+            <Later
+              view={view}
+              groups={groups}
+              keys={PAGE_GROUPS.waiting}
+              empty="Nothing of yours waits on anyone else."
               ctx={ctx}
               filter={filter}
               toggle={toggleGroup}

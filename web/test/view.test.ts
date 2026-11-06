@@ -21,6 +21,7 @@ import {
   navigable,
   onLines,
   parseList,
+  PAGE_GROUPS,
   parseRoute,
   removeCard,
   resolvedHead,
@@ -79,6 +80,7 @@ const queue = (): QueueView => ({
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
+  waiting: { reviews: [], prs: [] },
   cards: 10,
   paused: null,
   stacks: {},
@@ -179,6 +181,28 @@ test("the queue shows one part at a time, each part's Now before its Today, in t
   );
 });
 
+test("Waiting is a page of its own: what the desk says waits on reviews, then on other PRs, open, each row saying on whom", () => {
+  const q = queue();
+  q.waiting = { reviews: [card("acme/web#20", { why: "waits on a review from dana" })], prs: [card("acme/web#21")] };
+  assert.deepEqual(PAGE_GROUPS.waiting, ["waiting_reviews", "waiting_prs"]);
+  const g = groupsOf(q, DEFAULT_OPEN, "").filter((x) => PAGE_GROUPS.waiting.includes(x.key));
+  assert.deepEqual(
+    g.map((x) => [x.key, x.label, x.open, x.variant, x.cards.map((c) => c.id)]),
+    [
+      ["waiting_reviews", "On reviews", true, "waiting", ["acme/web#20"]],
+      ["waiting_prs", "On other PRs", true, "waiting", ["acme/web#21"]],
+    ],
+  );
+  assert.deepEqual(parseRoute("#/waiting"), { name: "waiting" });
+  assert.equal(routeHash({ name: "waiting" }), "#/waiting");
+  assert.deepEqual(
+    removeCard(q, "acme/web#20").waiting.reviews.map((c) => c.id),
+    ["acme/web#20"],
+    "what you do (done, a nudge) doesn't end its wait: it stays",
+  );
+  assert.deepEqual(removeCard(q, "acme/web#20", true).waiting.reviews, [], "a close or a merge ends it");
+});
+
 test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
   assert.deepEqual(
@@ -190,6 +214,8 @@ test("the queue, Later and the Archive are pages of their own: Later's own group
       ["hidden", false, 1],
       ["cleared", false, 1],
       ["archive", true, 1],
+      ["waiting_reviews", true, 0],
+      ["waiting_prs", true, 0],
     ],
   );
   assert.equal(groups.find((g) => g.key === "archive")?.variant, "archive");

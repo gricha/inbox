@@ -4702,6 +4702,13 @@ kbd {
   }
 }
 
+/* The macOS app pads the bar for the traffic lights: at its narrowest the sync label gives way to the page links. */
+@media (width <= 820px) {
+  :root[data-shell="desktop"][data-platform="darwin"] .sync span {
+    display: none;
+  }
+}
+
 @media (width <= 640px) {
   :root {
     --ref-w: 0px;

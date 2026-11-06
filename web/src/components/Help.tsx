@@ -29,6 +29,7 @@ const MORE_KEYS: [string, string][] = [
   ["g f", "FYI"],
   ["g a", "archive"],
   ["g m", "merging"],
+  ["g w", "waiting on others"],
   ["g r", "rules"],
   [",", "settings"],
 ];

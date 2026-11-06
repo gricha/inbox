@@ -253,6 +253,7 @@ interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
+  waiting: { reviews: Card[]; prs: Card[] }; // your open, non-draft PRs whose next move is someone else's (Desk.waiting()): reviews, someone asked and not approved (why "waits on a review from dana and @backend", waiting_since their latest ask, else when it was opened); prs, stacked on an open PR below it ("waits on api#4153 to merge first"). " · blocks …" names your open PRs stacked on it. Merging's included; left out when the move is yours: changes asked for and not asked again, a reply you owe, `pr.unasked`, red CI, a conflict. Longest wait first
   cards: number; // queue.cards: the queue is one list, now's cards then today's (each the weightiest first); it shows this many, the rest behind one line; 0 = all
   paused: { who: "claude" | "ai"; why: string } | null; // said once above the queue: claude, when the AI review or the judge can't log in; ai, when AI reviews nobody asked for keep failing otherwise
   reviewing: number; // someone else's PRs that would be in Now or Today, held until Claude's first review of them is written

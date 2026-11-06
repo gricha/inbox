@@ -147,6 +147,7 @@ const queueView: QueueView = {
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
+  waiting: { reviews: [], prs: [] },
   cards: 10,
   paused: null,
   stacks: {},
