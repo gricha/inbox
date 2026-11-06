@@ -296,12 +296,12 @@ export function Rules({
           <section className="side-block">
             <h3 className="s-sub">Hard rules</h3>
             {hard.length ? (
-              <p className="muted small">
+              <p className="small">
                 What they match stays at least in their bucket (<code>today</code> for a <code>now</code> rule), whatever Claude, quiet days
                 or caps say.
               </p>
             ) : (
-              <p className="muted small">
+              <p className="small">
                 None: Claude can sort anything off your desk. <code>hard = true</code> on a rule keeps what it matches there.
               </p>
             )}
@@ -324,14 +324,14 @@ export function Rules({
           <section className="side-block">
             <h3 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h3>
             {!preview ? (
-              <p className="muted small">Press {MOD}↵ to see what moves before you save. Nothing changes until you save.</p>
+              <p className="small">Press {MOD}↵ to see what moves before you save. Nothing changes until you save.</p>
             ) : pvBoards.length === 0 ? (
-              <p className="muted small">Fix the errors to see a preview.</p>
+              <p className="small">Fix the errors to see a preview.</p>
             ) : (
               changed.map((b) => (
                 <div key={b.id} className="pv-board">
                   <div className="pv-name">
-                    <b>{b.name}</b> <span className="mono muted">{b.id}</span>
+                    <b>{b.name}</b> <span className="mono">{b.id}</span>
                     {b.before === null && <span className="quiet">new board</span>}
                   </div>
                   <div className="pv-counts">
@@ -371,7 +371,7 @@ export function Rules({
               ))
             )}
             {pvBoards.length > 0 && unchanged.length > 0 && (
-              <p className={cls("muted small", changed.length > 0 && "pv-same")}>
+              <p className={cls("small", changed.length > 0 && "pv-same")}>
                 {changed.length ? `Unchanged: ${unchanged.map((b) => b.name).join(", ")}` : "Nothing moves on any board."}
               </p>
             )}
@@ -405,7 +405,7 @@ export function Rules({
                   <span className="doc">{f.doc}</span>
                 </button>
               ))}
-              {!shown.length && <p className="muted small">No fields match.</p>}
+              {!shown.length && <p className="small">No fields match.</p>}
             </div>
           </section>
 
