@@ -77,7 +77,8 @@ export function Chat({
         thread_id: about.thread?.id,
         thread_url: about.thread?.url,
       });
-      seen = seen && { ...seen, asks: [...seen.asks, ask] };
+      // An update can land first and bring the ask already.
+      seen = seen && (seen.asks.some((x) => x.id === ask.id) ? seen : { ...seen, asks: [...seen.asks, ask] });
       setView(seen);
     } catch (e) {
       if (!kept.get(key)) kept.set(key, t);
