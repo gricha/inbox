@@ -2166,6 +2166,7 @@ export class Desk {
 
   // GET /api/asks/:id (desk_ask): where an ask is, and the only branch a change it asks for may be pushed to.
   askPlace(id: string): AskPlace {
+    this.requireConfig();
     const ask = this.asks().find((x) => x.id === id);
     if (!ask) throw new DeskError(404, `no ask "${id}"`);
     const about = this.askAbout(ask.item_id);

@@ -1095,4 +1095,11 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
     fs.rmSync(home, { recursive: true, force: true });
   });
   assert.equal((await place("nope", createApp(cold, 49401))).status, 503, "a desk that's starting");
+  fs.writeFileSync(path.join(home, "config.toml"), "[[boards]]\nid = 7\n");
+  cold.reloadConfig();
+  cold.store.set("asks", [
+    { id: "a1", at: NOW.toISOString(), text: "x", item_id: "acme/web#3", thread_id: null, thread_url: null, lines, answer: null },
+  ]);
+  const broken = await place("a1", createApp(cold, 49401));
+  assert.deepEqual([broken.status, broken.body.error?.startsWith("config has errors: ")], [503, true], JSON.stringify(broken));
 });
