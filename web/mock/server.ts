@@ -721,6 +721,7 @@ const SEEDS: Seed[] = [
     n: 2303,
     title: "Show the export's progress in the toolbar",
     author: ME,
+    body: "The toolbar's export button now shows how far a running export has got, and the export can be cancelled from there instead of only from the dialog.\nWhy\nLarge exports took minutes with no sign of life, so people started a second one.",
     age: 30,
     upd: 3,
     ci: "green",

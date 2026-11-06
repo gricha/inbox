@@ -3370,6 +3370,7 @@ kbd {
 }
 
 .rv-head,
+.rv-desc,
 .rv-ai,
 .rv-actions,
 .rv-comment,
@@ -3728,6 +3729,10 @@ kbd {
   color: var(--ink);
   font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.5;
+}
+
+.rv-desc {
+  max-width: 780px;
 }
 
 /* Concerns are margin notes, as in the diff. */

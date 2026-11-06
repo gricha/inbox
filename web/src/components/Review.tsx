@@ -679,6 +679,8 @@ export function Review({
         )}
         <div className="rv-top">
           <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
+          {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
+          {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
           <Conversation view={view} now={now} flash={flash} onThread={onThread} onAsk={onAsk} />
           {((open && !acted) || !!comment.trim()) && (
             <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />

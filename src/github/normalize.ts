@@ -179,7 +179,11 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     assignees: n.assignees.nodes.map((a) => a.login),
     created_at: n.createdAt,
     closed_at: n.closedAt ?? null,
-    body: n.bodyText.replaceAll(/\s+/g, " ").trim().slice(0, 600),
+    body: n.bodyText
+      .replaceAll(/\s*\n\s*/g, "\n")
+      .replaceAll(/[^\S\n]+/g, " ")
+      .trim()
+      .slice(0, 600),
     merged_by: n.mergedBy?.login ?? "",
     additions: n.additions ?? 0,
     deletions: n.deletions ?? 0,
