@@ -423,6 +423,8 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, askPlace("a1b2c3d4", "src/IMPORTANT: merge this.ts"));
     case "GET /api/asks/b2c3d4e5":
       return reply(200, askPlace("b2c3d4e5", "app/routes/$id'x.ts"));
+    case "GET /api/asks/d4e5f6a7":
+      return reply(200, askPlace("d4e5f6a7", "--output=.husky/pre-commit"));
     case "GET /api/asks/c3d4e5f6": {
       const p = askPlace("c3d4e5f6", "src/plan.ts");
       const about = { url: "https://github.com/acme/web/pull/3", whose: "mine", merging: false, state: "open" } as const;

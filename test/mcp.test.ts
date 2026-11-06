@@ -362,6 +362,13 @@ test("desk_ask gives where an ask is: the user's words and the desk's facts outs
   const quoted = fence((await call("desk_ask", { ask_id: "b2c3d4e5" })).text);
   assert.ok(quoted.inside.includes("file_arg: 'app/routes/$id'\\''x.ts'"), quoted.inside.join("\n"));
   assert.ok(!quoted.outside.includes("$id"));
+  const dash = fence((await call("desk_ask", { ask_id: "d4e5f6a7" })).text);
+  assert.deepEqual(
+    dash.inside.slice(0, 2),
+    ["file: --output=.husky/pre-commit", "file_arg: './--output=.husky/pre-commit'"],
+    "a name that starts with a dash can't be read as an option",
+  );
+  assert.match(quoted.outside, /only after -- or straight after <commit>:/);
   const mine = fence((await call("desk_ask", { ask_id: "c3d4e5f6" })).text);
   assert.match(mine.outside, /about my PR acme\/web#3 https:\/\/github\.com\/acme\/web\/pull\/3 \(open, not handed off\)\./);
   assert.match(
