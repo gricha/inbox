@@ -823,7 +823,28 @@ const SHOTS: Shot[] = [
       await page.locator(".inq-answered").waitFor();
       await page.waitForTimeout(200);
     },
-    after: fresh,
+    // Then the check: the queue's view holds open questions only, and the page still knows the question is your agent's.
+    after: async (page) => {
+      await page.route("**/api/queue", async (route) => {
+        const res = await route.fetch();
+        const q = (await res.json()) as QueueView;
+        q.inquiries = q.inquiries.filter((x) => x.id !== "q1c0ffee");
+        await route.fulfill({ response: res, json: q });
+      });
+      await page.reload();
+      await page.locator(".inquiry .inq-options").waitFor();
+      await page.locator(".sync span", { hasText: "Synced" }).waitFor({ state: "attached" });
+      await page.waitForTimeout(300);
+      if (await page.locator(".tb-ask").count())
+        failures.push("inquiry-answered: the top bar offers Ask your agent once the queue drops the answered question");
+      await page.keyboard.press("t");
+      await page.locator(".chat-input").waitFor();
+      const about = (await chatState(page)).about;
+      if (about !== "notes-app#12") failures.push(`inquiry-answered: t on the answered question asks about ${JSON.stringify(about)}`);
+      await page.keyboard.press("Escape");
+      await unroute(page);
+      await fresh(page);
+    },
   },
   {
     // Merged and closed ones under Merged, below the fold at every size.

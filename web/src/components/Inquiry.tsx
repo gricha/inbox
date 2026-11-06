@@ -107,6 +107,7 @@ export function InquiryPage({
   flash,
   onAnswer,
   onBack,
+  onLoad,
 }: {
   id: string;
   loads: number; // bumped on every refresh: an answer from elsewhere shows
@@ -115,6 +116,7 @@ export function InquiryPage({
   flash: (text: string, error?: boolean) => void;
   onAnswer: (q: Inquiry, text: string, dismiss?: boolean) => Promise<boolean>; // true once the desk has it
   onBack: () => void;
+  onLoad: (q: Inquiry) => void; // the queue's view drops a question once it's answered; this page's copy stays
 }) {
   const [q, setQ] = useState<InquiryView | string | null>(null); // string: why it couldn't load
   const [text, setText] = useState("");
@@ -136,6 +138,9 @@ export function InquiryPage({
   }, [id, loads]);
 
   const v = typeof q === "object" ? q : null;
+  useEffect(() => {
+    if (v) onLoad(v);
+  }, [v, onLoad]);
   const answer = v?.answer ?? sent;
   const card = v?.card ?? null;
 

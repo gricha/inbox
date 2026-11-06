@@ -144,6 +144,7 @@ export function App() {
   const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
   const [asking, setAsking] = useState<About | null>(null); // your chat with the coordinator, open
   const [spot, setSpot] = useState<Spot | null>(null); // where in the open review you last were
+  const [pageQuestion, setPageQuestion] = useState<Inquiry | null>(null); // the question page's own copy, kept once it's answered
   const [askWaiting, setAskWaiting] = useState(false); // the open review's latest ask is unanswered (Review says, and unsays it as it goes)
   const rulesDirty = useRef(false);
 
@@ -362,6 +363,8 @@ export function App() {
   const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   const asked = inquiries.find((q) => inquiryOf(q.id) === selected) ?? null;
+  // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
+  const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
@@ -832,7 +835,7 @@ export function App() {
           : r.name === "settings"
             ? null
             : r.name === "inquiry"
-              ? (view?.inquiries.find((q) => q.id === r.id)?.item_id ?? null)
+              ? (questionOf(r.id)?.item_id ?? null)
               : current?.id);
     // Drawn and focused at once: a key typed right after t lands in the box, never on the page, where a approves.
     flushSync(() => {
@@ -1168,11 +1171,7 @@ export function App() {
           onHelp={() => {
             setHelp(true);
           }}
-          ask={
-            !asking &&
-            !!overview?.agent &&
-            !(route.name === "inquiry" && view?.inquiries.find((q) => q.id === route.id)?.from === COORDINATOR_NAME)
-          }
+          ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
           waiting={route.name === "review" && askWaiting}
           onAsk={() => {
             openAsk();
@@ -1322,6 +1321,7 @@ export function App() {
               onBack={() => {
                 go({ name: "queue" });
               }}
+              onLoad={setPageQuestion}
             />
           )}
           {route.name === "inflight" && !broken && (
