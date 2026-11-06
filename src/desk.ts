@@ -184,6 +184,14 @@ interface Merging {
 
 const MAX_POLICY = 20_000; // it goes with every judge call
 
+// Through a symlink to the real file, swapped in whole so a watcher never reads half of it.
+function replaceFile(file: string, text: string, backup = false): void {
+  const real = fs.existsSync(file) ? fs.realpathSync(file) : file;
+  if (backup) fs.copyFileSync(real, `${real}.bak`);
+  fs.writeFileSync(`${real}.tmp`, text);
+  fs.renameSync(`${real}.tmp`, real);
+}
+
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Promise<PrText>;
   generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Promise<AiReview>;
@@ -416,18 +424,12 @@ export class Desk {
     return { path: this.policyPath, text: this.policy.text, starter: DEFAULT_POLICY, hash: this.policy.hash, judge: this.judge.status() };
   }
 
-  writePolicy(text: string): void {
-    const real = fs.existsSync(this.policyPath) ? fs.realpathSync(this.policyPath) : this.policyPath;
-    fs.writeFileSync(`${real}.tmp`, text);
-    fs.renameSync(`${real}.tmp`, real);
-  }
-
   // `base` is the hash from GET: a stale one means it changed since (an agent, an editor) and nothing is written.
   putPolicy(text: string, base?: string): { ok: true; hash: string } {
     if (base !== undefined && base !== this.policy.hash)
       throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
     if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
-    this.writePolicy(text);
+    replaceFile(this.policyPath, text);
     this.policyChanged();
     return { ok: true, hash: this.policy.hash };
   }
@@ -513,10 +515,7 @@ export class Desk {
       this.log("config.toml still has settings sections; delete them (they now live in settings.json)");
       return;
     }
-    const real = fs.realpathSync(this.configPath);
-    fs.copyFileSync(real, `${real}.bak`);
-    fs.writeFileSync(`${real}.tmp`, m.text);
-    fs.renameSync(`${real}.tmp`, real);
+    replaceFile(this.configPath, m.text, true);
     this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
   }
 
@@ -541,10 +540,7 @@ export class Desk {
       did.push(m.did);
     }
     if (text !== before) {
-      const real = fs.realpathSync(this.configPath);
-      fs.copyFileSync(real, `${real}.bak`);
-      fs.writeFileSync(`${real}.tmp`, text);
-      fs.renameSync(`${real}.tmp`, real);
+      replaceFile(this.configPath, text, true);
       this.log(`${did.join("; ")} (backup: config.toml.bak)`);
     }
     for (const m of due) this.store.set(m.key, this.now().toISOString());
@@ -2478,9 +2474,7 @@ export class Desk {
     if (!loaded) return { ok: false, errors, warnings };
     // A save never brings settings back into config.toml: an unmigrated desk would move them to settings.json on its next start.
     if (warnings.length) return { ok: false, errors: warnings, warnings: [] };
-    const real = fs.realpathSync(this.configPath); // keep a symlinked config a symlink
-    fs.writeFileSync(`${real}.tmp`, text);
-    fs.renameSync(`${real}.tmp`, real);
+    replaceFile(this.configPath, text);
     this.reloadConfig(true);
     return { ok: true, errors: [], warnings };
   }
