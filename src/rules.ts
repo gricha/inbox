@@ -1,5 +1,6 @@
 // Places items on a board: filter, first matching rule, caps, sort.
 import type { BoardConfig, Bucket, Card, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
+import { RANK } from "./types.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
 
 export interface CompiledBoard {
@@ -55,8 +56,6 @@ function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
 
 // The policy judge's answer for an item, while judging is on.
 export type JudgeLookup = (id: string) => JudgeStep;
-
-const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 
 // A hard rule's floor: Today for a Now rule, so Claude still picks Now or Today for what it matches.
 export const floorOf = (b: Bucket): Bucket => (b === "now" ? "today" : b);

@@ -67,7 +67,7 @@ import type {
   TraceStep,
   Until,
 } from "../../src/types.ts";
-import { UNTIL } from "../../src/types.ts";
+import { RANK, UNTIL } from "../../src/types.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -80,7 +80,6 @@ const HOUR = 3_600_000;
 const T0 = Date.now();
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
 const hoursSince = (at: string) => Math.round((Date.now() - Date.parse(at)) / HOUR);
-const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 const BUCKET_LIST = new Set<Bucket>(["now", "today", "later", "fyi", "hide"]);
 
 // ---------------------------------------------------------------------------

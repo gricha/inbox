@@ -2,6 +2,7 @@
 
 export type Bucket = "now" | "today" | "later" | "fyi" | "hide";
 export const BUCKETS: Bucket[] = ["now", "today", "later", "fyi", "hide"];
+export const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 
 export type Ci = "green" | "red" | "pending" | "none";
 export type ReviewDecision = "approved" | "changes_requested" | "required" | "none";

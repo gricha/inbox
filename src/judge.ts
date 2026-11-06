@@ -6,6 +6,7 @@ import type { Desk } from "./desk.ts";
 import { askClaude, NOT_LOGGED_IN } from "./review.ts";
 import {
   BUCKETS,
+  RANK,
   type AiReview,
   type Bucket,
   type Context,
@@ -32,7 +33,6 @@ export const DEFAULT_POLICY = `Less is more. Show me what a person is waiting on
 
 const BATCH = 20;
 const HOUR = 3_600_000;
-const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 const MAX_WHY = 80;
 const BODY = 280; // characters of the description
 const DIRS = 4; // directories a PR touches

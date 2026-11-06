@@ -60,7 +60,7 @@ import type {
   Status,
   Until,
 } from "./types.ts";
-import { byPart, UNTIL } from "./types.ts";
+import { byPart, RANK, UNTIL } from "./types.ts";
 import { report, webSentry } from "./sentry.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, FIELDS, happened, waitable, type Analysis } from "./signals.ts";
@@ -87,7 +87,6 @@ import {
 } from "./settings.ts";
 
 const HOUR = 3_600_000;
-const RANK: Record<Bucket, number> = { now: 0, today: 1, later: 2, fyi: 3, hide: 4 };
 const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active

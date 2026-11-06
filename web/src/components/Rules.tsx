@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Bucket, ConfigDoc, ConfigError, FieldDoc, PreviewResult } from "../../../src/types.ts";
+import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewResult } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { BUCKET_LABEL, cls, shortId, tilde } from "../format.ts";
 import { lineOf } from "../view.ts";
 import { KeyButton } from "./Detail.tsx";
 
-const BUCKETS: Bucket[] = ["now", "today", "later", "fyi", "hide"];
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 export function Rules({
