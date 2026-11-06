@@ -852,7 +852,7 @@ test(
     await until(() => t.fake.sessions().length === 1);
     const res = await api.answer(
       first.id,
-      "**Yes**: done in `4be71c2`.\r\n\r\n\r\n\r\n- checked `merge.ts`\n- tests pass\u202e\u0007  \n\n```ts\nnextClock(s)\n```",
+      "**Yes**: done in `4be71c2`.\r\n\r\n\r\n\r\n- checked `merge.ts`\n- tests pass\u202e\u0007\u2063\u{e0049}  \n\n```ts\nnextClock(s)\n```",
     );
     assert.equal(res.status, 200);
     const kept = "**Yes**: done in `4be71c2`.\n\n- checked `merge.ts`\n- tests pass\n\n```ts\nnextClock(s)\n```";

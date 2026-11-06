@@ -119,9 +119,10 @@ const INQUIRIES_KEPT = 100;
 const MAX_CONTEXT = 6_000; // an inquiry's context
 const MIN_CONTEXT = 200; // a few sentences: the owner decides from its page alone
 const MAX_LINKS = 12;
-// what can't be seen or reorders what can: C0 but tab and newline, DEL, C1, bidi marks, zero-width marks with no meaning in text
-// oxlint-disable-next-line no-control-regex -- paragraphs stay; anything else invisible goes, bidi marks too
-const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
+// what can't be seen or reorders what can: C0 but tab and newline, DEL, C1, bidi marks, zero-width marks, invisible operators, tags
+const INVISIBLE =
+  // oxlint-disable-next-line no-control-regex -- paragraphs stay; anything else invisible goes, bidi marks too
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
 
 export { DeskError };
 
