@@ -202,7 +202,6 @@ export function Review({
   // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
   const [read, setRead] = useState("");
   const seq = useRef(0);
-  const shown = useRef(""); // the PR on screen
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
   const v = typeof view === "object" ? view : null;
   const canApprove = !!v?.approve.ok;
@@ -215,15 +214,10 @@ export function Review({
   const flying = !!row && row.state === "open";
 
   useEffect(() => {
-    if (shown.current !== id) {
-      window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
-      setShut(new Set());
-      setDraft(restored(id, ++drafts.current));
-      setSent([]);
-      setComment("");
-      draftText.current = keptDraft(id)?.text ?? "";
-    }
-    shown.current = id;
+    window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
+  }, []);
+
+  useEffect(() => {
     const n = ++seq.current;
     void (async () => {
       try {
@@ -454,7 +448,7 @@ export function Review({
     }
     sendingOn(pr, false);
     flash(d.thread ? `Sent your reply on ${ref} on GitHub` : `Commented on ${lineName(d.at)} on GitHub`);
-    if (!alive.current || shown.current !== pr) return; // a review you've left doesn't touch the one you're on
+    if (!alive.current) return; // a review you've left doesn't touch the one you're on
     setSent((s) => [...s, { at: d.at, thread: d.thread, body: text.trim(), url }]);
     setDraft((cur) => (cur?.n === d.n ? null : cur));
     if (drafts.current === d.n) {
