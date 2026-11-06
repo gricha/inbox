@@ -253,9 +253,9 @@ function PlacementView({ p }: { p: Placement }) {
 }
 
 // Parts of one line, apart like a card's call: "pushed a fix", "4be71c2", "24m".
-export function Dots({ parts, className }: { parts: ReactNode[]; className?: string }) {
+export function Dots({ parts }: { parts: ReactNode[] }) {
   return (
-    <span className={cls("dots", className)}>
+    <span className="dots">
       {parts.map((p, i) => (
         // oxlint-disable-next-line react/no-array-index-key -- parts are positional and never reorder
         <span key={i}>{p}</span>
@@ -273,7 +273,7 @@ export function HandKey({
   run,
   primary,
 }: {
-  card: Pick<Card, "id" | "inflight" | "draft" | "cta">;
+  card: Pick<Card, "inflight" | "draft" | "cta">;
   run: (k: string) => void;
   primary?: boolean;
 }) {
@@ -298,7 +298,6 @@ export function KeyButton({
   disabled,
   title,
   className,
-  busy,
 }: {
   k: string;
   label: string;
@@ -306,7 +305,6 @@ export function KeyButton({
   disabled?: boolean;
   title?: string;
   className?: string;
-  busy?: boolean; // sent and shown done, until GitHub has it
 }) {
   return (
     <button
@@ -320,7 +318,6 @@ export function KeyButton({
     >
       {k && <kbd>{k}</kbd>}
       {label}
-      {busy && <span className="busy" aria-label="sending" />}
     </button>
   );
 }
