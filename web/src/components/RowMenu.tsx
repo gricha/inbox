@@ -95,7 +95,7 @@ export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: R
     const close = () => {
       onClose();
     };
-    // Focus going anywhere else (a click in the composer, say) closes it, so typing there never runs its keys.
+    // Focus going anywhere else (a click in the chat, say) closes it, so typing there never runs its keys.
     const out = (e: FocusEvent) => {
       // menu.current is null once this menu is gone, while the next one, opened by a right-click elsewhere, takes focus.
       if (e.target instanceof Node && menu.current && !menu.current.contains(e.target)) onClose();

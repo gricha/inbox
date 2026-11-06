@@ -4,7 +4,6 @@ import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre
 import type {
   ActivityEvent,
   AiReview,
-  Ask,
   Card,
   Conversation as Convo,
   GitHubAction,
@@ -53,7 +52,7 @@ import {
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
-import type { Thread } from "./Composer.tsx";
+import type { Thread } from "./Chat.tsx";
 import { Conversation } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
@@ -88,7 +87,6 @@ interface Fact {
   tone: string; // t-bad, t-warn, or "" for pencil
 }
 
-const ASKS_SHOWN = 3; // your latest asks to the coordinator; the older ones are a click away
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
@@ -155,6 +153,8 @@ export function Review({
   onAskReviewers,
   onComment,
   onBack,
+  chat,
+  onChat,
   onAsk,
   onThread,
 }: {
@@ -175,7 +175,9 @@ export function Review({
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
   onComment: (c: Card, body: string) => Promise<boolean>; // w: your comment on the PR; true once GitHub has it
   onBack: () => void;
-  onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
+  chat: boolean; // your chat with the coordinator is open: it takes the sidebar's place
+  onChat: (open: boolean) => void; // the Coordinator button opens it about this PR; f closes it for the sidebar
+  onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the chat, about it
   onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
@@ -183,6 +185,7 @@ export function Review({
   const [noteIdx, setNoteIdx] = useState<number | null>(null); // a place in order.notes
   const [restOpen, setRestOpen] = useState(false);
   const [side, setSide] = useState(sideSaved);
+  const showSide = side && !chat;
   const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
@@ -460,9 +463,12 @@ export function Review({
   }
 
   function toggleSide() {
-    setSide(!side);
+    // With the chat open, f puts the sidebar back in its place.
+    const show = chat || !side;
+    if (chat) onChat(false);
+    setSide(show);
     try {
-      localStorage.setItem(SIDE, side ? "folded" : "open");
+      localStorage.setItem(SIDE, show ? "open" : "folded");
     } catch {
       // storage off: it holds until the window closes
     }
@@ -519,6 +525,7 @@ export function Review({
     } else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) setMore(true);
+    else if (k === "t") onChat(true);
     else if (k === "esc") onBack();
   }
 
@@ -560,7 +567,7 @@ export function Review({
     };
   }, []);
 
-  if (view === null) return <Shell card={known} me={me} now={now} row={row} side={side} />;
+  if (view === null) return <Shell card={known} me={me} now={now} row={row} side={showSide} />;
   if (typeof view === "string")
     return (
       <div className="review">
@@ -573,6 +580,7 @@ export function Review({
 
   const { card, item, files } = view;
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
+  const last = view.asks.at(-1); // your latest ask about it: the Coordinator button says where it stands
   const mine = item.state === "open" && isMine;
   const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
   const approvals = approvers.length;
@@ -671,9 +679,9 @@ export function Review({
   const open = item.state === "open";
 
   return (
-    <div className={cls("review", side && "side-open")}>
+    <div className={cls("review", showSide && "side-open")}>
       <div className="rv-main">
-        {!side && (
+        {!showSide && (
           <button type="button" className="act rv-side-toggle rv-side-show" title="Show the sidebar (f)" onClick={toggleSide}>
             <kbd>f</kbd>
             {view.stack ? "Stack and files" : "Files"}
@@ -687,7 +695,6 @@ export function Review({
           {((open && !acted) || !!comment.trim()) && (
             <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
           )}
-          <Asks asks={view.asks} now={now} />
           {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
           {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
             <AiSection
@@ -785,6 +792,14 @@ export function Review({
               />
             )}
           </span>
+          {last && (
+            <KeyButton
+              k="t"
+              label={last.answer ? `Coordinator \u00b7 answered ${sinceText(last.answer.at, now)}` : "Coordinator \u00b7 waiting"}
+              run={run}
+              title="Your chat with the coordinator about this PR (t)"
+            />
+          )}
         </div>
         {writing && (
           <WriteBox
@@ -836,7 +851,7 @@ export function Review({
           </div>
         )}
       </div>
-      {side && (
+      {showSide && (
         <aside className="rv-side" aria-label="Stack, files and recent activity">
           <button type="button" className="act rv-side-toggle" title="Hide the sidebar (f)" onClick={toggleSide}>
             <kbd>f</kbd>
@@ -1220,68 +1235,6 @@ function AiSection({
 export function withCode(text: string) {
   // oxlint-disable-next-line react/no-array-index-key -- a fixed split never reorders, and the same command can appear twice
   return text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
-}
-
-// Your asks to the coordinator about it, drawn as reviewers' notes are: your words, then its answer.
-function Asks({ asks, now }: { asks: Ask[]; now: number }) {
-  const [all, setAll] = useState(false);
-  if (!asks.length) return null;
-  const more = asks.length - ASKS_SHOWN;
-  return (
-    <section className="rv-asks" aria-label="Your asks to the coordinator">
-      <h2 className="d-head">You asked the coordinator</h2>
-      {more > 0 && (
-        <button
-          type="button"
-          className="rv-more"
-          aria-expanded={all}
-          onClick={() => {
-            setAll(!all);
-          }}
-        >
-          {all ? "Fewer" : `${more} earlier`}
-        </button>
-      )}
-      {(all ? asks : asks.slice(-ASKS_SHOWN)).map((a) => (
-        <article key={a.id} className="cv">
-          <p className="cv-gist">
-            {a.text} <span className="cv-age">{age(a.at, now)}</span>
-          </p>
-          {a.answer ? <Answer text={a.answer.text} /> : <p className="quiet">Waiting for its answer</p>}
-        </article>
-      ))}
-    </section>
-  );
-}
-
-// The coordinator's answers run long: the first lines, the rest a click away.
-function Answer({ text }: { text: string }) {
-  const box = useRef<HTMLParagraphElement>(null);
-  const [long, setLong] = useState(false);
-  const [all, setAll] = useState(false);
-  useLayoutEffect(() => {
-    const p = box.current;
-    if (p && !all) setLong(p.scrollHeight > p.clientHeight + 1);
-  }, [all]);
-  return (
-    <>
-      <p ref={box} className={cls("cv-answer", !all && "cv-clamp")}>
-        {withCode(text)}
-      </p>
-      {long && (
-        <button
-          type="button"
-          className="rv-more"
-          aria-expanded={all}
-          onClick={() => {
-            setAll(!all);
-          }}
-        >
-          {all ? "Less" : "The whole answer"}
-        </button>
-      )}
-    </>
-  );
 }
 
 function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {

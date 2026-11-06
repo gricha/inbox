@@ -2019,8 +2019,21 @@ function automationsView(): AutomationView[] {
   }));
 }
 
-// Your asks to the coordinator: one answered, one it's still on. A new one gets a canned answer a few seconds later.
+// Your asks to the coordinator: two answered (a list, then paragraphs, a list and a code block) and one it's still on. A new
+// one gets a canned answer a few seconds later.
 const ASKS: Ask[] = [
+  {
+    id: "c4e9a7d1",
+    at: iso(26),
+    text: "what's left before this can merge?",
+    item_id: "me/notes-app#12",
+    thread_id: null,
+    thread_url: null,
+    answer: {
+      text: "Two things, both small:\n\n1. kai's naming nit (`lamport()` \u2192 `nextClock()`)\n2. azulus's question on tombstones, which needs your reply\n\nCI is green and there are no conflicts.",
+      at: iso(25.9),
+    },
+  },
   {
     id: "a1f0c2e9",
     at: iso(3),
@@ -2029,14 +2042,14 @@ const ASKS: Ask[] = [
     thread_id: "PRRT_name",
     thread_url: "https://github.com/me/notes-app/pull/12#discussion_r2",
     answer: {
-      text: "Yes: 3e1f0a2 renames `lamport()` to `nextClock()` everywhere, including the two call sites in src/sync/merge.ts kai pointed at, and the tests pass on it (412 passed). The follow-up branch still calls `lamport()` once, in src/sync/replay.ts, so it won't build after a rebase: a one-line fix I can push there once this merges. Nothing else in kai's thread is open, so resolving it is safe.",
+      text: "Yes, it's done: 3e1f0a2 renames `lamport()` to `nextClock()` everywhere, and the tests pass on it (412 passed).\n\nWhat I checked:\n- both call sites kai pointed at in `src/sync/merge.ts`\n- the example in `docs/sync.md`\n- **nothing else in kai's thread is open**, so resolving it is safe\n\nOne catch: the follow-up branch still calls the old name once, in `src/sync/replay.ts`:\n\n```ts\nconst at = lamport(state); // becomes nextClock(state)\n```\n\nI can push that fix there once this merges: https://github.com/me/notes-app/pull/14",
       at: iso(2.9),
     },
   },
   {
     id: "b7d3e410",
     at: iso(0.2),
-    text: "i think we addressed azulus's tombstone point in the follow-up PR, can you confirm so I can reply",
+    text: "i think we addressed azulus's tombstone point in the follow-up PR, can you confirm so I can reply\n\nand if not, what's left?",
     item_id: "me/notes-app#12",
     thread_id: "PRRT_tomb",
     thread_url: "https://github.com/me/notes-app/pull/12#discussion_r1",
@@ -2060,7 +2073,7 @@ function addAsk(b: Record<string, unknown>): Ask {
   };
   ASKS.push(a);
   setTimeout(() => {
-    a.answer = { text: "Done: I checked it and took care of it. Nothing's left for you there.", at: new Date().toISOString() };
+    a.answer = { text: "Done: I checked it and took care of it.\n\nNothing's left for you there.", at: new Date().toISOString() };
     bump();
   }, 4000);
   bump();

@@ -21,7 +21,7 @@ const KEYS: [string[], string][] = [
 const MORE_KEYS: [string, string][] = [
   ["p", "pin"],
   ["u", "undo"],
-  ["t", "ask the coordinator"],
+  ["t", "chat with the coordinator"],
   ["i", "AI review"],
   ["w", "rule trace; an issue opened in place: comment"],
   ["r", "sync"],
@@ -59,7 +59,8 @@ const REVIEW_KEYS: [string[], string][] = [
   [["."], "More: open on GitHub; close, draft, reopen or merge now without the coordinator; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
-  [["esc"], "Back to where you opened it"],
+  [["t"], "Your chat with the coordinator about this PR, in the sidebar's place; f puts the sidebar back"],
+  [["esc"], "Close the chat when it's open; else back to where you opened it"],
 ];
 
 const INQUIRY_KEYS: [string[], string][] = [

@@ -288,6 +288,8 @@ kbd {
 /* Title bar ---------------------------------------------------------------- */
 
 .app {
+  --chat-w: clamp(320px, 25vw, 420px);
+
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   min-height: 100vh;
@@ -1940,7 +1942,8 @@ kbd {
 .line .line-ask,
 .line .line-more,
 .lane-more .act:not(.primary),
-.composer .act:not(.primary) {
+.composer .act:not(.primary),
+.chat .act:not(.primary) {
   border-color: transparent;
   background: none;
 }
@@ -1949,7 +1952,8 @@ kbd {
 .line .line-more:hover:not(:disabled),
 .line .line-more[aria-expanded="true"],
 .lane-more .act:not(.primary):hover:not(:disabled),
-.composer .act:not(.primary):hover:not(:disabled) {
+.composer .act:not(.primary):hover:not(:disabled),
+.chat .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
@@ -1960,7 +1964,8 @@ kbd {
 }
 
 /* Nothing to send yet: Send is text until there is. */
-.composer .act.primary:disabled {
+.composer .act.primary:disabled,
+.chat .act.primary:disabled {
   border-color: transparent;
   background: none;
 }
@@ -2307,7 +2312,7 @@ kbd {
   opacity: 0.7;
 }
 
-/* A word with the coordinator, over the page's bottom where the toast shows, as calm as a card. */
+/* Your comment on an issue opened in place, over the page's bottom where the toast shows. */
 .composer {
   position: fixed;
   bottom: 18px;
@@ -2394,57 +2399,268 @@ kbd {
   font-size: 12.5px;
 }
 
-/* Your asks and the coordinator's answers: in the composer, and quietly in the item's review. */
-.asks {
-  display: grid;
+/* Your chat with the coordinator: the window's right column, full height; at 1100px and below, over the page's right edge. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+@media (width > 1100px) {
+  .app:has(> .chat) {
+    grid-template-columns: 232px minmax(0, 1fr) var(--chat-w);
+  }
+
+  .chat {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+
+  .chat-head {
+    -webkit-app-region: drag;
+  }
+
+  .chat-head button {
+    -webkit-app-region: no-drag;
+  }
+
+  /* The toast centres on the page beside the chat, clear of its box. */
+  .app:has(> .chat) .toast {
+    left: calc(116px + (100vw - var(--chat-w)) / 2);
+    max-width: min(640px, calc(100vw - 264px - var(--chat-w)));
+  }
+}
+
+@media (width <= 1100px) {
+  .app {
+    --chat-w: min(360px, calc(100vw - 24px));
+  }
+
+  .chat {
+    position: fixed;
+    top: 52px;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    width: var(--chat-w);
+    box-shadow: var(--shadow);
+  }
+
+  .app:has(> .chat) .toast {
+    left: calc((100vw - var(--chat-w)) / 2);
+    max-width: calc(100vw - 32px - var(--chat-w));
+  }
+}
+
+/* As tall as the top bar, its words on one baseline; Close's text ends on the gutter, its fill reaching into it. */
+.chat-head {
+  display: flex;
+  align-items: baseline;
   gap: 10px;
-  width: 100%;
+  min-height: 52px;
+  padding: 8px 3px 8px 12px;
+  border-bottom: 1px solid var(--rule);
+  user-select: none;
+}
+
+.chat-title {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.ask {
-  display: grid;
-  gap: 2px;
-  padding: 1px 0 1px 12px;
-  border-left: 2px solid var(--rule-strong);
-}
-
-.ask-q {
-  color: var(--ink);
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-
-.ask-age {
-  margin-left: 6px;
+.chat-about {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--pencil);
   font-size: 12.5px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ask-a {
-  color: var(--ink-2);
-  font-size: 13.5px;
+.chat-about > span + span::before {
+  margin: 0 6px;
+  color: var(--faint);
+  content: "\b7";
+}
+
+/* One column that never grows past the panel: a long line of code wraps in its block, not across the log. */
+.chat-log {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  align-content: start;
+  gap: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 16px 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-log:focus-visible {
+  outline-offset: -2px;
+}
+
+.chat-turn {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-you {
+  justify-self: end;
+  max-width: 88%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--wash);
+  color: var(--ink);
+  font-size: 14px;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* An ask that waits: what the coordinator is doing about it, a spinner while it works, and where to watch it. */
-.ask-live {
+.chat-meta {
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+.chat-meta.mine {
+  justify-self: end;
+}
+
+.chat-meta a,
+.chat-wait a {
+  color: var(--pencil);
+}
+
+.chat-wait {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
+  color: var(--pencil);
+  font-size: 13px;
 }
 
-.ask-live a {
+.chat-wait .act {
+  height: 26px;
+  padding: 0 8px;
+}
+
+.chat-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.chat-box {
+  display: grid;
+  gap: 6px;
+  margin-top: auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--rule);
+}
+
+.chat-input {
+  width: 100%;
+  min-height: 40px;
+  max-height: 30vh;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 14px/1.45 var(--sans);
+  field-sizing: content;
+  resize: none;
+}
+
+.chat-input:focus {
+  border-color: var(--pencil);
+  outline: none;
+}
+
+.chat-input::placeholder {
   color: var(--pencil);
 }
 
-.ask-live .act.ask-wake {
-  height: 26px;
-  padding: 0 8px;
+.chat-send {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-hint,
+.chat-note {
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+/* An agent's words (web/src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */
+.prose {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.prose p,
+.prose li {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.prose ul,
+.prose ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+/* Inside the log's own list, a bullet would otherwise be drawn as a nested list's circle. */
+.prose ul {
+  list-style-type: disc;
+}
+
+.prose li::marker {
+  color: var(--pencil);
+}
+
+.prose b {
+  font-weight: 600;
+}
+
+.prose a {
+  color: var(--ink-2);
+}
+
+/* Wrapped, not scrolled: no part of a command hides past the block's edge. */
+.prose pre {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  font: 12.5px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prose pre code {
+  font: inherit;
 }
 
 @keyframes rise {
@@ -3738,8 +3954,7 @@ kbd {
 }
 
 /* What reviewers said: each one waiting on you is a margin note with Claude's read and a reply box; the rest fold into one line. */
-.rv-convo,
-.rv-asks {
+.rv-convo {
   display: grid;
   gap: 14px;
   justify-items: start;
@@ -3749,8 +3964,7 @@ kbd {
   font-size: clamp(13.5px, 12px + 0.2vw, 15px);
 }
 
-.rv-convo .d-head,
-.rv-asks .d-head {
+.rv-convo .d-head {
   margin: 0;
 }
 
@@ -3787,25 +4001,6 @@ kbd {
   color: var(--ink);
   font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.45;
-}
-
-.cv-age {
-  margin-left: 6px;
-  color: var(--pencil);
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
-.cv-answer {
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}
-
-.cv-clamp {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 /* Small and pencil, as "What azulus wrote" is. */

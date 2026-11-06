@@ -161,6 +161,10 @@ const toBottom = (name: string) => async (page: Page) => {
 const sideDefault = async (page: Page) => {
   await page.evaluate(`localStorage.removeItem("desk.review.side")`);
 };
+// Your chat closed: with words in its box, the first Esc only leaves the box.
+const closeChat = async (page: Page) => {
+  for (let i = 0; i < 2 && (await page.locator(".chat").count()); i++) await page.keyboard.press("Escape");
+};
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
@@ -489,25 +493,6 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
-  // Your asks to the coordinator, as reviewers' notes are drawn: a long answer shows its first lines, then the whole of it.
-  {
-    name: "review-asks",
-    go: async (page) => {
-      await review("me/notes-app#12")(page);
-      await page.evaluate(`document.querySelector(".rv-asks").scrollIntoView({ block: "center" })`);
-      await page.waitForTimeout(200);
-    },
-  },
-  {
-    name: "review-asks-open",
-    go: async (page) => {
-      await review("me/notes-app#12")(page);
-      const more = page.locator(".rv-asks .rv-more");
-      if ((await more.getAttribute("aria-expanded")) !== "true") await more.click();
-      await page.evaluate(`document.querySelector(".rv-asks").scrollIntoView({ block: "center" })`);
-      await page.waitForTimeout(200);
-    },
-  },
   // n goes to the next change in reading order; the sidebar lists a file at the repo's root and a long folder.
   { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
@@ -742,16 +727,17 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // t on a selected row: the composer to the coordinator, about that row.
+    // t on a selected row: the chat about that row, the queue narrowed beside it at wide sizes.
     name: "ask-row",
     go: async (page) => {
       await at("#/")(page);
       await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
       await page.keyboard.press("t");
-      await page.locator(".composer-input").waitFor();
+      await page.locator(".chat-input").waitFor();
       await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
-      await page.waitForTimeout(300); // its rise in has run
+      await page.waitForTimeout(300);
     },
+    after: closeChat,
   },
   {
     // In a review, about the conversation you were on: sent, it waits for the answer under it.
@@ -776,30 +762,51 @@ const SHOTS: Shot[] = [
       await review("me/notes-app#12")(page);
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");
+      // The cached asks draw at once: the fetch must land before the send, or it would replace the ask sent.
+      const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
       await page.keyboard.press("t");
-      await page.locator(".composer .ask", { hasText: "kai's naming nit" }).waitFor(); // its asks loaded, so they can't replace the one sent
+      await loaded;
+      await page.locator(".chat-turn", { hasText: "412 passed" }).waitFor();
+      for (const el of [".chat .prose pre", ".chat .prose ol", ".chat .prose ul"]) await page.locator(el).waitFor();
       await page.keyboard.type("Confirm we addressed priya's question so I can reply");
       await page.keyboard.press("Enter");
-      await page.locator(".composer .ask", { hasText: "priya's question" }).waitFor();
-      await page.waitForTimeout(300); // its rise in has run
+      await page.locator(".chat-turn", { hasText: "priya's question" }).waitFor();
+      if (await page.locator(".rv-side").count()) failures.push("ask-review: the review's sidebar shows beside the chat");
+      await page.waitForTimeout(300);
     },
     after: async (page) => {
-      await page.unroute("**/api/ask");
+      await unroute(page);
+      await closeChat(page);
     },
   },
   {
-    // The coordinator off: the composer says so and sends nothing.
+    // f with the chat open: the chat closes and the sidebar is back in its place.
+    name: "ask-f",
+    go: async (page) => {
+      await review("acme/api#4154")(page);
+      await page.keyboard.press("t");
+      await page.locator(".chat-empty").waitFor(); // no asks about it yet: no log to focus
+      await page.evaluate("document.activeElement.blur()"); // out of the box, so f is the review's
+      await page.keyboard.press("f");
+      await page.locator(".chat").waitFor({ state: "detached" });
+      await page.locator(".rv-side").waitFor();
+    },
+    after: sideDefault,
+  },
+  {
+    // The coordinator off: the chat says so and sends nothing.
     name: "ask-off",
     go: async (page) => {
       await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));
       await at("#/inflight")(page);
       await page.keyboard.press("j");
       await page.keyboard.press("t");
-      await page.locator(".composer-note").waitFor();
-      await page.waitForTimeout(300); // its rise in has run
+      await page.locator(".chat-input:disabled").waitFor();
+      await page.waitForTimeout(300);
     },
     after: async (page) => {
       await page.unroute("**/api/asks");
+      await closeChat(page);
     },
   },
   {

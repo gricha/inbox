@@ -38,7 +38,7 @@ import {
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
-import { Composer, type About, type Thread } from "./components/Composer.tsx";
+import { Chat, type About, type Thread } from "./components/Chat.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
@@ -139,7 +139,7 @@ export function App() {
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
   const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
-  const [asking, setAsking] = useState<About | null>(null); // the composer to the coordinator, open
+  const [asking, setAsking] = useState<About | null>(null); // your chat with the coordinator, open
   const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
   const rulesDirty = useRef(false);
 
@@ -231,8 +231,11 @@ export function App() {
 
   useEffect(() => {
     const on = () => {
-      setRoute(parseRoute(location.hash));
+      const next = parseRoute(location.hash);
+      setRoute(next);
       setThread(null); // a review you come back to asks about the PR until you pick a conversation again
+      // Your chat follows you into another PR's review, and closes when you leave for any other page.
+      setAsking((a) => (a && next.name === "review" ? (a.item === next.id ? a : { item: next.id, thread: null }) : null));
     };
     window.addEventListener("hashchange", on);
     return () => {
@@ -823,14 +826,16 @@ export function App() {
     }
   }
 
-  // t: a word with the coordinator about what you're on: the review's PR and its conversation, a row, or nothing.
+  // t: your chat with the coordinator, about what you're on: the review's PR and its conversation, a row, or nothing.
   function openAsk(id?: string, t?: Thread) {
     const r = routeRef.current;
     const item = id ?? (r.name === "review" ? r.id : r.name === "inflight" ? laneCur?.card.id : r.name === "settings" ? null : current?.id);
     setCommenting(null);
     setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
     requestAnimationFrame(() => {
-      document.querySelector<HTMLInputElement>(".composer-input")?.focus();
+      const box = document.querySelector<HTMLTextAreaElement>(".chat-input");
+      box?.focus();
+      box?.setSelectionRange(box.value.length, box.value.length); // a kept draft carries on at its end
     });
   }
 
@@ -1053,9 +1058,10 @@ export function App() {
       e.stopImmediatePropagation();
       return;
     }
-    // Esc closes the composer or the comment bar, wherever focus is, before a review or a page reads it as "go back"; a
-    // snooze or More menu over it closes first.
-    if ((asking || commenting) && !snoozeFor && !moreFor && e.key === "Escape" && !e.isComposing) {
+    // Esc closes the chat from anywhere but a text box (its own box closes it only when empty, else leaves it), and the
+    // comment bar from anywhere, before a review or a page reads it as "go back"; a snooze or More menu over it closes first.
+    const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
+    if (((asking && !typing) || commenting) && !snoozeFor && !moreFor && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
       e.preventDefault();
@@ -1263,10 +1269,18 @@ export function App() {
               onBack={() => {
                 go(reviewQuestion ? { name: "inquiry", id: reviewQuestion } : { name: reviewFrom });
               }}
+              chat={!!asking}
+              onChat={(show) => {
+                if (show) openAsk();
+                else setAsking(null);
+              }}
               onAsk={(t) => {
                 openAsk(t.item, t);
               }}
-              onThread={setThread}
+              onThread={(t) => {
+                setThread(t);
+                setAsking((a) => (a && a.item === t.item ? { ...a, thread: t } : a));
+              }}
             />
           )}
           {route.name === "inquiry" && !broken && (
@@ -1306,6 +1320,18 @@ export function App() {
           )}
         </main>
       </div>
+      {asking && (
+        <Chat
+          key={asking.item ?? ""} // a thread change keeps your draft; the head follows it
+          about={asking}
+          loads={loads}
+          now={now}
+          inert={help}
+          onClose={() => {
+            setAsking(null);
+          }}
+        />
+      )}
       {commenting && (
         <CommentBar
           key={commenting.id}
@@ -1318,17 +1344,6 @@ export function App() {
           onClose={() => {
             const id = commenting.id;
             setCommenting((cur) => (cur?.id === id ? null : cur));
-          }}
-        />
-      )}
-      {asking && (
-        <Composer
-          key={`${asking.item ?? ""} ${asking.thread?.id ?? ""}`} // another item or thread starts afresh
-          about={asking}
-          loads={loads}
-          now={now}
-          onClose={() => {
-            setAsking(null);
           }}
         />
       )}

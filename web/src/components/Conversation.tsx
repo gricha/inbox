@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, MOD } from "../format.ts";
-import type { Thread } from "./Composer.tsx";
+import type { Thread } from "./Chat.tsx";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
 const firstLine = (s: string) => {
