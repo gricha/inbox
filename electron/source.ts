@@ -68,7 +68,7 @@ function signal(pid: number | undefined, sig: NodeJS.Signals, group: boolean): v
   } catch {} // already gone
 }
 
-const freePort = () =>
+export const freePort = () =>
   new Promise<number>((resolve, reject) => {
     const s = net.createServer();
     s.once("error", reject);

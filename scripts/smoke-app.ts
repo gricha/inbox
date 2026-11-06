@@ -2,12 +2,12 @@
 // scratch home and port, checks the window, tray, bridge and clipboard, opens Settings and quits.
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { _electron } from "playwright-core";
 import { envVar, probeHealth } from "../electron/lib.ts";
+import { freePort } from "../electron/source.ts";
 import type { DesktopBridge } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -17,17 +17,6 @@ const home = envVar("DESK_HOME") ?? fs.mkdtempSync(path.join(os.tmpdir(), "desk-
 const port = envVar("DESK_PORT") ?? String(await freePort());
 if (port === "47823") throw new Error("pick a scratch DESK_PORT, not the real desk's 47823");
 const deskUrl = `http://localhost:${port}`;
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const s = net.createServer().listen(0, "127.0.0.1", () => {
-      const p = (s.address() as net.AddressInfo).port;
-      s.close(() => {
-        resolve(p);
-      });
-    });
-  });
-}
 
 const step = (msg: string) => {
   console.log(`• ${msg}`);
