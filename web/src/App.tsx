@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Action,
   Card,
-  DesktopBridge,
   GitHubAction,
   InflightRow,
   InflightView,
@@ -17,7 +16,7 @@ import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { keysHeld } from "./drafts.ts";
-import { adoptTheme } from "./theme.ts";
+import { adoptTheme, desktop } from "./theme.ts";
 import {
   DEFAULT_OPEN,
   groupsOf,
@@ -96,7 +95,6 @@ const CHORDS: Record<string, Route> = {
 // g l, g f, g h, g x: Later, with that group open; g a (or g d): the Archive.
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared", a: "archive", d: "archive" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
-const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 // The desktop app's window needs room for the macOS traffic lights and a draggable title bar.
 if (desktop) {

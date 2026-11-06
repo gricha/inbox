@@ -1,9 +1,8 @@
 // The desktop app running the desk from a checkout (Settings → Desktop app → Run from a checkout).
 import { useEffect, useState } from "react";
-import type { DesktopBridge, SourceStatus } from "../../../src/types.ts";
+import type { SourceStatus } from "../../../src/types.ts";
 import { tilde } from "../format.ts";
-
-const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
+import { desktop } from "../theme.ts";
 
 // While the desk is unreachable: is that the desk from a checkout restarting, or stopped until the next change?
 export function useSourceDown(down: boolean): SourceStatus | null {

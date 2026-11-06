@@ -10,7 +10,7 @@ import { withCode } from "./Review.tsx";
 import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
 import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
-import { applyTheme, savedTheme, THEMES, type ThemeId } from "../theme.ts";
+import { applyTheme, desktop, savedTheme, THEMES, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // Resolves to the value the server saved, or null when it was rejected (the row shows why).
@@ -561,7 +561,6 @@ export function Settings({
   onRulesDirty: (dirty: boolean) => void;
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
-  const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
   // Rules go after the sources and the agent they feed (GitHub, Agents), before the smaller settings.
   const at = view ? Math.max(1, view.sections.findIndex((x) => x.id === "agent") + 1) : 0;
   // Appearance goes before the desktop app's settings, or last.
@@ -575,13 +574,13 @@ export function Settings({
     const t =
       desktop && view
         ? setTimeout(() => {
-            desktop.status().then(setLive, () => {});
+            desktop?.status().then(setLive, () => {});
           }, 300)
         : undefined;
     return () => {
       clearTimeout(t);
     };
-  }, [view, desktop]);
+  }, [view]);
 
   // One page with every section; a link to a section (#/settings/rules) scrolls to it.
   const ready = view !== null;

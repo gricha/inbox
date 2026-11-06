@@ -13,7 +13,7 @@ export type ThemeId = (typeof THEMES)[number]["id"];
 const KEY = "desk.theme"; // index.html reads it too
 
 const known = (t: unknown): t is ThemeId => THEMES.some((x) => x.id === t);
-const desktop = () => (window as Window & { desktop?: DesktopBridge }).desktop;
+export const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 function stored(): ThemeId | null {
   try {
@@ -25,7 +25,7 @@ function stored(): ThemeId | null {
 }
 
 export function savedTheme(): ThemeId {
-  const app = desktop()?.theme;
+  const app = desktop?.theme;
   return known(app) ? app : (stored() ?? "system");
 }
 
@@ -38,16 +38,13 @@ export function applyTheme(id: ThemeId): void {
   } catch {
     // storage off (a private window): the theme holds until the window closes
   }
-  desktop()
-    ?.setTheme?.(id)
-    .catch(() => {});
+  desktop?.setTheme?.(id).catch(() => {});
 }
 
 // A theme picked before the app kept it lives in this origin's storage only: hand it to the app once.
 export function adoptTheme(): void {
-  const d = desktop();
   const t = stored();
-  if (d?.setTheme && d.theme === null && t) d.setTheme(t).catch(() => {});
+  if (desktop?.setTheme && desktop.theme === null && t) desktop.setTheme(t).catch(() => {});
 }
 
 // The diff's own light or dark, following the theme on screen.
