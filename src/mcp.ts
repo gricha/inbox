@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { createClient, type DeskClient } from "./client.ts";
+import { createClient, untilText, type DeskClient } from "./client.ts";
 import { judgeText } from "./judge.ts";
 import {
   UNTIL,
@@ -17,7 +17,6 @@ import {
   type JudgeStatus,
   type Placement,
   type Stack,
-  type Until,
 } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "later", "fyi", "hide", "cleared"] as const;
@@ -237,15 +236,7 @@ async function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[nu
   const u = action === "snooze" ? (until ?? "tomorrow") : undefined;
   const r = await api.act(ref, action, u);
   const s = r.state;
-  // The server stores "activity" as done-until-activity, so the state alone doesn't say it.
-  const when =
-    u === "activity"
-      ? " until someone else acts"
-      : u && s.snooze_when
-        ? ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`
-        : u && s.snooze_until
-          ? ` until ${s.snooze_until}${s.snooze_on_activity ? " or activity" : ""}`
-          : "";
+  const when = untilText(u, s, (t) => t);
   return `${action} ${s.id}${when}. Local state only; nothing was sent to GitHub. Undo with desk_undo seq=${r.undo_seq}.\n` + json(r);
 }
 

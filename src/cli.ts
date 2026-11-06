@@ -7,12 +7,12 @@ import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import * as agents from "./agents.ts";
 import * as api from "./client.ts";
-import { DeskApiError, DeskDownError } from "./client.ts";
+import { DeskApiError, DeskDownError, untilText } from "./client.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
 import { openCommand } from "./notify.ts";
-import { UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue, type Until } from "./types.ts";
+import { UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue } from "./types.ts";
 
 export interface Out {
   write(s: string): unknown;
@@ -246,15 +246,7 @@ const act =
     const until = action === "snooze" ? (x.args[1] ?? "tomorrow") : undefined;
     const r = await api.act(x.args[0]!, action, until);
     const s = r.state;
-    // The server stores "activity" as done-until-activity, so the state alone doesn't say it.
-    const when =
-      until === "activity"
-        ? " until someone else acts"
-        : until && s.snooze_when
-          ? ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`
-          : until && s.snooze_until
-            ? ` until ${localTime(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`
-            : "";
+    const when = untilText(until, s, localTime);
     x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
     return 0;
   };

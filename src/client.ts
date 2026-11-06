@@ -1,29 +1,31 @@
 // Typed HTTP client for the desk API. Used by the CLI and the MCP server.
 
-import type {
-  Action,
-  ActivityPage,
-  AiReview,
-  Ask,
-  Automation,
-  AutomationView,
-  Inquiry,
-  InquiryLink,
-  InquiryOption,
-  BoardView,
-  ConfigDoc,
-  ConfigError,
-  FieldDoc,
-  FocusView,
-  InflightView,
-  ItemDetail,
-  ItemState,
-  Overview,
-  PolicyDoc,
-  PreviewResult,
-  QueueView,
-  SettingsView,
-  SettingValue,
+import {
+  UNTIL,
+  type Action,
+  type ActivityPage,
+  type AiReview,
+  type Ask,
+  type Automation,
+  type AutomationView,
+  type Inquiry,
+  type InquiryLink,
+  type InquiryOption,
+  type BoardView,
+  type ConfigDoc,
+  type ConfigError,
+  type FieldDoc,
+  type FocusView,
+  type InflightView,
+  type ItemDetail,
+  type ItemState,
+  type Overview,
+  type PolicyDoc,
+  type PreviewResult,
+  type QueueView,
+  type SettingsView,
+  type SettingValue,
+  type Until,
 } from "./types.ts";
 
 export type { ConfigDoc };
@@ -32,6 +34,14 @@ export interface ActResult {
   ok: true;
   state: ItemState;
   undo_seq: number;
+}
+// The server stores "activity" as done-until-activity, so the state alone doesn't say it.
+export function untilText(until: string | undefined, s: ItemState, time: (iso: string) => string): string {
+  if (!until) return "";
+  if (until === "activity") return " until someone else acts";
+  if (s.snooze_when) return ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`;
+  if (s.snooze_until) return ` until ${time(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`;
+  return "";
 }
 export interface AddResult {
   ok: true;
