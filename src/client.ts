@@ -28,8 +28,6 @@ import {
   type Until,
 } from "./types.ts";
 
-export type { ConfigDoc };
-
 export interface ActResult {
   ok: true;
   state: ItemState;
