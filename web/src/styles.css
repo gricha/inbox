@@ -254,17 +254,6 @@ code {
   border-radius: 6px;
 }
 
-/* A key under the keyboard is the cursor: a neutral fill and the pencil ring, never an outline box. It sits on a selected
-   card's fill, so it takes the deeper one, and its padding clears the text without moving the row. */
-.cl-undo:focus-visible {
-  outline: none;
-  border-radius: 8px;
-  margin: 0 -8px;
-  padding: 0 8px;
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-}
-
 [hidden] {
   display: none !important;
 }
@@ -394,14 +383,9 @@ kbd {
   color: var(--pencil);
 }
 
-/* The pill means one thing: where you are. An open group is only bold. */
+/* The pill means one thing: where you are. */
 .side-item.on {
   background: var(--side-on);
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.side-item.open {
   color: var(--ink);
   font-weight: 600;
 }
@@ -1375,12 +1359,6 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.group-empty {
-  padding: 6px 12px 4px;
-  color: var(--pencil);
-  font-size: 13.5px;
-}
-
 /* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
 .ai-paused {
   margin: 0 0 6px;
@@ -1422,23 +1400,6 @@ kbd {
   box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
-.rows {
-  display: grid;
-}
-
-.row {
-  position: relative;
-  border-radius: 10px;
-  scroll-margin: 72px 0 84px;
-}
-
-.row-line {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .row-main {
   display: grid;
   flex: 1;
@@ -1456,11 +1417,6 @@ kbd {
 
 .row-main:focus-visible {
   outline-offset: -2px;
-}
-
-.row.leaving {
-  pointer-events: none;
-  animation: leave 200ms ease forwards;
 }
 
 @keyframes leave {
@@ -1512,13 +1468,6 @@ kbd {
   opacity: 1;
 }
 
-.title-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
 .title {
   overflow: hidden;
   color: var(--ink);
@@ -1526,26 +1475,6 @@ kbd {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dim .title,
-.b-later .title,
-.b-fyi .title {
-  color: var(--ink-2);
-  font-weight: 400;
-}
-
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-  margin-top: 2px;
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
-.meta .who {
-  color: var(--ink-2);
 }
 
 .fact-word {
@@ -1580,25 +1509,6 @@ kbd {
   color: var(--pencil);
 }
 
-.age {
-  color: var(--pencil);
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.group-head.sub {
-  position: sticky;
-  top: 52px;
-  z-index: 5;
-  margin: 28px 0 4px;
-  padding-top: 8px;
-  padding-bottom: 6px;
-  background: var(--paper);
-  color: var(--ink-2);
-  font-size: 15px;
-}
-
 /* Your own PR's why is what you owe: its label in ink, the rest darker than a reason. */
 .why.owed {
   color: var(--ink-2);
@@ -1612,10 +1522,6 @@ kbd {
 .why.owed .t-bad,
 .why.owed .t-warn {
   font-weight: 600;
-}
-
-.nowrap {
-  white-space: nowrap;
 }
 
 /* Parts of one line ("pushed a fix · 4be71c2 · 24m"), apart like the card's call. */
@@ -1658,14 +1564,6 @@ kbd {
 
 .more.opened .trace-toggle {
   margin-top: 4px;
-}
-
-/* An empty group says so on its heading's line. */
-.group-none {
-  color: var(--pencil);
-  font-size: 13.5px;
-  font-weight: 450;
-  letter-spacing: 0;
 }
 
 /* Merging --------------------------------------------------------------------
@@ -1946,11 +1844,6 @@ kbd {
   background: currentcolor;
 }
 
-.reasons {
-  margin: 6px 0 0;
-  padding-left: 18px;
-}
-
 .events {
   display: grid;
   gap: 3px;
@@ -2171,27 +2064,6 @@ kbd {
 
 .btn:not(:has(kbd)) {
   padding-right: 12px;
-}
-
-.btn.primary {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--paper);
-}
-
-.btn.primary kbd {
-  color: inherit;
-}
-
-.btn.primary:disabled {
-  opacity: 1;
-  border-color: var(--rule-strong);
-  background: none;
-  color: var(--pencil);
-}
-
-.btn.primary:disabled kbd {
-  color: var(--pencil);
 }
 
 .btn.ghost {
@@ -4572,11 +4444,6 @@ kbd {
     grid-column: 1;
     grid-row: 1;
     margin-bottom: 2px;
-  }
-
-  .age {
-    grid-column: 2;
-    grid-row: 1;
   }
 
   .detail {
