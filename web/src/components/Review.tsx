@@ -1685,7 +1685,6 @@ function ThreadNote({
   onOpen: (open: boolean) => void;
   onReply: (() => void) | null;
 }) {
-  const shown = sent.filter((s) => !convo.comments.some((c) => c.url === s.url));
   const body = (
     <>
       {convo.comments.map((c) => (
@@ -1695,7 +1694,7 @@ function ThreadNote({
           <div className="rv-tc-body">{c.body}</div>
         </div>
       ))}
-      {shown.map((s) => (
+      {sent.map((s) => (
         <Yours key={s.url || s.body} body={s.body} url={s.url} />
       ))}
       <div className="rv-tc-acts">
