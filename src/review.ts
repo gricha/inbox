@@ -208,12 +208,14 @@ export async function fetchPr(item: Item, since?: string): Promise<PrText> {
 }
 
 // The commit the files are at, from each one's contents_url (?ref=<sha>): undefined with no files, null when pages
-// fetched across a push disagree.
+// fetched across a push disagree. A removed file's is the base's: the head has no such file.
 export function filesHead(ndjson: string): string | undefined | null {
   const refs = new Set<string>();
   for (const l of ndjson.split("\n")) {
     if (!l.trim()) continue;
-    const url = (JSON.parse(l) as { contents_url?: unknown }).contents_url;
+    const f = JSON.parse(l) as { contents_url?: unknown; status?: unknown };
+    if (f.status === "removed") continue;
+    const url = f.contents_url;
     const ref = typeof url === "string" ? /[?&]ref=([0-9a-f]{40})\b/.exec(url)?.[1] : undefined;
     if (ref) refs.add(ref);
   }

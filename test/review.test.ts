@@ -94,6 +94,14 @@ test("the commit a diff is at comes from its own files, and pages fetched across
     JSON.stringify({ filename: f, contents_url: `https://api.github.com/repos/o/r/contents/${f}?ref=${sha}` });
   assert.equal(filesHead([at(A, "x.ts"), at(A, "y.ts"), ""].join("\n")), A);
   assert.equal(filesHead([at(A, "x.ts"), at(B, "y.ts")].join("\n")), null, "a push between pages");
+  // seer#9446: a removed file's contents_url is at the base, since the head has no such file.
+  const gone = JSON.stringify({
+    filename: "old.ts",
+    status: "removed",
+    contents_url: `https://api.github.com/repos/o/r/contents/old.ts?ref=${B}`,
+  });
+  assert.equal(filesHead([at(A, "x.ts"), gone, at(A, "y.ts")].join("\n")), A, "a removed file is at the base");
+  assert.equal(filesHead(gone), undefined, "only removals: the desk's own head");
   assert.equal(filesHead(""), undefined, "no files: the desk's own head");
   assert.equal(filesHead(JSON.stringify({ filename: "x.ts" })), undefined);
 });
