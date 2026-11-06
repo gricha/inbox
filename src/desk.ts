@@ -362,6 +362,10 @@ export class Desk {
     for (const fn of this.notifyListeners) fn(title, body);
   }
 
+  mayNotify(): boolean {
+    return this.settings["notify.enabled"] && !inQuietHours(this.settings["notify.quiet"], this.now());
+  }
+
   changed(): void {
     this.rev++;
     this.snap = null;
@@ -762,8 +766,7 @@ export class Desk {
   // New on the queue once placed (not while Claude hasn't sorted it, nor what you pinned or added, nor your own draft: you just
   // opened it); a hand-back is on it, in Now. Per PR, not the one line per stack: a member coming to stand for it isn't news.
   notifyNew(): void {
-    const cfg = this.loaded?.config;
-    if (!cfg || !this.syncedAt) return;
+    if (!this.loaded || !this.syncedAt) return;
     const snap = this.snapshot();
     const { now, today } = this.top(snap, new Set());
     const all = this.top(snap, new Set(), true);
@@ -786,7 +789,7 @@ export class Desk {
     // Held on the first pass, they were there before you looked, as the rest were.
     const prev = this.store.get("notified_queue") as string[] | null;
     const fresh = this.freshSince("notified_queue", queued, prev === null ? held : held.filter((id) => prev.includes(id)));
-    if (!fresh.length || !cfg.notify.enabled || inQuietHours(cfg.notify.quiet, this.now())) return;
+    if (!fresh.length || !this.mayNotify()) return;
     const [only] = fresh;
     const body =
       fresh.length === 1 && only ? `${only.ref} · ${only.why}` : `${fresh.length} need you: ${fresh.map((x) => x.ref).join(", ")}`;
@@ -2220,8 +2223,7 @@ export class Desk {
     );
     this.log(`${q.from} asks: ${q.question}`);
     this.changed();
-    if (this.settings["notify.enabled"] && !inQuietHours(this.settings["notify.quiet"], this.now()))
-      this.notify(`${q.from} asks`, q.question);
+    if (this.mayNotify()) this.notify(`${q.from} asks`, q.question);
     return q;
   }
 
@@ -2264,8 +2266,7 @@ export class Desk {
       all.map((x) => (x === a ? done : x)),
     );
     this.changed();
-    if (!a.answer && this.settings["notify.enabled"] && !inQuietHours(this.settings["notify.quiet"], this.now()))
-      this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
+    if (!a.answer && this.mayNotify()) this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
     return done;
   }
 

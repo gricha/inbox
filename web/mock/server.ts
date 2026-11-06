@@ -121,12 +121,11 @@ let overrides: Record<string, SettingValue> = {
 };
 
 // The config fields that come from settings (src/config.ts does the same).
-function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "notify" | "handoff"> {
+function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "handoff"> {
   const s = { ...DEFAULTS, ...overrides };
   return {
     poll_seconds: s["github.poll_seconds"],
     signals: { close_collaborator_min: s["github.close_collaborator_min"], bots: s["github.bots"], my_repos: s["github.my_repos"] },
-    notify: { enabled: s["notify.enabled"], quiet: s["notify.quiet"] },
     handoff: { prompt: s["handoff.prompt"], mine: s["handoff.mine"], issue: s["handoff.issue"] },
   };
 }

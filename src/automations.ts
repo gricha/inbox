@@ -6,7 +6,6 @@ import { randomBytes } from "node:crypto";
 import { DENY as COORDINATOR_DENY } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
 import { DeskError } from "./errors.ts";
-import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { Automation, AutomationRun, AutomationView } from "./types.ts";
 import { detached, report } from "./sentry.ts";
@@ -360,8 +359,7 @@ export class Automations {
 
   // What it put on your desk, or that it failed: a run you didn't watch says so once.
   tell(a: Automation, run: AutomationRun): void {
-    const s = this.desk.settings;
-    if (!s["notify.enabled"] || inQuietHours(s["notify.quiet"], this.desk.now())) return;
+    if (!this.desk.mayNotify()) return;
     const added = run.items.filter((x) => x.outcome === "added").length;
     const failed = run.items.filter((x) => x.outcome === "failed").length;
     if (run.error) this.desk.notify(`${a.name} failed`, run.error.split("\n")[0] ?? "");

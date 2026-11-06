@@ -185,7 +185,6 @@ export function parseConfig(
       bots: settings["github.bots"],
       my_repos: settings["github.my_repos"],
     },
-    notify: { enabled: settings["notify.enabled"], quiet: settings["notify.quiet"] },
     handoff: { prompt: settings["handoff.prompt"], mine: settings["handoff.mine"], issue: settings["handoff.issue"] },
     spaces,
     boards,

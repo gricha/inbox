@@ -194,7 +194,6 @@ export interface SpaceConfig {
 export interface Config {
   poll_seconds: number;
   signals: { close_collaborator_min: number; bots: string[]; my_repos: string[] };
-  notify: { enabled: boolean; quiet: string }; // quiet = "19:00-09:00", "" for none
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
   spaces: SpaceConfig[];
   boards: BoardConfig[];

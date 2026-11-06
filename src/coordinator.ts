@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Desk } from "./desk.ts";
-import { inQuietHours } from "./notify.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
 import { detached, report } from "./sentry.ts";
@@ -142,9 +141,7 @@ export class Coordinator {
     if (was === why) return;
     this.desk.store.set(ERROR, why);
     this.desk.changed();
-    const s = this.desk.settings;
-    if (why && !was && s["notify.enabled"] && !inQuietHours(s["notify.quiet"], this.desk.now()))
-      this.desk.notify("Coordinator can't run", why);
+    if (why && !was && this.desk.mayNotify()) this.desk.notify("Coordinator can't run", why);
   }
 
   // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.
