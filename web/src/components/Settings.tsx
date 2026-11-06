@@ -354,12 +354,12 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
   );
 }
 
-function PausedLine({ p, label, now }: { p: SettingsView["paused"]["ai"]; label: string; now: number }) {
+function PausedLine({ p, now }: { p: SettingsView["paused"]["ai"]; now: number }) {
   if (!p) return null;
   const left = Math.max(1, Math.round((Date.parse(p.until) - now) / 60_000));
   return (
     <p className="s-live">
-      <b>{label}</b> {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m.
+      <b>AI reviews are paused:</b> {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m.
     </p>
   );
 }
@@ -632,7 +632,7 @@ export function Settings({
             {x.help && <p className="s-intro">{x.help}</p>}
             {view && x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
             {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
-            {view && x.id === "review" && <PausedLine p={view.paused.ai} label="AI reviews are paused:" now={now} />}
+            {view && x.id === "review" && <PausedLine p={view.paused.ai} now={now} />}
             {x.id === "agent" && <AgentLink active={active} loads={loads} />}
             {x.id === "rules" && <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />}
             {x.id === "policy" && <Policy active={active} refresh={loads} now={now} flash={flash} />}
