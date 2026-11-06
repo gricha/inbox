@@ -1,6 +1,7 @@
 // GraphQL documents. Queries only; every one reports rateLimit so the client can track budget.
 
 const RATE = "rateLimit { remaining resetAt cost }";
+const HIT = "id number title updatedAt repository { nameWithOwner } author { __typename login }";
 
 export const VIEWER = `query { ${RATE} viewer { login } }`;
 
@@ -11,8 +12,8 @@ export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       __typename
-      ... on PullRequest { id number title updatedAt repository { nameWithOwner } author { __typename login } }
-      ... on Issue { id number title updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on PullRequest { ${HIT} }
+      ... on Issue { ${HIT} }
     }
   }
 }`;
@@ -35,6 +36,7 @@ const COMMON = `
   assignees(first: 10) { nodes { login } }
   comments(last: 10) { totalCount nodes { author { __typename login } authorAssociation createdAt } }`;
 
+const REVIEW = "author { __typename login } authorAssociation state submittedAt createdAt commit { oid }";
 const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on Bot { login } ... on Mannequin { login }";
 
 const PR = `${COMMON}
@@ -51,9 +53,9 @@ const PR = `${COMMON}
       ... on AutomaticBaseChangeSucceededEvent { oldBase createdAt }
     }
   }
-  latestReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
-  latestOpinionatedReviews(first: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
-  reviews(last: 20) { nodes { author { __typename login } authorAssociation state submittedAt createdAt commit { oid } } }
+  latestReviews(first: 20) { nodes { ${REVIEW} } }
+  latestOpinionatedReviews(first: 20) { nodes { ${REVIEW} } }
+  reviews(last: 20) { nodes { ${REVIEW} } }
   commits(last: 1) { nodes { commit { oid committedDate author { user { login } } statusCheckRollup { state } } } }`;
 
 const details = (pr: string) => `query($ids: [ID!]!) {
@@ -104,7 +106,7 @@ export function branchPrs(dirs: ("up" | "down")[]): string {
     ${dirs.map(one).join("\n    ")}
   }
 }
-fragment B on PullRequest { __typename id number title updatedAt repository { nameWithOwner } author { __typename login } headRepository { nameWithOwner } }`;
+fragment B on PullRequest { __typename ${HIT} headRepository { nameWithOwner } }`;
 }
 
 // desk_add's way in for a PR or issue no search returned: the details query wants its node id.
@@ -113,8 +115,8 @@ export const LOOKUP = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issueOrPullRequest(number: $number) {
       __typename
-      ... on PullRequest { id number title updatedAt repository { nameWithOwner } author { __typename login } }
-      ... on Issue { id number title updatedAt repository { nameWithOwner } author { __typename login } }
+      ... on PullRequest { ${HIT} }
+      ... on Issue { ${HIT} }
     }
   }
 }`;
