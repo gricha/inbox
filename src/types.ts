@@ -32,6 +32,7 @@ export interface Item {
   updated_at: string;
   closed_at?: string | null; // merged or closed; absent on items stored before it was fetched
   body?: string; // the description's first 600 characters, one paragraph a line (untrusted); absent on items stored before it was fetched
+  requires?: string[]; // PR only: the PRs its whole markdown description says must merge first, as owner/repo#N in the case written, at most 10; absent on items stored before it was fetched
   merged_by?: string; // login, "" if unknown
   // PR-only facts; zero values for issues.
   additions: number;
