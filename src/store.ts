@@ -61,31 +61,19 @@ export class Store {
       -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
       CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
-    const cols = new Set(
+    const columns = (table: string) =>
       this.db
-        .prepare("PRAGMA table_info(state)")
+        .prepare(`PRAGMA table_info(${table})`)
         .all()
-        .map((c) => c.name),
-    );
+        .map((c) => c.name);
+    const cols = new Set(columns("state"));
     if (!cols.has("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
     if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
     if (!cols.has("snooze_when")) this.db.exec("ALTER TABLE state ADD COLUMN snooze_when TEXT");
-    const hitCols = this.db
-      .prepare("PRAGMA table_info(hits)")
-      .all()
-      .map((c) => c.name);
-    if (!hitCols.includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
-    const itemCols = this.db
-      .prepare("PRAGMA table_info(items)")
-      .all()
-      .map((c) => c.name);
+    if (!columns("hits").includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
     // The snapshot an item's events were last logged against, while it's stored quietly since ('null': never); else NULL.
-    if (!itemCols.includes("said")) this.db.exec("ALTER TABLE items ADD COLUMN said TEXT");
-    const eventCols = this.db
-      .prepare("PRAGMA table_info(events)")
-      .all()
-      .map((c) => c.name);
-    if (!eventCols.includes("agent")) {
+    if (!columns("items").includes("said")) this.db.exec("ALTER TABLE items ADD COLUMN said TEXT");
+    if (!columns("events").includes("agent")) {
       this.db.exec("ALTER TABLE events ADD COLUMN agent TEXT");
       this.db.exec(
         "UPDATE events SET agent = 'coordinator' WHERE seq IN (SELECT undo_seq FROM coordinator_log WHERE undo_seq IS NOT NULL)",
