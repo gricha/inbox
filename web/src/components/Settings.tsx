@@ -494,8 +494,6 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
   );
 }
 
-// "/Users/me/.review-desk/settings.json" → "~/.review-desk/settings.json"
-
 // Not from the schema: the theme is this device's, so it's kept here, not on the desk.
 const APPEARANCE = { id: "appearance", title: "Appearance", help: "This device's theme. Other windows and devices keep their own." };
 
