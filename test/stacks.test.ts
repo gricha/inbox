@@ -590,7 +590,8 @@ test("a stored PR your PR requires is refreshed every 10 minutes while open, qui
 });
 
 test("a dependency in another repo is fetched quietly and blocks the PR that needs it", async (tc) => {
-  const dep = makeItem({ repo: "getsentry/sentry", number: 5, author: "carol" }); // on no search
+  const kai = { author: "kai", author_bot: false, state: "commented" as const, at: hoursAgo(3), commit: "x" };
+  const dep = makeItem({ repo: "getsentry/sentry", number: 5, author: "carol", reviews: [kai] }); // on no search
   const t = await setup([myPr(1, { requires: ["GetSentry/Sentry#5"] }), dep]);
   tc.after(t.cleanup);
   await t.desk.sync();
@@ -598,6 +599,10 @@ test("a dependency in another repo is fetched quietly and blocks the PR that nee
   const items = t.desk.store.items();
   assert.equal(items.find((i) => i.id === dep.id)?.state, "open");
   assert.equal(dependencies(items, buildStacks(items)).get("acme/web#1")?.root, dep.id);
+  assert.deepEqual(
+    t.desk.queue().sections.blocked.map((c) => [c.id, c.why]),
+    [["acme/web#1", "blocked by sentry#5, which waits on a review"]],
+  );
   assert.deepEqual(
     t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.item_id === dep.id),
     [],
