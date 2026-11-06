@@ -91,13 +91,16 @@ const lc = (s: string) => s.toLowerCase();
 const letters = (s: string) => lc(s).replaceAll(/[^\p{L}]/gu, "");
 const latest = (times: (string | null | undefined)[]): string | null =>
   times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
+export const botCheck = (listed: string[]) => {
+  const set = new Set(listed.map(lc));
+  return (login: string, flagged = false) => flagged || set.has(lc(login)) || login.endsWith("[bot]");
+};
 
 export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analysis {
   const me = lc(ctx.me);
-  const bots = new Set(cfg.signals.bots.map(lc));
   const teams = new Set(ctx.teams.map(lc));
   const isMe = (login: string) => lc(login) === me;
-  const isBot = (login: string, flagged = false) => flagged || bots.has(lc(login)) || login.endsWith("[bot]");
+  const isBot = botCheck(cfg.signals.bots);
   const hours = (iso: string | null) => (iso ? Math.max(0, (now.getTime() - Date.parse(iso)) / 3_600_000) : -1);
   // Git commit dates are author-controlled: never later than GitHub's own updatedAt, or now.
   const nowIso = now.toISOString();

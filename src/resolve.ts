@@ -1,5 +1,6 @@
 // Whether the world has already dealt with an item. Derived from each snapshot, never stored, so it undoes itself.
 import type { Settings } from "./settings.ts";
+import { botCheck } from "./signals.ts";
 import type { Item, Signals } from "./types.ts";
 
 export interface Resolution {
@@ -41,14 +42,13 @@ export function resolution(item: Item, s: Signals, settings: ResolveSettings, te
   // Your changes request still blocks the merge, and "required" means more reviews (maybe yours or your team's) are needed.
   const blocked = s.me.review_state === "changes_requested" || item.review_decision === "required";
   if ((mode === "always" || (mode === "team_only" && viaTeam)) && !blocked) {
-    const bots = new Set(settings["github.bots"].map(lc));
-    const isBot = (r: Item["reviews"][number]) => r.author_bot || bots.has(lc(r.author)) || r.author.endsWith("[bot]");
+    const isBot = botCheck(settings["github.bots"]);
     const since = lastAsk?.at ?? "";
     // Each reviewer's latest verdict: a later change request or dismissal takes an approval back.
     const verdicts = new Map<string, Item["reviews"][number]>();
     for (const r of item.reviews) if (r.state !== "commented" && r.state !== "pending") verdicts.set(lc(r.author), r);
     const approval = [...verdicts.values()]
-      .filter((r) => r.state === "approved" && r.at > since && lc(r.author) !== me && !isBot(r))
+      .filter((r) => r.state === "approved" && r.at > since && lc(r.author) !== me && !isBot(r.author, r.author_bot))
       .sort((a, b) => a.at.localeCompare(b.at))[0];
     if (approval) return { reason: `approved by ${approval.author}`, actor: approval.author, at: approval.at };
   }

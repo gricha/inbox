@@ -7,6 +7,7 @@ import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
 import type { Connector, NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
+import { botCheck } from "../signals.ts";
 import { detached, report } from "../sentry.ts";
 
 const HOUR = 3_600_000;
@@ -163,9 +164,9 @@ export class GitHubConnector implements Connector {
     if (!base.includes("{close_authors}")) return base;
     base = base.replace("{close_authors}", "").replaceAll(/\s+/g, " ").trim();
     const min = loaded.config.signals.close_collaborator_min;
-    const bots = new Set(loaded.config.signals.bots.map((b) => b.toLowerCase()));
+    const isBot = botCheck(loaded.config.signals.bots);
     const authors = Object.entries(this.desk.ctx?.affinity ?? {})
-      .filter(([a, n]) => n >= min && a.toLowerCase() !== me.toLowerCase() && !bots.has(a.toLowerCase()) && !a.endsWith("[bot]"))
+      .filter(([a, n]) => n >= min && a.toLowerCase() !== me.toLowerCase() && !isBot(a))
       .sort((a, b) => b[1] - a[1]);
     let out = base;
     for (const [a] of authors) {

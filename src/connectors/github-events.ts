@@ -1,4 +1,5 @@
 // Events from comparing two snapshots of a GitHub item. Pure: the clock comes in as `now`.
+import { botCheck } from "../signals.ts";
 import type { ActivityKind, Item } from "../types.ts";
 import type { NewEvent } from "./connector.ts";
 
@@ -17,9 +18,8 @@ const latestAt = (xs: { at: string }[]) => xs.reduce((a, x) => (x.at > a ? x.at 
 export function itemEvents(prev: Item | null, next: Item, ctx: DiffContext): NewEvent[] {
   const me = lc(ctx.me);
   const teams = new Set(ctx.teams.map(lc));
-  const bots = new Set(ctx.bots.map(lc));
   const isMe = (login: string) => lc(login) === me;
-  const isBot = (login: string, flagged = false) => flagged || bots.has(lc(login)) || login.endsWith("[bot]");
+  const isBot = botCheck(ctx.bots);
   const ev = (kind: ActivityKind, actor: string, at: string, data: NewEvent["data"] = {}): NewEvent => ({
     at,
     item_id: next.id,
