@@ -153,13 +153,13 @@ export class GitHubConnector implements Connector {
   }
 
   // Board query → expanded GitHub search string (null when it can't run, e.g. no collaborators yet).
-  expandQuery(q: string, scope: string, loaded = this.desk.loaded): string | null {
+  expandQuery(q: string, scope: string, loaded: LoadedConfig): string | null {
     const me = this.desk.me();
     let base = `${q} ${scope}`.replaceAll("{me}", me).replaceAll(/\s+/g, " ").trim();
     if (!base.includes("{close_authors}")) return base;
     base = base.replace("{close_authors}", "").replaceAll(/\s+/g, " ").trim();
-    const min = loaded?.config.signals.close_collaborator_min ?? 3;
-    const bots = new Set((loaded?.config.signals.bots ?? []).map((b) => b.toLowerCase()));
+    const min = loaded.config.signals.close_collaborator_min;
+    const bots = new Set(loaded.config.signals.bots.map((b) => b.toLowerCase()));
     const authors = Object.entries(this.desk.ctx?.affinity ?? {})
       .filter(([a, n]) => n >= min && a.toLowerCase() !== me.toLowerCase() && !bots.has(a.toLowerCase()) && !a.endsWith("[bot]"))
       .sort((a, b) => b[1] - a[1]);

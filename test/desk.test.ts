@@ -231,11 +231,15 @@ test("a desktop app attached to the desk takes its notifications over while it's
 test("close_authors expands within GitHub's 256-char query limit", async () => {
   const t = await setup([]);
   t.desk.ctx!.affinity = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`collaborator-${i}`, 50 - i]));
-  const q = t.desk.gh.expandQuery("is:pr is:open archived:false -is:draft -author:@me -review-requested:@me {close_authors}", "org:acme")!;
+  const q = t.desk.gh.expandQuery(
+    "is:pr is:open archived:false -is:draft -author:@me -review-requested:@me {close_authors}",
+    "org:acme",
+    t.desk.loaded!,
+  )!;
   assert.ok(q.length <= 256);
   assert.match(q, /author:collaborator-0 author:collaborator-1/);
   t.desk.ctx!.affinity = {};
-  assert.equal(t.desk.gh.expandQuery("is:pr {close_authors}", ""), null);
+  assert.equal(t.desk.gh.expandQuery("is:pr {close_authors}", "", t.desk.loaded!), null);
   t.cleanup();
 });
 
