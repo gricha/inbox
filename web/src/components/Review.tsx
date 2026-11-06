@@ -1216,7 +1216,8 @@ function AiSection({
 
 // A command in an agent's message (`claude auth login`) reads as code.
 export function withCode(text: string) {
-  return text.split("`").map((part, i) => (i % 2 ? <code key={part}>{part}</code> : part));
+  // oxlint-disable-next-line react/no-array-index-key -- a fixed split never reorders, and the same command can appear twice
+  return text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
 }
 
 function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {
