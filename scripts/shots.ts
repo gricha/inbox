@@ -161,12 +161,6 @@ const toBottom = (name: string) => async (page: Page) => {
 const sideDefault = async (page: Page) => {
   await page.evaluate(`localStorage.removeItem("desk.review.side")`);
 };
-// A fresh page, for a shot that left a write held: the queue as the mock has it.
-const reload = async (page: Page) => {
-  await page.evaluate(`location.hash = "#/"`);
-  await page.reload();
-  await page.locator(READY).first().waitFor({ timeout: 15_000 });
-};
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
@@ -470,7 +464,7 @@ const SHOTS: Shot[] = [
       await review("acme/web#2303", ["a"])(page);
       await page.waitForTimeout(300);
     },
-    after: reload,
+    after: fresh,
   },
   { name: "review-mine", go: review("oss/tinyhttp#205") },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
@@ -614,9 +608,7 @@ const SHOTS: Shot[] = [
       });
       await at("#/inflight")(page);
     },
-    after: async (page) => {
-      await unroute(page);
-    },
+    after: unroute,
   },
   {
     // claude couldn't start or resume it: the line says why, in red.
@@ -633,9 +625,7 @@ const SHOTS: Shot[] = [
       await at("#/inflight")(page);
       await page.locator(".lane-coord-error").waitFor({ timeout: 5000 });
     },
-    after: async (page) => {
-      await unroute(page);
-    },
+    after: unroute,
   },
   {
     // The selected row's keys: Review, Open on GitHub, Back to desk.
@@ -667,7 +657,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("m");
       await page.waitForTimeout(300);
     },
-    after: reload,
+    after: fresh,
   },
   {
     // An agent's question leads the main page; Enter opens its page: what it's about, all it said, its links, the answers.
@@ -703,7 +693,7 @@ const SHOTS: Shot[] = [
       await page.locator(".inq-answered").waitFor();
       await page.waitForTimeout(200);
     },
-    after: reload,
+    after: fresh,
   },
   {
     // Merged and closed ones under Merged, below the fold at every size.
@@ -824,7 +814,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("a");
       await page.waitForTimeout(300);
     },
-    after: reload,
+    after: fresh,
   },
   {
     // A PR the policy judge placed: w opens it in place; its rule trace ends with the policy step.
