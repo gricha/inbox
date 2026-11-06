@@ -168,7 +168,7 @@ export interface DeskOptions {
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
-  writer?: GitHubWriter; // approve and ready for review; without it they're off
+  writer?: GitHubWriter; // the desk's GitHub writes; without it they're off
 }
 
 // Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
@@ -1013,8 +1013,7 @@ export class Desk {
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
       ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
-      // A red draft needs finishing first; its why says so.
-      // Red CI too: getting it green is the coordinator's once it's ready, so the desk never holds this back.
+      // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
       ...(actions.length > 0 && { actions }),
@@ -1089,7 +1088,7 @@ export class Desk {
     };
   }
 
-  // Your PRs the coordinator handed back, at the top of the queue.
+  // Your PRs back on top of the queue: handed back, or ready and nobody's asked to review them.
   needsCards(snap: Snapshot, seen: Set<string>): Card[] {
     const out: Card[] = [];
     for (const id of snap.needs.keys()) {
