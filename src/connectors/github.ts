@@ -29,7 +29,7 @@ interface Feed {
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
 
-function isRateLimited(e: unknown): boolean {
+function isRateLimited(e: unknown): e is { resetAt: string } {
   return (e as Error)?.name === "RateLimitedError" || (typeof e === "object" && e !== null && "resetAt" in e);
 }
 
@@ -111,6 +111,10 @@ export class GitHubConnector implements Connector {
       },
       Math.max(wait, this.pausedUntil - Date.now()),
     );
+  }
+
+  pause(e: { resetAt: string }): void {
+    this.pausedUntil = Date.parse(e.resetAt) || Date.now() + 15 * 60_000;
   }
 
   status(): ConnectorStatus {
@@ -261,8 +265,8 @@ export class GitHubConnector implements Connector {
     } catch (e) {
       if (this.stopped) return;
       this.error = (e as Error).message;
-      if (!isRateLimited(e)) report(e, "sync");
-      if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
+      if (isRateLimited(e)) this.pause(e);
+      else report(e, "sync");
       desk.log(`sync failed: ${this.error}`);
     } finally {
       this.syncing = false;
@@ -355,7 +359,7 @@ export class GitHubConnector implements Connector {
       desk.ingest(this, items);
       desk.synced();
     } catch (e) {
-      if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
+      if (isRateLimited(e)) this.pause(e);
       else report(e, "refresh", id);
       desk.log(`refresh of ${id} failed: ${(e as Error).message}`);
     }
@@ -416,7 +420,7 @@ export class GitHubConnector implements Connector {
         );
       if (unknown) void this.reconcile();
     } catch (e) {
-      if (isRateLimited(e)) this.pausedUntil = Date.parse((e as { resetAt: string }).resetAt) || Date.now() + 15 * 60_000;
+      if (isRateLimited(e)) this.pause(e);
       else {
         this.feedError = (e as Error).message;
         report(e, "notifications");
