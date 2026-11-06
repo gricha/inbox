@@ -431,7 +431,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_brief",
     {
       description:
-        "A PR's AI review, written by the user's agent (Claude Code or Codex, no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
+        "A PR's AI review, written by the user's own Claude Code (no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
       inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },

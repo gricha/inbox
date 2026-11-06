@@ -7,7 +7,7 @@ GitHub GraphQL + notifications ──(read only)──> src/github/* ──> src
                                                                    │ snapshots, events
                                                                    ▼
                                                      src/store.ts (node:sqlite: items, activity, ...)
-gh api (a PR's files) ──────────> src/review.ts ──> claude -p / codex exec (the AI review)
+gh api (a PR's files) ──────────> src/review.ts ──> claude -p (the AI review)
 your a / w / Send / . ──> src/github/write.ts ──(approve, reply, ready + reviewers, the More menu's: the only API writes)──> GitHub
                                                      │
 config.toml ──> src/config.ts ──> src/rules.ts <── src/signals.ts <── src/expr.ts
