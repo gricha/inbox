@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { cls, tilde } from "../format.ts";
+import { cls, MOD, tilde } from "../format.ts";
 import { KeyButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
 
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 // What the editor starts from: the file, or the starter while it's empty.
 const shown = (d: PolicyDoc) => (d.text.trim() ? d.text : d.starter);
 

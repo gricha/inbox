@@ -1,5 +1,8 @@
 import { UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff } from "../../src/types.ts";
 
+export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+export const MOD = MAC ? "⌘" : "Ctrl+";
+
 // What an agent's hand-off leads with: which task sent it.
 export const handoffLabel = (h: Handoff) => (h.from ? `From ${h.from}:` : "Handed to you:");
 

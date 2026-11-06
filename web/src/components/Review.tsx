@@ -17,7 +17,7 @@ import type {
   StackMember,
 } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, eventText, handoffLabel, modelName, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -1274,8 +1274,6 @@ function Dir({ path }: { path: string }) {
     </span>
   );
 }
-
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 // Your comment on the PR, under what reviewers said, while it's open (or while it has words): w puts the cursor in it, ⌘↵
 // sends it, Esc leaves it. The words are the review's, so GitHub refusing them leaves them here.

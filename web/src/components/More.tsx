@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Card, GitHubAction } from "../../../src/types.ts";
-import { cls } from "../format.ts";
-
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+import { cls, MOD } from "../format.ts";
 
 // The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does
 // it; u undoes a close or a draft. x only opens the box to write in.

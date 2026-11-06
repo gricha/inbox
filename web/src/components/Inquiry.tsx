@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls } from "../format.ts";
+import { age, cls, MOD } from "../format.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
 
 // What an agent's row needs from the app.

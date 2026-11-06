@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import type { AutomationRun, AutomationView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, when } from "../format.ts";
+import { ago, cls, MOD, when } from "../format.ts";
 
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
   added: "Added",
   kept: "Already on your desk",

@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age } from "../format.ts";
+import { age, MOD } from "../format.ts";
 import type { Thread } from "./Composer.tsx";
-
-const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
 const firstLine = (s: string) => {

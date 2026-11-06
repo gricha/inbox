@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { ago, cls, tilde, when } from "../format.ts";
+import { ago, cls, MAC, tilde, when } from "../format.ts";
 import { Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
@@ -23,8 +23,6 @@ interface FieldProps {
   id: string;
   invalid: boolean;
 }
-
-const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // A refetch updates the draft only while you aren't editing it, and a rejected draft stays for you to fix.
 function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
