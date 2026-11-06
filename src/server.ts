@@ -409,8 +409,6 @@ export function createApp(desk: Desk, port: number): Hono {
         await stream.sleep(25_000);
         if (!stream.aborted) await stream.write(": ping\n\n");
       }
-      off();
-      offNotify();
     }),
   );
 
