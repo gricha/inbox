@@ -41,14 +41,12 @@ export function MoreMenu({
   links,
   pick,
   onClose,
-  className,
 }: {
   card: Card;
   actions: GitHubAction[];
   links?: { key: string; label: string; run: () => void }[]; // what isn't a write, above them: Open on GitHub
   pick: (a: GitHubAction) => void;
   onClose: () => void;
-  className?: string;
 }) {
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -89,7 +87,7 @@ export function MoreMenu({
   return (
     <>
       <div className="scrim-clear" role="presentation" onClick={onClose} />
-      <div ref={menu} className={cls("popover more-pop", className)} role="menu" aria-label="More">
+      <div ref={menu} className="popover more-pop" role="menu" aria-label="More">
         <div className="pop-title">On GitHub</div>
         {links?.map((l) => (
           <button
