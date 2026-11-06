@@ -210,7 +210,7 @@ export function Review({
   // Your ready PR nobody's asked to review: a asks who you pick.
   const asking = v?.card.cta === "reviewers";
   const picking = readying || asking;
-  // A PR in Merging is the coordinator's: no prompt to copy or AI review to ask for.
+  // A PR in Merging is the coordinator's: no AI review to ask for.
   const flying = !!row && row.state === "open";
 
   useEffect(() => {
@@ -540,7 +540,7 @@ export function Review({
     else if (e.key === "@" && picking) {
       e.preventDefault();
       document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
-    } else if (("npoci[]admbfwzNPZ.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
+    } else if (("npoi[]admbfwzNPZ.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
       e.preventDefault();
       run(e.key);
     }
