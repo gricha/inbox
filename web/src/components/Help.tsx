@@ -46,11 +46,14 @@ const LANE_KEYS: [string[], string][] = [
 
 const REVIEW_KEYS: [string[], string][] = [
   [["n", "p"], "Next and previous change, in the AI review's reading order"],
-  [["]", "["], "Next and previous AI note"],
+  [["]", "["], "Next and previous AI note; t then asks your agent about its line"],
   [["N", "P"], "Next and previous PR in the stack"],
   [["f"], "Show or hide the sidebar: the stack, the files and recent activity"],
   [["z", "Z"], "Fold the file you're in, or every file; its header folds it too"],
-  [["+"], "By a line's number: comment on that line on GitHub, or drag it down several"],
+  [
+    ["+"],
+    "By a line's number, on an open PR, with the mouse: comment on that line on GitHub, or drag it down several; Ask your agent in its box asks about them instead",
+  ],
   [["a"], "Approve on GitHub, or your draft ready for review, asking the reviewers you picked; or Ask reviewers"],
   [["@"], "Your draft, or your PR nobody's asked to review: add a reviewer, from GitHub's suggestions or by name"],
   [["w"], "Your comment on the PR: the box under what reviewers said"],
@@ -59,7 +62,10 @@ const REVIEW_KEYS: [string[], string][] = [
   [["."], "More: open on GitHub; close, draft, reopen or merge now without your agent; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
-  [["t"], "Your chat with your agent about this PR, in the sidebar's place; f puts the sidebar back"],
+  [
+    ["t"],
+    "Ask your agent about what you're on: the PR, or the conversation, lines or AI note you were last on; in the sidebar's place, f puts the sidebar back",
+  ],
   [["esc"], "Close the chat when it's open; else back to where you opened it"],
 ];
 

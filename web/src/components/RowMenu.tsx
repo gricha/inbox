@@ -17,6 +17,7 @@ export interface RowMenuProps {
   x: number;
   y: number;
   me: string;
+  agent: boolean; // your agent is on: Ask your agent is one of its entries
   run: (c: Card, key: string) => void;
   act: (c: Card, action: Action, until?: string) => void;
   github: (c: Card, a: GitHubAction) => void;
@@ -26,7 +27,7 @@ export interface RowMenuProps {
 
 // A row's right-click menu: what its keys do, so a mouse reaches all of it. Snooze opens to the side with the times and what
 // this item can wait on.
-export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: RowMenuProps) {
+export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClose }: RowMenuProps) {
   const menu = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y, flip: false });
   const [sub, setSub] = useState(false);
@@ -63,7 +64,7 @@ export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: R
             },
           ]),
       { label: card.pinned ? "Unpin" : "Pin", key: "p", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
-      key("Ask your agent", "t"),
+      ...(agent ? [key("Ask your agent", "t")] : []),
     ],
     // Its call to action is above already.
     rowActions(card)

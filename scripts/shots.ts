@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Route } from "playwright-core";
-import type { Ask, AsksView, InflightView, QueueView, ReviewView } from "../src/types.ts";
+import type { Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -168,6 +168,83 @@ const closeChat = async (page: Page) => {
 const top = async (page: Page) => {
   await page.evaluate("scrollTo(0, 0)");
 };
+// A line of plan.ts in acme/api#4127's review, and the + by its number once hovering the line shows it.
+const PLAN = '.rv-file-sec[aria-label="src/planner/plan.ts"]';
+const planLine = (page: Page, n: number) => page.locator(PLAN).first().locator(`div[data-line="${n}"]`).last();
+const plusBy = async (page: Page, n: number) => {
+  const line = planLine(page, n);
+  await line.scrollIntoViewIfNeeded();
+  const plus = page.locator(PLAN).first().locator("[data-utility-button]").first();
+  for (let i = 0; i < 10 && !(await plus.count()); i++) {
+    await page.mouse.move(0, 0);
+    await line.hover();
+    await page.waitForTimeout(150);
+  }
+  return plus;
+};
+// Asks sent from the chat stay in the page, never the mock: the bodies posted, and the asks list carrying the last one.
+const echoAsks = async (page: Page, id: string) => {
+  const posted: Record<string, unknown>[] = [];
+  let sent: Ask | null = null;
+  await page.route("**/api/ask", (route) => {
+    const b = route.request().postDataJSON() as {
+      text: string;
+      item_id?: string;
+      thread_id?: string;
+      thread_url?: string;
+      lines?: AskLines;
+    };
+    posted.push(b);
+    sent = {
+      id,
+      at: new Date().toISOString(),
+      text: b.text,
+      item_id: b.item_id ?? null,
+      thread_id: b.thread_id ?? null,
+      thread_url: b.thread_url ?? null,
+      lines: b.lines ?? null,
+      answer: null,
+    };
+    return route.fulfill({ json: { ok: true, ask: sent } });
+  });
+  await page.route("**/api/asks", async (route) => {
+    const res = await route.fetch();
+    const v = (await res.json()) as AsksView;
+    if (sent) v.asks.push(sent);
+    await route.fulfill({ response: res, json: v });
+  });
+  return posted;
+};
+// What the page says about the chat: the line above its box, its item, and whether its box has the keys.
+const chatState = (page: Page) =>
+  page.evaluate<{ on: string | null; about: string | null; drops: number; focus: boolean; box: boolean }>(`({
+    on: document.querySelector(".chat-on")?.textContent ?? null,
+    about: document.querySelector(".chat-about")?.textContent ?? null,
+    drops: document.querySelectorAll(".chat .chat-drop").length,
+    focus: !!document.activeElement?.classList.contains("chat-input"),
+    box: !!document.querySelector(".rv-inline"),
+  })`);
+// acme/api#4127's review in a fresh page, lines 20 to 23 of plan.ts picked down the gutter, and their box's Ask your agent.
+const linesInChat = async (page: Page) => {
+  await fresh(page);
+  await review("acme/api#4127")(page);
+  // The whole range in view: a drag past the window's edge stops at it.
+  await planLine(page, 21).evaluate((el: { scrollIntoView: (o: { block: "center" }) => void }) => {
+    el.scrollIntoView({ block: "center" });
+  });
+  const plus = await plusBy(page, 20);
+  const from = await plus.boundingBox();
+  const to = await planLine(page, 23).boundingBox();
+  if (!from || !to) throw new Error("plan.ts's lines 20 and 23 aren't on screen");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.locator(".rv-inline").waitFor();
+  await page.locator(".rv-inline button", { hasText: "Ask your agent" }).click();
+  await page.locator(".chat-input").waitFor();
+};
+const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
 // A theme picked in Settings → Appearance, as its select sets it; `after` puts System back.
 const pickTheme = (id: string) => async (page: Page) => {
   await page.evaluate(`localStorage.setItem("desk.theme", ${JSON.stringify(id)}); location.hash = "#/"`);
@@ -414,19 +491,15 @@ const SHOTS: Shot[] = [
     name: "review-inline",
     go: async (page) => {
       await review("acme/api#4127")(page);
-      const plan = page.locator('.rv-file-sec[aria-label="src/planner/plan.ts"]').first();
-      const line = plan.locator('div[data-line="23"]').last();
-      await line.scrollIntoViewIfNeeded();
-      const plus = plan.locator("[data-utility-button]").first();
-      for (let i = 0; i < 10 && !(await plus.count()); i++) {
-        await page.mouse.move(0, 0);
-        await line.hover();
-        await page.waitForTimeout(150);
-      }
-      await plus.click();
+      await (await plusBy(page, 23)).click();
       await page.locator(".rv-inline textarea").waitFor();
       await page.keyboard.type("Return how many rows the stream had read when the budget ran out?");
       await page.waitForTimeout(300);
+      // Only its GitHub send is a shape: Cancel and Ask your agent are text.
+      const filled = await page.locator(".rv-inline .act.primary").count();
+      if (filled !== 1) failures.push(`review-inline: ${filled} filled buttons in the box, not 1`);
+      if (!(await page.locator(".rv-inline button", { hasText: "Ask your agent" }).count()))
+        failures.push("review-inline: the box has no Ask your agent");
     },
   },
   // Z: every file folded to its header.
@@ -672,6 +745,8 @@ const SHOTS: Shot[] = [
       await at("#/inflight")(page);
       await page.keyboard.press("j");
       await page.waitForTimeout(200);
+      if ((await page.locator(".lane-row.sel .card-keys").textContent())?.includes("Ask"))
+        failures.push("inflight-selected: the row's keys still offer Ask");
     },
   },
   {
@@ -707,6 +782,8 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("Enter");
       await page.locator(".inquiry .inq-options").waitFor();
       await page.waitForTimeout(200);
+      // Your agent's own question: its answer box is how you talk to it here.
+      if (await page.locator(".tb-ask").count()) failures.push("inquiry: the top bar offers Ask your agent on its own question");
     },
     after: at("#/"),
   },
@@ -770,6 +847,8 @@ const SHOTS: Shot[] = [
       await page.locator(".chat-input").waitFor();
       await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
       await page.waitForTimeout(300);
+      if (await page.locator(".line-ask").count()) failures.push("ask-row: a row still has its own Ask");
+      if (await page.locator(".tb-ask").isVisible()) failures.push("ask-row: the top bar offers Ask your agent with the chat open");
     },
     after: closeChat,
   },
@@ -819,6 +898,18 @@ const SHOTS: Shot[] = [
       await loaded;
       await page.locator(".chat-turn", { hasText: "412 passed" }).waitFor();
       for (const el of [".chat .prose pre", ".chat .prose ol", ".chat .prose ul"]) await page.locator(el).waitFor();
+      const asked = await page.evaluate<{ text: string; href: string | null } | null>(`(() => {
+        const q = document.querySelector(".chat-q");
+        return q && { text: q.textContent, href: q.querySelector("a")?.getAttribute("href") ?? null };
+      })()`);
+      if (!asked?.text.startsWith("Your agent asks: Compact tombstones") || asked.href !== "#/inquiry/q1c0ffee")
+        failures.push(`ask-review: above the box, ${JSON.stringify(asked)} rather than your agent's question about notes-app#12`);
+      if (
+        !(await page.evaluate<boolean>(
+          `[...document.querySelectorAll(".chat .prose pre")].every((p) => p.nextElementSibling?.classList.contains("prose-copy"))`,
+        ))
+      )
+        failures.push("ask-review: a code block in an answer has no Copy under it");
       await page.keyboard.type("Confirm we addressed priya's question so I can reply");
       await page.keyboard.press("Enter");
       await page.locator(".chat-turn", { hasText: "priya's question" }).waitFor();
@@ -848,13 +939,132 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
-    // A PR you've asked about: t Your agent after More says where your latest ask stands.
-    name: "ask-button",
+    // A PR whose latest ask is unanswered, the chat closed: the top bar says so, in what fits the width; its action line doesn't.
+    name: "ask-top-bar",
     go: async (page) => {
       await review("me/notes-app#12")(page);
-      await page.evaluate(`document.querySelector(".rv-actions").scrollIntoView({ block: "center" })`);
+      const width = page.viewportSize()?.width ?? 0;
+      const bar = await page.evaluate<{ words: string; icon: boolean } | null>(`(() => {
+        const b = document.querySelector(".tb-ask");
+        const shown = (el) => !!el && getComputedStyle(el).display !== "none";
+        return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".i")) };
+      })()`);
+      const want = width > 1000 ? "Your agent \u00b7 waiting" : width > 820 ? "Ask" : "";
+      if (!bar || bar.words !== want || (width <= 820 && !bar.icon))
+        failures.push(`ask-top-bar: at ${width}px the top bar's ask is ${JSON.stringify(bar)}, not ${want || "its icon alone"}`);
+      const actions = (await page.locator(".rv-actions").textContent()) ?? "";
+      if (/Coordinator|agent/.test(actions)) failures.push(`ask-top-bar: the review's actions say ${actions}`);
+    },
+  },
+  {
+    // Lines picked down the gutter, then their box's Ask your agent: the box goes (it was empty), the chat is on those lines.
+    name: "ask-lines",
+    go: async (page) => {
+      const posted = await echoAsks(page, "shot0002");
+      await linesInChat(page);
+      const c = await chatState(page);
+      if (c.box || !c.on?.startsWith("On plan.ts:20\u201323") || !c.focus)
+        failures.push(`ask-lines: after Ask your agent, ${JSON.stringify(c)}`);
+      await page.keyboard.type("why is the budget only checked between batches?");
+      await page.keyboard.press("Enter");
+      await page.locator(".chat-turn .chat-meta", { hasText: "on plan.ts:20\u201323" }).waitFor();
+      const b = posted[0] ?? {};
+      const { head, ...lines } = (b.lines ?? {}) as Partial<AskLines>;
+      if (JSON.stringify(lines) !== JSON.stringify(LINES) || !/^[0-9a-f]{40}$/.test(head ?? "") || "thread_id" in b)
+        failures.push(`ask-lines: it posted ${JSON.stringify(b)}`);
       await page.waitForTimeout(200);
     },
+    after: async (page) => {
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
+    // Words in the + box, then its Ask your agent: they stay in the box, unsent, and the chat is on that line.
+    name: "ask-lines-words",
+    go: async (page) => {
+      const words = "Return how many rows the stream had read when the budget ran out?";
+      await fresh(page);
+      await review("acme/api#4127")(page);
+      await (await plusBy(page, 23)).click();
+      await page.waitForFunction(`document.activeElement?.matches(".rv-inline textarea")`); // Pierre slots the box in a frame later
+      await page.keyboard.type(words);
+      await page.route("**/api/review/*/inline", (route) => {
+        failures.push("ask-lines-words: Ask your agent posted to GitHub");
+        return route.abort();
+      });
+      await page.locator(".rv-inline button", { hasText: "Ask your agent" }).click();
+      await page.locator(".chat-input").waitFor();
+      const c = await chatState(page);
+      const kept = await page.locator(".rv-inline textarea").inputValue();
+      if (kept !== words || c.on !== "On plan.ts:23\u00d7" || !c.focus)
+        failures.push(`ask-lines-words: the box holds ${JSON.stringify(kept)}, the chat ${JSON.stringify(c)}`);
+      await page.locator(".rv-inline").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await closeChat(page);
+      await fresh(page); // the words are kept per PR in this window
+    },
+  },
+  {
+    // The line's x: the next ask is about the whole PR.
+    name: "ask-lines-drop",
+    go: async (page) => {
+      const posted = await echoAsks(page, "shot0003");
+      await linesInChat(page);
+      await page.locator(".chat-on .chat-drop").click();
+      const c = await chatState(page);
+      if (c.on !== null || !c.focus) failures.push(`ask-lines-drop: after its x, ${JSON.stringify(c)}`);
+      await page.keyboard.type("is anything else in this PR worth a second look?");
+      await page.keyboard.press("Enter");
+      await page.locator(".chat-turn", { hasText: "worth a second look" }).waitFor();
+      if (posted[0]?.lines) failures.push(`ask-lines-drop: it posted lines ${JSON.stringify(posted[0].lines)}`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
+    // The top bar's Ask your agent on the queue: the chat about the selected row; the head's x makes it about nothing.
+    name: "ask-general",
+    go: async (page) => {
+      const posted = await echoAsks(page, "shot0004");
+      await at("#/")(page);
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.locator(".tb-ask").click();
+      await page.locator(".chat-input").waitFor();
+      const before = await chatState(page);
+      if (before.about !== "tinyhttp#205") failures.push(`ask-general: the chat is about ${JSON.stringify(before.about)}`);
+      await page.locator(".chat-head .chat-drop").click();
+      const c = await chatState(page);
+      if (c.about !== "" || c.drops || !c.focus) failures.push(`ask-general: after the head's x, ${JSON.stringify(c)}`);
+      await page.keyboard.type("what should I look at first?");
+      await page.keyboard.press("Enter");
+      await page.locator(".chat-turn", { hasText: "look at first" }).waitFor();
+      if (posted[0]?.item_id) failures.push(`ask-general: it posted item_id ${JSON.stringify(posted[0].item_id)}`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
+    // ] to an AI note, then t: the chat is on the note's line.
+    name: "ask-note",
+    go: async (page) => {
+      await review("acme/api#4127", ["]"])(page);
+      await page.keyboard.press("t");
+      await page.locator(".chat-input").waitFor();
+      const c = await chatState(page);
+      if (!c.on?.startsWith("On Claude's note on ")) failures.push(`ask-note: the chat is on ${JSON.stringify(c.on)}`);
+      await page.waitForTimeout(200);
+    },
+    after: closeChat,
   },
   {
     // t on Settings: the chat about nothing beside the page.
@@ -882,10 +1092,30 @@ const SHOTS: Shot[] = [
     after: sideDefault,
   },
   {
-    // Your agent off: the chat says so and sends nothing.
+    // Your agent off: no Ask your agent anywhere; t still opens the chat, which says so and sends nothing.
     name: "ask-off",
     go: async (page) => {
       await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));
+      await page.route("**/api/overview", async (route) => {
+        const res = await route.fetch();
+        const o = (await res.json()) as Overview;
+        o.agent = false;
+        await route.fulfill({ response: res, json: o });
+      });
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await review("me/notes-app#12")(page);
+      const asks = await page.evaluate<string[]>(
+        `[...document.querySelectorAll("button, a, .tb-ask")].filter((el) => !el.closest(".chat") && el.textContent.includes("Ask your agent")).map((el) => el.className)`,
+      );
+      if (asks.length || (await page.locator(".tb-ask").count()))
+        failures.push(`ask-off: the review offers Ask your agent: ${asks.join(", ")}`);
+      await at("#/")(page);
+      await page.locator(".line", { hasText: "Drop the legacy v1 auth" }).locator(".row-main").click({ button: "right" });
+      await page.locator(".ctx").waitFor();
+      if ((await page.locator(".ctx").textContent())?.includes("Ask your agent"))
+        failures.push("ask-off: a row's menu offers Ask your agent");
+      await page.keyboard.press("Escape");
       await at("#/inflight")(page);
       await page.keyboard.press("j");
       await page.keyboard.press("t");
@@ -894,7 +1124,9 @@ const SHOTS: Shot[] = [
     },
     after: async (page) => {
       await page.unroute("**/api/asks");
+      await page.unroute("**/api/overview");
       await closeChat(page);
+      await fresh(page);
     },
   },
   {

@@ -4,6 +4,7 @@ import type {
   AiReview,
   InlineAt,
   Ask,
+  AskLines,
   AsksView,
   ConfigDoc,
   ConfigError,
@@ -97,7 +98,7 @@ export const api = {
   // With an ask it stopped without answering: that ask goes to it again.
   wakeCoordinator: (ask?: string) => call<{ ok: true }>("POST", "/api/coordinator/wake", ask ? { ask } : {}),
   asks: () => call<AsksView>("GET", "/api/asks"),
-  ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }) =>
+  ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }) =>
     call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),

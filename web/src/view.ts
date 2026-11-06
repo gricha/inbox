@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  AskLines,
   Card,
   Conversation,
   InlineAt,
@@ -226,6 +227,14 @@ export function threadsOn(conversation: Conversation[], path: string, hunks: Pic
 export function splitPath(p: string): [string, string] {
   const i = p.lastIndexOf("/");
   return [p.slice(0, i + 1), p.slice(i + 1)];
+}
+
+export const lineName = (at: InlineAt) => `${splitPath(at.path)[1]}:${at.start ? `${at.start.line}\u2013` : ""}${at.line}`;
+
+// Mixed sides read as the new file's lines: only an all-removed range says so.
+export function linesLabel(l: AskLines): string {
+  if (l.note) return `Claude's note on ${lineName(l)}`;
+  return l.side === "old" && (!l.start || l.start.side === "old") ? `${lineName(l)}, removed` : lineName(l);
 }
 
 // A resolved PR's "Resolved: …" line takes the event that caused it (and who merged or closed it), so Recent activity

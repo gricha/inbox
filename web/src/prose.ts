@@ -4,7 +4,10 @@
 export type Span =
   { t: "text"; text: string; bold: boolean } | { t: "code"; text: string; bold: boolean } | { t: "link"; url: string; bold: boolean };
 export type Block =
-  { t: "p"; spans: Span[] } | { t: "ul"; items: Span[][] } | { t: "ol"; start: number; items: Span[][] } | { t: "pre"; text: string };
+  | { t: "p"; spans: Span[] }
+  | { t: "ul"; items: Span[][] }
+  | { t: "ol"; start: number; items: Span[][] }
+  | { t: "pre"; text: string; info: string }; // info: the fence's ```suggestion or ```ts, kept only for Copy
 
 // Markers only, with the rest of the line sliced off: a `[ \t]+(.*)$` tail backtracks quadratically when `$` can't match.
 const HEADING = /^ {0,3}#{1,6}[ \t]/;
@@ -12,16 +15,18 @@ const BULLET = /^[ \t]*[-*][ \t]/;
 const NUMBER = /^[ \t]*(\d{1,3})\.[ \t]/;
 const MD_LINK = /\[([^\]\n]{1,200})\]\((https:\/\/[^\s)]+)\)/g;
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
+const INFO = /^[\w+-]{1,30}$/;
 
 type Raw =
   | { t: "p"; lines: string[]; heading: boolean }
   | { t: "ul"; items: string[][] }
   | { t: "ol"; start: number; items: string[][] }
-  | { t: "pre"; text: string };
+  | { t: "pre"; text: string; info: string };
 
 export function blocks(text: string): Block[] {
   const raw: Raw[] = [];
   let fence: string[] | null = null;
+  let info = "";
   let list: Extract<Raw, { items: string[][] }> | null = null;
   let open: string[] | null = null; // the open p's or list item's lines, which a plain line continues
   const close = () => {
@@ -37,7 +42,7 @@ export function blocks(text: string): Block[] {
     }
   };
   const pre = (lines: string[]) => {
-    if (lines.join("").trim()) raw.push({ t: "pre", text: lines.join("\n") });
+    if (lines.join("").trim()) raw.push({ t: "pre", text: lines.join("\n"), info });
   };
   for (const line of text.replaceAll("\r", "").split("\n")) {
     if (fence) {
@@ -50,6 +55,8 @@ export function blocks(text: string): Block[] {
     }
     if (line.trimStart().startsWith("```")) {
       fence = [];
+      const rest = line.trim().slice(3).trim();
+      info = INFO.test(rest) ? rest : "";
       close();
       continue;
     }

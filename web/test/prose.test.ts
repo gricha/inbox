@@ -8,7 +8,7 @@ const a = (url: string, bold = false): Span => ({ t: "link", url, bold });
 const p = (...spans: Span[]): Block => ({ t: "p", spans });
 const ul = (...items: Span[][]): Block => ({ t: "ul", items });
 const ol = (start: number, ...items: Span[][]): Block => ({ t: "ol", start, items });
-const pre = (text: string): Block => ({ t: "pre", text });
+const pre = (text: string, info = ""): Block => ({ t: "pre", text, info });
 const is = (text: string, want: Block[]) => {
   assert.deepEqual(blocks(text), want, JSON.stringify(text));
 };
@@ -36,12 +36,19 @@ test("- and * bullets and 1. numbers make lists; nesting flattens; +, \u2022, 1)
 });
 
 test("a ``` fence keeps its lines as written until a ``` line, or to the end; an empty one draws nothing", () => {
-  is("```ts\n  x()\n\n  y()\n```", [pre("  x()\n\n  y()")]);
+  is("```ts\n  x()\n\n  y()\n```", [pre("  x()\n\n  y()", "ts")]);
   is("a\n```\nx\n\ny", [p(t("a")), pre("x\n\ny")]);
   is("```\n`a` **b** - c\n# d\n```", [pre("`a` **b** - c\n# d")]);
   is("- a\n  ```\nx\n  ```  \nb", [ul([t("a")]), pre("x"), p(t("b"))]);
   is("```\n```", []);
   is("```\n  \n```", []);
+});
+
+test("a fence keeps its info string for Copy", () => {
+  is("```suggestion\nx\n```", [pre("x", "suggestion")]);
+  is("```a b\nx\n```", [pre("x")]);
+  is("  ```ts  \nx\n```", [pre("x", "ts")]);
+  is("```c++\nx\n```\n```\ny\n```", [pre("x", "c++"), pre("y")]);
 });
 
 test("backticks pair into code; an unpaired last one, and an empty pair, aren't code", () => {

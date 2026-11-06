@@ -26,6 +26,9 @@ export function TopBar({
   filterRef,
   onSync,
   onHelp,
+  ask,
+  waiting,
+  onAsk,
   inert,
 }: {
   overview: Overview | null;
@@ -39,6 +42,9 @@ export function TopBar({
   filterRef: RefObject<HTMLInputElement | null>;
   onSync: () => void;
   onHelp: () => void;
+  ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
+  waiting: boolean; // the open review's latest ask is unanswered
+  onAsk: () => void;
   inert?: boolean;
 }) {
   const inSettings = route.name === "settings";
@@ -124,6 +130,21 @@ export function TopBar({
           <a className="tb-flight" href="#/archive" title="What's done (g a)">
             Archive
           </a>
+        )}
+        {ask && (
+          <button
+            type="button"
+            className="tb-ask"
+            onClick={onAsk}
+            title={`Ask your agent about what you're on (t)${waiting ? " \u00b7 waiting for its answer" : ""}`}
+          >
+            <kbd>t</kbd>
+            <span className="tb-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
+            <span className="tb-ask-short">Ask</span>
+            <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
+            </svg>
+          </button>
         )}
         <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

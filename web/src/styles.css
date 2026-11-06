@@ -1088,9 +1088,8 @@ kbd {
   text-align: right;
 }
 
-/* A row's call to action and, on the selected row, Ask and More before it; the negative margin keeps every row one height. */
+/* A row's call to action and, on the selected row, More before it; the negative margin keeps every row one height. */
 .line .line-cta,
-.line .line-ask,
 .line .line-more {
   position: relative;
   z-index: 1;
@@ -1100,7 +1099,6 @@ kbd {
   margin: -4px 0 -4px auto;
 }
 
-.line .line-ask,
 .line .line-more {
   padding: 0 6px;
 }
@@ -1109,19 +1107,8 @@ kbd {
   display: none;
 }
 
-.line-ask + .line-cta,
-.line-ask + .line-more,
 .line-more + .line-cta {
   margin-left: -8px;
-}
-
-/* With the chat open, t and the chat stand for a row's Ask, so the row keeps its title and repo. */
-.app:has(> .chat) .line .line-ask {
-  display: none;
-}
-
-.app:has(> .chat) .line-ask + :is(.line-cta, .line-more) {
-  margin-left: auto;
 }
 
 .dim .line-title {
@@ -1962,23 +1949,25 @@ kbd {
   color: var(--pencil);
 }
 
-/* On a row and in Merging, only a call to action is a shape; the rest are text that fills on hover, and while the menu it
-   opened is open. A review's few actions are all buttons. */
-.line .line-ask,
+/* On a row, in Merging and in a box you write in, only its call to action (or its send) is a shape; the rest are text that
+   fills on hover, and while the menu it opened is open. A review's few actions are buttons. */
 .line .line-more,
 .lane-more .act:not(.primary),
 .composer .act:not(.primary),
-.chat .act:not(.primary) {
+.chat .act:not(.primary),
+.rv-inline .act:not(.primary),
+.cv .actions .act:not(.primary) {
   border-color: transparent;
   background: none;
 }
 
-.line .line-ask:hover:not(:disabled),
 .line .line-more:hover:not(:disabled),
 .line .line-more[aria-expanded="true"],
 .lane-more .act:not(.primary):hover:not(:disabled),
 .composer .act:not(.primary):hover:not(:disabled),
-.chat .act:not(.primary):hover:not(:disabled) {
+.chat .act:not(.primary):hover:not(:disabled),
+.rv-inline .act:not(.primary):hover:not(:disabled),
+.cv .actions .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
@@ -2494,7 +2483,7 @@ kbd {
 }
 
 .chat-about {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--pencil);
@@ -2624,11 +2613,30 @@ kbd {
   font-size: 12.5px;
 }
 
-/* The conversation the next ask carries, by the box it goes with. */
-.chat-on {
+/* The spot the next ask carries, and your agent's open questions, by the box they go with: one line each, cut short. */
+.chat-on,
+.chat-q {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-on > span,
+.chat-q > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-q a {
+  flex: none;
+  color: var(--ink-2);
+}
+
+/* The head's x sits after the item; Close keeps the right edge. */
+.chat-head > .act {
+  margin-left: auto;
 }
 
 /* An agent's words (web/src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */
@@ -2671,6 +2679,16 @@ kbd {
 
 .prose a {
   color: var(--ink-2);
+}
+
+/* Under its block's right edge, quiet text as the chat's other actions are. */
+.prose .prose-copy {
+  display: block;
+  height: 26px;
+  margin: -4px 0 0 auto;
+  padding: 0 6px;
+  color: var(--ink-2);
+  font-size: 12.5px;
 }
 
 /* Wrapped, not scrolled: no part of a command hides past the block's edge. */
@@ -3222,6 +3240,32 @@ kbd {
   margin-left: auto;
 }
 
+/* Ask your agent, quiet like the sync line: the words at full width, Ask below 1000px, a speech bubble below 820px. */
+.tb-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--pencil);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tb-ask:hover {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.tb-ask-short,
+.tb-ask .i {
+  display: none;
+}
+
 /* Below 1000px, where the sidebar's Merging entry is hidden: the same, in pencil. */
 .tb-flight {
   display: inline-flex;
@@ -3677,8 +3721,10 @@ kbd {
   font-weight: 400;
 }
 
-.rv-reviewer-x {
+.rv-reviewer-x,
+.chat-drop {
   display: grid;
+  flex: none;
   place-items: center;
   width: 20px;
   height: 20px;
@@ -3692,7 +3738,8 @@ kbd {
   cursor: pointer;
 }
 
-.rv-reviewer-x:hover:not(:disabled) {
+.rv-reviewer-x:hover:not(:disabled),
+.chat-drop:hover:not(:disabled) {
   background: var(--rule-strong);
   color: var(--ink);
 }
@@ -4596,12 +4643,35 @@ kbd {
   .line .more-dots {
     display: inline;
   }
+
+  .tb-ask-long {
+    display: none;
+  }
+
+  .tb-ask-short {
+    display: inline;
+  }
 }
 
 /* The macOS app pads the bar for the traffic lights: at its narrowest the sync label gives way to the page links. */
 @media (width <= 820px) {
   :root[data-shell="desktop"][data-platform="darwin"] .sync span {
     display: none;
+  }
+
+  .tb-ask {
+    justify-content: center;
+    width: 32px;
+    padding: 0;
+  }
+
+  .tb-ask kbd,
+  .tb-ask span {
+    display: none;
+  }
+
+  .tb-ask .i {
+    display: block;
   }
 }
 

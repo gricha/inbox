@@ -110,20 +110,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             </span>
           )}
         </button>
-        {/* Under the cursor only: the quiet way to tell your agent something about it. */}
-        {sel && !why && (
-          <button
-            type="button"
-            className="act line-ask"
-            title="Tell or ask your agent something about it"
-            onClick={() => {
-              ctx.run(card, "t");
-            }}
-          >
-            <kbd>t</kbd>
-            Ask
-          </button>
-        )}
         {/* Only where no call to action shows: the row keeps room for its title, and . still opens it. */}
         {sel && (!card.cta || !!why) && rowActions(card).length > 0 && (
           <MoreButton

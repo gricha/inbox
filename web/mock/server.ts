@@ -24,6 +24,7 @@ import type {
   Areas,
   AiReview,
   Ask,
+  AskLines,
   Automation,
   AutomationRun,
   AutomationView,
@@ -2208,6 +2209,7 @@ function addAsk(b: Record<string, unknown>): Ask {
     item_id: str("item_id"),
     thread_id: str("thread_id"),
     thread_url: str("thread_url"),
+    lines: typeof b.lines === "object" && b.lines ? (b.lines as AskLines) : null,
     answer: null,
   };
   ASKS.push(a);
@@ -2278,6 +2280,7 @@ function overview(): Overview {
       asks: INQUIRIES.filter((q) => !q.answer).length,
     },
     inflight: { total: recs.filter(inFlight).length },
+    agent: setting("agent.coordinator"),
     rate_limit: rateLimit(),
   };
 }

@@ -40,6 +40,8 @@ import {
   drawUpTo,
   filePatch,
   inlineAt,
+  lineName,
+  linesLabel,
   onLines,
   resolvedHead,
   routeHash,
@@ -53,8 +55,8 @@ import {
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
-import type { Thread } from "./Chat.tsx";
-import { Conversation } from "./Conversation.tsx";
+import type { Spot } from "./Chat.tsx";
+import { Conversation, threadOf } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
@@ -155,9 +157,11 @@ export function Review({
   onComment,
   onBack,
   chat,
-  onChat,
+  agent,
+  onCloseChat,
   onAsk,
-  onThread,
+  onSpot,
+  onAskWaiting,
 }: {
   id: string;
   known: Card | null; // its row's card, drawn at once while the review is on its way
@@ -176,10 +180,12 @@ export function Review({
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
   onComment: (c: Card, body: string) => Promise<boolean>; // w: your comment on the PR; true once GitHub has it
   onBack: () => void;
-  chat: boolean; // your chat with the coordinator is open: it takes the sidebar's place
-  onChat: (open: boolean) => void; // the Coordinator button opens it about this PR; f closes it for the sidebar
-  onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the chat, about it
-  onThread: (t: Thread) => void; // the conversation you're on, for what t asks about
+  chat: boolean; // your chat with your agent is open: it takes the sidebar's place
+  agent: boolean; // your agent is on: its boxes offer Ask your agent
+  onCloseChat: () => void; // f closes it for the sidebar
+  onAsk: (s: Spot) => void; // a box's Ask your agent: the chat, about that spot
+  onSpot: (s: Spot | null) => void; // the spot you're on, for what t asks about; null: the PR as a whole
+  onAskWaiting: (waiting: boolean) => void; // your latest ask about it is unanswered: the top bar says so
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
@@ -210,6 +216,14 @@ export function Review({
   const seq = useRef(0);
   const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
   const v = typeof view === "object" ? view : null;
+  const latest = v?.asks.at(-1);
+  const waiting = !!latest && !latest.answer; // your latest ask about it: the top bar says it's waiting
+  useEffect(() => {
+    onAskWaiting(waiting);
+    return () => {
+      onAskWaiting(false);
+    };
+  }, [waiting, onAskWaiting]);
   const canApprove = !!v?.approve.ok;
   // Your own open draft: a marks it ready for review instead of approving.
   const readying = v?.card.cta === "ready";
@@ -373,6 +387,13 @@ export function Review({
     }
     const n = noteIdx === null ? (d > 0 ? 0 : notes.length - 1) : (noteIdx + d + notes.length) % notes.length;
     setNoteIdx(n);
+    const note = v.ai?.notes[notes[n]!];
+    // A whole-file note has no line: t then asks about the PR, never the spot picked before.
+    if (!note || note.line <= 0) onSpot(null);
+    else {
+      const lines = { path: note.path, line: note.line, side: note.side, head: v.ai!.head_oid, note: true };
+      onSpot({ kind: "lines", item: v.card.id, lines, label: linesLabel(lines) });
+    }
     const i = Math.max(
       0,
       list.findIndex((x) => x.notes.includes(notes[n]!)),
@@ -425,8 +446,23 @@ export function Review({
     }
     draftText.current = "";
     draftSel.current = null;
-    setDraft({ n: ++drafts.current, at, thread, head: v.diff_head, busy: false });
+    const d = { n: ++drafts.current, at, thread, head: v.diff_head, busy: false };
+    setDraft(d);
     setFocusAsk((f) => f + 1);
+    onSpot(spotOf(d, v));
+  }
+
+  // The box's Ask your agent: the chat about its spot. It never reads what you typed: an empty box closes, words stay put.
+  function askFromBox() {
+    if (!draft || !v) return;
+    const s = spotOf(draft, v);
+    if (!draftText.current.trim()) {
+      setDraft(null);
+      draftText.current = "";
+      keepDraft(id, null);
+      holdKeys(false);
+    }
+    onAsk(s);
   }
 
   async function sendDraft(text: string) {
@@ -466,7 +502,7 @@ export function Review({
   function toggleSide() {
     // With the chat open, f puts the sidebar back in its place.
     const show = chat || !side;
-    if (chat) onChat(false);
+    if (chat) onCloseChat();
     setSide(show);
     try {
       localStorage.setItem(SIDE, show ? "open" : "folded");
@@ -526,7 +562,6 @@ export function Review({
     } else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) setMore(true);
-    else if (k === "t") onChat(true);
     else if (k === "esc") onBack();
   }
 
@@ -581,7 +616,6 @@ export function Review({
 
   const { card, item, files } = view;
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
-  const last = view.asks.at(-1); // your latest ask about it: the Coordinator button says where it stands
   const mine = item.state === "open" && isMine;
   const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
   const approvals = approvers.length;
@@ -633,6 +667,7 @@ export function Review({
           keepDraft(id, null);
           holdKeys(false);
         }}
+        onAsk={agent ? askFromBox : undefined}
       />
     );
   // A box whose line a refresh took off the diff, or put under the closed rest, is drawn above the diff instead.
@@ -693,7 +728,7 @@ export function Review({
           <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
           {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
           {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
-          <Conversation view={view} now={now} flash={flash} onThread={onThread} onAsk={onAsk} />
+          <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
           {((open && !acted) || !!comment.trim()) && (
             <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
           )}
@@ -794,14 +829,6 @@ export function Review({
               />
             )}
           </span>
-          {last && (
-            <KeyButton
-              k="t"
-              label={last.answer ? `Your agent \u00b7 answered ${sinceText(last.answer.at, now)}` : "Your agent \u00b7 waiting"}
-              run={run}
-              title="Your chat with your agent about this PR (t)"
-            />
-          )}
         </div>
         {writing && (
           <WriteBox
@@ -1365,6 +1392,14 @@ function restored(id: string, n: number): Draft | null {
   return k && { n, at: k.at, thread: k.thread, head: k.head, busy: false };
 }
 
+// Where a box is, as the chat names it: its thread, or the lines at the commit you picked them in.
+function spotOf(d: Draft, rv: ReviewView): Spot {
+  const convo = rv.conversation.find((x) => x.id === d.thread);
+  if (convo) return threadOf(rv.card.id, convo);
+  const lines = { ...d.at, head: d.head };
+  return { kind: "lines", item: rv.card.id, lines, label: linesLabel(lines) };
+}
+
 // The section a draft's box belongs in; -1 once a push took its line or thread off the diff (it shows above the diff then).
 function drawnAt(d: Draft, list: Section[], conversation: Convo[], head: string): number {
   if (!d.thread && d.head !== head) return -1; // a push since: the line it posts on isn't the one on screen any more
@@ -1372,7 +1407,6 @@ function drawnAt(d: Draft, list: Section[], conversation: Convo[], head: string)
 }
 
 const rangeLabel = (at: InlineAt | undefined) => (at?.start ? `Comment on lines ${at.start.line}–${at.line}` : "Comment");
-const lineName = (at: InlineAt) => `${splitPath(at.path)[1]}:${at.start ? `${at.start.line}–` : ""}${at.line}`;
 
 function SectionView({
   section: x,
@@ -1581,6 +1615,7 @@ function InlineBox({
   onText,
   onSend,
   onCancel,
+  onAsk,
 }: {
   label: string;
   busy: boolean;
@@ -1594,6 +1629,7 @@ function InlineBox({
   onText: (text: string) => void;
   onSend: (text: string) => void;
   onCancel: () => void;
+  onAsk?: (() => void) | undefined; // Ask your agent: your chat about this spot; what you typed here stays here
 }) {
   const [value, setValue] = useState(text);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -1693,6 +1729,21 @@ function InlineBox({
         <button type="button" className="act" disabled={busy} onClick={onCancel}>
           Cancel
         </button>
+        {onAsk && (
+          <button
+            type="button"
+            className="act"
+            disabled={busy}
+            title={
+              label === "Reply"
+                ? "Your chat with your agent about this thread; what you typed here stays here, unsent"
+                : "Your chat with your agent about these lines; what you typed here stays here, unsent"
+            }
+            onClick={onAsk}
+          >
+            Ask your agent
+          </button>
+        )}
       </div>
     </div>
   );

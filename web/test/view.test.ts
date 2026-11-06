@@ -17,7 +17,9 @@ import {
   inlineAt,
   judgeStatusText,
   judgeStepText,
+  lineName,
   lineOf,
+  linesLabel,
   navigable,
   onLines,
   parseList,
@@ -684,7 +686,14 @@ test("formatting", () => {
   assert.match(clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat })), /^snoozed until .*\b9:00 or new activity$/);
 });
 
-test("fromName shows the coordinator as your agent", () => {
+test("lineName and linesLabel name lines as the chat shows them; fromName shows the coordinator as your agent", () => {
+  const head = "a".repeat(40);
+  const path = "src/planner/plan.ts";
+  assert.equal(lineName({ path, line: 23, side: "new" }), "plan.ts:23");
+  assert.equal(linesLabel({ path, line: 23, side: "new", start: { line: 20, side: "new" }, head }), "plan.ts:20\u201323");
+  assert.equal(linesLabel({ path, line: 18, side: "old", start: { line: 17, side: "old" }, head }), "plan.ts:17\u201318, removed");
+  assert.equal(linesLabel({ path, line: 23, side: "new", start: { line: 17, side: "old" }, head }), "plan.ts:17\u201323");
+  assert.equal(linesLabel({ path, line: 23, side: "new", head, note: true }), "Claude's note on plan.ts:23");
   assert.equal(fromName("Review Desk coordinator"), "Your agent");
   assert.equal(fromName("Review Desk coordinator", false), "your agent");
   assert.equal(fromName("sentry: rollout"), "sentry: rollout");

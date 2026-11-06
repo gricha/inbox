@@ -1,39 +1,53 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AsksView, CoordinatorView } from "../../../src/types.ts";
+import type { AskLines, AsksView, CoordinatorView, Inquiry } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { shortId, sinceText } from "../format.ts";
+import { linesLabel } from "../view.ts";
 import { Prose } from "./Prose.tsx";
 
 const kept = new Map<string, string>(); // what you'd typed to it, per item, in this window
 let seen: AsksView | null = null; // the last asks fetched, so a reopen draws at once
 const OFF = "Your agent is off in Settings \u2192 Agents, so nothing is sent.";
 
-// A conversation in a PR's review, the one you were last on.
 export interface Thread {
+  kind: "thread";
   item: string;
   id: string;
   url: string;
   label: string; // "dana's thread on src/auth.ts:42"
 }
+interface Lines {
+  kind: "lines";
+  item: string;
+  lines: AskLines;
+  label: string; // "plan.ts:20-23", as linesLabel says it
+}
+export type Spot = Thread | Lines; // where in a PR's review you last were, for what t asks about
 
-// What t opened the chat about: the review's PR (and its conversation), the selected row, or nothing.
+// What t opened the chat about: the review's PR (and the spot you were last on in it), the selected row, or nothing.
 export interface About {
   item: string | null;
-  thread: Thread | null;
+  spot: Spot | null;
 }
 
 // Your chat with the coordinator on the window's right: every ask about the item, oldest first, each with its answer.
 export function Chat({
   about,
+  review,
+  questions,
   loads,
   now,
   inert,
+  onWiden,
   onClose,
 }: {
   about: About;
+  review: boolean; // about the open review's PR: its x widens to the whole PR, never to nothing
+  questions: Inquiry[]; // your agent's open ones about the item
   loads: number;
   now: number;
   inert: boolean;
+  onWiden: () => void; // an x: one step wider
   onClose: () => void;
 }) {
   const key = about.item ?? "";
@@ -71,12 +85,13 @@ export function Chat({
     // Emptied now, so Esc closes at once and a chat reopened before the reply never offers the words again.
     kept.delete(key);
     setText("");
+    const s = about.spot;
     try {
       const { ask } = await api.ask({
         text: t,
         item_id: about.item ?? undefined,
-        thread_id: about.thread?.id,
-        thread_url: about.thread?.url,
+        ...(s?.kind === "thread" && { thread_id: s.id, thread_url: s.url }),
+        ...(s?.kind === "lines" && { lines: s.lines }),
       });
       // An update can land first and bring the ask already.
       seen = seen && (seen.asks.some((x) => x.id === ask.id) ? seen : { ...seen, asks: [...seen.asks, ask] });
@@ -107,6 +122,22 @@ export function Chat({
         <p className="chat-about" title={about.item ?? undefined}>
           {about.item && shortId(about.item)}
         </p>
+        {about.item && !review && (
+          <button
+            type="button"
+            className="chat-drop"
+            aria-label="Ask about nothing in particular"
+            title="Ask about nothing in particular"
+            onClick={() => {
+              // The chat is drawn again for no item: what you'd typed goes with you.
+              if (text) kept.set("", text);
+              kept.delete(key);
+              onWiden();
+            }}
+          >
+            {"\u00d7"}
+          </button>
+        )}
         <button type="button" className="act" onClick={onClose}>
           <kbd>esc</kbd>
           Close
@@ -120,6 +151,12 @@ export function Chat({
               <p className="chat-you">{a.text}</p>
               <p className="chat-meta mine">
                 {sinceText(a.at, now)}
+                {a.lines && (
+                  <>
+                    {" \u00b7 "}
+                    <span title={`${a.lines.path} at ${a.lines.head.slice(0, 7)}`}>on {linesLabel(a.lines)}</span>
+                  </>
+                )}
                 {a.thread_url && (
                   <>
                     {" \u00b7 "}
@@ -152,9 +189,29 @@ export function Chat({
         )
       )}
       <div className="chat-box">
-        {about.thread && (
-          <p className="chat-hint chat-on" title={about.thread.label}>
-            On {about.thread.label}
+        {questions.map((q) => (
+          <p key={q.id} className="chat-hint chat-q">
+            <span title={q.question}>Your agent asks: {q.question}</span>
+            {" \u00b7 "}
+            <a href={`#/inquiry/${q.id}`}>Answer</a>
+          </p>
+        ))}
+        {about.spot && (
+          <p className="chat-hint chat-on">
+            <span
+              title={about.spot.kind === "thread" ? about.spot.label : `${about.spot.lines.path} at ${about.spot.lines.head.slice(0, 7)}`}
+            >
+              On {about.spot.label}
+            </span>
+            <button
+              type="button"
+              className="chat-drop"
+              aria-label="Ask about the whole PR instead"
+              title="Ask about the whole PR instead"
+              onClick={onWiden}
+            >
+              {"\u00d7"}
+            </button>
           </p>
         )}
         <textarea

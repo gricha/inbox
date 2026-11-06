@@ -16,7 +16,7 @@ export function Inflight({
   now: number;
   selected: string | null;
   select: (id: string) => void;
-  run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b t
+  run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b
 }) {
   if (!view)
     return (
@@ -181,7 +181,6 @@ function Row({
             <KeyButton k="enter" label="Review" run={keys} className="primary" />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
-            <KeyButton k="t" label="Ask your agent" title="Tell or ask your agent something about it" run={keys} />
           </div>
         </div>
       )}

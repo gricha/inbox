@@ -2,9 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, MOD } from "../format.ts";
-import type { Thread } from "./Chat.tsx";
+import type { Spot, Thread } from "./Chat.tsx";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
+// What an ask to your agent is about: "dana's thread on src/auth.ts:42".
+export const threadOf = (item: string, c: Convo): Thread => ({
+  kind: "thread",
+  item,
+  id: c.id,
+  url: c.url,
+  label: `${c.comments[0]?.author ?? "their"}'s ${c.kind}${c.path ? ` on ${where(c)}` : ""}`,
+});
 const firstLine = (s: string) => {
   const line = s.trim().split("\n")[0] ?? "";
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
@@ -15,14 +23,16 @@ export function Conversation({
   view,
   now,
   flash,
-  onThread,
+  agent,
+  onSpot,
   onAsk,
 }: {
   view: ReviewView;
   now: number;
   flash: (text: string, error?: boolean) => void;
-  onThread: (t: Thread) => void;
-  onAsk: (t: Thread) => void;
+  agent: boolean; // your agent is on: each reply box offers Ask your agent
+  onSpot: (s: Spot) => void; // the conversation you're on, for what t asks about
+  onAsk: (s: Spot) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
   const [sent, setSent] = useState<Record<string, string>>({}); // until the sync shows your reply: its url
@@ -36,19 +46,14 @@ export function Conversation({
     const box = document.querySelector<HTMLTextAreaElement>(".cv-reply");
     if (!box) return;
     replied.current = view.card.id;
+    // t pressed while the review loaded put your keys in the chat: they never move into a box that posts on GitHub.
+    if (document.activeElement?.closest("input, textarea, [contenteditable='true']")) return;
     box.focus();
   }, [view]);
 
   const waiting = view.conversation.filter((c) => c.waiting_on_you && !(c.id in sent));
-  // What an ask to the coordinator is about: "dana's thread on src/auth.ts:42".
-  const threadOf = (c: Convo): Thread => ({
-    item: view.card.id,
-    id: c.id,
-    url: c.url,
-    label: `${c.comments[0]?.author ?? "their"}'s ${c.kind}${c.path ? ` on ${where(c)}` : ""}`,
-  });
   const on = (c: Convo) => {
-    onThread(threadOf(c));
+    onSpot(threadOf(view.card.id, c));
   };
   const rest = view.conversation.filter((c) => !c.waiting_on_you);
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
@@ -139,17 +144,18 @@ export function Conversation({
               <a className="act" href={c.url} target="_blank" rel="noreferrer">
                 Open on GitHub
               </a>
-              <button
-                type="button"
-                className="act"
-                title="Your chat with your agent about this conversation; your reply here stays here, unsent"
-                onClick={() => {
-                  on(c);
-                  onAsk(threadOf(c));
-                }}
-              >
-                Ask your agent
-              </button>
+              {agent && (
+                <button
+                  type="button"
+                  className="act"
+                  title="Your chat with your agent about this conversation; your reply here stays here, unsent"
+                  onClick={() => {
+                    onAsk(threadOf(view.card.id, c));
+                  }}
+                >
+                  Ask your agent
+                </button>
+              )}
             </div>
           </article>
         );

@@ -13,10 +13,11 @@ import type {
   Reviewer,
   SettingsView,
 } from "../../src/types.ts";
+import { COORDINATOR_NAME } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
 import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
-import { keysHeld } from "./drafts.ts";
+import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop } from "./theme.ts";
 import {
   DEFAULT_OPEN,
@@ -39,7 +40,7 @@ import {
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
-import { Chat, type About, type Thread } from "./components/Chat.tsx";
+import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
@@ -142,7 +143,8 @@ export function App() {
   const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
   const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
   const [asking, setAsking] = useState<About | null>(null); // your chat with the coordinator, open
-  const [thread, setThread] = useState<Thread | null>(null); // the conversation you were last on in a review
+  const [spot, setSpot] = useState<Spot | null>(null); // where in the open review you last were
+  const [askWaiting, setAskWaiting] = useState(false); // the open review's latest ask is unanswered (Review says, and unsays it as it goes)
   const rulesDirty = useRef(false);
 
   const filterRef = useRef<HTMLInputElement>(null);
@@ -235,9 +237,9 @@ export function App() {
     const on = () => {
       const next = parseRoute(location.hash);
       setRoute(next);
-      setThread(null); // a review you come back to asks about the PR until you pick a conversation again
+      setSpot(null); // a review you come back to asks about the PR until you pick a spot in it again
       // Your chat follows you into another PR's review, and closes when you leave for any other page.
-      setAsking((a) => (a && next.name === "review" ? (a.item === next.id ? a : { item: next.id, thread: null }) : null));
+      setAsking((a) => (a && next.name === "review" ? (a.item === next.id ? a : { item: next.id, spot: null }) : null));
     };
     window.addEventListener("hashchange", on);
     return () => {
@@ -816,21 +818,43 @@ export function App() {
     }
   }
 
-  // t: your chat with the coordinator, about what you're on: the review's PR and its conversation, a row, or nothing.
-  function openAsk(id?: string, t?: Thread) {
+  // t: your chat with your agent, about what you're on: the review's PR and the spot you were last on, a row, or nothing.
+  function openAsk(id?: string, s?: Spot) {
+    // A + box's blur lets the keys go a frame later; one Pierre draws again meanwhile would take focus back from the chat.
+    holdKeys(false);
     const r = routeRef.current;
-    const item = id ?? (r.name === "review" ? r.id : r.name === "inflight" ? laneCur?.card.id : r.name === "settings" ? null : current?.id);
+    const item =
+      id ??
+      (r.name === "review"
+        ? r.id
+        : r.name === "inflight"
+          ? laneCur?.card.id
+          : r.name === "settings"
+            ? null
+            : r.name === "inquiry"
+              ? (view?.inquiries.find((q) => q.id === r.id)?.item_id ?? null)
+              : current?.id);
     // Drawn and focused at once: a key typed right after t lands in the box, never on the page, where a approves.
     flushSync(() => {
       setCommenting(null);
-      setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
+      if (s) setSpot(s);
+      setAsking({ item: item ?? null, spot: s ?? (r.name === "review" && spot?.item === item ? spot : null) });
     });
     const box = document.querySelector<HTMLTextAreaElement>(".chat-input");
     box?.focus();
     box?.setSelectionRange(box.value.length, box.value.length); // a kept draft carries on at its end
   }
 
-  // Merging's keys: enter review, o GitHub, b back to desk, t ask the coordinator.
+  // One step wider: from a spot to its PR, or from an item to nothing in particular.
+  function widen() {
+    flushSync(() => {
+      if (asking?.spot) setSpot(null);
+      setAsking((a) => a && (a.spot ? { ...a, spot: null } : { item: null, spot: null }));
+    });
+    document.querySelector<HTMLTextAreaElement>(".chat-input")?.focus();
+  }
+
+  // Merging's keys: enter review, o GitHub, b back to desk, t ask your agent.
   function laneRun(r: InflightRow, k: string) {
     const c = r.card;
     setLaneSel(c.id);
@@ -1144,6 +1168,15 @@ export function App() {
           onHelp={() => {
             setHelp(true);
           }}
+          ask={
+            !asking &&
+            !!overview?.agent &&
+            !(route.name === "inquiry" && view?.inquiries.find((q) => q.id === route.id)?.from === COORDINATOR_NAME)
+          }
+          waiting={route.name === "review" && askWaiting}
+          onAsk={() => {
+            openAsk();
+          }}
           inert={help}
         />
         <main className="main" inert={help}>
@@ -1263,17 +1296,18 @@ export function App() {
                 go(reviewQuestion ? { name: "inquiry", id: reviewQuestion } : { name: reviewFrom });
               }}
               chat={!!asking}
-              onChat={(show) => {
-                if (show) openAsk();
-                else setAsking(null);
+              agent={!!overview?.agent}
+              onCloseChat={() => {
+                setAsking(null);
               }}
-              onAsk={(t) => {
-                openAsk(t.item, t);
+              onAsk={(s) => {
+                openAsk(s.item, s);
               }}
-              onThread={(t) => {
-                setThread(t);
-                setAsking((a) => (a && a.item === t.item ? { ...a, thread: t } : a));
+              onSpot={(s) => {
+                setSpot(s);
+                setAsking((a) => (a && (!s || a.item === s.item) ? { ...a, spot: s } : a));
               }}
+              onAskWaiting={setAskWaiting}
             />
           )}
           {route.name === "inquiry" && !broken && (
@@ -1315,11 +1349,14 @@ export function App() {
       </div>
       {asking && (
         <Chat
-          key={asking.item ?? ""} // a thread change keeps your draft; the head follows it
+          key={asking.item ?? ""} // a new spot keeps your draft; the line above the box follows it
           about={asking}
+          review={route.name === "review"}
+          questions={(view?.inquiries ?? []).filter((q) => q.from === COORDINATOR_NAME && q.item_id === asking.item && !answered.has(q.id))}
           loads={loads}
           now={now}
           inert={help}
+          onWiden={widen}
           onClose={() => {
             setAsking(null);
           }}
@@ -1365,6 +1402,7 @@ export function App() {
           x={menuAt.x}
           y={menuAt.y}
           me={me}
+          agent={!!overview?.agent}
           run={run}
           act={(c, a, until) => {
             void act(c, a, until);
