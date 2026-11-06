@@ -23,6 +23,12 @@ type Raw =
   | { t: "ol"; start: number; items: string[][] }
   | { t: "pre"; text: string; info: string };
 
+// Copy's text: a fence longer than any backtick run opening a line inside, since GitHub ends a block on one as long.
+export function fencedCopy(text: string, info: string): string {
+  const f = "`".repeat(Math.max(3, ...[...text.matchAll(/^ {0,3}(`+)/gm)].map((m) => m[1]!.length + 1)));
+  return `${f}${info}\n${text}\n${f}`;
+}
+
 export function blocks(text: string): Block[] {
   const raw: Raw[] = [];
   let fence: string[] | null = null;

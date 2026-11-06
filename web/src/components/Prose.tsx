@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { copyText } from "../format.ts";
-import { blocks, type Block, type Span } from "../prose.ts";
+import { blocks, fencedCopy, type Block, type Span } from "../prose.ts";
 
 // An agent's words drawn from web/src/prose.ts: React elements only, never HTML, never an image.
 export function Prose({ text }: { text: string }) {
@@ -25,8 +25,6 @@ function block(b: Block): ReactNode {
   return b.t === "ul" ? <ul>{items}</ul> : <ol start={b.start}>{items}</ol>;
 }
 
-const FENCE = "```";
-
 // A code block, and a quiet Copy that keeps its fence: a ```suggestion pasted on GitHub is a suggestion there.
 function Pre({ text, info }: { text: string; info: string }) {
   const [said, setSaid] = useState("Copy");
@@ -42,7 +40,7 @@ function Pre({ text, info }: { text: string; info: string }) {
         onClick={() => {
           void (async () => {
             try {
-              await copyText(`${FENCE}${info}\n${text}\n${FENCE}`);
+              await copyText(fencedCopy(text, info));
               setSaid("Copied");
             } catch {
               setSaid("Couldn't copy: select it instead");

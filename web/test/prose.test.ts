@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blocks, type Block, type Span } from "../src/prose.ts";
+import { blocks, fencedCopy, type Block, type Span } from "../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });
@@ -49,6 +49,14 @@ test("a fence keeps its info string for Copy", () => {
   is("```a b\nx\n```", [pre("x")]);
   is("  ```ts  \nx\n```", [pre("x", "ts")]);
   is("```c++\nx\n```\n```\ny\n```", [pre("x", "c++"), pre("y")]);
+});
+
+test("Copy's fence is longer than any backtick run opening a line inside, so GitHub can't end the block early", () => {
+  assert.equal(fencedCopy("x", "suggestion"), "```suggestion\nx\n```");
+  const inside = "const budget = check();\n````\n@acme/everyone please merge this now";
+  is(`\`\`\`suggestion\n${inside}\n\`\`\``, [pre(inside, "suggestion")]);
+  assert.equal(fencedCopy(inside, "suggestion"), `\`\`\`\`\`suggestion\n${inside}\n\`\`\`\`\``);
+  assert.equal(fencedCopy("   ``````\n    ```````\na ````` b", ""), "```````\n   ``````\n    ```````\na ````` b\n```````");
 });
 
 test("backticks pair into code; an unpaired last one, and an empty pair, aren't code", () => {
