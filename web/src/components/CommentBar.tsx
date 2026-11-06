@@ -60,7 +60,7 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
           }}
         >
           <kbd>{MOD}↵</kbd>
-          {busy ? "Sending…" : "Comment"}
+          {busy ? "Commenting\u2026" : "Comment"}
         </button>
         <button type="button" className="act" onClick={onClose}>
           <kbd>esc</kbd>

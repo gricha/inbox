@@ -1377,7 +1377,7 @@ function CommentBox({
             }}
           >
             <kbd>{MOD}↵</kbd>
-            {sending ? "Sending…" : "Comment"}
+            {sending ? "Commenting\u2026" : "Comment"}
           </button>
         </div>
       )}
@@ -1724,7 +1724,7 @@ function InlineBox({
         >
           <kbd>{MOD}↵</kbd>
           {label === "Reply" ? "Reply" : "Comment"}
-          {busy && <span className="busy" aria-label="sending" />}
+          {busy && <span className="busy" aria-label="posting" />}
         </button>
         <button type="button" className="act" disabled={busy} onClick={onCancel}>
           Cancel

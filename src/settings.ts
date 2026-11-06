@@ -28,7 +28,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "github",
     title: "GitHub",
-    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR, send a reply or mark your own draft ready for review.",
+    help: "Read through the gh CLI's login (or GITHUB_TOKEN). Review Desk writes to GitHub only when you approve a PR, post a reply or comment, or mark your own draft ready for review.",
   },
   {
     id: "queue",
