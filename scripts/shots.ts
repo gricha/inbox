@@ -493,6 +493,7 @@ const SHOTS: Shot[] = [
       await review("acme/api#4127")(page);
       await (await plusBy(page, 23)).click();
       await page.locator(".rv-inline textarea").waitFor();
+      await page.waitForFunction(`document.activeElement?.matches(".rv-inline textarea")`); // Pierre slots the box in a frame later
       await page.keyboard.type("Return how many rows the stream had read when the budget ran out?");
       await page.waitForTimeout(300);
       // Only its GitHub send is a shape: Cancel and Ask your agent are text.
