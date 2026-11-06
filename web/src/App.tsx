@@ -91,7 +91,8 @@ const CHORDS: Record<string, Route> = {
   s: { name: "settings", section: "github" },
   q: { name: "queue" },
   m: { name: "inflight" },
-  w: { name: "waiting" },
+  b: { name: "blocked" },
+  w: { name: "blocked" }, // Waiting's old key
 };
 // g l, g f, g h, g x: Later, with that group open; g a (or g d): the Archive.
 const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared", a: "archive", d: "archive" };
@@ -339,12 +340,12 @@ export function App() {
   }, [route]);
   const onLater = route.name === "later";
   const onArchive = route.name === "archive";
-  const onWaiting = route.name === "waiting";
+  const onBlocked = route.name === "blocked";
   const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
   // j/k and the selection go through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
-    const keys = PAGE_GROUPS[list === "later" || list === "archive" || list === "waiting" ? list : "queue"];
+    const keys = PAGE_GROUPS[list === "later" || list === "archive" || list === "blocked" ? list : "queue"];
     return groups.filter((g) => keys.includes(g.key));
   }, [groups, list]);
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
@@ -429,7 +430,7 @@ export function App() {
   const onRow =
     route.name === "inflight"
       ? (laneCur?.card ?? null)
-      : route.name === "queue" || route.name === "later" || route.name === "archive" || route.name === "waiting"
+      : route.name === "queue" || route.name === "later" || route.name === "archive" || route.name === "blocked"
         ? current
         : null;
   const restingPr = onRow?.kind === "pr" ? onRow.id : null;
@@ -480,7 +481,7 @@ export function App() {
 
   // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
-    if (!selected || !["queue", "later", "waiting", "archive"].includes(route.name) || stay.current === selected) return;
+    if (!selected || !["queue", "later", "blocked", "archive"].includes(route.name) || stay.current === selected) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
     const head = el?.closest(".group")?.querySelector(".group-head");
     if (!el) return;
@@ -564,10 +565,10 @@ export function App() {
   }
 
   // A row leaving the list: the next one takes the cursor, it fades out, and j/k skip it until unhide().
-  // `ends`: a close or a merge, which ends a wait too; anything else you do on Waiting leaves the row where it is.
+  // `ends`: a close or a merge, which ends a wait too; anything else you do on Blocked leaves the row where it is.
   function hide(c: Card, ends = false) {
     setSnoozeFor(null);
-    if (list === "waiting" && !ends) return;
+    if (list === "blocked" && !ends) return;
     const i = flat.findIndex((x) => x.id === c.id);
     if (i >= 0) setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
     if (expanded === c.id) setExpanded(null);
@@ -617,7 +618,7 @@ export function App() {
     write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>,
     ends = false,
   ): Promise<boolean> {
-    // Sent already from this review; a list's row that stays (Waiting's) can take the next write.
+    // Sent already from this review; a list's row that stays (Blocked's) can take the next write.
     if (actedRef.current[c.id] && routeRef.current.name === "review") return false;
     const mark = (to: Acted | null) => {
       actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
@@ -1023,7 +1024,7 @@ export function App() {
     } else if (k === "Escape") {
       if (expanded) setExpanded(null);
       else if (filter) setFilter("");
-      else if (onLater || onArchive || onWaiting) go({ name: "queue" });
+      else if (onLater || onArchive || onBlocked) go({ name: "queue" });
     } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
       e.preventDefault();
       move(k === "j" || k === "ArrowDown" ? 1 : -1);
@@ -1230,12 +1231,12 @@ export function App() {
               toggle={toggleGroup}
             />
           )}
-          {route.name === "waiting" && !broken && (
+          {route.name === "blocked" && !broken && (
             <Later
               view={view}
               groups={groups}
-              keys={PAGE_GROUPS.waiting}
-              empty="Nothing of yours waits on anyone else."
+              keys={PAGE_GROUPS.blocked}
+              empty="Nothing is blocked."
               ctx={ctx}
               filter={filter}
               toggle={toggleGroup}

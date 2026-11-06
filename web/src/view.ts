@@ -23,7 +23,7 @@ export type Route =
   | { name: "review"; id: string }
   | { name: "inquiry"; id: string } // an agent's question
   | { name: "later" }
-  | { name: "waiting" } // your PRs whose next move is someone else's
+  | { name: "blocked" } // what can't move until something else happens
   | { name: "inflight" }
   | { name: "archive" }
   | { name: "settings"; section: string };
@@ -35,7 +35,7 @@ export interface Acted {
 }
 
 // A list page a review was opened from, and goes back to.
-export type ListPage = "queue" | "later" | "waiting" | "inflight" | "archive";
+export type ListPage = "queue" | "later" | "blocked" | "inflight" | "archive";
 // The queue is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is under
 // Later; what's done (yours, or resolved by the world) is in the Archive.
 export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "waiting_reviews" | "waiting_prs";
@@ -60,11 +60,11 @@ export const isInquiry = (id: string | null) => !!id?.startsWith("ask:");
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
 // The groups each list page shows.
-export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "waiting", GroupKey[]> = {
+export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "blocked", GroupKey[]> = {
   queue: ["queue"],
   later: SORTED_AWAY,
   archive: ["archive"],
-  waiting: ["waiting_reviews", "waiting_prs"],
+  blocked: ["waiting_reviews", "waiting_prs"],
 };
 
 export function parseRoute(hash: string): Route {
@@ -73,7 +73,7 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };
-  if (hash === "#/waiting") return { name: "waiting" };
+  if (hash === "#/blocked" || hash === "#/waiting") return { name: "blocked" };
   if (hash === "#/archive") return { name: "archive" };
   const page = /^#\/(review|inquiry)\/(.+)$/.exec(hash);
   if (page) {
@@ -388,7 +388,7 @@ export const stops = (groups: Group[], leaving: Set<string>): string[] =>
     g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [foldOf(g.key)] : [])] : [],
   );
 
-// `ends`: a close or a merge, which takes it off Waiting too; what else you do leaves its wait in place.
+// `ends`: a close or a merge, which takes it off Blocked too; what else you do leaves its wait in place.
 export function removeCard(v: QueueView, id: string, ends = false): QueueView {
   const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);
   const s = v.sections;

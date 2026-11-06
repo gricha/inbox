@@ -180,11 +180,14 @@ test("the queue shows one part at a time, each part's Now before its Today, in t
   );
 });
 
-test("Waiting is a page of its own: what the desk says waits on reviews, then on other PRs, open, each row saying on whom", () => {
+test("Blocked is the Waiting page renamed: #/blocked and #/waiting open it", () => {
+  assert.deepEqual(parseRoute("#/blocked"), { name: "blocked" });
+  assert.deepEqual(parseRoute("#/waiting"), { name: "blocked" });
+  assert.equal(routeHash({ name: "blocked" }), "#/blocked");
+  assert.deepEqual(PAGE_GROUPS.blocked, ["waiting_reviews", "waiting_prs"]);
   const q = queue();
   q.waiting = { reviews: [card("acme/web#20", { why: "waits on a review from dana" })], prs: [card("acme/web#21")] };
-  assert.deepEqual(PAGE_GROUPS.waiting, ["waiting_reviews", "waiting_prs"]);
-  const g = groupsOf(q, DEFAULT_OPEN, "").filter((x) => PAGE_GROUPS.waiting.includes(x.key));
+  const g = groupsOf(q, DEFAULT_OPEN, "").filter((x) => PAGE_GROUPS.blocked.includes(x.key));
   assert.deepEqual(
     g.map((x) => [x.key, x.label, x.open, x.variant, x.cards.map((c) => c.id)]),
     [
@@ -192,8 +195,6 @@ test("Waiting is a page of its own: what the desk says waits on reviews, then on
       ["waiting_prs", "On other PRs", true, "waiting", ["acme/web#21"]],
     ],
   );
-  assert.deepEqual(parseRoute("#/waiting"), { name: "waiting" });
-  assert.equal(routeHash({ name: "waiting" }), "#/waiting");
   assert.deepEqual(
     removeCard(q, "acme/web#20").waiting.reviews.map((c) => c.id),
     ["acme/web#20"],
