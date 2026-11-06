@@ -973,6 +973,7 @@ export function App() {
     // Holding a key must not mark card after card done; only movement repeats.
     if (e.repeat && !["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) return;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    if (t.closest(".chat") && e.key.startsWith("Arrow")) return; // they scroll the chat's log
     // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
     if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
     const k = e.key;
