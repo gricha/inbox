@@ -687,9 +687,10 @@ kbd {
   border-top: 1px solid var(--rule);
 }
 
-/* A tight table drops the stage column first, then who it's from; a review still shows both. */
+/* A tight table drops the stage column and a question's sender first, then who it's from; a review still shows both. */
 @container (width < 760px) {
-  .line-row .line-stage {
+  .line-row .line-stage,
+  .line .inq-from {
     display: none;
   }
 }
@@ -1100,6 +1101,15 @@ kbd {
 .line-ask + .line-more,
 .line-more + .line-cta {
   margin-left: -8px;
+}
+
+/* With the chat open, t and the chat stand for a row's Ask, so the row keeps its title and repo. */
+.app:has(> .chat) .line .line-ask {
+  display: none;
+}
+
+.app:has(> .chat) .line-ask + :is(.line-cta, .line-more) {
+  margin-left: auto;
 }
 
 .dim .line-title {
