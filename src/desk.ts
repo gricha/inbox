@@ -899,8 +899,10 @@ export class Desk {
       const queries = this.gh.queriesFor(loaded, board);
       const ids = new Set<string>();
       for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
+      // A coordinator's desk_add too: its why says what it wants, so it doesn't vanish once its pin stops counting as yours.
       if (board === ADDED)
-        for (const [id, by] of pins) if (by === "them" && ![...boards.values()].some((b) => b.result.placements.has(id))) ids.add(id);
+        for (const [id, by] of pins)
+          if ((by === "them" || handed.has(id)) && ![...boards.values()].some((b) => b.result.placements.has(id))) ids.add(id);
       // A kept item is only there to show as resolved.
       const list = [...ids]
         .map((id) => entries.get(id))
@@ -1834,7 +1836,8 @@ export class Desk {
     // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
     const before = this.store.state(id);
     this.store.putState({ ...before, ...ACTIVE, pinned: true });
-    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString());
+    // The coordinator's desk_add is its opinion, which Claude weighs: no floor, as the old desk-run coordinator's pins.
+    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), who === COORDINATOR ? "coordinator" : undefined);
     if (note !== null)
       this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
     this.changed();

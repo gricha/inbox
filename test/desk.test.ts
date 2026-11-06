@@ -1075,3 +1075,34 @@ test("a dependency closed without merging puts your PR in Today: needs X, closed
     [["acme/web#1", "needs api#66, closed without merging"]],
   );
 });
+
+test("the coordinator's desk_add is its opinion: no Today floor; on no other board it's on Added; anyone else's desk_add is your pin", async (c) => {
+  const needs = (n: number) => myPr(n, { ci: "green", requires: ["acme/web#100"] });
+  const t = await setup([myPr(100, { ci: "green" }), needs(1), needs(2)], { settings: QUIET });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const coordinator = "Review Desk coordinator";
+  await t.desk.add("acme/web#1", "waits on web#100: no review in 3 days", coordinator);
+  let q = t.desk.queue();
+  assert.equal(
+    q.sections.today.some((x) => x.id === "acme/web#1"),
+    false,
+    "no floor: the rule's Blocked keeps it",
+  );
+  assert.deepEqual(
+    q.sections.blocked.filter((x) => x.id === "acme/web#1").map((x) => x.handoff),
+    [{ why: "waits on web#100: no review in 3 days", from: coordinator }],
+  );
+  t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
+  await t.desk.add("acme/api#6", "carol's fix for the flaky retry", coordinator);
+  await t.desk.add("acme/web#2", "needs your call on the retry budget", "seer fix");
+  q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.today.map((x) => [x.id, x.board, x.why]),
+    [
+      ["acme/api#6", "added", "you added it"],
+      ["acme/web#2", "acme-mine", "blocked by web#100, which waits on a review from dana"],
+    ],
+    "on no other board it's on Added; anyone else's desk_add is your pin, which lifts it to Today",
+  );
+});
