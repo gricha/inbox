@@ -9,14 +9,14 @@ import { SkRows } from "./Skeleton.tsx";
 const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", hidden: "g h", cleared: "g x", archive: "g a" };
 
 const PART: Record<QueueGroup, string> = {
-  back: "Handed back to you",
+  back: "Back to you",
   review: "Waiting on your review",
   other: "Issues and other PRs",
   mine: "Your PRs",
 };
 // What the fold line says each part has behind it.
 const FOLDED: Record<QueueGroup, string> = {
-  back: "handed back",
+  back: "back to you",
   review: "waiting on your review",
   other: "issues and other PRs",
   mine: "of your PRs",

@@ -41,7 +41,8 @@ export function RowMenu({ card, x, y, me, run, act, github, reopen, onClose }: R
     [key(card.kind === "pr" ? "Review" : "Open", "enter"), key("Open on GitHub", "o")],
     [
       ...(card.cta === "ready" ? [key("Ready for review", "a")] : []),
-      ...(mine && !card.resolved && !card.draft && !card.inflight ? [key("Hand off for merge", "m")] : []),
+      ...(card.cta === "reviewers" ? [key("Add reviewers", "a")] : []),
+      ...(mine && !card.resolved && !card.draft && !card.inflight && card.cta !== "reviewers" ? [key("Hand off for merge", "m")] : []),
       ...(card.inflight ? [key("Back to the desk", "b")] : []),
       ...(card.inflight
         ? []

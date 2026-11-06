@@ -27,6 +27,17 @@ test("PR by someone else with a bot-added team request (review fragment)", () =>
     { reviewer: "platform-core", type: "team", codeowner: true },
     { reviewer: "octo-dev", type: "user", codeowner: false },
   ]);
+  assert.equal(it.review_requests_hidden, undefined);
+  // A bot asked to review (Copilot's) says so.
+  const bot = { asCodeOwner: false, requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } };
+  const raw = fixture("pr-review");
+  const withBot = normalize({ ...raw, reviewRequests: { nodes: [...(raw.reviewRequests?.nodes ?? []), bot] } }, NOW);
+  assert.deepEqual(withBot.review_requests.at(-1), {
+    reviewer: "copilot-pull-request-reviewer",
+    type: "user",
+    bot: true,
+    codeowner: false,
+  });
   assert.deepEqual(it.request_events, [
     { at: "2026-03-01T09:05:00Z", actor: "maple", actor_bot: false, reviewer: "octo-dev", reviewer_type: "user" },
     { at: "2026-03-01T10:00:00Z", actor: "triage-helper", actor_bot: true, reviewer: "platform-core", reviewer_type: "team" },
@@ -134,8 +145,9 @@ test("issue gets zero values for PR-only fields", () => {
   assert.deepEqual([it.threads_total, it.threads_unresolved], [0, 0]);
 });
 
-test("deleted accounts become ghost; null reviewers are dropped", () => {
+test("deleted accounts become ghost; null reviewers are dropped, but counted: someone was asked", () => {
   const it = normalize(fixture("pr-ghost"), NOW);
+  assert.equal(it.review_requests_hidden, 1);
   assert.equal(it.author, "ghost");
   assert.equal(it.author_bot, false);
   assert.equal(it.state, "merged");

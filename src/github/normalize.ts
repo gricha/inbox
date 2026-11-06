@@ -129,7 +129,9 @@ const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => a.at.local
 // An agent that opens PRs for people (Junior) ends its description with "via @login." or "via Some Name.": the last such line.
 const viaOf = (text: string) => [...text.matchAll(/^via (@?[^\n]{1,60}?)\.?[ \t]*$/gm)].at(-1)?.[1]?.trim() ?? "";
 const reviewer = (r: Reviewer) =>
-  r.__typename === "Team" ? { reviewer: r.slug!, type: "team" as const } : { reviewer: r.login ?? "ghost", type: "user" as const };
+  r.__typename === "Team"
+    ? { reviewer: r.slug!, type: "team" as const }
+    : { reviewer: r.login ?? "ghost", type: "user" as const, ...(r.__typename === "Bot" && { bot: true }) };
 
 export function toHit(n: RawHit): SearchHit {
   return {
@@ -202,6 +204,9 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
       .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),
+    ...(n.reviewRequests?.nodes.some((r) => !r.requestedReviewer) && {
+      review_requests_hidden: n.reviewRequests.nodes.filter((r) => !r.requestedReviewer).length,
+    }),
     request_events: byAt(
       (n.timelineItems?.nodes ?? [])
         .filter((e) => e.requestedReviewer)

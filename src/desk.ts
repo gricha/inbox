@@ -98,6 +98,8 @@ const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.c
 const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_LINE = 300; // a hand-back's why, a note, a hand-off's why
+const UNASKED = "nobody's asked to review it: add reviewers";
+const UNASKED_AFTER = 10 / 60; // hours: a workflow or CODEOWNERS asks someone within moments of a PR opening or going ready
 const MAX_FROM = 60; // which task sends it, as an inquiry's from
 const MAX_REPLY = 5_000;
 // What each More menu write does to % (the item), and what it did.
@@ -135,7 +137,8 @@ interface Snapshot {
   reviews: Map<string, AiReview>;
   boards: Map<string, { result: BoardResult; queries: string[]; unfetched: string[]; error?: string }>;
   best: Map<string, Placement>; // best placement across boards, active items only
-  needs: Map<string, string>; // PRs the coordinator handed back: why, at the top of the queue
+  needs: Map<string, string>; // PRs the coordinator handed back, or ready ones nobody's asked to review: why, at the top
+  unasked: Set<string>; // your ready PRs nobody's asked to review: their call to action is Add reviewers
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
   auto: Map<string, string>; // an automation's pin: "<its name>: <its why>"
   handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
@@ -619,6 +622,7 @@ export class Desk {
   synced(): void {
     this.changed();
     this.rebaseConflicts();
+    this.handBackUnasked();
     this.notifyNew();
     this.pumpAi();
     const kept = new Set(this.store.itemMeta().keys());
@@ -924,6 +928,22 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
     }
+    // Your ready PR nobody's asked to review: Add reviewers is its call to action, as m refuses it. Past the moments a
+    // workflow takes, while a board lists it and it isn't quiet as Later counts it, it's back on top of your desk too.
+    const asking = new Set<string>();
+    const quietHours = this.settings["queue.quiet_days"] * 24;
+    for (const e of entries.values()) {
+      const it = e.item;
+      const sig = e.analysis.signals;
+      if (!sig.me.author || !sig.pr.unasked || e.inflight || e.status !== "active" || e.resolved) continue;
+      asking.add(it.id);
+      if (needs.has(it.id) || !this.stuckUnasked(e)) continue; // handed back: its reason says so
+      const quiet = quietHours > 0 && !e.state.pinned && sig.item.updated_hours >= quietHours;
+      if (quiet || ![...boards.values()].some((b) => b.result.placements.has(it.id))) continue;
+      needs.set(it.id, UNASKED);
+      const board = [...boards.values()].map((b) => b.result.placements.get(it.id)?.board).find(Boolean) ?? "";
+      best.set(it.id, { board, bucket: "now", rule_bucket: "now", rule: null, why: UNASKED, trace: [] });
+    }
     return {
       rev,
       at: now.getTime(),
@@ -932,6 +952,7 @@ export class Desk {
       boards,
       best,
       needs,
+      unasked: asking,
       pins,
       auto,
       handed,
@@ -1001,6 +1022,7 @@ export class Desk {
       // A red draft needs finishing first; its why says so.
       // Red CI too: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
+      ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
@@ -1101,7 +1123,7 @@ export class Desk {
         .activity({ after: 0, limit: 20, item: it.id, latest: true })
         .find((x) => x.kind === "commented" || x.kind === "reviewed");
       if (said) c.last_event = said;
-      if (this.replyOnly(e)) c.cta = "reply";
+      if (this.replyOnly(e) && c.cta !== "reviewers") c.cta = "reply"; // asking someone comes first
     }
     if (it.kind === "issue") {
       const recent = this.store.activity({ after: 0, limit: 20, item: it.id, latest: true });
@@ -1404,7 +1426,7 @@ export class Desk {
     // A PR the desk would have reviewed on its own says why it didn't.
     const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
     return {
-      card: this.replyOnly(e) ? { ...d.card, cta: "reply" } : d.card,
+      card: this.replyOnly(e) && d.card.cta !== "reviewers" ? { ...d.card, cta: "reply" } : d.card,
       item: d.item,
       handoff_prompt: d.handoff_prompt,
       files,
@@ -1762,6 +1784,8 @@ export class Desk {
         if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
         // Ready for review is yours, so a draft in Merging would wait on you there.
         if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first (a)`);
+        // Nobody would review it, so the coordinator would wait on nothing.
+        if (entry.analysis.signals.pr.unasked) throw new DeskError(409, `nobody's asked to review ${id}: add reviewers first (a)`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false });
@@ -2012,19 +2036,61 @@ export class Desk {
 
   // desk_hand_back: the coordinator can't realistically get it merged. The PR leaves Merging for your desk with the line as its
   // why, on top. Nothing goes to GitHub.
-  handBack(ref: string, why: string): { reason: string } {
+  // `by`: the desk itself hands back a PR nobody's asked to review (handBackUnasked).
+  handBack(ref: string, why: string, by: "agent" | "desk" = "agent"): { reason: string } {
     const e = this.inflightEntry(ref);
     const id = e.item.id;
     const reason = this.line(why, "reason");
     const before = this.store.state(id);
     const at = this.now().toISOString();
     this.store.putState({ ...before, inflight_at: null });
-    this.store.logAction(id, "takeback", before, at, "agent");
+    this.store.logAction(id, "takeback", before, at, by);
     this.store.set(`sitter:${id}`, { ...this.merging(id), handback: { reason, at } });
-    this.log(`an agent handed ${id} back: ${reason}`);
+    this.log(`${by === "desk" ? "the desk" : "an agent"} handed ${id} back: ${reason}`);
     this.changed();
     this.notifyNew();
     return { reason };
+  }
+
+  // A PR in Merging nobody's asked to review (its request taken back, say): the coordinator can't get it reviewed, so it
+  // comes back to you to ask someone.
+  handBackUnasked(): void {
+    if (!this.loaded) return;
+    for (const e of this.snapshot().entries.values())
+      if (e.inflight && e.status === "active" && this.stuckUnasked(e)) this.handBack(e.item.id, UNASKED, "desk");
+  }
+
+  // Your PR nobody's asked to review, past the moments a workflow or CODEOWNERS takes to ask someone.
+  stuckUnasked(e: Entry): boolean {
+    const sig = e.analysis.signals;
+    return sig.me.author && sig.pr.unasked && sig.item.updated_hours >= UNASKED_AFTER;
+  }
+
+  // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (a in its review), one of the desk's GitHub
+  // writes, on your keypress. Your part is done, so it leaves your desk until someone reviews.
+  async askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Promise<void> {
+    const e = this.pr(ref);
+    const id = e.item.id;
+    if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
+    if (e.item.state !== "open" || e.item.draft) throw new DeskError(409, `${id} isn't open and ready for review`);
+    if (!ask.users.length && !ask.teams.length) throw new DeskError(400, "pick someone to ask");
+    if (!this.writer) throw new DeskError(409, "asking for reviews isn't available in this desk");
+    if (this.approving.has(id)) throw new DeskError(409, `already asking on ${id}`);
+    this.approving.add(id);
+    try {
+      try {
+        await this.writer.requestReviews(e.item.node_id, ask.users, ask.teams);
+      } catch (err) {
+        throw new DeskError(502, `GitHub didn't ask for the reviews: ${(err as Error).message}`);
+      }
+      this.store.logWrite(id, "request_reviews", this.now().toISOString());
+      const n = ask.users.length + ask.teams.length;
+      this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+      this.doneAfterWrite(id);
+    } finally {
+      this.approving.delete(id);
+      void this.gh.refresh(id);
+    }
   }
 
   asks(item?: string): Ask[] {
@@ -2229,7 +2295,7 @@ export class Desk {
     this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
     // Answering was all it asked of you, and nobody else waits on you there: it's done.
     const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
-    const only = this.replyOnly(e);
+    const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
     this.convos.forget(id);
     if (only && last) this.doneAfterWrite(id);
     this.changed();

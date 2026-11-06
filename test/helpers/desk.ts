@@ -16,8 +16,17 @@ export const reviewAsk = (n: number, o: Partial<Item> = {}) =>
   });
 export const teamPing = (n: number) =>
   makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+// Asked of dana: a ready PR nobody's asked to review comes back to you (pr.unasked), which few tests are about.
 export const myPr = (n: number, o: Partial<Item> = {}) =>
-  makeItem({ number: n, repo: "acme/web", author: "me", head_author: "me", ci: "red", ...o });
+  makeItem({
+    number: n,
+    repo: "acme/web",
+    author: "me",
+    head_author: "me",
+    ci: "red",
+    review_requests: [{ reviewer: "dana", type: "user", codeowner: false }],
+    ...o,
+  });
 
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
 // `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer).

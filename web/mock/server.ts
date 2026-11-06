@@ -1329,6 +1329,7 @@ function signals(r: Rec): Signals {
       unresolved_threads: s.threads?.[0] ?? 0,
       base: pr ? (s.base ?? "main") : "",
       stacked: pr && (s.base ?? "main") !== "main",
+      unasked: false, // the shots show it with queueAs and reviewAs
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
@@ -3141,6 +3142,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     TALK.set(r.id, talk);
     bump();
     return { ok: true, url: c.url };
+  }
+  // Reviewers for your ready PR nobody's asked: the mock only remembers that you acted.
+  const askingFor = /^\/api\/review\/(.+)\/reviewers$/.exec(url.pathname);
+  if (askingFor && req.method === "POST") {
+    const r = resolve(decodeURIComponent(askingFor[1]!));
+    const { users, teams } = await readBody(req);
+    if (r.seed.author !== ME) throw new HttpError(409, `${r.id} isn't your PR`);
+    if (![users, teams].flat().filter(Boolean).length) throw new HttpError(400, "pick someone to ask");
+    bump();
+    return { ok: true };
   }
   // A comment on the PR: the mock only remembers that you acted.
   const commented = /^\/api\/review\/(.+)\/comment$/.exec(url.pathname);

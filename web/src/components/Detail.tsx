@@ -273,12 +273,13 @@ export function HandKey({
   run,
   primary,
 }: {
-  card: Pick<Card, "id" | "inflight" | "draft">;
+  card: Pick<Card, "id" | "inflight" | "draft" | "cta">;
   run: (k: string) => void;
   primary?: boolean;
 }) {
   if (card.inflight) return <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
   if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
+  if (card.cta === "reviewers") return null; // nor one nobody's asked to review: Ask reviewers first
   return (
     <KeyButton
       k="m"

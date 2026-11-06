@@ -393,3 +393,35 @@ test("an issue on your desk takes your comment, from the desk's window only, and
   assert.equal((await post({ body: "One more thing." }, desk)).status, 409, "closed: as a PR's review offers none");
   assert.equal(w.calls.length, 1);
 });
+
+test("answering a comment on your PR nobody's asked to review leaves Add reviewers on your desk", async (c) => {
+  const w = fakeWriter();
+  const one = (n: number): PrContext => ({
+    threads: [thread(`PRRT_${n}`, [say(`c${n}`, "azulus", "Do tombstones ever expire?", 3)])],
+    reviews: [],
+    comments: [],
+    commits: [],
+  });
+  const t = await setup(
+    [myPr(3, { ci: "green", review_requests: [], thread_last: azulus }), myPr(4, { ci: "green", thread_last: azulus })],
+    { settings: JUDGE_OFF, desk: { writer: w.writer } },
+  );
+  c.after(t.cleanup);
+  t.gh.contexts.set("PR_acme/web_3", one(3));
+  t.gh.contexts.set("PR_acme/web_4", one(4));
+  await t.desk.sync();
+  const app = createApp(t.desk, 47823);
+  const desk = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
+  const reply = (n: number) =>
+    app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent(`acme/web#${n}`)}/reply`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...desk },
+      body: JSON.stringify({ id: `PRRT_${n}`, body: "After 30 days." }),
+    });
+  await t.desk.reviewView("web#3");
+  await t.desk.reviewView("web#4");
+  assert.equal((await reply(3)).status, 200);
+  assert.equal((await reply(4)).status, 200);
+  assert.deepEqual([t.desk.item("web#3").card.status, t.desk.item("web#3").card.cta], ["active", "reviewers"]);
+  assert.equal(t.desk.item("web#4").card.status, "done", "dana's asked: answering was all it wanted");
+});

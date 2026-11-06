@@ -53,7 +53,8 @@ export interface Item {
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
   merge_method?: "MERGE" | "SQUASH" | "REBASE"; // the repo's default merge method for you; PRs you authored only
-  review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean }[]; // team reviewer = slug
+  review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean; bot?: boolean }[]; // team reviewer = slug; bot: a GitHub App
+  review_requests_hidden?: number; // requests whose reviewer GitHub doesn't show you (a team you can't see): still someone asked
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
   // trusted: the author is a collaborator on the repo (OWNER, MEMBER, COLLABORATOR); absent on items stored before the desk asked
   reviews: { author: string; author_bot: boolean; trusted?: boolean; state: ReviewState; at: string; commit: string }[]; // most recent last; commit = oid reviewed
@@ -117,6 +118,7 @@ export interface Signals {
     unresolved_threads: number;
     base: string;
     stacked: boolean; // its base isn't the repo's default branch
+    unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
     pushed_hours: number;
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
     my_area: boolean; // my_area_files >= 1
@@ -440,8 +442,8 @@ export interface Card {
   next?: string; // your own PR in Now or Today: what to do about it, e.g. "merge conflict with main: m hands it off for merge"
   checks_failed?: string[]; // your own PR in Now or Today: its failing checks' names
   checks_optional?: string[]; // those of them its base branch doesn't require
-  handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged; its why says why
-  cta?: "ready" | "reply"; // the row's one call to action: Ready for review on your own open draft (a a), or Reply on your PR whose only action is answering someone
+  handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
+  cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft (a a), Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
   actions?: GitHubAction[]; // the GitHub writes its More menu (.) offers, as the desk allows them now; absent when none
   involved?: string; // an issue in Now or Today: how you're on it ("assigned to you", "you were mentioned")
   last_event?: ActivityEvent; // an issue in Now or Today: its latest event, for a line of context

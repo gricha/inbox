@@ -399,6 +399,42 @@ const SHOTS: Shot[] = [
   { name: "review-files-folded", go: review("acme/api#4127", ["Z"]) },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
+  // Your ready PR nobody's asked to review: back on top of the queue with Add reviewers.
+  {
+    name: "queue-unasked",
+    go: async (page) => {
+      await fresh(page);
+      await queueAs((q) => {
+        for (const c of [...q.sections.now, ...q.sections.today])
+          if (c.id === "acme/api#3051")
+            Object.assign(c, { cta: "reviewers", handed_back: true, group: "back", why: "nobody's asked to review it: add reviewers" });
+      })(page);
+      await top(page);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    },
+  },
+  // Its review: the reviewers box has the cursor, GitHub's suggestions beside it, Ask reviewers the one to press.
+  {
+    name: "review-unasked",
+    go: async (page) => {
+      await fresh(page);
+      await reviewAs((v) => {
+        if (v.card.id !== "acme/api#3051") return;
+        Object.assign(v.card, { cta: "reviewers", handed_back: true, why: "nobody's asked to review it: add reviewers" });
+        v.item = { ...v.item, review_requests: [] };
+      })(page);
+      await at(`#/review/${encodeURIComponent("acme/api#3051")}`)(page);
+      await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
   // @ opens GitHub's suggested reviewers for your draft.
   {
     name: "review-reviewers",

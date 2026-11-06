@@ -198,6 +198,21 @@ export function createApp(desk: Desk, port: number): Hono {
     await desk.markReady(c.req.param("id"), { users, teams });
     return c.json({ ok: true });
   });
+  // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.
+  app.post("/api/review/:id{.+}/reviewers", async (c) => {
+    ready();
+    if (!fromDesk(c)) throw new DeskError(403, "ask reviewers from the desk's window (a in the PR's review)");
+    const b = await c.req.json<{ users?: unknown; teams?: unknown }>().catch((): { users?: unknown; teams?: unknown } => ({}));
+    const ids = (v: unknown): string[] | null => {
+      if (v === undefined) return [];
+      return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
+    };
+    const users = ids(b.users);
+    const teams = ids(b.teams);
+    if (!users || !teams) throw new DeskError(400, "users and teams are lists of node ids");
+    await desk.askReviewers(c.req.param("id"), { users, teams });
+    return c.json({ ok: true });
+  });
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
   app.post("/api/github", async (c) => {
     ready();

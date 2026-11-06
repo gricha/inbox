@@ -31,6 +31,11 @@ export const FIELDS: FieldDoc[] = [
   { path: "pr.unresolved_threads", type: "number", doc: "unresolved review threads" },
   { path: "pr.base", type: "string", doc: "base branch" },
   { path: "pr.stacked", type: "boolean", doc: "its base isn't the repo's default branch: it's stacked on another PR" },
+  {
+    path: "pr.unasked",
+    type: "boolean",
+    doc: "open and ready for review, but nobody's asked to review it (bots aside) and only bots or its author have reviewed it",
+  },
   { path: "pr.pushed_hours", type: "number", doc: "hours since the latest commit (-1 if unknown)" },
   {
     path: "pr.my_area_files",
@@ -180,6 +185,13 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       unresolved_threads: item.threads_unresolved,
       base: item.base,
       stacked: !!item.default_branch && !!item.base && item.base !== item.default_branch,
+      unasked:
+        item.kind === "pr" &&
+        item.state === "open" &&
+        !item.draft &&
+        !item.review_requests_hidden &&
+        !item.review_requests.some((r) => !isBot(r.reviewer, r.bot)) &&
+        !item.reviews.some((r) => lc(r.author) !== lc(item.author) && !isMe(r.author) && !isBot(r.author, r.author_bot)),
       pushed_hours: hours(headAt),
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,

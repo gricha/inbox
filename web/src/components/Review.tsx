@@ -150,6 +150,7 @@ export function Review({
   acted,
   onApprove,
   onReady,
+  onAskReviewers,
   onComment,
   onBack,
   onAsk,
@@ -169,6 +170,7 @@ export function Review({
   // a: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
   onApprove: (c: Card, head: string) => void;
   onReady: (c: Card, picked: Reviewer[]) => void;
+  onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
   onComment: (c: Card, body: string) => Promise<boolean>; // w: your comment on the PR; true once GitHub has it
   onBack: () => void;
   onAsk: (t: Thread) => void; // a conversation's Ask coordinator: the composer, about it
@@ -206,6 +208,9 @@ export function Review({
   const canApprove = !!v?.approve.ok;
   // Your own open draft: a marks it ready for review instead of approving.
   const readying = v?.card.cta === "ready";
+  // Your ready PR nobody's asked to review: a asks who you pick.
+  const asking = v?.card.cta === "reviewers";
+  const picking = readying || asking;
   // A PR in Merging is the coordinator's: no prompt to copy or AI review to ask for.
   const flying = !!row && row.state === "open";
 
@@ -234,6 +239,16 @@ export function Review({
     })();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [id, loads]);
+
+  // Opened to ask reviewers (its row's Add reviewers): the box has the cursor, once per PR.
+  const askedFocus = useRef("");
+  useEffect(() => {
+    if (!asking || askedFocus.current === id) return;
+    askedFocus.current = id;
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
+    });
+  }, [asking, id]);
 
   // The desk's reading order; its notes are only those written for this commit, in the order ] and [ step through.
   const order = v?.order;
@@ -502,7 +517,10 @@ export function Review({
     else if (k === "w" && v?.item.state === "open") document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
     else if (k === "a" && acted) flash(`${acted.what}: ${v ? shortRef(v.card) : ""} is off your desk`);
     else if (k === "a" && readying && v) onReady(v.card, picked);
-    else if (k === "a") approve();
+    else if (k === "a" && asking && v) {
+      if (picked.length) onAskReviewers(v.card, picked);
+      else document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
+    } else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) setMore(true);
     else if (k === "esc") onBack();
@@ -525,7 +543,7 @@ export function Review({
       return;
     }
     if (e.key === "Escape") onBack();
-    else if (e.key === "@" && readying) {
+    else if (e.key === "@" && picking) {
       e.preventDefault();
       document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
     } else if (("npoci[]admbfwzNPZ.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
@@ -685,7 +703,7 @@ export function Review({
           )}
         </div>
 
-        {readying && !acted && (
+        {picking && !acted && (
           <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />
         )}
         {/* Done from here: what you did and where it went, above what's left to do. */}
@@ -711,6 +729,19 @@ export function Review({
               className="primary"
             />
           )}
+          {asking && !acted && (
+            <KeyButton
+              k="a"
+              label="Ask reviewers"
+              run={run}
+              title={
+                picked.length
+                  ? `Ask ${picked.map((p) => p.login).join(", ")} to review it, on GitHub`
+                  : "Nobody's asked to review it: pick reviewers above (@), then a asks them"
+              }
+              className="primary"
+            />
+          )}
           {/* Only someone else's open PR is yours to approve. */}
           {open && !isMine && !acted && (
             <KeyButton
@@ -724,7 +755,7 @@ export function Review({
           )}
           {/* While you owe replies, Send is the one filled button. */}
           {mine && !(acted?.where === "inflight" && !card.inflight) && (
-            <HandKey card={card} run={run} primary={card.cta !== "reply" && !acted} />
+            <HandKey card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
           )}
           <span className="more-wrap">
             <MoreButton

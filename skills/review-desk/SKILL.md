@@ -17,7 +17,7 @@ A rule with `hard = true` is a floor (asked to review by name, by default): what
 
 The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off and wakes with a message when something changes on a PR in Merging (see "Coordinator" below). Any session can message it by name; Claude Code delivers it only when both sessions skip permission prompts or neither does.
 
-All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, comment on one or on an issue, Send on their reply to a reviewer, Ready for review on their own draft with the reviewers they pick, and the More menu's close, draft, merge, reopen and request changes).
+All triage state is local: done, snooze, mute, pin and Merging live in `~/.review-desk/desk.db`. Review Desk reads GitHub; it writes only when the user presses a key in the desk (approve a PR, comment on one or on an issue, Send on their reply to a reviewer, Ready for review on their own draft with the reviewers they pick, Ask reviewers on their ready PR nobody's asked to review, and the More menu's close, draft, merge, reopen and request changes).
 
 ## How to reach it
 
@@ -167,6 +167,7 @@ Get each of your PRs merged, one at a time, the bottom of a stack first:
 - Push only to the user's own PRs' branches, never another person's: normally, or `--force-with-lease` after a rebase. Never plain `--force` or `-f`, and never reset a PR branch.
 - **Never post comments, replies or reviews as the user.** If a reviewer needs an answer from the user, hand it back.
 - **Drafts stay drafts.** Ready for review is the user's; never `gh pr ready`. A PR that became a draft in Merging: hand it back.
+- **Reviewers are the user's to ask.** Never request reviews. A PR nobody's asked to review leaves Merging by itself: the desk hands it back for the user to add reviewers.
 - **Merge** when it's approved (`approved_by` in `desk_merging` counts only the repo's collaborators), CI is green, there are no conflicts and no open change requests. Right before pushing or merging, check it's still in `desk_merging` (the user's `b` writes nothing to GitHub, so that's the only stop), and that `gh pr checks` passes on the head you'll merge: `gh pr merge <number> --repo <owner/repo> --match-head-commit <sha>` with the repo's allowed method (`--squash`, `--merge` or `--rebase`; `desk_merging` gives the repo's default). Never `--admin` or anything that bypasses branch protection.
 - After doing something, one `desk_note` on the PR: what you did, or what it waits on ("pushed a fix for the lint failure, CI running").
 - **Hand it back** with `desk_hand_back` and one line why when you can't realistically finish: a redesign, a product decision, an answer only the user can give, CI you can't fix after a real try, no clone. Then leave it alone.

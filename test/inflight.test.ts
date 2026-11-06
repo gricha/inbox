@@ -7,7 +7,7 @@ import type { GitHubWriter } from "../src/github/write.ts";
 import { REBASE } from "../src/coordinator.ts";
 import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
-import { hoursAgo } from "./helpers/items.ts";
+import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 
 function fakeWriter(refuse = false, refuseReviews = false) {
@@ -161,7 +161,7 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
     myPr(6, { ...green, review_requests: [{ reviewer: "backend", type: "team", codeowner: true }] }),
     myPr(7, { ...approved, base: "feat/a", default_branch: "main" }),
     myPr(8, approved),
-    myPr(9, { ...green, reviews: [outsider] }),
+    myPr(9, { ...green, review_requests: [], reviews: [outsider] }), // reviewed, if not by a collaborator: not one nobody's asked
   ]);
   c.after(t.cleanup);
   await t.desk.sync();
@@ -489,4 +489,164 @@ test("d on your own PR is plain done: it leaves the queue and comes back when so
   assert.deepEqual([r.state.inflight_at, t.desk.inflight().rows.length], [null, 0]);
   assert.ok(!all().includes("acme/web#3"));
   assert.ok(t.desk.queue().cleared.some((x) => x.id === "acme/web#3"));
+});
+
+test("your ready PR nobody's asked to review tops your desk with Add reviewers; m refuses it; asking someone clears it", async (c) => {
+  const w = fakeWriter();
+  const green = { ci: "green" as const, review_requests: [] };
+  const t = await setup([reviewAsk(1), myPr(3, green), myPr(4, { ...green, draft: true }), myPr(5, { ci: "green" })], {
+    settings: { "policy.judge": false },
+    desk: { writer: w.writer },
+  });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const card = (ref: string) => t.desk.item(ref).card;
+  assert.deepEqual(
+    [card("web#3").cta, card("web#3").why, card("web#3").handed_back, card("web#3").bucket],
+    ["reviewers", "nobody's asked to review it: add reviewers", true, "now"],
+  );
+  const top = t.desk.focus().sections.now[0];
+  assert.deepEqual([top?.id, top?.group], ["acme/web#3", "back"], "on top, in Back to you");
+  assert.equal(card("web#4").cta, "ready", "a draft: Ready for review comes first");
+  assert.equal(card("web#5").cta, undefined, "dana's asked");
+  assert.throws(() => t.desk.act("web#3", "inflight"), /nobody's asked to review acme\/web#3: add reviewers first/);
+
+  const post = client(t);
+  const desk = "http://localhost:47823";
+  const ask = (ref: string, body: unknown, origin?: string) => post(`/api/review/${encodeURIComponent(ref)}/reviewers`, body, origin);
+  assert.equal((await ask("acme/web#3", { users: ["U_dana"] })).status, 403, "MCP and the CLI can't");
+  assert.equal((await ask("acme/web#3", {}, desk)).status, 400, "nobody picked");
+  assert.equal((await ask("acme/web#3", { users: [1] }, desk)).status, 400);
+  assert.equal((await ask("acme/web#4", { users: ["U_dana"] }, desk)).status, 409, "a draft: Ready for review asks them");
+  assert.equal((await ask("acme/api#1", { users: ["U_dana"] }, desk)).status, 409, "not yours");
+  assert.deepEqual(w.calls, []);
+  assert.equal((await ask("acme/web#3", { users: ["U_dana"], teams: ["T_backend"] }, desk)).status, 200);
+  assert.deepEqual(w.calls, [["request_reviews", "PR_acme/web_3", ["U_dana"], ["T_backend"]]]);
+  assert.equal(card("web#3").status, "done", "your part is done until someone reviews");
+  assert.equal(
+    [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === "acme/web#3"),
+    false,
+    "off your desk",
+  );
+
+  // GitHub has the request: nothing to ask any more.
+  t.gh.items.set("acme/web#3", { ...myPr(3, { ci: "green" }), updated_at: hoursAgo(0) });
+  await t.desk.sync();
+  assert.deepEqual([card("web#3").cta, card("web#3").handed_back], [undefined, undefined]);
+});
+
+test("a review someone left counts as asked; a bot's or your own doesn't", async (c) => {
+  const review = (author: string, bot = false) => ({ author, author_bot: bot, state: "commented" as const, at: hoursAgo(1), commit: "c1" });
+  const t = await setup(
+    [
+      myPr(3, { ci: "green", review_requests: [], reviews: [review("marco")] }),
+      myPr(4, { ci: "green", review_requests: [], reviews: [review("cursor", true), review("me")] }),
+    ],
+    { settings: { "policy.judge": false } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  assert.equal(t.desk.item("web#3").card.handed_back, undefined);
+  assert.equal(t.desk.item("web#4").card.why, "nobody's asked to review it: add reviewers");
+});
+
+test("a PR in Merging nobody's asked to review any more comes back to you on the next sync, with Add reviewers", async (c) => {
+  const t = await setup([myPr(3, { ci: "green" })], {
+    settings: { "policy.judge": false, "notify.quiet": "" },
+    desk: { writer: fakeWriter().writer },
+  });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act("web#3", "inflight");
+  assert.equal(t.desk.item("web#3").card.inflight, true);
+  t.gh.items.set("acme/web#3", { ...myPr(3, { ci: "green", review_requests: [] }), updated_at: hoursAgo(0.05) });
+  await t.desk.sync();
+  assert.equal(t.desk.item("web#3").card.inflight, true, "a few minutes: a workflow may be asking someone");
+  t.setNow(new Date(NOW.getTime() + 30 * 60_000));
+  await t.desk.sync();
+  const d = t.desk.item("web#3");
+  assert.deepEqual(
+    [d.card.inflight, d.card.handed_back, d.card.cta, d.card.why],
+    [false, true, "reviewers", "handed back: nobody's asked to review it: add reviewers"],
+  );
+  const by = t.desk.store.db.prepare("SELECT agent FROM events WHERE item_id = 'acme/web#3' AND action = 'takeback'").all();
+  assert.deepEqual(
+    by.map((r) => r.agent),
+    ["desk"],
+    "the desk's, not an agent's",
+  );
+  assert.equal(
+    t.desk.inflight().rows.some((r) => r.card.id === "acme/web#3" && r.state === "open"),
+    false,
+    "out of Merging",
+  );
+});
+
+test("what counts as asked: a bot's request or review doesn't, one GitHub hides from you does; nor does a listed bot", async (c) => {
+  const green = { ci: "green" as const, review_requests: [] };
+  const t = await setup(
+    [
+      myPr(3, { ...green, review_requests: [{ reviewer: "copilot-pull-request-reviewer", type: "user", codeowner: false, bot: true }] }),
+      myPr(4, { ...green, review_requests_hidden: 1 }),
+      myPr(5, { ...green, reviews: [{ author: "sentry-review", author_bot: false, state: "commented", at: hoursAgo(1), commit: "c1" }] }),
+    ],
+    { settings: { "policy.judge": false, "github.bots": ["sentry-review"] } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const unasked = (ref: string) => t.desk.item(ref).signals.pr.unasked;
+  assert.deepEqual([unasked("web#3"), unasked("web#4"), unasked("web#5")], [true, false, true]);
+});
+
+test("nobody's asked: not while a workflow may still ask, not once it's quiet, not when no board lists it; Reply doesn't hide it", async (c) => {
+  const green = { ci: "green" as const, review_requests: [] };
+  const say = { author: "marco", author_bot: false, at: hoursAgo(1) };
+  const t = await setup(
+    [
+      myPr(3, { ...green, updated_at: hoursAgo(0.05) }),
+      myPr(4, { ...green, updated_at: hoursAgo(40 * 24), created_at: hoursAgo(40 * 24) }),
+      myPr(5, { ...green, comments: [say] }),
+    ],
+    { settings: { "policy.judge": false, "notify.quiet": "" }, desk: { writer: fakeWriter().writer } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const card = (ref: string) => t.desk.item(ref).card;
+  assert.equal(card("web#3").handed_back, undefined, "minutes old");
+  assert.equal(card("web#4").handed_back, undefined, "quiet for 40 days: Later has it");
+  assert.equal(card("web#5").cta, "reviewers", "a comment waits on you, but nobody would review your answer");
+  const row = [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].find((x) => x.id === "acme/web#5");
+  assert.equal(row?.cta, "reviewers");
+
+  t.gh.route = () => []; // it left every search: nothing refreshes it any more
+  await t.desk.sync();
+  assert.equal(card("web#5").handed_back, undefined, "no board lists it");
+});
+
+test("Add reviewers and m's refusal agree, from the first minute; quiet is Later's: no update in quiet_days, not age", async (c) => {
+  const green = { ci: "green" as const, review_requests: [] };
+  const t = await setup(
+    [myPr(3, { ...green, updated_at: hoursAgo(0.05) }), myPr(4, { ...green, created_at: hoursAgo(20 * 24), updated_at: hoursAgo(1) })],
+    { settings: { "policy.judge": false }, desk: { writer: fakeWriter().writer } },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const card = (ref: string) => t.desk.item(ref).card;
+  assert.deepEqual([card("web#3").cta, card("web#3").handed_back], ["reviewers", undefined], "not on top yet, but it says what m needs");
+  assert.throws(() => t.desk.act("web#3", "inflight"), /add reviewers first/);
+  assert.deepEqual([card("web#4").cta, card("web#4").handed_back], ["reviewers", true], "20 days old, pushed to an hour ago");
+});
+
+test("on a bot's PR opened for you, your own review doesn't count as anyone reviewing it", async (c) => {
+  const t = await setup([], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const mine = { author: "me", author_bot: false, state: "commented" as const, at: hoursAgo(1), commit: "c1" };
+  t.gh.items.set(
+    "acme/web#8",
+    makeItem({ number: 8, repo: "acme/web", author: "junior[bot]", author_bot: true, via: "@me", ci: "green", reviews: [mine] }),
+  );
+  await t.desk.add("acme/web#8");
+  const s = t.desk.item("web#8").signals;
+  assert.deepEqual([s.me.author, s.pr.unasked], [true, true]);
 });

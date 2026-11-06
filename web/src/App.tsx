@@ -744,6 +744,16 @@ export function App() {
     });
   }
 
+  // a in the review of your ready PR nobody's asked to review: asks who you picked; it leaves your desk until someone reviews.
+  function askReviewers(c: Card, picked: Reviewer[]) {
+    const names = picked.map((p) => p.login).join(", ");
+    const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
+    void finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, async () => {
+      await api.askReviewers(c.id, ask);
+      return { text: `Asked ${names} to review ${shortRef(c)} on GitHub` };
+    });
+  }
+
   // w: your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Promise<boolean> {
@@ -860,8 +870,11 @@ export function App() {
     else if (k === "b") void back(c);
     else if (k === ".") openMore(c);
     else if (k === "a" && c.cta === "ready") markReady(c);
+    else if (k === "a" && c.cta === "reviewers")
+      openCard(c); // its review, with the reviewers box ready
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {
       if (c.draft) flash(`${shortRef(c)} is a draft: mark it ready for review first (a)`);
+      else if (c.cta === "reviewers") flash(`Nobody's asked to review ${shortRef(c)}: add reviewers first (a)`);
       else handOff(c);
     } else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
@@ -1224,6 +1237,7 @@ export function App() {
               row={laneRows.find((r) => r.card.id === route.id) ?? null}
               onApprove={approve}
               onReady={markReady}
+              onAskReviewers={askReviewers}
               onComment={comment}
               onBack={() => {
                 go(reviewQuestion ? { name: "inquiry", id: reviewQuestion } : { name: reviewFrom });

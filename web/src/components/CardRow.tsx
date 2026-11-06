@@ -136,6 +136,19 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             Ready for review
           </button>
         )}
+        {card.cta === "reviewers" && !why && (
+          <button
+            type="button"
+            className={cls("act line-cta", sel && "primary")}
+            title="Nobody's asked to review it: opens its review to pick reviewers"
+            onClick={() => {
+              ctx.run(card, "a");
+            }}
+          >
+            {sel && <kbd>a</kbd>}
+            Add reviewers
+          </button>
+        )}
         {card.cta === "reply" && !why && (
           <button
             type="button"

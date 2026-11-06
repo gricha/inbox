@@ -78,6 +78,8 @@ export const api = {
   // With the reviewers you picked (node ids), asked right after it's marked ready.
   ready: (id: string, ask?: { users: string[]; teams: string[] }) =>
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
+  askReviewers: (id: string, ask: { users: string[]; teams: string[] }) =>
+    call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewers`, ask),
   // Your answer to an agent's question, or leaving it unanswered.
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
