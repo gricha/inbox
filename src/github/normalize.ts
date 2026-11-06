@@ -3,7 +3,7 @@
 import type { Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
-interface Actor {
+export interface Actor {
   __typename?: string;
   login: string;
 }
@@ -122,9 +122,9 @@ function ciOf(rollup: string | undefined, checks: RawCheck[] | null): { ci: Ci; 
   return { ci: checks.some(checkRunning) ? "pending" : "green", optional };
 }
 
-const login = (a: Actor | null) => a?.login ?? "ghost";
+export const login = (a: Actor | null) => a?.login ?? "ghost";
 // GraphQL drops the [bot] suffix for apps, so __typename is the reliable signal.
-const isBot = (a: Actor | null) => a?.__typename === "Bot" || !!a?.login.endsWith("[bot]");
+export const isBot = (a: Actor | null) => a?.__typename === "Bot" || !!a?.login.endsWith("[bot]");
 const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => a.at.localeCompare(b.at));
 // An agent that opens PRs for people (Junior) ends its description with "via @login." or "via Some Name.": the last such line.
 const viaOf = (text: string) => [...text.matchAll(/^via (@?[^\n]{1,60}?)\.?[ \t]*$/gm)].at(-1)?.[1]?.trim() ?? "";

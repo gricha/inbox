@@ -3,7 +3,7 @@
 import { buildAreas, type AreaPr } from "../areas.ts";
 import type { Areas, Context, Item, Reviewer, ReviewState } from "../types.ts";
 import { createClient, RateLimitedError } from "./client.ts";
-import { normalize, toHit, type RawHit, type RawNode } from "./normalize.ts";
+import { isBot, login, normalize, toHit, type Actor, type RawHit, type RawNode } from "./normalize.ts";
 import {
   branchPrs as branchPrsQuery,
   DETAILS_REVIEW,
@@ -81,7 +81,7 @@ export interface GitHub {
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
-type RawSaid = { id: string; author: { __typename?: string; login: string } | null; body: string; createdAt: string; url: string };
+type RawSaid = { id: string; author: Actor | null; body: string; createdAt: string; url: string };
 interface RawPrContext {
   node: {
     reviewThreads?: {
@@ -104,8 +104,8 @@ interface RawPrContext {
 
 const said = (c: RawSaid, at = c.createdAt): Said => ({
   id: c.id,
-  author: c.author?.login ?? "ghost",
-  bot: c.author?.__typename === "Bot" || !!c.author?.login.endsWith("[bot]"),
+  author: login(c.author),
+  bot: isBot(c.author),
   body: c.body,
   at,
   url: c.url,
