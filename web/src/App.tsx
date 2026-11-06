@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   Action,
   Card,
@@ -830,13 +831,14 @@ export function App() {
   function openAsk(id?: string, t?: Thread) {
     const r = routeRef.current;
     const item = id ?? (r.name === "review" ? r.id : r.name === "inflight" ? laneCur?.card.id : r.name === "settings" ? null : current?.id);
-    setCommenting(null);
-    setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
-    requestAnimationFrame(() => {
-      const box = document.querySelector<HTMLTextAreaElement>(".chat-input");
-      box?.focus();
-      box?.setSelectionRange(box.value.length, box.value.length); // a kept draft carries on at its end
+    // Drawn and focused at once: a key typed right after t lands in the box, never on the page, where a approves.
+    flushSync(() => {
+      setCommenting(null);
+      setAsking({ item: item ?? null, thread: t ?? (r.name === "review" && thread?.item === item ? thread : null) });
     });
+    const box = document.querySelector<HTMLTextAreaElement>(".chat-input");
+    box?.focus();
+    box?.setSelectionRange(box.value.length, box.value.length); // a kept draft carries on at its end
   }
 
   // Merging's keys: enter review, o GitHub, b back to desk, t ask the coordinator.
