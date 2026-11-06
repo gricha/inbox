@@ -794,11 +794,11 @@ export interface CoordinatorView {
 export interface Ask {
   id: string;
   at: string;
-  text: string;
+  text: string; // your words, in paragraphs
   item_id: string | null;
   thread_id: string | null; // a conversation in the PR's review
   thread_url: string | null;
-  answer: { text: string; at: string } | null; // untrusted: an agent wrote it
+  answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by web/src/prose.ts, never as HTML
 }
 
 // A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it, and

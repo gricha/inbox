@@ -112,12 +112,16 @@ const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
   reopen: ["reopen %", "reopened %"],
   request_changes: ["request changes on %", "requested changes on %"],
 };
-const MAX_ASK = 2_000; // an ask or its answer
+const MAX_ASK = 2_000; // your words to the coordinator, and your answer to an agent's question
+const MAX_ANSWER = 6_000; // the coordinator's answer: room for a list and a few lines of code, as an inquiry's context
 const ASKS_KEPT = 200;
 const INQUIRIES_KEPT = 100;
 const MAX_CONTEXT = 6_000; // an inquiry's context
 const MIN_CONTEXT = 200; // a few sentences: the owner decides from its page alone
 const MAX_LINKS = 12;
+// what can't be seen or reorders what can: C0 but tab and newline, DEL, C1, bidi marks, zero-width marks with no meaning in text
+// oxlint-disable-next-line no-control-regex -- paragraphs stay; anything else invisible goes, bidi marks too
+const INVISIBLE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
 
 export { DeskError };
 
@@ -2013,6 +2017,21 @@ export class Desk {
     return t.length > max ? `${t.slice(0, max - 1)}…` : t;
   }
 
+  // Words in paragraphs, yours or an agent's: refused, not cut, over max; newlines and tabs stay, at most one blank line in a row.
+  paragraphs(text: string, what: string, max: number): string {
+    if (text.length > max) throw new DeskError(400, `keep the ${what} under ${max} characters`);
+    const t = text
+      .replaceAll(/\r\n?|[\u0085\u2028\u2029]/g, "\n")
+      .replaceAll(INVISIBLE, "")
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .join("\n")
+      .replaceAll(/\n{3,}/g, "\n\n")
+      .trim();
+    if (!t) throw new DeskError(400, `the ${what} is empty`);
+    return t;
+  }
+
   // desk_note: the coordinator's latest status line on a PR in Merging, shown on its row.
   note(ref: string, text: string): { text: string } {
     const e = this.inflightEntry(ref);
@@ -2094,7 +2113,7 @@ export class Desk {
     const a: Ask = {
       id: randomBytes(4).toString("hex"),
       at: this.now().toISOString(),
-      text: this.line(b.text, "ask", MAX_ASK),
+      text: this.paragraphs(b.text, "ask", MAX_ASK),
       item_id: item?.id ?? null,
       thread_id: item && b.thread_id ? b.thread_id : null,
       thread_url: item && b.thread_url ? b.thread_url : null,
@@ -2240,18 +2259,20 @@ export class Desk {
     return done;
   }
 
-  // desk_answer: the coordinator's answer to one of your asks, under it in the desk, and a notification.
+  // desk_answer: the coordinator's answer to one of your asks, in your chat with it in the desk, and a notification.
   answer(id: string, text: string): Ask {
     const all = this.asks();
     const a = all.find((x) => x.id === id);
     if (!a) throw new DeskError(404, `no ask "${id}"`);
-    const done: Ask = { ...a, answer: { text: this.line(text, "answer", MAX_ASK), at: this.now().toISOString() } };
+    const done: Ask = { ...a, answer: { text: this.paragraphs(text, "answer", MAX_ANSWER), at: this.now().toISOString() } };
     this.store.set(
       "asks",
       all.map((x) => (x === a ? done : x)),
     );
     this.changed();
-    if (!a.answer && this.mayNotify()) this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${done.answer!.text}`);
+    const said = lead(done.answer!.text);
+    if (!a.answer && this.mayNotify())
+      this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${said ? this.line(said, "answer") : "It answered your ask."}`);
     return done;
   }
 
@@ -2533,6 +2554,23 @@ function linkUrl(url: string): string {
   if (u.protocol !== "https:") throw new DeskError(400, `a link is https, not ${u.protocol}`);
   if (u.href.length > 2_000) throw new DeskError(400, "keep a link under 2000 characters");
   return u.href;
+}
+
+// A notification's words: the answer's first paragraph outside a ``` block, without ** or backticks.
+function lead(text: string): string {
+  const out: string[] = [];
+  let fence = false;
+  for (const l of text.split("\n")) {
+    if (l.trimStart().startsWith("```")) {
+      if (out.length) break;
+      fence = !fence;
+    } else if (!fence && l.trim()) out.push(l);
+    else if (!fence && out.length) break;
+  }
+  return out
+    .join(" ")
+    .replaceAll(/\*\*|`/g, "")
+    .trim();
 }
 
 function shortRef(c: { repo: string; number: number }): string {

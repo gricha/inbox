@@ -156,7 +156,7 @@ Full reference: [api.md](api.md). Binds `127.0.0.1`. Rejects requests whose `Hos
 | POST   | `/api/coordinator/wake`      |                                                        | Starts the coordinator, or has it look at Merging now (`w`)                                                                                                  |
 | POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url? }`          | `{ ok, ask }`: your words to the coordinator (`t`), sent at once; only from the desk's own page                                                              |
 | GET    | `/api/asks`                  |                                                        | `AsksView`: `{ on, asks }`                                                                                                                                   |
-| POST   | `/api/asks/:id/answer`       | `{ text }`                                             | `{ ok, ask }` — `desk_answer`: the coordinator's answer, and a notification                                                                                  |
+| POST   | `/api/asks/:id/answer`       | `{ text }`                                             | `{ ok, ask }` — `desk_answer`: the coordinator's answer, in paragraphs; the first notifies with its first paragraph                                          |
 | POST   | `/api/inflight/:id/note`     | `{ text }`                                             | `{ ok, text }` — `desk_note`: the PR's status line in Merging                                                                                                |
 | POST   | `/api/inflight/:id/handback` | `{ why }`                                              | `{ ok, reason }` — `desk_hand_back`: the PR leaves Merging for the top of the queue                                                                          |
 | GET    | `/api/activity`              | `?after=&limit=&item=&wait=` (wait ≤ 60 s)             | `{ events, last_seq }`: the event log; a long-poll that answers as soon as an event lands                                                                    |
@@ -209,7 +209,7 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports: Streamable HTTP 
 - `desk_merging()` — your PRs in Merging with their state (CI, reviews, threads, mergeable, stacked, merge method) and the last note.
 - `desk_note({ ref, text })` — the coordinator's status line on a PR in Merging.
 - `desk_hand_back({ ref, why })` — gives a PR in Merging back to you, at the top of the queue with the reason.
-- `desk_answer({ ask_id, text })` — the coordinator's answer to your ask from the desk's window.
+- `desk_answer({ ask_id, text })` — the coordinator's answer to your ask from the desk's window, shown in your chat with it.
 
 Every tool result marks PR titles and bodies as untrusted data; the policy and config come fenced too. No tool writes to GitHub: agents never approve or mark ready through the desk.
 

@@ -85,13 +85,13 @@ const alive = (pid: number) => {
   }
 };
 
-// The owner's words as they wrote them (they're trusted); what they were on only as its id and URLs.
+// The owner's words as they wrote them (they're trusted), on one line (cmd.exe can't pass a newline); what they were on only as its id and URLs.
 export function askLine(a: Ask, url: string | null): string {
   const about = [
     a.item_id ? `about ${a.item_id}${url ? ` (${url})` : ""}` : "",
     a.thread_url ? `on the thread ${a.thread_url}` : "",
   ].filter(Boolean);
-  return `My ask ${a.id}${about.length ? `, ${about.join(", ")}` : ""}: "${a.text}" Answer it with desk_answer.`;
+  return `My ask ${a.id}${about.length ? `, ${about.join(", ")}` : ""}: "${a.text.replaceAll(/\s+/g, " ")}" Answer it with desk_answer.`;
 }
 
 // What wakes it, in its words; null for what doesn't (its own pushes, CI starting).
@@ -200,7 +200,7 @@ export class Coordinator {
     return this.again();
   }
 
-  // While one of your asks waits on its answer, what it's doing is looked at often, so the composer can say: on it,
+  // While one of your asks waits on its answer, what it's doing is looked at often, so the chat can say: on it,
   // waiting on a permission, or stopped without answering. One `claude agents`, no turn.
   watch(): void {
     if (this.watching || this.desk.stopped) return;

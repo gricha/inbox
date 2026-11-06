@@ -513,10 +513,10 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
     "desk_answer",
     {
       description:
-        "Answer the user's ask (a wake message from the desk gives its id): what you did or found, in a sentence or two. It shows under their ask in the desk, and they get a notification.",
+        "Answer the user's ask (a wake message from the desk gives its id). They read it in their chat with you in the desk, beside what they asked about, and get a notification with its first paragraph. Lead with the answer in one sentence (yes, no, done, or what you found); then, only if it helps, short paragraphs or a list of what you checked or did. `code` for identifiers, files and commands, a ``` block for a few lines of code, bare https URLs for links (they show as the URL). No headings, tables, HTML or images, and no essays: a few short paragraphs at most.",
       inputSchema: {
         ask_id: z.string().describe("The ask's id, from the wake message"),
-        text: z.string().min(1).max(2000),
+        text: z.string().min(1).max(6000).describe("The answer first, then short paragraphs or a list"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },

@@ -307,6 +307,10 @@ test("desk_answer answers the owner's ask by its id", async () => {
   });
   assert.deepEqual(lastCall(), { method: "POST", path: "/api/asks/a1b2c3d4/answer", body: { text: "Done: dismissed it" } });
   assert.equal((await call("desk_answer", { ask_id: "a1b2c3d4" })).isError, true);
+  await call("desk_answer", { ask_id: "a1b2c3d4", text: "Yes.\n\n- a\n- b" });
+  assert.deepEqual(lastCall().body, { text: "Yes.\n\n- a\n- b" }, "its paragraphs and list reach the desk as written");
+  assert.equal((await call("desk_answer", { ask_id: "a1b2c3d4", text: "x".repeat(6_000) })).isError, false);
+  assert.equal((await call("desk_answer", { ask_id: "a1b2c3d4", text: "x".repeat(6_001) })).isError, true);
 });
 
 test("desk_undo says what was undone", async () => {

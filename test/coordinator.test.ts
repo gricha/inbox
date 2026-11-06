@@ -749,7 +749,7 @@ test(
       {
         id: "",
         at: "",
-        text: "i think we addressed it in follow up, you can dismiss this item",
+        text: "i think we addressed it in follow up,\nyou can dismiss this item",
         item_id: "acme/web#3",
         thread_id: "PRRT_9",
         thread_url: thread,
@@ -821,12 +821,12 @@ test(
     const res = await api.answer(ask.id, "Yes: 4be71c2 handles the\nempty list, with a test.");
     assert.equal(res.status, 200);
     assert.deepEqual(((await res.json()) as { ask: Ask }).ask.answer, {
-      text: "Yes: 4be71c2 handles the empty list, with a test.",
+      text: "Yes: 4be71c2 handles the\nempty list, with a test.",
       at: NOW.toISOString(),
     });
     assert.ok(t.desk.rev > rev, "the window hears of it");
     assert.deepEqual(t.notes, ["acme/web#3: Yes: 4be71c2 handles the empty list, with a test."]);
-    assert.deepEqual((await api.list()).asks[0]!.answer?.text, "Yes: 4be71c2 handles the empty list, with a test.");
+    assert.deepEqual((await api.list()).asks[0]!.answer?.text, "Yes: 4be71c2 handles the\nempty list, with a test.");
     assert.equal((await api.answer("nope", "hi")).status, 404);
     assert.equal((await api.answer(ask.id, " ")).status, 400);
     assert.equal((await api.answer(ask.id, "Also rebased it.")).status, 200);
@@ -836,6 +836,50 @@ test(
     const quiet = ((await (await api.ask({ text: "anything left for me today?" })).json()) as { ask: Ask }).ask;
     assert.equal((await api.answer(quiet.id, "No.")).status, 200);
     assert.equal(t.notes.length, 1, "quiet hours");
+  },
+);
+
+test(
+  "an answer keeps its paragraphs, lists and code, drops what's invisible, and notifies with its first paragraph outside code; past its limit it's refused, not cut",
+  posix,
+  async (c) => {
+    const t = await coordinated(c, { "notify.quiet": "" });
+    const api = asking(t);
+    const ask = async (body: unknown) => ((await (await api.ask(body)).json()) as { ask: Ask }).ask;
+    const stored = async (id: string) => (await api.list()).asks.find((a) => a.id === id)?.answer ?? null;
+
+    const first = await ask({ text: "is it done?", item_id: "web#3" });
+    await until(() => t.fake.sessions().length === 1);
+    const res = await api.answer(
+      first.id,
+      "**Yes**: done in `4be71c2`.\r\n\r\n\r\n\r\n- checked `merge.ts`\n- tests pass\u202e\u0007  \n\n```ts\nnextClock(s)\n```",
+    );
+    assert.equal(res.status, 200);
+    const kept = "**Yes**: done in `4be71c2`.\n\n- checked `merge.ts`\n- tests pass\n\n```ts\nnextClock(s)\n```";
+    assert.equal(((await res.json()) as { ask: Ask }).ask.answer?.text, kept);
+    assert.equal((await stored(first.id))?.text, kept);
+    assert.deepEqual(t.notes, ["acme/web#3: Yes: done in 4be71c2."]);
+
+    const second = await ask({ text: "and is it deployed?", item_id: "web#3" });
+    assert.equal((await api.answer(second.id, "```\nx\n\nYes, merged and deployed.\n```\n\nNo: CI is red.")).status, 200);
+    assert.equal(t.notes.at(-1), "acme/web#3: No: CI is red.", "never the code block's words");
+
+    const third = await ask({ text: "what did CI say?", item_id: "web#3" });
+    assert.equal((await api.answer(third.id, "x".repeat(6_001))).status, 400);
+    assert.equal(await stored(third.id), null, "refused, not cut");
+    assert.equal((await api.answer(third.id, " ".repeat(200_000) + "x")).status, 400, "measured before it's normalised");
+    assert.equal(await stored(third.id), null);
+    assert.equal((await api.answer(third.id, "x".repeat(6_000))).status, 200);
+
+    const words = await ask({ text: "line one\u2028\n\n\n\nline two\u2066" });
+    assert.equal(words.text, "line one\n\nline two");
+    await until(() => !!t.said().at(-1)?.endsWith('"line one line two" Answer it with desk_answer.'));
+    const said = t.said().length;
+    const asks = (await api.list()).asks.length;
+    assert.equal((await api.ask({ text: "y".repeat(2_001) })).status, 400);
+    assert.equal((await api.list()).asks.length, asks, "refused, not kept");
+    await settle();
+    assert.equal(t.said().length, said, "and never sent");
   },
 );
 
