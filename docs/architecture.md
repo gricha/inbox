@@ -23,7 +23,7 @@ policy.md ──> src/judge.ts ──────────────┘ Cla
 
 Runtime: Node ≥ 22.18 (Electron 45 bundles Node 24), TypeScript run directly, in the packaged app too (type stripping: no enums, namespaces or parameter properties; relative imports end in `.ts`; type-only imports use `import type`). Tests: `node --test` in `test/`. No native modules.
 
-Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `policy.md` (prose for the judge), `desk.db`, `desk.log` and `agent/` (the empty directory the AI review, the judge and login checks run in). Port: `47823` (override `DESK_PORT`).
+Home: `~/.review-desk/` (override with `DESK_HOME`) holds `config.toml` (spaces, boards, rules), `settings.json` (everything else, only values you changed), `policy.md` (prose for the judge), `desk.db`, `desk.log` and `agent/` (the empty directory the AI review, the judge and Claude's read of what reviewers said run in). Port: `47823` (override `DESK_PORT`).
 
 ## Concepts
 

@@ -21,7 +21,6 @@ import {
   numberPatch,
   parseFiles,
   parseReview,
-  probeLogin,
   reviewOrder,
   type PrText,
 } from "../src/review.ts";
@@ -271,10 +270,7 @@ test(
     for (const a of ["--model", "--restricted", "--settings", "--bare", "--agents", "--system-prompt"]) assert.ok(!args.includes(a), a);
     assert.equal(fs.readFileSync(path.join(f.dir, "stdin"), "utf8"), "PROMPT");
     assert.equal(fs.readFileSync(path.join(f.dir, "cwd-listing"), "utf8"), "");
-    // The login check too, without its own model. Every call, from every launch, runs in <home>/agent: one ~/.claude/projects entry.
-    await probeLogin(agentDir(home), f.bin);
-    const probe = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
-    assert.ok(probe.includes("--no-session-persistence") && !probe.includes("--model") && !probe.includes("--restricted"));
+    // Every call, from every launch, runs in <home>/agent: one ~/.claude/projects entry.
     const cwds = new Set(fs.readFileSync(path.join(f.dir, "cwds"), "utf8").trim().split("\n"));
     assert.deepEqual(
       [...cwds].map((d) => fs.realpathSync(d)),

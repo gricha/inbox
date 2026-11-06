@@ -451,21 +451,6 @@ export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth logi
 // The queue's one line when it is: every agent stops on it, the judge too.
 export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
 
-// Does the login work? A tiny call that leaves no session behind, before a run that would: a session run that fails on
-// the login still saves a session, which piles up in claude --resume. Throws claudeError's error when it doesn't.
-export async function probeLogin(dir: string, command = claudeCommand(), signal?: AbortSignal): Promise<void> {
-  const args = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
-  const out = await runCommand(claudeSpawn(command, args), {
-    input: "Reply with the word ok.",
-    cwd: dir,
-    timeout: 60_000,
-    stdoutOnError: true,
-    missing: claudeMissing(command),
-    signal,
-  });
-  claudeEnvelope(out);
-}
-
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `cause`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): Error {
   const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");

@@ -384,7 +384,7 @@ export class Desk {
     return this.ctx?.me ?? "";
   }
 
-  // Where the tool-less agent calls run (the AI review, the judge, login checks).
+  // Where the tool-less agent calls run (the AI review, the judge, the read of conversations).
   agentDir(): string {
     return agentDir(this.home);
   }
