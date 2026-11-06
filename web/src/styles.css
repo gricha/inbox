@@ -1073,17 +1073,8 @@ kbd {
   text-align: right;
 }
 
-/* The row's one call to action, a button on the right before its age; its negative margin keeps every row one height. */
-.line .line-cta {
-  position: relative;
-  z-index: 1;
-  flex: none;
-  align-self: center;
-  height: 32px;
-  margin: -4px 0 -4px auto;
-}
-
-/* The selected row's quiet way to the coordinator and its More menu, before its call to action, at its height. */
+/* A row's call to action and, on the selected row, Ask and More before it; the negative margin keeps every row one height. */
+.line .line-cta,
 .line .line-ask,
 .line .line-more {
   position: relative;
@@ -1092,6 +1083,10 @@ kbd {
   align-self: center;
   height: 32px;
   margin: -4px 0 -4px auto;
+}
+
+.line .line-ask,
+.line .line-more {
   padding: 0 6px;
 }
 
