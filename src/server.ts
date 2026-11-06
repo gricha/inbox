@@ -75,6 +75,7 @@ export function createApp(desk: Desk, port: number): Hono {
   const ready = () => {
     if (!desk.loaded && !desk.configErrors.length) throw new DeskError(503, "desk is starting; the first sync can take a minute");
   };
+  const input = (c: { req: { json<T>(): Promise<T> } }) => c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
 
   app.get("/health", (c) => c.json({ ok: true, version: VERSION }));
   app.get("/api/overview", (c) => {
@@ -108,8 +109,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // desk_add and `desk add`: a pin plus GitHub reads, so agents may call it.
   app.post("/api/add", async (c) => {
     ready();
-    type Body = { id?: unknown; why?: unknown; from?: unknown };
-    const { id, why, from } = await c.req.json<Body>().catch((): Body => ({}));
+    const { id, why, from } = await input(c);
     if (typeof id !== "string" || !id) throw new DeskError(400, "need { id }: owner/repo#123 or a GitHub URL");
     const line = (v: unknown) => {
       if (v !== undefined && typeof v !== "string") throw new DeskError(400, "why and from are lines of text");
@@ -129,15 +129,13 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/ai", async (c) => {
     ready();
-    const { force } = await c.req.json<{ force?: boolean }>().catch((): { force?: boolean } => ({}));
+    const { force } = await input(c);
     return c.json({ ok: true, ai: await desk.aiReview(c.req.param("id"), force === true) });
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk (a)");
-    const { head_oid, body } = await c.req
-      .json<{ head_oid?: unknown; body?: unknown }>()
-      .catch((): { head_oid?: unknown; body?: unknown } => ({}));
+    const { head_oid, body } = await input(c);
     if (typeof head_oid !== "string" || !head_oid) throw new DeskError(400, "need { head_oid }: the commit you reviewed");
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
@@ -146,7 +144,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/review/:id{.+}/reply", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
-    const b = await c.req.json<{ id?: unknown; body?: unknown }>().catch((): { id?: unknown; body?: unknown } => ({}));
+    const b = await input(c);
     if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") throw new DeskError(400, "need { id, body }");
     return c.json({ ok: true, ...(await desk.reply(c.req.param("id"), b.id, b.body)) });
   });
@@ -154,7 +152,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/review/:id{.+}/comment", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
-    const b = await c.req.json<{ body?: unknown }>().catch((): { body?: unknown } => ({}));
+    const b = await input(c);
     if (typeof b.body !== "string") throw new DeskError(400, "need { body }");
     return c.json({ ok: true, ...(await desk.comment(c.req.param("id"), b.body)) });
   });
@@ -162,7 +160,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/review/:id{.+}/inline", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
-    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const b = await input(c);
     const line = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
     const side = (v: unknown): v is "new" | "old" => v === "new" || v === "old";
     const start = (v: unknown): v is InlineAt["start"] =>
@@ -186,7 +184,7 @@ export function createApp(desk: Desk, port: number): Hono {
     });
   });
   const reviewerIds = async (c: { req: { json<T>(): Promise<T> } }) => {
-    const b = await c.req.json<{ users?: unknown; teams?: unknown }>().catch((): { users?: unknown; teams?: unknown } => ({}));
+    const b = await input(c);
     const ids = (v: unknown): string[] | null => {
       if (v === undefined) return [];
       return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
@@ -214,9 +212,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/github", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window (.)");
-    const b = await c.req
-      .json<{ id?: unknown; action?: unknown; head_oid?: unknown; body?: unknown }>()
-      .catch((): { id?: unknown; action?: unknown; head_oid?: unknown; body?: unknown } => ({}));
+    const b = await input(c);
     if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) throw new DeskError(400, "need { id, action }");
     if (b.head_oid !== undefined && typeof b.head_oid !== "string") throw new DeskError(400, "head_oid must be a string");
     if (b.body !== undefined && typeof b.body !== "string") throw new DeskError(400, "body must be a string");
@@ -233,7 +229,7 @@ export function createApp(desk: Desk, port: number): Hono {
     throw new DeskError(400, `${k} must be a string`);
   };
   const line = async (c: { req: { json<T>(): Promise<T> } }, key: string) => {
-    const v = (await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({})))[key];
+    const v = (await input(c))[key];
     if (typeof v !== "string") throw new DeskError(400, `need { ${key} }`);
     return v;
   };
@@ -248,7 +244,7 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/coordinator/wake", async (c) => {
     ready();
-    const { ask } = await c.req.json<{ ask?: unknown }>().catch((): { ask?: unknown } => ({}));
+    const { ask } = await input(c);
     await desk.wakeCoordinator(typeof ask === "string" ? ask : undefined);
     return c.json({ ok: true });
   });
@@ -256,7 +252,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.post("/api/ask", async (c) => {
     ready();
     if (!fromDesk(c)) throw new DeskError(403, "ask the coordinator from the desk's window (t)");
-    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const b = await input(c);
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
     const ask = await desk.ask({
       text: b.text,
@@ -272,7 +268,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.
   app.post("/api/inquiries", async (c) => {
     ready();
-    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const b = await input(c);
     const pairs = (k: string, a: string, z: string): Record<string, string>[] => {
       const v = b[k] ?? [];
       if (
@@ -308,7 +304,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your answer, from the desk's own window only: an agent can't answer its own question.
   app.post("/api/inquiries/:id/answer", async (c) => {
     if (!fromDesk(c)) throw new DeskError(403, "answer it in the desk's window");
-    const b = await c.req.json<{ text?: unknown; dismiss?: unknown }>().catch((): { text?: unknown; dismiss?: unknown } => ({}));
+    const b = await input(c);
     if (b.dismiss === true) return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), "", true) });
     if (typeof b.text !== "string") throw new DeskError(400, "need { text } or { dismiss: true }");
     return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), b.text) });
@@ -318,7 +314,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.get("/api/automations", (c) => c.json(desk.automations.view()));
   app.put("/api/automations/:id", async (c) => {
     ready();
-    const b = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const b = await input(c);
     if (
       typeof b.name !== "string" ||
       typeof b.schedule !== "string" ||
