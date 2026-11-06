@@ -1064,7 +1064,8 @@ export function App() {
     // Esc closes the chat from anywhere but a text box (its own box closes it only when empty, else leaves it), and the
     // comment bar from anywhere, before a review or a page reads it as "go back"; a snooze or More menu over it closes first.
     const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
-    if (((asking && !typing) || commenting) && !snoozeFor && !moreFor && e.key === "Escape" && !e.isComposing) {
+    const menu = !!moreFor || !!document.querySelector(".more-pop"); // the review's More menu is its own state
+    if (((asking && !typing) || commenting) && !snoozeFor && !menu && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
       e.preventDefault();
