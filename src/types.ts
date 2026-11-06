@@ -251,11 +251,11 @@ export interface SettingsView {
   paused: { ai: { why: string; until: string } | null };
 }
 
-// GET /api/agents: whether Claude Code has the desk's MCP tools and the Review Desk skill. null for an agent the desk doesn't know.
+// GET /api/agents: whether Claude Code has the desk's MCP tools and the Review Desk skill.
 export interface AgentStatus {
   driver: string;
-  mcp: { connected: boolean; command: string } | null; // command: what Connect runs to register the desk
-  skill: { state: "installed" | "outdated" | "missing"; path: string; command: string } | null; // path: the installed SKILL.md
+  mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
+  skill: { state: "installed" | "outdated" | "missing"; path: string; command: string }; // path: the installed SKILL.md
 }
 
 // GET /api/policy: ~/.review-desk/policy.md, prose the judge follows. While it's empty it follows `starter`.

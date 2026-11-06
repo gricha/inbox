@@ -18,7 +18,7 @@ interface Driver {
   skills: (home: string) => string;
 }
 
-const DRIVERS: Record<string, Driver> = {
+const DRIVERS = {
   // ~/.claude.json's top-level mcpServers is Claude Code's user scope.
   "claude-code": {
     bin: "claude",
@@ -33,7 +33,8 @@ const DRIVERS: Record<string, Driver> = {
     servers: (home) => parse(fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8")).mcp_servers,
     skills: (home) => path.join(home, ".agents", "skills"),
   },
-};
+} satisfies Record<string, Driver>;
+export type DriverId = keyof typeof DRIVERS;
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 
@@ -54,9 +55,8 @@ function skillState(dir: string): "installed" | "outdated" | "missing" {
 }
 
 // HOME is read on every call, so tests can point it at a scratch directory.
-export function status(driver: string, url: string): AgentStatus {
+export function status(driver: DriverId, url: string): AgentStatus {
   const d = DRIVERS[driver];
-  if (!d) return { driver, mcp: null, skill: null };
   const home = os.homedir();
   const parent = d.skills(home);
   const dir = path.join(parent, "review-desk");
@@ -109,10 +109,9 @@ export function refreshSkills(deskHome: string): string[] {
 }
 
 // Installs or refreshes the skill, then registers the MCP server if it isn't yet.
-export async function connect(driver: string, url: string): Promise<AgentStatus> {
+export async function connect(driver: DriverId, url: string): Promise<AgentStatus> {
   const d = DRIVERS[driver];
   const s = status(driver, url);
-  if (!d || !s.mcp || !s.skill) return s;
   if (s.skill.state !== "installed") copySkill(path.dirname(s.skill.path));
   if (!s.mcp.connected) await run(d.bin, d.add(url), s.mcp.command);
   return status(driver, url);

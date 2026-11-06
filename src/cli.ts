@@ -420,7 +420,7 @@ const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: 
 
 // The harness you work in, given the desk's tools: Claude Code unless you name Codex. Works with the desk down too: it
 // reads the agent's own config files.
-const HARNESSES: Record<string, { id: string; label: string }> = {
+const HARNESSES: Record<string, { id: agents.DriverId; label: string }> = {
   claude: { id: "claude-code", label: "Claude Code" },
   codex: { id: "codex", label: "Codex" },
 };
@@ -430,7 +430,6 @@ async function connect(x: Ctx): Promise<number> {
   if (!driver) throw new UsageError(`unknown agent: ${x.args[0]} (try: desk connect claude, or codex)`);
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
   const s = x.opts.apply ? await agents.connect(driver.id, url) : agents.status(driver.id, url);
-  if (!s.mcp || !s.skill) throw new Error(`can't check ${driver.label}`);
   if (s.mcp.connected && s.skill.state === "installed") {
     x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
     return 0;

@@ -407,7 +407,7 @@ function AgentLink({ active, loads }: { active: boolean; loads: number }) {
     }
   }
 
-  if (!status?.mcp || !status.skill) return null;
+  if (!status) return null;
   const missing = !status.mcp.connected || status.skill.state !== "installed";
   return (
     <div className="agent">

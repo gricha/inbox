@@ -65,11 +65,6 @@ test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
   assert.equal(status("codex", MCP).mcp?.connected, true);
 });
 
-test("none: nothing to connect", async () => {
-  assert.deepEqual(status("none", MCP), { driver: "none", mcp: null, skill: null });
-  assert.deepEqual(await connect("none", MCP), { driver: "none", mcp: null, skill: null });
-});
-
 // Already registered, so no agent CLI runs: this part works on every OS.
 test("connect copies the skill, and refreshes it when it's out of date", async () => {
   write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: MCP } } }));
