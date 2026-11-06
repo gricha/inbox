@@ -131,19 +131,22 @@ export function parseConfig(
     const rules: Rule[] = rawRules.map((r, j) => {
       const rp = `${path}.rules[${j}]`;
       const rt = table(r, rp);
-      known(rt, rp, ["when", "bucket", "why", "nocap", "hard"]);
+      known(rt, rp, ["when", "bucket", "why", "nocap", "hard", "final"]);
       const when = str(rt.when, `${rp}.when`, "");
       if (!when) err(`${rp}.when`, "is required");
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
       if (rt.hard !== undefined && typeof rt.hard !== "boolean") err(`${rp}.hard`, "must be true or false");
+      if (rt.final !== undefined && typeof rt.final !== "boolean") err(`${rp}.final`, "must be true or false");
       const to = ruleBucket(rt.bucket, `${rp}.bucket`);
       if (rt.hard === true && to === "judge") err(`${rp}.hard`, "a hard rule places the item itself; give it a bucket, not judge");
+      if (rt.final === true && to === "judge") err(`${rp}.final`, "a final rule places the item itself; give it a bucket, not judge");
       return {
         when: when || "false",
         bucket: to,
         why: str(rt.why, `${rp}.why`, ""),
         nocap: rt.nocap === true,
         hard: rt.hard === true,
+        final: rt.final === true,
       };
     });
     const sort = str(t.sort, `${path}.sort`, "waiting");
@@ -215,6 +218,10 @@ export function migrateBotAsk(text: string): string | null {
 }
 
 const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true`;
+const BLOCKED_BY = `{ when = "pr.blocked", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
+// Yours: a change request or a reply you owe is yours to do now, blocked or not.
+const MINE_BLOCKED = `{ when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
+const WAITS_REVIEW = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked", why = "{pr.waits}", final = true }`;
 
 // The old first-run rule sending all your drafts to later, only as written, becomes today's two draft rules; null if absent.
 export function migrateDrafts(text: string): string | null {
@@ -243,10 +250,14 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const out: string[] = [
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
     `# Each [[boards]] table feeds the queue: GitHub searches (the space scope is appended), an optional filter,`,
-    `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, later, fyi, hide.`,
+    `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.`,
     `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint. A rule with`,
     `# \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever Claude, quiet`,
     `# days or caps say.`,
+    `# A rule with \`final = true\` isn't re-sorted by Claude: what it matches stays in its bucket (your pin still lifts it).`,
+    `# \`blocked\`: it can't move until something else happens: a PR it needs merging first (pr.blocked: its description says`,
+    `# "Requires \u2026", or it's stacked on it), or reviewers you asked. Only rules fill it: Claude never answers blocked. The`,
+    `# Blocked page lists it, and a hand-back of a PR another PR blocks waits there until that PR merges.`,
     `# \`caps\` limit Now and Today; overflow moves down a bucket with a note. Pinned and \`nocap\` items don't count, and nor do`,
     `# your PRs in Merging. Caps apply after Claude, so give every board one: a board without caps can fill Now.`,
     `# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().`,
@@ -280,6 +291,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "later"`,
       `default_why = "review requested"`,
       `rules = [`,
+      `  ${BLOCKED_BY},`,
       `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },`,
       `  ${BOT_ASK},`,
       `  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },`,
@@ -303,13 +315,17 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "later"`,
       `default_why = "waiting on reviewers"`,
       `rules = [`,
+      `  ${MINE_BLOCKED},`,
       `  ${FRESH_DRAFT} },`,
       `  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },`,
+      `  { when = "len(pr.requires_closed) > 0", bucket = "today", why = "needs {pr.requires_closed}, closed without merging" },`,
+      `  { when = "len(pr.blocks) > 0 && me.owes_reply", bucket = "today", why = "blocks {pr.blocks}; it {pr.waits}" },`,
       `  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },`,
       `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },`,
       `  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },`,
       `  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },`,
+      `  ${WAITS_REVIEW},`,
       `  { when = "pr.unresolved_threads > 0", bucket = "later", why = "unresolved threads: {pr.unresolved_threads}" },`,
       `  { when = "item.activity_hours > 72", bucket = "later", why = "quiet for 3+ days: nudge a reviewer?" },`,
       `]`,
@@ -329,6 +345,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "fyi"`,
       `default_why = "mentions you"`,
       `rules = [`,
+      `  ${BLOCKED_BY},`,
       `  { when = "me.new_activity", bucket = "today", why = "new replies since you last acted" },`,
       `  { when = "!me.commented && !me.author && item.activity_hours < 72", bucket = "today", why = "you were mentioned and haven't replied" },`,
       `  { when = "me.assignee", bucket = "later", why = "assigned to you" },`,

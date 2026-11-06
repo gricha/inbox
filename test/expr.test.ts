@@ -59,7 +59,13 @@ test("type errors surface at eval time", () => {
 
 test("templates interpolate fields and round numbers", () => {
   assert.equal(renderTemplate("{author.login} · {author.engaged_90d} PRs · {item.created_hours}h", sig), "alice · 12 PRs · 48h");
-  assert.equal(renderTemplate("{nope.field} {item.labels}", sig), "{nope.field} bug, area:ml");
+  assert.equal(renderTemplate("{nope.field} {item.labels}", sig), "{nope.field} bug and area:ml");
+});
+
+test("a list of three or more renders 'a, b and N more'", () => {
+  const blocks = { ...sig, pr: { ...sig.pr, blocks: ["web#1", "web#2", "web#3", "web#4"] } };
+  assert.equal(renderTemplate("blocks {pr.blocks}", blocks), "blocks web#1, web#2 and 2 more");
+  assert.equal(renderTemplate("blocks {pr.blocks}", { ...sig, pr: { ...sig.pr, blocks: ["web#1"] } }), "blocks web#1");
 });
 
 test("a count of 1 takes the singular", () => {

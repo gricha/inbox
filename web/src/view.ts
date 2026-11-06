@@ -325,9 +325,17 @@ export function groupsOf(
       ),
       "archive",
     ),
-    // Your PRs whose next move is someone else's, longest wait first.
-    group("waiting_reviews", view.waiting.reviews, "waiting"),
-    group("waiting_prs", view.waiting.prs, "waiting"),
+    // What can't move yet, in the desk's order: waits on reviews, then on another PR.
+    group(
+      "waiting_reviews",
+      s.blocked.filter((c) => !c.blocker),
+      "waiting",
+    ),
+    group(
+      "waiting_prs",
+      s.blocked.filter((c) => c.blocker),
+      "waiting",
+    ),
   ];
 }
 
@@ -388,15 +396,13 @@ export const stops = (groups: Group[], leaving: Set<string>): string[] =>
     g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [foldOf(g.key)] : [])] : [],
   );
 
-// `ends`: a close or a merge, which takes it off Blocked too; what else you do leaves its wait in place.
-export function removeCard(v: QueueView, id: string, ends = false): QueueView {
+export function removeCard(v: QueueView, id: string): QueueView {
   const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);
   const s = v.sections;
   return {
     ...v,
     sections: { now: drop(s.now), today: drop(s.today), blocked: drop(s.blocked), later: drop(s.later), fyi: drop(s.fyi) },
     hidden: drop(v.hidden),
-    ...(ends && { waiting: { reviews: drop(v.waiting.reviews), prs: drop(v.waiting.prs) } }),
   };
 }
 

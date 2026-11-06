@@ -650,3 +650,42 @@ test("on a bot's PR opened for you, your own review doesn't count as anyone revi
   const s = t.desk.item("web#8").signals;
   assert.deepEqual([s.me.author, s.pr.unasked], [true, true]);
 });
+
+test("a blocked PR in Merging waits on its blocker, and the coordinator is woken 'unblocked: \u2026 merged'", async (c) => {
+  const approved = { author: "kofi", author_bot: false, trusted: true, state: "approved" as const, at: hoursAgo(45), commit: "abc" };
+  const t = await setup(
+    [
+      myPr(1, {
+        repo: "getsentry/getsentry",
+        ci: "green",
+        review_decision: "approved",
+        reviews: [approved],
+        requires: ["getsentry/sentry#129460"],
+      }),
+      myPr(129460, { repo: "getsentry/sentry", ci: "green" }),
+    ],
+    { settings: { "policy.judge": false } },
+  );
+  c.after(t.cleanup);
+  const woke: [string, string][] = [];
+  t.desk.coordinator.wake = (id, what) => {
+    woke.push([id, what]);
+  };
+  await t.desk.sync();
+  t.desk.act("getsentry#1", "inflight");
+  const row = t.desk.inflight().rows[0]!;
+  assert.deepEqual(
+    [row.waits_on, row.blocked_by],
+    ["waits on sentry#129460 to merge first", { ref: "sentry#129460", waits: "waits on a review from dana" }],
+  );
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  const dep = t.gh.items.get("getsentry/sentry#129460")!;
+  t.gh.items.set(dep.id, { ...dep, state: "merged", closed_at: at, updated_at: at });
+  t.setNow(new Date(at));
+  await t.desk.sync();
+  assert.deepEqual(
+    woke.filter(([, what]) => what.startsWith("unblocked")),
+    [["getsentry/getsentry#1", "unblocked: sentry#129460 merged"]],
+  );
+  assert.equal(t.desk.inflight().rows[0]!.waits_on, "ready to merge");
+});

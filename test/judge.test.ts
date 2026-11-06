@@ -44,7 +44,7 @@ const board = (o: Partial<BoardConfig>): BoardConfig => ({
 test('"judge" is a rule bucket, not a board default', () => {
   const text = defaultConfigText({ workOrgs: ["acme"] }).replace(`bucket = "hide", why = "bot PR"`, `bucket = "judge", why = "bot PR"`);
   assert.deepEqual(parseConfig(text).errors, []);
-  assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[7]!.bucket, "judge");
+  assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[8]!.bucket, "judge");
   const bad = parseConfig(text.replace(`default = "later"`, `default = "judge"`)).errors;
   assert.match(bad[0]?.message ?? "", /must be one of now, today, blocked, later, fyi, hide/);
   assert.match(parseConfig(text.replace(`bucket = "judge"`, `bucket = "maybe"`)).errors[0]?.message ?? "", /or judge/);
@@ -64,9 +64,9 @@ test("hard = true: the first-run template sets it on asks by name, a person's or
   ]);
   const errors = (t: string) => parseConfig(t).errors.map((e) => `${e.path}: ${e.message}`);
   const rule = `why = "{me.requested_by} asked you directly", hard = true`;
-  assert.deepEqual(errors(text.replace(rule, rule.replace("true", `"yes"`))), ["boards[0].rules[0].hard: must be true or false"]);
+  assert.deepEqual(errors(text.replace(rule, rule.replace("true", `"yes"`))), ["boards[0].rules[1].hard: must be true or false"]);
   assert.deepEqual(errors(text.replace(`bucket = "now", why = "{me.requested_by} asked you directly"`, `bucket = "judge"`)), [
-    "boards[0].rules[0].hard: a hard rule places the item itself; give it a bucket, not judge",
+    "boards[0].rules[1].hard: a hard rule places the item itself; give it a bucket, not judge",
   ]);
 });
 
@@ -433,6 +433,110 @@ test("Claude can't answer blocked: the schema leaves it out and parseVerdicts dr
   assert.equal(v.size, 0);
 });
 
+test("the prompt says blocked is only a hint or a floor", () => {
+  const it = makeItem();
+  const p = buildJudgePrompt(
+    [
+      {
+        item: it,
+        signals: analyze(it, ctx, cfg, NOW).signals,
+        board: "B",
+        hint: { bucket: "later", why: "" },
+        answered: false,
+        bucket: "later",
+        ai: null,
+        key: "",
+      },
+    ],
+    "",
+    "me",
+    null,
+    "TAG",
+  );
+  assert.match(
+    p,
+    /\n- later: .*\n- blocked: only in a hint or a floor, never an answer: their rules say it can't move until something else happens \(another PR merging first, reviewers\) and keep it off their page, under Blocked\. To keep it off their page, answer later\.\n- fyi: /,
+  );
+});
+
+test("describe says what blocks a PR and what it blocks", () => {
+  const it = makeItem({ repo: "getsentry/getsentry", number: 22982, author: "me" });
+  const s = analyze(it, ctx, cfg, NOW).signals;
+  Object.assign(s.pr, {
+    blocked: true,
+    blocker: "sentry#129460",
+    blocker_waits: "waits on a review from sam",
+    blocks: ["getsentry#22983"],
+    requires_closed: ["sentry#1"],
+  });
+  const p = buildJudgePrompt(
+    [
+      {
+        item: it,
+        signals: s,
+        board: "My PRs",
+        hint: { bucket: "blocked", why: "" },
+        answered: false,
+        bucket: "blocked",
+        ai: null,
+        key: "",
+      },
+    ],
+    "",
+    "me",
+    null,
+    "TAG",
+  );
+  assert.match(p, /\n {2}blocked by sentry#129460, which waits on a review from sam: it can't merge before that one does\n/);
+  assert.match(p, /\n {2}needs sentry#1, closed without merging\n/);
+  assert.match(p, /\n {2}blocks getsentry#22983\n/);
+  const none = buildJudgePrompt(
+    [
+      {
+        item: it,
+        signals: analyze(it, ctx, cfg, NOW).signals,
+        board: "My PRs",
+        hint: { bucket: "later", why: "" },
+        answered: false,
+        bucket: "later",
+        ai: null,
+        key: "",
+      },
+    ],
+    "",
+    "me",
+    null,
+    "TAG",
+  );
+  assert.doesNotMatch(none, /blocked by|blocks |closed without merging/);
+});
+
+test("judgeKey changes with the blocker, and is the old key without one", () => {
+  const it = makeItem();
+  const at = hoursAgo(2);
+  const old = textHash(
+    JSON.stringify([
+      at,
+      it.state,
+      it.draft,
+      it.head_oid,
+      false,
+      it.review_decision,
+      it.mergeable,
+      it.title,
+      it.labels,
+      it.review_requests,
+      [],
+      false,
+      false,
+    ]),
+  );
+  assert.equal(judgeKey(it, at, null), old, "no mass re-judge");
+  assert.equal(judgeKey(it, at, null, undefined, ""), old);
+  assert.notEqual(judgeKey(it, at, null, undefined, "sentry#129460"), old);
+  assert.notEqual(judgeKey(it, at, null, undefined, "sentry#129460"), judgeKey(it, at, null, undefined, "sentry#5"));
+});
+
 // ---------------------------------------------------------------- the desk, with a fake claude
 
 // A fake claude: records each call, waits while `hold` exists, fails with a 401 while `fail` exists, and places every
@@ -676,7 +780,7 @@ test("a rule's placement reaches Claude as its hint, and hints in Now or Today g
   assert.match(asked, /- id: me\/api#2\n/, "the rules put it in Today, so it goes before a newer one they put in Later");
   assert.doesNotMatch(asked, /acme\/api#1/);
   assert.match(asked, /\n {2}hint: the rules would put it in today on the "PRs to review" board \(your repo\)\n/);
-  assert.deepEqual([t.placed(2).rule, t.placed(2).bucket, t.placed(2).why], [6, "today", "fake says today"]);
+  assert.deepEqual([t.placed(2).rule, t.placed(2).bucket, t.placed(2).why], [7, "today", "fake says today"]);
   assert.deepEqual(t.placed(2).hint?.bucket, "today");
   assert.deepEqual([t.placed(1).bucket, t.placed(1).judge], ["later", { bucket: null, why: "", pending: true }]);
 });

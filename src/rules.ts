@@ -72,7 +72,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
   }
   // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'. Below a hard
   // rule's floor, or your pin's, the floor holds with the rule's why.
-  const judged = (rule: number | null, ruled: Bucket, why: string, hard?: Bucket): Placement => {
+  const judged = (rule: number | null, ruled: Bucket, why: string, hard?: Bucket, final?: boolean): Placement => {
     const floor = e.floor ? atLeast(e.floor, hard) : hard;
     const bucket = atLeast(ruled, floor);
     const lifted = (from: Bucket, to: Bucket) => (to !== from ? e.floor_why : undefined);
@@ -86,7 +86,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
       ...(hard && { hard: true }),
       ...(floor && { floor }),
     };
-    if (!judge) return p;
+    if (!judge || final) return p; // a final rule: Claude doesn't re-sort it
     const j = judge(e.id);
     const hint = { bucket: ruled, why: p.why };
     if (j.bucket === null) return { ...p, judge: j, hint };
@@ -100,7 +100,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     trace.push({ index: i, when: rule.when, ...r });
     if (!r.matched) continue;
     if (rule.bucket === "judge") return judged(i, cfg.default, rule.why?.trim() ? rule.why : cfg.default_why);
-    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined);
+    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined, rule.final);
   }
   return judged(null, cfg.default, cfg.default_why);
 }

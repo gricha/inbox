@@ -1,6 +1,6 @@
 // Turns a GitHub item plus facts about you into the signals rules can test.
 import { areaFiles } from "./areas.ts";
-import { approved } from "./stage.ts";
+import { approved, owesReply, waitsOf } from "./stage.ts";
 import type { Config, Context, FieldDoc, Item, ReviewState, Signals, Until } from "./types.ts";
 
 export const FIELDS: FieldDoc[] = [
@@ -31,6 +31,39 @@ export const FIELDS: FieldDoc[] = [
   { path: "pr.unresolved_threads", type: "number", doc: "unresolved review threads" },
   { path: "pr.base", type: "string", doc: "base branch" },
   { path: "pr.stacked", type: "boolean", doc: "its base isn't the repo's default branch: it's stacked on another PR" },
+  {
+    path: "pr.requires",
+    type: "string[]",
+    doc: 'PRs it needs merged first, as repo#number, in any state: the PR below it in its stack, and those its description names ("Requires", "Depends on", "Stacked on", "Builds on", "Blocked by", "Needs" or "Merge this after", then a link or ref)',
+  },
+  {
+    path: "pr.blocked",
+    type: "boolean",
+    doc: "a PR it needs, or one that PR needs in turn, is still open (PRs the desk doesn't hold, and issues, never block)",
+  },
+  { path: "pr.blocked_by", type: "string[]", doc: "the open PRs it needs directly, as repo#number" },
+  {
+    path: "pr.blocker",
+    type: "string",
+    doc: 'the open PR at the end of the chain, as repo#number, with "(through repo#number)" when it isn\'t one it needs directly; "" when not blocked',
+  },
+  {
+    path: "pr.blocker_waits",
+    type: "string",
+    doc: 'what that PR waits on, as its pr.waits says it, or "is in Merging"; "" when not blocked',
+  },
+  { path: "pr.blocks", type: "string[]", doc: "open PRs that need this one merged first, directly or through others, as repo#number" },
+  { path: "pr.requires_closed", type: "string[]", doc: "PRs it needs that were closed without merging" },
+  {
+    path: "pr.waiting_on",
+    type: "string[]",
+    doc: "who is asked to review it and hasn't approved: logins and @teams, you and bots left out; empty once it's approved",
+  },
+  {
+    path: "pr.waits",
+    type: "string",
+    doc: 'what it waits on next, in words: "is your draft", "waits on a CI fix", "has changes requested by kofi", "waits on your reply to markstory, then a review from sam", "waits on a review from sam, @backend and 1 more", "waits on CI", "is ready to merge"; "" once merged or closed',
+  },
   {
     path: "pr.unasked",
     type: "boolean",
@@ -64,6 +97,11 @@ export const FIELDS: FieldDoc[] = [
   { path: "me.commented", type: "boolean", doc: "you commented or reviewed" },
   { path: "me.last_action_hours", type: "number", doc: "hours since your latest comment, review or push (-1 if none)" },
   { path: "me.new_activity", type: "boolean", doc: "someone else acted after your latest action" },
+  {
+    path: "me.owes_reply",
+    type: "boolean",
+    doc: "your PR has an open thread or a comment where someone other than you (bots aside) spoke last: its row's Reply; false on others' PRs",
+  },
   { path: "author.login", type: "string", doc: "author login" },
   { path: "author.bot", type: "boolean", doc: "author is a bot (GitHub App or listed in signals.bots)" },
   {
@@ -156,6 +194,12 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const yours = isMe(author) || viaMe;
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
   const myAreaFiles = areaFiles(item, ctx);
+  const waitingOn =
+    item.kind !== "pr" || approved(item, yours ? ctx.me : author)
+      ? []
+      : item.review_requests
+          .filter((r) => !isBot(r.reviewer, r.bot) && (r.type === "team" || !isMe(r.reviewer)))
+          .map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer));
 
   const signals: Signals = {
     item: {
@@ -205,7 +249,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       blocker_waits: "",
       blocks: [],
       requires_closed: [],
-      waiting_on: [],
+      waiting_on: waitingOn,
       waits: "",
     },
     me: {
@@ -226,7 +270,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       commented: item.comments.some((c) => isMe(c.author)) || myReviews.length > 0,
       last_action_hours: hours(lastAction),
       new_activity: Boolean(lastAction && others && others > lastAction),
-      owes_reply: false,
+      owes_reply: yours && item.kind === "pr" && owesReply(item, ctx.me),
     },
     author: {
       login: author,
@@ -242,6 +286,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       my_prs_90d: repoPrs,
     },
   };
+  signals.pr.waits = waitsOf(item, ctx.me, { mine: yours, unasked: signals.pr.unasked, askedYou: requested, waitingOn });
   return {
     signals,
     activity_at: activity,

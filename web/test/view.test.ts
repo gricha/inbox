@@ -85,7 +85,6 @@ const queue = (): QueueView => ({
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
-  waiting: { reviews: [], prs: [] },
   cards: 10,
   paused: null,
   stacks: {},
@@ -192,7 +191,8 @@ test("Blocked is the Waiting page renamed: #/blocked and #/waiting open it", () 
   assert.equal(routeHash({ name: "blocked" }), "#/blocked");
   assert.deepEqual(PAGE_GROUPS.blocked, ["waiting_reviews", "waiting_prs"]);
   const q = queue();
-  q.waiting = { reviews: [card("acme/web#20", { why: "waits on a review from dana" })], prs: [card("acme/web#21")] };
+  const by = { id: "acme/api#9", ref: "api#9", waits: "waits on a review" };
+  q.sections.blocked = [card("acme/web#20", { why: "waits on a review from dana" }), card("acme/web#21", { blocker: by })];
   const g = groupsOf(q, DEFAULT_OPEN, "").filter((x) => PAGE_GROUPS.blocked.includes(x.key));
   assert.deepEqual(
     g.map((x) => [x.key, x.label, x.open, x.variant, x.cards.map((c) => c.id)]),
@@ -202,11 +202,10 @@ test("Blocked is the Waiting page renamed: #/blocked and #/waiting open it", () 
     ],
   );
   assert.deepEqual(
-    removeCard(q, "acme/web#20").waiting.reviews.map((c) => c.id),
-    ["acme/web#20"],
-    "what you do (done, a nudge) doesn't end its wait: it stays",
+    removeCard(q, "acme/web#20").sections.blocked.map((c) => c.id),
+    ["acme/web#21"],
+    "acting on a row takes it off",
   );
-  assert.deepEqual(removeCard(q, "acme/web#20", true).waiting.reviews, [], "a close or a merge ends it");
 });
 
 test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {

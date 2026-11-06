@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
 import { askClaude, NOT_LOGGED_IN } from "./review.ts";
+import { andMore } from "./stage.ts";
 import {
   BUCKETS,
   RANK,
@@ -84,12 +85,12 @@ export interface JudgeItem {
 
 // What the judge reads of an item that can change: an answer holds until one of these does, so a bot's comment or a CI
 // rerun doesn't ask again. `activityAt` is others' latest activity, bots left out; the files and the AI review of its commit
-// count once they arrive, and so does a pin (who pinned it).
-export function judgeKey(item: Item, activityAt: string, ai: AiReview | null | undefined, pinned?: string): string {
+// count once they arrive, and so does a pin (who pinned it) and the PR that blocks it.
+export function judgeKey(item: Item, activityAt: string, ai: AiReview | null | undefined, pinned?: string, blocker = ""): string {
   const reviews = item.reviews.filter((r) => !r.author_bot).map((r) => [r.author, r.state]);
   const facts = [activityAt, item.state, item.draft, item.head_oid, item.ci === "red", item.review_decision, item.mergeable];
   const text = [item.title, item.labels, item.review_requests, reviews, !!item.paths, ai?.head_oid === item.head_oid];
-  return textHash(JSON.stringify([...facts, ...text, ...(pinned ? [pinned] : [])]));
+  return textHash(JSON.stringify([...facts, ...text, ...(pinned ? [pinned] : []), ...(blocker ? [`blocked by ${blocker}`] : [])]));
 }
 
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
@@ -210,6 +211,9 @@ function describe(g: JudgeItem, ctx: Context | null): string[] {
       : []),
     theirPush ? `they pushed ${minutesAgo(s.pr.pushed_hours)}` : null,
     pr ? threads(it) : null,
+    s.pr.blocked ? `blocked by ${s.pr.blocker}, which ${s.pr.blocker_waits}: it can't merge before that one does` : null,
+    s.pr.requires_closed.length ? `needs ${s.pr.requires_closed.join(", ")}, closed without merging` : null,
+    s.pr.blocks.length ? `blocks ${andMore(s.pr.blocks)}` : null,
     [`for ${s.me.login}: ${asked(s)}`, s.me.author ? null : affinity(s), s.repo.mine ? "their repo" : null].filter(Boolean).join("; "),
     others(it, s),
     pr ? reviewed(it, s) : null,
@@ -273,6 +277,7 @@ export function buildJudgePrompt(
     `- now: a person is blocked on them today: asked by name and waiting, changes requested on their PR, a question to them. One or two at most; CI on their own PR is never now.`,
     `- today: a person is waiting on them, or it's theirs to finish (approved and green and ready to merge, or their own draft touched in the last two weeks).`,
     `- later: theirs, but nobody is blocked: their PRs waiting on others, reviews they'll likely end up doing.`,
+    `- blocked: only in a hint or a floor, never an answer: their rules say it can't move until something else happens (another PR merging first, reviewers) and keep it off their page, under Blocked. To keep it off their page, answer later.`,
     `- fyi: someone else has it, or nobody needs them. It's kept off their page.`,
     `- hide: automated noise.`,
     `Less is more: when unsure, sort it away. Each item's hint says where their rules would put it; their policy below says how they want things sorted, and it wins over the hint. When the policy's lines disagree, a line that sorts an item away for who made it or its state (bots, drafts other than their own recent ones, stacked PRs, someone else asked by name, a teammate reviewing) beats a line that promotes it for what it touches. Being asked by name, their own pin and a hard rule's floor beat both.`,
@@ -362,7 +367,7 @@ export class Judge {
           answered: !!p.judge.bucket,
           bucket: p.judge.bucket ?? p.hint.bucket,
           ai: snap.reviews.get(id) ?? null,
-          key: judgeKey(e.item, e.analysis.activity_at, snap.reviews.get(id), snap.pins.get(id)),
+          key: judgeKey(e.item, e.analysis.activity_at, snap.reviews.get(id), snap.pins.get(id), e.analysis.signals.pr.blocker),
           ...(snap.pins.has(id) && { pinned: snap.pins.get(id) }),
         });
       }

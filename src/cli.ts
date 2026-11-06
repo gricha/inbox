@@ -29,7 +29,7 @@ const USAGE = `usage: desk <command>
   serve [--port N] [--open]           run the desk server in the foreground
   open                                open the UI in the browser
   status [--short]                    counts per board; --short prints the status-line text
-  ls [board|focus] [--all] [--json]   list cards (default focus); --all adds later and fyi
+  ls [board|focus] [--all] [--json]   list cards (default focus); --all adds blocked, later and fyi
   show <ref> [--json]                 one item: why, facts, rule trace
   add <ref> [why] [--from <task>]     put a PR or issue on your desk (fetched if new, pinned) and start its pre-review;
                                       why: the line it shows as why it's there
@@ -183,13 +183,14 @@ async function ls(x: Ctx): Promise<number> {
     ["now", s.now],
     ["today", s.today],
   ];
-  if (x.opts.all) groups.push(["later", s.later], ["fyi", s.fyi]);
+  if (x.opts.all) groups.push(["blocked", s.blocked], ["later", s.later], ["fyi", s.fyi]);
   if (groups.every(([, cs]) => !cs.length)) x.out(`Nothing in ${groups.map(([b]) => b.toUpperCase()).join(" or ")}.`);
   if (x.opts.all) groups.push(["hide", v.hidden, "HIDDEN BY RULES"], ["hide", v.cleared, "CLEARED (done, snoozed, muted)"]);
   printCards(x, groups);
   const counts: [number, string][] = x.opts.all
     ? []
     : [
+        [s.blocked.length, "blocked"],
         [s.later.length, "later"],
         [s.fyi.length, "fyi"],
         [v.cleared.length, "cleared"],
@@ -197,7 +198,8 @@ async function ls(x: Ctx): Promise<number> {
         ["reviewing" in v ? v.reviewing : 0, "more once Claude has reviewed them"],
       ];
   const more = counts.filter(([n]) => n).map(([n, l]) => `${n} ${l}`);
-  const hint = !x.opts.all && (s.later.length || s.fyi.length) ? `  (desk ls ${which === "focus" ? "" : `${which} `}--all)` : "";
+  const hint =
+    !x.opts.all && (s.blocked.length || s.later.length || s.fyi.length) ? `  (desk ls ${which === "focus" ? "" : `${which} `}--all)` : "";
   if (more.length) x.out("\n" + x.c.dim(clip(more.join(" · ") + hint, x.width)));
   return 0;
 }
@@ -292,7 +294,7 @@ async function status(x: Ctx): Promise<number> {
     x.out(x.c.bold(s.name));
     for (const b of s.boards) {
       const n = b.counts;
-      const counts = (["now", "today", "later", "fyi"] as const).map((k) => `${x.glyph(k)}${n[k]}`).join(" ");
+      const counts = (["now", "today", "blocked", "later", "fyi"] as const).map((k) => `${x.glyph(k)}${n[k]}`).join(" ");
       x.out(
         `  ${b.id.padEnd(idW)}  ${b.name.padEnd(nameW)}  ${counts}${b.new ? `  +${b.new} new` : ""}${b.error ? x.c.red(`  ${b.error}`) : ""}`,
       );

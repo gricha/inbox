@@ -363,3 +363,56 @@ test("the queue's order within Now or Today: handed back, close looks, then the 
     ["9", "10", "4", "8", "3", "7", "5", "2", "6", "1"],
   );
 });
+
+test("final = true: Claude isn't asked, and its answer doesn't move it, in any bucket", () => {
+  const rules = (final: boolean) =>
+    compileBoard(
+      board({
+        rules: [
+          { when: "item.number == 1", bucket: "blocked", why: "blocked by api#9", final },
+          { when: "item.number == 2", bucket: "now", why: "asked you", final },
+        ],
+      }),
+      "x",
+    ).board;
+  const entries = [entry(makeItem({ number: 1 })), entry(makeItem({ number: 2 }))];
+  const today = () => ({ bucket: "today" as const, why: "Claude says today", pending: false });
+  const p = (b: ReturnType<typeof rules>, n: number) => classify(b, entries, today).placements.get(`acme/api#${n}`)!;
+  for (const [n, bucket] of [
+    [1, "blocked"],
+    [2, "now"],
+  ] as const)
+    assert.deepEqual(
+      [p(rules(true), n).bucket, p(rules(true), n).why, p(rules(true), n).judge, placedBy(p(rules(true), n))],
+      [bucket, n === 1 ? "blocked by api#9" : "asked you", undefined, undefined],
+    );
+  assert.deepEqual([p(rules(false), 1).bucket, p(rules(false), 2).bucket], ["today", "today"], "without final, Claude's today");
+});
+
+test("a hard blocked rule: Claude may lift it, never below Blocked", () => {
+  const { board: b } = compileBoard(board({ rules: [{ when: "true", bucket: "blocked", why: "blocked by api#9", hard: true }] }), "x");
+  const at = (bucket: Bucket) =>
+    classify(b, [entry(makeItem())], () => ({ bucket, why: "", pending: false })).placements.get("acme/api#1")!.bucket;
+  assert.deepEqual([at("today"), at("later")], ["today", "blocked"]);
+});
+
+test("your pin lifts a final blocked rule to today, keeping the rule's why", () => {
+  const { board: b } = compileBoard(board({ rules: [{ when: "true", bucket: "blocked", why: "blocked by api#9", final: true }] }), "x");
+  const p = classify(b, [entry(makeItem(), { pinned: true, floor: "today" })], () => ({ bucket: "fyi", why: "", pending: false }));
+  const got = p.placements.get("acme/api#1")!;
+  assert.deepEqual([got.bucket, got.why, got.judge], ["today", "blocked by api#9", undefined]);
+});
+
+test("blocked isn't capped or made quiet", () => {
+  const { board: b } = compileBoard(
+    board({ caps: { now: 1, today: 2 }, rules: [{ when: "true", bucket: "blocked", why: "blocked by api#9", final: true }] }),
+    "x",
+  );
+  const old = Array.from({ length: 8 }, (_, i) => entry(makeItem({ number: i + 1, updated_at: hoursAgo(30 * 24) })));
+  const r = classify(b, old, undefined, 1);
+  assert.equal(r.order.blocked.length, 8);
+  assert.deepEqual(
+    [...r.placements.values()].map((p) => [p.bucket, p.demoted]),
+    Array.from({ length: 8 }, () => ["blocked", undefined]),
+  );
+});

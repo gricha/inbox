@@ -118,13 +118,14 @@ test("ls --all on focus prints the whole queue", async () => {
   );
 });
 
-test("ls <board> hides later/fyi unless --all, and counts cleared/hidden", async () => {
+test("ls <board> hides blocked/later/fyi unless --all, and counts cleared/hidden", async () => {
   const r = await run(["ls", "reviews"]);
   assert.equal(r.code, 0);
   assert.doesNotMatch(r.out, /LATER|sentry#202/);
-  assert.match(r.out, /1 later · 1 fyi · 1 cleared · 1 hidden {2}\(desk ls reviews --all\)\n$/);
+  assert.match(r.out, /1 blocked \u00b7 1 later \u00b7 1 fyi \u00b7 1 cleared \u00b7 1 hidden {2}\(desk ls reviews --all\)\n$/);
 
   const all = await run(["ls", "reviews", "--all"]);
+  assert.match(all.out, /TODAY 1\n.*\n\nBLOCKED 1\n\u2298 sentry#606 +Read the new region config/);
   assert.match(all.out, /LATER 1\n○ sentry#202 +Bump some dependency/);
   assert.match(all.out, /FYI 1\n· widgets#7 +Widget docs/);
   assert.match(all.out, /HIDDEN BY RULES 1\n/);
@@ -240,7 +241,7 @@ test("status prints focus totals and boards", async () => {
   const r = await run(["status"]);
   assert.equal(r.code, 0);
   assert.match(r.out, /^● 1 now {2}◐ 1 today {2}\+1 new {3}synced (just now|\dm ago)\n/);
-  assert.match(r.out, /\nWork\n {2}reviews {2}PRs to review {2}●1 ◐1 ○1 ·1 {2}\+1 new\n/);
+  assert.match(r.out, /\nWork\n {2}reviews {2}PRs to review {2}\u25cf1 \u25d01 \u22980 \u25cb1 \u00b71 {2}\+1 new\n/);
 });
 
 test("status --short prints the status text, or 'desk offline' fast", async () => {

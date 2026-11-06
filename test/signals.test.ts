@@ -195,3 +195,75 @@ test("stacked: a PR whose base isn't its repo's default branch; unknown until th
   assert.equal(s({ base: "master", default_branch: "master" }), false);
   assert.equal(s({ base: "ref/sa-narrow", default_branch: undefined }), false, "stored before the default branch was fetched");
 });
+
+test("pr.waits, pr.waiting_on and me.owes_reply", () => {
+  const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
+  const review = (author: string, state: "approved" | "changes_requested" | "commented") => ({
+    author,
+    author_bot: false,
+    trusted: true,
+    state,
+    at: hoursAgo(30),
+    commit: "abc",
+  });
+  const said = (author: string, h: number) => ({ author, author_bot: false, at: hoursAgo(h), resolved: false });
+  const mine = (o: Partial<Item>) => makeItem({ author: "me", head_author: "me", ...o });
+  const of = (it: Item) => analyze(it, ctx, cfg, NOW).signals;
+  // sentry#129460: yours, asked of cvxluo, skaasten and 6 teams; markstory had the last word twice after his COMMENTED review.
+  const live = of(
+    mine({
+      review_requests: [
+        user("cvxluo"),
+        user("skaasten"),
+        ...["a", "b", "c", "d", "e", "f"].map((t) => ({ reviewer: t, type: "team" as const, codeowner: true })),
+      ],
+      reviews: [review("markstory", "commented")],
+      thread_last: [said("me", 27), said("markstory", 29), said("markstory", 28), said("me", 26), said("me", 25)],
+    }),
+  );
+  assert.equal(live.pr.waits, "waits on your reply to markstory, then a review from cvxluo, skaasten and 6 more");
+  assert.equal(live.pr.waiting_on.length, 8);
+  assert.equal(live.me.owes_reply, true);
+  const theirs = of(makeItem({ author: "carol", review_requests: [user("me")], thread_last: [said("carol", 1)] }));
+  assert.deepEqual([theirs.pr.waits, theirs.pr.waiting_on, theirs.me.owes_reply], ["waits on your review", [], false]);
+  const approved = { review_decision: "approved" as const, reviews: [review("kofi", "approved")], review_requests: [user("sam")] };
+  const rows: [string, Item, string][] = [
+    ["an issue", makeItem({ kind: "issue" }), ""],
+    ["merged", mine({ state: "merged" }), ""],
+    ["your draft", mine({ draft: true }), "is your draft"],
+    ["their draft", makeItem({ draft: true }), "is a draft"],
+    ["your red CI", mine({ ci: "red" }), "waits on a CI fix"],
+    ["their red CI", makeItem({ ci: "red" }), "has CI failing"],
+    ["a conflict", mine({ mergeable: "conflict" }), "waits on a merge conflict fix"],
+    ["changes", mine({ reviews: [review("kofi", "changes_requested")] }), "has changes requested by kofi"],
+    [
+      "asked, hidden too",
+      mine({ review_requests: [user("sam"), user("me")], review_requests_hidden: 2 }),
+      "waits on a review from sam and 2 more",
+    ],
+    [
+      "a reply, nobody asked",
+      mine({ comments: [{ author: "priya", author_bot: false, at: hoursAgo(1) }], review_requests: [] }),
+      "waits on your reply to priya, then a review",
+    ],
+    ["nobody asked", mine({ review_requests: [] }), "has nobody asked to review it"],
+    ["a reviewer looked", mine({ reviews: [review("kai", "commented")] }), "waits on a review"],
+    ["CI running", mine({ ...approved, ci: "pending" }), "waits on CI"],
+    ["yours, ready", mine(approved), "is ready to merge"],
+    ["theirs, approved", makeItem({ ...approved, author: "carol" }), "is approved, for carol to merge"],
+  ];
+  for (const [what, it, waits] of rows) assert.equal(of(it).pr.waits, waits, what);
+  assert.deepEqual(of(mine(approved)).pr.waiting_on, [], "empty once it's approved");
+  assert.deepEqual(
+    of(mine({ review_requests: [user("sam"), user("me"), { reviewer: "copilot", type: "user", codeowner: false, bot: true }] })).pr
+      .waiting_on,
+    ["sam"],
+    "you and bots left out",
+  );
+  const deps = of(mine({ requires: ["acme/api#9"] })).pr;
+  assert.deepEqual(
+    [deps.requires, deps.blocked, deps.blocked_by, deps.blocker, deps.blocker_waits, deps.blocks, deps.requires_closed],
+    [[], false, [], "", "", [], []],
+    "Desk.compute() fills the dependency fields",
+  );
+});

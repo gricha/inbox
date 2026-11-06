@@ -6,7 +6,7 @@ import path from "node:path";
 import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
 import { judgeKey } from "../src/judge.ts";
-import type { Context } from "../src/types.ts";
+import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
@@ -714,18 +714,194 @@ test("a new sync interval re-arms the pending poll", async (ctx) => {
   t.cleanup();
 });
 
-test("Waiting: your open PRs whose next move is someone else's, on reviews or on the PR below, longest wait first", async (c) => {
+// ---------------------------------------------------------------- Blocked
+
+// The live example: getsentry#22982 and #22983 require sentry#129460, yours, which waits on your reply to markstory (he spoke
+// last on two open threads after his COMMENTED review) and on reviews from cvxluo, skaasten and 6 teams.
+const LIVE = "getsentry/sentry#129460";
+const WAITS = "waits on your reply to markstory, then a review from cvxluo, skaasten and 6 more";
+const said = (author: string, h: number) => ({ author, author_bot: false, at: hoursAgo(h), resolved: false });
+const review = (author: string, state: "approved" | "changes_requested" | "commented", h = 45) => ({
+  author,
+  author_bot: false,
+  trusted: true,
+  state,
+  at: hoursAgo(h),
+  commit: "abc",
+});
+const root = (o: Partial<Item> = {}) =>
+  makeItem({
+    repo: "getsentry/sentry",
+    number: 129460,
+    author: "me",
+    head_author: "me",
+    created_at: hoursAgo(70),
+    review_requests: [
+      { reviewer: "cvxluo", type: "user", codeowner: false },
+      { reviewer: "skaasten", type: "user", codeowner: false },
+      ...["issues", "owners-auth", "security", "issue-detection-backend", "issues-feed", "backend"].map((reviewer) => ({
+        reviewer,
+        type: "team" as const,
+        codeowner: true,
+      })),
+    ],
+    reviews: [review("markstory", "commented", 30)],
+    threads_total: 5,
+    threads_unresolved: 5,
+    thread_last: [said("markstory", 29), said("markstory", 28), said("me", 27), said("me", 26), said("me", 25)],
+    ...o,
+  });
+// Yours, approved by a collaborator, CI green, no comments, nobody asked any more.
+const dependent = (n: number, o: Partial<Item> = {}) =>
+  makeItem({
+    repo: "getsentry/getsentry",
+    number: n,
+    author: "me",
+    head_author: "me",
+    created_at: hoursAgo(60 - (n % 10)),
+    review_decision: "approved",
+    reviews: [review("kofi", "approved")],
+    requires: [LIVE],
+    ...o,
+  });
+const QUIET = { "policy.judge": false, "notify.quiet": "" };
+const merge = (t: Awaited<ReturnType<typeof setup>>, id: string, h: number) => {
+  t.setNow(new Date(NOW.getTime() + h * 3_600_000));
+  const at = new Date(NOW.getTime() + h * 3_600_000).toISOString();
+  t.gh.items.set(id, { ...t.gh.items.get(id)!, state: "merged", closed_at: at, updated_at: at });
+};
+const back = (cs: Card[]) => cs.filter((x) => x.group === "back").map((x) => [x.id, x.why]);
+
+test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits on a reply and reviews, wait in Blocked; when it merges they're back to you, unblocked, with one notification", async (c) => {
+  const t = await setup([dependent(22982), dependent(22983), root()], { settings: QUIET });
+  c.after(t.cleanup);
+  t.desk.coordinator.wake = () => {};
+  await t.desk.sync();
+  const why = "CI can't pass until getsentry/sentry#129460 merges";
+  for (const id of ["getsentry#22982", "getsentry#22983"]) {
+    t.desk.act(id, "inflight");
+    t.desk.handBack(id, why);
+  }
+  let q = t.desk.queue();
+  assert.deepEqual(back(q.sections.now), [], "not back to you while #129460 blocks them");
+  assert.deepEqual(
+    q.sections.blocked.map((x) => [x.id, x.why, x.stage]),
+    [
+      ["getsentry/getsentry#22982", `blocked by sentry#129460, which ${WAITS}`, "blocked"],
+      ["getsentry/getsentry#22983", "blocked by sentry#129460", "blocked"],
+    ],
+  );
+  assert.deepEqual(
+    q.sections.today.map((x) => [x.id, x.why, x.cta]),
+    [[LIVE, `blocks getsentry#22982 and getsentry#22983; it ${WAITS}`, "reply"]],
+  );
+  assert.deepEqual(t.notes, []);
+
+  merge(t, LIVE, 1);
+  await t.desk.sync();
+  await t.desk.sync();
+  q = t.desk.queue();
+  const unblocked = `unblocked: sentry#129460 merged \u00b7 handed back: ${why}`;
+  assert.deepEqual(back(q.sections.now), [
+    ["getsentry/getsentry#22982", unblocked],
+    ["getsentry/getsentry#22983", unblocked],
+  ]);
+  assert.deepEqual(q.sections.blocked, []);
+  assert.deepEqual(t.notes, ["2 need you: getsentry#22982, getsentry#22983"]);
+  const events = t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.kind === "unblocked");
+  assert.deepEqual(
+    events.map((e) => [e.item_id, e.data.merged]),
+    [
+      ["getsentry/getsentry#22982", "sentry#129460"],
+      ["getsentry/getsentry#22983", "sentry#129460"],
+    ],
+  );
+});
+
+test("A review asked of you by name that requires an open PR waits in Blocked; once that PR merges it's in Now, notified", async (c) => {
+  const ask = reviewAsk(9, { requires: ["acme/api#5"] });
+  const t = await setup([ask], { settings: QUIET });
+  c.after(t.cleanup);
+  // carol's own PR, on no board: kai has looked, nobody has approved.
+  const five = makeItem({ number: 5, author: "carol", reviews: [{ ...review("kai", "commented"), commit: "x" }] });
+  t.desk.store.putItems([five], NOW.toISOString(), true);
+  await t.desk.sync();
+  let q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.now.map((x) => x.id),
+    [],
+  );
+  assert.deepEqual(
+    q.sections.blocked.map((x) => [x.id, x.why]),
+    [["acme/api#9", "blocked by api#5, which waits on a review"]],
+  );
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.desk.store.putItems([{ ...five, state: "merged", closed_at: at, updated_at: at }], at, true);
+  t.setNow(new Date(at));
+  await t.desk.sync();
+  q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.now.map((x) => [x.id, x.why]),
+    [["acme/api#9", "carol asked you directly"]],
+  );
+  assert.equal(t.notes.at(-1), "api#9 \u00b7 carol asked you directly");
+});
+
+test("A change request or a reply you owe on a blocked PR is yours: not in Blocked, and its hand-back isn't held", async (c) => {
+  const needs = { requires: ["acme/web#100"] };
+  const t = await setup(
+    [
+      myPr(100, { ci: "green", created_at: hoursAgo(80) }),
+      myPr(1, { ...needs, ci: "green", review_decision: "changes_requested", reviews: [review("kofi", "changes_requested")] }),
+      myPr(2, { ...needs, ci: "green", threads_unresolved: 1, thread_last: [said("priya", 1)] }),
+      myPr(3, { ...needs, draft: true }),
+    ],
+    { settings: QUIET },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act("web#1", "inflight");
+  t.desk.handBack("web#1", "kofi wants a different retry budget");
+  const q = t.desk.queue();
+  assert.equal(
+    q.sections.today.some((x) => x.id === "acme/web#3"),
+    false,
+    "your fresh draft waits on web#100 too",
+  );
+  assert.deepEqual(back(q.sections.now), [["acme/web#1", "handed back: kofi wants a different retry budget"]]);
+  assert.deepEqual(
+    q.sections.blocked.map((x) => [x.id, x.why]),
+    [
+      ["acme/web#100", "waits on a review from dana"],
+      ["acme/web#3", "blocked by web#100"],
+    ],
+    "a reply you owe keeps web#2 out; web#100's own row says what it waits on",
+  );
+});
+
+test("Done on a Blocked row: it comes back when the PR it waits on merges", async (c) => {
+  const t = await setup([dependent(22982), root()], { settings: QUIET });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  t.desk.act("getsentry#22982", "done");
+  const all = () => Object.values(t.desk.queue().sections).flat();
+  assert.equal(
+    all().some((x) => x.id === "getsentry/getsentry#22982"),
+    false,
+  );
+  merge(t, LIVE, 1);
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.queue().sections.today.map((x) => [x.id, x.why]),
+    [["getsentry/getsentry#22982", "approved and green: ready to merge"]],
+  );
+  assert.equal(t.notes.at(-1), "getsentry#22982 \u00b7 approved and green: ready to merge");
+});
+
+test("Blocked by the template: your PRs waiting on reviews, the latest ask as their age; what's yours to do stays out", async (c) => {
   const asked = (reviewer: string, at: number, type: "user" | "team" = "user") => ({
     review_requests: [{ reviewer, type, codeowner: false }],
     request_events: [{ at: hoursAgo(at), actor: "me", actor_bot: false, reviewer, reviewer_type: type }],
-  });
-  const review = (author: string, state: "approved" | "changes_requested") => ({
-    author,
-    author_bot: false,
-    trusted: true,
-    state,
-    at: hoursAgo(20),
-    commit: "c",
   });
   const t = await setup(
     [
@@ -738,75 +914,164 @@ test("Waiting: your open PRs whose next move is someone else's, on reviews or on
           { reviewer: "kai", type: "user", codeowner: false },
         ],
       }),
-      myPr(3, { ci: "green", mergeable: "clean", review_decision: "approved", reviews: [review("kofi", "approved")] }),
-      myPr(4, { draft: true, ...asked("dana", 5) }),
-      myPr(5, { ci: "green", reviews: [review("kofi", "changes_requested")] }),
+      myPr(3, { ci: "green", ...asked("dana", 5), comments: [{ author: "priya", author_bot: false, at: hoursAgo(1) }] }),
+      myPr(5, { ci: "green", review_decision: "changes_requested", reviews: [review("kofi", "changes_requested", 20)] }),
       myPr(6, { ci: "red", ...asked("dana", 5) }),
       myPr(7, { ci: "green", ...asked("eve", 10) }),
       myPr(8, { ci: "green", head_ref: "planner-a", ...asked("dana", 40) }),
       myPr(9, { ci: "green", head_ref: "planner-b", base: "planner-a", ...asked("sam", 2) }),
     ],
-    { settings: { "policy.judge": false } },
+    { settings: QUIET },
   );
   c.after(t.cleanup);
   await t.desk.sync();
   t.desk.act("web#7", "inflight");
-  const w = t.desk.queue().waiting;
+  const q = t.desk.queue();
+  assert.equal(
+    q.sections.later.some((x) => x.id === "acme/web#1"),
+    false,
+    "Blocked, not Later",
+  );
+  const b = q.sections.blocked;
   assert.deepEqual(
-    w.reviews.map((x) => [x.id, x.why, x.waiting_since]),
+    b.map((x) => [x.id, x.why, x.waiting_since]),
     [
       ["acme/web#2", "waits on a review from sam, @backend and 1 more", hoursAgo(48)],
-      ["acme/web#8", "waits on a review from dana · blocks web#9", hoursAgo(40)],
+      ["acme/web#8", "waits on a review from dana", hoursAgo(40)],
       ["acme/web#1", "waits on a review from dana", hoursAgo(30)],
-      ["acme/web#7", "waits on a review from eve", hoursAgo(10)],
     ],
-    "the latest ask, else when it was opened; Merging's too",
+    "a reply owed (web#3), changes requested (web#5), red CI (web#6) and Merging's web#7 waiting on a review stay out",
+  );
+  assert.deepEqual([b[1]!.stack?.folded, b[1]!.blocks], [["acme/web#9"], ["web#9"]], "web#8 stands for its stack");
+});
+
+test("Merging's PRs another PR blocks are on Blocked, in their chain, marked in Merging", async (c) => {
+  const t = await setup([dependent(22982), dependent(22983), root()], { settings: QUIET });
+  c.after(t.cleanup);
+  t.desk.coordinator.wake = () => {};
+  await t.desk.sync();
+  t.desk.act("getsentry#22983", "inflight");
+  const q = t.desk.queue();
+  assert.equal(
+    q.sections.today.some((x) => x.id === "getsentry/getsentry#22982"),
+    false,
+    "approved and green, but it can't merge before sentry#129460",
   );
   assert.deepEqual(
-    w.prs.map((x) => [x.id, x.why]),
-    [["acme/web#9", "waits on web#8 to merge first"]],
-    "the PR below it first, asked or not",
+    q.sections.blocked.map((x) => [x.id, x.why, x.inflight]),
+    [
+      ["getsentry/getsentry#22982", `blocked by sentry#129460, which ${WAITS}`, false],
+      ["getsentry/getsentry#22983", "in Merging \u00b7 blocked by sentry#129460", true],
+    ],
+  );
+  const elsewhere = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi, ...q.hidden, ...q.cleared];
+  assert.equal(
+    elsewhere.some((x) => x.id === "getsentry/getsentry#22983"),
+    false,
+  );
+  assert.deepEqual(
+    t.desk.inflight().rows.map((r) => [r.card.id, r.waits_on]),
+    [["getsentry/getsentry#22983", "waits on sentry#129460 to merge first"]],
   );
 });
 
-test("Waiting leaves out what's yours to do and what no search holds: changes not re-asked, a reply owed, you asked of yourself", async (c) => {
-  const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
-  const changes = { author: "kofi", author_bot: false, trusted: true, state: "changes_requested" as const, at: hoursAgo(20), commit: "c" };
-  const approve = { ...changes, state: "approved" as const };
-  const said = { author: "priya", author_bot: false, at: hoursAgo(1) }; // after your last word: you owe her a reply
+test("a hand-back of a PR only waiting on reviewers isn't held, and a hand-back never held never says unblocked", async (c) => {
   const t = await setup(
-    [
-      myPr(1, { ci: "green", review_requests: [user("sam")], reviews: [changes] }),
-      myPr(2, { ci: "green", review_requests: [user("kofi")], reviews: [changes] }),
-      myPr(3, { ci: "green", head_ref: "a", review_requests: [user("sam")] }),
-      myPr(4, { ci: "green", head_ref: "b", base: "a", reviews: [changes] }),
-      reviewAsk(5, { author: "sentry-junior", author_bot: true, via: "@me", ci: "green" }),
-      myPr(6, { ci: "green", review_requests: [user("dana")] }),
-      myPr(7, { ci: "green", review_requests: [user("sam")], comments: [said] }),
-      myPr(8, { ci: "green", review_requests: [user("kofi")], reviews: [changes], review_decision: "changes_requested", comments: [said] }),
-      myPr(9, { ci: "green", head_ref: "c", review_requests: [user("sam")] }),
-      myPr(10, { ci: "green", head_ref: "d", base: "c", review_decision: "approved", reviews: [approve], comments: [said] }),
-      myPr(11, { ci: "green", head_ref: "e", base: "c", review_requests: [] }), // stacked, but nobody's asked: Add reviewers is yours
-    ],
-    { settings: { "policy.judge": false } },
+    [myPr(1, { ci: "green", reviews: [review("kofi", "commented")] }), myPr(2, { ci: "green", requires: ["acme/api#77"] })],
+    {
+      settings: QUIET,
+    },
   );
   c.after(t.cleanup);
+  t.desk.coordinator.wake = () => {};
   await t.desk.sync();
-  const ids = () => [...t.desk.queue().waiting.reviews, ...t.desk.queue().waiting.prs].map((x) => x.id).toSorted();
-  assert.deepEqual(
-    ids(),
-    ["acme/web#2", "acme/web#3", "acme/web#6", "acme/web#9"],
-    "kofi asked again waits; changes not asked again, stacked or not, and a reply you owe, asked again or approved, are yours",
-  );
   assert.equal(
-    t.desk.queue().waiting.reviews.some((x) => x.why.includes(" me")),
+    t.desk.queue().sections.later.some((x) => x.id === "acme/web#1"),
     false,
+    "it waits on reviews: Blocked, not Later",
   );
+  for (const n of [1, 2]) {
+    t.desk.act(`web#${n}`, "inflight");
+    t.desk.handBack(`web#${n}`, "needs your call");
+  }
+  // web#2's dependency merged after the hand-back, while the desk never saw it open.
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.desk.store.putItems([makeItem({ number: 77, state: "merged", closed_at: at, updated_at: at })], at, true);
+  t.setNow(new Date(at));
+  await t.desk.sync();
+  assert.deepEqual(back(t.desk.queue().sections.now), [
+    ["acme/web#1", "handed back: needs your call"],
+    ["acme/web#2", "handed back: needs your call"],
+  ]);
+});
 
-  // A search that stops returning it: it isn't refreshed any more, so it can't say what it waits on.
-  const route = t.gh.route;
-  t.gh.route = (q) => route(q).filter((id) => id !== "acme/web#6");
+test("the nobody's-asked hoist, handBackUnasked and rebaseConflicts skip a blocked PR", async (c) => {
+  const needs = { requires: ["acme/web#100"] };
+  const ready: Partial<Item> = { ci: "green", review_decision: "approved", reviews: [review("kofi", "approved")] };
+  const t = await setup(
+    [
+      myPr(100, { ci: "green" }),
+      myPr(1, { ...needs, ci: "green", review_requests: [] }),
+      myPr(2, { ...needs, ci: "green" }),
+      myPr(3, { ...needs, ...ready, mergeable: "conflict" }),
+    ],
+    { settings: QUIET },
+  );
+  c.after(t.cleanup);
+  t.desk.store.set("coordinator_bg", { id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" });
+  t.desk.coordinator.wake = () => {};
+  t.desk.coordinator.stop = async () => {};
   await t.desk.sync();
+  t.desk.act("web#2", "inflight");
+  t.desk.act("web#3", "pin");
+  t.gh.items.set("acme/web#2", { ...t.gh.items.get("acme/web#2")!, review_requests: [], updated_at: hoursAgo(1) });
   await t.desk.sync();
-  assert.deepEqual(ids(), ["acme/web#2", "acme/web#3", "acme/web#9"]);
+  const q = t.desk.queue();
+  assert.equal(
+    q.sections.now.some((x) => x.id === "acme/web#1"),
+    false,
+    "not hoisted: it can't merge before web#100 anyway",
+  );
+  assert.equal(t.desk.merging("acme/web#2").handback, undefined, "Merging keeps it");
+  assert.equal(t.desk.merging("acme/web#3").rebase, undefined, "a blocked PR isn't ready to merge");
+});
+
+test("trackBlocked: the first run logs nothing; becoming blocked logs 'blocked by \u2026'; its blocker follows a change; kv blocked's since is the Blocked row's age", async (c) => {
+  const t = await setup([myPr(100, { ci: "green" }), myPr(1, { ci: "green", requires: ["acme/web#100"] }), myPr(2, { ci: "green" })], {
+    settings: QUIET,
+  });
+  c.after(t.cleanup);
+  const kinds = () => t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.kind === "blocked" || e.kind === "unblocked");
+  await t.desk.sync();
+  assert.deepEqual(kinds(), []);
+  assert.deepEqual(t.desk.store.get("blocked"), { "acme/web#1": { since: hoursAgo(48), by: "web#100" } });
+
+  t.setNow(new Date(NOW.getTime() + 3_600_000));
+  const later = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.gh.items.set("acme/web#2", { ...t.gh.items.get("acme/web#2")!, requires: ["acme/web#100"], updated_at: later });
+  t.gh.items.set("acme/web#1", { ...t.gh.items.get("acme/web#1")!, requires: ["acme/web#101"], updated_at: later });
+  t.gh.items.set("acme/web#101", myPr(101, { ci: "green" }));
+  await t.desk.sync();
+  assert.deepEqual(
+    kinds().map((e) => [e.item_id, e.kind, e.data.by]),
+    [["acme/web#2", "blocked", "web#100"]],
+    "web#1 was blocked already",
+  );
+  assert.deepEqual(t.desk.store.get("blocked"), {
+    "acme/web#1": { since: hoursAgo(48), by: "web#101" },
+    "acme/web#2": { since: later, by: "web#100" },
+  });
+  const rows = Object.fromEntries(t.desk.queue().sections.blocked.map((x) => [x.id, x.waiting_since]));
+  assert.deepEqual([rows["acme/web#1"], rows["acme/web#2"]], [hoursAgo(48), later]);
+});
+
+test("a dependency closed without merging puts your PR in Today: needs X, closed without merging", async (c) => {
+  const t = await setup([myPr(1, { ci: "green", requires: ["acme/api#66"] })], { settings: QUIET });
+  c.after(t.cleanup);
+  t.desk.store.putItems([makeItem({ number: 66, state: "closed", closed_at: hoursAgo(3) })], NOW.toISOString(), true);
+  await t.desk.sync();
+  assert.deepEqual(
+    t.desk.queue().sections.today.map((x) => [x.id, x.why]),
+    [["acme/web#1", "needs api#66, closed without merging"]],
+  );
 });

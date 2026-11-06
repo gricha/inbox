@@ -6,6 +6,7 @@ import type { PrContext } from "./github/index.ts";
 import { askClaude } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
+import { waitsOnYou } from "./stage.ts";
 
 const BATCH = 10; // conversations per call
 const BODY = 1500; // characters of each comment
@@ -20,18 +21,6 @@ const lc = (s: string) => s.toLowerCase();
 // oxlint-disable-next-line no-control-regex -- one plain line, whatever Claude sent
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029\s]+/g, " ").trim();
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-// The rule: a person other than you had the last word, so they wait on your reply.
-const waitsOnYou = (last: { author: string; bot: boolean } | undefined, me: string) => !!last && !last.bot && lc(last.author) !== lc(me);
-
-// The rule on what a sync knows of your PR, for its row: an open thread, or its comments, where someone else spoke last.
-export function owesReply(it: Item, me: string): boolean {
-  const last = it.comments.findLast((c) => !c.author_bot);
-  return (
-    it.thread_last.some((t) => t.resolved === false && waitsOnYou({ author: t.author, bot: t.author_bot }, me)) ||
-    waitsOnYou(last && { author: last.author, bot: false }, me)
-  );
-}
 
 const said = (c: Said) => ({ id: c.id, author: c.author, bot: c.bot, body: c.body, at: c.at, url: c.url });
 

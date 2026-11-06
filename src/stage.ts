@@ -37,3 +37,52 @@ export function andMore(xs: string[], extra = 0): string {
   const more = xs.length - shown.length + extra;
   return more > 0 && shown.length ? `${shown.join(", ")} and ${more} more` : shown.join(" and ");
 }
+
+const lc = (s: string) => s.toLowerCase();
+
+// The rule: a person other than you had the last word, so they wait on your reply.
+export const waitsOnYou = (last: { author: string; bot: boolean } | undefined, me: string) =>
+  !!last && !last.bot && lc(last.author) !== lc(me);
+
+// Who waits on your reply, from what a sync knows of your PR: the last word on its open threads (latest first), then on its comments.
+function owedTo(it: Item, me: string): string[] {
+  const open = it.thread_last.filter((t) => t.resolved === false).toSorted((a, b) => b.at.localeCompare(a.at));
+  const last = it.comments.findLast((c) => !c.author_bot);
+  const who = [...open.map((t) => ({ author: t.author, bot: t.author_bot })), ...(last ? [{ author: last.author, bot: false }] : [])];
+  const out = new Map<string, string>();
+  for (const w of who) if (waitsOnYou(w, me) && !out.has(lc(w.author))) out.set(lc(w.author), w.author);
+  return [...out.values()];
+}
+
+// The rule on what a sync knows of your PR, for its row: an open thread, or its comments, where someone else spoke last.
+export const owesReply = (it: Item, me: string): boolean => owedTo(it, me).length > 0;
+
+// Since the latest ask of those still asked (you aside): a re-request starts the wait again; else since it was opened.
+export function askedAt(it: Item, me: string): string {
+  const still = new Set(it.review_requests.filter((r) => r.type === "team" || lc(r.reviewer) !== lc(me)).map((r) => lc(r.reviewer)));
+  return it.request_events.filter((r) => still.has(lc(r.reviewer))).reduce((a, r) => (r.at > a ? r.at : a), it.created_at);
+}
+
+// What an open PR waits on next, in words: the first that applies of draft, CI, conflict, changes, a reply you owe, reviews.
+export function waitsOf(it: Item, me: string, o: { mine: boolean; unasked: boolean; askedYou: boolean; waitingOn: string[] }): string {
+  if (it.kind !== "pr" || it.state !== "open") return "";
+  const self = o.mine ? me : it.author;
+  if (it.draft) return o.mine ? "is your draft" : "is a draft";
+  if (it.ci === "red") return o.mine ? "waits on a CI fix" : "has CI failing";
+  if (it.mergeable === "conflict") return "waits on a merge conflict fix";
+  const changes = verdicts(it, self).changes_by;
+  if (changes.length) return `has changes requested by ${andMore(changes)}`;
+  const review = approved(it, self)
+    ? ""
+    : !o.mine && o.askedYou
+      ? "your review"
+      : o.waitingOn.length
+        ? `a review from ${andMore(o.waitingOn, it.review_requests_hidden ?? 0)}`
+        : "a review";
+  const owed = o.mine ? owedTo(it, me) : [];
+  if (owed.length) return `waits on your reply to ${andMore(owed)}${review ? `, then ${review}` : ""}`;
+  if (o.unasked) return "has nobody asked to review it";
+  if (review) return `waits on ${review}`;
+  if (it.ci === "pending") return "waits on CI";
+  return o.mine ? "is ready to merge" : `is approved, for ${it.author} to merge`;
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { andMore, stage } from "../src/stage.ts";
+import { andMore, askedAt, stage } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -75,4 +75,35 @@ test("andMore", () => {
   assert.equal(andMore(["a", "b"], 3), "a, b and 3 more", "requests GitHub hides count too");
   assert.equal(andMore(["a"], 1), "a and 1 more");
   assert.equal(andMore([]), "");
+});
+
+test("askedAt is the latest ask of those still asked", () => {
+  const ask = (reviewer: string, h: number, type: "user" | "team" = "user") => ({
+    at: hoursAgo(h),
+    actor: "me",
+    actor_bot: false,
+    reviewer,
+    reviewer_type: type,
+  });
+  const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
+  const it = (o: Partial<Item>) => makeItem({ author: "me", created_at: hoursAgo(48), ...o });
+  assert.equal(askedAt(it({ review_requests: [user("dana")], request_events: [ask("dana", 30)] }), "me"), hoursAgo(30));
+  assert.equal(
+    askedAt(it({ review_requests: [user("dana")], request_events: [ask("dana", 30), ask("sam", 2)] }), "me"),
+    hoursAgo(30),
+    "sam's ask is gone: he reviewed",
+  );
+  assert.equal(
+    askedAt(it({ review_requests: [user("dana"), user("me")], request_events: [ask("dana", 30), ask("me", 1)] }), "me"),
+    hoursAgo(30),
+    "you aside",
+  );
+  assert.equal(
+    askedAt(
+      it({ review_requests: [{ reviewer: "backend", type: "team", codeowner: true }], request_events: [ask("backend", 5, "team")] }),
+      "me",
+    ),
+    hoursAgo(5),
+  );
+  assert.equal(askedAt(it({ review_requests: [user("dana")] }), "me"), hoursAgo(48), "no ask logged: since it was opened");
 });

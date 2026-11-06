@@ -365,16 +365,7 @@ export function App() {
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
-    if (view)
-      for (const c of [
-        ...Object.values(view.sections).flat(),
-        ...view.hidden,
-        ...view.cleared,
-        ...view.resolved,
-        ...view.waiting.reviews,
-        ...view.waiting.prs,
-      ])
-        m.set(c.id, c);
+    if (view) for (const c of [...Object.values(view.sections).flat(), ...view.hidden, ...view.cleared, ...view.resolved]) m.set(c.id, c);
     for (const r of laneRows) m.set(r.card.id, r.card);
     return m;
   }, [view, laneRows]);
@@ -630,7 +621,7 @@ export function App() {
     try {
       const r = await write();
       mark({ ...did, sending: false });
-      setView((v) => v && removeCard(v, c.id, ends));
+      setView((v) => v && removeCard(v, c.id));
       flash(r.text, r.error, r.undo);
       return true;
     } catch (e) {

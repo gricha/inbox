@@ -11,7 +11,8 @@ import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { approved, stage, verdicts } from "./stage.ts";
+import { askedAt, owesReply, stage, verdicts } from "./stage.ts";
+import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
   InlineAt,
   Action,
@@ -71,7 +72,7 @@ import { inQuietHours, notify } from "./notify.ts";
 import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
-import { Conversations, owesReply } from "./conversation.ts";
+import { Conversations } from "./conversation.ts";
 import { askLine, Coordinator, NAME as COORDINATOR, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
@@ -149,6 +150,7 @@ interface Snapshot {
   auto: Map<string, string>; // an automation's pin: "<its name>: <its why>"
   handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
   stacks: Stacks;
+  deps: Map<string, DepFacts>; // open PRs' dependency facts (src/deps.ts)
 }
 
 // Without it a pin no board places (desk_add's, or one a board's search dropped) would be on no page at all.
@@ -629,6 +631,7 @@ export class Desk {
     this.changed();
     this.rebaseConflicts();
     this.handBackUnasked();
+    this.trackBlocked();
     this.notifyNew();
     this.pumpAi();
     const kept = new Set(this.store.itemMeta().keys());
@@ -815,6 +818,9 @@ export class Desk {
     const baseline = (this.store.get("baseline_at") as string | null) ?? now.toISOString();
     const entries = new Map<string, Entry>();
     const items = this.store.items();
+    // Who blocks whom, before any status: a PR it needs merging is news for it, and the rules read the facts as fields.
+    const stacks = buildStacks(items);
+    const deps = dependencies(items, stacks);
     for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
       let state = states.get(item.id) ?? emptyState(item.id);
@@ -826,7 +832,19 @@ export class Desk {
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
       const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
       const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
-      entries.set(item.id, { item, analysis, state, status: statusOf(state, analysis.activity_at, now), isNew, resolved, inflight });
+      const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
+      const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
+      entries.set(item.id, { item, analysis, state, status: statusOf(state, activityAt, now), isNew, resolved, inflight });
+    }
+    for (const [id, f] of deps) {
+      const pr = entries.get(id)!.analysis.signals.pr;
+      const root = f.root ? entries.get(f.root) : undefined;
+      Object.assign(pr, { requires: f.requires, blocked_by: f.open, requires_closed: f.closed, blocks: f.blocks });
+      if (root) {
+        pr.blocked = true;
+        pr.blocker = `${shortRef(root.item)}${f.through ? ` (through ${f.through})` : ""}`;
+        pr.blocker_waits = root.inflight ? "is in Merging" : root.analysis.signals.pr.waits;
+      }
     }
 
     const hits = this.store.hits();
@@ -871,7 +889,9 @@ export class Desk {
           if (!a) return { bucket: null, why: "", pending: true };
           const e = entries.get(id);
           const stale =
-            !e || a.policy !== this.policy.hash || a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id), pins.get(id));
+            !e ||
+            a.policy !== this.policy.hash ||
+            a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id), pins.get(id), e.analysis.signals.pr.blocker);
           return { bucket: a.bucket, why: a.why, pending: stale };
         }
       : undefined;
@@ -922,7 +942,13 @@ export class Desk {
     for (const e of entries.values()) {
       const back = merging.get(e.item.id)?.handback;
       if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
-      const why = `handed back: ${back.reason}`;
+      // Another PR blocks it and your rules keep it in Blocked: the hand-back waits there until that PR merges.
+      if (e.analysis.signals.pr.blocked && best.get(e.item.id)?.bucket === "blocked") continue;
+      // Held until it unblocked: trackBlocked() logged when, and which PR merged.
+      const freed = this.store.activity({ after: 0, limit: 20, item: e.item.id, latest: true }).find((x) => x.kind === "unblocked");
+      const merged =
+        freed && freed.at >= back.at ? (freed.data.merged ? `unblocked: ${String(freed.data.merged)} merged` : "unblocked") : "";
+      const why = `${merged ? `${merged} \u00b7 ` : ""}handed back: ${back.reason}`;
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
       best.set(e.item.id, { board, bucket: "now", rule_bucket: "now", rule: null, why, trace: [] });
@@ -936,6 +962,7 @@ export class Desk {
       const sig = e.analysis.signals;
       if (!sig.me.author || !sig.pr.unasked || e.inflight || e.status !== "active" || e.resolved) continue;
       asking.add(it.id);
+      if (sig.pr.blocked && best.get(it.id)?.bucket === "blocked") continue;
       if (needs.has(it.id) || !this.stuckUnasked(e)) continue; // handed back: its reason says so
       const quiet = quietHours > 0 && !e.state.pinned && sig.item.updated_hours >= quietHours;
       if (quiet || ![...boards.values()].some((b) => b.result.placements.has(it.id))) continue;
@@ -955,7 +982,8 @@ export class Desk {
       pins,
       auto,
       handed,
-      stacks: buildStacks(items),
+      stacks,
+      deps,
     };
   }
 
@@ -978,7 +1006,9 @@ export class Desk {
     const stack = stackRef(snap.stacks, it.id);
     const actions = this.actions(e);
     const via = e.analysis.signals.author.via.replace(/^@/, "");
+    const sig = e.analysis.signals.pr;
     const st = stage(it, me.author ? this.me() : it.author);
+    const shown = sig.blocked && (st === "approved" || st === "waiting for review") ? "blocked" : st;
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -990,7 +1020,7 @@ export class Desk {
       author: it.author,
       author_bot: e.analysis.signals.author.bot,
       by: me.author ? "you" : via || it.author,
-      ...(st && { stage: st }),
+      ...(shown && { stage: shown }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? p?.why ?? "",
       ...(snap.handed.has(it.id) && { handoff: snap.handed.get(it.id) }),
@@ -1023,6 +1053,8 @@ export class Desk {
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
+      ...(sig.blocked && { blocker: { id: snap.deps.get(it.id)!.root!, ref: sig.blocker, waits: sig.blocker_waits } }),
+      ...(sig.blocks.length > 0 && { blocks: sig.blocks }),
     };
   }
 
@@ -1212,7 +1244,7 @@ export class Desk {
     const sections: QueueView["sections"] = { ...this.top(snap, seen), blocked: [], later: [], fyi: [] };
     const reviewing = this.reviewing(snap);
     const hidden: Card[] = [];
-    for (const bucket of ["later", "fyi", "hide"] as const) {
+    for (const bucket of ["blocked", "later", "fyi", "hide"] as const) {
       for (const board of boardsOf(loaded)) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
           const p = snap.best.get(id);
@@ -1222,7 +1254,23 @@ export class Desk {
         }
       }
     }
-    const leads = oneLinePerStack(sections, ["now", "today", "later", "fyi"], snap.stacks);
+    const leads = oneLinePerStack(sections, ["now", "today", "blocked", "later", "fyi"], snap.stacks);
+    const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
+    const aged = (c: Card): Card => {
+      const e = snap.entries.get(c.id)!;
+      const asked = e.analysis.signals.me.author && e.analysis.signals.pr.waiting_on.length > 0;
+      return { ...c, waiting_since: blockedSince[c.id]?.since ?? (asked ? askedAt(e.item, this.me()) : c.waiting_since) };
+    };
+    // Your PRs in Merging that another PR blocks: Merging has them, and Blocked lists them in their chain too.
+    const merging = [...snap.entries.values()]
+      .filter((e) => laneOwned(e) && e.analysis.signals.pr.blocked)
+      .map((e) => {
+        const pr = e.analysis.signals.pr;
+        const c = this.card(e, this.shownAt(e, snap), snap);
+        c.why = `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}`;
+        return c;
+      });
+    sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged));
     const cleared: Card[] = [];
     const resolved: Card[] = [];
     // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
@@ -1255,56 +1303,10 @@ export class Desk {
       hidden,
       cleared,
       resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-      waiting: this.waiting(snap),
       cards: this.settings["queue.cards"],
       paused: this.paused(),
-      stacks: this.stacksOf([...leads, ...hidden, ...cleared, ...resolved], snap),
+      stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
     };
-  }
-
-  // Your open PRs whose next move is someone else's: a review you asked for, or the PR below it in a stack merging first.
-  // Merging's too; CI, and what's yours to do (changes asked for, a reply you owe, nobody asked, red CI, a conflict, ready to merge), stay out.
-  waiting(snap: Snapshot): QueueView["waiting"] {
-    const me = this.me();
-    const out: QueueView["waiting"] = { reviews: [], prs: [] };
-    // What a board holds: one no search returns any more isn't refreshed, so it can't say what it waits on.
-    const listed = new Set<string>();
-    for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
-    for (const e of snap.entries.values()) {
-      const it = e.item;
-      if (it.kind !== "pr" || it.state !== "open" || it.draft || e.resolved || !e.analysis.signals.me.author) continue;
-      // A reply you owe, red CI or a conflict: the next move is yours.
-      if (!listed.has(it.id) || it.ci === "red" || it.mergeable === "conflict" || owesReply(it, me)) continue;
-      if (e.analysis.signals.pr.unasked) continue; // nobody's asked to review it: Add reviewers is yours
-      // A bot's PR opened through you can ask you: that's on your desk, not a wait.
-      const asked = it.review_requests.filter((r) => r.type === "team" || r.reviewer.toLowerCase() !== me.toLowerCase());
-      const still = new Set(asked.map((r) => r.reviewer.toLowerCase()));
-      // Changes asked for and not asked again since: the fix is yours.
-      if (verdicts(it, me).changes_by.some((x) => !still.has(x.toLowerCase()))) continue;
-      const node = snap.stacks.nodes.get(it.id);
-      const below = node?.parent ? snap.stacks.nodes.get(node.parent)?.item : undefined;
-      const blocks = (node?.children ?? [])
-        .map((id) => snap.stacks.nodes.get(id)!.item)
-        .filter((c) => c.state === "open")
-        .map(shortRef);
-      let group: keyof QueueView["waiting"];
-      let why: string;
-      let since = it.created_at;
-      if (below?.state === "open") {
-        group = "prs";
-        why = `waits on ${shortRef(below)} to merge first`;
-      } else if (asked.length && !approved(it, me)) {
-        group = "reviews";
-        const who = asked.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer));
-        why = `waits on a review from ${who.length > 2 ? `${who.slice(0, 2).join(", ")} and ${who.length - 2} more` : who.join(" and ")}`;
-        // Since the latest ask of those still asked: a re-request starts the wait again.
-        since = it.request_events.filter((r) => still.has(r.reviewer.toLowerCase())).reduce((a, r) => (r.at > a ? r.at : a), since);
-      } else continue;
-      const c = this.card(e, this.shownAt(e, snap), snap);
-      out[group].push({ ...c, why: blocks.length ? `${why} · blocks ${blocks.join(", ")}` : why, waiting_since: since });
-    }
-    for (const list of Object.values(out)) list.sort((a, b) => a.waiting_since.localeCompare(b.waiting_since));
-    return out;
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).
@@ -1925,7 +1927,9 @@ export class Desk {
         mergeable: it.mergeable,
         draft: it.draft,
         rebase: !!m.rebase,
-        blocked_by: null,
+        blocked_by: e.analysis.signals.pr.blocked
+          ? { ref: e.analysis.signals.pr.blocker, waits: e.analysis.signals.pr.blocker_waits }
+          : null,
       };
       rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
     }
@@ -1986,6 +1990,7 @@ export class Desk {
         this.coordinator.saved() && // a scratch desk's would be a second one, on your real branches
         (bucket === "now" || bucket === "today") &&
         e.analysis.signals.me.author &&
+        !e.analysis.signals.pr.blocked && // a blocked PR isn't ready to merge
         !it.draft &&
         it.review_decision === "approved" &&
         it.ci !== "red" && // GitHub runs no pull_request CI on a conflicting PR
@@ -2067,7 +2072,38 @@ export class Desk {
   handBackUnasked(): void {
     if (!this.loaded) return;
     for (const e of this.snapshot().entries.values())
-      if (e.inflight && e.status === "active" && this.stuckUnasked(e)) this.handBack(e.item.id, UNASKED, "desk");
+      if (e.inflight && e.status === "active" && this.stuckUnasked(e) && !e.analysis.signals.pr.blocked)
+        this.handBack(e.item.id, UNASKED, "desk");
+  }
+
+  // Your PRs a board lists or Merging has: log when one becomes blocked by another PR or stops being, which wakes the
+  // coordinator for Merging's ("unblocked: sentry#129460 merged") and words a held hand-back. The first run only fills kv `blocked`.
+  trackBlocked(): void {
+    if (!this.loaded) return;
+    const snap = this.snapshot();
+    const prev = this.store.get("blocked") as Record<string, { since: string; by: string }> | null;
+    const listed = new Set<string>();
+    for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
+    const now = this.now().toISOString();
+    const next: Record<string, { since: string; by: string }> = {};
+    const events: NewEvent[] = [];
+    for (const e of snap.entries.values()) {
+      const it = e.item;
+      const pr = e.analysis.signals.pr;
+      if (it.kind !== "pr" || it.state !== "open" || !e.analysis.signals.me.author || !(listed.has(it.id) || e.inflight)) continue;
+      const was = prev?.[it.id];
+      if (pr.blocked) {
+        next[it.id] = { since: was?.since ?? (prev ? now : it.created_at), by: pr.blocker };
+        if (prev && !was) events.push({ at: now, item_id: it.id, kind: "blocked", actor: "", data: { by: pr.blocker } });
+      } else if (was) {
+        const merged = snap.deps.get(it.id)?.merged.findLast((m) => m.at > was.since)?.ref ?? "";
+        events.push({ at: now, item_id: it.id, kind: "unblocked", actor: "", data: { was: was.by, merged } });
+      }
+    }
+    this.store.set("blocked", next);
+    if (!events.length) return;
+    this.record("desk", events);
+    this.changed(); // a held hand-back's why reads the unblocked event
   }
 
   // Your PR nobody's asked to review, past the moments a workflow or CODEOWNERS takes to ask someone.
@@ -2537,6 +2573,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
   if (r.rebase) return "rebasing";
+  if (r.blocked_by) return `waits on ${r.blocked_by.ref} to merge first`;
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;

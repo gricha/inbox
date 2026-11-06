@@ -12,7 +12,7 @@ import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/revie
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, waitable } from "../../src/signals.ts";
-import { approved as approvedBy, stage, verdicts } from "../../src/stage.ts";
+import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -1735,7 +1735,6 @@ function queue(): QueueView {
     hidden,
     cleared: clearedCards,
     resolved: resolvedCards,
-    waiting: waiting(),
     cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
@@ -1813,40 +1812,6 @@ function bestPlacement(r: Rec): Placement {
 }
 
 const needsCards = () => recs.flatMap((r) => (handedBack(r) ? [cardOf(r, shownAt(r, bestPlacement(r)))] : []));
-
-// As Desk.waiting(): your open PRs whose next move is someone else's, longest wait first.
-function waiting(): QueueView["waiting"] {
-  const out: QueueView["waiting"] = { reviews: [], prs: [] };
-  const s = stacks();
-  for (const r of recs) {
-    const it = itemOf(r);
-    if (it.kind !== "pr" || it.state !== "open" || it.draft || r.seed.resolved || r.seed.author !== ME) continue;
-    // As owesReply(): someone waits on your answer.
-    if (it.ci === "red" || it.mergeable === "conflict" || TALK.get(r.id)?.some((x) => x.waiting_on_you)) continue;
-    const asked = it.review_requests.filter((x) => x.type === "team" || x.reviewer !== ME);
-    const still = new Set(asked.map((x) => x.reviewer.toLowerCase()));
-    if (verdicts(it, ME).changes_by.some((x) => !still.has(x.toLowerCase()))) continue;
-    const node = s.nodes.get(it.id);
-    const below = node?.parent ? s.nodes.get(node.parent)?.item : undefined;
-    const blocks = (node?.children ?? []).map((id) => s.nodes.get(id)!.item).filter((c) => c.state === "open");
-    let group: keyof QueueView["waiting"];
-    let why: string;
-    let since = it.created_at;
-    if (below?.state === "open") {
-      group = "prs";
-      why = `waits on ${below.repo.split("/")[1]}#${below.number} to merge first`;
-    } else if (asked.length && !approvedBy(it, ME)) {
-      group = "reviews";
-      const who = asked.map((x) => (x.type === "team" ? `@${x.reviewer}` : x.reviewer));
-      why = `waits on a review from ${who.length > 2 ? `${who.slice(0, 2).join(", ")} and ${who.length - 2} more` : who.join(" and ")}`;
-      since = it.request_events.filter((x) => still.has(x.reviewer.toLowerCase())).reduce((a, x) => (x.at > a ? x.at : a), since);
-    } else continue;
-    const tail = blocks.length ? ` · blocks ${blocks.map((c) => `${c.repo.split("/")[1]}#${c.number}`).join(", ")}` : "";
-    out[group].push({ ...cardOf(r, shownAt(r, bestPlacement(r))), why: why + tail, waiting_since: since });
-  }
-  for (const list of Object.values(out)) list.sort((a, b) => a.waiting_since.localeCompare(b.waiting_since));
-  return out;
-}
 
 // As waitsOn() in src/desk.ts.
 function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | null {

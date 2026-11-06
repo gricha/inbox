@@ -578,8 +578,6 @@ export interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
-  // Your open PRs whose next move is someone else's, longest wait first; each card's why says on whom, waiting_since since when
-  waiting: { reviews: Card[]; prs: Card[] };
   cards: number; // as in FocusView
   paused: Paused | null;
   stacks: Record<string, Stack>; // by id: each stack a card here carries (current: the card sections list it by, else its first card)

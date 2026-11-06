@@ -1,6 +1,7 @@
 // A small, safe expression language for rule `when` / `filter` and `why` templates.
 import type { Signals } from "./types.ts";
 import { FIELDS } from "./signals.ts";
+import { andMore } from "./stage.ts";
 
 // A field's value (FIELDS leaves are strings, numbers, booleans or string lists) or a computed one.
 type Value = string | number | boolean | null | undefined | Value[];
@@ -385,7 +386,7 @@ export function renderTemplate(tpl: string, s: Signals): string {
         const word = noun ?? "";
         return `${n}${n === 1 && !/(ss|this|does|plus|always)$/.test(word) ? word.slice(0, -1) : word}`;
       }
-      if (Array.isArray(v)) return `${v.join(", ")}${noun ?? ""}`;
+      if (Array.isArray(v)) return `${andMore(v.map(String))}${noun ?? ""}`;
       return `${String(v ?? "")}${noun ?? ""}`;
     },
   );

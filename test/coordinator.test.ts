@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AsksView } from "../src/types.ts";
@@ -898,4 +899,10 @@ test("an ask that can't start the coordinator says so and isn't kept", posix, as
   const { ask } = (await (await api.ask({ text: "try again" })).json()) as { ask: Ask };
   assert.deepEqual(t.said(), [`${ROLE} My ask ${ask.id}: "try again" Answer it with desk_answer.`]);
   assert.deepEqual((await api.list()).asks, [ask]);
+});
+
+test("wakeFor: unblocked says which PR merged", () => {
+  assert.equal(wakeFor({ kind: "unblocked", data: { was: "sentry#129460", merged: "sentry#129460" } }), "unblocked: sentry#129460 merged");
+  assert.equal(wakeFor({ kind: "unblocked", data: { was: "sentry#129460", merged: "" } }), "unblocked");
+  assert.equal(wakeFor({ kind: "blocked", data: { by: "sentry#129460" } }), null, "desk_merging says it on the next wake");
 });

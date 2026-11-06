@@ -146,7 +146,6 @@ const queueView: QueueView = {
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
-  waiting: { reviews: [], prs: [] },
   cards: 10,
   paused: null,
   stacks: {},
@@ -171,7 +170,7 @@ const inflightView: InflightView = {
       mergeable: "clean",
       draft: false,
       rebase: false,
-      blocked_by: null,
+      blocked_by: { ref: "sentry#5", waits: "waits on a review from kai" },
       waits_on: "waits on a CI fix",
       note: { text: "Fixing the flaky test", at: ago(0.1) },
     },
@@ -180,9 +179,20 @@ const inflightView: InflightView = {
   coordinator: { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fake", error: null, status: "idle", queued: [] },
 };
 
+// A review asked of you that needs another PR merged first.
+const BLOCKED = card(
+  "getsentry/sentry#606",
+  "blocked",
+  "Read the new region config",
+  "blocked by sentry#5, which waits on a review from kai",
+  {
+    stage: "blocked",
+    blocker: { id: "getsentry/sentry#5", ref: "sentry#5", waits: "waits on a review from kai" },
+  },
+);
 const boardView: BoardView = {
   board: { ...summary, queries: ["is:open is:pr review-requested:@me"] },
-  sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
+  sections: { now: [CARDS.now], today: [CARDS.today], blocked: [BLOCKED], later: [CARDS.later], fyi: [CARDS.fyi] },
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
 };
