@@ -1715,7 +1715,7 @@ export class Desk {
     const entry = this.snapshot().entries.get(id)!;
     // The coordinator keeps working on it whatever its status, so it comes back to the desk first.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
-      throw new DeskError(409, `${id} is in Merging, so the coordinator has it; bring it back to the desk (b) first`);
+      throw new DeskError(409, `${id} is in Merging, so your agent has it; bring it back to the desk (b) first`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = entry.activityAt;
     switch (action) {
@@ -1960,14 +1960,14 @@ export class Desk {
   // POST /api/coordinator/wake: w in Merging has it look now (and starts it, if it isn't running).
   // w, or Wake it under an ask it stopped without answering: that ask goes to it again, your words as you wrote them.
   async wakeCoordinator(askId?: string): Promise<void> {
-    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
+    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
     const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
     if (a) {
       const url = a.item_id ? (this.snapshot().entries.get(a.item_id)?.item.url ?? null) : null;
       await this.coordinator.tell(askLine(a, url));
     } else await this.coordinator.now();
     if (!this.coordinator.saved())
-      throw Object.assign(new DeskError(502, "the coordinator didn't start; the desk's log says why"), { cause: this.coordinator.failure });
+      throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), { cause: this.coordinator.failure });
   }
 
   merging(id: string): Merging {
@@ -2153,7 +2153,7 @@ export class Desk {
 
   // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread) you were on.
   async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string }): Promise<Ask> {
-    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "the coordinator is off: Settings → Agents");
+    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
     const item = b.item_id ? this.snapshot().entries.get(this.resolve(b.item_id))!.item : null;
     if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) throw new DeskError(400, "thread_url must be a GitHub URL");
     const a: Ask = {
@@ -2185,7 +2185,7 @@ export class Desk {
           this.asks().filter((x) => x.id !== a.id),
         );
         this.changed();
-        throw Object.assign(new DeskError(502, "the coordinator didn't start; the desk's log says why"), {
+        throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), {
           cause: this.coordinator.failure,
         });
       }
@@ -2273,7 +2273,7 @@ export class Desk {
     );
     this.log(`${q.from} asks: ${q.question}`);
     this.changed();
-    if (this.mayNotify()) this.notify(`${q.from} asks`, q.question);
+    if (this.mayNotify()) this.notify(q.from === COORDINATOR ? "Your agent asks" : `${q.from} asks`, q.question);
     return q;
   }
 
@@ -2318,7 +2318,7 @@ export class Desk {
     this.changed();
     const said = lead(done.answer!.text);
     if (!a.answer && this.mayNotify())
-      this.notify("Coordinator", `${a.item_id ? `${a.item_id}: ` : ""}${said ? this.line(said, "answer") : "It answered your ask."}`);
+      this.notify("Your agent", `${a.item_id ? `${a.item_id}: ` : ""}${said ? this.line(said, "answer") : "It answered your ask."}`);
     return done;
   }
 

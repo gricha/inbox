@@ -796,6 +796,9 @@ export interface InflightView {
   coordinator: CoordinatorView;
 }
 
+// The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".
+export const COORDINATOR_NAME = "Review Desk coordinator";
+
 // The background Claude Code session the desk starts and wakes (README → Coordinator).
 export interface CoordinatorView {
   on: boolean;

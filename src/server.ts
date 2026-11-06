@@ -251,7 +251,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your words to the coordinator, from the desk's own window only: it's woken with them at once.
   app.post("/api/ask", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "ask the coordinator from the desk's window (t)");
+    if (!fromDesk(c)) throw new DeskError(403, "ask your agent from the desk's window (t)");
     const b = await input(c);
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
     const ask = await desk.ask({

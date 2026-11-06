@@ -6,10 +6,10 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Desk } from "./desk.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
-import type { ActivityEvent, Ask, CoordinatorView } from "./types.ts";
+import { COORDINATOR_NAME, type ActivityEvent, type Ask, type CoordinatorView } from "./types.ts";
 import { detached, report } from "./sentry.ts";
 
-export const NAME = "Review Desk coordinator";
+export const NAME = COORDINATOR_NAME;
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
 const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
 const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines
@@ -158,7 +158,7 @@ export class Coordinator {
     if (was === why) return;
     this.desk.store.set(ERROR, why);
     this.desk.changed();
-    if (why && !was && this.desk.mayNotify()) this.desk.notify("Coordinator can't run", why);
+    if (why && !was && this.desk.mayNotify()) this.desk.notify("Your agent can't run", why);
   }
 
   // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.

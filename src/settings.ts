@@ -38,7 +38,7 @@ export const SECTIONS: SettingsSection[] = [
   {
     id: "agent",
     title: "Agents",
-    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill, which the coordinator works with.",
+    help: "Every agent the desk runs is your own Claude Code: claude from your PATH, with your login, model and settings. Here it gets the desk's MCP tools and skill, which your agent works with.",
   },
   {
     id: "policy",
@@ -132,18 +132,18 @@ export const SETTINGS = [
   {
     key: "agent.coordinator",
     section: "agent",
-    label: "Coordinator",
+    label: "Your agent",
     type: "boolean",
     default: true,
-    help: "A background Claude Code session that gets the PRs you hand off merged. The desk starts it on your first hand-off, keeps it running and wakes it when something changes on a PR in Merging. Off: it's stopped and nothing wakes it.",
+    help: "A background Claude Code session (\"Review Desk coordinator\" on claude.ai) that answers what you ask it from the desk (t, or Ask your agent in a PR's review) and gets the PRs you hand off merged. The desk starts it on your first hand-off or ask, keeps it running and wakes it with your asks and with news on PRs in Merging. Off: it's stopped, nothing wakes it, and the window shows no Ask your agent.",
   },
   {
     key: "agent.coordinator_bypass",
     section: "agent",
-    label: "Coordinator skips permission prompts",
+    label: "Your agent skips permission prompts",
     type: "boolean",
     default: true,
-    help: "The coordinator runs in bypass permissions mode, so it never stops to ask. Its deny list is then the only fence: it blocks posting or editing as you with gh, all of gh api, and any force push but one with a lease; anything it doesn't name runs without asking. Leave it on if your own sessions skip permission prompts: Claude Code delivers messages between two sessions only when both skip them or neither does, so otherwise what it sends your sessions, and they send it, is held and expires. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts the coordinator in the new mode, with its history.",
+    help: "Your agent runs in bypass permissions mode, so it never stops to ask. Its deny list is then the only fence: it blocks posting or editing as you with gh, all of gh api, and any force push but one with a lease; anything it doesn't name runs without asking. Leave it on if your own sessions skip permission prompts: Claude Code delivers messages between two sessions only when both skip them or neither does, so otherwise what it sends your sessions, and they send it, is held and expires. Claude Code needs bypass mode accepted once: run claude --dangerously-skip-permissions in a terminal and accept. Changing this restarts it in the new mode, with its history.",
   },
   {
     key: "policy.judge",
@@ -169,7 +169,7 @@ export const SETTINGS = [
     label: "Notify me when something new needs me",
     type: "boolean",
     default: true,
-    help: "A new item on the queue, once Claude or a hard rule placed it, a PR the coordinator handed back included.",
+    help: "A new item on the queue, once Claude or a hard rule placed it, a PR your agent handed back included.",
   },
   {
     key: "notify.quiet",
