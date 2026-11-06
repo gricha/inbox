@@ -256,7 +256,7 @@ export function currentFile(tops: number[], line: number, atEnd = false): number
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
-// Later's own group opens with its page; the rest open when asked (g f, g d, g h, g x, or a click on their heading).
+// Later's own group opens with its page; the rest open when asked (g f, g h, g x, or a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   queue: true,
   later: true,

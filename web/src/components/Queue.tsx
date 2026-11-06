@@ -53,7 +53,7 @@ export function Queue({
     );
   }
   const g = groups.find((x) => x.key === "queue");
-  // The cards come in their parts' order (byGroup): a heading where the part changes, each counting all of its lines.
+  // The cards come in their parts' order (byPart): a heading where the part changes, each counting all of its lines.
   const parts: { key: QueueGroup; cards: Card[] }[] = [];
   for (const c of g?.cards ?? []) {
     const key = c.group ?? "other";

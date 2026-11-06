@@ -5,7 +5,7 @@ import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p c w i a t .).
+// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p w i a t .).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
@@ -23,7 +23,7 @@ export interface RowCtx {
   closeSnooze: () => void;
   moreFor: string | null; // the row whose More menu (.) is open
   closeMore: () => void;
-  github: (c: Card, action: GitHubAction) => void; // a More menu write, after its second press where it takes one
+  github: (c: Card, action: GitHubAction) => void; // a More menu write
 }
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
