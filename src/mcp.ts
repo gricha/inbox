@@ -1,6 +1,7 @@
 // The desk's MCP tools, served over stdio by `desk mcp` and over HTTP at the server's /mcp. Local triage only; nothing writes to GitHub.
 
 import { randomBytes } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -589,9 +590,7 @@ export function createMcpServer(api: DeskClient = createClient()): McpServer {
         const end = Date.now() + (wait ?? 0) * 1000;
         let q = await api.inquiry(id);
         while (!q.answer && Date.now() < end) {
-          await new Promise((r) => {
-            setTimeout(r, 1000);
-          });
+          await sleep(1000);
           q = await api.inquiry(id);
         }
         if (!q.answer) return `no answer yet to "${oneLine(q.question)}"`;
