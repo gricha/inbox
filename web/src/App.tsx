@@ -556,10 +556,8 @@ export function App() {
   }
 
   // A row leaving the list: the next one takes the cursor, it fades out, and j/k skip it until unhide().
-  // `ends`: a close or a merge, which ends a wait too; anything else you do on Blocked leaves the row where it is.
-  function hide(c: Card, ends = false) {
+  function hide(c: Card) {
     setSnoozeFor(null);
-    if (list === "blocked" && !ends) return;
     const i = flat.findIndex((x) => x.id === c.id);
     if (i >= 0) setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
     if (expanded === c.id) setExpanded(null);
@@ -607,16 +605,15 @@ export function App() {
     sending: string,
     did: Acted,
     write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>,
-    ends = false,
   ): Promise<boolean> {
-    // Sent already from this review; a list's row that stays (Blocked's) can take the next write.
+    // Sent already from this review.
     if (actedRef.current[c.id] && routeRef.current.name === "review") return false;
     const mark = (to: Acted | null) => {
       actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
       setActed(actedRef.current);
     };
     mark({ ...did, sending: true });
-    hide(c, ends);
+    hide(c);
     flash(sending, false, false, 60_000, true);
     try {
       const r = await write();
@@ -805,7 +802,7 @@ export function App() {
     if (action === "close" || action === "merge" || action === "request_changes") {
       const verb = action === "close" ? "Closing" : action === "merge" ? "Merging" : "Requesting changes on";
       const what = action === "close" ? "Closed" : action === "merge" ? "Merged" : "Requested changes";
-      return finish(c, `${verb} ${shortRef(c)} on GitHub…`, { what, where: "archive" }, write, action !== "request_changes");
+      return finish(c, `${verb} ${shortRef(c)} on GitHub\u2026`, { what, where: "archive" }, write);
     }
     try {
       const r = await write();

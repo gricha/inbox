@@ -38,8 +38,8 @@ export interface Acted {
 export type ListPage = "queue" | "later" | "blocked" | "inflight" | "archive";
 // The queue is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is under
 // Later; what's done (yours, or resolved by the world) is in the Archive.
-export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "waiting_reviews" | "waiting_prs";
-export type Variant = "active" | "hidden" | "cleared" | "archive" | "waiting";
+export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "blocked";
+export type Variant = "active" | "hidden" | "cleared" | "archive" | "blocked";
 
 export interface Group {
   key: GroupKey;
@@ -64,7 +64,7 @@ export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "blocked", Grou
   queue: ["queue"],
   later: SORTED_AWAY,
   archive: ["archive"],
-  blocked: ["waiting_reviews", "waiting_prs"],
+  blocked: ["blocked"],
 };
 
 export function parseRoute(hash: string): Route {
@@ -264,8 +264,7 @@ export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   hidden: false,
   cleared: false,
   archive: true,
-  waiting_reviews: true,
-  waiting_prs: true,
+  blocked: true,
 };
 
 const LABEL: Record<GroupKey, string> = {
@@ -275,8 +274,7 @@ const LABEL: Record<GroupKey, string> = {
   hidden: "Hidden by rules",
   cleared: "Snoozed or muted",
   archive: "Archive",
-  waiting_reviews: "On reviews",
-  waiting_prs: "On other PRs",
+  blocked: "Blocked",
 };
 
 // The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
@@ -325,17 +323,8 @@ export function groupsOf(
       ),
       "archive",
     ),
-    // What can't move yet, in the desk's order: waits on reviews, then on another PR.
-    group(
-      "waiting_reviews",
-      s.blocked.filter((c) => !c.blocker),
-      "waiting",
-    ),
-    group(
-      "waiting_prs",
-      s.blocked.filter((c) => c.blocker),
-      "waiting",
-    ),
+    // What can't move yet, a chain's rows together, in the desk's order.
+    group("blocked", s.blocked, "blocked"),
   ];
 }
 

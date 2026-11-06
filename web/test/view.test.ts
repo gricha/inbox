@@ -185,27 +185,39 @@ test("the queue shows one part at a time, each part's Now before its Today, in t
   );
 });
 
-test("Blocked is the Waiting page renamed: #/blocked and #/waiting open it", () => {
+test("#/waiting still opens Blocked, at #/blocked", () => {
   assert.deepEqual(parseRoute("#/blocked"), { name: "blocked" });
   assert.deepEqual(parseRoute("#/waiting"), { name: "blocked" });
   assert.equal(routeHash({ name: "blocked" }), "#/blocked");
-  assert.deepEqual(PAGE_GROUPS.blocked, ["waiting_reviews", "waiting_prs"]);
+});
+
+test("Blocked is one group from sections.blocked, open, in the desk's order; acting on a row takes it off", () => {
   const q = queue();
-  const by = { id: "acme/api#9", ref: "api#9", waits: "waits on a review" };
-  q.sections.blocked = [card("acme/web#20", { why: "waits on a review from dana" }), card("acme/web#21", { blocker: by })];
+  const first = card("acme/billing#1", { bucket: "blocked", why: "blocked by api#9, which waits on a review from kai" });
+  q.sections.blocked = [first, card("acme/billing#2", { bucket: "blocked", why: "blocked by api#9" })];
+  assert.deepEqual(PAGE_GROUPS.blocked, ["blocked"]);
   const g = groupsOf(q, DEFAULT_OPEN, "").filter((x) => PAGE_GROUPS.blocked.includes(x.key));
   assert.deepEqual(
-    g.map((x) => [x.key, x.label, x.open, x.variant, x.cards.map((c) => c.id)]),
+    g.map((x) => [x.key, x.label, x.open, x.variant, x.cards.map((c) => [c.id, c.why])]),
     [
-      ["waiting_reviews", "On reviews", true, "waiting", ["acme/web#20"]],
-      ["waiting_prs", "On other PRs", true, "waiting", ["acme/web#21"]],
+      [
+        "blocked",
+        "Blocked",
+        true,
+        "blocked",
+        [
+          ["acme/billing#1", "blocked by api#9, which waits on a review from kai"],
+          ["acme/billing#2", "blocked by api#9"],
+        ],
+      ],
     ],
   );
   assert.deepEqual(
-    removeCard(q, "acme/web#20").sections.blocked.map((c) => c.id),
-    ["acme/web#21"],
-    "acting on a row takes it off",
+    removeCard(q, "acme/billing#1").sections.blocked.map((c) => c.id),
+    ["acme/billing#2"],
+    "done on it takes it off, as on Later: it comes back when what it waits on merges",
   );
+  assert.ok(!navigable(main(groupsOf(q, DEFAULT_OPEN, "")), new Set()).some((c) => c.bucket === "blocked"), "not on the main page");
 });
 
 test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
@@ -219,8 +231,7 @@ test("the queue, Later and the Archive are pages of their own: Later's own group
       ["hidden", false, 1],
       ["cleared", false, 1],
       ["archive", true, 1],
-      ["waiting_reviews", true, 0],
-      ["waiting_prs", true, 0],
+      ["blocked", true, 0],
     ],
   );
   assert.equal(groups.find((g) => g.key === "archive")?.variant, "archive");

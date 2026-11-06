@@ -10,6 +10,7 @@ import { renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
+import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, waitable } from "../../src/signals.ts";
 import { stage } from "../../src/stage.ts";
@@ -80,7 +81,7 @@ const HOUR = 3_600_000;
 const T0 = Date.now();
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
 const hoursSince = (at: string) => Math.round((Date.now() - Date.parse(at)) / HOUR);
-const BUCKET_LIST = new Set<Bucket>(["now", "today", "later", "fyi", "hide"]);
+const BUCKET_LIST = new Set<Bucket>(["now", "today", "blocked", "later", "fyi", "hide"]);
 
 // ---------------------------------------------------------------------------
 // Config
@@ -102,6 +103,11 @@ const W = {
   closem: "author.close",
   depbot: 'author.bot && any(item.labels, "dependenc*")',
   unres: "pr.unresolved_threads > 0",
+  // As the template's blocked rules (src/config.ts).
+  blocked: "pr.blocked",
+  mineBlocked: "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply",
+  root: "len(pr.blocks) > 0 && me.owes_reply",
+  waitsrev: "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'",
 };
 type Key = keyof typeof W;
 
@@ -143,6 +149,7 @@ let config: Config = {
       queries: ["is:open is:pr review-requested:{me}", "is:open is:pr reviewed-by:{me} -author:{me}"],
       filter: "!author.bot",
       rules: [
+        { when: W.blocked, bucket: "blocked", why: "blocked by {pr.blocker}, which {pr.blocker_waits}", final: true },
         { when: W.direct, bucket: "now", why: "asked you directly", hard: true },
         { when: W.pushed, bucket: "now", why: "pushed since your review" },
         { when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
@@ -163,11 +170,14 @@ let config: Config = {
       name: "My PRs",
       queries: ["is:open is:pr author:{me}"],
       rules: [
+        { when: W.mineBlocked, bucket: "blocked", why: "blocked by {pr.blocker}, which {pr.blocker_waits}", final: true },
         { when: W.cr, bucket: "now", why: "changes requested" },
+        { when: W.root, bucket: "today", why: "blocks {pr.blocks}; it {pr.waits}" },
         { when: W.merge, bucket: "now", why: "approved and green: merge it", nocap: true },
         { when: W.red, bucket: "today", why: "CI failing" },
         { when: W.conflict, bucket: "today", why: "conflicts with {pr.base}" },
         { when: W.idle, bucket: "later", why: "draft, idle over a week" },
+        { when: W.waitsrev, bucket: "blocked", why: "{pr.waits}", final: true },
       ],
       default: "fyi",
       default_why: "waiting on reviewers",
@@ -180,6 +190,7 @@ let config: Config = {
       queries: ["is:open mentions:{me}", "is:open is:issue assignee:{me}"],
       filter: "!item.draft",
       rules: [
+        { when: W.blocked, bucket: "blocked", why: "blocked by {pr.blocker}, which {pr.blocker_waits}", final: true },
         { when: W.assigned, bucket: "now", why: "assigned to you" },
         { when: W.newact, bucket: "today", why: "new activity since you looked" },
         { when: W.closem, bucket: "today", why: "close collaborator mentioned you" },
@@ -270,6 +281,10 @@ interface Seed {
   base?: string; // a PR's base branch, default "main"; another seed's head makes a stack
   head?: string; // its head branch, default "<author>/<n>"
   moved?: [string, number]; // GitHub moved it to main when the PR below merged: the branch it was on, hours ago
+  blocker?: [string, string]; // another PR it needs merged first, as pr.blocker, and what that one waits on
+  blocks?: string[]; // pr.blocks
+  waits?: string; // pr.waits
+  asked2?: string[]; // pr.waiting_on: who's asked and hasn't approved, teams as @slug
 }
 
 // A PR in Merging: its failing checks, who it waits on, and the coordinator's latest desk_note (hours ago).
@@ -278,6 +293,8 @@ interface Flight {
   waiting?: string[];
   note?: [string, number];
 }
+
+const SILO = "waits on your reply to dana, then a review from sam, kai and 6 more"; // what api#1294 waits on
 
 const SEEDS: Seed[] = [
   {
@@ -1122,6 +1139,98 @@ const SEEDS: Seed[] = [
     base: "marco/leases-1",
     on: {},
   },
+  // The live example in acme's names: your api#1294 waits on your reply to dana, then on reviews, and four billing PRs of
+  // yours need it merged first (one handed back, its hand-back held; one in Merging). Dana's api#1301 asks you directly
+  // but needs her api#1299 first. Your web#2306 waits on reviewers.
+  {
+    repo: "acme/api",
+    n: 1294,
+    title: "Service accounts reach control-silo endpoints",
+    author: ME,
+    age: 70,
+    upd: 5,
+    review: "required",
+    reviews: [["dana", "commented", 5]],
+    mergeable: "clean",
+    size: [214, 38, 7],
+    threads: [1, 1],
+    asked2: ["sam", "kai", "@hybrid-cloud", "@security", "@api", "@billing", "@enterprise", "@owners-auth"],
+    blocks: ["billing#2298", "billing#2299", "billing#2300", "billing#2301"],
+    waits: SILO,
+    on: { "work-mine": ["root"] },
+  },
+  ...(
+    [
+      [
+        2298,
+        "Let service accounts read billing usage",
+        60,
+        {
+          reviews: [["shan", "approved", 8]],
+          back: "CI can't pass until acme/api#1294 merges: the new test needs service accounts on control silo",
+        },
+      ],
+      [2299, "Bill service accounts' API calls to the team that owns them", 56, { reviews: [["shan", "approved", 9]] }],
+      [2300, "Show service-account usage on the billing page", 44, { review: "required", on: { "work-mine": ["mineBlocked"] } }],
+      [
+        2301,
+        "Alert when a service account's usage spikes",
+        34,
+        {
+          reviews: [["shan", "approved", 4]],
+          upd: 32,
+          st: { inflight_at: iso(20) },
+          fly: { note: ["Nothing to fix here: its CI needs service accounts on control silo, which api#1294 adds", 2] },
+        },
+      ],
+    ] as [number, string, number, Partial<Seed>][]
+  ).map(([n, title, age, o]): Seed =>
+    Object.assign(
+      {
+        repo: "acme/billing",
+        n,
+        title,
+        author: ME,
+        age,
+        upd: age / 8,
+        review: "approved" as const,
+        mergeable: "clean" as const,
+        size: [40 + (n % 7) * 13, 6 + (n % 5), 3 + (n % 3)] as [number, number, number],
+        blocker: ["api#1294", SILO] as [string, string],
+        on: { "work-mine": ["mineBlocked", "merge"] as Key[] },
+      },
+      o,
+    ),
+  ),
+  {
+    repo: "acme/api",
+    n: 1301,
+    title: "Per-region usage export",
+    author: "dana",
+    age: 26,
+    wait: 20,
+    by: "dana",
+    direct: true,
+    close: 5,
+    size: [140, 22, 5],
+    blocker: ["api#1299", "waits on a review from kai"],
+    on: { "work-review": ["blocked", "direct", "close"] },
+  },
+  {
+    repo: "acme/web",
+    n: 2306,
+    title: "Remember the export format each person picked last",
+    author: ME,
+    age: 40,
+    wait: 10,
+    upd: 10,
+    review: "required",
+    mergeable: "clean",
+    size: [48, 10, 3],
+    asked2: ["sam", "@backend", "kai"],
+    waits: "waits on a review from sam, @backend and 1 more",
+    on: { "work-mine": ["waitsrev"] },
+  },
 ];
 
 interface Rec {
@@ -1158,6 +1267,33 @@ const convo = (o: Partial<Conversation> & Pick<Conversation, "id" | "comments">)
   ...o,
 });
 const TALK = new Map<string, Conversation[]>([
+  [
+    "acme/api#1294",
+    [
+      convo({
+        id: "PRRT_silo",
+        path: "src/auth/silo.py",
+        line: 41,
+        waiting_on_you: true,
+        comments: [
+          said(
+            "sc1",
+            "dana",
+            5,
+            "Does this open every control-silo endpoint to service accounts, or only the ones that check the actor? I'd rather each endpoint opted in.",
+          ),
+        ],
+        take: {
+          gist: "Should endpoints opt in to service accounts, rather than all of them taking one?",
+          take: "Only you can answer: it's a call on how wide the change should be, and the billing PRs below wait on it.",
+          reply:
+            "Only the ones that check the actor: everything else still refuses a service account. An opt-in list per endpoint can follow.",
+          comment_id: "sc1",
+          at: iso(4),
+        },
+      }),
+    ],
+  ],
   [
     "me/notes-app#12",
     [
@@ -1326,15 +1462,15 @@ function signals(r: Rec): Signals {
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
-      requires: [],
-      blocked: false,
-      blocked_by: [],
-      blocker: "",
-      blocker_waits: "",
-      blocks: [],
+      requires: s.blocker ? [s.blocker[0]] : [],
+      blocked: !!s.blocker,
+      blocked_by: s.blocker ? [s.blocker[0]] : [],
+      blocker: s.blocker?.[0] ?? "",
+      blocker_waits: s.blocker?.[1] ?? "",
+      blocks: s.blocks ?? [],
       requires_closed: [],
-      waiting_on: [],
-      waits: "",
+      waiting_on: s.asked2 ?? [],
+      waits: s.waits ?? "",
     },
     me: {
       login: ME,
@@ -1354,7 +1490,7 @@ function signals(r: Rec): Signals {
       commented: !!myReview,
       last_action_hours: myReview?.[2] ?? (mine ? (s.upd ?? s.age) : -1),
       new_activity: r.fresh,
-      owes_reply: false,
+      owes_reply: mine && !!TALK.get(r.id)?.some((x) => x.waiting_on_you),
     },
     author: {
       login: s.author,
@@ -1446,8 +1582,9 @@ function place(r: Rec, b: BoardConfig): Placement | null {
   const sig = signals(r);
   const trace: TraceStep[] = b.filter ? [{ index: -1, when: b.filter, matched: true }] : [];
   const truths = on === "filtered" ? [] : on.map((k) => W[k]);
-  // As src/rules.ts: Claude sorts everything, with where the rules put it as its hint, never below a hard rule's floor.
-  const judged = (rule: number | null, bucket: Bucket, why: string, floor?: Bucket): Placement => {
+  // As src/rules.ts: Claude sorts everything, with where the rules put it as its hint, never below a hard rule's floor; a
+  // final rule's isn't re-sorted.
+  const judged = (rule: number | null, bucket: Bucket, why: string, floor?: Bucket, final?: boolean): Placement => {
     const p: Placement = {
       board: b.id,
       bucket,
@@ -1457,7 +1594,7 @@ function place(r: Rec, b: BoardConfig): Placement | null {
       trace,
       ...(floor && { hard: true, floor }),
     };
-    if (judgeOff()) return p;
+    if (judgeOff() || final) return p;
     const hint = { bucket, why: p.why };
     const j = r.seed.judge;
     if (!j) return { ...p, judge: { bucket, why: "", pending: false }, hint };
@@ -1469,7 +1606,7 @@ function place(r: Rec, b: BoardConfig): Placement | null {
     trace.push({ index: i, when: rule.when, matched });
     if (!matched) continue;
     if (rule.bucket === "judge") return judged(i, b.default, rule.why ?? b.default_why);
-    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined);
+    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined, rule.final);
   }
   return judged(null, b.default, b.default_why);
 }
@@ -1556,7 +1693,9 @@ function cardOf(r: Rec, p: Placement): Card {
   const me = sig.me;
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
   const actions = actionsOf(r);
-  const st = stage(itemOf(r), me.author ? ME : s.author);
+  const was = stage(itemOf(r), me.author ? ME : s.author);
+  // As Desk.card(): an open PR another one blocks says so, unless it's a draft or changes are requested.
+  const st = sig.pr.blocked && (was === "approved" || was === "waiting for review") ? "blocked" : was;
   const wake = waitable(sig, itemOf(r), ME);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
@@ -1599,6 +1738,8 @@ function cardOf(r: Rec, p: Placement): Card {
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),
+    ...(s.blocker && { blocker: { id: `${s.repo.split("/")[0]}/${s.blocker[0].split(" ")[0]}`, ref: s.blocker[0], waits: s.blocker[1] } }),
+    ...(sig.pr.blocks.length > 0 && { blocks: sig.pr.blocks }),
   };
 }
 
@@ -1720,11 +1861,19 @@ function queue(): QueueView {
   const sections = {
     now: queueOrder([...needsCards(), ...of("now")].map(top), ME),
     today: queueOrder(of("today").map(top), ME),
-    blocked: [],
+    blocked: of("blocked"),
     later: of("later"),
     fyi: of("fyi"),
   };
-  const leads = oneLinePerStack(sections, ["now", "today", "later", "fyi"], stacks());
+  const leads = oneLinePerStack(sections, ["now", "today", "blocked", "later", "fyi"], stacks());
+  // Your PRs in Merging that another PR blocks: Merging has them, and Blocked lists them in their chain too.
+  const merging = recs.flatMap((r) => {
+    const pr = signals(r).pr;
+    return laneOwned(r) && pr.blocked
+      ? [{ ...cardOf(r, shownAt(r, bestPlacement(r))), why: `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}` }]
+      : [];
+  });
+  sections.blocked = blockedOrder([...sections.blocked, ...merging]);
   const hidden = of("hide");
   const clearedCards = [...cleared.values()].filter((c) => !best.has(c.id));
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
@@ -1794,7 +1943,9 @@ for (const r of recs) if (r.seed.fly?.note) laneNotes.set(r.id, { text: r.seed.f
 
 const inFlight = (r: Rec) => !!r.state.inflight_at && r.seed.author === ME && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
 const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
-const handedBack = (r: Rec) => !!r.seed.back && !inFlight(r) && !r.seed.resolved && status(r) === "active";
+// Another PR blocks it and the rules keep it in Blocked: the hand-back waits there until that PR merges.
+const handedBack = (r: Rec) =>
+  !!r.seed.back && !inFlight(r) && !r.seed.resolved && status(r) === "active" && !(r.seed.blocker && bestPlacement(r).bucket === "blocked");
 
 // As Desk.shownAt(): in Merging, Merging's; handed back, at the top of Now.
 function shownAt(r: Rec, p: Placement): Placement {
@@ -1819,6 +1970,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   const threads = r.threads_unresolved;
   if (r.state !== "open") return null;
   if (r.rebase) return "rebasing";
+  if (r.blocked_by) return `waits on ${r.blocked_by.ref} to merge first`;
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
@@ -1847,7 +1999,7 @@ function laneRow(r: Rec): InflightRow {
     mergeable: sig.pr.mergeable,
     draft: !!s.draft,
     rebase: false,
-    blocked_by: null,
+    blocked_by: sig.pr.blocked ? { ref: sig.pr.blocker, waits: sig.pr.blocker_waits } : null,
   };
   return { card: cardOf(r, shownAt(r, bestPlacement(r))), ...row, waits_on: waitsOn(row), note: laneNotes.get(r.id) ?? null };
 }
@@ -2586,6 +2738,7 @@ function toToml(c: Config): string {
       if (r.why) out.push(`why = ${tomlStr(r.why)}`);
       if (r.nocap) out.push("nocap = true");
       if (r.hard) out.push("hard = true");
+      if (r.final) out.push("final = true");
     }
   }
   return out.join("\n") + "\n";
@@ -2742,7 +2895,8 @@ function validate(c: Config): ConfigError[] {
   const spaces = new Set(c.spaces.map((s) => s.id));
   const ids = new Set<string>();
   const bucket = (p: string, v: unknown) => {
-    if (!BUCKET_LIST.has(v as Bucket)) errors.push({ path: p, message: `"${String(v)}" is not a bucket (now, today, later, fyi, hide)` });
+    if (!BUCKET_LIST.has(v as Bucket))
+      errors.push({ path: p, message: `"${String(v)}" is not a bucket (now, today, blocked, later, fyi, hide)` });
   };
   const expr = (p: string, v: string) => {
     const err = checkExpr(v);
@@ -2764,6 +2918,8 @@ function validate(c: Config): ConfigError[] {
       if (!r.when) errors.push({ path: `${p}.rules[${j}].when`, message: "rule needs a when" });
       else expr(`${p}.rules[${j}].when`, r.when);
       if (r.bucket !== "judge") bucket(`${p}.rules[${j}].bucket`, r.bucket);
+      else if (r.final)
+        errors.push({ path: `${p}.rules[${j}].final`, message: "a final rule places the item itself; give it a bucket, not judge" });
     });
   });
   return errors;

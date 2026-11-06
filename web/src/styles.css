@@ -1432,6 +1432,7 @@ kbd {
 }
 
 .b-later .ref-ink,
+.b-blocked .ref-ink,
 .b-fyi .ref-ink,
 .b-hide .ref-ink {
   color: var(--pencil);
@@ -1461,8 +1462,10 @@ kbd {
 }
 
 .b-later .fact-word.t-bad,
+.b-blocked .fact-word.t-bad,
 .b-fyi .fact-word.t-bad,
 .b-later .fact-word.t-warn,
+.b-blocked .fact-word.t-warn,
 .b-fyi .fact-word.t-warn,
 .dim .fact-word.t-bad,
 .dim .fact-word.t-warn {

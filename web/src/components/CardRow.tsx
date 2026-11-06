@@ -50,7 +50,7 @@ function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);
   if (variant === "hidden") return card.why || "hidden by your rules";
   if (variant === "archive") return card.resolved ?? "done: back when someone else acts";
-  if (variant === "waiting") return card.why;
+  if (variant === "blocked") return card.why;
   return card.demoted ?? card.why;
 }
 
@@ -61,7 +61,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
   // A resolved item isn't waiting any more: its time is when it resolved.
-  const since = variant === "waiting" ? card.waiting_since : (card.resolved_at ?? card.done_at ?? card.waiting_since);
+  const since = variant === "blocked" ? card.waiting_since : (card.resolved_at ?? card.done_at ?? card.waiting_since);
   return (
     <div
       className={cls(
@@ -69,7 +69,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         sel && "sel",
         open && "open",
         ctx.leaving.has(card.id) && "leaving",
-        variant !== "active" && variant !== "waiting" && "dim",
+        variant !== "active" && variant !== "blocked" && "dim",
       )}
       data-id={card.id}
     >
@@ -103,7 +103,11 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
               {card.stack.pos}/{card.stack.size}
             </span>
           )}
-          {note && <span className="line-note">{note}</span>}
+          {note && (
+            <span className="line-note" title={note}>
+              {note}
+            </span>
+          )}
         </button>
         {/* Under the cursor only: the quiet way to tell the coordinator something about it. */}
         {sel && !why && (
@@ -176,7 +180,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         )}
         <span
           className="line-age"
-          title={`${variant !== "waiting" && card.resolved_at ? "resolved" : variant !== "waiting" && card.done_at ? "done" : "waiting since"} ${new Date(since).toLocaleString()}`}
+          title={`${variant === "blocked" ? "blocked since" : card.resolved_at ? "resolved" : card.done_at ? "done" : "waiting since"} ${new Date(since).toLocaleString()}`}
         >
           {age(since, ctx.now)}
         </span>

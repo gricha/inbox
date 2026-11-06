@@ -16,6 +16,7 @@ import type {
   Stack,
   StackMember,
 } from "../../../src/types.ts";
+import { andMore } from "../../../src/stage.ts";
 import { api, message } from "../api.ts";
 import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
 import { reviewOf } from "../reviews.ts";
@@ -597,6 +598,7 @@ export function Review({
     // Merged or closed, a conflict no longer matters.
     ...(item.state === "open" && item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
     ...(item.draft ? [{ text: "draft", tone: "" }] : []),
+    ...depFacts(card),
     { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
   ];
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
@@ -991,6 +993,14 @@ function Head({
   );
 }
 
+// Another PR it needs merged first, and the open PRs that need it.
+function depFacts(c: Card): Fact[] {
+  return [
+    ...(c.blocker ? [{ text: `blocked by ${c.blocker.ref}`, tone: "" }] : []),
+    ...(c.blocks?.length ? [{ text: `blocks ${andMore(c.blocks)}`, tone: "" }] : []),
+  ];
+}
+
 // The header's facts as its row has them, until the review brings who approved and how many files.
 function rowFacts(c: Card): Fact[] {
   const size = c.chips.find((x) => x.startsWith("+"));
@@ -999,6 +1009,7 @@ function rowFacts(c: Card): Fact[] {
     { text: REVIEW[c.review], tone: c.review === "changes_requested" ? "t-warn" : "" },
     ...(!c.resolved && c.chips.includes("conflict") ? [{ text: "merge conflict", tone: "t-warn" }] : []),
     ...(c.draft ? [{ text: "draft", tone: "" }] : []),
+    ...depFacts(c),
     ...(size ? [{ text: size, tone: "" }] : []),
   ];
 }

@@ -157,7 +157,8 @@ test("item detail resolves short refs and explains placement", async () => {
     review.trace.map((t) => [t.index, t.matched]),
     [
       [-1, true],
-      [0, true],
+      [0, false], // blocked by another PR
+      [1, true],
     ],
   );
   assert.match(d.handoff_prompt, /acme\/web#2301/);
@@ -201,7 +202,7 @@ test("config preview reports moves and errors; save applies", async () => {
   );
 
   const { data: bad } = await call<PreviewResult>("POST", "/api/config/preview", { text: edited.replace("pr.approvals", "pr.aprovals") });
-  assert.equal(bad.errors[0]?.path, "boards[0].rules[6].when");
+  assert.equal(bad.errors[0]?.path, "boards[0].rules[7].when");
   assert.match(bad.errors[0]?.message ?? "", /did you mean pr\.approvals/);
 
   const { data: saved } = await call<{ ok: boolean }>("PUT", "/api/config", { text: edited });
@@ -459,6 +460,7 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
       ["acme/web#2295", "waits on a CI fix"],
       ["acme/api#4110", "waits on a merge conflict fix"],
       ["acme/api#4105", "waits on a review from sam, @backend and 4 more"],
+      ["acme/billing#2301", "waits on api#1294 to merge first"],
       ["acme/worker#871", null],
     ],
   );
@@ -480,14 +482,18 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
   assert.equal(row("acme/api#4105").note, null);
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const all = [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared, ...q.resolved];
-  assert.ok(!all.some((c) => c.inflight), "Merging has them");
+  assert.deepEqual(
+    all.filter((c) => c.inflight).map((c) => [c.id, q.sections.blocked.includes(c)]),
+    [["acme/billing#2301", true]],
+    "Merging has them; Blocked also lists the one another PR blocks",
+  );
   assert.deepEqual(
     q.sections.now.slice(0, 1).map((c) => c.id),
     ["oss/tinyhttp#205"],
   );
   assert.match(q.sections.now[0]!.why, /^handed back: /);
   const { data: o } = await call<Overview>("GET", "/api/overview");
-  assert.deepEqual(o.inflight, { total: 6 });
+  assert.deepEqual(o.inflight, { total: 7 });
 
   const act = (id: string, action: string) => call("POST", "/api/act", { id, action });
   assert.equal((await act("acme/api#4127", "inflight")).status, 409, "not your PR");
@@ -499,6 +505,46 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
       .some((c) => c.id === "acme/web#2295" && !c.inflight),
   );
   assert.equal((await act("acme/web#2295", "inflight")).status, 200);
+});
+
+test("Blocked: api#1294's chain together, saying once what it waits on, Merging's marked; dana's api#1301, then a review wait", async () => {
+  const silo = "waits on your reply to dana, then a review from sam, kai and 6 more";
+  const { data: q } = await call<QueueView>("GET", "/api/queue");
+  assert.deepEqual(
+    q.sections.blocked.map((c) => [c.id, c.why, c.inflight]),
+    [
+      ["acme/billing#2298", `blocked by api#1294, which ${silo}`, false],
+      ["acme/billing#2299", "blocked by api#1294", false],
+      ["acme/billing#2300", "blocked by api#1294", false],
+      ["acme/billing#2301", "in Merging \u00b7 blocked by api#1294", true],
+      ["acme/api#1301", "blocked by api#1299, which waits on a review from kai", false],
+      ["acme/web#2306", "waits on a review from sam, @backend and 1 more", false],
+    ],
+  );
+  const held = q.sections.blocked[0]!;
+  assert.deepEqual(
+    [held.stage, held.blocker, held.handed_back],
+    ["blocked", { id: "acme/api#1294", ref: "api#1294", waits: silo }, undefined],
+  );
+  assert.equal(q.sections.blocked[2]!.stage, "blocked", "waiting for review, but blocked");
+  const page = [...q.sections.now, ...q.sections.today];
+  assert.ok(!page.some((c) => c.blocker), "a held hand-back, and a review asked of you by name, wait in Blocked");
+  assert.equal(page[0]!.id, "oss/tinyhttp#205", "a hand-back nothing blocks is still back to you");
+  const root = q.sections.today.find((c) => c.id === "acme/api#1294")!;
+  assert.deepEqual(
+    [root.why, root.cta, root.blocks],
+    [`blocks billing#2298, billing#2299 and 2 more; it ${silo}`, "reply", ["billing#2298", "billing#2299", "billing#2300", "billing#2301"]],
+  );
+
+  const { data: lane } = await call<InflightView>("GET", "/api/inflight");
+  const row = lane.rows.find((r) => r.card.id === "acme/billing#2301")!;
+  assert.deepEqual([row.waits_on, row.blocked_by], ["waits on api#1294 to merge first", { ref: "api#1294", waits: silo }]);
+  // The rule that put it in Blocked is final: Claude isn't asked, though the judge is on.
+  const { data: d } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("acme/api#1301")}`);
+  const p = d.placements.find((x) => x.board === "work-review")!;
+  assert.deepEqual([p.bucket, p.rule, p.judge], ["blocked", 0, undefined]);
+  const { data: other } = await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent("acme/api#4127")}`);
+  assert.ok(other.placements.find((x) => x.board === "work-review")!.judge, "a rule that isn't final is sorted by Claude");
 });
 
 test("your own draft carries one call to action, Ready for review, and the mock takes it", async () => {

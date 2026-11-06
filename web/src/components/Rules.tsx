@@ -421,7 +421,7 @@ export function Rules({
               <div className="fact">
                 <dt>buckets</dt>
                 <dd>
-                  <code>now today later fyi hide</code>
+                  <code>now today blocked later fyi hide</code>
                 </dd>
               </div>
               <div className="fact">
@@ -465,6 +465,13 @@ export function Rules({
                 <dd>
                   <code>hard = true</code> on a rule: a floor. What it matches never sorts below its bucket (<code>today</code> for a{" "}
                   <code>now</code> rule); Claude sorts within it, and everything else with the rule's bucket as its hint
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>final</dt>
+                <dd>
+                  <code>final = true</code> on a rule: Claude doesn't re-sort what it matches; it stays in the rule's bucket (your pin still
+                  lifts it)
                 </dd>
               </div>
             </dl>
