@@ -6,6 +6,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
+import { renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
@@ -1362,16 +1363,6 @@ function urlOf(s: Seed) {
   return `https://github.com/${s.repo}/${(s.kind ?? "pr") === "pr" ? "pull" : "issues"}/${s.n}`;
 }
 
-function render(tpl: string, sig: Signals): string {
-  return tpl.replaceAll(/\{([\w.]+)\}/g, (_, path: string) => {
-    let v: unknown = sig;
-    for (const k of path.split(".")) v = (v as Record<string, unknown> | undefined)?.[k];
-    if (typeof v === "number") return String(Math.round(v));
-    if (typeof v === "string" || typeof v === "boolean") return String(v);
-    return Array.isArray(v) ? v.join(",") : "";
-  });
-}
-
 function itemOf(r: Rec): Item {
   const s = r.seed;
   const sig = signals(r);
@@ -1453,7 +1444,7 @@ function place(r: Rec, b: BoardConfig): Placement | null {
       bucket,
       rule_bucket: bucket,
       rule,
-      why: render(why, sig),
+      why: renderTemplate(why, sig),
       trace,
       ...(floor && { hard: true, floor }),
     };
@@ -2252,7 +2243,7 @@ function detail(r: Rec): ItemDetail {
     signals: sig,
     placements,
     state: r.state,
-    handoff_prompt: render(config.handoff.prompt, sig),
+    handoff_prompt: renderTemplate(config.handoff.prompt, sig),
     ai,
     ai_stale: !!ai && ai.head_oid !== item.head_oid,
     generating: generating.has(r.id),
