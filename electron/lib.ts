@@ -34,9 +34,9 @@ export const envVar = (name: string): string | undefined => (process.env[name] =
 export type Probe = { kind: "desk" } | { kind: "free" } | { kind: "other"; detail: string };
 
 // What answers on the desk's port: a desk (attach), nothing (start one), or something else.
-export async function probeHealth(base: string, timeoutMs = 1000, fetchFn: typeof fetch = fetch): Promise<Probe> {
+export async function probeHealth(base: string, timeoutMs = 1000): Promise<Probe> {
   try {
-    const res = await fetchFn(`${base}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(timeoutMs) });
     const body = (await res.json().catch(() => null)) as { ok?: unknown } | null;
     return res.ok && body?.ok === true ? { kind: "desk" } : { kind: "other", detail: `HTTP ${res.status} on /health` };
   } catch (e) {
