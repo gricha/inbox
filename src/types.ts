@@ -616,7 +616,6 @@ export interface AiReview {
 export interface ChunkRanking {
   ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // in Claude's order, then any hunk it noted but didn't rank, as a skim
   unread: string[]; // left out of the prompt because the PR, or the hunk's file, was too long to read whole: not judged either way
-  capped: boolean; // Claude ranked as many as it may (20): more may be worth a look
   total: number; // hunks in the diff
 }
 
@@ -625,7 +624,6 @@ export interface ReviewHunk {
   id: string; // h1, h2, … across the files in order, as the AI review's prompt numbers them
   path: string;
   file: number; // index in ReviewView.files
-  index: number; // its place among its file's hunks
   header: string; // its @@ line
   patch: string; // its own lines, the @@ line first
   additions: number;

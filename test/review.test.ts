@@ -391,14 +391,13 @@ test("parseReview ranks only hunks the prompt showed, each once, in Claude's ord
       { id: "h2", path: "src/planner/plan.ts", level: "look", why: "x".repeat(80) },
     ],
     unread: [],
-    capped: false,
     total: 5,
   });
   assert.ok(!("chunks" in parseReview({ summary: "x" }, files)), "no list is no ranking");
-  assert.deepEqual(parseReview({ summary: "x", chunks: [] }, files).chunks, { ranked: [], unread: [], capped: false, total: 5 });
+  assert.deepEqual(parseReview({ summary: "x", chunks: [] }, files).chunks, { ranked: [], unread: [], total: 5 });
 });
 
-test("at most 20 chunks are ranked and a full list says so; hunks left out for length are unread, not ranked", () => {
+test("at most 20 chunks are ranked; hunks left out for length are unread, not ranked", () => {
   const many: ReviewFile = {
     ...FILE,
     path: "src/many.ts",
@@ -411,8 +410,6 @@ test("at most 20 chunks are ranked and a full list says so; hunks left out for l
     all.slice(0, 20).map((c) => c.id),
     "Claude's first 20, in its order",
   );
-  assert.equal(r.capped, true);
-  assert.equal(parseReview({ summary: "x", chunks: all.slice(0, 19) }, [many]).chunks!.capped, false);
 
   // Six files of about 17 KB of numbered diff each: the prompt's 80 KB holds four.
   const item = makeItem({});
@@ -440,7 +437,6 @@ test("at most 20 chunks are ranked and a full list says so; hunks left out for l
   assert.deepEqual(ranked.chunks, {
     ranked: [{ id: "h1", path: "src/big0.ts", level: "look", why: "seen" }],
     unread: ["h5", "h6"],
-    capped: false,
     total: 7,
   });
   assert.deepEqual(
@@ -532,7 +528,6 @@ test("a hunk that crosses a file's 20 KB shows its start and counts as read; the
   assert.deepEqual(r.chunks, {
     ranked: [{ id: "h2", path: "src/auth.ts", level: "look", why: "the new login" }],
     unread: ["h3"],
-    capped: false,
     total: 3,
   });
   assert.deepEqual(
@@ -731,7 +726,6 @@ test(
           { id: "h1", path: FILE.path, level: "skim", why: "caps rows" },
         ],
         unread: [],
-        capped: false,
         total: 3,
       });
       assert.equal(ai.head_oid, "c0ffee");
@@ -760,7 +754,6 @@ test("the review order: ranked chunks across files, then unread, then what Claud
         { id: "h1", path: "src/planner/plan.ts", level: "skim", why: "caps rows" },
       ],
       unread: ["h5"],
-      capped: false,
       total: 5,
     },
     notes: [
@@ -775,10 +768,10 @@ test("the review order: ranked chunks across files, then unread, then what Claud
   const o = reviewOrder(files, ai, false);
   assert.equal(o.ranked, true);
   assert.deepEqual(
-    o.chunks.map((h) => [h.id, h.path, h.file, h.index, h.rank, h.level, h.why, h.notes]),
+    o.chunks.map((h) => [h.id, h.path, h.file, h.rank, h.level, h.why, h.notes]),
     [
-      ["h4", "src/b.ts", 2, 0, 1, "look", "the fix", [3, 0]],
-      ["h1", "src/planner/plan.ts", 0, 0, 2, "skim", "caps rows", [1]],
+      ["h4", "src/b.ts", 2, 1, "look", "the fix", [3, 0]],
+      ["h1", "src/planner/plan.ts", 0, 2, "skim", "caps rows", [1]],
     ],
   );
   assert.deepEqual(o.chunks[0]!.patch, PATCH.split("\n").slice(0, 6).join("\n"));
@@ -830,7 +823,7 @@ test("without a ranking for this commit the order is today's: every hunk file by
   );
   const ranked = aiOf({
     notes,
-    chunks: { ranked: [{ id: "h2", path: FILE.path, level: "look", why: "w" }], unread: [], capped: false, total: 3 },
+    chunks: { ranked: [{ id: "h2", path: FILE.path, level: "look", why: "w" }], unread: [], total: 3 },
   });
   for (const o of [reviewOrder(files, ranked, true), reviewOrder(files, null, false)]) {
     assert.equal(o.ranked, false);

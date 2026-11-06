@@ -284,13 +284,12 @@ function hunksOf(files: ReviewFile[]): Hunk[] {
       if (line.startsWith("@@")) parts.push([line]);
       else parts.at(-1)?.push(line);
     }
-    for (const [index, lines] of parts.entries()) {
+    for (const lines of parts) {
       const body = lines.slice(1);
       out.push({
         id: `h${out.length + 1}`,
         path: f.path,
         file,
-        index,
         header: lines[0]!,
         patch: lines.join("\n"),
         additions: body.filter((l) => l.startsWith("+")).length,
@@ -709,7 +708,6 @@ function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[]): Ch
   return {
     ranked: [...kept, ...hunks.filter((h) => noted.has(h.id)).map((h) => ({ id: h.id, path: h.path, level: "skim" as const, why: "" }))],
     unread: hunks.filter((h) => !read.has(h.id) && !NOISE.test(h.path)).map((h) => h.id),
-    capped: ranked.length >= MAX_CHUNKS,
     total: hunks.length,
   };
 }

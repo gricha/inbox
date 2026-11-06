@@ -365,7 +365,6 @@ test("the review reads in the desk's order: a file's hunks next to each other at
     id,
     path,
     file: path === "a.ts" ? 0 : 1,
-    index: 0,
     header: "@@ -1,3 +1,4 @@",
     patch: "@@ -1,3 +1,4 @@\n+x",
     additions: 1,

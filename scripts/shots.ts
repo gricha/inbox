@@ -503,7 +503,7 @@ const SHOTS: Shot[] = [
   { name: "review-fold", go: review("acme/api#4127", ["n", "n", "n", "n", "n"]) },
   { name: "review-rest", go: review("acme/api#4127", ["n", "n", "n", "n", "n", "Enter"]) },
   {
-    // A capped ranking: what Claude didn't read, then the fold that says some may still be worth a look.
+    // A capped ranking: what Claude didn't read, then the hunks it left out, marked Skip.
     name: "review-unread",
     go: async (page) => {
       await review("acme/worker#879")(page);
