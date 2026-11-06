@@ -184,7 +184,7 @@ test("what to fetch: the PR below a bottom, PRs above open ones, stale members; 
   ];
   const listed = new Set([id(2), id(3), id(4), id(5), id(10), id(6, "acme/x")]);
   const s = buildStacks(items);
-  const got = toFetch(items, s, listed, hoursAgo(0.5));
+  const got = toFetch(items, s, listed, hoursAgo(0.5), hoursAgo(1 / 6));
   const probes = got.probes.map((p) => `${p.repo} ${p.dir} ${p.branch}`).sort();
   assert.deepEqual(probes, [
     "acme/api down b10",
@@ -203,11 +203,45 @@ test("what to fetch: the PR below a bottom, PRs above open ones, stale members; 
 
   const known = [...items, makeItem({ repo: "acme/x", number: 7, default_branch: "main" })];
   assert.ok(
-    toFetch(known, buildStacks(known), listed, hoursAgo(0.5)).probes.some(
+    toFetch(known, buildStacks(known), listed, hoursAgo(0.5), hoursAgo(1 / 6)).probes.some(
       (p) => p.repo === "acme/x" && p.dir === "up" && p.branch === "dev",
     ),
     "the default branch comes from another PR in the repo when this one was stored without it",
   );
+});
+
+test("toFetch keeps what a listed PR requires from pruning, and refreshes an open one after 10 minutes", () => {
+  const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
+  const old = hoursAgo(0.25);
+  const items = [
+    web(1, { requires: ["Acme/API#20", "acme/api#404"] }), // listed; api#404 isn't stored
+    pr(20, "main", { requires: ["acme/api#21", "acme/api#30"], detail_at: old }),
+    pr(21, "main", { detail_at: hoursAgo(0.1) }), // fetched 6 minutes ago
+    pr(30, "main", { state: "merged", detail_at: old }),
+    pr(31, "main", { requires: ["acme/api#40"], detail_at: old }), // what web#2 requires is listed itself
+    pr(40, "main", { detail_at: old }),
+    web(2, { requires: ["acme/api#31"] }),
+    web(3, { requires: ["acme/api#41"] }),
+    // Five hops down, through the PR below api#41 in its stack: api#46 is the sixth.
+    pr(41, 42, { detail_at: old }),
+    pr(42, "main", { requires: ["acme/api#43"], detail_at: old }),
+    pr(43, "main", { requires: ["acme/api#44"], detail_at: old }),
+    pr(44, "main", { requires: ["acme/api#45"], detail_at: old }),
+    pr(45, "main", { requires: ["acme/api#46"], detail_at: old }),
+    pr(46, "main", { detail_at: old }),
+    web(4, { state: "merged", requires: ["acme/api#50"] }), // only an open PR waits on what it needs
+    pr(50, "main", { detail_at: old }),
+  ];
+  const listed = new Set(["acme/web#1", "acme/web#2", "acme/web#3", "acme/web#4", id(31)]);
+  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6));
+  assert.deepEqual(got.members.toSorted(), [...ids(20, 21, 30, 40, 41, 42, 43, 44, 45)].toSorted());
+  assert.deepEqual(
+    got.stale.map((i) => i.id).toSorted(),
+    ids(20, 40, 41, 42, 43, 44, 45),
+    "open, unlisted and fetched over 10 minutes ago; never api#30, which merged",
+  );
+  const bare = items.map((it) => Object.assign(structuredClone(it), { requires: [] }));
+  assert.deepEqual(got.probes, toFetch(bare, buildStacks(bare), listed, hoursAgo(0.5), hoursAgo(1 / 6)).probes, "nothing new is probed");
 });
 
 // The desk: what it fetches for stacks and how its views carry them.
@@ -487,6 +521,34 @@ test("off-board members of a stack the boards list aren't pruned with the items 
     [1, 2, 3],
   );
   assert.equal(t.desk.store.itemsById([id(9)]).has(id(9)), false, "an item in no stack still goes");
+});
+
+test("a stored PR your PR requires is refreshed every 10 minutes while open, quietly, and isn't pruned once it merges", async (tc) => {
+  const dep = makeItem({ number: 5, author: "carol", detail_at: hoursAgo(1) });
+  const t = await setup([myPr(1, { requires: ["acme/api#5"] }), dep]);
+  tc.after(t.cleanup);
+  t.desk.store.putItems([dep], hoursAgo(15 * 24), true); // no search has returned it for 15 days
+  const fetched = () => t.gh.detailCalls.flat().filter((x) => x === dep.id).length;
+  await t.desk.sync();
+  assert.equal(t.desk.store.itemsById([dep.id]).has(dep.id), true, "not pruned: a listed PR needs it");
+  assert.equal(fetched(), 1, "stored an hour ago: refreshed");
+  t.setNow(new Date(NOW.getTime() + 5 * 60_000));
+  await t.desk.sync();
+  assert.equal(fetched(), 1, "not again within 10 minutes");
+  t.gh.items.set(dep.id, { ...dep, state: "merged", closed_at: at(12), updated_at: at(12) });
+  t.setNow(new Date(NOW.getTime() + 12 * 60_000));
+  await t.desk.sync();
+  assert.equal(fetched(), 2);
+  assert.equal(t.desk.store.itemsById([dep.id]).get(dep.id)?.state, "merged");
+  t.setNow(new Date(NOW.getTime() + 60 * 60_000));
+  await t.desk.sync();
+  assert.equal(fetched(), 2, "merged: not refreshed");
+  assert.equal(t.desk.store.itemsById([dep.id]).has(dep.id), true, "still kept: the PR that needs it is open");
+  assert.deepEqual(
+    t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.item_id === dep.id),
+    [],
+    "context, not news",
+  );
 });
 
 test("QueueView.stacks has every stack a card in the view carries, cleared ones too", async (tc) => {

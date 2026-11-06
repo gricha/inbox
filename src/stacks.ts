@@ -2,6 +2,7 @@
 import type { Bucket, Card, Item, Stack, StackMember, StackRef } from "./types.ts";
 
 const SLACK = 5 * 60_000; // GitHub moves a stacked PR to main seconds after the one below it merges
+const DEPTH = 5; // hops followed down what listed PRs need, through the PRs the desk stores
 const STATE: Record<Item["state"], number> = { open: 0, merged: 1, closed: 2 };
 
 interface Node {
@@ -242,33 +243,55 @@ export function grouped<T>(rows: T[], idOf: (row: T) => string, s: Stacks): T[] 
   return slots.flatMap((g) => (g.length > 1 ? g.toSorted((a, b) => below(s, idOf(a), idOf(b))) : g));
 }
 
+// The stored PRs that listed open PRs need merged first (the PR below, and what the description requires), down the chain.
+function needed(items: Item[], s: Stacks, listed: Set<string>): Item[] {
+  const prs = new Map(items.filter((i) => i.kind === "pr").map((i) => [lc(i.id), i]));
+  const out = new Map<string, Item>();
+  let level = [...listed].flatMap((id) => prs.get(lc(id)) ?? []).filter((it) => it.state === "open");
+  for (let hop = 0; hop < DEPTH && level.length; hop++) {
+    const next: Item[] = [];
+    for (const x of level)
+      for (const ref of [s.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
+        const y = ref ? prs.get(lc(ref)) : undefined;
+        if (!y || out.has(y.id) || listed.has(y.id)) continue;
+        out.set(y.id, y);
+        if (y.state === "open") next.push(y);
+      }
+    level = next;
+  }
+  return [...out.values()];
+}
+
 // What to fetch for the stacks of the PRs on the boards (`listed`), which the desk may see only part of. Probes: up, the
 // PR whose branch a bottom PR is based on (or was, before the one below it merged); down, open PRs based on an open PR's
-// branch. Stale: members no board lists, still open as of a fetch before `before`. Members: every PR in the stacks of
-// listed ones.
+// branch. Stale: members no board lists, still open as of a fetch before `before`, or before `depBefore` for a PR a listed
+// one needs. Members: every PR in the stacks of listed ones, and the stored PRs they need, merged ones too.
 export function toFetch(
   items: Item[],
   s: Stacks,
   listed: Set<string>,
   before: string,
+  depBefore: string,
 ): { probes: Probe[]; stale: Item[]; members: string[] } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const roots = new Set([...listed].map((id) => s.nodes.get(id)?.root));
   const members = [...s.nodes.values()].filter((n) => roots.has(n.root)).map((n) => n.item.id);
+  const needs = needed(items, s, listed);
   const ids = new Set([...listed, ...members]);
   const mainOf = defaults(items);
   const probes = new Map<string, Probe>();
   const add = (p: Probe) => probes.set(probeKey(p), p);
-  const stale: Item[] = [];
+  const stale = new Map<string, Item>();
+  for (const it of needs) if (it.state === "open" && it.detail_at < depBefore) stale.set(it.id, it);
   for (const id of ids) {
     const it = byId.get(id);
     if (!it || it.kind !== "pr" || it.state === "closed") continue;
-    if (!listed.has(id) && it.state === "open" && it.detail_at < before) stale.push(it);
+    if (!listed.has(id) && it.state === "open" && it.detail_at < before) stale.set(id, it);
     const main = mainOf(it);
     const under = main && !s.nodes.get(id)?.parent ? [it.base, it.retargeted?.from].find((b) => b && b !== main) : undefined;
     if (under) add({ repo: it.repo, dir: "up", branch: under, stacked: true });
     if (it.state === "open" && ownBranch(it))
       add({ repo: it.repo, dir: "down", branch: it.head_ref!, stacked: !!under || s.nodes.has(id) });
   }
-  return { probes: [...probes.values()], stale, members };
+  return { probes: [...probes.values()], stale: [...stale.values()], members: [...new Set([...members, ...needs.map((i) => i.id)])] };
 }

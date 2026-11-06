@@ -22,6 +22,7 @@ const PROBE_TTL = 30 * 60_000; // a stack probe isn't asked again before this; a
 const MAX_PROBES = 120; // stack probes a pass
 const RESERVE = 40; // of those, kept from probes that only look for a stack, for the rounds that follow a chain up
 const STACK_ROUNDS = 3; // probe, fetch, probe again: a chain a few PRs deep fills in one pass
+const DEP_TTL = 10 * 60_000; // a stored PR another one needs is refreshed after this
 
 interface Feed {
   since: string | null; // ask for threads updated after this
@@ -282,8 +283,8 @@ export class GitHubConnector implements Connector {
   }
 
   // Stack members no board search returns (the PR below a stack's bottom, PRs stacked on one on the desk) and stored ones
-  // gone stale, fetched read only and stored without events: they're context for a stack, not news. Returns how many, and
-  // the members of the listed PRs' stacks.
+  // gone stale, with the stored PRs listed ones need, fetched read only and stored without events: they're context, not
+  // news. Returns how many, and the members of the listed PRs' stacks with the PRs they need, which pruning keeps.
   async fillStacks(listed: Set<string>): Promise<{ fetched: number; members: Set<string> }> {
     const desk = this.desk;
     const at = desk.now();
@@ -299,7 +300,7 @@ export class GitHubConnector implements Connector {
       for (let round = 0; round < STACK_ROUNDS; round++) {
         const stored = desk.store.items();
         const before = new Date(at.getTime() - PROBE_TTL).toISOString();
-        const got = toFetch(stored, buildStacks(stored), listed, before);
+        const got = toFetch(stored, buildStacks(stored), listed, before, new Date(at.getTime() - DEP_TTL).toISOString());
         for (const id of got.members) members.add(id);
         const due = got.probes.filter((p) => !asked[probeKey(p)]);
         const stacked = due.filter((p) => p.stacked).slice(0, budget);
