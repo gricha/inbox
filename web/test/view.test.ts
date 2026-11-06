@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
 import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, modelName, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
+import { age, ago, clearedText, eventText, fromName, modelName, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
   authProblem,
@@ -682,6 +682,12 @@ test("formatting", () => {
   // Times read as the snooze menu writes them.
   const sat = new Date(2026, 9, 31, 9, 0).toISOString();
   assert.match(clearedText(card("a/b#1", { status: "snoozed", snooze_until: sat })), /^snoozed until .*\b9:00 or new activity$/);
+});
+
+test("fromName shows the coordinator as your agent", () => {
+  assert.equal(fromName("Review Desk coordinator"), "Your agent");
+  assert.equal(fromName("Review Desk coordinator", false), "your agent");
+  assert.equal(fromName("sentry: rollout"), "sentry: rollout");
 });
 
 test("an AI review names the model that wrote it the way people say it", () => {

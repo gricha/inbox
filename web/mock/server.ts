@@ -68,7 +68,7 @@ import type {
   TraceStep,
   Until,
 } from "../../src/types.ts";
-import { RANK, UNTIL } from "../../src/types.ts";
+import { COORDINATOR_NAME, RANK, UNTIL } from "../../src/types.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -2040,7 +2040,7 @@ const INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
     at: iso(0.4),
-    from: "notes-app: sync tombstones",
+    from: COORDINATOR_NAME,
     question: "Compact tombstones in #12, or ship #12 and compact them in a follow-up?",
     context:
       "azulus asked on #12 why tombstones never go away: every sync ships the whole list, and on a long-lived notebook it only grows. " +
@@ -2197,7 +2197,7 @@ const ASKS: Ask[] = [
 ];
 let askN = 0;
 function addAsk(b: Record<string, unknown>): Ask {
-  if (!setting("agent.coordinator")) throw new HttpError(409, "the coordinator is off: Settings → Agents");
+  if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings \u2192 Agents");
   const text = textOf(b).trim();
   if (!text) throw new HttpError(400, "the ask is empty");
   const str = (k: string) => (typeof b[k] === "string" && b[k] ? b[k] : null);

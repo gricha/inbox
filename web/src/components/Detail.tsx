@@ -264,7 +264,7 @@ export function Dots({ parts }: { parts: ReactNode[] }) {
   );
 }
 
-export const BACK_TITLE = "Out of Merging and back on your desk; the coordinator leaves it alone";
+export const BACK_TITLE = "Out of Merging and back on your desk; your agent leaves it alone";
 
 // Your own open PR: m hands it off for merge (green: a yes, like Approve), b brings it back from Merging. The same on a
 // card, an opened item and a review.
@@ -284,7 +284,7 @@ export function HandKey({
     <KeyButton
       k="m"
       label="Hand off for merge"
-      title="The coordinator gets it merged: it fixes CI, addresses comments and merges it once it's approved"
+      title="Your agent gets it merged: it fixes CI, addresses comments and merges it once it's approved"
       className={cls(primary && "primary go")}
       run={run}
     />

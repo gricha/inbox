@@ -6,7 +6,7 @@ import { Prose } from "./Prose.tsx";
 
 const kept = new Map<string, string>(); // what you'd typed to it, per item, in this window
 let seen: AsksView | null = null; // the last asks fetched, so a reopen draws at once
-const OFF = "The coordinator is off in Settings \u2192 Agents, so nothing is sent.";
+const OFF = "Your agent is off in Settings \u2192 Agents, so nothing is sent.";
 
 // A conversation in a PR's review, the one you were last on.
 export interface Thread {
@@ -101,9 +101,9 @@ export function Chat({
   }, [mine.length, answered]);
 
   return (
-    <aside className="chat" aria-label="Your chat with the coordinator" inert={inert}>
+    <aside className="chat" aria-label="Your chat with your agent" inert={inert}>
       <div className="chat-head">
-        <h2 className="chat-title">Coordinator</h2>
+        <h2 className="chat-title">Your agent</h2>
         <p className="chat-about" title={about.item ?? undefined}>
           {about.item && shortId(about.item)}
         </p>
@@ -160,8 +160,8 @@ export function Chat({
         <textarea
           className="chat-input"
           rows={2}
-          aria-label="Your words to the coordinator"
-          placeholder={off ? "The coordinator is off" : "Ask or tell it something"}
+          aria-label="Your words to your agent"
+          placeholder={off ? "Your agent is off" : "Ask or tell it something"}
           value={text}
           disabled={off}
           onChange={(e) => {

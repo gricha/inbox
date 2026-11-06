@@ -799,6 +799,18 @@ const SHOTS: Shot[] = [
         await route.fulfill({ response: res, json: v });
       });
       await review("me/notes-app#12")(page);
+      // A box that posts on GitHub names what it does there: Send is only for your agent.
+      const convos = await page.evaluate<{ buttons: string[]; filled: string }[]>(`[...document.querySelectorAll(".cv")].map((cv) => {
+        const words = (b) => [...b.childNodes].filter((n) => n.nodeName !== "KBD").map((n) => n.textContent).join("").trim();
+        const actions = cv.querySelector(".actions");
+        return { buttons: [...actions.querySelectorAll("button, a")].map(words), filled: words(actions.querySelector(".act.primary")) };
+      })`);
+      for (const [i, c] of convos.entries()) {
+        if (c.buttons.some((b) => b.includes("Send") || b === "Ask coordinator"))
+          failures.push(`ask-review: conversation ${i + 1}'s actions read ${c.buttons.join(", ")}`);
+        if (c.filled !== "Reply") failures.push(`ask-review: conversation ${i + 1}'s filled button reads "${c.filled}", not Reply`);
+      }
+      if (!convos[1]?.buttons.includes("Ask your agent")) failures.push("ask-review: the second conversation has no Ask your agent");
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");
       // The cached asks draw at once: the fetch must land before the send, or it would replace the ask sent.
@@ -836,7 +848,7 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
-    // A PR you've asked about: t Coordinator after More says where your latest ask stands.
+    // A PR you've asked about: t Your agent after More says where your latest ask stands.
     name: "ask-button",
     go: async (page) => {
       await review("me/notes-app#12")(page);
@@ -870,7 +882,7 @@ const SHOTS: Shot[] = [
     after: sideDefault,
   },
   {
-    // The coordinator off: the chat says so and sends nothing.
+    // Your agent off: the chat says so and sends nothing.
     name: "ask-off",
     go: async (page) => {
       await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));

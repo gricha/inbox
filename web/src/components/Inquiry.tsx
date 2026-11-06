@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
-import { age, cls, issueUrl, MOD } from "../format.ts";
+import { age, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
@@ -37,7 +37,7 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
           <span className="line-kind">Agent</span>
           <span className="line-title">{q.question}</span>
           <span className="line-ref inq-from" title={q.from}>
-            {q.from}
+            {fromName(q.from)}
           </span>
         </button>
         <button
@@ -206,7 +206,9 @@ export function InquiryPage({
         <p className="rv-ref">
           <span className="inq-kind">Agent</span>
           <span className="rv-by" title={`asked ${new Date(q.at).toLocaleString()}`}>
-            {q.from} · {age(q.at, now)}
+            {fromName(q.from)}
+            {" \u00b7 "}
+            {age(q.at, now)}
           </span>
         </p>
         <h1 className="rv-title">{q.question}</h1>
@@ -261,7 +263,7 @@ export function InquiryPage({
         <p className="rv-acted inq-answered">
           <span className="rv-acted-what">{answer.dismissed ? "✓ Dismissed: it decides itself" : `✓ Answered: ${answer.text}`}</span>
           {!q.answer && <span className="busy" aria-label="sending" />}
-          {q.answer && <span className="quiet">{q.from} has it</span>}
+          {q.answer && <span className="quiet">{fromName(q.from)} has it</span>}
         </p>
       ) : (
         <section className="inq-answer" aria-label="Your answer">
@@ -293,7 +295,7 @@ export function InquiryPage({
             <textarea
               ref={box}
               className="cv-reply"
-              aria-label={`Your answer to ${q.from}`}
+              aria-label={`Your answer to ${fromName(q.from, false)}`}
               placeholder={q.options.length ? "Or write your own answer" : "Your answer"}
               value={text}
               maxLength={2000}
@@ -315,7 +317,7 @@ export function InquiryPage({
               <button
                 type="button"
                 className={cls("act", !q.options.length && "primary")}
-                title={`Send it to ${q.from}: the button or ${MOD}↵`}
+                title={`Send it to ${fromName(q.from, false)}: the button or ${MOD}\u21b5`}
                 disabled={!text.trim()}
                 onClick={() => {
                   void send(text);

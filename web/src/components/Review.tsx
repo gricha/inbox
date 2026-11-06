@@ -408,7 +408,7 @@ export function Review({
     if (i >= 0) goTo(i, ".rv-inline", "center");
     else document.querySelector(".rv-orphan")?.scrollIntoView({ block: "center" });
     setFocusAsk((f) => f + 1);
-    flash("Send or clear the comment you're writing first");
+    flash("Post or clear the comment you're writing first");
   }
 
   // The gutter's + (or a drag down it), or a thread's Reply: a box under that line. Words you haven't sent are never dropped
@@ -760,7 +760,7 @@ export function Review({
               className={cls("go", !writing && "primary")}
             />
           )}
-          {/* While you owe replies, Send is the one filled button. */}
+          {/* While you owe replies, Reply is the one filled button. */}
           {mine && !(acted?.where === "inflight" && !card.inflight) && (
             <HandKey card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
           )}
@@ -797,9 +797,9 @@ export function Review({
           {last && (
             <KeyButton
               k="t"
-              label={last.answer ? `Coordinator \u00b7 answered ${sinceText(last.answer.at, now)}` : "Coordinator \u00b7 waiting"}
+              label={last.answer ? `Your agent \u00b7 answered ${sinceText(last.answer.at, now)}` : "Your agent \u00b7 waiting"}
               run={run}
-              title="Your chat with the coordinator about this PR (t)"
+              title="Your chat with your agent about this PR (t)"
             />
           )}
         </div>
@@ -1567,7 +1567,7 @@ function SectionView({
   );
 }
 
-// What you're writing under a line: ⌘↵ or Send posts it on GitHub, as you; Esc leaves an empty one.
+// What you're writing under a line: Cmd+Enter or its button posts it on GitHub, as you; Esc leaves an empty one.
 function InlineBox({
   label,
   busy,

@@ -110,12 +110,12 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             </span>
           )}
         </button>
-        {/* Under the cursor only: the quiet way to tell the coordinator something about it. */}
+        {/* Under the cursor only: the quiet way to tell your agent something about it. */}
         {sel && !why && (
           <button
             type="button"
             className="act line-ask"
-            title="Tell or ask your coordinator something about it"
+            title="Tell or ask your agent something about it"
             onClick={() => {
               ctx.run(card, "t");
             }}

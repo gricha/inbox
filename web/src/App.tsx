@@ -14,7 +14,7 @@ import type {
   SettingsView,
 } from "../../src/types.ts";
 import { api, message, starting, unreachable } from "./api.ts";
-import { cls, copyText, shortId, shortRef, snoozeOptions } from "./format.ts";
+import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop } from "./theme.ts";
@@ -582,7 +582,7 @@ export function App() {
     let ok = true;
     try {
       await api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text });
-      flash(dismiss ? `Dismissed ${q.from}'s question` : `Answered ${q.from}`);
+      flash(dismiss ? `Dismissed ${fromName(q.from, false)}'s question` : `Answered ${fromName(q.from, false)}`);
     } catch (e) {
       ok = false;
       setAnswered((s) => {
@@ -710,7 +710,7 @@ export function App() {
     void finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, async () => {
       await api.act(c.id, "inflight");
       undoSeq.current = null;
-      return { text: `Handed off for merge: ${shortRef(c)}. The coordinator gets it merged.` };
+      return { text: `Handed off for merge: ${shortRef(c)}. Your agent gets it merged.` };
     });
   }
 
@@ -846,12 +846,12 @@ export function App() {
     try {
       if (k === "w") {
         await api.wakeCoordinator();
-        flash(id ? "Asked the coordinator to look at Merging." : "Started the coordinator.");
+        flash(id ? "Asked your agent to look at Merging." : "Started your agent.");
         refresh(0);
       } else if (id) {
         await copyText(`claude attach ${id}`);
-        flash("Copied. Run it in a terminal to open the coordinator.");
-      } else flash("The coordinator isn't started yet: w starts it.");
+        flash("Copied. Run it in a terminal to open your agent.");
+      } else flash("Your agent isn't started yet: w starts it.");
     } catch (e) {
       flash(message(e), true);
     }
@@ -872,7 +872,7 @@ export function App() {
     else if (k === "t") openAsk(c.id);
     // From its review: a PR in Merging is the coordinator's.
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
-      flash(`${shortRef(c)} is in Merging, so the coordinator has it. b brings it back to the desk.`);
+      flash(`${shortRef(c)} is in Merging, so your agent has it. b brings it back to the desk.`);
     else if (k === "b") void back(c);
     else if (k === ".") openMore(c);
     else if (k === "a" && c.cta === "ready") markReady(c);

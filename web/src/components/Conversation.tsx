@@ -54,7 +54,7 @@ export function Conversation({
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
   if (!view.conversation.length) return null;
 
-  // Sending is yours: Send (or ⌘↩).
+  // Posting is yours: Reply (or Cmd+Enter).
   async function send(c: Convo, text: string) {
     const to = c.comments.at(-1)?.author ?? "them";
     if (!text.trim() || busy) return;
@@ -127,14 +127,14 @@ export function Conversation({
               <button
                 type="button"
                 className="act primary"
-                title={`Post this reply on GitHub, as you: Send, or ${MOD}↵`}
+                title={`Post this reply on GitHub, as you: Reply, or ${MOD}\u21b5`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {
                   void send(c, text);
                 }}
               >
                 <kbd>{MOD}↵</kbd>
-                {busy === c.id ? "Sending…" : "Send"}
+                {busy === c.id ? "Replying\u2026" : "Reply"}
               </button>
               <a className="act" href={c.url} target="_blank" rel="noreferrer">
                 Open on GitHub
@@ -142,13 +142,13 @@ export function Conversation({
               <button
                 type="button"
                 className="act"
-                title="Tell or ask your coordinator something about this conversation (t)"
+                title="Your chat with your agent about this conversation; your reply here stays here, unsent"
                 onClick={() => {
                   on(c);
                   onAsk(threadOf(c));
                 }}
               >
-                Ask coordinator
+                Ask your agent
               </button>
             </div>
           </article>

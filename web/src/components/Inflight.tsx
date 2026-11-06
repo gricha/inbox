@@ -77,24 +77,24 @@ export function Inflight({
 
 // One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
 function Coordinator({ c }: { c: CoordinatorView }) {
-  if (!c.on) return <p className="lane-coord">The coordinator is off in Settings → Agents.</p>;
+  if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings \u2192 Agents."}</p>;
   if (c.error)
     return (
       <p className="lane-coord lane-coord-error">
-        <b>The coordinator can't run:</b> {withCode(c.error)} <kbd>w</kbd> tries again.
+        <b>Your agent can't run:</b> {withCode(c.error)} <kbd>w</kbd> tries again.
       </p>
     );
   if (!c.id)
     return (
       <p className="lane-coord">
-        The coordinator starts on your first hand-off; <kbd>w</kbd> starts it now.
+        Your agent starts on your first hand-off or ask; <kbd>w</kbd> starts it now.
       </p>
     );
   return (
     <p className="lane-coord">
       <Dots
         parts={[
-          "Coordinator",
+          "Your agent",
           ...(c.url
             ? [
                 <a key="url" href={c.url} target="_blank" rel="noreferrer">
@@ -181,7 +181,7 @@ function Row({
             <KeyButton k="enter" label="Review" run={keys} className="primary" />
             <KeyButton k="o" label="Open on GitHub" run={keys} />
             {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
-            <KeyButton k="t" label="Ask coordinator" title="Tell or ask your coordinator something about it" run={keys} />
+            <KeyButton k="t" label="Ask your agent" title="Tell or ask your agent something about it" run={keys} />
           </div>
         </div>
       )}

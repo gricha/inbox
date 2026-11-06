@@ -7,11 +7,11 @@ const KEYS: [string[], string][] = [
   [["enter"], "Review the PR; an agent's question opens its page; an issue opens in place; “n more” shows the rest"],
   [["o"], "Open on GitHub"],
   [["a"], "The row's call to action: your draft, ready for review on GitHub; your PR nobody's asked to review, add reviewers"],
-  [["m"], "Your own PR: hand it off for merge. The coordinator gets it merged"],
+  [["m"], "Your own PR: hand it off for merge. Your agent gets it merged"],
   [["e", "d"], "Done: it comes back when someone else acts"],
   [["s"], "Snooze: 1 to 5 for how long, 6 on until CI passes, new commits, an approval…"],
   [["m"], "Someone else's: mute or unmute"],
-  [["."], "More on GitHub: close, draft, reopen, or merge now without the coordinator"],
+  [["."], "More on GitHub: close, draft, reopen, or merge now without your agent"],
   [["/"], "Filter"],
   [["esc"], "Close the item, then clear the filter; on Later, back to the queue"],
   [["?"], "This list"],
@@ -21,7 +21,7 @@ const KEYS: [string[], string][] = [
 const MORE_KEYS: [string, string][] = [
   ["p", "pin"],
   ["u", "undo"],
-  ["t", "chat with the coordinator"],
+  ["t", "ask your agent about what you're on"],
   ["i", "AI review"],
   ["w", "rule trace; an issue opened in place: comment"],
   ["r", "sync"],
@@ -37,10 +37,10 @@ const MORE_KEYS: [string, string][] = [
 const LANE_KEYS: [string[], string][] = [
   [["j", "k"], "Move"],
   [["enter"], "Review the PR"],
-  [["b"], "Back to desk: the coordinator leaves it alone"],
+  [["b"], "Back to desk: your agent leaves it alone"],
   [["o"], "Open on GitHub"],
-  [["c"], "Copy the command that opens the coordinator in a terminal"],
-  [["w"], "Wake the coordinator: it starts, or looks at Merging now"],
+  [["c"], "Copy the command that opens your agent in a terminal"],
+  [["w"], "Wake your agent: it starts, or looks at Merging now"],
   [["esc"], "Back to the queue"],
 ];
 
@@ -56,10 +56,10 @@ const REVIEW_KEYS: [string[], string][] = [
   [["w"], "Your comment on the PR: the box under what reviewers said"],
   [["m", "b"], "Your own PR: hand it off for merge, or back to desk"],
   [["d"], "Done"],
-  [["."], "More: open on GitHub; close, draft, reopen or merge now without the coordinator; request changes on someone else's"],
+  [["."], "More: open on GitHub; close, draft, reopen or merge now without your agent; request changes on someone else's"],
   [["i"], "Ask for the AI review again"],
   [["o"], "Open on GitHub"],
-  [["t"], "Your chat with the coordinator about this PR, in the sidebar's place; f puts the sidebar back"],
+  [["t"], "Your chat with your agent about this PR, in the sidebar's place; f puts the sidebar back"],
   [["esc"], "Close the chat when it's open; else back to where you opened it"],
 ];
 

@@ -67,7 +67,7 @@ export function Sidebar({
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight ? `${flight.total} merging (g m)` : "Your PRs the coordinator is getting merged (g m)"}
+          title={flight ? `${flight.total} merging (g m)` : "Your PRs your agent is getting merged (g m)"}
         >
           <span className="side-name">Merging</span>
         </a>
