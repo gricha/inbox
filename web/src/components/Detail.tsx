@@ -207,9 +207,9 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <KeyButton k="s" label="Snooze" run={run} />
         {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
         <KeyButton k="p" label={card.pinned ? "Unpin" : "Pin"} run={run} />
-        <KeyButton k="w" label={ctx.showSignals ? "Hide signals" : "Signals"} run={run} />
+        <KeyButton k="w" label="Hide signals" run={run} />
       </div>
-      {ctx.showSignals && <pre className="signals">{JSON.stringify(s, null, 2)}</pre>}
+      <pre className="signals">{JSON.stringify(s, null, 2)}</pre>
     </div>
   );
 }
