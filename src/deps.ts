@@ -72,7 +72,7 @@ export function requiresOf(md: string, repo: string, number: number): string[] {
 }
 
 export interface DepFacts {
-  requires: string[]; // repo#number, any state: the stack parent, then the description's (unknown refs too)
+  requires: string[]; // repo#number, any state: the stack parent, then the description's (unknown refs too; another org's in full)
   open: string[]; // repo#number: open PRs the desk holds that it needs directly, edges that close a loop left out
   closed: string[]; // repo#number: needs closed without merging
   merged: { ref: string; at: string }[]; // needs that merged, oldest first
@@ -82,8 +82,11 @@ export interface DepFacts {
 }
 
 const short = (it: Item) => `${it.repo.split("/")[1]}#${it.number}`;
+const orgOf = (ref: string) => ref.slice(0, ref.indexOf("/")).toLowerCase();
+// Its author can't pick a blocker in another org, nor one that reads like your org's: only its own org's refs count.
+export const sameOrg = (ref: string, it: Item) => orgOf(ref) === orgOf(it.repo);
 
-// Keyed by item.id, open PRs only. Refs the desk doesn't hold, and issues, never block; a loop blocks nobody in it.
+// Keyed by item.id, open PRs only. Refs the desk doesn't hold, another org's, and issues never block; a loop blocks nobody in it.
 export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFacts> {
   const prs = new Map(items.filter((i) => i.kind === "pr").map((i) => [i.id.toLowerCase(), i]));
   const live = [...prs.values()].filter((i) => i.state === "open");
@@ -96,8 +99,9 @@ export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFact
     for (const ref of [stacks.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
       if (!ref || seen.has(ref.toLowerCase())) continue;
       seen.add(ref.toLowerCase());
-      const y = prs.get(ref.toLowerCase());
-      f.requires.push(y ? short(y) : ref.slice(ref.indexOf("/") + 1));
+      const ours = sameOrg(ref, x);
+      const y = ours ? prs.get(ref.toLowerCase()) : undefined;
+      f.requires.push(y ? short(y) : ours ? ref.slice(ref.indexOf("/") + 1) : ref);
       if (y?.state === "open") out.push(y);
       else if (y?.state === "closed") f.closed.push(short(y));
       else if (y) f.merged.push({ ref: short(y), at: y.closed_at ?? y.updated_at });

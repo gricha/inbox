@@ -847,6 +847,15 @@ test("A review asked of you by name that requires an open PR waits in Blocked; o
   assert.equal(t.notes.at(-1), "api#9 \u00b7 carol asked you directly");
 });
 
+test("A review asked of you by name whose description names an open PR in another org stays in Now", async (c) => {
+  const t = await setup([reviewAsk(9, { requires: ["evilcorp/api#5"] })], { settings: QUIET });
+  c.after(t.cleanup);
+  t.desk.store.putItems([makeItem({ repo: "evilcorp/api", number: 5, author: "carol" })], NOW.toISOString(), true);
+  await t.desk.sync();
+  const q = t.desk.queue();
+  assert.deepEqual([q.sections.now.map((x) => [x.id, x.why]), q.sections.blocked], [[["acme/api#9", "carol asked you directly"]], []]);
+});
+
 test("A change request or a reply you owe on a blocked PR is yours: not in Blocked, and its hand-back isn't held", async (c) => {
   const needs = { requires: ["acme/web#100"] };
   const t = await setup(

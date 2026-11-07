@@ -121,7 +121,7 @@ export interface Signals {
     base: string;
     stacked: boolean; // its base isn't the repo's default branch
     requires: string[]; // PRs it needs merged first, as repo#number, in any state: the one below it in its stack, then its description's
-    blocked: boolean; // a PR it needs, or one that PR needs in turn, is still open (PRs the desk doesn't hold, and issues, never block)
+    blocked: boolean; // a PR it needs, or one that PR needs in turn, is still open (only PRs in its own org count; issues never block)
     blocked_by: string[]; // the open PRs it needs directly, as repo#number
     blocker: string; // the open PR at the end of the chain, as repo#number, "(through repo#number)" when it isn't a direct need; "" when not blocked
     blocker_waits: string; // what that PR waits on, as its pr.waits says it, or "is in Merging"; "" when not blocked

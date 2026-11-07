@@ -1,4 +1,5 @@
 // Stacks of PRs, from the PRs the desk holds: in one repo, each based on the head branch of the one below it. Pure.
+import { sameOrg } from "./deps.ts";
 import type { Bucket, Card, Item, Stack, StackMember, StackRef } from "./types.ts";
 
 const SLACK = 5 * 60_000; // GitHub moves a stacked PR to main seconds after the one below it merges
@@ -254,6 +255,7 @@ function needed(items: Item[], s: Stacks, listed: Set<string>, from: (it: Item) 
     const next: Item[] = [];
     for (const x of level)
       for (const ref of [s.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
+        if (ref && !sameOrg(ref, x)) continue;
         const y = ref ? known.get(lc(ref)) : undefined;
         if (ref && !y) missing.set(lc(ref), ref);
         if (y?.kind !== "pr" || held.has(y.id) || listed.has(y.id)) continue;

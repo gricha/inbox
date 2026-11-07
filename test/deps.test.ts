@@ -167,6 +167,14 @@ test("refs the desk doesn't hold, and issues, don't block", () => {
   assert.deepEqual(f.open, []);
 });
 
+test("another org's PR never blocks, held or not: requires names it in full", () => {
+  const theirs = pr("evilcorp/sentry#5");
+  const it = pr("getsentry/sentry#9", { requires: ["evilcorp/sentry#5", "GetSentry/Seer#3"] });
+  const f = deps([theirs, it, pr("getsentry/seer#3")]).get(it.id)!;
+  assert.deepEqual([f.requires, f.open, f.root], [["evilcorp/sentry#5", "seer#3"], ["seer#3"], "getsentry/seer#3"]);
+  assert.deepEqual(deps([theirs]).get(theirs.id)?.blocks, []);
+});
+
 test("a PR stacked on an open PR is blocked by it, with no description", () => {
   const below = pr("acme/api#1", { head_ref: "b1" });
   const it = pr("acme/api#2", { head_ref: "b2", base: "b1" });

@@ -39,7 +39,7 @@ export const FIELDS: FieldDoc[] = [
   {
     path: "pr.blocked",
     type: "boolean",
-    doc: "a PR it needs, or one that PR needs in turn, is still open (PRs the desk doesn't hold, and issues, never block)",
+    doc: "a PR it needs, or one that PR needs in turn, is still open (only PRs in its own org count; issues never block)",
   },
   { path: "pr.blocked_by", type: "string[]", doc: "the open PRs it needs directly, as repo#number" },
   {

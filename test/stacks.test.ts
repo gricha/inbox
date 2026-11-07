@@ -259,6 +259,16 @@ test("toFetch keeps what a listed PR requires from pruning, and refreshes an ope
   );
 });
 
+test("toFetch follows only what a listed PR needs in its own org: another org's PR isn't kept or refreshed", () => {
+  const items = [
+    makeItem({ repo: "acme/web", number: 1, requires: ["evilcorp/x#1", "acme/api#20"] }),
+    makeItem({ repo: "evilcorp/x", number: 1, requires: ["evilcorp/x#2"], detail_at: hoursAgo(1) }),
+    pr(20, "main", { requires: ["evilcorp/x#2"], detail_at: hoursAgo(1) }),
+  ];
+  const got = toFetch(items, buildStacks(items), new Set(["acme/web#1"]), hoursAgo(0.5), hoursAgo(1 / 6), new Set());
+  assert.deepEqual([got.members, got.stale.map((i) => i.id)], [[id(20)], [id(20)]]);
+});
+
 test("toFetch probes by number a PR a listed one requires when the desk doesn't hold it", () => {
   const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
   const items = [
