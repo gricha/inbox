@@ -174,7 +174,16 @@ const PLAN = '.rv-file-sec[aria-label="src/planner/plan.ts"]';
 const planLine = (page: Page, n: number) => page.locator(PLAN).first().locator(`div[data-line="${n}"]`).last();
 const plusBy = async (page: Page, n: number) => {
   const line = planLine(page, n);
-  await line.scrollIntoViewIfNeeded();
+  // Pierre can redraw the diff mid-scroll: the locator finds the line again.
+  for (let i = 0; ; i++) {
+    try {
+      await line.scrollIntoViewIfNeeded({ timeout: 5000 });
+      break;
+    } catch (e) {
+      if (i === 2) throw e;
+      await page.waitForTimeout(300);
+    }
+  }
   const plus = page.locator(PLAN).first().locator("[data-utility-button]").first();
   for (let i = 0; i < 10 && !(await plus.count()); i++) {
     await page.mouse.move(0, 0);
