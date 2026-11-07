@@ -863,6 +863,7 @@ export class Desk {
     const added = this.store.prefixed<Added>("added:");
     const auto = new Map<string, string>();
     const handed = new Map<string, Handoff>();
+    const coordinatorAdded = new Set<string>();
     for (const e of entries.values()) {
       if (!e.state.pinned) continue;
       const pin = this.store.lastPin(e.item.id);
@@ -873,6 +874,7 @@ export class Desk {
       if (pu) auto.set(e.item.id, `${pu.name}: ${pu.why}`);
       // The why goes with the pin that brought it, until you act on the item: then it's yours, as an automation's pin is.
       const ad = pin && added.get(e.item.id)?.[pin.seq];
+      if (ad && by === "coordinator") coordinatorAdded.add(e.item.id);
       if (ad && !this.store.hasLaterAction(e.item.id, pin.seq)) handed.set(e.item.id, ad);
     }
     // The AI's call on this commit: over a cap, the lightest gives up its slot first, so a close look keeps one.
@@ -900,10 +902,10 @@ export class Desk {
       const queries = this.gh.queriesFor(loaded, board);
       const ids = new Set<string>();
       for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
-      // A coordinator's desk_add too: its why says what it wants, so it doesn't vanish once its pin stops counting as yours.
+      // A coordinator's desk_add too, after you act on it, so it doesn't vanish once its pin stops counting as yours.
       if (board === ADDED)
         for (const [id, by] of pins)
-          if ((by === "them" || handed.has(id)) && ![...boards.values()].some((b) => b.result.placements.has(id))) ids.add(id);
+          if ((by === "them" || coordinatorAdded.has(id)) && ![...boards.values()].some((b) => b.result.placements.has(id))) ids.add(id);
       // A kept item is only there to show as resolved.
       const list = [...ids]
         .map((id) => entries.get(id))

@@ -1140,3 +1140,30 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
     "on no other board it's on Added; anyone else's desk_add is your pin, which lifts it to Today",
   );
 });
+
+test("a coordinator's desk_add on no other board stays on Added after you act on it: in the Archive while done, back in Today on activity", async (c) => {
+  const t = await setup([], { settings: QUIET });
+  c.after(t.cleanup);
+  t.gh.items.set("acme/api#77", makeItem({ number: 77, author: "carol" }));
+  await t.desk.sync();
+  await t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Review Desk coordinator");
+  t.desk.act("api#77", "done");
+  let q = t.desk.queue();
+  assert.deepEqual(
+    q.cleared.map((x) => [x.id, x.status]),
+    [["acme/api#77", "done"]],
+  );
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.setNow(new Date(at));
+  t.gh.items.set("acme/api#77", {
+    ...t.gh.items.get("acme/api#77")!,
+    updated_at: at,
+    comments: [{ author: "carol", author_bot: false, at }],
+  });
+  await t.desk.sync();
+  q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.today.map((x) => [x.id, x.board]),
+    [["acme/api#77", "added"]],
+  );
+});
