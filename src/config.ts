@@ -366,6 +366,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
         `default = "fyi"`,
         `default_why = "{author.login}: you engaged with {author.engaged_90d} of their PRs in 90 days"`,
         `rules = [`,
+        `  ${BLOCKED_BY},`,
         `  { when = "item.created_hours < 24", bucket = "later", why = "new from {author.login}" },`,
         `]`,
       );

@@ -214,4 +214,5 @@ test("the template: blocked first on every PR board", () => {
     assert.deepEqual(rule(`${space}-review`, 1).slice(0, 2), ["me.requested_direct && !me.requested_by_bot", "now"]);
     assert.equal(rule(`${space}-review`, 1)[3], true, "the hard direct-ask rules follow");
   }
+  assert.deepEqual(rule("acme-collaborators", 0), ["pr.blocked", "blocked", true, false]);
 });
