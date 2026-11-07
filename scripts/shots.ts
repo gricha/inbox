@@ -297,6 +297,24 @@ const SHOTS: Shot[] = [
     after: refold,
   },
   {
+    // Your pin lifts a blocked PR onto your page, its stage "blocked", under api#1294, which it waits on and which offers Reply.
+    name: "queue-blocked",
+    go: async (page) => {
+      await queueAs((q) => {
+        const [pinned] = q.sections.blocked.splice(0, 1);
+        const at1294 = q.sections.today.findIndex((c) => c.id === "acme/api#1294");
+        if (pinned) q.sections.today.splice(at1294 + 1, 0, { ...pinned, group: "mine", pinned: true });
+      })(page);
+      await unfold(page);
+      await page.evaluate(`document.querySelector('.queue [data-id="acme/billing#2298"]').scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await refold(page);
+    },
+  },
+  {
     // The end of the queue: its last rows and the fold line, then the window's edge.
     name: "queue-bottom",
     go: async (page) => {
