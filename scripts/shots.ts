@@ -183,10 +183,22 @@ const SHOTS: Shot[] = [
   { name: "queue", go: at("#/") },
   // What can't move yet: a chain's rows together, the first saying what its blocker waits on, then a review wait.
   { name: "blocked", go: at("#/blocked") },
-  // The PR a chain waits on: what it blocks, and what it waits on.
-  { name: "review-blocker", go: review("acme/api#1294") },
+  // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
+  {
+    name: "review-blocker",
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#1294")(page);
+    },
+  },
   // A PR another one blocks: its header says what, greyed like Later's.
-  { name: "review-blocked", go: review("acme/billing#2298") },
+  {
+    name: "review-blocked",
+    go: async (page) => {
+      await at("#/blocked")(page);
+      await review("acme/billing#2298")(page);
+    },
+  },
   {
     // j j from the top: the selected row's calm fill, and the rows stay evenly spaced.
     name: "queue-selected",
