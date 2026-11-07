@@ -17,7 +17,73 @@ export function parseShellPath(out: string): string | null {
   return p === "" ? null : p;
 }
 
-export const fallbackDirs = (home: string): string[] => ["/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/bin`];
+export interface Disk {
+  isDir(p: string): boolean;
+  read(p: string): string | null;
+  list(p: string): string[];
+}
+
+const disk: Disk = {
+  isDir: (p) => {
+    try {
+      return fs.statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  read: (p) => {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch {
+      return null;
+    }
+  },
+  list: (p) => {
+    try {
+      return fs.readdirSync(p);
+    } catch {
+      return [];
+    }
+  },
+};
+
+// Version managers' node dirs go after the usual ones, so gh and claude resolve exactly as before.
+export function fallbackDirs(home: string, d: Disk = disk): string[] {
+  const managers = [
+    nvmBin(home, d),
+    `${home}/.volta/bin`,
+    `${home}/.local/share/mise/shims`,
+    `${home}/.asdf/shims`,
+    `${home}/.local/share/fnm/aliases/default/bin`,
+    `${home}/Library/Application Support/fnm/aliases/default/bin`,
+  ];
+  return [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    `${home}/.local/bin`,
+    `${home}/bin`,
+    ...managers.filter((p): p is string => p !== null && d.isDir(p)),
+  ];
+}
+
+// nvm's default alias ("22", "lts/*", "node", another alias) as the newest installed version it names, else the newest installed.
+function nvmBin(home: string, d: Disk): string | null {
+  const root = `${home}/.nvm`;
+  const installed = d
+    .list(`${root}/versions/node`)
+    .filter((v) => /^v\d+\.\d+\.\d+$/.test(v))
+    .sort((a, b) => b.localeCompare(a, "en", { numeric: true }));
+  if (!installed.length) return null;
+  let want = "default";
+  for (let hops = 0; hops < 10; hops++) {
+    const next = d.read(`${root}/alias/${want}`)?.trim();
+    if (!next) break;
+    want = next;
+  }
+  const version = /^v?(\d+(?:\.\d+){0,2})$/.exec(want)?.[1];
+  const hit = version ? installed.find((v) => `${v.slice(1)}.`.startsWith(`${version}.`)) : undefined;
+  return `${root}/versions/node/${hit ?? installed[0]}/bin`;
+}
 
 // Joins PATH strings and dirs in order, dropping empties and repeats.
 export function mergePath(sep: string, ...parts: string[]): string {

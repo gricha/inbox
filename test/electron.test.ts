@@ -13,6 +13,7 @@ import {
   desktopEntry,
   desktopSettings,
   envVar,
+  fallbackDirs,
   findNode,
   isAppUrl,
   isGitHubUrl,
@@ -46,6 +47,54 @@ test("parseShellPath ignores rc-file noise around the markers", () => {
 
 test("mergePath keeps order and drops repeats and empties", () => {
   assert.equal(mergePath(":", "/a:/b", "/usr/bin:/a::", "/c", ""), "/a:/b:/usr/bin:/c");
+});
+
+test("fallbackDirs: the usual dirs, then where nvm, Volta, mise, asdf and fnm keep node", () => {
+  const usual = ["/opt/homebrew/bin", "/usr/local/bin", "/h/.local/bin", "/h/bin"];
+  const disk = (versions: string[], aliases: Record<string, string>, dirs: string[] = []) => {
+    const has = new Set([...versions.map((v) => `/h/.nvm/versions/node/${v}/bin`), ...dirs]);
+    return {
+      isDir: (p: string) => has.has(p),
+      read: (p: string) => (p.startsWith("/h/.nvm/alias/") ? (aliases[p.slice("/h/.nvm/alias/".length)] ?? null) : null),
+      list: (p: string) => (p === "/h/.nvm/versions/node" ? versions : []),
+    };
+  };
+  const nvm = (versions: string[], aliases: Record<string, string>) => fallbackDirs("/h", disk(versions, aliases)).slice(usual.length);
+  const bin = (v: string) => [`/h/.nvm/versions/node/${v}/bin`];
+
+  assert.deepEqual(fallbackDirs("/h", disk([], {})), usual, "gh and claude are looked for where they were");
+  const installed = ["v22.9.0", "v24.14.0", "v22.22.0", "v20.20.2"];
+  assert.deepEqual(nvm(installed, { default: "22" }), bin("v22.22.0"), "a partial version is the newest it matches");
+  assert.deepEqual(nvm(installed, { default: "v22.9.0\n" }), bin("v22.9.0"));
+  assert.deepEqual(nvm(installed, { default: "node" }), bin("v24.14.0"));
+  assert.deepEqual(
+    nvm(installed, { default: "lts/*", "lts/*": "lts/iron", "lts/iron": "v20.20.2" }),
+    bin("v20.20.2"),
+    "aliases are followed",
+  );
+  assert.deepEqual(
+    nvm(installed, { default: "lts/*", "lts/*": "lts/krypton", "lts/krypton": "v24.16.0" }),
+    bin("v24.14.0"),
+    "not installed: the newest",
+  );
+  assert.deepEqual(nvm(installed, { default: "2" }), bin("v24.14.0"), "2 isn't 22");
+  assert.deepEqual(nvm(installed, { default: "a", a: "b", b: "a" }), bin("v24.14.0"), "an alias loop ends");
+  assert.deepEqual(nvm(installed, {}), bin("v24.14.0"), "no default alias");
+  assert.deepEqual(nvm(["v22.22.0", "system", ".DS_Store"], {}), bin("v22.22.0"));
+
+  const managers = ["/h/.volta/bin", "/h/.local/share/mise/shims", "/h/.asdf/shims", "/h/.local/share/fnm/aliases/default/bin"];
+  assert.deepEqual(fallbackDirs("/h", disk(["v22.22.0"], { default: "22" }, managers)), [...usual, ...bin("v22.22.0"), ...managers]);
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  try {
+    fs.mkdirSync(path.join(home, ".nvm/versions/node/v22.22.0/bin"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".nvm/alias"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".nvm/alias/default"), "22\n");
+    fs.mkdirSync(path.join(home, ".volta/bin"), { recursive: true });
+    assert.deepEqual(fallbackDirs(home).slice(usual.length), [`${home}/.nvm/versions/node/v22.22.0/bin`, `${home}/.volta/bin`], "on disk");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("envVar treats an empty variable as unset", () => {
