@@ -276,6 +276,7 @@ function mergingLine(r: InflightRow): string {
     r.threads_unresolved ? `${r.threads_unresolved} unresolved threads` : "",
     r.mergeable === "conflict" ? "merge conflict" : r.mergeable === "clean" ? "mergeable" : "",
     r.blocked_by ? `blocked by ${r.blocked_by.ref}, which ${r.blocked_by.waits}: it can't merge before that one does` : "",
+    r.requires_closed.length ? `needs ${r.requires_closed.join(", ")}, closed without merging: it can't merge as its description says` : "",
     r.stacked ? `stacked on ${r.base} (not the default branch: merge the PR below first)` : `base ${r.base}`,
     r.merge_method ? `merge method ${r.merge_method.toLowerCase()}` : "",
   ].filter(Boolean);

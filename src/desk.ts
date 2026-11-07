@@ -949,8 +949,7 @@ export class Desk {
       if (e.analysis.signals.pr.blocked && best.get(e.item.id)?.bucket === "blocked") continue;
       // Held until it unblocked: trackBlocked() logged when, and which PR merged.
       const freed = this.store.activity({ after: 0, limit: 20, item: e.item.id, latest: true }).find((x) => x.kind === "unblocked");
-      const merged =
-        freed && freed.at >= back.at ? (freed.data.merged ? `unblocked: ${String(freed.data.merged)} merged` : "unblocked") : "";
+      const merged = freed && freed.at >= back.at ? wakeFor(freed) : "";
       const why = `${merged ? `${merged} \u00b7 ` : ""}handed back: ${back.reason}`;
       needs.set(e.item.id, why);
       const board = [...boards.values()].map((b) => b.result.placements.get(e.item.id)?.board).find(Boolean) ?? "";
@@ -1934,6 +1933,7 @@ export class Desk {
         blocked_by: e.analysis.signals.pr.blocked
           ? { ref: e.analysis.signals.pr.blocker, waits: e.analysis.signals.pr.blocker_waits }
           : null,
+        requires_closed: e.analysis.signals.pr.requires_closed,
       };
       rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
     }
@@ -2101,7 +2101,8 @@ export class Desk {
         if (prev && !was) events.push({ at: now, item_id: it.id, kind: "blocked", actor: "", data: { by: pr.blocker } });
       } else if (was) {
         const merged = snap.deps.get(it.id)?.merged.findLast((m) => m.at > was.since)?.ref ?? "";
-        events.push({ at: now, item_id: it.id, kind: "unblocked", actor: "", data: { was: was.by, merged } });
+        const closed = pr.requires_closed.join(", ");
+        events.push({ at: now, item_id: it.id, kind: "unblocked", actor: "", data: { was: was.by, merged, closed } });
       }
     }
     this.store.set("blocked", next);
@@ -2578,6 +2579,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (r.state !== "open") return null;
   if (r.rebase) return "rebasing";
   if (r.blocked_by) return `waits on ${r.blocked_by.ref} to merge first`;
+  if (r.requires_closed.length) return `needs ${r.requires_closed.join(", ")}, closed without merging`;
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;

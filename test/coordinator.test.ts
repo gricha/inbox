@@ -904,5 +904,9 @@ test("an ask that can't start the coordinator says so and isn't kept", posix, as
 test("wakeFor: unblocked says which PR merged", () => {
   assert.equal(wakeFor({ kind: "unblocked", data: { was: "sentry#129460", merged: "sentry#129460" } }), "unblocked: sentry#129460 merged");
   assert.equal(wakeFor({ kind: "unblocked", data: { was: "sentry#129460", merged: "" } }), "unblocked");
+  assert.equal(
+    wakeFor({ kind: "unblocked", data: { was: "sentry#129460", merged: "", closed: "sentry#129460" } }),
+    "needs sentry#129460, closed without merging",
+  );
   assert.equal(wakeFor({ kind: "blocked", data: { by: "sentry#129460" } }), null, "desk_merging says it on the next wake");
 });

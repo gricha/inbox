@@ -1971,6 +1971,7 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (r.state !== "open") return null;
   if (r.rebase) return "rebasing";
   if (r.blocked_by) return `waits on ${r.blocked_by.ref} to merge first`;
+  if (r.requires_closed.length) return `needs ${r.requires_closed.join(", ")}, closed without merging`;
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
@@ -2000,6 +2001,7 @@ function laneRow(r: Rec): InflightRow {
     draft: !!s.draft,
     rebase: false,
     blocked_by: sig.pr.blocked ? { ref: sig.pr.blocker, waits: sig.pr.blocker_waits } : null,
+    requires_closed: sig.pr.requires_closed,
   };
   return { card: cardOf(r, shownAt(r, bestPlacement(r))), ...row, waits_on: waitsOn(row), note: laneNotes.get(r.id) ?? null };
 }

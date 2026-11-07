@@ -749,7 +749,7 @@ export type ActivityKind =
   | "resolved" // data: reason
   | "unresolved" // data: was (the reason that stopped holding)
   | "blocked" // your PR, blocked by another PR; data: by
-  | "unblocked"; // no longer; data: was, merged (the PR that merged, "" if none)
+  | "unblocked"; // no longer; data: was, merged (the PR that merged, "" if none), closed (pr.requires_closed, joined)
 
 export interface ActivityEvent {
   seq: number; // increasing; pass the last one you saw as `after`
@@ -785,6 +785,7 @@ export interface InflightRow {
   draft: boolean; // a draft PR
   rebase: boolean; // the desk gave it to the coordinator only to rebase (ready to merge but conflicts); it leaves once mergeable
   blocked_by: { ref: string; waits: string } | null; // another PR must merge first: pr.blocker and pr.blocker_waits
+  requires_closed: string[]; // PRs it needs that were closed without merging, as repo#number: pr.requires_closed
   waits_on: string | null; // what it waits on, in Merging's words: "waits on CI", "ready to merge"; null once merged or closed
   note: { text: string; at: string } | null; // the coordinator's latest desk_note on it; untrusted, an agent wrote it
 }

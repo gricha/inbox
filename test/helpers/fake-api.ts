@@ -171,6 +171,7 @@ const inflightView: InflightView = {
       draft: false,
       rebase: false,
       blocked_by: { ref: "sentry#5", waits: "waits on a review from kai" },
+      requires_closed: [],
       waits_on: "waits on a CI fix",
       note: { text: "Fixing the flaky test", at: ago(0.1) },
     },

@@ -689,3 +689,29 @@ test("a blocked PR in Merging waits on its blocker, and the coordinator is woken
   );
   assert.equal(t.desk.inflight().rows[0]!.waits_on, "ready to merge");
 });
+
+test("a Merging PR whose required PR closed without merging says so, and the coordinator is woken with it, not 'unblocked'", async (c) => {
+  const approved = { author: "kofi", author_bot: false, trusted: true, state: "approved" as const, at: hoursAgo(45), commit: "abc" };
+  const t = await setup(
+    [
+      myPr(9, { ci: "green", review_decision: "approved", reviews: [approved], requires: ["acme/api#5"] }),
+      myPr(5, { repo: "acme/api", ci: "green" }),
+    ],
+    { settings: { "policy.judge": false } },
+  );
+  c.after(t.cleanup);
+  const woke: [string, string][] = [];
+  t.desk.coordinator.wake = (id, what) => {
+    woke.push([id, what]);
+  };
+  await t.desk.sync();
+  t.desk.act("web#9", "inflight");
+  woke.length = 0;
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.gh.items.set("acme/api#5", { ...t.gh.items.get("acme/api#5")!, state: "closed", closed_at: at, updated_at: at });
+  t.setNow(new Date(at));
+  await t.desk.sync();
+  const row = t.desk.inflight().rows.find((r) => r.card.id === "acme/web#9")!;
+  assert.deepEqual([row.waits_on, row.requires_closed], ["needs api#5, closed without merging", ["api#5"]]);
+  assert.deepEqual(woke, [["acme/web#9", "needs api#5, closed without merging"]]);
+});

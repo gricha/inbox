@@ -101,7 +101,12 @@ export function wakeFor(e: Pick<ActivityEvent, "kind" | "data">): string | null 
     return e.data.state === "approved" ? "approved" : e.data.state === "changes_requested" ? "changes requested" : "new review";
   if (e.kind === "commented") return "new comment";
   if (e.kind === "conflict") return "merge conflict";
-  if (e.kind === "unblocked") return e.data.merged ? `unblocked: ${String(e.data.merged)} merged` : "unblocked";
+  if (e.kind === "unblocked")
+    return e.data.merged
+      ? `unblocked: ${String(e.data.merged)} merged`
+      : e.data.closed
+        ? `needs ${String(e.data.closed)}, closed without merging`
+        : "unblocked";
   return null;
 }
 

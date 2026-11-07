@@ -107,7 +107,11 @@ export function eventText(e: ActivityEvent, me = ""): string {
     case "blocked":
       return `blocked by ${String(d.by)}`;
     case "unblocked":
-      return d.merged ? `unblocked: ${String(d.merged)} merged` : "unblocked";
+      return d.merged
+        ? `unblocked: ${String(d.merged)} merged`
+        : d.closed
+          ? `needs ${String(d.closed)}, closed without merging`
+          : "unblocked";
   }
   return e.kind;
 }
