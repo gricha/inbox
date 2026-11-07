@@ -11,10 +11,10 @@ export interface InquiryCtx {
   now: number;
   selected: string | null;
   select: (q: Inquiry) => void;
-  open: (q: Inquiry) => void; // Enter: its page
+  open: (q: Inquiry) => void; // a click: its page
 }
 
-// An agent session's question for you, a row like a PR's labeled Agent: Enter opens its page; d dismisses it.
+// An agent session's question for you, a row like a PR's labeled Agent: a click opens its page.
 export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
@@ -97,12 +97,11 @@ function where(url: string): string {
 }
 
 // An agent's question on its own page: what it's about, everything it said, its links, and each answer with what it leads
-// to. 1–6 picks one, w writes your own, d dismisses it; answered, it stays here saying so. Its text is the agent's: text only.
+// to. A click picks one, or write your own, or Dismiss; answered, it stays here saying so. Its text is the agent's: text only.
 export function InquiryPage({
   id,
   loads,
   now,
-  inert,
   flash,
   onAnswer,
   onBack,
@@ -111,7 +110,6 @@ export function InquiryPage({
   id: string;
   loads: number; // bumped on every refresh: an answer from elsewhere shows
   now: number;
-  inert: boolean;
   flash: (text: string, error?: boolean) => void;
   onAnswer: (q: Inquiry, text: string, dismiss?: boolean) => Promise<boolean>; // true once the desk has it
   onBack: () => void;
@@ -121,7 +119,6 @@ export function InquiryPage({
   const [text, setText] = useState("");
   const [sent, setSent] = useState<Inquiry["answer"]>(null); // yours, until the desk's copy says so
   const seq = useRef(0);
-  const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const n = ++seq.current;
@@ -156,29 +153,12 @@ export function InquiryPage({
     else setSent(null);
   }
 
+  // Esc goes back, loading or failed too; the answer box keeps its own Esc.
   const onKey = (e: KeyboardEvent) => {
-    if (inert || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
+    if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (e.key === "Escape") {
-      onBack(); // loading or failed too
-      return;
-    }
-    if (!v) return;
-    const pick = /^[1-6]$/.test(e.key) ? v.options[Number(e.key) - 1] : undefined;
-    if (pick) {
-      e.preventDefault();
-      void send(pick.answer);
-    } else if (e.key === "w") {
-      e.preventDefault();
-      box.current?.focus();
-    } else if (e.key === "d") {
-      e.preventDefault();
-      void send("", true);
-    } else if (e.key === "o") {
-      const url = v.item_id ? (card?.url ?? issueUrl(v.item_id)) : v.links[0]?.url;
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
-    }
+    onBack();
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
@@ -293,7 +273,6 @@ export function InquiryPage({
           )}
           <div className="rv-changes inq-write">
             <textarea
-              ref={box}
               className="cv-reply"
               aria-label={`Your answer to ${fromName(q.from, false)}`}
               placeholder={q.options.length ? "Or write your own answer" : "Your answer"}

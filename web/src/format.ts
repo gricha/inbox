@@ -139,7 +139,7 @@ export const SNOOZE: { key: string; until: string; label: string; toast: string 
   { key: "5", until: "activity", label: "Until activity", toast: "until someone acts" },
 ];
 
-// The times, then what this item can wait on (6 on), as the desk says: it stays in Later until that happens.
+// The times, then what this item can wait on, as the desk says: it stays in Later until that happens.
 export const snoozeOptions = (c: Card): typeof SNOOZE => [
   ...SNOOZE,
   ...(c.wake_on ?? []).map((u, i) => ({ key: String(6 + i), until: u, label: `Until ${UNTIL[u]}`, toast: `until ${UNTIL[u]}` })),

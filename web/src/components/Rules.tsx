@@ -3,7 +3,7 @@ import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewR
 import { api, message } from "../api.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde } from "../format.ts";
 import { lineOf } from "../view.ts";
-import { KeyButton } from "./Detail.tsx";
+import { ActButton } from "./Detail.tsx";
 
 export function Rules({
   active,
@@ -218,7 +218,7 @@ export function Rules({
             }}
           />
           <div className="editor-foot">
-            <KeyButton
+            <ActButton
               label={busy === "save" ? "Saving…" : "Save"}
               title={`Save (${MOD}S)`}
               disabled={!!busy || !dirty}
@@ -226,7 +226,7 @@ export function Rules({
                 void save();
               }}
             />
-            <KeyButton
+            <ActButton
               label={busy === "preview" ? "Previewing…" : "Preview changes"}
               title={`Preview changes (${MOD}\u21b5)`}
               disabled={!!busy}
@@ -234,7 +234,7 @@ export function Rules({
                 void runPreview();
               }}
             />
-            <KeyButton
+            <ActButton
               label="Revert"
               disabled={!dirty}
               run={() => {

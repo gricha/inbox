@@ -31,7 +31,7 @@ export function Conversation({
   now: number;
   flash: (text: string, error?: boolean) => void;
   agent: boolean; // your agent is on: each reply box offers Ask your agent
-  onSpot: (s: Spot) => void; // the conversation you're on, for what t asks about
+  onSpot: (s: Spot) => void; // the conversation you're on, for what Ask your agent asks about
   onAsk: (s: Spot) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
@@ -46,7 +46,7 @@ export function Conversation({
     const box = document.querySelector<HTMLTextAreaElement>(".cv-reply");
     if (!box) return;
     replied.current = view.card.id;
-    // t pressed while the review loaded put your keys in the chat: they never move into a box that posts on GitHub.
+    // Ask your agent opened while the review loaded has your typing: it never moves into a box that posts on GitHub.
     if (document.activeElement?.closest("input, textarea, [contenteditable='true']")) return;
     box.focus();
   }, [view]);

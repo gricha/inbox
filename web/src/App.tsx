@@ -4,7 +4,6 @@ import type {
   Action,
   Card,
   GitHubAction,
-  InflightRow,
   InflightView,
   Inquiry,
   ItemDetail,
@@ -23,7 +22,6 @@ import {
   DEFAULT_OPEN,
   groupsOf,
   inquiryOf,
-  isFold,
   navigable,
   parseRoute,
   removeCard,
@@ -40,10 +38,8 @@ import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
-import { Help } from "./components/Help.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { rowActions } from "./components/More.tsx";
 import { RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
@@ -69,7 +65,7 @@ const VERB: Partial<Record<Action, string>> = {
   unpin: "Unpinned",
   restore: "Restored",
 };
-// What a More menu write says it did; close and draft can be undone with u (reopen, ready for review).
+// What a More menu write says it did; the toast's Undo undoes close and draft (reopen, ready for review).
 const DID: Record<GitHubAction, string> = {
   close: "Closed on GitHub",
   draft: "Converted to a draft on GitHub",
@@ -86,16 +82,6 @@ const go = (r: Route) => {
   location.hash = routeHash(r);
 };
 const UNREACHABLE = "unreachable";
-const CHORDS: Record<string, Route> = {
-  r: { name: "settings", section: "rules" },
-  s: { name: "settings", section: "github" },
-  q: { name: "queue" },
-  m: { name: "inflight" },
-  b: { name: "blocked" },
-  w: { name: "blocked" }, // Waiting's old key
-};
-// g l, g f, g h, g x: Later, with that group open; g a (or g d): the Archive.
-const AWAY_KEYS: Record<string, GroupKey> = { l: "later", f: "fyi", h: "hidden", x: "cleared", a: "archive", d: "archive" };
 const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
 
 // The desktop app's window needs room for the macOS traffic lights and a draggable title bar.
@@ -116,22 +102,20 @@ export function App() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
   const [showSignals, setShowSignals] = useState(false);
-  const [snoozeFor, setSnoozeFor] = useState<string | null>(null);
-  const [moreFor, setMoreFor] = useState<string | null>(null); // the row whose More menu is open
-  const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (w on it opened in place)
-  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number } | null>(null); // a row's right-click menu
+  const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (its Comment, opened in place)
+  // A row's menu: at a right-click, or under an issue's Snooze with Snooze open.
+  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean } | null>(null);
   const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
-  // What you did on an item from this page, until you leave it: a review shows it in place of the key you pressed.
+  // What you did on an item from this page, until you leave it: a review shows it in place of the button you pressed.
   const [acted, setActed] = useState<Record<string, Acted | undefined>>({});
   const actedRef = useRef(acted);
-  // Later's groups other than its own open only when asked (g f, …), and close again on reload.
+  // Later's groups other than its own open on a click on their heading, and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
   const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
-  const [help, setHelp] = useState(false);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [section, setSection] = useState(route.name === "settings" ? route.section : "github"); // kept while on the queue
   const [settingsSeen, setSettingsSeen] = useState(route.name === "settings");
@@ -147,7 +131,6 @@ export function App() {
   const [askWaiting, setAskWaiting] = useState(false); // the open review's latest ask is unanswered (Review says, and unsays it as it goes)
   const rulesDirty = useRef(false);
 
-  const filterRef = useRef<HTMLInputElement>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
   const expandedRef = useRef(expanded);
@@ -159,13 +142,12 @@ export function App() {
   const refreshTimer = useRef(0);
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
-  const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // u after a close or a draft, instead
+  const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // Undo after a close or a draft, instead
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
-  const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
   const pending = useRef<{ id: string; until: number } | null>(null);
 
-  // A GitHub write's u lasts as long as its toast, so a stray u hours later can't reopen or un-draft anything.
+  // A GitHub write's Undo lasts as long as its toast, so nothing can reopen or un-draft it hours later.
   const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, busy = false) => {
     clearTimeout(toastTimer.current);
     if (!canUndo) undoWrite.current = null;
@@ -250,8 +232,6 @@ export function App() {
   useEffect(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setExpanded(null);
-    setSnoozeFor(null);
-    setMoreFor(null);
     if (settingsSection !== null) {
       setSection(settingsSection);
       setSettingsSeen(true);
@@ -349,11 +329,8 @@ export function App() {
     stay.current = null;
     setMenuAt(null);
   }, [route]);
-  const onLater = route.name === "later";
-  const onArchive = route.name === "archive";
-  const onBlocked = route.name === "blocked";
   const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
-  // j/k and the selection go through the page on screen: the queue, or Later's groups; in a review, the page it came from.
+  // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
     const keys = PAGE_GROUPS[list === "later" || list === "archive" || list === "blocked" ? list : "queue"];
@@ -370,7 +347,6 @@ export function App() {
   }, [view, answered, filter, route.name]);
   const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
-  const asked = inquiries.find((q) => inquiryOf(q.id) === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
@@ -402,8 +378,6 @@ export function App() {
     stay.current = c.id;
     if (onLane) setLaneSel(c.id);
     else setSelected(c.id);
-    setSnoozeFor(null);
-    setMoreFor(null);
     setMenuAt({ id: c.id, x, y });
     return true;
   }
@@ -430,7 +404,7 @@ export function App() {
     if (menuAt && !menuCard) closeMenu();
   }, [menuAt, menuCard, closeMenu]);
 
-  // The PR row you rest on, by j/k or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
+  // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
     route.name === "inflight"
       ? (laneCur?.card ?? null)
@@ -509,7 +483,6 @@ export function App() {
 
   function toggle(c: Card) {
     setSelected(c.id);
-    setSnoozeFor(null);
     if (expanded === c.id) {
       setExpanded(null);
       return;
@@ -521,14 +494,13 @@ export function App() {
   }
 
   async function act(c: Card, action: Action, until?: string) {
-    setSnoozeFor(null);
     // A resolved item stays under Resolved whatever you do to it.
     const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
     if (leaves) hide(c);
     try {
       const started = Date.now();
       const res = await api.act(c.id, action, until);
-      undoSeq.current = res.undo_seq || null; // before the animation, so a quick u undoes this action
+      undoSeq.current = res.undo_seq || null; // before the animation, so a quick Undo undoes this action
       undoWrite.current = null;
       if (leaves) {
         await sleep(Math.max(0, 200 - (Date.now() - started)));
@@ -544,17 +516,15 @@ export function App() {
     }
   }
 
-  // Enter on an agent's question: its own page, with all it said.
+  // A click on an agent's question: its own page, with all it said.
   function openInquiry(q: Inquiry) {
     setSelected(inquiryOf(q.id));
     go({ name: "inquiry", id: q.id });
   }
 
-  // A row leaving the list: the next one takes the cursor, it fades out, and j/k skip it until unhide().
+  // A row leaving the list: it fades out, and takes its selection with it.
   function hide(c: Card) {
-    setSnoozeFor(null);
-    const i = flat.findIndex((x) => x.id === c.id);
-    if (i >= 0) setSelected((flat[i + 1] ?? flat[i - 1])?.id ?? null);
+    if (selected === c.id) setSelected(null);
     if (expanded === c.id) setExpanded(null);
     setLeaving((s) => new Set(s).add(c.id));
   }
@@ -571,8 +541,7 @@ export function App() {
   // saying so; a refusal brings it back. True once the desk has it.
   async function answerInquiry(q: Inquiry, text: string, dismiss = false): Promise<boolean> {
     const id = inquiryOf(q.id);
-    const i = cursor.indexOf(id);
-    if (selected === id) setSelected(cursor[i + 1] ?? cursor[i - 1] ?? null);
+    if (selected === id) setSelected(null);
     setAnswered((s) => new Set(s).add(q.id));
     let ok = true;
     try {
@@ -642,7 +611,7 @@ export function App() {
       refresh(0);
       return;
     }
-    // Only what this window did: a stray u must not walk back yesterday's history.
+    // Only what this window did: it must not walk back yesterday's history.
     if (undoSeq.current === null) {
       flash("Nothing to undo in this window");
       return;
@@ -680,27 +649,11 @@ export function App() {
       return;
     }
     setSelected(c.id);
-    setSnoozeFor(null);
     go({ name: "review", id: c.id });
     void seen(c);
   }
 
-  // Starts the PR's AI review without opening it; the verdict shows on the row when it's done.
-  async function aiReview(c: Card) {
-    if (c.kind !== "pr") {
-      flash("AI reviews are for pull requests", true);
-      return;
-    }
-    flash(`Asked for an AI review of ${shortRef(c)}. It takes a minute or two.`);
-    try {
-      const r = await api.aiReview(c.id);
-      flash(`AI review of ${shortRef(c)}: ${r.ai.verdict}`);
-    } catch (e) {
-      flash(`AI review of ${shortRef(c)} failed: ${message(e)}`, true);
-    }
-  }
-
-  // m: your own open PR goes to Merging (you're done; the coordinator gets it merged). Not undone with u: b brings it back.
+  // Hand off for merge: your own open PR goes to Merging (you're done; your agent gets it merged). Back to desk undoes it.
   function handOff(c: Card) {
     void finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, async () => {
       await api.act(c.id, "inflight");
@@ -709,7 +662,7 @@ export function App() {
     });
   }
 
-  // b: your PR leaves Merging for your desk.
+  // Back to desk: your PR leaves Merging for your desk.
   async function back(c: Card) {
     if (!c.inflight) {
       flash(`${shortRef(c)} isn't in Merging`);
@@ -726,7 +679,7 @@ export function App() {
     refresh(0);
   }
 
-  // a: Ready for review on GitHub, from its row or its review (asking whoever was picked there). Only the review request
+  // Ready for review on GitHub, from its row or its review (asking whoever was picked there). Only the review request
   // failing leaves it ready, so it stays gone and the toast says who to ask.
   function markReady(c: Card, picked: Reviewer[] = []) {
     const names = picked.map((p) => p.login).join(", ");
@@ -742,7 +695,7 @@ export function App() {
     });
   }
 
-  // a in the review of your ready PR nobody's asked to review: asks who you picked; it leaves your desk until someone reviews.
+  // Ask reviewers in the review of your ready PR nobody's asked to review: it leaves your desk until someone reviews.
   function askReviewers(c: Card, picked: Reviewer[]) {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
@@ -752,7 +705,7 @@ export function App() {
     });
   }
 
-  // w: your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
+  // Your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Promise<boolean> {
     return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, async () => {
@@ -761,7 +714,7 @@ export function App() {
     });
   }
 
-  // a in a review: approved on GitHub, pinned to the commit the review showed.
+  // Approve in a review: approved on GitHub, pinned to the commit the review showed.
   function approve(c: Card, head: string) {
     void finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, async () => {
       await api.approve(c.id, head);
@@ -769,20 +722,18 @@ export function App() {
     });
   }
 
-  // .: the row's More menu, with what the desk allows it on GitHub.
-  function openMore(c: Card) {
+  // A button that opens its row's menu, at the button: an opened issue's Snooze, with Snooze open.
+  function openRowMenu(c: Card, el: HTMLElement, snooze = false) {
+    const r = el.getBoundingClientRect();
+    stay.current = c.id;
     setSelected(c.id);
-    setSnoozeFor(null);
-    if (rowActions(c).length) setMoreFor(c.id);
-    else if (c.actions?.includes("request_changes")) flash("Request changes is in its review.");
-    else flash(`Nothing more to do on GitHub for ${shortRef(c)}`);
+    setMenuAt({ id: c.id, x: r.left, y: r.bottom + 4, snooze });
   }
 
-  // A More menu write, from a row or a review (head: the commit the review showed; body: Request changes' words). Close,
+  // A More menu write, from a row's menu or a review (head: the commit the review showed; body: Request changes' words). Close,
   // merge and Request changes finish your part, so it leaves your desk at once; draft and reopen keep it where it is.
   async function github(c: Card, action: GitHubAction, head?: string, body?: string): Promise<boolean> {
-    setMoreFor(null);
-    // The same as its a: off your desk at once, into the Archive.
+    // The same as Ready for review: off your desk at once, into the Archive.
     if (action === "ready") {
       markReady(c);
       return true;
@@ -811,7 +762,7 @@ export function App() {
     }
   }
 
-  // t: your chat with your agent, about what you're on: the review's PR and the spot you were last on, a row, or nothing.
+  // Ask your agent: your chat with your agent, about what you're on: the review's PR and the spot you were last on, a row, or nothing.
   function openAsk(id?: string, s?: Spot) {
     // A + box's blur lets the keys go a frame later; one Pierre draws again meanwhile would take focus back from the chat.
     holdKeys(false);
@@ -827,7 +778,7 @@ export function App() {
             : r.name === "inquiry"
               ? (questionOf(r.id)?.item_id ?? null)
               : current?.id);
-    // Drawn and focused at once: a key typed right after t lands in the box, never on the page, where a approves.
+    // Drawn and focused at once, so what you type lands in the box.
     flushSync(() => {
       setCommenting(null);
       if (s) setSpot(s);
@@ -847,16 +798,6 @@ export function App() {
     document.querySelector<HTMLTextAreaElement>(".chat-input")?.focus();
   }
 
-  // Merging's keys: enter review, o GitHub, b back to desk, t ask your agent.
-  function laneRun(r: InflightRow, k: string) {
-    const c = r.card;
-    setLaneSel(c.id);
-    if (k === "t") openAsk(c.id);
-    else if (k === "enter") go({ name: "review", id: c.id });
-    else if (k === "o") window.open(c.url, "_blank", "noopener,noreferrer");
-    else if (k === "b" && r.state === "open") void back(c);
-  }
-
   // Copy attach command copies `claude attach <id>`; Wake it starts your agent, or has it look at Merging now.
   async function coordinatorAct(k: "copy" | "wake") {
     const id = lane?.coordinator.id;
@@ -868,24 +809,15 @@ export function App() {
       } else if (id) {
         await copyText(`claude attach ${id}`);
         flash("Copied. Run it in a terminal to open your agent.");
-      } else flash("Your agent isn't started yet.");
+      }
     } catch (e) {
       flash(message(e), true);
     }
   }
 
-  function moveLane(d: number) {
-    if (!laneRows.length) return;
-    const i = laneRows.findIndex((r) => r.card.id === laneCur?.card.id);
-    const next = laneRows[Math.max(0, Math.min(laneRows.length - 1, i + d))];
-    if (!next) return;
-    setLaneSel(next.card.id);
-    focusRow(next.card.id);
-  }
-
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
-    else if (k === "esc") setExpanded(null);
+    else if (k === "close") setExpanded(null);
     else if (k === "t") openAsk(c.id);
     else if (k === "why") {
       if (expanded === c.id && showSignals) {
@@ -895,63 +827,36 @@ export function App() {
         if (expanded !== c.id) toggle(c);
         setShowSignals(true);
       }
-    }
-    // From its review: a PR in Merging is the coordinator's.
-    else if (c.inflight && ["e", "d", "s", "m"].includes(k))
-      flash(`${shortRef(c)} is in Merging, so your agent has it: Back to desk brings it back.`);
-    else if (k === "b") void back(c);
-    else if (k === ".") openMore(c);
+    } else if (k === "b") void back(c);
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
-    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {
-      if (c.draft) flash(`${shortRef(c)} is a draft: mark it ready for review first`);
-      else if (c.cta === "reviewers") flash(`Nobody's asked to review ${shortRef(c)}: add reviewers first`);
-      else handOff(c);
-    } else if (k === "o") {
+    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOff(c);
+    else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       void seen(c);
     } else if (k === "e" || k === "d") void act(c, c.status === "active" ? "done" : "restore");
-    else if (k === "s") {
-      setSelected(c.id);
-      setSnoozeFor(c.id);
-    } else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
+    else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
     else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
-    else if (k === "i") void aiReview(c);
-    else if (k === "w") {
-      // An issue opened in place: w writes a comment, as it does in a PR's review.
-      if (expanded === c.id && c.kind === "issue" && !showSignals && !c.resolved) {
-        setAsking(null);
-        setCommenting(c);
-        // Open already, it takes the keys back: what you type never runs as the page's keys.
-        requestAnimationFrame(() => {
-          document.querySelector<HTMLTextAreaElement>(".composer-text")?.focus();
-        });
-      } else if (expanded === c.id) setShowSignals((s) => !s);
-      else {
-        toggle(c);
-        setShowSignals(true);
-      }
+    else if (k === "comment") {
+      // An issue opened in place: Comment opens the comment bar.
+      setAsking(null);
+      setCommenting(c);
+      // Open already, it takes the cursor back.
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(".composer-text")?.focus();
+      });
     }
   }
 
-  // Focus follows the cursor, without a scroll of its own.
+  // Focus follows the selection, without a scroll of its own.
   function focusRow(id: string) {
     const el = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
     const target = el instanceof HTMLButtonElement ? el : el?.querySelector(".row-main");
     if (target instanceof HTMLElement) target.focus({ preventScroll: true });
   }
 
-  function move(d: number) {
-    if (!cursor.length) return;
-    const i = cursor.indexOf(selected ?? "");
-    const next = cursor[i < 0 ? 0 : Math.max(0, Math.min(cursor.length - 1, i + d))];
-    if (!next) return;
-    setSelected(next);
-    focusRow(next);
-  }
-
-  // A group's "n more" line opens in place; the cursor goes on to the first card it showed.
+  // A group's "n more" line opens in place; the selection goes on to the first card it showed.
   function unfold(k: GroupKey) {
     const shown = new Set(groups.find((g) => g.key === k)?.cards.map((c) => c.id));
     const first = groupsOf(view, open, filter, { ...unfolded, [k]: true })
@@ -970,150 +875,52 @@ export function App() {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
-  // A chord opens its group on Later (or the Archive), and scrolls to it; pressed again there, it closes it.
-  function chordGroup(k: GroupKey) {
-    const target = k === "archive" ? "archive" : "later";
-    const here = route.name === target;
-    if (!here || !open[k]) setOpen((o) => ({ ...o, [k]: true }));
-    else toggleGroup(k);
-    if (!here) go({ name: target });
-    requestAnimationFrame(() => {
-      document.querySelector(`.g-${k}`)?.scrollIntoView({ block: "start" });
-    });
-  }
-
+  // Esc is the one key: on a list it closes the item opened in place, then clears the filter; then it goes back to the main page.
   const onKey = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
-    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-    // Holding a key must not mark card after card done; only movement repeats.
-    if (e.repeat && !["j", "k", "ArrowDown", "ArrowUp"].includes(e.key)) return;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (t.closest(".chat") && e.key.startsWith("Arrow")) return; // they scroll the chat's log
-    // Buttons keep their own Enter/Space, except a card's own row button: Enter there means the selected card.
-    if ((e.key === "Enter" || e.key === " ") && t.closest("button, a, summary") && !t.classList.contains("row-main")) return;
-    const k = e.key;
-    if (help) {
-      if (k === "Escape" || k === "?") setHelp(false);
-      return;
-    }
-    if (snoozeFor) {
-      const c = flat.find((x) => x.id === snoozeFor);
-      if (!c)
-        setSnoozeFor(null); // its card left the list; don't hold the keyboard
-      else {
-        const o = snoozeOptions(c).find((x) => x.key === k);
-        if (o) void act(c, "snooze", o.until);
-        else if (k === "Escape" || k === "s") setSnoozeFor(null);
-        e.preventDefault();
-        return;
-      }
-    }
-    if (k === "g") gAt.current = Date.now();
-    else if (k === "?") setHelp(true);
-    else if (k === "t") {
-      e.preventDefault();
-      openAsk();
-    } else if (k === ",") go({ name: "settings", section: "github" });
-    else if (k === "r") void sync();
-    else if (k === "u") void undo();
-    else if (route.name === "settings") {
-      if (k === "Escape") go({ name: "queue" });
-    } else if (route.name === "review" || route.name === "inquiry") {
-      // The review and a question's page read their own keys.
-    } else if (route.name === "inflight") {
-      if (k === "Escape") go({ name: "queue" });
-      else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
-        e.preventDefault();
-        moveLane(k === "j" || k === "ArrowDown" ? 1 : -1);
-      } else if (laneCur && (k === "Enter" || k === "o" || k === "b")) {
-        e.preventDefault();
-        laneRun(laneCur, k === "Enter" ? "enter" : k);
-      } else if (k === "c" || k === "w") {
-        e.preventDefault();
-        void coordinatorAct(k === "c" ? "copy" : "wake");
-      }
-    } else if (k === "/") {
-      e.preventDefault();
-      filterRef.current?.focus();
-    } else if (k === "Escape") {
-      if (expanded) setExpanded(null);
-      else if (filter) setFilter("");
-      else if (onLater || onArchive || onBlocked) go({ name: "queue" });
-    } else if (k === "j" || k === "ArrowDown" || k === "k" || k === "ArrowUp") {
-      e.preventDefault();
-      move(k === "j" || k === "ArrowDown" ? 1 : -1);
-    } else if (asked && k === "Enter") {
-      e.preventDefault();
-      openInquiry(asked);
-    } else if (asked && (k === "d" || k === "e")) {
-      e.preventDefault();
-      void answerInquiry(asked, "", true);
-    } else if (k === "Enter" && isFold(selected)) {
-      e.preventDefault();
-      unfold(selected!.slice("fold:".length) as GroupKey);
-    } else if (k === "Enter" && current) {
-      e.preventDefault();
-      openCard(current);
-    } else if (current && k.length === 1 && "oedsmbpwia.".includes(k)) {
-      e.preventDefault();
-      run(current, k);
-    }
+    if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
+    const onList = ["queue", "later", "blocked", "archive"].includes(route.name); // where the filter is drawn
+    if (onList && expanded) setExpanded(null);
+    else if (onList && filter) setFilter("");
+    else if (route.name !== "queue") go({ name: "queue" });
   };
-  // The key after g is the chord's, whatever it means on its own (i in a review, b in Merging), so it never falls
-  // through to them. Capture phase: this runs before any other keydown listener, the review's included.
-  const onChord = (e: KeyboardEvent) => {
-    // A key while the review's comment box is drawn again is the box's: no shortcut runs on it.
+  // Capture phase: this runs before any other keydown listener, the review's included.
+  const onCapture = (e: KeyboardEvent) => {
+    // A key while the review's comment box is drawn again is the box's: Esc can't go back meanwhile.
     if (keysHeld()) {
       e.preventDefault();
       e.stopImmediatePropagation();
       return;
     }
     if (menuAt) return; // a row's menu has the keyboard, Esc included
-    // Esc on the help sheet closes it, and only it: a review or a page under it would read it as "go back" too.
-    if (help && (e.key === "Escape" || e.key === "?") && !e.isComposing) {
-      setHelp(false);
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
     // Esc closes the chat from anywhere but a text box (its own box closes it only when empty, else leaves it), and the
-    // comment bar from anywhere, before a review or a page reads it as "go back"; a snooze or More menu over it closes first.
+    // comment bar from anywhere, before a review or a page reads it as "go back"; a More menu over it closes first.
     const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
-    const menu = !!moreFor || !!document.querySelector(".more-pop"); // the review's More menu is its own state
-    if (((asking && !typing) || commenting) && !snoozeFor && !menu && e.key === "Escape" && !e.isComposing) {
+    const menu = !!document.querySelector(".more-pop");
+    if (((asking && !typing) || commenting) && !menu && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
       e.preventDefault();
       e.stopImmediatePropagation();
-      return;
     }
-    if (!gAt.current || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
-    const t = e.target instanceof HTMLElement ? e.target : document.body;
-    if (t.closest("input, textarea, select, [contenteditable='true']")) return;
-    const fresh = Date.now() - gAt.current < 1200;
-    gAt.current = 0;
-    if (!fresh) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    const k = e.key;
-    if (CHORDS[k]) go(CHORDS[k]);
-    else if (AWAY_KEYS[k]) chordGroup(AWAY_KEYS[k]);
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
-  const chordRef = useRef(onChord);
-  chordRef.current = onChord;
+  const captureRef = useRef(onCapture);
+  captureRef.current = onCapture;
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       keyRef.current(e);
     };
-    const chord = (e: KeyboardEvent) => {
-      chordRef.current(e);
+    const capture = (e: KeyboardEvent) => {
+      captureRef.current(e);
     };
-    window.addEventListener("keydown", chord, { capture: true });
+    window.addEventListener("keydown", capture, { capture: true });
     window.addEventListener("keydown", h);
     return () => {
-      window.removeEventListener("keydown", chord, { capture: true });
+      window.removeEventListener("keydown", capture, { capture: true });
       window.removeEventListener("keydown", h);
     };
   }, []);
@@ -1124,7 +931,6 @@ export function App() {
     selected,
     expanded,
     leaving,
-    snoozeFor,
     showSignals,
     details,
     boardLabel,
@@ -1133,26 +939,14 @@ export function App() {
       setSelected(c.id);
     },
     run,
-    snooze: (c, until) => {
-      void act(c, "snooze", until);
-    },
-    closeSnooze: () => {
-      setSnoozeFor(null);
-    },
-    moreFor,
-    closeMore: () => {
-      setMoreFor(null);
-    },
-    github: (c, a) => {
-      void github(c, a);
-    },
+    menu: openRowMenu,
   };
   const configErrors = overview?.config_errors.length ?? 0;
   const broken = configBroken(down);
 
   return (
     <div className="app">
-      <Sidebar route={route} from={reviewFrom} view={view} overview={overview} inert={help} />
+      <Sidebar route={route} from={reviewFrom} view={view} overview={overview} />
       <div className="col">
         <TopBar
           overview={overview}
@@ -1163,7 +957,6 @@ export function App() {
           question={route.name === "review" ? reviewQuestion : null}
           filter={filter}
           setFilter={setFilter}
-          filterRef={filterRef}
           onSync={() => {
             void sync();
           }}
@@ -1172,9 +965,8 @@ export function App() {
           onAsk={() => {
             openAsk();
           }}
-          inert={help}
         />
-        <main className="main" inert={help}>
+        <main className="main">
           {sourceDown && <SourceNotice s={sourceDown} />}
           {down && !broken && !sourceDown && (
             <div className={cls("notice", down === UNREACHABLE ? "err" : "warn")} role="alert">
@@ -1277,7 +1069,6 @@ export function App() {
               loads={loads}
               me={overview?.me ?? ""}
               now={now}
-              inert={help}
               flash={flash}
               onCard={run}
               onGithub={(c, a, head, body) => github(c, a, head, body)}
@@ -1311,7 +1102,6 @@ export function App() {
               id={route.id}
               loads={loads}
               now={now}
-              inert={help}
               flash={flash}
               onAnswer={answerInquiry}
               onBack={() => {
@@ -1326,9 +1116,12 @@ export function App() {
               now={now}
               selected={laneCur?.card.id ?? null}
               select={setLaneSel}
-              run={laneRun}
               act={(k) => {
                 void coordinatorAct(k);
+              }}
+              open={(r) => {
+                setLaneSel(r.card.id);
+                go({ name: "review", id: r.card.id });
               }}
             />
           )}
@@ -1360,7 +1153,6 @@ export function App() {
           questions={(view?.inquiries ?? []).filter((q) => q.from === COORDINATOR_NAME && q.item_id === asking.item && !answered.has(q.id))}
           loads={loads}
           now={now}
-          inert={help}
           onWiden={widen}
           onClose={() => {
             setAsking(null);
@@ -1406,6 +1198,7 @@ export function App() {
           card={menuCard}
           x={menuAt.x}
           y={menuAt.y}
+          snooze={menuAt.snooze}
           me={me}
           agent={!!overview?.agent}
           run={run}
@@ -1420,13 +1213,6 @@ export function App() {
             rowMenu(x, y, under ?? null);
           }}
           onClose={closeMenu}
-        />
-      )}
-      {help && (
-        <Help
-          onClose={() => {
-            setHelp(false);
-          }}
         />
       )}
     </div>

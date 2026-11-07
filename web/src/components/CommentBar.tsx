@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Card } from "../../../src/types.ts";
 import { MOD, shortRef } from "../format.ts";
 
-// w on an issue opened in place: your comment, at the window's bottom, so a refresh that
+// Comment on an issue opened in place: your comment, at the window's bottom, so a refresh that
 // moves the issue's row never takes what you're writing. ⌘↵ sends, Esc closes; GitHub refusing it keeps your words here.
 export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (body: string) => Promise<boolean>; onClose: () => void }) {
   const [text, setText] = useState("");
@@ -10,7 +10,7 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
   const box = useRef<HTMLTextAreaElement>(null);
 
   // Focus goes back to the issue's row on close (a click selects a row without focusing it, so where focus was may be
-  // another row, which focusing would select), so the keys act on it again.
+  // another row, which focusing would select), so Tab goes on from it.
   useEffect(() => {
     box.current?.focus();
     return () => {

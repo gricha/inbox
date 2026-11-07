@@ -3,12 +3,11 @@ import type { Action, Card, GitHubAction } from "../../../src/types.ts";
 import { cls, snoozeOptions } from "../format.ts";
 import { MORE, rowActions } from "./More.tsx";
 
-// What an entry does: the row's key (as run() takes it), a desk action, a More menu write, or a snooze.
+// What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
 type Do = { key: string } | { act: Action } | { github: GitHubAction } | { snooze: string };
 
 interface Entry {
   label: string;
-  key?: string; // the row's own key for it, which also works while the menu is open
   do: Do;
 }
 
@@ -16,6 +15,7 @@ export interface RowMenuProps {
   card: Card;
   x: number;
   y: number;
+  snooze?: boolean; // opened by an issue's Snooze: Snooze open, its first time focused
   me: string;
   agent: boolean; // your agent is on: Ask your agent is one of its entries
   run: (c: Card, key: string) => void;
@@ -25,52 +25,42 @@ export interface RowMenuProps {
   onClose: () => void;
 }
 
-// A row's right-click menu: what its keys do, so a mouse reaches all of it. Snooze opens to the side with the times and what
-// this item can wait on.
-export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClose }: RowMenuProps) {
+// A row's right-click menu: every write a row has. Snooze opens to the side with the times and what this item can wait on.
+export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reopen, onClose }: RowMenuProps) {
   const menu = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y, flip: false });
-  const [sub, setSub] = useState(false);
+  const [sub, setSub] = useState(!!snooze);
   const leave = useRef<number | undefined>(undefined);
   const mine = card.kind === "pr" && card.author.toLowerCase() === me.toLowerCase();
   const snoozes = card.inflight ? [] : snoozeOptions(card);
 
-  const key = (label: string, k: string): Entry => ({ label, key: k, do: { key: k } });
+  const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
   const muted = card.status === "muted";
-  const handsOff = mine && !card.resolved; // m on your open PR hands it off, so it doesn't mute
   const groups: Entry[][] = [
-    [key(card.kind === "pr" ? "Review" : "Open", "enter"), key("Open on GitHub", "o")],
+    [go(card.kind === "pr" ? "Review" : "Open", "enter"), go("Open on GitHub", "o")],
     [
-      ...(card.cta === "ready" ? [key("Ready for review", "a")] : []),
-      ...(card.cta === "reviewers" ? [key("Add reviewers", "a")] : []),
-      ...(mine && !card.resolved && !card.draft && !card.inflight && card.cta !== "reviewers" ? [key("Hand off for merge", "m")] : []),
-      ...(card.inflight ? [key("Back to the desk", "b")] : []),
+      ...(card.cta === "ready" ? [go("Ready for review", "a")] : []),
+      ...(card.cta === "reviewers" ? [go("Add reviewers", "a")] : []),
+      ...(mine && !card.resolved && !card.draft && !card.inflight && card.cta !== "reviewers" ? [go("Hand off for merge", "m")] : []),
+      ...(card.inflight ? [go("Back to the desk", "b")] : []),
       ...(card.inflight
         ? []
         : [
             card.status === "active"
-              ? { label: "Done", key: "e", do: { act: "done" as const } }
-              : { label: "Back on the desk", key: "e", do: { act: "restore" as const } },
+              ? { label: "Done", do: { act: "done" as const } }
+              : { label: "Back on the desk", do: { act: "restore" as const } },
           ]),
     ],
     [
-      ...(card.inflight
-        ? []
-        : [
-            {
-              label: muted ? "Unmute" : "Mute",
-              ...(!handsOff && { key: "m" }),
-              do: { act: muted ? ("unmute" as const) : ("mute" as const) },
-            },
-          ]),
-      { label: card.pinned ? "Unpin" : "Pin", key: "p", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
-      ...(card.inflight ? [] : [{ label: "Why it's here", do: { key: "why" } }]),
-      ...(agent ? [key("Ask your agent", "t")] : []),
+      ...(card.inflight ? [] : [{ label: muted ? "Unmute" : "Mute", do: { act: muted ? ("unmute" as const) : ("mute" as const) } }]),
+      { label: card.pinned ? "Unpin" : "Pin", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
+      ...(card.inflight ? [] : [go("Why it's here", "why")]),
+      ...(agent ? [go("Ask your agent", "t")] : []),
     ],
     // Its call to action is above already.
     rowActions(card)
       .filter((a) => !(a === "ready" && card.cta === "ready"))
-      .map((a) => ({ label: `${MORE[a].label} on GitHub`, do: { github: a } })),
+      .map((a) => ({ label: `${MORE[a]} on GitHub`, do: { github: a } })),
   ];
   const entries = groups.flat();
 
@@ -89,9 +79,11 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
     const left = x + r.width > innerWidth - 8 ? Math.max(8, x - r.width) : x;
     const top = y + r.height > innerHeight - 8 ? Math.max(8, innerHeight - 8 - r.height) : y;
     setPos({ left, top, flip: left + r.width + 260 > innerWidth - 8 });
-    // The menu takes focus, not its first item: nothing looks picked until you hover or press an arrow.
-    menu.current?.focus({ preventScroll: true });
-  }, [x, y]);
+    // The menu takes focus, not its first item: nothing looks picked until you hover or press an arrow; opened for Snooze,
+    // Snooze's first time does.
+    const first = snooze ? menu.current?.querySelector<HTMLElement>(".ctx-sub .ctx-item") : null;
+    (first ?? menu.current)?.focus({ preventScroll: true });
+  }, [x, y, snooze]);
 
   useEffect(() => {
     const close = () => {
@@ -118,7 +110,7 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
     };
   }, [onClose]);
 
-  // While open it has the keyboard: arrows move, → and ← open and close Snooze, the row's keys act, Esc closes.
+  // While open it has the keyboard: arrows move, Right and Left open and close Snooze, Enter picks, Esc closes.
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
     e.preventDefault();
@@ -138,10 +130,7 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
       const i = at < 0 ? -1 : scope.indexOf(items[at]!);
       const down = e.key === "ArrowDown";
       scope[i < 0 ? (down ? 0 : scope.length - 1) : (i + (down ? 1 : scope.length - 1)) % scope.length]?.focus();
-    } else if (
-      (e.key === "ArrowRight" && (document.activeElement as HTMLElement | null)?.classList.contains("ctx-has-sub")) ||
-      (e.key === "s" && snoozes.length)
-    ) {
+    } else if (e.key === "ArrowRight" && (document.activeElement as HTMLElement | null)?.classList.contains("ctx-has-sub")) {
       openSub();
     } else if (e.key === "ArrowLeft" && inSub) {
       setSub(false);
@@ -150,11 +139,6 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
       // Nothing picked yet: Enter is the row's own, Review.
       if (at >= 0) items[at]?.click();
       else if (e.key === "Enter") choose(entries[0]!.do);
-    } else {
-      const hit = entries.find((en) => en.key === e.key);
-      const o = snoozes.find((so) => so.key === e.key);
-      if (hit) choose(hit.do);
-      else if (o) choose({ snooze: o.until });
     }
   };
   const keyRef = useRef(onKey);
@@ -231,7 +215,7 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
           .map((g, gi) => (
             <div key={g[0]!.label} className="ctx-group">
               {g.map(item)}
-              {/* Snooze sits after Done, as e and s do on the keyboard. */}
+              {/* Snooze sits after Done. */}
               {gi === 1 && snoozes.length > 0 && (
                 <div
                   className="ctx-subwrap"

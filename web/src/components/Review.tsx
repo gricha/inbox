@@ -54,15 +54,15 @@ import {
 } from "../view.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
-import { CI, HandKey, KeyButton, REVIEW } from "./Detail.tsx";
+import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
-// What sits under a line of the diff: an AI note (index: its place in reading order, what ] and [ step through), a review
-// thread, the comment you're writing, or one you sent that the conversation doesn't show yet.
+// What sits under a line of the diff: an AI note (index: its place in reading order), a review thread, the comment you're
+// writing, or one you sent that the conversation doesn't show yet.
 type Meta =
   | { kind: "note"; index: number; body: string }
   | { kind: "thread"; id: string }
@@ -145,7 +145,6 @@ export function Review({
   loads,
   me,
   now,
-  inert,
   flash,
   onCard,
   onGithub,
@@ -166,37 +165,35 @@ export function Review({
   id: string;
   known: Card | null; // its row's card, drawn at once while the review is on its way
   loads: number; // bumped on every refresh, so the review follows the server's updates
-  me: string; // your login: m and b are for your own PRs
+  me: string; // your login: Hand off for merge and Back to desk are for your own PRs
   now: number;
-  inert: boolean;
   flash: (text: string, error?: boolean) => void;
-  onCard: (c: Card, key: string) => void; // d done, m hand off for merge, b back to desk: as on its card
+  onCard: (c: Card, key: string) => void; // d Done, m Hand off for merge, b Back to desk: as in its row's menu
   onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Promise<boolean>; // the More menu's writes, and Request changes
-  acted: Acted | undefined; // what you did on it from here: shown in place of the key you pressed
+  acted: Acted | undefined; // what you did on it from here: shown in place of the button you pressed
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
-  // a: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
+  // Approve, Ready for review, Ask reviewers: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
   onApprove: (c: Card, head: string) => void;
   onReady: (c: Card, picked: Reviewer[]) => void;
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
-  onComment: (c: Card, body: string) => Promise<boolean>; // w: your comment on the PR; true once GitHub has it
+  onComment: (c: Card, body: string) => Promise<boolean>; // your comment on the PR; true once GitHub has it
   onBack: () => void;
   chat: boolean; // your chat with your agent is open: it takes the sidebar's place
   agent: boolean; // your agent is on: its boxes offer Ask your agent
-  onCloseChat: () => void; // f closes it for the sidebar
+  onCloseChat: () => void; // Files closes it for the sidebar
   onAsk: (s: Spot) => void; // a box's Ask your agent: the chat, about that spot
-  onSpot: (s: Spot | null) => void; // the spot you're on, for what t asks about; null: the PR as a whole
+  onSpot: (s: Spot | null) => void; // the spot you're on, for what Ask your agent asks about; null: the PR as a whole
   onAskWaiting: (waiting: boolean) => void; // your latest ask about it is unanswered: the top bar says so
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
-  const [noteIdx, setNoteIdx] = useState<number | null>(null); // a place in order.notes
   const [restOpen, setRestOpen] = useState(false);
   const [side, setSide] = useState(sideSaved);
   const showSide = side && !chat;
   const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
-  const [more, setMore] = useState(false); // the More menu (.)
+  const [more, setMore] = useState(false); // the More menu
   const [writing, setWriting] = useState(false); // Request changes, being written
   // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it.
   const [comment, setComment] = useState("");
@@ -207,14 +204,14 @@ export function Review({
   const drafts = useRef(1);
   const alive = useRef(true);
   const draftSel = useRef<[number, number] | null>(null); // where the caret was, for a box drawn again
-  const [stay, setStay] = useState<number | null>(null); // after a fold: the file you were in, kept in view and the one z means
+  const [stay, setStay] = useState<number | null>(null); // after a fold: the file you were in, kept in view
   const [focusAsk, setFocusAsk] = useState(0); // bumped to put the cursor in the box; a box drawn again after a fold doesn't take it
   const focusDone = useRef(0);
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set()); // resolved threads you opened, by id
   // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
   const [read, setRead] = useState("");
   const seq = useRef(0);
-  const jumped = useRef(0); // when n, p, ] or [ last scrolled the page
+  const jumped = useRef(0); // when a click last scrolled the page to a file
   const v = typeof view === "object" ? view : null;
   const latest = v?.asks.at(-1);
   const waiting = !!latest && !latest.answer; // your latest ask about it: the top bar says it's waiting
@@ -225,9 +222,9 @@ export function Review({
     };
   }, [waiting, onAskWaiting]);
   const canApprove = !!v?.approve.ok;
-  // Your own open draft: a marks it ready for review instead of approving.
+  // Your own open draft: Ready for review instead of Approve.
   const readying = v?.card.cta === "ready";
-  // Your ready PR nobody's asked to review: a asks who you pick.
+  // Your ready PR nobody's asked to review: Ask reviewers asks who you pick.
   const asking = v?.card.cta === "reviewers";
   const picking = readying || asking;
   // A PR in Merging is the coordinator's: no AI review to ask for.
@@ -264,7 +261,7 @@ export function Review({
     });
   }, [asking, id]);
 
-  // The desk's reading order; its notes are only those written for this commit, in the order ] and [ step through.
+  // The desk's reading order; its notes are only those written for this commit, in reading order.
   const order = v?.order;
   const { list, rest } = useMemo(() => (order ? sections(order) : { list: [], rest: 0 }), [order]);
   const notes = order?.notes ?? [];
@@ -289,7 +286,7 @@ export function Review({
     };
   }, [upTo, list]);
 
-  // The section you're reading follows the scroll, except right after a key moved you: then it's the one the key picked.
+  // The section you're reading follows the scroll, except right after a click moved you: then it's the one it picked.
   useEffect(() => {
     let frame = 0;
     const onScroll = () => {
@@ -366,43 +363,6 @@ export function Review({
     });
   }
 
-  // n and p stop on the folded rest's line too, as j and k do on the queue's "n more"; Enter there opens it.
-  function goSec(i: number) {
-    const n = Math.max(0, Math.min(visible.length - (folded ? 0 : 1), i));
-    if (!folded || n < rest) goTo(n);
-    else {
-      jumped.current = Date.now();
-      setDrawn((d) => Math.max(d, rest)); // the fold shows once what's above it is drawn
-      setSecIdx(n);
-      requestAnimationFrame(() => {
-        document.querySelector(".rv-fold")?.scrollIntoView({ block: "center" });
-      });
-    }
-  }
-
-  function goNote(d: number) {
-    if (!v || !notes.length) {
-      flash(v?.generating ? "The AI review is still being written" : "No notes on this PR");
-      return;
-    }
-    const n = noteIdx === null ? (d > 0 ? 0 : notes.length - 1) : (noteIdx + d + notes.length) % notes.length;
-    setNoteIdx(n);
-    const note = v.ai?.notes[notes[n]!];
-    // A whole-file note has no line: t then asks about the PR, never the spot picked before.
-    if (!note || note.line <= 0) onSpot(null);
-    else {
-      const lines = { path: note.path, line: note.line, side: note.side, head: v.ai!.head_oid, note: true };
-      onSpot({ kind: "lines", item: v.card.id, lines, label: linesLabel(lines) });
-    }
-    const i = Math.max(
-      0,
-      list.findIndex((x) => x.notes.includes(notes[n]!)),
-    );
-    const path = list[i]?.path;
-    if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
-    goTo(i, `[data-note="${n}"]`, "center");
-  }
-
   function toggleFold(path: string, at: number) {
     holdKeys(false); // you've left the box for the fold
     const next = new Set(shut);
@@ -410,14 +370,6 @@ export function Review({
     else next.add(path);
     setShut(next);
     setStay(at);
-  }
-
-  // Z: all folded, or all open again once they are.
-  function foldAll() {
-    holdKeys(false);
-    const paths = new Set(list.map((x) => x.path));
-    setShut([...paths].every((p) => shut.has(p)) ? new Set() : paths);
-    setStay(Math.max(0, Math.min(secIdx, visible.length - 1)));
   }
 
   // To the words you haven't sent, opening their file (or the rest, which goTo opens) if it's folded, with the cursor in them.
@@ -500,7 +452,7 @@ export function Review({
   }
 
   function toggleSide() {
-    // With the chat open, f puts the sidebar back in its place.
+    // With the chat open, Files puts the sidebar back in its place.
     const show = chat || !side;
     if (chat) onCloseChat();
     setSide(show);
@@ -535,25 +487,13 @@ export function Review({
   }
 
   function run(k: string) {
-    // With your comment unsent, what acts on the PR (a key or a click) goes back to it first.
+    // With your comment unsent, what acts on the PR goes back to it first.
     if (comment.trim() && "admb.".includes(k)) {
       document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
       flash("Your comment isn't sent: Comment sends it, or empty the box");
       return;
     }
-    if (k === "n") goSec(secIdx + 1);
-    else if (k === "p") goSec(secIdx - 1);
-    else if (k === "N" && v?.stack?.up) location.hash = routeHash({ name: "review", id: v.stack.up });
-    else if (k === "P" && v?.stack?.down) location.hash = routeHash({ name: "review", id: v.stack.down });
-    else if (k === "f") toggleSide();
-    else if (k === "z" && list[secIdx] && !(folded && secIdx >= rest)) toggleFold(list[secIdx].path, secIdx);
-    else if (k === "Z") foldAll();
-    else if (k === "Enter" && folded && secIdx >= rest) goTo(rest);
-    else if (k === "]") goNote(1);
-    else if (k === "[") goNote(-1);
-    else if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
-    else if (k === "i" && !flying) void askAi();
-    else if (k === "w" && v?.item.state === "open") document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
+    if (k === "o" && v) window.open(v.card.url, "_blank", "noopener,noreferrer");
     else if (k === "a" && acted) flash(`${acted.what}: ${v ? shortRef(v.card) : ""} is off your desk`);
     else if (k === "a" && readying && v) onReady(v.card, picked);
     else if (k === "a" && asking && v) {
@@ -562,33 +502,18 @@ export function Review({
     } else if (k === "a") approve();
     else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) setMore(true);
-    else if (k === "esc") onBack();
   }
 
+  // Esc goes back to where the review was opened from; a box you write in keeps its own Esc.
   const onKey = (e: KeyboardEvent) => {
-    // Option types @ on some layouts.
-    if (inert || e.metaKey || e.ctrlKey || (e.altKey && e.key !== "@") || e.isComposing) return;
-    if (e.repeat && !["n", "p", "]", "["].includes(e.key)) return;
+    if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
     if (keysHeld()) {
       e.preventDefault();
       return;
     }
-    // With words unsent, a key that acts goes back to them, so one that slipped out of the box can't approve.
-    if (draft && draftText.current.trim() && e.key.length === 1 && "admbw.".includes(e.key)) {
-      e.preventDefault();
-      backToDraft(draft);
-      return;
-    }
-    if (e.key === "Escape") onBack();
-    else if (e.key === "@" && picking) {
-      e.preventDefault();
-      document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
-    } else if (("npoi[]admbfwzNPZ.".includes(e.key) && e.key.length === 1) || (e.key === "Enter" && folded && secIdx >= rest)) {
-      e.preventDefault();
-      run(e.key);
-    }
+    onBack();
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
@@ -684,7 +609,6 @@ export function Review({
       file={files[x.file]!}
       notes={view.ai?.notes ?? []}
       order={notes}
-      current={noteIdx}
       now={now}
       shut={shut.has(x.path)}
       onFold={() => {
@@ -763,10 +687,10 @@ export function Review({
             <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>{acted.where === "inflight" ? "in Merging" : "in Archive"}</a>
           </p>
         )}
-        {/* What finishes it first (a, or m or b on yours), then o and the rest. */}
+        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest. */}
         <div className="actions rv-actions">
           {readying && !acted && (
-            <KeyButton
+            <ActButton
               k="a"
               label="Ready for review"
               run={run}
@@ -779,7 +703,7 @@ export function Review({
             />
           )}
           {asking && !acted && (
-            <KeyButton
+            <ActButton
               k="a"
               label="Ask reviewers"
               run={run}
@@ -793,7 +717,7 @@ export function Review({
           )}
           {/* Only someone else's open PR is yours to approve. */}
           {open && !isMine && !acted && (
-            <KeyButton
+            <ActButton
               k="a"
               label="Approve"
               run={run}
@@ -804,7 +728,7 @@ export function Review({
           )}
           {/* While you owe replies, Reply is the one filled button. */}
           {mine && !(acted?.where === "inflight" && !card.inflight) && (
-            <HandKey card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
+            <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
           )}
           <span className="more-wrap">
             <MoreButton
@@ -840,7 +764,6 @@ export function Review({
                       ]
                     : []),
                   {
-                    key: "o",
                     label: "Open on GitHub",
                     run: () => {
                       run("o");
@@ -1353,8 +1276,8 @@ function Dir({ path }: { path: string }) {
   );
 }
 
-// Your comment on the PR, under what reviewers said, while it's open (or while it has words): w puts the cursor in it, ⌘↵
-// sends it, Esc leaves it. The words are the review's, so GitHub refusing them leaves them here.
+// Your comment on the PR, under what reviewers said, while it's open (or while it has words): Comment (or Cmd+Enter) sends
+// it, Esc leaves it. The words are the review's, so GitHub refusing them leaves them here.
 function CommentBox({
   card,
   body,
@@ -1439,7 +1362,6 @@ function SectionView({
   file,
   notes,
   order,
-  current,
   now,
   shut,
   onFold,
@@ -1457,8 +1379,7 @@ function SectionView({
   index: number;
   file: ReviewFile;
   notes: ReviewNote[]; // the AI review's
-  order: number[]; // ReviewView.order.notes: a note's place in it is what ] and [ land on
-  current: number | null;
+  order: number[]; // ReviewView.order.notes: a note's place in it is its place in reading order
   now: number;
   shut: boolean; // you folded this file
   onFold: () => void;
@@ -1581,8 +1502,7 @@ function SectionView({
         )}
         {x.hunks.length > 0 && <span className="rv-delta">{`+${adds} −${dels}`}</span>}
       </h3>
-      {!shut &&
-        mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} on={current === n.index} />)}
+      {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} />)}
       {!shut && fileDiff && (
         <FileDiff<Meta>
           className="rv-diff"
@@ -1594,7 +1514,7 @@ function SectionView({
           lineAnnotations={annotations}
           renderAnnotation={(a) => {
             const m = a.metadata;
-            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} on={current === m.index} />;
+            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} />;
             if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
             if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
             const t = threads.find((c) => c.id === m.id);
@@ -1857,9 +1777,9 @@ function Yours({ body, url }: { body: string; url: string }) {
   );
 }
 
-function Note({ index, body, on }: { index: number; body: string; on: boolean }) {
+function Note({ index, body }: { index: number; body: string }) {
   return (
-    <div className={cls("rv-note", on && "on")} data-note={index}>
+    <div className="rv-note" data-note={index}>
       {body}
     </div>
   );

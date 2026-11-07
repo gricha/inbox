@@ -60,18 +60,24 @@ const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
   await page.waitForTimeout(400);
 };
-// A PR's review, once Pierre has drawn and highlighted its diffs.
+// A PR's review, once Pierre has drawn and highlighted its diffs; then each selector clicked in order.
 const review =
-  (id: string, keys: string[] = []) =>
+  (id: string, clicks: string[] = []) =>
   async (page: Page) => {
     await at(`#/review/${encodeURIComponent(id)}`)(page);
     await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
     await page.waitForTimeout(900);
-    for (const k of keys) {
-      await page.keyboard.press(k);
+    for (const c of clicks) {
+      await page.locator(c).first().click();
       await page.waitForTimeout(250);
     }
   };
+const MORE = ".rv-actions .more-wrap > button";
+// A row's right-click menu, then its entry that reads `item`.
+const rowMenuPick = async (page: Page, row: string, item: string) => {
+  await page.locator(row).locator(".row-main").click({ button: "right" });
+  await page.locator(".ctx-item", { hasText: item }).first().click();
+};
 // AI reviews paused, as after an expired login: a mock-only switch (web/mock/server.ts).
 const pauseAi = (paused: boolean) => async (page: Page) => {
   await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
@@ -158,7 +164,7 @@ const toBottom = (name: string) => async (page: Page) => {
   if (room !== null && room > BOTTOM_ROOM)
     failures.push(`${name}: ${room}px of empty page below the last content when scrolled to the bottom`);
 };
-// The review's sidebar back to its default for the window's width: what f chose is kept per device.
+// The review's sidebar back to its default for the window's width: what Hide or Files chose is kept per device.
 const sideDefault = async (page: Page) => {
   await page.evaluate(`localStorage.removeItem("desk.review.side")`);
 };
@@ -324,16 +330,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // j j from the top: the selected row's calm fill, and the rows stay evenly spaced.
+    // The third row Tab-focused: its calm fill, and the rows stay evenly spaced.
     name: "queue-selected",
     go: async (page) => {
       await at("#/")(page);
       await top(page);
-      await page.locator(".queue [data-id]").first().locator(".row-main").focus();
-      for (const k of ["j", "j"]) {
-        await page.keyboard.press(k);
-        await page.waitForTimeout(250);
-      }
+      await page.locator(".queue [data-id]").nth(2).locator(".row-main").focus();
+      await page.waitForTimeout(250);
       // Within each part's sheet: the parts have room between them.
       const gaps = await page.evaluate<number[]>(`(() => [...document.querySelectorAll(".queue .lines")].flatMap((sheet) => {
         const rows = [...sheet.querySelectorAll(":scope > [data-id]")].map((el) => el.getBoundingClientRect());
@@ -402,7 +405,7 @@ const SHOTS: Shot[] = [
     after: release("**/api/queue"),
   },
   {
-    // The cursor on the queue's "n more" line, then Enter opens the rest in place.
+    // The queue's "n more" line, Tab-focused; a click opens the rest in place.
     name: "queue-fold",
     go: async (page) => {
       await at("#/")(page);
@@ -414,8 +417,7 @@ const SHOTS: Shot[] = [
     name: "queue-unfolded",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".queue .fold").focus();
-      await page.keyboard.press("Enter");
+      await page.locator(".queue .fold").click();
       await page.waitForTimeout(200);
     },
     after: refold,
@@ -473,7 +475,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // w on an issue opened in place: the comment bar at the window's bottom.
+    // Comment on an issue opened in place: the comment bar at the window's bottom.
     name: "issue-comment",
     after: refold,
     go: async (page) => {
@@ -481,9 +483,26 @@ const SHOTS: Shot[] = [
       await unfold(page);
       await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
-      await page.keyboard.press("w");
+      await page.locator(".card-keys button", { hasText: "Comment" }).click();
       await page.keyboard.type("The OOM is in the batcher: I'll cap the batch at 500 rows today.");
       await page.waitForTimeout(200);
+    },
+  },
+  {
+    // Snooze on an issue opened in place: its row's menu at the button, Snooze open.
+    name: "issue-snooze",
+    go: async (page) => {
+      await at("#/")(page);
+      await unfold(page);
+      await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
+      await page.waitForTimeout(400);
+      await page.locator(".card-keys button", { hasText: "Snooze" }).click();
+      await page.waitForTimeout(200);
+      if (!(await page.locator(".ctx-sub").isVisible())) failures.push("issue-snooze: Snooze didn't open its times");
+    },
+    after: async (page) => {
+      for (let i = 0; i < 2 && (await page.locator(".ctx").count()); i++) await page.keyboard.press("Escape");
+      await refold(page);
     },
   },
   { name: "review", go: review("acme/api#4127") },
@@ -556,7 +575,6 @@ const SHOTS: Shot[] = [
       await toBottom("review-bottom")(page);
     },
   },
-  { name: "review-note", go: review("acme/api#4127", ["]", "]", "]"]) },
   {
     // The + by a line's number: a box under that line, below the thread already on it.
     name: "review-inline",
@@ -574,8 +592,6 @@ const SHOTS: Shot[] = [
         failures.push("review-inline: the box has no Ask your agent");
     },
   },
-  // Z: every file folded to its header.
-  { name: "review-files-folded", go: review("acme/api#4127", ["Z"]) },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
   // Your ready PR nobody's asked to review: back on top of the queue with Add reviewers.
@@ -614,12 +630,11 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
   },
-  // @ opens GitHub's suggested reviewers for your draft.
+  // The reviewers box opens GitHub's suggested reviewers for your draft.
   {
     name: "review-reviewers",
     go: async (page) => {
-      await review("acme/web#2303")(page);
-      await page.keyboard.press("@");
+      await review("acme/web#2303", [".rv-reviewers-input"])(page);
       await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
     },
   },
@@ -638,13 +653,13 @@ const SHOTS: Shot[] = [
       await box.press("Escape");
     },
   },
-  // a: it's off your desk at once; the review stays, saying what you did and where it went, its spinner while GitHub (here
+  // Ready for review: it's off your desk at once; the review stays, saying what you did and where it went, its spinner while GitHub (here
   // never) answers. The held request stays held (unrouting would let it through to the mock); a reload brings the row back.
   {
     name: "review-ready-sent",
     go: async (page) => {
       await page.route("**/ready", () => {});
-      await review("acme/web#2303", ["a"])(page);
+      await review("acme/web#2303", ['.rv-actions button:has-text("Ready for review")'])(page);
       await page.waitForTimeout(300);
     },
     after: fresh,
@@ -672,13 +687,22 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
-  // n goes to the next change in reading order; the sidebar lists a file at the repo's root and a long folder.
-  { name: "review-python", go: review("acme/ml-pipeline#311", ["n"]) },
+  // The sidebar lists a file at the repo's root and a long folder.
+  { name: "review-python", go: review("acme/ml-pipeline#311") },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
   { name: "review-stack", go: review("acme/api#4154") },
-  // n past the last change stops on the folded rest's line; Enter opens it in place.
-  { name: "review-fold", go: review("acme/api#4127", ["n", "n", "n", "n", "n"]) },
-  { name: "review-rest", go: review("acme/api#4127", ["n", "n", "n", "n", "n", "Enter"]) },
+  // Past the last change: the folded rest's line where the review has one (the mock's doesn't), and a click opens it in place.
+  ...(["review-fold", "review-rest"] as const).map((name): Shot => ({
+    name,
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      const fold = page.locator(".rv-fold");
+      if (!(await fold.count())) await page.locator(".rv-file-sec").last().scrollIntoViewIfNeeded();
+      else if (name === "review-rest") await fold.click();
+      else await fold.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+    },
+  })),
   {
     // A capped ranking: what Claude didn't read, then the hunks it left out, marked Skip.
     name: "review-unread",
@@ -688,9 +712,9 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // f: folded where it was open (wide), open over the diff where it starts folded (narrow); f again puts it back.
+    // Hide or Files: folded where it was open (wide), open over the diff where it starts folded (narrow).
     name: "review-side-toggled",
-    go: review("acme/api#4154", ["f"]),
+    go: review("acme/api#4154", [".rv-side-toggle"]),
     after: sideDefault,
   },
   {
@@ -704,40 +728,40 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Enter from the queue on a PR with no AI review yet: it's being written.
+    // A click from the queue on a PR with no AI review yet: it's being written.
     name: "review-writing",
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
-      await page.locator(".line", { hasText: "Virtualize the issue stream list" }).locator(".row-main").focus();
-      await page.keyboard.press("Enter");
+      await page.locator(".line", { hasText: "Virtualize the issue stream list" }).locator(".row-main").click();
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
     },
   },
   {
-    // The menu opens under the row.
+    // A row's menu, Snooze open: the times, then what this PR can wait on.
     name: "snooze",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".line", { hasText: "Support HTTP/2 prior knowledge" }).locator(".row-main").focus();
-      await page.keyboard.press("s");
+      await rowMenuPick(page, '.line:has-text("Support HTTP/2 prior knowledge")', "Snooze");
+      await page.locator(".ctx-sub").waitFor();
       await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      for (let i = 0; i < 2 && (await page.locator(".ctx").count()); i++) await page.keyboard.press("Escape");
     },
   },
   {
-    // g a: the Archive, what you finished and what resolved, newest first.
+    // The Archive, what you finished and what resolved, newest first.
     name: "archive",
     go: async (page) => {
-      await at("#/")(page);
-      await page.keyboard.press("g");
-      await page.keyboard.press("a");
+      await at("#/archive")(page);
       await page.locator(".g-archive").waitFor();
       await page.waitForTimeout(200);
     },
   },
   {
-    // Enter on a resolved PR in the Archive: its review says why it resolved, and when, under the facts.
+    // A click on a resolved PR in the Archive: its review says why it resolved, and when, under the facts.
     name: "review-resolved",
     go: async (page) => {
       await at("#/archive")(page);
@@ -752,7 +776,7 @@ const SHOTS: Shot[] = [
     name: "review-activity",
     go: async (page) => {
       await review("acme/api#4127")(page);
-      if (!(await page.locator(".rv-side").isVisible())) await page.keyboard.press("f"); // folded in a narrow window
+      if (!(await page.locator(".rv-side").isVisible())) await page.locator(".rv-side-show").click(); // folded in a narrow window
       await page.locator(".rv-side .rv-more").click();
       await page.waitForTimeout(200);
     },
@@ -864,27 +888,25 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // m on your own PR hands it off at once: the row leaves, a spinner in the toast while the desk (here never) answers.
+    // Hand off for merge, in your own PR's row menu: the row leaves at once, a spinner in the toast while the desk (here never) answers.
     name: "handoff-sent",
     go: async (page) => {
       await page.route("**/api/act", async (route) => {
         if ((route.request().postDataJSON() as { action?: string }).action !== "inflight") await route.continue();
       });
       await at("#/")(page);
-      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
-      await page.keyboard.press("m");
+      await rowMenuPick(page, '.line[data-id="oss/tinyhttp#205"]', "Hand off for merge");
       await page.waitForTimeout(300);
     },
     after: fresh,
   },
   {
-    // An agent's question leads the main page; Enter opens its page: what it's about, all it said, its links, the answers.
+    // An agent's question leads the main page; a click opens its page: what it's about, all it said, its links, the answers.
     name: "inquiry",
     go: async (page) => {
       await at("#/")(page);
       await top(page);
-      await page.locator(".queue .line.inq .row-main").first().focus();
-      await page.keyboard.press("Enter");
+      await page.locator(".queue .line.inq .row-main").first().click();
       await page.locator(".inquiry .inq-options").waitFor();
       await page.waitForTimeout(200);
       // Your agent's own question: its answer box is how you talk to it here.
@@ -903,13 +925,12 @@ const SHOTS: Shot[] = [
     after: at("#/"),
   },
   {
-    // 1 picks the agent's answer: the page stays and says so while it's sent. Held, so the mock's question waits for the next size.
+    // A click picks the agent's answer: the page stays and says so while it's sent. Held, so the mock's question waits for the next size.
     name: "inquiry-answered",
     go: async (page) => {
       await page.route("**/api/inquiries/*/answer", () => {});
       await at("#/inquiry/q1c0ffee")(page);
-      await page.locator(".inquiry .inq-options").waitFor();
-      await page.keyboard.press("1");
+      await page.locator(".inquiry .inq-option").first().click();
       await page.locator(".inq-answered").waitFor();
       await page.waitForTimeout(200);
     },
@@ -927,11 +948,6 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
       if (await page.locator(".tb-ask").count())
         failures.push("inquiry-answered: the top bar offers Ask your agent once the queue drops the answered question");
-      await page.keyboard.press("t");
-      await page.locator(".chat-input").waitFor();
-      const about = (await chatState(page)).about;
-      if (about !== "notes-app#12") failures.push(`inquiry-answered: t on the answered question asks about ${JSON.stringify(about)}`);
-      await page.keyboard.press("Escape");
       await unroute(page);
       await fresh(page);
     },
@@ -963,12 +979,11 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // t on a selected row: the chat about that row, the queue narrowed beside it at wide sizes.
+    // A row menu's Ask your agent: the chat about that row, the queue narrowed beside it at wide sizes.
     name: "ask-row",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
-      await page.keyboard.press("t");
+      await rowMenuPick(page, '.line[data-id="oss/tinyhttp#205"]', "Ask your agent");
       await page.locator(".chat-input").waitFor();
       await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
       await page.waitForTimeout(300);
@@ -978,12 +993,12 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
-    // t on Blocked's first row: beside the chat, every row's why wraps whole rather than run under More.
+    // Ask your agent on Blocked's first row: beside the chat, every row's why wraps whole rather than run under More.
     name: "ask-blocked",
     go: async (page) => {
       await at("#/blocked")(page);
       await page.locator(".queue [data-id]").first().locator(".row-main").focus();
-      await page.keyboard.press("t");
+      await page.locator(".tb-ask").click();
       await page.locator(".chat-input").waitFor();
       await page.waitForTimeout(300);
       const cut = await page.evaluate<number[]>(
@@ -1021,7 +1036,7 @@ const SHOTS: Shot[] = [
       await review("me/notes-app#12")(page);
       // A box that posts on GitHub names what it does there: Send is only for your agent.
       const convos = await page.evaluate<{ buttons: string[]; filled: string }[]>(`[...document.querySelectorAll(".cv")].map((cv) => {
-        const words = (b) => [...b.childNodes].filter((n) => n.nodeName !== "KBD").map((n) => n.textContent).join("").trim();
+        const words = (b) => b.textContent.trim();
         const actions = cv.querySelector(".actions");
         return { buttons: [...actions.querySelectorAll("button, a")].map(words), filled: words(actions.querySelector(".act.primary")) };
       })`);
@@ -1035,7 +1050,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("Escape");
       // The cached asks draw at once: the fetch must land before the send, or it would replace the ask sent.
       const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
-      await page.keyboard.press("t");
+      await page.locator(".tb-ask").click();
       await loaded;
       await page.locator(".chat-turn", { hasText: "412 passed" }).waitFor();
       for (const el of [".chat .prose pre", ".chat .prose ol", ".chat .prose ul"]) await page.locator(el).waitFor();
@@ -1067,10 +1082,9 @@ const SHOTS: Shot[] = [
     name: "ask-top",
     go: async (page) => {
       await review("me/notes-app#12")(page);
-      await page.evaluate("document.activeElement.blur()"); // out of the reply box it opens in, so t is the page's
       // The fetch lands before the scroll: a turn it adds or drops sends the log back to the newest.
       const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
-      await page.keyboard.press("t");
+      await page.locator(".tb-ask").click();
       await loaded;
       await page.locator(".chat .prose ol").waitFor();
       await page.waitForTimeout(100);
@@ -1195,45 +1209,33 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // ] to an AI note, then t: the chat is on the note's line.
-    name: "ask-note",
-    go: async (page) => {
-      await review("acme/api#4127", ["]"])(page);
-      await page.keyboard.press("t");
-      await page.locator(".chat-input").waitFor();
-      const c = await chatState(page);
-      if (!c.on?.startsWith("On Claude's note on ")) failures.push(`ask-note: the chat is on ${JSON.stringify(c.on)}`);
-      await page.waitForTimeout(200);
-    },
-    after: closeChat,
-  },
-  {
-    // t on Settings: the chat about nothing beside the page.
+    // Ask your agent on Settings: the chat about nothing beside the page.
     name: "ask-settings",
     go: async (page) => {
       await at("#/settings/github")(page);
-      await page.keyboard.press("t");
+      await page.locator(".tb-ask").click();
       await page.locator(".chat-input").waitFor();
       await page.waitForTimeout(200);
     },
     after: closeChat,
   },
   {
-    // f with the chat open: the chat closes and the sidebar is back in its place.
+    // Files with the chat open beside the review: the chat closes and the sidebar is back in its place. At 1100px and below
+    // the chat lies over the page, Files under it: Close first.
     name: "ask-f",
     go: async (page) => {
       await review("acme/api#4154")(page);
-      await page.keyboard.press("t");
+      await page.locator(".tb-ask").click();
       await page.locator(".chat-empty").waitFor(); // no asks about it yet: no log to focus
-      await page.evaluate("document.activeElement.blur()"); // out of the box, so f is the review's
-      await page.keyboard.press("f");
+      if ((page.viewportSize()?.width ?? 0) <= 1100) await page.locator(".chat-head button", { hasText: "Close" }).click();
+      await page.locator(".rv-side-show").click();
       await page.locator(".chat").waitFor({ state: "detached" });
       await page.locator(".rv-side").waitFor();
     },
     after: sideDefault,
   },
   {
-    // Your agent off: no Ask your agent anywhere; t still opens the chat, which says so and sends nothing.
+    // Your agent off: no Ask your agent anywhere.
     name: "ask-off",
     go: async (page) => {
       await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));
@@ -1257,25 +1259,13 @@ const SHOTS: Shot[] = [
       if ((await page.locator(".ctx").textContent())?.includes("Ask your agent"))
         failures.push("ask-off: a row's menu offers Ask your agent");
       await page.keyboard.press("Escape");
-      await at("#/inflight")(page);
-      await page.keyboard.press("j");
-      await page.keyboard.press("t");
-      await page.locator(".chat-input:disabled").waitFor();
       await page.waitForTimeout(300);
     },
+    // A refresh can still be on its way through the overview's handler: unroute lets it finish quietly.
     after: async (page) => {
-      await page.unroute("**/api/asks");
-      await page.unroute("**/api/overview");
+      await unroute(page);
       await closeChat(page);
       await fresh(page);
-    },
-  },
-  {
-    name: "help",
-    go: async (page) => {
-      await at("#/")(page);
-      await page.keyboard.press("?");
-      await page.waitForTimeout(200);
     },
   },
   {
@@ -1289,7 +1279,7 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
     },
   },
-  // a on its row: off the list at once, a spinner while GitHub (here never) answers. Held, as review-ready-sent's, so the
+  // Ready for review on its row: off the list at once, a spinner while GitHub (here never) answers. Held, as review-ready-sent's, so the
   // mock's draft stays a draft for the next size's shots.
   {
     name: "draft-cta-sent",
@@ -1297,21 +1287,19 @@ const SHOTS: Shot[] = [
       await page.route("**/ready", () => {});
       await at("#/")(page);
       await unfold(page);
-      await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
-      await page.keyboard.press("a");
+      await page.locator('.line[data-id="acme/web#2303"] .line-cta').click();
       await page.waitForTimeout(300);
     },
     after: fresh,
   },
   {
-    // A PR the policy judge placed: w opens it in place; its rule trace ends with the policy step.
+    // A PR the policy judge placed: Why it's here opens it in place; its rule trace ends with the policy step.
     name: "judged",
     after: refold,
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
-      await page.locator(".line", { hasText: "Rewrite the tokenizer with a state table" }).locator(".row-main").focus();
-      await page.keyboard.press("w");
+      await rowMenuPick(page, '.line:has-text("Rewrite the tokenizer with a state table")', "Why it's here");
       await page.locator(".trace-toggle summary").first().click();
       await page.waitForTimeout(300);
     },
@@ -1389,23 +1377,22 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Snoozed or muted, under Later, with until when.
+    // Snoozed or muted, under Later, with until when: its heading opens it.
     name: "cleared",
     go: async (page) => {
       await at("#/later")(page);
-      await page.keyboard.press("g");
-      await page.keyboard.press("x");
+      await page.locator(".g-cleared .group-toggle").click();
       await page.waitForTimeout(300);
       await page.locator(".g-cleared").scrollIntoViewIfNeeded();
       await page.waitForTimeout(200);
     },
   },
-  // The More menu (.): on your PR's review, on the queue's selected row, and on an old PR of yours under Later.
+  // The More menu in a review.
   {
     // Done first, then what isn't a write, then the writes under "On GitHub".
     name: "more-review",
     go: async (page) => {
-      await review("acme/worker#875", ["."])(page);
+      await review("acme/worker#875", [MORE])(page);
       const items = await moreItems(page);
       const head = items.indexOf("#On GitHub");
       if (items[0] !== "Done" || head < 1 || head === items.length - 1 || items[head - 1] !== "Open on GitHub")
@@ -1420,8 +1407,7 @@ const SHOTS: Shot[] = [
       await reviewAs((v) => {
         v.card.status = "done";
       })(page);
-      await review("acme/api#4127")(page);
-      await page.locator(".rv-actions .more-wrap > button").click();
+      await review("acme/api#4127", [MORE])(page);
       await page.locator(".more-pop").waitFor();
       const items = await moreItems(page);
       if (items[0] !== "Back on the desk" || items.includes("Done"))
@@ -1434,42 +1420,10 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    name: "more-row",
-    after: refold,
-    go: async (page) => {
-      await at("#/")(page);
-      await unfold(page); // your PRs come after what waits on your review
-      await page.locator('.line[data-id="acme/worker#875"] .row-main').focus();
-      await page.keyboard.press(".");
-      await page.waitForTimeout(200);
-    },
-  },
-  {
-    // Your draft: Ready for review in its More menu too.
-    name: "more-draft",
-    after: refold,
-    go: async (page) => {
-      await at("#/")(page);
-      await unfold(page);
-      await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
-      await page.keyboard.press(".");
-      await page.waitForTimeout(200);
-    },
-  },
-  {
-    name: "more-later",
-    go: async (page) => {
-      await at("#/later")(page);
-      await page.locator('.line[data-id="acme/api#4040"] .row-main').focus();
-      await page.keyboard.press(".");
-      await page.waitForTimeout(200);
-    },
-  },
-  {
     // Request changes on someone else's PR: what you write, sent twice.
     name: "review-request-changes",
     go: async (page) => {
-      await review("acme/api#4127", [".", "x"])(page);
+      await review("acme/api#4127", [MORE, '.more-pop .pop-item:has-text("Request changes")'])(page);
       await page.keyboard.type("The retry loop never gives up: cap it, and add a test for the cap.");
       await page.waitForTimeout(200);
     },
@@ -1490,8 +1444,7 @@ const SHOTS: Shot[] = [
       name: `theme-${id}`,
       go: async (page) => {
         await pickTheme(id)(page);
-        await page.locator(".queue [data-id]").first().locator(".row-main").focus();
-        await page.keyboard.press("j");
+        await page.locator(".queue [data-id]").nth(1).locator(".row-main").focus();
       },
       after: systemTheme,
     },
@@ -1508,8 +1461,7 @@ const SHOTS: Shot[] = [
       go: async (page) => {
         await pickTheme(id)(page);
         await review("me/notes-app#12")(page);
-        await page.evaluate("document.activeElement.blur()");
-        await page.keyboard.press("t");
+        await page.locator(".tb-ask").click();
         await page.locator(".chat .prose").first().waitFor();
         await page.waitForTimeout(200);
       },
@@ -1525,8 +1477,8 @@ const SHOTS: Shot[] = [
       after: systemTheme,
     },
   ]),
-  // The More menu open in a review, its keys on it.
-  { name: "more-menu", go: review("acme/worker#875", ["."]) },
+  // The More menu open in a review.
+  { name: "more-menu", go: review("acme/worker#875", [MORE]) },
   // Right-click a row: its actions at the pointer, Snooze open to the side with what this PR can wait on.
   {
     name: "row-menu",
@@ -1542,13 +1494,59 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("Escape");
     },
   },
-  // a approves at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
+  {
+    // Done in a row's menu: the row leaves and takes its fill with it; no neighbour is filled in its place. Held, so the mock
+    // keeps the row for the next size's shots.
+    name: "row-done-unselected",
+    go: async (page) => {
+      await page.route("**/api/act", async (route) => {
+        if ((route.request().postDataJSON() as { action?: string }).action !== "done") await route.continue();
+      });
+      await at("#/")(page);
+      await rowMenuPick(page, ".queue .line:not(.inq) >> nth=1", "Done");
+      await page.waitForTimeout(400);
+      if (await page.locator(".line.sel").count()) failures.push("row-done-unselected: a row is filled after the one you finished left");
+    },
+    // The reload drops the held write first: unrouting while it's held would let it through to the mock.
+    after: async (page) => {
+      await fresh(page);
+      await unroute(page);
+    },
+  },
+  {
+    // The letters that were shortcuts do nothing now: no menu, toast, chat or page change, and the row keeps the focus.
+    name: "no-keys",
+    go: async (page) => {
+      await fresh(page);
+      await page.locator(".toast").waitFor({ state: "detached" });
+      await top(page);
+      const row = page.locator(".queue .line:not(.inq)").first();
+      await row.locator(".row-main").focus();
+      const id = await row.getAttribute("data-id");
+      let tabs = 0;
+      const opened = () => {
+        tabs++;
+      };
+      page.context().on("page", opened);
+      for (const k of ["j", "k", "e", "d", "s", "m", "p", "a", ".", "u", "r", "/", "?", "g", "l", "t", "w", "i", "o"]) {
+        await page.keyboard.press(k);
+        await page.waitForTimeout(100);
+      }
+      page.context().off("page", opened);
+      const open = await page.locator(".toast, .ctx, .more-pop, .popover, .chat, .dialog").count();
+      const hash = await page.evaluate<string>("location.hash");
+      const focused = await page.evaluate<string | null>(`document.activeElement?.closest(".line")?.dataset.id ?? null`);
+      if (open || hash !== "#/" || focused !== id || tabs)
+        failures.push(`no-keys: after the old shortcuts, ${JSON.stringify({ open, hash, focused, tabs })}`);
+    },
+  },
+  // Approve at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
   // answers. Last: its toast would sit over the next shot.
   {
     name: "review-approve",
     go: async (page) => {
       await page.route("**/approve", () => {});
-      await review("acme/api#4127", ["a"])(page);
+      await review("acme/api#4127", ['.rv-actions button:has-text("Approve")'])(page);
     },
   },
 ];
@@ -1598,10 +1596,8 @@ try {
         files.push(file);
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
         if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
-        // The window names no key: a button's tooltip names its own. Help, the list of keys, is the one place.
-        const chips = await page.evaluate<number>(
-          `[...document.querySelectorAll("kbd")].filter((k) => !k.closest(".dialog") && k.getClientRects().length).length`,
-        );
+        // The window names no key: a button's tooltip names its own.
+        const chips = await page.evaluate<number>(`[...document.querySelectorAll("kbd")].filter((k) => k.getClientRects().length).length`);
         if (chips) failures.push(`${file}: ${chips} key chip(s) on screen`);
         const spill = await page.evaluate<number>(`(() => {
           const bar = document.querySelector(".topbar");

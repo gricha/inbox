@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { cls, MOD, tilde } from "../format.ts";
-import { KeyButton } from "./Detail.tsx";
+import { ActButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
 
@@ -117,7 +117,7 @@ export function Policy({
         }}
       />
       <div className="editor-foot">
-        <KeyButton
+        <ActButton
           label={busy ? "Saving…" : "Save"}
           title={`Save (${MOD}S)`}
           disabled={busy || !dirty}
@@ -125,7 +125,7 @@ export function Policy({
             void save();
           }}
         />
-        <KeyButton
+        <ActButton
           label="Revert"
           disabled={!dirty}
           run={() => {

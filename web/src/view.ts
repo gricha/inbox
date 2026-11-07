@@ -55,7 +55,6 @@ export interface Group {
 
 // The cursor's stop on a group's "n more" line.
 export const foldOf = (k: GroupKey) => `fold:${k}`;
-export const isFold = (id: string | null) => !!id?.startsWith("fold:");
 export const inquiryOf = (id: string) => `ask:${id}`; // an agent's question on the main page
 
 export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
@@ -264,7 +263,7 @@ export function currentFile(tops: number[], line: number, atEnd = false): number
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
-// Later's own group opens with its page; the rest open when asked (g f, g h, g x, or a click on their heading).
+// Later's own group opens with its page; the rest open when asked (a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   queue: true,
   later: true,
@@ -387,7 +386,7 @@ export function cardFacts(
 export const navigable = (groups: Group[], leaving: Set<string>) =>
   groups.flatMap((g) => (g.open ? g.cards : [])).filter((c) => !leaving.has(c.id));
 
-// What j/k move through: the cards on screen, and a group's "n more" line where it folds.
+// The rows on screen, and a group's "n more" line where it folds.
 export const stops = (groups: Group[], leaving: Set<string>): string[] =>
   groups.flatMap((g) =>
     g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [foldOf(g.key)] : [])] : [],

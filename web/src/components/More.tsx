@@ -1,39 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import type { Card, GitHubAction } from "../../../src/types.ts";
-import { cls, MOD } from "../format.ts";
+import { MOD } from "../format.ts";
 
-// The More menu's keys, read only while it's open (. first, so a slipped key on the page writes nothing). One press does
-// it; u undoes a close or a draft. x only opens the box to write in.
-export const MORE: Record<GitHubAction, { key: string; label: string }> = {
-  close: { key: "c", label: "Close" },
-  draft: { key: "d", label: "Convert to draft" },
-  ready: { key: "a", label: "Ready for review" },
-  merge: { key: "m", label: "Merge now" },
-  reopen: { key: "r", label: "Reopen" },
-  request_changes: { key: "x", label: "Request changes" },
+// The More menu's writes, by label. One press does it; the toast's Undo undoes a close or a draft; Request changes only
+// opens the box to write in.
+export const MORE: Record<GitHubAction, string> = {
+  close: "Close",
+  draft: "Convert to draft",
+  ready: "Ready for review",
+  merge: "Merge now",
+  reopen: "Reopen",
+  request_changes: "Request changes",
 };
 
 // A row has no room to write in: requesting changes is in the PR's review.
 export const rowActions = (c: Card) => (c.actions ?? []).filter((a) => a !== "request_changes");
 
-// The quiet button that opens it; a row below 1000px says "...", so selecting it never cuts its title shorter.
-export function MoreButton({ className, open, onClick }: { className?: string; open: boolean; onClick: () => void }) {
+// The quiet button that opens it.
+export function MoreButton({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      className={cls("act", className)}
-      title="More actions"
-      aria-label="More actions"
-      aria-expanded={open}
-      onClick={onClick}
-    >
-      <span className="more-word">More</span>
-      <span className="more-dots">…</span>
+    <button type="button" className="act" title="More actions" aria-label="More actions" aria-expanded={open} onClick={onClick}>
+      More
     </button>
   );
 }
 
-// While open it has the keyboard, as the snooze menu does: its keys act, Esc or . closes it, anything else does nothing.
 export function MoreMenu({
   card,
   actions,
@@ -43,7 +34,7 @@ export function MoreMenu({
 }: {
   card: Card;
   actions: GitHubAction[];
-  links?: { key?: string; label: string; run: () => void }[]; // what isn't a write, above them: Done, Open on GitHub
+  links?: { label: string; run: () => void }[]; // what isn't a write, above them: Done, Open on GitHub
   pick: (a: GitHubAction) => void;
   onClose: () => void;
 }) {
@@ -57,22 +48,16 @@ export function MoreMenu({
     pick(a);
   }
 
+  // Esc closes it, before the review reads it as "back"; Tab, Enter and Space are its buttons'.
   const onKey = (e: KeyboardEvent) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || ["Shift", "Meta", "Control", "Alt"].includes(e.key)) return;
+    if (e.key !== "Escape" || e.isComposing) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (e.repeat) return;
-    const a = actions.find((x) => MORE[x].key === e.key);
-    const l = links?.find((x) => x.key === e.key);
-    if (a) choose(a);
-    else if (l) {
-      onClose();
-      l.run();
-    } else if (e.key === "Escape" || e.key === ".") onClose();
+    onClose();
   };
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
-  // Capture phase, so the page's own keys (r sync, u undo, Esc back) never see what the menu took.
+  // Capture phase, so the page's own Esc never sees the one the menu took.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       keyRef.current(e);
@@ -112,7 +97,7 @@ export function MoreMenu({
               choose(a);
             }}
           >
-            <span>{a === "close" && card.kind === "issue" ? "Close issue" : MORE[a].label}</span>
+            <span>{a === "close" && card.kind === "issue" ? "Close issue" : MORE[a]}</span>
           </button>
         ))}
       </div>

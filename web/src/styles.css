@@ -44,7 +44,6 @@
   --accent-ink: #2a56c4;
   --accent-wash: #e8eefb;
   --on-accent: #fff;
-  --scrim: rgb(27 29 33 / 30%);
   --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
@@ -84,7 +83,6 @@
     --accent-ink: #8fb0ff;
     --accent-wash: #1c2438;
     --on-accent: #fff;
-    --scrim: rgb(0 0 0 / 55%);
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
     color-scheme: dark;
@@ -117,7 +115,6 @@
   --accent-ink: #8fb0ff;
   --accent-wash: #1c2438;
   --on-accent: #fff;
-  --scrim: rgb(0 0 0 / 55%);
   --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
   color-scheme: dark;
@@ -150,7 +147,6 @@
   --accent-ink: #3352c0;
   --accent-wash: #e3e4f1;
   --on-accent: #fbf8f2;
-  --scrim: rgb(42 37 31 / 30%);
   --shadow: 0 1px 2px rgb(42 37 31 / 7%), 0 10px 30px rgb(42 37 31 / 13%);
 
   color-scheme: light;
@@ -183,7 +179,6 @@
   --accent-ink: #9db4ff;
   --accent-wash: #252e4a;
   --on-accent: #fff;
-  --scrim: rgb(0 0 0 / 50%);
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px rgb(0 0 0 / 45%);
 
   color-scheme: dark;
@@ -253,12 +248,6 @@ code {
 
 p {
   margin: 0;
-}
-
-/* One key style everywhere: the key in pencil, before what it does, with no box. */
-kbd {
-  color: var(--pencil);
-  font: 600 12px var(--sans);
 }
 
 .quiet {
@@ -1080,27 +1069,14 @@ kbd {
   text-align: right;
 }
 
-/* A row's call to action and, on the selected row, More before it; the negative margin keeps every row one height. */
-.line .line-cta,
-.line .line-more {
+/* A row's call to action; the negative margin keeps every row one height. */
+.line .line-cta {
   position: relative;
   z-index: 1;
   flex: none;
   align-self: center;
   height: 32px;
   margin: -4px 0 -4px auto;
-}
-
-.line .line-more {
-  padding: 0 6px;
-}
-
-.more-dots {
-  display: none;
-}
-
-.line-more + .line-cta {
-  margin-left: -8px;
 }
 
 .dim .line-title {
@@ -1125,20 +1101,10 @@ kbd {
   }
 }
 
-/* Opened in place (an issue, or w): under the title's edge. */
+/* Opened in place (an issue, or Why it's here): under the title's edge. */
 .line .more.opened,
 .line .detail {
   padding: 4px 12px 18px;
-}
-
-.line .popover {
-  left: 4px;
-}
-
-/* Under its More button, at the row's right end. */
-.line .more-pop {
-  right: 4px;
-  left: auto;
 }
 
 .more-wrap {
@@ -1362,7 +1328,7 @@ kbd {
   font-weight: 600;
 }
 
-/* The queue's "n more": the cursor stops on it, Enter opens it in place. */
+/* The queue's "n more": a click opens it in place. */
 .fold {
   display: block;
   width: 100%;
@@ -1500,7 +1466,7 @@ kbd {
   content: "·";
 }
 
-/* The selected card's facts, then its keys under a hairline, as far below it as the facts sit above. */
+/* The selected card's facts, then its actions under a hairline, as far below it as the facts sit above. */
 .card-facts {
   display: flex;
   flex-wrap: wrap;
@@ -1603,31 +1569,6 @@ kbd {
   margin: 4px 0 0;
   color: var(--ink-2);
   font-size: var(--meta-size);
-}
-
-.keys-head.lane-keys {
-  margin-top: 22px;
-}
-
-.keys-more {
-  margin: 0 0 14px;
-  color: var(--pencil);
-  font-size: 12.5px;
-}
-
-/* Each key stays with its label; the line wraps between pairs, so no "·" is needed (or left at a line's start). */
-.keys-more .dots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-}
-
-.keys-more .dots > span {
-  white-space: nowrap;
-}
-
-.keys-more .dots > :not(:first-child)::before {
-  content: none;
 }
 
 /* Expanded item ------------------------------------------------------------ */
@@ -1865,7 +1806,7 @@ kbd {
   color: var(--on-accent);
 }
 
-/* Done from the review, which stays open: what you did, in green, and where it went, on its own line above the keys. */
+/* Done from the review, which stays open: what you did, in green, and where it went, on its own line above its actions. */
 .rv-acted {
   display: flex;
   align-items: center;
@@ -1929,8 +1870,7 @@ kbd {
 }
 
 /* On a row, an item opened in place and in a box you write in, only its call to action (or its send) is a shape; the rest
-   are text that fills on hover, and while the menu it opened is open. A review's few actions are buttons. */
-.line .line-more,
+   are text that fills on hover. A review's few actions are buttons. */
 .card-keys .act:not(.primary),
 .composer .act:not(.primary),
 .chat .act:not(.primary),
@@ -1940,8 +1880,6 @@ kbd {
   background: none;
 }
 
-.line .line-more:hover:not(:disabled),
-.line .line-more[aria-expanded="true"],
 .card-keys .act:not(.primary):hover:not(:disabled),
 .composer .act:not(.primary):hover:not(:disabled),
 .chat .act:not(.primary):hover:not(:disabled),
@@ -2009,15 +1947,6 @@ kbd {
 .btn:disabled {
   cursor: default;
   opacity: 0.45;
-}
-
-.btn.ghost {
-  border-color: transparent;
-  background: none;
-}
-
-.btn.ghost:hover {
-  background: var(--wash);
 }
 
 .link-btn {
@@ -2157,12 +2086,6 @@ kbd {
 }
 
 /* The snooze menu's times, then what this item can wait on. */
-.pop-item.pop-sep {
-  position: relative;
-  margin-top: 9px;
-}
-
-.pop-sep::before,
 .ctx-sep::before {
   position: absolute;
   top: -5px;
@@ -2677,63 +2600,6 @@ kbd {
   }
 }
 
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: var(--scrim);
-}
-
-.dialog {
-  width: min(480px, 100%);
-  max-height: calc(100vh - 32px);
-  padding: 18px 20px 20px;
-  overflow: auto;
-  border-radius: 16px;
-  background: var(--sheet);
-  box-shadow: var(--shadow);
-}
-
-.dialog:focus {
-  outline: none;
-}
-
-.dialog-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.dialog-head h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 650;
-}
-
-.keys {
-  display: grid;
-
-  /* One key column for every section, so their descriptions share an edge. */
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 9px 18px;
-  margin: 0;
-  font-size: 13.5px;
-}
-
-.keys dt {
-  display: flex;
-  gap: 4px;
-}
-
-.keys dd {
-  margin: 0;
-  color: var(--ink-2);
-}
-
 /* Settings ----------------------------------------------------------------- */
 
 /* Same columns as the queue: the section list sits where refs sit, the pane where titles sit. */
@@ -3034,7 +2900,7 @@ kbd {
   margin-top: 6px;
 }
 
-/* Automations: one table of them, each its switch, name and schedule, its keys, and its last run under it. */
+/* Automations: one table of them, each its switch, name and schedule, its buttons, and its last run under it. */
 .au {
   display: grid;
   gap: 14px;
@@ -4403,7 +4269,7 @@ kbd {
   white-space: nowrap;
 }
 
-/* The rest, folded: one line with a count; Enter (or a click) opens it in place. */
+/* The rest, folded: one line with a count; a click opens it in place. */
 .rv-fold {
   margin: 0;
   padding: 8px 12px 9px;
@@ -4438,7 +4304,7 @@ kbd {
   box-shadow: 0 0 0 1px var(--rule);
 }
 
-/* The review on its way: its header (when its row isn't at hand), keys, a file's name and code, the sidebar's files. */
+/* The review on its way: its header (when its row isn't at hand), actions, a file's name and code, the sidebar's files. */
 .rv-ref .sk {
   width: 9em;
 }
@@ -4514,38 +4380,8 @@ kbd {
   white-space: normal;
 }
 
-.rv-note.on {
-  border-left-color: var(--pencil);
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
-  color: var(--ink);
-}
-
 .rv-file-sec > .rv-note {
   margin: 0;
-}
-
-.keys-head {
-  margin: 0 0 10px;
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 650;
-}
-
-.keys-cols {
-  display: grid;
-  gap: 22px 36px;
-}
-
-/* Side by side when there's room, so the sheet doesn't scroll. */
-@media (width > 900px) {
-  .dialog:has(.keys-cols) {
-    width: min(880px, 100%);
-  }
-
-  .keys-cols {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 /* Narrow windows ----------------------------------------------------------- */
@@ -4586,14 +4422,6 @@ kbd {
   /* Without the sidebar, the desktop app on macOS draws its traffic lights over the top bar. */
   :root[data-shell="desktop"][data-platform="darwin"] .topbar {
     padding-left: 86px;
-  }
-
-  .line .more-word {
-    display: none;
-  }
-
-  .line .more-dots {
-    display: inline;
   }
 
   .tb-ask-long {

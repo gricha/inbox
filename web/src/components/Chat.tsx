@@ -22,9 +22,9 @@ interface Lines {
   lines: AskLines;
   label: string; // "plan.ts:20-23", as linesLabel says it
 }
-export type Spot = Thread | Lines; // where in a PR's review you last were, for what t asks about
+export type Spot = Thread | Lines; // where in a PR's review you last were, for what Ask your agent asks about
 
-// What t opened the chat about: the review's PR (and the spot you were last on in it), the selected row, or nothing.
+// What Ask your agent opened the chat about: the review's PR (and the spot you were last on in it), the selected row, or nothing.
 export interface About {
   item: string | null;
   spot: Spot | null;
@@ -37,7 +37,6 @@ export function Chat({
   questions,
   loads,
   now,
-  inert,
   onWiden,
   onClose,
 }: {
@@ -46,7 +45,6 @@ export function Chat({
   questions: Inquiry[]; // your agent's open ones about the item
   loads: number;
   now: number;
-  inert: boolean;
   onWiden: () => void; // an x: one step wider
   onClose: () => void;
 }) {
@@ -116,7 +114,7 @@ export function Chat({
   }, [mine.length, answered]);
 
   return (
-    <aside className="chat" aria-label="Your chat with your agent" inert={inert}>
+    <aside className="chat" aria-label="Your chat with your agent">
       <div className="chat-head">
         <h2 className="chat-title">Your agent</h2>
         <p className="chat-about" title={about.item ?? undefined}>

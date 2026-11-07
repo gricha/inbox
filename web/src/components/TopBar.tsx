@@ -1,4 +1,3 @@
-import type { RefObject } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
 import { routeHash, type ListPage, type Route } from "../view.ts";
@@ -23,12 +22,10 @@ export function TopBar({
   question,
   filter,
   setFilter,
-  filterRef,
   onSync,
   ask,
   waiting,
   onAsk,
-  inert,
 }: {
   overview: Overview | null;
   offline: boolean;
@@ -38,17 +35,15 @@ export function TopBar({
   question: string | null; // a review opened from an agent's question goes back to it
   filter: string;
   setFilter: (s: string) => void;
-  filterRef: RefObject<HTMLInputElement | null>;
   onSync: () => void;
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
   onAsk: () => void;
-  inert?: boolean;
 }) {
   const inSettings = route.name === "settings";
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
   return (
-    <header className="topbar" inert={inert}>
+    <header className="topbar">
       <a className="wordmark" href="#/" title="Queue">
         <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
           <rect x="2" y="3" width="16" height="4" rx="1.5" />
@@ -77,7 +72,6 @@ export function TopBar({
             <path d="m10.5 10.5 3 3" />
           </svg>
           <input
-            ref={filterRef}
             type="search"
             placeholder="Filter"
             aria-label="Filter by title, repo or author"

@@ -1,29 +1,22 @@
-import { useEffect, useRef } from "react";
-import type { Card, GitHubAction, ItemDetail } from "../../../src/types.ts";
-import { age, clearedText, cls, snoozeOptions } from "../format.ts";
+import type { Card, ItemDetail } from "../../../src/types.ts";
+import { age, clearedText, cls } from "../format.ts";
 import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
-import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
 
-// Everything a row needs from the app; `run` takes an action id (enter esc o e d s m b p w why i a t .).
+// Everything a row needs from the app; `run` takes an action id (enter close o e d m b p why comment a t).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
   selected: string | null;
   expanded: string | null;
   leaving: Set<string>;
-  snoozeFor: string | null;
   showSignals: boolean;
   details: Record<string, ItemDetail | string>; // string = load error
   boardLabel: (id: string) => string;
   click: (c: Card) => void;
   select: (c: Card) => void;
   run: (c: Card, key: string) => void;
-  snooze: (c: Card, until: string) => void;
-  closeSnooze: () => void;
-  moreFor: string | null; // the row whose More menu (.) is open
-  closeMore: () => void;
-  github: (c: Card, action: GitHubAction) => void; // a More menu write
+  menu: (c: Card, at: HTMLElement, snooze?: boolean) => void; // its row's menu, at a button
 }
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
@@ -55,7 +48,7 @@ function noteOf(card: Card, variant: Variant): string {
 }
 
 // One line: whether it's a PR or an issue, the title, quietly its repo#number, its one call to action, then who it's from,
-// a PR's stage and its age in columns on the right. Enter opens an issue (or `w` any item) in place under it.
+// a PR's stage and its age in columns on the right. A click opens an issue in place under it.
 export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
@@ -76,7 +69,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
     >
       {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
       <div className="line-main line-row">
-        {/* Focus selects (Tab and j/k are one cursor); not on mousedown, so a click opens without selecting first. */}
+        {/* Focus selects (Tab); not on mousedown, so a click opens without selecting first. */}
         <button
           type="button"
           className="row-main line-btn"
@@ -110,16 +103,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             </span>
           )}
         </button>
-        {/* Only where no call to action shows: the row keeps room for its title, and . still opens it. */}
-        {sel && (!card.cta || !!why) && rowActions(card).length > 0 && (
-          <MoreButton
-            className="line-more"
-            open={ctx.moreFor === card.id}
-            onClick={() => {
-              ctx.run(card, ".");
-            }}
-          />
-        )}
         {/* Tinted, and filled under the pointer. */}
         {card.cta === "ready" && !why && (
           <button
@@ -170,54 +153,6 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         </span>
       </div>
       {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
-      {ctx.moreFor === card.id && (
-        <MoreMenu
-          card={card}
-          actions={rowActions(card)}
-          pick={(a) => {
-            ctx.github(card, a);
-          }}
-          onClose={ctx.closeMore}
-        />
-      )}
-      {/* Under the row, so it never covers the row itself. */}
-      {ctx.snoozeFor === card.id && (
-        <SnoozeMenu
-          card={card}
-          onPick={(until) => {
-            ctx.snooze(card, until);
-          }}
-          onClose={ctx.closeSnooze}
-        />
-      )}
     </div>
-  );
-}
-
-function SnoozeMenu({ card, onPick, onClose }: { card: Card; onPick: (until: string) => void; onClose: () => void }) {
-  const menu = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    menu.current?.scrollIntoView({ block: "nearest" });
-  }, []);
-  return (
-    <>
-      <div className="scrim-clear" role="presentation" onClick={onClose} />
-      <div ref={menu} className="popover" role="menu" aria-label="Snooze">
-        <div className="pop-title">Snooze</div>
-        {snoozeOptions(card).map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            role="menuitem"
-            className={cls("pop-item", o.key === "6" && "pop-sep")}
-            onClick={() => {
-              onPick(o.until);
-            }}
-          >
-            <span>{o.label}</span>
-          </button>
-        ))}
-      </div>
-    </>
   );
 }

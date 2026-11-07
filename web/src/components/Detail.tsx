@@ -138,14 +138,23 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         {why}
         {activity}
         <div className="actions card-keys">
-          {card.kind === "issue" && !card.resolved && <KeyButton k="w" label="Comment" run={run} />}
-          <KeyButton k="o" label="Open on GitHub" run={run} />
-          {mine && <HandKey card={card} run={run} />}
-          <KeyButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
-          <KeyButton k="s" label="Snooze" run={run} />
-          {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
+          {card.kind === "issue" && !card.resolved && <ActButton k="comment" label="Comment" run={run} />}
+          <ActButton k="o" label="Open on GitHub" run={run} />
+          {mine && <HandButton card={card} run={run} />}
+          <ActButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
+          <button
+            type="button"
+            className="act"
+            aria-haspopup="menu"
+            onClick={(e) => {
+              ctx.menu(card, e.currentTarget, true);
+            }}
+          >
+            Snooze
+          </button>
+          {!mine && <ActButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
           {/* Last, so a pointer that read down to here closes it here. */}
-          <KeyButton k="esc" label="Close" title="Close (Esc)" run={run} />
+          <ActButton k="close" label="Close" title="Close (Esc)" run={run} />
         </div>
       </div>
     );
@@ -201,7 +210,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       {why}
       {activity}
       <div className="actions card-keys">
-        <KeyButton k="why" label="Hide signals" run={run} />
+        <ActButton k="why" label="Hide signals" run={run} />
       </div>
       <pre className="signals">{JSON.stringify(s, null, 2)}</pre>
     </div>
@@ -262,7 +271,7 @@ const BACK_TITLE = "Out of Merging and back on your desk; your agent leaves it a
 
 // Your own open PR: Hand off for merge (green: a yes, like Approve), or Back to desk from Merging. The same on an opened
 // item and a review.
-export function HandKey({
+export function HandButton({
   card,
   run,
   primary,
@@ -271,11 +280,11 @@ export function HandKey({
   run: (k: string) => void;
   primary?: boolean;
 }) {
-  if (card.inflight) return <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
+  if (card.inflight) return <ActButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
   if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
   if (card.cta === "reviewers") return null; // nor one nobody's asked to review: Ask reviewers first
   return (
-    <KeyButton
+    <ActButton
       k="m"
       label="Hand off for merge"
       title="Your agent gets it merged: it fixes CI, addresses comments and merges it once it's approved"
@@ -285,7 +294,7 @@ export function HandKey({
   );
 }
 
-export function KeyButton({
+export function ActButton({
   k = "",
   label,
   run,

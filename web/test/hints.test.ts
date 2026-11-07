@@ -1,4 +1,4 @@
-// The window names no key: no <kbd> chip, and no key written in the words it shows. Help, the one list of keys, goes in PR 2.
+// The window names no key: no <kbd> chip, and no key written in the words it shows.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
@@ -6,7 +6,7 @@ import { test } from "node:test";
 const root = new URL("../../", import.meta.url);
 const tsx = fs
   .readdirSync(new URL("web/src/", root), { encoding: "utf8", recursive: true })
-  .filter((f) => f.endsWith(".tsx") && !f.endsWith("Help.tsx"))
+  .filter((f) => f.endsWith(".tsx"))
   .map((f) => `web/src/${f}`);
 // What the desk puts in the window: Settings' help, the 409s and 403s a toast shows, the first-run config.
 const desk = ["src/settings.ts", "src/desk.ts", "src/server.ts", "src/config.ts"];

@@ -1,5 +1,5 @@
 // Your inline comments not yet sent, and the keyboard while you write one. Kept by PR for this window, so leaving a
-// review (N, P, a link, a g chord, Esc) and coming back finds your words where you left them.
+// review (a link, the back link, Esc) and coming back finds your words where you left them.
 import type { InlineAt } from "../../src/types.ts";
 
 export interface Kept {
@@ -63,7 +63,7 @@ export function boxBack(): void {
   gone = 0;
 }
 
-// Keys meanwhile land on the page: they're swallowed, not run as shortcuts.
+// Keys meanwhile land on the page: they're swallowed, so Esc can't go back.
 export function keysHeld(): boolean {
   const page = document.activeElement === null || document.activeElement === document.body;
   return held && gone > 0 && page && Date.now() - gone < CAP_MS;

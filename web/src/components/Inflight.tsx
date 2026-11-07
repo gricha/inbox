@@ -10,15 +10,15 @@ export function Inflight({
   now,
   selected,
   select,
-  run,
   act,
+  open,
 }: {
   view: InflightView | null;
   now: number;
   selected: string | null;
   select: (id: string) => void;
-  run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b
   act: (k: "copy" | "wake") => void; // your agent's line: Copy attach command, Wake it
+  open: (row: InflightRow) => void; // its review
 }) {
   if (!view)
     return (
@@ -26,9 +26,9 @@ export function Inflight({
         <SkRows count={4} />
       </div>
     );
-  const open = view.rows.filter((r) => r.state === "open");
+  const live = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
-  const row = (r: InflightRow) => <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} run={run} />;
+  const row = (r: InflightRow) => <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} open={open} />;
   // The desk sends a stack's rows together, bottom first: two or more sit under one quiet header.
   const rows = (list: InflightRow[]) => {
     const parts: InflightRow[][] = [];
@@ -57,8 +57,8 @@ export function Inflight({
   return (
     <div className="queue lane">
       <Coordinator c={view.coordinator} act={act} />
-      {open.length ? (
-        rows(open)
+      {live.length ? (
+        rows(live)
       ) : (
         <p className="queue-empty">Nothing in Merging yet: hand off one of your PRs for merge when you're done with it.</p>
       )}
@@ -139,13 +139,13 @@ function Row({
   now,
   on,
   select,
-  run,
+  open,
 }: {
   row: InflightRow;
   now: number;
   on: boolean;
   select: (id: string) => void;
-  run: (row: InflightRow, key: string) => void;
+  open: (row: InflightRow) => void;
 }) {
   const c = r.card;
   const live = r.state === "open";
@@ -160,7 +160,7 @@ function Row({
           e.preventDefault(); // a click opens without selecting first, as the main page's rows do
         }}
         onClick={() => {
-          run(r, "enter");
+          open(r);
         }}
         onFocus={() => {
           select(c.id);

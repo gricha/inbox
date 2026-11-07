@@ -8,13 +8,11 @@ export function Sidebar({
   from,
   view,
   overview,
-  inert,
 }: {
   route: Route;
   from: ListPage; // where a review was opened from: it stays that page's
   view: QueueView | null;
   overview: Overview | null;
-  inert?: boolean;
 }) {
   const onQueue = route.name === "queue" || route.name === "inquiry" || (route.name === "review" && from === "queue");
   const onLater = route.name === "later" || (route.name === "review" && from === "later");
@@ -26,7 +24,7 @@ export function Sidebar({
   const today = view?.sections.today.length ?? 0;
   const flight = overview?.inflight;
   return (
-    <aside className="side" inert={inert}>
+    <aside className="side">
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
       <div className="wordmark side-brand">
         <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
