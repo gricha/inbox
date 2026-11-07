@@ -262,7 +262,7 @@ const CANNED: Record<string, Canned> = {
           path: "src/routes/query.ts",
           side: "new",
           line: 30,
-          body: "The only place a budget comes from the outside. Without ?budget= the 2 s default applies, which changes behaviour for every existing caller.",
+          body: "The only place a budget comes from the outside. Without `?budget=` the 2 s default applies, which changes behaviour for every existing caller.",
         },
         {
           path: "src/routes/query.ts",
@@ -274,7 +274,7 @@ const CANNED: Record<string, Canned> = {
           path: "test/planner/stream.test.ts",
           side: "new",
           line: 0,
-          body: "Covers batching and abort, but nothing exercises runPlan's partial path or the route's header.",
+          body: "Covers batching and abort, but nothing exercises `runPlan`'s partial path or the route's `X-Partial-Results` header.",
         },
       ],
       chunks: {
@@ -304,7 +304,7 @@ const CANNED: Record<string, Canned> = {
           path: "pipeline/tokenize.py",
           side: "new",
           line: 9,
-          body: "lru_cache keys on the name argument, so get_tokenizer() and get_tokenizer(settings.TOKENIZER) would be two cache entries for the same model; encode_batch now always passes the name, which avoids that in practice.",
+          body: "`lru_cache` keys on the `name` argument, so `get_tokenizer()` and `get_tokenizer(settings.TOKENIZER)` would be two cache entries for the same model; `encode_batch` now always passes the name, which avoids that in practice.",
         },
         {
           path: "pipeline/worker.py",

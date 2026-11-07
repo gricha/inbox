@@ -1805,10 +1805,11 @@ function Yours({ body, url }: { body: string; url: string }) {
   );
 }
 
+// Claude's words on the PR's code, drawn as the AI review's are: code as code, a URL as text.
 function Note({ index, body }: { index: number; body: string }) {
   return (
     <div className="rv-note" data-note={index}>
-      {body}
+      {spans(unlinked(inline(body)))}
     </div>
   );
 }

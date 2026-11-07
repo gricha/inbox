@@ -592,6 +592,20 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A note in the diff draws its code names as code, as the AI review above it does.
+    name: "review-ai-note",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      await page.evaluate(
+        `[...document.querySelectorAll(".rv-note")].find((n) => n.querySelector("code"))?.scrollIntoView({ block: "center" })`,
+      );
+      await page.waitForTimeout(300);
+      const notes = page.locator(".rv-note");
+      if (!(await notes.locator("code").count())) failures.push("review-ai-note: a note's code names aren't code");
+      if ((await notes.allInnerTexts()).join("").includes("`")) failures.push("review-ai-note: a backtick shows in a note");
+    },
+  },
+  {
     // Opened while the desk fetches its diff: the row's header and AI read at once, quiet placeholders for the rest.
     name: "review-loading",
     go: async (page) => {
