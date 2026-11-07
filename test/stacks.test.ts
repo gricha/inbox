@@ -262,19 +262,19 @@ test("toFetch keeps what a listed PR requires from pruning, and refreshes an ope
 test("toFetch probes by number a PR a listed one requires when the desk doesn't hold it", () => {
   const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
   const items = [
-    web(1, { requires: ["getsentry/sentry#5", "acme/api#7", "acme/api#2", "acme/api#99999999999", "getsentry/sentry#9"] }),
+    web(1, { requires: ["acme/sentry#5", "acme/api#7", "acme/api#2", "acme/api#99999999999", "acme/sentry#9"] }),
     makeItem({ number: 7, kind: "issue" }),
     pr(2, "main", { requires: ["acme/api#3"] }), // stored, so what it needs is asked too, and PRs stacked on it
-    web(4, { author: "dependabot", author_bot: true, requires: ["getsentry/sentry#6"] }),
-    web(8, { author: "sentry-junior", author_bot: true, via: "greg", requires: ["getsentry/sentry#8"] }),
+    web(4, { author: "dependabot", author_bot: true, requires: ["acme/sentry#6"] }),
+    web(8, { author: "sentry-junior", author_bot: true, via: "greg", requires: ["acme/sentry#8"] }),
   ];
   const listed = new Set(["acme/web#1", "acme/web#4", "acme/web#8"]);
-  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set(["getsentry/sentry pr 9"]));
+  const got = toFetch(items, buildStacks(items), listed, hoursAgo(0.5), hoursAgo(1 / 6), new Set(["acme/sentry pr 9"]));
   assert.deepEqual(
     got.probes.filter((p) => p.dir === "pr"),
     [
-      { repo: "getsentry/sentry", dir: "pr", branch: "5", stacked: false },
-      { repo: "getsentry/sentry", dir: "pr", branch: "8", stacked: false },
+      { repo: "acme/sentry", dir: "pr", branch: "5", stacked: false },
+      { repo: "acme/sentry", dir: "pr", branch: "8", stacked: false },
       { repo: "acme/api", dir: "pr", branch: "3", stacked: false },
     ],
     "not the issue, a number past GraphQL's Int, a miss, or what only a bot's own PR needs",
@@ -591,11 +591,11 @@ test("a stored PR your PR requires is refreshed every 10 minutes while open, qui
 
 test("a dependency in another repo is fetched quietly and blocks the PR that needs it", async (tc) => {
   const kai = { author: "kai", author_bot: false, state: "commented" as const, at: hoursAgo(3), commit: "x" };
-  const dep = makeItem({ repo: "getsentry/sentry", number: 5, author: "carol", reviews: [kai] }); // on no search
-  const t = await setup([myPr(1, { requires: ["GetSentry/Sentry#5"] }), dep]);
+  const dep = makeItem({ repo: "acme/sentry", number: 5, author: "carol", reviews: [kai] }); // on no search
+  const t = await setup([myPr(1, { requires: ["Acme/Sentry#5"] }), dep]);
   tc.after(t.cleanup);
   await t.desk.sync();
-  assert.ok(t.gh.probeCalls.includes("GetSentry/Sentry pr 5"));
+  assert.ok(t.gh.probeCalls.includes("Acme/Sentry pr 5"));
   const items = t.desk.store.items();
   assert.equal(items.find((i) => i.id === dep.id)?.state, "open");
   assert.equal(dependencies(items, buildStacks(items)).get("acme/web#1")?.root, dep.id);
