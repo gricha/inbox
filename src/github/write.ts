@@ -9,9 +9,9 @@ const ENDPOINT = "https://api.github.com/graphql";
 // reply and comment: your reply to a conversation in a PR's review, when you press Send.
 // inline_comment: your comment on a line (or lines) of a PR's diff, posted at once like GitHub's "Add single comment", pinned
 // to the commit the review showed.
-// ready: your own draft's "Ready for review" (a on its row or in its review); request_reviews: the reviewers you picked with
+// ready: your own draft's "Ready for review" (on its row or in its review); request_reviews: the reviewers you picked with
 // it, added to any already asked (union).
-// The rest are the More menu's (.): close, draft, mark ready, merge and reopen your own PR, request changes on someone else's, close an issue.
+// The rest are the More menu's: close, draft, mark ready, merge and reopen your own PR, request changes on someone else's, close an issue.
 // expectedHeadOid pins a merge to the commit the desk judged ready, so a push since then isn't merged unseen.
 export const ALLOWED = {
   approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {

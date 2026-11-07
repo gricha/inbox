@@ -291,7 +291,7 @@ export function createApp(desk: Desk, port: number): Hono {
     if (b.body !== undefined && typeof b.body !== "string") throw new DeskError(400, "body must be a string");
     return c.json({ ok: true, ...(await desk.githubAct(b.id, b.action as GitHubAction, { head: b.head_oid, body: b.body })) });
   });
-  // Merging: your own PRs you handed off (m, b through /api/act), which the coordinator gets merged.
+  // Merging: your own PRs you handed off (Hand off for merge and Back to desk, through /api/act), which the coordinator gets merged.
   app.get("/api/inflight", (c) => {
     ready();
     return c.json(desk.inflight());

@@ -1,5 +1,5 @@
 // What reviewers said on a PR, which of it waits on you, and Claude's read of what does. Read only: replies go through
-// Desk.reply(), on your keypress. Claude runs like the judge: your own claude, no tools, an empty directory.
+// Desk.reply(), on your click. Claude runs like the judge: your own claude, no tools, an empty directory.
 import { randomBytes } from "node:crypto";
 import type { Desk } from "./desk.ts";
 import type { PrContext } from "./github/index.ts";

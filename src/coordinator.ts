@@ -138,7 +138,7 @@ export class Coordinator {
   desk: Desk;
   batch = 60_000; // what lands within this goes in one message
   every = 5 * 60_000; // how often the desk checks it's still running: one `claude agents`, no turn
-  asked = false; // w in Merging
+  asked = false; // Wake it or Start it now in Merging
   timer: NodeJS.Timeout | null = null;
   ticker: NodeJS.Timeout | null = null;
   flushing: Promise<void> | null = null;
@@ -253,7 +253,7 @@ export class Coordinator {
     );
   }
 
-  // w in Merging: start it, or have it look now.
+  // Wake it or Start it now in Merging: start it, or have it look now.
   now(): Promise<void> {
     if (this.flushing) return this.flushing; // a second w while one runs would wake it twice
     this.asked = true;

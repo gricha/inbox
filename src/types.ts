@@ -461,8 +461,8 @@ export interface Card {
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
-  cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft (a a), Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
-  actions?: GitHubAction[]; // the GitHub writes its More menu (.) offers, as the desk allows them now; absent when none
+  cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft, Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
+  actions?: GitHubAction[]; // the GitHub writes its More menu offers, as the desk allows them now; absent when none
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
@@ -512,8 +512,8 @@ export interface Stack {
   line: StackMember[]; // bottom first, through the current PR; above a fork it takes the branch with open PRs, then the longest
   forks: StackMember[]; // the members on other branches of a fork, each with its parent; bottom first
   current: string; // the PR the view is about: the reviewed one, or the one card the queue lists for the stack
-  up: string | null; // the next open PR above the current one on the line (the review view's N)
-  down: string | null; // ...and below it (P)
+  up: string | null; // the next open PR above the current one on the line
+  down: string | null; // ...and below it
 }
 
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
@@ -779,7 +779,7 @@ export interface ActivityPage {
 }
 
 // ---------------------------------------------------------------------------
-// Merging: your own PRs you handed off (m), which the coordinator gets merged (GET /api/inflight).
+// Merging: your own PRs you handed off (Hand off for merge), which the coordinator gets merged (GET /api/inflight).
 
 export interface InflightRow {
   card: Card;
@@ -823,7 +823,7 @@ export interface CoordinatorView {
   queued: string[]; // your asks not handed over yet: it gets them once it's done with what it's on
 }
 
-// Your words to the coordinator from the desk's window (t), about what you were on, and its answer (desk_answer).
+// Your words to the coordinator from the desk's window (Ask your agent), about what you were on, and its answer (desk_answer).
 export interface Ask {
   id: string;
   at: string;

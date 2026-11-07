@@ -1597,7 +1597,7 @@ export class Desk {
     return { ok: true, reason: null };
   }
 
-  // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your keypress; `head` is the commit the view showed, so a newer push isn't approved unread.
+  // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your click; `head` is the commit the view showed, so a newer push isn't approved unread.
   async approve(ref: string, head: string, body?: string): Promise<{ url: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
@@ -1622,7 +1622,7 @@ export class Desk {
     return { url };
   }
 
-  // The More menu's GitHub writes this item allows now. A PR in Merging is the coordinator's: b brings it back first.
+  // The More menu's GitHub writes this item allows now. A PR in Merging is the coordinator's: Back to desk brings it back first.
   actions(e: Entry): GitHubAction[] {
     const it = e.item;
     const me = e.analysis.signals.me;
@@ -1642,7 +1642,7 @@ export class Desk {
     ];
   }
 
-  // POST /api/github: a More menu write, on your keypress in the desk's window. A change request needs `head`
+  // POST /api/github: a More menu write, on your click in the desk's window. A change request needs `head`
   // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
   async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
     this.requireConfig();
@@ -1696,7 +1696,7 @@ export class Desk {
 
   // ---------------------------------------------------------------- actions
 
-  // You acted on it in the desk, so your part is done: it leaves the desk at once, as d does, and comes back when someone
+  // You acted on it in the desk, so your part is done: it leaves the desk at once, as Done does, and comes back when someone
   // else acts. A PR in Merging stays the coordinator's.
   private doneAfterWrite(id: string): void {
     if (this.snapshot().entries.get(id)?.inflight) return;
@@ -1961,7 +1961,7 @@ export class Desk {
     };
   }
 
-  // POST /api/coordinator/wake: w in Merging has it look now (and starts it, if it isn't running).
+  // POST /api/coordinator/wake: Wake it (or Start it now) in Merging has it look now (and starts it, if it isn't running).
   // w, or Wake it under an ask it stopped without answering: that ask goes to it again, your words as you wrote them.
   async wakeCoordinator(askId?: string): Promise<void> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
@@ -2121,8 +2121,8 @@ export class Desk {
     return sig.me.author && sig.pr.unasked && sig.item.updated_hours >= UNASKED_AFTER;
   }
 
-  // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (a in its review), one of the desk's GitHub
-  // writes, on your keypress. Your part is done, so it leaves your desk until someone reviews.
+  // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (Ask reviewers in its review), one of the desk's
+  // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
   async askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Promise<void> {
     const e = this.pr(ref);
     const id = e.item.id;
@@ -2159,7 +2159,7 @@ export class Desk {
     if (!e) return null;
     const it = e.item;
     const me = this.me().toLowerCase();
-    // Only your own m puts a PR in Merging, a bot's opened for you included; elsewhere it's the real author, never a bot's via.
+    // Only your own hand-off puts a PR in Merging, a bot's opened for you included; elsewhere it's the real author, never a bot's via.
     const whose = it.kind === "issue" ? "issue" : e.inflight || (me && it.author.toLowerCase() === me) ? "mine" : "theirs";
     return { url: it.url, whose, merging: e.inflight, state: it.state };
   }
@@ -2228,7 +2228,7 @@ export class Desk {
     }
     this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
     this.changed();
-    // Like w: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
+    // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
     if (!started) {
       await told;
       if (!this.coordinator.saved()) {
@@ -2375,7 +2375,7 @@ export class Desk {
     return done;
   }
 
-  // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your keypress. One of the desk's GitHub writes.
+  // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your click. One of the desk's GitHub writes.
   async reply(ref: string, convoId: string, body: string): Promise<{ url: string }> {
     const e = this.pr(ref);
     const id = e.item.id;
@@ -2411,8 +2411,8 @@ export class Desk {
     return { url };
   }
 
-  // POST /api/review/:id/comment: your comment on the PR (w in its review) or the issue (w on it opened in place), on your
-  // keypress. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
+  // POST /api/review/:id/comment: your comment on the PR (Comment in its review) or the issue (Comment on it opened
+  // in place), on your click. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
   async comment(ref: string, body: string): Promise<{ url: string }> {
     this.requireConfig();
     const e = this.snapshot().entries.get(this.resolve(ref))!;
@@ -2477,7 +2477,7 @@ export class Desk {
     return { url };
   }
 
-  // POST /api/review/:id/ready: your own draft's "Ready for review" (a), one of the desk's GitHub writes, on your keypress,
+  // POST /api/review/:id/ready: your own draft's "Ready for review", one of the desk's GitHub writes, on your click,
   // then a review request to whoever you picked with it (node ids from reviewers()).
   async markReady(ref: string, ask?: { users: string[]; teams: string[] }): Promise<void> {
     const e = this.pr(ref);

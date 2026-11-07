@@ -399,7 +399,7 @@ export class Judge {
   pump(): void {
     const desk = this.desk;
     if (this.offReason()) {
-      // Like the AI review's i: turning it off and on (after `claude auth login`, say) tries again now.
+      // Like the AI review's Try again: turning it off and on (after `claude auth login`, say) tries again now.
       this.retry();
       return;
     }
