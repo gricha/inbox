@@ -328,6 +328,32 @@ test("from a checkout the desk's own address serves the app's Vite UI, the API s
   assert.match(await down.text(), /http-equiv="refresh"/, "the page tries again while Vite starts");
 });
 
+test("from a checkout a path under /api or /health that the desk doesn't route is its own 404, not a loop through Vite", async (c) => {
+  // Vite's proxy sends these prefixes back to the desk, as this stand-in does with everything (a few times at most).
+  let asked = 0;
+  let desk = "";
+  const up = http.createServer((req, res) => {
+    asked++;
+    if (asked > 5) res.writeHead(508).end();
+    else void fetch(`${desk}${req.url}`).then(async (r) => res.writeHead(r.status).end(await r.text()));
+  });
+  up.listen(0, "127.0.0.1");
+  await once(up, "listening");
+  c.after(() => {
+    up.closeAllConnections();
+    up.close();
+  });
+  withUiOrigin(c, `http://127.0.0.1:${(up.address() as AddressInfo).port}`);
+  const t = await setup();
+  c.after(t.cleanup);
+  const srv = serve({ fetch: createApp(t.desk, 47823).fetch, port: 0, hostname: "127.0.0.1" });
+  await once(srv, "listening");
+  c.after(() => srv.close());
+  desk = `http://localhost:${(srv.address() as AddressInfo).port}`;
+  for (const p of ["/apix", "/api-docs", "/health/", "/healthz"]) assert.equal((await fetch(`${desk}${p}`)).status, 404, p);
+  assert.equal(asked, 0, "none went to Vite");
+});
+
 // The app's own Vite server, from web/vite.config.ts, on a free port.
 async function realVite(c: { after(fn: () => unknown): void }) {
   const prev = process.env.DESK_API;

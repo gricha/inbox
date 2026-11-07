@@ -64,6 +64,8 @@ async function fromUi(req: Request, ui: string): Promise<Response> {
   if ((site === "cross-site" || site === "same-site") && req.headers.get("sec-fetch-mode") !== "navigate")
     throw new DeskError(403, "forbidden cross-site request");
   const { pathname, search } = new URL(req.url);
+  // Vite's proxy sends these prefixes back to the desk, so one the desk doesn't route would go round forever.
+  if (pathname.startsWith("/api") || pathname.startsWith("/health")) throw new DeskError(404, "not found");
   const headers = new Headers(req.headers);
   for (const h of HOP) headers.delete(h);
   let res: Response;
