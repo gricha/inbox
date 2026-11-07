@@ -1067,6 +1067,18 @@ kbd {
   text-overflow: ellipsis;
 }
 
+/* On Blocked the why is the row's point: the title gives way first, and a long why wraps rather than lose what it waits on. */
+.blocked-row .line-title {
+  flex-shrink: 10000;
+  min-width: calc-size(max-content, min(size, 30%, 16ch));
+}
+
+.blocked-row .line-note {
+  flex: 0 1 auto;
+  min-width: calc-size(max-content, min(size, 40%));
+  white-space: normal;
+}
+
 /* One width for every age, so the calls to action before it end in one column. */
 .line-age {
   flex: none;

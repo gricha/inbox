@@ -70,6 +70,7 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
         open && "open",
         ctx.leaving.has(card.id) && "leaving",
         variant !== "active" && variant !== "blocked" && "dim",
+        variant === "blocked" && "blocked-row",
       )}
       data-id={card.id}
     >
