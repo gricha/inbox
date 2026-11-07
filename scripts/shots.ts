@@ -581,10 +581,11 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await review("acme/api#4099")(page);
       const ai = page.locator(".rv-ai");
-      if (!(await ai.locator(".rv-ai-lead").allInnerTexts()).join("").includes("on an earlier commit"))
+      if (!(await ai.locator('.rv-ai-lead[aria-expanded="false"]').count()))
+        failures.push("review-ai-since: the AI review doesn't open folded");
+      if (!(await ai.locator(".rv-verdict").allInnerTexts()).join("").includes("on an earlier commit"))
         failures.push("review-ai-since: the verdict isn't marked on an earlier commit");
-      if (!(await ai.locator(".rv-since").allInnerTexts()).join("").startsWith("Since your review:"))
-        failures.push("review-ai-since: no since line while folded");
+      if (!(await ai.allInnerTexts()).join("").includes("Since your review:")) failures.push("review-ai-since: no since line while folded");
       if ((await ai.locator(".rv-since code, .rv-concerns code").count()) < 2)
         failures.push("review-ai-since: since or a concern shows code raw");
       if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-since: a backtick shows");
