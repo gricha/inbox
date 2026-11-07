@@ -20,6 +20,7 @@ import {
   isHttpsUrl,
   isHttpUrl,
   isTheme,
+  loginShellPath,
   menuLabel,
   mergePath,
   parseNotice,
@@ -43,6 +44,22 @@ test("parseShellPath ignores rc-file noise around the markers", () => {
   assert.equal(parseShellPath("no markers"), null);
   assert.equal(parseShellPath("__DESK_PATH__\n__DESK_PATH__"), null);
   assert.match(SHELL_PATH_COMMAND, /printenv PATH/);
+});
+
+test("loginShellPath tries the login shell once more, for longer, before giving up on it", async () => {
+  const tries: number[] = [];
+  const shell = (outs: string[]) => (timeoutMs: number) => {
+    tries.push(timeoutMs);
+    return Promise.resolve(outs[tries.length - 1] ?? "");
+  };
+  assert.equal(await loginShellPath(shell(["", "__DESK_PATH__/opt/homebrew/bin:/usr/bin\n__DESK_PATH__"])), "/opt/homebrew/bin:/usr/bin");
+  assert.deepEqual(tries, [5000, 20_000], "a slow first shell after a boot gets a second, longer try");
+  tries.length = 0;
+  assert.equal(await loginShellPath(shell(["__DESK_PATH__/usr/bin__DESK_PATH__"])), "/usr/bin");
+  assert.deepEqual(tries, [5000]);
+  tries.length = 0;
+  assert.equal(await loginShellPath(shell(["noise", "noise"])), null);
+  assert.equal(tries.length, 2);
 });
 
 test("mergePath keeps order and drops repeats and empties", () => {

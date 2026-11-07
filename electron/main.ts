@@ -38,10 +38,10 @@ import {
   isHttpsUrl,
   isHttpUrl,
   isTheme,
+  loginShellPath,
   menuLabel,
   mergePath,
   parseNotice,
-  parseShellPath,
   parseSSE,
   probeHealth,
   restoreBounds,
@@ -202,12 +202,15 @@ async function loadUi(): Promise<void> {
 async function fixPath(): Promise<void> {
   if (process.platform === "win32") return;
   const sh = envVar("SHELL") ?? (mac ? "/bin/zsh" : "/bin/bash");
-  const out = await new Promise<string>((resolve) => {
-    execFile(sh, ["-ilc", SHELL_PATH_COMMAND], { timeout: 5000, encoding: "utf8" }, (_e, stdout) => {
-      resolve(stdout ?? "");
-    });
-  });
-  const fromShell = parseShellPath(out);
+  const fromShell = await loginShellPath(
+    (timeout) =>
+      new Promise<string>((resolve) => {
+        execFile(sh, ["-ilc", SHELL_PATH_COMMAND], { timeout, encoding: "utf8" }, (e, stdout) => {
+          if (e?.killed) log(`${sh} didn't print PATH within ${timeout / 1000}s`);
+          resolve(stdout ?? "");
+        });
+      }),
+  );
   process.env.PATH = mergePath(path.delimiter, fromShell ?? "", process.env.PATH ?? "", ...fallbackDirs(os.homedir()));
   if (!fromShell) log(`couldn't read PATH from ${sh}; added the usual dirs`);
 }

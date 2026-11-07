@@ -17,6 +17,15 @@ export function parseShellPath(out: string): string | null {
   return p === "" ? null : p;
 }
 
+// The first login shell after a boot can be slow (nvm, a cold disk), so it gets a second, longer try.
+export async function loginShellPath(run: (timeoutMs: number) => Promise<string>, timeouts = [5000, 20_000]): Promise<string | null> {
+  for (const timeoutMs of timeouts) {
+    const p = parseShellPath(await run(timeoutMs));
+    if (p) return p;
+  }
+  return null;
+}
+
 export interface Disk {
   isDir(p: string): boolean;
   read(p: string): string | null;
