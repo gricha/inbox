@@ -92,7 +92,7 @@ test("a draft isn't handed off: Ready for review is yours, so it would wait on y
   await t.desk.sync();
   assert.throws(
     () => t.desk.act("web#3", "inflight"),
-    (e: Error & { status: number }) => e.status === 409 && e.message.includes("mark it ready for review first (a)"),
+    (e: Error & { status: number }) => e.status === 409 && e.message.endsWith("mark it ready for review first"),
   );
   assert.equal(t.desk.inflight().rows.length, 0);
 });
@@ -134,7 +134,7 @@ test("in Merging, the coordinator owns it: done, snooze and mute are refused, an
   for (const action of ["done", "snooze", "mute"] as const)
     assert.throws(
       () => t.desk.act("web#3", action),
-      (e: Error & { status: number }) => e.status === 409 && e.message.includes("back to the desk (b)"),
+      (e: Error & { status: number }) => e.status === 409 && e.message.endsWith("bring it back to the desk first"),
     );
   // Undoing the hand-off brings back the mute.
   t.desk.undo(marked.undo_seq);

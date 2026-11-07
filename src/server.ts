@@ -223,7 +223,7 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   app.post("/api/review/:id{.+}/approve", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk (a)");
+    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk");
     const { head_oid, body } = await input(c);
     if (typeof head_oid !== "string" || !head_oid) throw new DeskError(400, "need { head_oid }: the commit you reviewed");
     if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
@@ -270,21 +270,21 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your own draft's Ready for review, from the desk's own window only.
   app.post("/api/review/:id{.+}/ready", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window (a)");
+    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window");
     await desk.markReady(c.req.param("id"), await reviewerIds(c));
     return c.json({ ok: true });
   });
   // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.
   app.post("/api/review/:id{.+}/reviewers", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "ask reviewers from the desk's window (a in the PR's review)");
+    if (!fromDesk(c)) throw new DeskError(403, "ask reviewers from the PR's review in the desk's window");
     await desk.askReviewers(c.req.param("id"), await reviewerIds(c));
     return c.json({ ok: true });
   });
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
   app.post("/api/github", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window (.)");
+    if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window");
     const b = await input(c);
     if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) throw new DeskError(400, "need { id, action }");
     if (b.head_oid !== undefined && typeof b.head_oid !== "string") throw new DeskError(400, "head_oid must be a string");
@@ -324,7 +324,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your words to the coordinator, from the desk's own window only: it's woken with them at once.
   app.post("/api/ask", async (c) => {
     ready();
-    if (!fromDesk(c)) throw new DeskError(403, "ask your agent from the desk's window (t)");
+    if (!fromDesk(c)) throw new DeskError(403, "ask your agent from the desk's window");
     const b = await input(c);
     if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
     let lines: AskLines | undefined;

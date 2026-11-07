@@ -59,8 +59,8 @@ export const SECTIONS: SettingsSection[] = [
   },
   {
     id: "handoff",
-    title: "Hand-off prompts",
-    help: "Pressing c on an item copies one of these, ready to paste into a Claude session. Fields like {item.url}, {item.number}, {item.repo} and {item.author} are filled in. Keep PR titles out: they are untrusted text.",
+    title: "Prompts for a Claude session",
+    help: "What desk prompt <ref> prints for an item, and what an agent's desk_item gives it, ready to paste into a Claude session. Fields like {item.url}, {item.number}, {item.repo} and {item.author} are filled in. Keep PR titles out: they are untrusted text.",
   },
 ];
 
@@ -135,7 +135,7 @@ export const SETTINGS = [
     label: "Your agent",
     type: "boolean",
     default: true,
-    help: "A background Claude Code session (\"Review Desk coordinator\" on claude.ai) that answers what you ask it from the desk (t, or Ask your agent in a PR's review) and gets the PRs you hand off merged. The desk starts it on your first hand-off or ask, keeps it running and wakes it with your asks and with news on PRs in Merging. Off: it's stopped, nothing wakes it, and the window shows no Ask your agent.",
+    help: "A background Claude Code session (\"Review Desk coordinator\" on claude.ai) that answers what you ask it from the desk (Ask your agent, in the top bar or a PR's review) and gets the PRs you hand off merged. The desk starts it on your first hand-off or ask, keeps it running and wakes it with your asks and with news on PRs in Merging. Off: it's stopped, nothing wakes it, and the window shows no Ask your agent.",
   },
   {
     key: "agent.coordinator_bypass",
@@ -209,7 +209,7 @@ export const SETTINGS = [
     label: "Review PRs in the queue ahead of time",
     type: "boolean",
     default: true,
-    help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: press i in a review to ask for one.",
+    help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: a PR's review offers Ask Claude for one.",
   },
   { key: "handoff.prompt", section: "handoff", label: "Someone else's PR", type: "text", default: DEFAULT_PROMPT, required: true },
   { key: "handoff.mine", section: "handoff", label: "Your PR", type: "text", default: DEFAULT_MINE, required: true },

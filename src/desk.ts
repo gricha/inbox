@@ -1712,14 +1712,14 @@ export class Desk {
       return { state: this.undo(ev.seq, agent).state, undo_seq: 0 };
     }
     // The coordinator merges what's in Merging, so only you put a PR there.
-    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off with m in the desk");
+    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off for merge from the desk's window");
     const now = this.now();
     const before = this.store.state(id);
     const s: StateRow = { ...before };
     const entry = this.snapshot().entries.get(id)!;
     // The coordinator keeps working on it whatever its status, so it comes back to the desk first.
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
-      throw new DeskError(409, `${id} is in Merging, so your agent has it; bring it back to the desk (b) first`);
+      throw new DeskError(409, `${id} is in Merging, so your agent has it; bring it back to the desk first`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
     const seen = entry.activityAt;
     switch (action) {
@@ -1786,9 +1786,9 @@ export class Desk {
           throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
         if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
         // Ready for review is yours, so a draft in Merging would wait on you there.
-        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first (a)`);
+        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first`);
         // Nobody would review it, so the coordinator would wait on nothing.
-        if (entry.analysis.signals.pr.unasked) throw new DeskError(409, `nobody's asked to review ${id}: add reviewers first (a)`);
+        if (entry.analysis.signals.pr.unasked) throw new DeskError(409, `nobody's asked to review ${id}: add reviewers first`);
         s.inflight_at = now.toISOString();
         // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
         Object.assign(s, ACTIVE);
