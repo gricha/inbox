@@ -396,11 +396,11 @@ test("a hard blocked rule: Claude may lift it, never below Blocked", () => {
   assert.deepEqual([at("today"), at("later")], ["today", "blocked"]);
 });
 
-test("your pin lifts a final blocked rule to today, keeping the rule's why", () => {
+test("your pin lifts a final blocked rule to today, keeping the rule's why, and the card says your pin placed it", () => {
   const { board: b } = compileBoard(board({ rules: [{ when: "true", bucket: "blocked", why: "blocked by api#9", final: true }] }), "x");
   const p = classify(b, [entry(makeItem(), { pinned: true, floor: "today" })], () => ({ bucket: "fyi", why: "", pending: false }));
   const got = p.placements.get("acme/api#1")!;
-  assert.deepEqual([got.bucket, got.why, got.judge], ["today", "blocked by api#9", undefined]);
+  assert.deepEqual([got.bucket, got.why, got.judge, placedBy(got)], ["today", "blocked by api#9", undefined, "pin"]);
 });
 
 test("blocked isn't capped or made quiet", () => {

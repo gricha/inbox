@@ -86,9 +86,10 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
       ...(hard && { hard: true }),
       ...(floor && { floor }),
     };
-    if (!judge || final) return p; // a final rule: Claude doesn't re-sort it
-    const j = judge(e.id);
+    if (!judge) return p;
     const hint = { bucket: ruled, why: p.why };
+    if (final) return { ...p, hint }; // a final rule: Claude doesn't re-sort it
+    const j = judge(e.id);
     if (j.bucket === null) return { ...p, judge: j, hint };
     const to = atLeast(j.bucket, floor);
     const own = to === j.bucket && j.why.trim() ? j.why : (lifted(j.bucket, to) ?? p.why);
@@ -110,7 +111,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
 export function placedBy(p: Placement): Card["placed_by"] {
   if (p.judge?.bucket && p.judge.bucket === p.rule_bucket) return "claude";
   if (p.hard) return "hard";
-  if (p.floor && p.judge && p.rule_bucket !== (p.judge.bucket ?? p.hint?.bucket)) return "pin";
+  if (p.floor && p.hint && p.rule_bucket !== (p.judge?.bucket ?? p.hint.bucket)) return "pin";
   if (!p.judge) return undefined;
   return p.judge.pending ? "pending" : "unanswered";
 }

@@ -377,7 +377,7 @@ export interface Placement {
   hard?: boolean; // a hard rule matched it
   floor?: Bucket; // ...or you pinned it, so it never sorts below this, whatever Claude, quiet days or caps say
   judge?: JudgeStep; // set while the judge is on
-  hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers
+  hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers (for good on a final rule)
 }
 
 // The policy judge's step in a placement.
