@@ -236,18 +236,20 @@ function executable(p: string): boolean {
   }
 }
 
-export type DeskPlan = { run: "source"; node: string } | { run: "wait"; problem: string } | { run: "in-process"; problem?: string };
+export type DeskPlan =
+  { run: "source"; node: string } | { run: "wait"; need: "checkout" | "modules" | "node"; problem: string } | { run: "in-process" };
 
-// A chosen checkout waits for what it lacks rather than fall back to the app's own desk, which may be too old for today's config.
+// A chosen folder waits for what it lacks, even being a checkout, rather than fall back to the app's own desk, which may be too old for today's config.
 export function deskPlan(dir: string, node: string | null, exists: (p: string) => boolean = fs.existsSync): DeskPlan {
   if (!dir) return { run: "in-process" };
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
-    return { run: "in-process", problem: `${dir} isn't a Review Desk checkout` };
+    return { run: "wait", need: "checkout", problem: `${dir} isn't a Review Desk checkout` };
   if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js")))
-    return { run: "wait", problem: `${dir} has no node_modules yet; run npm install there` };
+    return { run: "wait", need: "modules", problem: `${dir} has no node_modules yet; run npm install there` };
   if (!node)
     return {
       run: "wait",
+      need: "node",
       problem: "Couldn't find node on your login shell's PATH or where nvm, Volta, mise, asdf or fnm keep it; install Node 22.18 or newer",
     };
   return { run: "source", node };

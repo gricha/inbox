@@ -238,25 +238,27 @@ test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => 
 });
 
 test("deskPlan: a chosen checkout runs from source or waits for what it lacks, never the app's own desk", () => {
-  const problem = (p: DeskPlan) => (p.run === "source" ? "" : (p.problem ?? ""));
+  const waits = (p: DeskPlan) => (p.run === "wait" ? `${p.need}: ${p.problem}` : p.run);
   assert.deepEqual(deskPlan("", null), { run: "in-process" }, "no checkout chosen: the app's own desk, as before");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
   try {
-    const notCheckout = deskPlan(dir, "/bin/node");
-    assert.equal(notCheckout.run, "in-process", "a wrong folder can still be fixed in Settings");
-    assert.match(problem(notCheckout), /isn't a Review Desk checkout/);
+    assert.match(
+      waits(deskPlan(dir, "/bin/node")),
+      /^checkout: .* isn't a Review Desk checkout/,
+      "a wrong folder waits too, never the app's own desk",
+    );
     for (const f of ["src/cli.ts", "web/vite.config.ts"]) {
       fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
       fs.writeFileSync(path.join(dir, f), "");
     }
-    const noModules = deskPlan(dir, "/bin/node");
-    assert.equal(noModules.run, "wait");
-    assert.match(problem(noModules), /run npm install there/);
+    assert.match(waits(deskPlan(dir, "/bin/node")), /^modules: .*run npm install there/);
     fs.mkdirSync(path.join(dir, "node_modules/vite/bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, "node_modules/vite/bin/vite.js"), "");
-    const noNode = deskPlan(dir, null);
-    assert.equal(noNode.run, "wait", "without node it waits for node; an older bundled desk can't read today's config");
-    assert.match(problem(noNode), /Couldn't find node .*Node 22\.18/);
+    assert.match(
+      waits(deskPlan(dir, null)),
+      /^node: Couldn't find node .*Node 22\.18/,
+      "without node it waits for node; an older bundled desk can't read today's config",
+    );
     assert.deepEqual(deskPlan(dir, "/bin/node"), { run: "source", node: "/bin/node" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

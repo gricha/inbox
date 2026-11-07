@@ -173,7 +173,6 @@ async function main(): Promise<void> {
   createWindow();
   await pathReady;
   planDesk();
-  if (plan.run === "in-process" && plan.problem) log(`not running from a checkout: ${plan.problem}`);
   await reap(home, log);
   if (!(await connect())) return;
   // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
@@ -217,6 +216,14 @@ function planDesk(): void {
   fromSource = plan.run === "in-process" ? "" : sourceWanted;
 }
 
+// What the window says while the chosen folder can't run the desk yet.
+function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
+  if (p.need !== "checkout")
+    return `${p.problem}. The desk starts from ${fromSource} once that's fixed; the app looks again every 15 seconds.`;
+  if (envSource !== undefined) return `${p.problem}. Point DESK_SOURCE at a Review Desk clone, or unset it, and start the app again.`;
+  return `${p.problem}. Point app.source in ${settingsPath(home)} at a Review Desk clone, or clear it to run the app's own desk; the app restarts when you save it.`;
+}
+
 // Attach to the desk on the port, or start one here. False when the user chose Quit.
 async function connect(): Promise<boolean> {
   let waitingOn = "";
@@ -239,12 +246,11 @@ async function connect(): Promise<boolean> {
       if (plan.problem !== waitingOn) {
         waitingOn = plan.problem;
         log(`waiting to run the desk from ${fromSource}: ${plan.problem}`);
-        void win?.loadURL(
-          startPage(`${plan.problem}. The desk starts from ${fromSource} once that's fixed; the app looks again every 15 seconds.`),
-        );
+        void win?.loadURL(startPage(waitText(plan)));
       }
       await sleep(15_000);
-      if (quitting) return false;
+      checkSource(); // with no desk there's no Settings page: settings.json is where the folder gets fixed
+      if (quitting || relaunching) return false;
       await fixPath();
       planDesk();
       continue;
@@ -314,7 +320,7 @@ async function watch(): Promise<void> {
 
 function sourceStatus(): SourceStatus | null {
   if (!sourceWanted) return null;
-  if (plan.run !== "source" && plan.problem) return { dir: sourceWanted, state: "invalid", detail: plan.problem };
+  if (plan.run === "wait") return { dir: sourceWanted, state: "invalid", detail: plan.problem };
   return source?.status() ?? { dir: sourceWanted, state: "attached" };
 }
 
