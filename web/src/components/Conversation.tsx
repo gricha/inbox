@@ -3,6 +3,7 @@ import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, message } from "../api.ts";
 import { age, MOD } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
+import { Words } from "./Prose.tsx";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
 // What an ask to your agent is about: "dana's thread on src/auth.ts:42".
@@ -93,14 +94,16 @@ export function Conversation({
               <span>{where(c)}</span>
               <span>{age(last.at, now)}</span>
             </p>
-            <p className="cv-gist">{c.take?.gist ?? firstLine(last.body)}</p>
+            <p className="cv-gist">
+              <Words text={c.take?.gist ?? firstLine(last.body)} />
+            </p>
             {c.take && (
               <p className="cv-take">
                 {why === undefined ? (
-                  call
+                  <Words text={call} />
                 ) : (
                   <>
-                    <b>{call}:</b> {why}
+                    <b>{call}:</b> <Words text={why} />
                   </>
                 )}
               </p>
@@ -192,7 +195,9 @@ export function Conversation({
                 <span className="cv-author">{first.author}</span>
                 <span>{where(c)}</span>
                 {c.resolved && <span>resolved</span>}
-                <span className="cv-line">{firstLine(last.body)}</span>
+                <span className="cv-line">
+                  <Words text={firstLine(last.body)} />
+                </span>
               </summary>
               <Said c={c} now={now} />
             </details>
@@ -202,7 +207,7 @@ export function Conversation({
   );
 }
 
-// The original words: plain text, as GitHub has them.
+// The original words as GitHub has them, code as code.
 function Said({ c, label, now }: { c: Convo; label?: string; now: number }) {
   const body = (
     <ol className="cv-comments">
@@ -212,7 +217,9 @@ function Said({ c, label, now }: { c: Convo; label?: string; now: number }) {
             <span className="cv-author">{x.author}</span>
             <span>{age(x.at, now)}</span>
           </p>
-          <p className="cv-body">{x.body.trim()}</p>
+          <p className="cv-body">
+            <Words text={x.body.trim()} />
+          </p>
         </li>
       ))}
     </ol>

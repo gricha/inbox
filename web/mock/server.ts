@@ -1314,12 +1314,12 @@ const TALK = new Map<string, Conversation[]>([
             "c1",
             "azulus",
             5,
-            "Tombstones never go away here. On a long-lived notebook this list grows forever, and every sync ships all of it.\n\nIs there a plan to compact them, or should merge() drop the ones older than the last full sync?",
+            "Tombstones never go away here. On a long-lived notebook this list grows forever, and every sync ships all of it.\n\nIs there a plan to compact them, or should `merge()` drop the ones older than the last full sync?",
           ),
         ],
         take: {
           gist: "Tombstones are never compacted, so every sync ships all of them",
-          take: "Valid concern: nothing in this PR or on main prunes the tombstone list, and syncTombstones() sends it whole on every pull.",
+          take: "Valid concern: nothing in this PR or on main prunes the tombstone list, and `syncTombstones()` sends it whole on every pull.",
           reply:
             "Good catch: nothing prunes them yet. I'll have merge() drop tombstones older than the oldest device's last full sync, in this PR, with a test that a week-old delete doesn't come back.",
           comment_id: "c1",
@@ -1345,7 +1345,7 @@ const TALK = new Map<string, Conversation[]>([
         line: 14,
         resolved: true,
         comments: [
-          said("c2", "kai", 6, "Nit: lamport() reads oddly next to tick(); maybe nextClock()?"),
+          said("c2", "kai", 6, "Nit: `lamport()` reads oddly next to `tick()`; maybe `nextClock()`?"),
           said("c3", ME, 5.5, "Renamed in 3e1f0a2."),
         ],
       }),
@@ -1380,7 +1380,7 @@ const TALK = new Map<string, Conversation[]>([
             6,
             "A slow scan stops here with most rows missing. Should the response say how many it dropped, so the UI can tell people?",
           ),
-          said("pc2", "dana", 5, "+1, a count is cheap: the stream knows how far it got."),
+          said("pc2", "dana", 5, "+1, a count is cheap: `streamRows` knows how far it got."),
         ],
       }),
     ],

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blocks, fencedCopy, inline, lead, unlinked, type Block, type Span } from "../src/prose.ts";
+import { blocks, fencedCopy, inline, lead, textLines, unlinked, type Block, type Span } from "../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });
@@ -159,5 +159,20 @@ test("unlinked: a URL in an AI review is drawn as its text, a markdown link's la
     t("), "),
     c("c"),
     t("."),
+  ]);
+});
+
+test("textLines: a reviewer's lines keep their indents, a fence and its lines stay as typed, code outside reads as code", () => {
+  assert.deepEqual(textLines('Traceback:\n    File "a.py", line 3\n      x = `y`'), [
+    [t("Traceback:")],
+    [t('    File "a.py", line 3')],
+    [t("      x = "), c("y")],
+  ]);
+  assert.deepEqual(textLines("Use `x`:\n```suggestion\nconst a = `b`;\n```\n# install"), [
+    [t("Use "), c("x"), t(":")],
+    [t("```suggestion")],
+    [t("const a = `b`;")],
+    [t("```")],
+    [t("# install")],
   ]);
 });

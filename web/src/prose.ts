@@ -208,3 +208,13 @@ export function lead(bs: Block[]): { first: Span[]; rest: Block[] } {
 export function unlinked(ss: Span[]): Span[] {
   return ss.map((s): Span => (s.t === "link" ? { t: "text", text: s.url, bold: s.bold } : s));
 }
+
+// A reviewer's words line by line as GitHub has them: `code` as code, but a ``` fence and the lines inside it left as typed.
+export function textLines(text: string): Span[][] {
+  let fenced = false;
+  return text.split("\n").map((line) => {
+    const fence = /^ {0,3}```/.test(line);
+    if (fence) fenced = !fenced;
+    return fence || fenced ? [{ t: "text", text: line, bold: false }] : inline(line);
+  });
+}

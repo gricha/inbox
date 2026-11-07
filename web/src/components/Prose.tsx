@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { copyText } from "../format.ts";
-import { blocks, fencedCopy, unlinked, type Block, type Span } from "../prose.ts";
+import { blocks, fencedCopy, textLines, unlinked, type Block, type Span } from "../prose.ts";
 
 // An agent's words drawn from web/src/prose.ts: React elements only, never HTML, never an image.
 export function Prose({ text }: { text: string }) {
@@ -18,6 +18,17 @@ export function ProseBlocks({ bs, links = true }: { bs: Block[]; links?: boolean
       ))}
     </div>
   );
+}
+
+// What a reviewer wrote, or Claude's read of it: code as code, a URL as text, never HTML; the box's pre-wrap keeps lines and indents.
+export function Words({ text }: { text: string }) {
+  return textLines(text).map((l, i) => (
+    // oxlint-disable-next-line react/no-array-index-key -- a fixed split never reorders
+    <Fragment key={i}>
+      {i > 0 && "\n"}
+      {spans(unlinked(l))}
+    </Fragment>
+  ));
 }
 
 function block(b: Block, links: boolean): ReactNode {

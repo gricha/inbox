@@ -59,7 +59,7 @@ import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
-import { ProseBlocks, spans } from "./Prose.tsx";
+import { ProseBlocks, spans, Words } from "./Prose.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -1745,7 +1745,9 @@ function ThreadNote({
         <div key={c.id} className="rv-tc">
           <span className="rv-tc-who">{c.author}</span>
           <span className="rv-tc-at">{age(c.at, now)}</span>
-          <div className="rv-tc-body">{c.body}</div>
+          <div className="rv-tc-body">
+            <Words text={c.body} />
+          </div>
         </div>
       ))}
       {sent.map((s) => (
@@ -1779,7 +1781,8 @@ function ThreadNote({
       }}
     >
       <summary>
-        Resolved · {convo.comments[0]?.author}: {convo.comments[0]?.body.split("\n")[0]}
+        {"Resolved \u00b7 "}
+        {convo.comments[0]?.author}: <Words text={convo.comments[0]?.body.split("\n")[0] ?? ""} />
       </summary>
       {body}
     </details>
@@ -1800,7 +1803,9 @@ function Yours({ body, url }: { body: string; url: string }) {
           "sent"
         )}
       </span>
-      <div className="rv-tc-body">{body}</div>
+      <div className="rv-tc-body">
+        <Words text={body} />
+      </div>
     </div>
   );
 }

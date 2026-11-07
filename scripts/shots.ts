@@ -691,6 +691,7 @@ const SHOTS: Shot[] = [
       // Only its GitHub send is a shape: Cancel and Ask your agent are text.
       const filled = await page.locator(".rv-inline .act.primary").count();
       if (filled !== 1) failures.push(`review-inline: ${filled} filled buttons in the box, not 1`);
+      if (!(await page.locator(".rv-tc-body code").count())) failures.push("review-inline: a code name in the thread above isn't code");
       if (!(await page.locator(".rv-inline button", { hasText: "Ask your agent" }).count()))
         failures.push("review-inline: the box has no Ask your agent");
     },
@@ -776,6 +777,11 @@ const SHOTS: Shot[] = [
       await page.locator(".rv-convo .rv-more").click();
       await page.locator(".cv-said").first().locator("summary").click();
       await page.waitForTimeout(200);
+      // Claude's read, what azulus wrote and the folded lines set code names as code.
+      const convo = page.locator(".rv-convo");
+      if ((await convo.locator(".cv-take code, .cv-body code, .cv-line code").count()) < 3)
+        failures.push("review-conversation: a code name in the conversation isn't code");
+      if ((await convo.allInnerTexts()).join("").includes("`")) failures.push("review-conversation: a backtick shows");
     },
   },
   {
