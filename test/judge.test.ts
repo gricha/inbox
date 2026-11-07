@@ -968,7 +968,10 @@ test(
     await t.sync();
     assert.equal(fs.readFileSync(path.join(t.home, "config.toml.bak"), "utf8"), old);
     assert.deepEqual(
-      t.desk.getConfig().hard.map((h) => [h.board, h.why]),
+      t.desk
+        .getConfig()
+        .hard.filter((h) => !h.final)
+        .map((h) => [h.board, h.why]),
       [
         ["PRs to review (acme)", "someone asked you directly"],
         ["PRs to review (acme)", "asked you by name (added by someone)"],
@@ -982,6 +985,9 @@ test(
     t.desk.stop();
     fs.writeFileSync(path.join(t.home, "config.toml"), old);
     const again = await setup(c, [direct], { home: t.home });
-    assert.deepEqual(again.desk.getConfig().hard, []);
+    assert.deepEqual(
+      again.desk.getConfig().hard.filter((h) => !h.final),
+      [],
+    );
   },
 );

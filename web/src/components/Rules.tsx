@@ -294,11 +294,11 @@ export function Rules({
           )}
 
           <section className="side-block">
-            <h3 className="s-sub">Hard rules</h3>
+            <h3 className="s-sub">Hard and final rules</h3>
             {hard.length ? (
               <p className="small">
-                What they match stays at least in their bucket (<code>today</code> for a <code>now</code> rule), whatever Claude, quiet days
-                or caps say.
+                What a hard rule matches stays at least in its bucket (<code>today</code> for a <code>now</code> rule), whatever Claude,
+                quiet days or caps say. A final rule places what it matches itself: Claude doesn't re-sort it.
               </p>
             ) : (
               <p className="small">
@@ -313,6 +313,7 @@ export function Rules({
                     <span>
                       {h.board} → {BUCKET_LABEL[h.bucket]}
                       {h.why && `: ${h.why}`}
+                      {h.final && <span className="quiet"> (final)</span>}
                     </span>
                     <code>{h.when}</code>
                   </li>

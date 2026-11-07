@@ -896,7 +896,7 @@ export interface ConfigDoc {
   hash: string; // PUT /api/config takes it (or the whole text) as `base`
   errors: ConfigError[];
   warnings?: ConfigError[]; // leftover pre-settings keys: ignored, not fatal
-  hard: { board: string; bucket: Bucket; when: string; why: string }[]; // the loaded config's hard rules, for the Rules page
+  hard: { board: string; bucket: Bucket; when: string; why: string; final?: boolean }[]; // the loaded config's hard and final rules, for the Rules page
 }
 
 export interface PreviewResult {

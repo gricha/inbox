@@ -64,7 +64,7 @@ import type {
 import { byPart, RANK, UNTIL } from "./types.ts";
 import { report, webSentry } from "./sentry.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
-import { analyze, FIELDS, happened, waitable, type Analysis } from "./signals.ts";
+import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
@@ -2472,7 +2472,7 @@ export class Desk {
 
   // ---------------------------------------------------------------- config
 
-  // The hard rules in plain words: a board named in two spaces says which, and a why's fields read as "someone" or "some".
+  // The hard and final rules in plain words (plainWhy): a board named in two spaces says which.
   getConfig(): ConfigDoc {
     const text = this.configText;
     const cfg = this.loaded?.config;
@@ -2481,14 +2481,11 @@ export class Desk {
       boards.filter((x) => x.name === b.name).length > 1
         ? `${b.name} (${cfg!.spaces.find((x) => x.id === b.space)?.name ?? b.space})`
         : b.name;
-    const plain = (why: string) =>
-      why.replaceAll(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, field: string) => {
-        const type = FIELDS.find((f) => f.path === field)?.type;
-        return type === "number" ? "some" : type === "string" ? "someone" : whole;
-      });
     const hard = boards.flatMap((b) =>
       b.rules.flatMap((r) =>
-        r.hard && r.bucket !== "judge" ? [{ board: label(b), bucket: r.bucket, when: r.when, why: plain(r.why ?? "") }] : [],
+        (r.hard || r.final) && r.bucket !== "judge"
+          ? [{ board: label(b), bucket: r.bucket, when: r.when, why: plainWhy(r.why ?? ""), ...(r.final && { final: true }) }]
+          : [],
       ),
     );
     return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings, hard };

@@ -131,6 +131,20 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
   t.cleanup();
 });
 
+test("the Rules page lists the final rules with the hard ones, in board order, their whys in plain words", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  const review = t.desk.getConfig().hard.filter((h) => h.board === "PRs to review (acme)");
+  assert.deepEqual(
+    review.map((h) => [h.bucket, h.why, !!h.final]),
+    [
+      ["blocked", "blocked by another PR, which waits on something", true],
+      ["now", "someone asked you directly", false],
+      ["today", "asked you by name (added by someone)", false],
+    ],
+  );
+});
+
 test("preview shows moves without saving; putConfig saves valid text only", async () => {
   const t = await setup([reviewAsk(1), teamPing(2)]);
   await t.desk.sync();

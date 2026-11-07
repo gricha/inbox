@@ -134,6 +134,19 @@ export const botCheck = (listed: string[]) => {
   return (login: string, flagged = false) => flagged || set.has(lc(login)) || login.endsWith("[bot]");
 };
 
+// A why in plain words for the Rules page: a field reads as "someone" or "some", and the blocked rules' as what they stand for.
+const WORDS: Record<string, string> = {
+  "pr.blocker": "another PR",
+  "pr.blocker_waits": "waits on something",
+  "pr.waits": "waits on something",
+};
+export function plainWhy(why: string): string {
+  return why.replaceAll(/\{([a-z_]+(?:\.[a-z_0-9]+)+)\}/g, (whole, field: string) => {
+    const type = FIELDS.find((f) => f.path === field)?.type;
+    return WORDS[field] ?? (type === "number" ? "some" : type === "string" ? "someone" : whole);
+  });
+}
+
 export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analysis {
   const me = lc(ctx.me);
   const teams = new Set(ctx.teams.map(lc));

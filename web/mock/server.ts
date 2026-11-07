@@ -12,7 +12,7 @@ import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/revie
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
-import { FIELDS, waitable } from "../../src/signals.ts";
+import { FIELDS, plainWhy, waitable } from "../../src/signals.ts";
 import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import { canned } from "./diffs.ts";
@@ -3348,7 +3348,11 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/config") {
     const hard = config.boards.flatMap((b) =>
-      b.rules.flatMap((r) => (r.hard && r.bucket !== "judge" ? [{ board: b.name, bucket: r.bucket, when: r.when, why: r.why ?? "" }] : [])),
+      b.rules.flatMap((r) =>
+        (r.hard || r.final) && r.bucket !== "judge"
+          ? [{ board: b.name, bucket: r.bucket, when: r.when, why: plainWhy(r.why ?? ""), ...(r.final && { final: true }) }]
+          : [],
+      ),
     );
     return { path: `${homedir()}/.review-desk/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard };
   }
