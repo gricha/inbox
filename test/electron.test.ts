@@ -22,6 +22,7 @@ import {
   isHttpsUrl,
   isHttpUrl,
   isTheme,
+  keepsView,
   loginShellPath,
   menuLabel,
   mergePath,
@@ -347,6 +348,16 @@ test("URL checks", () => {
   assert.ok(
     !isGitHubUrl("http://github.com/x") && !isGitHubUrl("https://github.com.evil.example/x") && !isGitHubUrl("https://gist.github.com/x"),
   );
+});
+
+test("keepsView: after the desk comes back, only a window still on its UI reloads; the wait page loads the UI", () => {
+  const origins = ["http://localhost:47823", "http://127.0.0.1:47823"];
+  const waitPage = "data:text/html;charset=utf-8,%3Ctitle%3EReview%20Desk";
+  assert.equal(keepsView("http://localhost:47823/#/pr/o/r/1", origins, false), true, "attached again: the same view");
+  assert.equal(keepsView(waitPage, origins, false), false, "waited, then attached or started here: load the UI");
+  assert.equal(keepsView("chrome-error://chromewebdata/", origins, false), false);
+  assert.equal(keepsView("", origins, false), false);
+  assert.equal(keepsView("http://localhost:47823/", origins, true), false, "from source: the UI is on Vite now");
 });
 
 test("restoreBounds keeps saved bounds only when they're on a screen", () => {

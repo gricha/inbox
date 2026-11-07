@@ -336,6 +336,8 @@ const parse = (url: string): URL | null => {
 };
 
 export const isAppUrl = (url: string, origins: string[]): boolean => origins.includes(parse(url)?.origin ?? "");
+// After the desk comes back, a window still on its UI keeps its view; one on the start or wait page has none to keep.
+export const keepsView = (pageUrl: string, origins: string[], fromSource: boolean): boolean => !fromSource && isAppUrl(pageUrl, origins);
 export const isHttpUrl = (url: string): boolean => ["http:", "https:"].includes(parse(url)?.protocol ?? "");
 export const isHttpsUrl = (url: string): boolean => parse(url)?.protocol === "https:";
 export const isGitHubUrl = (url: string): boolean => {

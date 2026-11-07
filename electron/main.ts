@@ -38,6 +38,7 @@ import {
   isHttpsUrl,
   isHttpUrl,
   isTheme,
+  keepsView,
   loginShellPath,
   menuLabel,
   mergePath,
@@ -303,8 +304,8 @@ async function watch(): Promise<void> {
     if (!server && !source && (await deskGone())) {
       log(fromSource ? "the desk went away; running it from source" : "the desk went away; starting one here");
       if (!(await connect())) return;
-      if (source) await loadUi();
-      else win?.webContents.reload();
+      if (keepsView(win?.webContents.getURL() ?? "", origins, !!source)) win?.webContents.reload();
+      else await loadUi();
       continue;
     }
     await sleep(source ? 1000 : backoff(attempt++));
