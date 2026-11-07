@@ -240,7 +240,7 @@ const CANNED: Record<string, Canned> = {
       verdict: "look",
       risk: "medium",
       summary:
-        "Adds a streaming scan (streamRows) and uses it in runPlan, so a query that runs past its time budget returns the rows found so far, marked partial. The /v2/query route passes an optional ?budget= through and sets X-Partial-Results.",
+        "Adds a streaming scan (`streamRows`) and uses it in `runPlan`, so a query that runs past its time budget returns the rows found so far, marked partial. The `/v2/query` route passes an optional `?budget=` through and sets `X-Partial-Results`.",
       concerns: [
         "src/routes/query.ts passes ?budget= through Number() unchecked: a non-numeric value becomes NaN and silently turns the budget off, and 0 or a negative value returns an empty partial result.",
         "Every query now has a 2 s budget by default, so slow queries that used to complete will come back partial; clients that ignore the new partial flag will treat them as complete.",

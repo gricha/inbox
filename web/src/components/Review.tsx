@@ -19,6 +19,7 @@ import type {
 import { andMore } from "../../../src/stage.ts";
 import { api, message } from "../api.ts";
 import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
+import { blocks, inline, lead, unlinked } from "../prose.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -58,6 +59,7 @@ import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
+import { ProseBlocks, spans } from "./Prose.tsx";
 import { Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -652,10 +654,6 @@ export function Review({
           <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
           {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
           {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
-          <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
-          {((open && !acted) || !!comment.trim()) && (
-            <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
-          )}
           {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
           {aiShown && (
             <AiSection
@@ -673,6 +671,10 @@ export function Review({
                     }
               }
             />
+          )}
+          <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
+          {((open && !acted) || !!comment.trim()) && (
+            <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
           )}
         </div>
 
@@ -1026,18 +1028,18 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
               </p>
             </header>
           )}
-          {(card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
-            <SkLines count={1} className="rv-convo sk-short" />
-          )}
           {ai || writing || none ? (
             <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} onAsk={undefined} />
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
                 <SkLines count={1} className="sk-verdict" />
-                <SkLines count={3} className="rv-summary" />
+                <SkLines count={1} className="rv-gist" />
               </section>
             )
+          )}
+          {(card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
+            <SkLines count={1} className="rv-convo sk-short" />
           )}
         </div>
         <div className="actions rv-actions" aria-hidden="true">
@@ -1161,6 +1163,24 @@ function AiSection({
   notes: number;
   onAsk: (() => void) | undefined; // none for a PR in Merging: it's your agent's
 }) {
+  const [more, setMore] = useState(false); // the rest of the summary, on this PR only: every PR opens folded
+  const summary = ai?.summary ?? "";
+  const { first, rest } = useMemo(() => lead(blocks(summary)), [summary]);
+  const folds = first.length > 0 && rest.length > 0;
+  const verdict = ai && (
+    <>
+      <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict]}</span>
+      <span className={`risk r-${ai.risk}`}>
+        <span className="meter" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        {ai.risk} risk
+      </span>
+      {stale && <span className="quiet">on an earlier commit</span>}
+    </>
+  );
   return (
     <section className="rv-ai" aria-label="AI review">
       {busy && <p className="quiet">Claude is reviewing it. The notes land in the code below in a minute or two.</p>}
@@ -1184,21 +1204,29 @@ function AiSection({
       {ai && (
         <>
           <p className="rv-verdict" title={ai.model && ai.at ? `AI review by ${modelName(ai.model)}, ${when(ai.at)}` : undefined}>
-            <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict]}</span>
-            <span className={`risk r-${ai.risk}`}>
-              <span className="meter" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-              {ai.risk} risk
-            </span>
-            {stale && <span className="quiet">on an earlier commit</span>}
+            {folds ? (
+              <button
+                type="button"
+                className={cls("rv-ai-lead", !more && "shut")}
+                aria-expanded={more}
+                onClick={() => {
+                  setMore(!more);
+                }}
+              >
+                <span className="rv-chev" aria-hidden="true">
+                  {"\u203a"}
+                </span>
+                {verdict}
+              </button>
+            ) : (
+              verdict
+            )}
           </p>
-          <p className="rv-summary">{ai.summary}</p>
+          {first.length > 0 && <p className="rv-gist">{spans(unlinked(first))}</p>}
+          {rest.length > 0 && (more || !folds) && <ProseBlocks bs={rest} links={false} />}
           {ai.since && (
-            <p className="rv-summary">
-              <b>Since your review:</b> {ai.since}
+            <p className="rv-since">
+              <b>Since your review:</b> {spans(unlinked(inline(ai.since)))}
             </p>
           )}
           {/* Each concern is also a note in the code; listed here only when the notes can't sit there. */}
@@ -1206,7 +1234,7 @@ function AiSection({
             (ai.concerns.length > 0 ? (
               <ul className="rv-concerns" aria-label="Concerns">
                 {ai.concerns.map((c) => (
-                  <li key={c}>{c}</li>
+                  <li key={c}>{spans(unlinked(inline(c)))}</li>
                 ))}
               </ul>
             ) : (

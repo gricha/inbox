@@ -102,7 +102,7 @@ export function blocks(text: string): Block[] {
   });
 }
 
-function inline(text: string, heading = false): Span[] {
+export function inline(text: string, heading = false): Span[] {
   const parts = text.split("`");
   // An odd backtick count leaves the last one unpaired: it's text.
   if (parts.length % 2 === 0) parts.splice(-2, 2, parts.slice(-2).join("`"));
@@ -177,4 +177,34 @@ function tidy(spans: Span[]): Span[] {
     else out.push(s);
   }
   return out;
+}
+
+// A sentence ends at . ! or ? (and a closing quote or bracket) before a space; "e.g." and the like don't end one.
+const END = /(?<!\b(?:e\.g|i\.e|etc|vs|cf))[.!?]["')\]]?(?=\s)/i;
+
+// The first sentence of the first paragraph and what's left, never cut inside `code`; no lead when it opens with a list or code.
+export function lead(bs: Block[]): { first: Span[]; rest: Block[] } {
+  const [head, ...after] = bs;
+  if (head?.t !== "p") return { first: [], rest: bs };
+  for (const [i, s] of head.spans.entries()) {
+    if (s.t !== "text") continue;
+    const next = head.spans[i + 1]; // a sentence can end on bold, before the next text's space
+    const m = END.exec(s.text + (next?.t === "text" ? next.text.slice(0, 1) : ""));
+    if (!m) continue;
+    const cut = m.index + m[0].length;
+    const more = tidy([{ ...s, text: s.text.slice(cut) }, ...head.spans.slice(i + 1)]);
+    const [h] = more;
+    if (h?.t === "text") more[0] = { ...h, text: h.text.trimStart() };
+    const spans = more.filter((x) => x.t === "link" || x.text);
+    return {
+      first: [...head.spans.slice(0, i), { ...s, text: s.text.slice(0, cut) }],
+      rest: spans.length ? [{ t: "p", spans }, ...after] : after,
+    };
+  }
+  return { first: head.spans, rest: after };
+}
+
+// Text the PR's author can steer (an AI review of their PR) opens no link: a URL in it is drawn as its text.
+export function unlinked(ss: Span[]): Span[] {
+  return ss.map((s): Span => (s.t === "link" ? { t: "text", text: s.url, bold: s.bold } : s));
 }

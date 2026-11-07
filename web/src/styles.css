@@ -3662,7 +3662,7 @@ p {
   margin-top: 12px;
 }
 
-/* The facts, the threads waiting on you, and the AI review. */
+/* The facts, Claude's read, the threads waiting on you and your comment. */
 .rv-top {
   display: grid;
   gap: 22px;
@@ -3792,10 +3792,10 @@ p {
 
 .rv-ai {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-width: 780px;
   color: var(--ink-2);
-  font-size: clamp(13.5px, 12px + 0.2vw, 15px);
+  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
 }
 
 .rv-verdict {
@@ -3806,24 +3806,14 @@ p {
 }
 
 .rv-verdict .verdict {
-  font-size: clamp(18px, 16px + 0.25vw, 20px);
+  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 
-/* Next to the verdict at nearly its size, so a medium or high risk is the first colour you see. */
-.rv-verdict .risk {
-  font-size: clamp(15.5px, 14px + 0.2vw, 17px);
-}
-
-.rv-verdict .meter > span {
-  width: 5px;
-  height: 13px;
-}
-
 .rv-verdict .v-skim,
 .rv-verdict .v-skip {
-  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
+  font-size: clamp(14px, 12.5px + 0.2vw, 15.5px);
   font-weight: 500;
 }
 
@@ -3832,7 +3822,7 @@ p {
 }
 
 .sk-verdict {
-  font-size: clamp(18px, 16px + 0.25vw, 20px);
+  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
 }
 
 .sk-verdict .sk {
@@ -3848,6 +3838,47 @@ p {
 
 .rv-desc {
   max-width: 780px;
+}
+
+/* The verdict folds the rest of the summary; its chevron hangs in the gutter, as a file header's does, so the verdict keeps the title's edge. */
+.rv-ai-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rv-ai-lead .rv-chev {
+  margin: 0 -14px 0 -12px;
+  font-size: 1.2em;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.rv-ai-lead:hover .rv-chev {
+  color: var(--ink);
+}
+
+/* The summary's first sentence in ink; the rest a step quieter, at the section's size. */
+.rv-gist {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.rv-ai .prose {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.rv-since b {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* Concerns are margin notes, as in the diff. */

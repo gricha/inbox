@@ -78,6 +78,10 @@ const rowMenuPick = async (page: Page, row: string, item: string) => {
   await page.locator(row).locator(".row-main").click({ button: "right" });
   await page.locator(".ctx-item", { hasText: item }).first().click();
 };
+// Where each selector's first match starts down the page, or -1 when there's none: read at once, never waited for.
+const tops = (page: Page, sels: string[]) =>
+  page.evaluate<number[]>(`${JSON.stringify(sels)}.map((s) => document.querySelector(s)?.getBoundingClientRect().top ?? -1)`);
+const inOrder = (ys: number[]) => ys.every((y, i) => y >= 0 && (i === 0 || y > ys[i - 1]!));
 // AI reviews paused, as after an expired login: a mock-only switch (web/mock/server.ts).
 const pauseAi = (paused: boolean) => async (page: Page) => {
   await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
@@ -533,6 +537,57 @@ const SHOTS: Shot[] = [
       if (back !== "Inbox") failures.push(`review: the back link reads ${JSON.stringify(back)}`);
       const bar = await barPages(page);
       if (bar !== null && bar !== "Blocked FYI | Merging Archive") failures.push(`review: the top bar's pages read ${bar}`);
+      if (await page.locator(".rv-ai .prose").count()) failures.push("review: the AI review doesn't open folded");
+      if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
+        failures.push("review: the AI review isn't above the conversation and your comment");
+    },
+  },
+  {
+    // The owner's case: Skim it, low risk, a long summary with code names, folded under the facts.
+    name: "review-ai-skim",
+    go: async (page) => {
+      await review("nadia/sentry-javascript-integrations#14402")(page);
+      const ai = page.locator(".rv-ai");
+      if (!(await ai.locator('.rv-ai-lead[aria-expanded="false"]').count()))
+        failures.push("review-ai-skim: the AI review doesn't open folded");
+      if (await ai.locator(".prose").count()) failures.push("review-ai-skim: the rest of the summary shows while folded");
+      if ((await ai.locator(".rv-gist code").count()) < 2) failures.push("review-ai-skim: the first sentence's code names aren't code");
+      if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-skim: a backtick shows");
+      const h = await page.evaluate<number>(`document.querySelector(".rv-ai")?.getBoundingClientRect().height ?? 0`);
+      if (h > 120) failures.push(`review-ai-skim: the folded AI review is ${Math.round(h)}px tall`);
+      if (!inOrder(await tops(page, [".rv-ai", ".rv-comment"]))) failures.push("review-ai-skim: the AI review isn't above your comment");
+    },
+  },
+  {
+    // A click on the verdict opens the rest under the first sentence; a URL in it stays text.
+    name: "review-ai-open",
+    go: async (page) => {
+      await review("nadia/sentry-javascript-integrations#14402")(page);
+      const lead = page.locator(".rv-ai-lead");
+      if (await lead.count()) await lead.click();
+      await page.waitForTimeout(200);
+      const ai = page.locator(".rv-ai");
+      if (!(await ai.locator('.rv-ai-lead[aria-expanded="true"]').count())) failures.push("review-ai-open: a click doesn't open it");
+      if (!(await ai.locator(".prose").allInnerTexts()).join(" ").includes("Tests cover"))
+        failures.push("review-ai-open: the rest of the summary is missing");
+      if (!(await ai.locator(".prose code").count())) failures.push("review-ai-open: the rest's code names aren't code");
+      if (await ai.locator("a").count()) failures.push("review-ai-open: a URL in the AI review is a link");
+      if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-open: a backtick shows");
+    },
+  },
+  {
+    // A re-review being written over one on an earlier commit: since and the concerns stay out of the fold.
+    name: "review-ai-since",
+    go: async (page) => {
+      await review("acme/api#4099")(page);
+      const ai = page.locator(".rv-ai");
+      if (!(await ai.locator(".rv-ai-lead").allInnerTexts()).join("").includes("on an earlier commit"))
+        failures.push("review-ai-since: the verdict isn't marked on an earlier commit");
+      if (!(await ai.locator(".rv-since").allInnerTexts()).join("").startsWith("Since your review:"))
+        failures.push("review-ai-since: no since line while folded");
+      if ((await ai.locator(".rv-since code, .rv-concerns code").count()) < 2)
+        failures.push("review-ai-since: since or a concern shows code raw");
+      if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-since: a backtick shows");
     },
   },
   {
@@ -543,6 +598,10 @@ const SHOTS: Shot[] = [
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
       await page.waitForTimeout(300);
+      if (!(await page.locator('.review[aria-busy="true"] .rv-ai-lead').count()))
+        failures.push("review-loading: the row's AI read isn't folded");
+      if ((await page.locator(".rv-convo.sk-short").count()) && !inOrder(await tops(page, [".rv-ai", ".rv-convo.sk-short"])))
+        failures.push("review-loading: the AI read isn't above the conversation's placeholder");
     },
     after: release("**/api/review/**"),
   },

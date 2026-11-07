@@ -2433,8 +2433,9 @@ const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "s
     risk: "medium",
     summary:
       "Removes the v1 session-cookie middleware and moves the four routes that still used it onto token auth. Most of the diff deletes compatibility shims and their tests.",
-    since: "Moves /v1/export onto token auth too and adds a Deprecation header, but cookie callers still break with no window to switch.",
-    concerns: ["/v1/export still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."],
+    since:
+      "Moves `/v1/export` onto token auth too and adds a `Deprecation` header, but cookie callers still break with no window to switch.",
+    concerns: ["`/v1/export` still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."],
   },
   "acme/web#2301": {
     verdict: "look",
@@ -2463,7 +2464,8 @@ const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "s
   "nadia/sentry-javascript-integrations#14402": {
     verdict: "skim",
     risk: "low",
-    summary: "Listens for unhandledrejection in edge runtimes and reports the reason as unhandled. Node keeps its own handler.",
+    summary:
+      "Listens for `unhandledrejection` in edge runtimes and reports `event.reason` as an unhandled error, so a promise that rejects with no catch shows up in Sentry. The handler lives in `edgeRejectionIntegration()` and is added only when `globalThis.EdgeRuntime` is set; Node keeps its own `onUnhandledRejection` integration. A reason that isn't an `Error` (a string, say) is wrapped in a synthetic one, so it still gets a stack. The new `captureUnhandledRejections` option defaults to on. Tests cover an `Error` reason, a string reason and the Node path, as https://github.com/nadia/sentry-javascript-integrations/issues/14390 asked.",
     concerns: [],
   },
   "oss/parsekit#77": {

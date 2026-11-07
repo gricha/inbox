@@ -1,26 +1,32 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { copyText } from "../format.ts";
-import { blocks, fencedCopy, type Block, type Span } from "../prose.ts";
+import { blocks, fencedCopy, unlinked, type Block, type Span } from "../prose.ts";
 
 // An agent's words drawn from web/src/prose.ts: React elements only, never HTML, never an image.
 export function Prose({ text }: { text: string }) {
   const bs = useMemo(() => blocks(text), [text]);
+  return <ProseBlocks bs={bs} />;
+}
+
+// links false: text the PR's author can steer (an AI review of their PR), where a URL is drawn as text.
+export function ProseBlocks({ bs, links = true }: { bs: Block[]; links?: boolean }) {
   return (
     <div className="prose">
       {bs.map((b, i) => (
         // oxlint-disable-next-line react/no-array-index-key -- a fixed parse never reorders
-        <Fragment key={i}>{block(b)}</Fragment>
+        <Fragment key={i}>{block(b, links)}</Fragment>
       ))}
     </div>
   );
 }
 
-function block(b: Block): ReactNode {
+function block(b: Block, links: boolean): ReactNode {
+  const line = (ss: Span[]) => spans(links ? ss : unlinked(ss));
   if (b.t === "pre") return <Pre text={b.text} info={b.info} />;
-  if (b.t === "p") return <p>{spans(b.spans)}</p>;
+  if (b.t === "p") return <p>{line(b.spans)}</p>;
   const items = b.items.map((s, i) => (
     // oxlint-disable-next-line react/no-array-index-key -- a fixed parse never reorders
-    <li key={i}>{spans(s)}</li>
+    <li key={i}>{line(s)}</li>
   ));
   return b.t === "ul" ? <ul>{items}</ul> : <ol start={b.start}>{items}</ol>;
 }
@@ -54,7 +60,7 @@ function Pre({ text, info }: { text: string; info: string }) {
   );
 }
 
-function spans(ss: Span[]): ReactNode {
+export function spans(ss: Span[]): ReactNode {
   return ss.map((s, i) => {
     const el =
       s.t === "text" ? (

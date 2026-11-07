@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blocks, fencedCopy, type Block, type Span } from "../src/prose.ts";
+import { blocks, fencedCopy, inline, lead, unlinked, type Block, type Span } from "../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });
@@ -131,4 +131,33 @@ test("worst cases each parse in under 100 ms", () => {
     const ms = performance.now() - t0;
     assert.ok(ms < 100, `${JSON.stringify(s.slice(0, 16))}: ${ms.toFixed(1)} ms`);
   }
+});
+
+test("lead: the first paragraph's first sentence and the rest, never cut inside code or after e.g.", () => {
+  const cut = (text: string, first: Span[], rest: Block[]) => {
+    assert.deepEqual(lead(blocks(text)), { first, rest }, JSON.stringify(text));
+  };
+  cut("Adds `a.b`. Then c.\n\nMore.", [t("Adds "), c("a.b"), t(".")], [p(t("Then c.")), p(t("More."))]);
+  cut("Uses a cache, e.g. Redis, for 1.5 s. Then x.", [t("Uses a cache, e.g. Redis, for 1.5 s.")], [p(t("Then x."))]);
+  cut('Says "done." Then x?', [t('Says "done."')], [p(t("Then x?"))]);
+  cut("One.\nTwo.", [t("One.")], [p(t("Two."))]);
+  cut("Sets **one.** Two.", [t("Sets "), t("one.", true)], [p(t("Two."))]);
+  cut("One. `x` two.", [t("One.")], [p(c("x"), t(" two."))]);
+  cut("Adds `x. Then y.", [t("Adds `x.")], [p(t("Then y."))]);
+  cut("See https://x.dev/a. Then", [t("See "), a("https://x.dev/a"), t(".")], [p(t("Then"))]);
+  cut("Only one sentence.", [t("Only one sentence.")], []);
+  cut("- a\n- b", [], [ul([t("a")], [t("b")])]);
+  cut("", [], []);
+});
+
+test("unlinked: a URL in an AI review is drawn as its text, a markdown link's label kept", () => {
+  assert.deepEqual(unlinked(inline("See https://x.dev/a and [the doc](https://x.dev/b), `c`.")), [
+    t("See "),
+    t("https://x.dev/a"),
+    t(" and the doc ("),
+    t("https://x.dev/b"),
+    t("), "),
+    c("c"),
+    t("."),
+  ]);
 });
