@@ -272,7 +272,7 @@ test("toFetch follows only what a listed PR needs in its own org: another org's 
 test("toFetch probes by number a PR a listed one requires when the desk doesn't hold it", () => {
   const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
   const items = [
-    web(1, { requires: ["acme/sentry#5", "acme/api#7", "acme/api#2", "acme/api#99999999999", "acme/sentry#9"] }),
+    web(1, { requires: ["acme/sentry#5", "acme/api#7", "acme/api#2", "acme/api#99999999999", "acme/sentry#9", "evilcorp/x#1"] }),
     makeItem({ number: 7, kind: "issue" }),
     pr(2, "main", { requires: ["acme/api#3"] }), // stored, so what it needs is asked too, and PRs stacked on it
     web(4, { author: "dependabot", author_bot: true, requires: ["acme/sentry#6"] }),
@@ -287,7 +287,7 @@ test("toFetch probes by number a PR a listed one requires when the desk doesn't 
       { repo: "acme/sentry", dir: "pr", branch: "8", stacked: false },
       { repo: "acme/api", dir: "pr", branch: "3", stacked: false },
     ],
-    "not the issue, a number past GraphQL's Int, a miss, or what only a bot's own PR needs",
+    "not the issue, a number past GraphQL's Int, a miss, another org's PR, or what only a bot's own PR needs",
   );
   assert.ok(got.probes.some((p) => p.repo === "acme/api" && p.dir === "down" && p.branch === "b2"));
 });
