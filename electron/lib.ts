@@ -240,7 +240,11 @@ export type DeskPlan =
   { run: "source"; node: string } | { run: "wait"; need: "checkout" | "modules" | "node"; problem: string } | { run: "in-process" };
 
 // A chosen folder waits for what it lacks, even being a checkout, rather than fall back to the app's own desk, which may be too old for today's config.
-export function deskPlan(dir: string, node: string | null, exists: (p: string) => boolean = fs.existsSync): DeskPlan {
+export function deskPlan(
+  dir: string,
+  node: { path: string; version: string } | null,
+  exists: (p: string) => boolean = fs.existsSync,
+): DeskPlan {
   if (!dir) return { run: "in-process" };
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
     return { run: "wait", need: "checkout", problem: `${dir} isn't a Review Desk checkout` };
@@ -252,8 +256,22 @@ export function deskPlan(dir: string, node: string | null, exists: (p: string) =
       need: "node",
       problem: "Couldn't find node on your login shell's PATH or where nvm, Volta, mise, asdf or fnm keep it; install Node 22.18 or newer",
     };
-  return { run: "source", node };
+  if (tooOld(node.version))
+    return {
+      run: "wait",
+      need: "node",
+      problem: node.version
+        ? `${node.path} is Node ${node.version.trim().replace(/^v/, "")}; the desk needs 22.18 or newer`
+        : `${node.path} didn't say its version; the desk needs Node 22.18 or newer`,
+    };
+  return { run: "source", node: node.path };
 }
+
+// package.json's engines: older Node can't run src/cli.ts as TypeScript without a flag.
+const tooOld = (version: string): boolean => {
+  const m = /^v?(\d+)\.(\d+)\./.exec(version.trim());
+  return !m || Number(m[1]) < 22 || (Number(m[1]) === 22 && Number(m[2]) < 18);
+};
 
 // --watch-path, not node's own module tracking: a file that doesn't parse is watched too, so saving a fix restarts it.
 export const DESK_ARGS = [

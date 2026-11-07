@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   createTray();
   createWindow();
   await pathReady;
-  planDesk();
+  await planDesk();
   await reap(home, log);
   if (!(await connect())) return;
   // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
@@ -211,8 +211,10 @@ async function fixPath(): Promise<void> {
 
 // ---------------------------------------------------------------- the desk
 
-function planDesk(): void {
-  plan = deskPlan(sourceWanted, findNode(process.env.PATH ?? ""));
+async function planDesk(): Promise<void> {
+  const node = sourceWanted ? findNode(process.env.PATH ?? "") : null;
+  const version = node ? (await commandOutput(node, ["--version"], 5000)).stdout : "";
+  plan = deskPlan(sourceWanted, node ? { path: node, version } : null);
   fromSource = plan.run === "in-process" ? "" : sourceWanted;
 }
 
@@ -252,7 +254,7 @@ async function connect(): Promise<boolean> {
       checkSource(); // with no desk there's no Settings page: settings.json is where the folder gets fixed
       if (quitting || relaunching) return false;
       await fixPath();
-      planDesk();
+      await planDesk();
       continue;
     }
     if (plan.run === "source") {

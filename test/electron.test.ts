@@ -239,11 +239,12 @@ test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => 
 
 test("deskPlan: a chosen checkout runs from source or waits for what it lacks, never the app's own desk", () => {
   const waits = (p: DeskPlan) => (p.run === "wait" ? `${p.need}: ${p.problem}` : p.run);
+  const node = (version: string) => ({ path: "/bin/node", version });
   assert.deepEqual(deskPlan("", null), { run: "in-process" }, "no checkout chosen: the app's own desk, as before");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
   try {
     assert.match(
-      waits(deskPlan(dir, "/bin/node")),
+      waits(deskPlan(dir, node("v22.22.0\n"))),
       /^checkout: .* isn't a Review Desk checkout/,
       "a wrong folder waits too, never the app's own desk",
     );
@@ -251,7 +252,7 @@ test("deskPlan: a chosen checkout runs from source or waits for what it lacks, n
       fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
       fs.writeFileSync(path.join(dir, f), "");
     }
-    assert.match(waits(deskPlan(dir, "/bin/node")), /^modules: .*run npm install there/);
+    assert.match(waits(deskPlan(dir, node("v22.22.0\n"))), /^modules: .*run npm install there/);
     fs.mkdirSync(path.join(dir, "node_modules/vite/bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, "node_modules/vite/bin/vite.js"), "");
     assert.match(
@@ -259,7 +260,15 @@ test("deskPlan: a chosen checkout runs from source or waits for what it lacks, n
       /^node: Couldn't find node .*Node 22\.18/,
       "without node it waits for node; an older bundled desk can't read today's config",
     );
-    assert.deepEqual(deskPlan(dir, "/bin/node"), { run: "source", node: "/bin/node" });
+    assert.deepEqual(deskPlan(dir, node("v22.22.0\n")), { run: "source", node: "/bin/node" });
+    for (const v of ["v22.18.0", "v23.1.0", "v24.14.0"]) assert.equal(deskPlan(dir, node(v)).run, "source", v);
+    assert.equal(
+      waits(deskPlan(dir, node("v20.20.2\n"))),
+      "node: /bin/node is Node 20.20.2; the desk needs 22.18 or newer",
+      "nvm's lts/iron",
+    );
+    assert.match(waits(deskPlan(dir, node("v22.17.1"))), /^node: .*Node 22\.17\.1/);
+    assert.match(waits(deskPlan(dir, node(""))), /^node: \/bin\/node didn't say its version/, "a node that doesn't run");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
