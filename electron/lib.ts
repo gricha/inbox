@@ -244,6 +244,7 @@ export function deskPlan(
   dir: string,
   node: { path: string; version: string } | null,
   exists: (p: string) => boolean = fs.existsSync,
+  platform: NodeJS.Platform = process.platform,
 ): DeskPlan {
   if (!dir) return { run: "in-process" };
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
@@ -254,7 +255,10 @@ export function deskPlan(
     return {
       run: "wait",
       need: "node",
-      problem: "Couldn't find node on your login shell's PATH or where nvm, Volta, mise, asdf or fnm keep it; install Node 22.18 or newer",
+      problem:
+        platform === "win32" // no login shell or version-manager dirs to look in
+          ? "Couldn't find node on PATH; install Node 22.18 or newer"
+          : "Couldn't find node on your login shell's PATH or where nvm, Volta, mise, asdf or fnm keep it; install Node 22.18 or newer",
     };
   if (tooOld(node.version))
     return {

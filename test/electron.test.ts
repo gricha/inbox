@@ -260,6 +260,11 @@ test("deskPlan: a chosen checkout runs from source or waits for what it lacks, n
       /^node: Couldn't find node .*Node 22\.18/,
       "without node it waits for node; an older bundled desk can't read today's config",
     );
+    assert.equal(
+      waits(deskPlan(dir, null, fs.existsSync, "win32")),
+      "node: Couldn't find node on PATH; install Node 22.18 or newer",
+      "Windows has no login shell or version-manager dirs to name",
+    );
     assert.deepEqual(deskPlan(dir, node("v22.22.0\n")), { run: "source", node: "/bin/node" });
     for (const v of ["v22.18.0", "v23.1.0", "v24.14.0"]) assert.equal(deskPlan(dir, node(v)).run, "source", v);
     assert.equal(

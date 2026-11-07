@@ -220,6 +220,9 @@ async function planDesk(): Promise<void> {
 
 // What the window says while the chosen folder can't run the desk yet.
 function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
+  // Windows' PATH comes only from launch: a node installed meanwhile isn't found until the app starts again.
+  if (p.need === "node" && process.platform === "win32")
+    return `${p.problem}. The desk starts from ${fromSource} once you quit the app and open it again.`;
   if (p.need !== "checkout")
     return `${p.problem}. The desk starts from ${fromSource} once that's fixed; the app looks again every 15 seconds.`;
   if (envSource !== undefined) return `${p.problem}. Point DESK_SOURCE at a Review Desk clone, or unset it, and start the app again.`;
@@ -253,7 +256,7 @@ async function connect(): Promise<boolean> {
       await sleep(15_000);
       checkSource(); // with no desk there's no Settings page: settings.json is where the folder gets fixed
       if (quitting || relaunching) return false;
-      await fixPath();
+      if (plan.need === "node") await fixPath(); // a login shell (nvm and all) every 15 s only when it can help
       await planDesk();
       continue;
     }
