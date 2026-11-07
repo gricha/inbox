@@ -1,8 +1,9 @@
 import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import type { ListPage, Route } from "../view.ts";
+import { pageOf, type ListPage, type Route } from "../view.ts";
 
-// Sources of work, one entry each (just GitHub for now), what was sorted away, your PRs in Merging, and Settings in the footer.
+// The pages, in the owner's order: Inbox, Blocked, FYI, then Merging and the Archive under a hairline, and Settings in the
+// footer.
 export function Sidebar({
   route,
   from,
@@ -14,11 +15,12 @@ export function Sidebar({
   view: QueueView | null;
   overview: Overview | null;
 }) {
-  const onQueue = route.name === "queue" || route.name === "inquiry" || (route.name === "review" && from === "queue");
-  const onLater = route.name === "later" || (route.name === "review" && from === "later");
-  const onLane = route.name === "inflight" || (route.name === "review" && from === "inflight");
-  const onBlocked = route.name === "blocked" || (route.name === "review" && from === "blocked");
-  const onArchive = route.name === "archive" || (route.name === "review" && from === "archive");
+  const page = pageOf(route, from);
+  const onQueue = page === "queue";
+  const onLater = page === "later";
+  const onLane = page === "inflight";
+  const onBlocked = page === "blocked";
+  const onArchive = page === "archive";
   const onSettings = route.name === "settings";
   const now = (view?.sections.now.length ?? 0) + (view?.inquiries.length ?? 0); // an agent's question waits on you too
   const today = view?.sections.today.length ?? 0;
@@ -34,7 +36,7 @@ export function Sidebar({
         </svg>
         <span>Review Desk</span>
       </div>
-      <nav className="side-nav" aria-label="Sources">
+      <nav className="side-nav" aria-label="Pages">
         <a
           href="#/"
           className={cls("side-item", onQueue && "on")}
@@ -48,21 +50,8 @@ export function Sidebar({
             }
           }}
         >
-          <span className="side-name">GitHub</span>
+          <span className="side-name">Inbox</span>
           <span className="side-count">{view && now + today > 0 ? now + today : ""}</span>
-        </a>
-        {/* What Claude and the rules sorted away: no count, nothing there needs you. */}
-        <a href="#/later" className={cls("side-item", onLater && "on")} aria-current={onLater ? "page" : undefined} title="Sorted away">
-          <span className="side-name">Later</span>
-        </a>
-        {/* No count: nothing there needs you, the coordinator has it. */}
-        <a
-          href="#/inflight"
-          className={cls("side-item", onLane && "on")}
-          aria-current={onLane ? "page" : undefined}
-          title={flight?.total ? `${flight.total} merging` : "Your agent and what it merged"}
-        >
-          <span className="side-name">Merging</span>
         </a>
         {/* What can't move yet: no count, nothing there can move. */}
         <a
@@ -72,6 +61,25 @@ export function Sidebar({
           title="What can't move yet: another PR to merge first, or a review"
         >
           <span className="side-name">Blocked</span>
+        </a>
+        {/* What Claude and the rules sorted away: no count, nothing there needs you. */}
+        <a
+          href="#/later"
+          className={cls("side-item", onLater && "on")}
+          aria-current={onLater ? "page" : undefined}
+          title="What was sorted away, snoozed or muted"
+        >
+          <span className="side-name">FYI</span>
+        </a>
+        <div className="side-sep" aria-hidden="true" />
+        {/* No count: nothing there needs you, the coordinator has it. */}
+        <a
+          href="#/inflight"
+          className={cls("side-item", onLane && "on")}
+          aria-current={onLane ? "page" : undefined}
+          title={flight?.total ? `${flight.total} merging` : "Your agent and what it merged"}
+        >
+          <span className="side-name">Merging</span>
         </a>
         {/* What you finished, and what was dealt with: no count, nothing there needs you. */}
         <a

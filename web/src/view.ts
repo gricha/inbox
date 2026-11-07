@@ -17,8 +17,8 @@ import type {
 import { byPart } from "../../src/types.ts";
 import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
 
-// The queue, a PR's review in its place, Later (what was sorted away), your PRs in Merging, the Archive (what's done), and
-// Settings (with the rules).
+// The Inbox (`queue`), a PR's review in its place, Blocked, FYI (`later`: what was sorted away), your PRs in Merging, the
+// Archive (what's done), and Settings (with the rules).
 export type Route =
   | { name: "queue" }
   | { name: "review"; id: string }
@@ -37,8 +37,8 @@ export interface Acted {
 
 // A list page a review was opened from, and goes back to.
 export type ListPage = "queue" | "later" | "blocked" | "inflight" | "archive";
-// The queue is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is under
-// Later; what's done (yours, or resolved by the world) is in the Archive.
+// The Inbox is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is on
+// FYI (`later`); what's done (yours, or resolved by the world) is in the Archive.
 export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "blocked";
 export type Variant = "active" | "hidden" | "cleared" | "archive" | "blocked";
 
@@ -83,6 +83,13 @@ export function parseRoute(hash: string): Route {
     }
   }
   return { name: "queue" };
+}
+
+// The page the sidebar marks current: a review is on the page it was opened from, a question on the Inbox; Settings is none.
+export function pageOf(route: Route, from: ListPage): ListPage | null {
+  if (route.name === "review") return from;
+  if (route.name === "inquiry") return "queue";
+  return route.name === "settings" ? null : route.name;
 }
 
 export function routeHash(r: Route): string {
@@ -263,7 +270,7 @@ export function currentFile(tops: number[], line: number, atEnd = false): number
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
-// Later's own group opens with its page; the rest open when asked (a click on their heading).
+// FYI's Later group opens with the page; the rest open when asked (a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   queue: true,
   later: true,

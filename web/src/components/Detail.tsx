@@ -5,7 +5,7 @@ import { cardFacts, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
-const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "In the queue", today: "In the queue" };
+const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "In the Inbox", today: "In the Inbox" };
 
 export const CI = { green: "passing", red: "failing", pending: "running", none: "no checks" };
 export const REVIEW: Record<ReviewDecision, string> = {

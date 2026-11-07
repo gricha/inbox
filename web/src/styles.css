@@ -325,6 +325,13 @@ p {
   padding: 6px 10px 24px;
 }
 
+/* Merging and the Archive sit under a hairline, below the pages you look at. */
+.side-sep {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--rule);
+}
+
 /* Settings lives in the footer: always there, never in the way. */
 .side-foot {
   justify-content: flex-start;
@@ -420,7 +427,8 @@ p {
   .topbar .wordmark,
   .topbar .crumb,
   .topbar .icon.to-settings,
-  .topbar .tb-flight {
+  .topbar .tb-flight,
+  .topbar .tb-sep {
     display: none;
   }
 }
@@ -3095,7 +3103,7 @@ p {
   display: none;
 }
 
-/* Below 1000px, where the sidebar's Merging entry is hidden: the same, in pencil. */
+/* Below 1000px, where the sidebar is hidden: its pages, in pencil. */
 .tb-flight {
   display: inline-flex;
   align-items: center;
@@ -3110,6 +3118,15 @@ p {
 .tb-flight:hover {
   background: var(--wash);
   color: var(--ink);
+}
+
+/* The same split among the narrow top bar's page links. */
+.tb-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--rule-strong);
 }
 
 .side-col {

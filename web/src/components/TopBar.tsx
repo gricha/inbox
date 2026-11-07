@@ -1,9 +1,9 @@
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
-import { routeHash, type ListPage, type Route } from "../view.ts";
+import { pageOf, routeHash, type ListPage, type Route } from "../view.ts";
 
-const BACK = { queue: "the queue", later: "Later", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
-const BACK_LABEL = { queue: "Queue", later: "Later", blocked: "Blocked", inflight: "Merging", archive: "Archive" };
+const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
+const BACK_LABEL = { queue: "Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "Archive" };
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
   if (offline) return "Offline";
@@ -41,10 +41,11 @@ export function TopBar({
   onAsk: () => void;
 }) {
   const inSettings = route.name === "settings";
+  const page = pageOf(route, from);
   const rate = o?.rate_limit ? `GitHub API: ${o.rate_limit.remaining} requests left` : undefined;
   return (
     <header className="topbar">
-      <a className="wordmark" href="#/" title="Queue">
+      <a className="wordmark" href="#/" title="Inbox">
         <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
           <rect x="2" y="3" width="16" height="4" rx="1.5" />
           <rect x="2" y="9" width="12" height="2.5" rx="1.25" />
@@ -100,14 +101,25 @@ export function TopBar({
           </svg>
           <span>{syncText(o, now, offline)}</span>
         </button>
-        {/* Below 1000px the sidebar is gone: Later, Merging, Blocked and the Archive are reachable from here. */}
-        {route.name !== "later" && (
-          <a className="tb-flight" href="#/later" title="Sorted away">
-            Later
+        {/* Below 1000px the sidebar is gone: its pages are here in its order, less the one it marks current. */}
+        {page !== "queue" && (
+          <a className="tb-flight" href="#/" title={o ? `${o.focus.now + o.focus.today + o.focus.asks} need you` : undefined}>
+            Inbox
           </a>
         )}
+        {page !== "blocked" && (
+          <a className="tb-flight" href="#/blocked" title="What can't move yet">
+            Blocked
+          </a>
+        )}
+        {page !== "later" && (
+          <a className="tb-flight" href="#/later" title="What was sorted away, snoozed or muted">
+            FYI
+          </a>
+        )}
+        <span className="tb-sep" aria-hidden="true" />
         {/* Merging is your agent's page, so it's here while nothing is handed off too. */}
-        {route.name !== "inflight" && (
+        {page !== "inflight" && (
           <a
             className="tb-flight"
             href="#/inflight"
@@ -116,12 +128,7 @@ export function TopBar({
             Merging
           </a>
         )}
-        {route.name !== "blocked" && (
-          <a className="tb-flight" href="#/blocked" title="What can't move yet">
-            Blocked
-          </a>
-        )}
-        {route.name !== "archive" && (
+        {page !== "archive" && (
           <a className="tb-flight" href="#/archive" title="What's done">
             Archive
           </a>
@@ -143,7 +150,7 @@ export function TopBar({
         <a
           className={cls("icon", "to-settings", inSettings && "on")}
           href={inSettings ? "#/" : "#/settings/github"}
-          title={inSettings ? "Back to the queue (Esc)" : "Settings"}
+          title={inSettings ? "Back to the Inbox (Esc)" : "Settings"}
           aria-label="Settings"
         >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

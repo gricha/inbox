@@ -875,7 +875,7 @@ export function App() {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
-  // Esc is the one key: on a list it closes the item opened in place, then clears the filter; then it goes back to the main page.
+  // Esc is the one key: on a list it closes the item opened in place, then clears the filter; then it goes back to the Inbox.
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
@@ -990,7 +990,7 @@ export function App() {
           )}
           {broken && !(route.name === "settings" && route.section === "rules") && (
             <div className="notice err" role="alert">
-              <span>Your rules don't load, so there's no queue yet. {down!.replace(/^config has errors:\s*/, "")}</span>
+              <span>Your rules don't load, so there's nothing on your desk yet. {down!.replace(/^config has errors:\s*/, "")}</span>
               <a className="btn" href="#/settings/rules">
                 Fix rules
               </a>
@@ -999,7 +999,7 @@ export function App() {
           {configErrors > 0 && !broken && !(route.name === "settings" && route.section === "rules") && (
             <div className="notice warn">
               <span>
-                Your rules have {configErrors} {configErrors === 1 ? "error" : "errors"}, so the queue uses the last version that worked.
+                Your rules have {configErrors} {configErrors === 1 ? "error" : "errors"}, so your desk uses the last version that worked.
               </span>
               <a className="btn" href="#/settings/rules">
                 Fix rules

@@ -272,6 +272,22 @@ const systemTheme = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+// The narrow top bar's page links as shown, "|" for the rule among them; null where the sidebar shows instead.
+const barPages = (page: Page) =>
+  page.evaluate<string | null>(`(() => {
+    if (document.querySelector(".side")?.getClientRects().length) return null;
+    return [...document.querySelectorAll(".topbar .tb-flight, .topbar .tb-sep")]
+      .filter((el) => el.getClientRects().length)
+      .map((el) => (el.classList.contains("tb-sep") ? "|" : el.textContent.trim()))
+      .join(" ");
+  })()`);
+// The sidebar's pages in order, "|" for its hairline; null where it's hidden.
+const sidePages = (page: Page) =>
+  page.evaluate<string | null>(`(() => {
+    const nav = document.querySelector(".side-nav");
+    if (!nav?.getClientRects().length) return null;
+    return [...nav.children].map((el) => (el.classList.contains("side-sep") ? "|" : el.querySelector(".side-name")?.textContent.trim())).join(" ");
+  })()`);
 // The words of the open More menu, top to bottom, its heading as "#On GitHub".
 const moreItems = (page: Page) =>
   page.evaluate<string[]>(
@@ -285,6 +301,8 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
       if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
+      const bar = await barPages(page);
+      if (bar !== null && bar !== "Blocked FYI | Merging Archive") failures.push(`queue: the top bar's pages read ${bar}`);
     },
   },
   {
@@ -505,7 +523,18 @@ const SHOTS: Shot[] = [
       await refold(page);
     },
   },
-  { name: "review", go: review("acme/api#4127") },
+  {
+    // Opened from the Inbox: the back link names it, and the narrow top bar leaves it out, as the sidebar marks it.
+    name: "review",
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      const back = (await page.locator(".topbar .back").textContent())?.trim();
+      if (back !== "Inbox") failures.push(`review: the back link reads ${JSON.stringify(back)}`);
+      const bar = await barPages(page);
+      if (bar !== null && bar !== "Blocked FYI | Merging Archive") failures.push(`review: the top bar's pages read ${bar}`);
+    },
+  },
   {
     // Opened while the desk fetches its diff: the row's header and AI read at once, quiet placeholders for the rest.
     name: "review-loading",
@@ -782,8 +811,18 @@ const SHOTS: Shot[] = [
     },
     after: sideDefault,
   },
-  // What Claude and the rules sorted away, on its own page.
-  { name: "later", go: at("#/later") },
+  // FYI: what Claude and the rules sorted away, on its own page.
+  {
+    name: "later",
+    go: async (page) => {
+      await at("#/later")(page);
+      const on = await page.locator(".side-item.on").textContent();
+      if ((await page.locator(".side").isVisible()) && on?.trim() !== "FYI")
+        failures.push(`later: the sidebar marks ${JSON.stringify(on)}`);
+      const bar = await barPages(page);
+      if (bar !== null && bar !== "Inbox Blocked | Merging Archive") failures.push(`later: the top bar's pages read ${bar}`);
+    },
+  },
   {
     name: "later-empty",
     go: async (page) => {
@@ -1342,7 +1381,15 @@ const SHOTS: Shot[] = [
       })()`);
     },
   },
-  { name: "settings-app", go: at("#/settings/app") },
+  {
+    // No page is current on Settings: the narrow top bar has all five beside its crumb.
+    name: "settings-app",
+    go: async (page) => {
+      await at("#/settings/app")(page);
+      const bar = await barPages(page);
+      if (bar !== null && bar !== "Inbox Blocked FYI | Merging Archive") failures.push(`settings-app: the top bar's pages read ${bar}`);
+    },
+  },
   { name: "settings-appearance", go: at("#/settings/appearance") },
   { name: "settings-review", go: at("#/settings/review") },
   {
@@ -1429,12 +1476,14 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The sidebar after use: Later opened from it, then a Settings page. Only the page you're on gets the pill.
+    // The sidebar after use: FYI opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",
     go: async (page) => {
       await at("#/")(page);
-      const later = page.locator(".side-item", { hasText: "Later" });
-      if (await later.isVisible()) await later.click();
+      const side = await sidePages(page);
+      if (side !== null && side !== "Inbox Blocked FYI | Merging Archive") failures.push(`sidebar-used: the sidebar reads ${side}`);
+      const fyi = page.locator(".side-item", { hasText: "FYI" });
+      if (await fyi.isVisible()) await fyi.click();
       await at("#/settings/notify")(page);
     },
   },

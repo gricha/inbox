@@ -46,7 +46,7 @@ export function Queue({
     const first = !!overview && !overview.synced_at;
     return (
       <div className="queue">
-        {first ? <p className="quiet-note">Reading your GitHub queue for the first time. This takes about 30 seconds.</p> : <SkRows />}
+        {first ? <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p> : <SkRows />}
       </div>
     );
   }
@@ -60,7 +60,7 @@ export function Queue({
     else parts.push({ key, cards: [c] });
   }
   const total = (k: QueueGroup) => [...view.sections.now, ...view.sections.today].filter((c) => (c.group ?? "other") === k).length;
-  // Filtering, a heading says how many of its lines match, as Later's do.
+  // Filtering, a heading says how many of its lines match, as FYI's do.
   const count = (p: { key: QueueGroup; cards: Card[] }) => (filter.trim() ? `${p.cards.length} of ${total(p.key)}` : total(p.key));
   // The fold is only there unfiltered, so what each part has behind it is its total less what shows.
   const folded = QUEUE_GROUPS.map((k) => [k, total(k) - (parts.find((p) => p.key === k)?.cards.length ?? 0)] as const).filter(
@@ -137,8 +137,8 @@ export function Queue({
   );
 }
 
-// Later: what Claude and the rules sorted away, and what you snoozed or muted; the Archive: what's done. Each group opens on
-// its heading.
+// FYI (`later`): what Claude and the rules sorted away, and what you snoozed or muted. Blocked and the Archive are drawn by it
+// too. Each group opens on its heading.
 export function Later({
   view,
   groups,

@@ -22,6 +22,7 @@ import {
   linesLabel,
   navigable,
   onLines,
+  pageOf,
   parseList,
   PAGE_GROUPS,
   parseRoute,
@@ -105,6 +106,20 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
   assert.equal(routeHash({ name: "inflight" }), "#/inflight");
   assert.deepEqual(parseRoute(routeHash({ name: "later" })), { name: "later" });
+});
+
+test("the old links still open their pages under the new names: #/later is FYI, #/archive the Archive", () => {
+  assert.deepEqual(parseRoute("#/later"), { name: "later" });
+  assert.deepEqual(parseRoute("#/archive"), { name: "archive" });
+  assert.deepEqual(parseRoute("#/waiting"), { name: "blocked" });
+});
+
+test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {
+  assert.equal(pageOf({ name: "queue" }, "later"), "queue");
+  assert.equal(pageOf({ name: "inquiry", id: "q1" }, "later"), "queue");
+  assert.equal(pageOf({ name: "review", id: "acme/api#1" }, "later"), "later");
+  assert.equal(pageOf({ name: "blocked" }, "queue"), "blocked");
+  assert.equal(pageOf({ name: "settings", section: "github" }, "queue"), null);
 });
 
 test("settings fields: text to value and back", () => {
