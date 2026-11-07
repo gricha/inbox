@@ -269,6 +269,28 @@ test("toFetch follows only what a listed PR needs in its own org: another org's 
   assert.deepEqual([got.members, got.stale.map((i) => i.id)], [[id(20)], [id(20)]]);
 });
 
+test("toFetch follows at most 20 refs from each listed PR, and refreshes at most 20 stored ones a pass, the longest unfetched first", () => {
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => id(from + i));
+  // api#1-10 each need ten more; the larger the number, the longer since it was fetched.
+  const items = [
+    makeItem({ repo: "acme/web", number: 1, requires: range(1, 10) }),
+    makeItem({ repo: "acme/web", number: 2, requires: range(111, 120) }),
+    ...Array.from({ length: 120 }, (_, i) =>
+      pr(i + 1, "main", { requires: i < 10 ? range(10 * i + 11, 10 * i + 20) : [], detail_at: hoursAgo(1 + i / 100) }),
+    ),
+  ];
+  const one = toFetch(items, buildStacks(items), new Set(["acme/web#1"]), hoursAgo(0.5), hoursAgo(1 / 6), new Set());
+  assert.deepEqual(one.members, range(1, 20), "its 10, then the first 10 of the next hop");
+  assert.equal(one.stale.length, 20);
+  const two = toFetch(items, buildStacks(items), new Set(["acme/web#1", "acme/web#2"]), hoursAgo(0.5), hoursAgo(1 / 6), new Set());
+  assert.equal(two.members.length, 30);
+  assert.deepEqual(
+    two.stale.map((i) => i.id),
+    [...range(11, 20), ...range(111, 120)].toReversed(),
+    "20 of the 30 due",
+  );
+});
+
 test("toFetch probes by number a PR a listed one requires when the desk doesn't hold it", () => {
   const web = (n: number, o: Partial<Item> = {}) => makeItem({ repo: "acme/web", number: n, ...o });
   const items = [

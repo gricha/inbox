@@ -4,6 +4,8 @@ import type { Bucket, Card, Item, Stack, StackMember, StackRef } from "./types.t
 
 const SLACK = 5 * 60_000; // GitHub moves a stacked PR to main seconds after the one below it merges
 const DEPTH = 5; // hops followed down what listed PRs need, through the PRs the desk stores
+const MAX_NEEDS = 20; // refs followed from each listed PR, nearest first: its author picks what its description names
+const DEP_REFRESH = 20; // stored PRs listed ones need, refreshed a pass at most, the longest unfetched first
 const STATE: Record<Item["state"], number> = { open: 0, merged: 1, closed: 2 };
 
 interface Node {
@@ -250,17 +252,24 @@ function needed(items: Item[], s: Stacks, listed: Set<string>, from: (it: Item) 
   const known = new Map(items.map((i) => [lc(i.id), i]));
   const held = new Map<string, Item>();
   const missing = new Map<string, string>();
-  let level = [...listed].flatMap((id) => known.get(lc(id)) ?? []).filter((it) => it.kind === "pr" && it.state === "open" && from(it));
+  const followed = new Map<string, number>(); // refs followed from each listed PR
+  let level = [...listed]
+    .flatMap((id) => known.get(lc(id)) ?? [])
+    .filter((it) => it.kind === "pr" && it.state === "open" && from(it))
+    .map((it) => ({ x: it, top: it.id }));
   for (let hop = 0; hop < DEPTH && level.length; hop++) {
-    const next: Item[] = [];
-    for (const x of level)
+    const next: typeof level = [];
+    for (const { x, top } of level)
       for (const ref of [s.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
-        if (ref && !sameOrg(ref, x)) continue;
-        const y = ref ? known.get(lc(ref)) : undefined;
-        if (ref && !y) missing.set(lc(ref), ref);
+        if (!ref || !sameOrg(ref, x)) continue;
+        const n = followed.get(top) ?? 0;
+        if (n >= MAX_NEEDS) break;
+        followed.set(top, n + 1);
+        const y = known.get(lc(ref));
+        if (!y) missing.set(lc(ref), ref);
         if (y?.kind !== "pr" || held.has(y.id) || listed.has(y.id)) continue;
         held.set(y.id, y);
-        if (y.state === "open") next.push(y);
+        if (y.state === "open") next.push({ x: y, top });
       }
     level = next;
   }
@@ -299,11 +308,13 @@ export function toFetch(
     if (n >= 1 && n <= 2 ** 31 - 1 && !misses.has(probeKey(p))) add(p);
   }
   const stale = new Map<string, Item>();
-  for (const it of needs) if (it.state === "open" && it.detail_at < depBefore) stale.set(it.id, it);
+  const inStack = new Set(members); // what listed PRs need is refreshed above, within DEP_REFRESH
+  const due = needs.filter((it) => it.state === "open" && it.detail_at < depBefore);
+  for (const it of due.toSorted((a, b) => a.detail_at.localeCompare(b.detail_at)).slice(0, DEP_REFRESH)) stale.set(it.id, it);
   for (const id of ids) {
     const it = byId.get(id);
     if (!it || it.kind !== "pr" || it.state === "closed") continue;
-    if (!listed.has(id) && it.state === "open" && it.detail_at < before) stale.set(id, it);
+    if (inStack.has(id) && !listed.has(id) && it.state === "open" && it.detail_at < before) stale.set(id, it);
     const main = mainOf(it);
     const under = main && !s.nodes.get(id)?.parent ? [it.base, it.retargeted?.from].find((b) => b && b !== main) : undefined;
     if (under) add({ repo: it.repo, dir: "up", branch: under, stacked: true });
