@@ -17,7 +17,19 @@ logger.error = (msg, opts) => {
 
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "desk-editor-guard",
+      configureServer(server) {
+        // Vite's /__open-in-editor opens any file in the owner's editor; only its own error overlay may ask, not another site's iframe.
+        server.middlewares.use("/__open-in-editor", (req, res, next) => {
+          if (req.headers["sec-fetch-site"] === "same-origin") next();
+          else res.writeHead(403).end("forbidden cross-site request");
+        });
+      },
+    },
+  ],
   customLogger: logger,
   build: { outDir: "dist", emptyOutDir: true },
   server: {

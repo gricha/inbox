@@ -10,6 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createServer as createViteServer } from "vite";
 import { Desk } from "../src/desk.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
@@ -325,6 +326,41 @@ test("from a checkout the desk's own address serves the app's Vite UI, the API s
   const down = await get("/");
   assert.equal(down.status, 503);
   assert.match(await down.text(), /http-equiv="refresh"/, "the page tries again while Vite starts");
+});
+
+// The app's own Vite server, from web/vite.config.ts, on a free port.
+async function realVite(c: { after(fn: () => unknown): void }) {
+  const prev = process.env.DESK_API;
+  process.env.DESK_API = "http://127.0.0.1:1"; // its proxy must not reach a real desk
+  const server = await createViteServer({
+    configFile: path.join(import.meta.dirname, "../web/vite.config.ts"),
+    cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), "desk-vite-")),
+    logLevel: "silent",
+    server: { host: "127.0.0.1", port: 0, watch: null, hmr: false },
+    optimizeDeps: { noDiscovery: true, include: [] },
+  }).finally(() => {
+    if (prev === undefined) delete process.env.DESK_API;
+    else process.env.DESK_API = prev;
+  });
+  await server.listen();
+  c.after(() => server.close());
+  return `http://127.0.0.1:${(server.httpServer!.address() as AddressInfo).port}`;
+}
+
+test("only Vite's own page can open a file in the owner's editor, on Vite's port or through the desk", async (c) => {
+  const vite = await realVite(c);
+  withUiOrigin(c, vite);
+  const t = await setup();
+  c.after(t.cleanup);
+  const app = createApp(t.desk, 47823);
+  // No such file, so a request that gets through opens nothing either.
+  const open = `/__open-in-editor?file=${encodeURIComponent(path.join(os.tmpdir(), "desk-no-such-file"))}`;
+  const iframe = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" };
+  assert.equal((await fetch(`${vite}${open}`, { headers: iframe })).status, 403, "another site's hidden iframe on Vite's port");
+  assert.equal((await app.request(`http://localhost:47823${open}`, { headers: iframe })).status, 403, "or on the desk's");
+  assert.equal((await fetch(`${vite}${open}`, { headers: { "sec-fetch-site": "same-site" } })).status, 403, "another localhost port");
+  const overlay = { "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors" };
+  assert.equal((await app.request(`http://localhost:47823${open}`, { headers: overlay })).status, 200, "Vite's error overlay still can");
 });
 
 test("from a checkout the page's hot-reload socket goes through to Vite, from the desk's own page only", async (c) => {
