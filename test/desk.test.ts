@@ -898,6 +898,40 @@ test("Done on a Blocked row: it comes back when the PR it waits on merges", asyn
   assert.equal(t.notes.at(-1), "getsentry#22982 \u00b7 approved and green: ready to merge");
 });
 
+test("Done or a snooze after the PR it needs merged sticks, from a description or a retargeted stack", async (c) => {
+  const t = await setup(
+    [
+      dependent(22982),
+      root(),
+      myPr(1, { ci: "green", head_ref: "change-1" }),
+      myPr(2, { ci: "green", head_ref: "change-2", base: "change-1" }),
+    ],
+    { settings: QUIET },
+  );
+  c.after(t.cleanup);
+  await t.desk.sync();
+  merge(t, LIVE, 1);
+  merge(t, "acme/web#1", 1);
+  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
+  t.gh.items.set("acme/web#2", {
+    ...t.gh.items.get("acme/web#2")!,
+    base: "main",
+    retargeted: { from: "change-1", at },
+    updated_at: hoursAgo(5),
+  });
+  await t.desk.sync();
+  t.setNow(new Date(NOW.getTime() + 2 * 3_600_000));
+  const where = (id: string) =>
+    Object.entries(t.desk.queue().sections)
+      .filter(([, cs]) => cs.some((x) => x.id === id))
+      .map(([s]) => s);
+  t.desk.act("getsentry#22982", "done");
+  t.desk.act("web#2", "done");
+  assert.deepEqual([where("getsentry/getsentry#22982"), where("acme/web#2")], [[], []]);
+  t.desk.act("getsentry#22982", "snooze", "3h");
+  assert.deepEqual(where("getsentry/getsentry#22982"), []);
+});
+
 test("Blocked by the template: your PRs waiting on reviews, the latest ask as their age; what's yours to do stays out", async (c) => {
   const asked = (reviewer: string, at: number, type: "user" | "team" = "user") => ({
     review_requests: [{ reviewer, type, codeowner: false }],

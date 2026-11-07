@@ -135,6 +135,7 @@ interface Entry {
   isNew: boolean;
   resolved: Resolution | null;
   inflight: boolean; // your open PR, handed off for merge: Merging has it, not the queue's buckets
+  activityAt: string; // its activity, or a later merge of a PR it needs: what done and snoozes compare with
 }
 
 interface Snapshot {
@@ -834,7 +835,7 @@ export class Desk {
       const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
       const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
-      entries.set(item.id, { item, analysis, state, status: statusOf(state, activityAt, now), isNew, resolved, inflight });
+      entries.set(item.id, { item, analysis, state, status: statusOf(state, activityAt, now), isNew, resolved, inflight, activityAt });
     }
     for (const [id, f] of deps) {
       const pr = entries.get(id)!.analysis.signals.pr;
@@ -1715,7 +1716,7 @@ export class Desk {
     if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
       throw new DeskError(409, `${id} is in Merging, so the coordinator has it; bring it back to the desk (b) first`);
     // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
-    const seen = entry.analysis.activity_at;
+    const seen = entry.activityAt;
     switch (action) {
       case "done":
         s.done_at = now.toISOString();
