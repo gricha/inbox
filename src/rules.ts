@@ -147,9 +147,9 @@ export function quietText(hours: number): string {
   return days < 60 ? `quiet for ${Math.round(days / 7)} weeks` : `quiet for ${Math.round(days / 30)} months`;
 }
 
-// Over a board's cap, in the queue's words: it's one list, so "now" is urgency and "today" a place on it.
+// Over a board's cap, in the Inbox's words: it's one list, so "now" is urgency and "today" a place on it.
 export const capText = (from: "now" | "today", cap: number, board: string): string =>
-  from === "now" ? `${cap} from ${board} ${cap === 1 ? "is" : "are"} urgent already` : `the queue has ${cap} from ${board} already`;
+  from === "now" ? `${cap} from ${board} ${cap === 1 ? "is" : "are"} urgent already` : `the Inbox has ${cap} from ${board} already`;
 
 // Quiet items (nobody touched them in `quietDays`, 0 = off) leave Now and Today for Later, then caps apply after the judge.
 // Neither moves an item below a hard rule's floor.

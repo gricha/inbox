@@ -32,8 +32,8 @@ export const SECTIONS: SettingsSection[] = [
   },
   {
     id: "queue",
-    title: "Queue",
-    help: "The queue is one list of what needs you, in the desk's order. What Claude and your rules sorted away is under Later.",
+    title: "Inbox",
+    help: "The Inbox is one list of what needs you, in the desk's order. What Claude and your rules sorted away is under FYI.",
   },
   {
     id: "agent",
@@ -117,12 +117,12 @@ export const SETTINGS = [
     default: 14,
     min: 0,
     max: 365,
-    help: "An item nobody has touched for this long leaves the queue for Later. Pinned items, what a hard rule placed, and a review you were asked for in that time stay. 0 keeps everything.",
+    help: "An item nobody has touched for this long leaves the Inbox for Later, on FYI. Pinned items, what a hard rule placed, and a review you were asked for in that time stay. 0 keeps everything.",
   },
   {
     key: "queue.cards",
     section: "queue",
-    label: "The queue shows",
+    label: "The Inbox shows",
     type: "number",
     default: 10,
     min: 0,
@@ -151,7 +151,7 @@ export const SETTINGS = [
     label: "Let Claude sort everything on your desk",
     type: "boolean",
     default: true,
-    help: "Claude Code reads each item with your policy and decides what you should do with it: now, today, later, FYI (off your page) or hidden. Where your rules put it is its hint, and holds until it answers. A hard rule's bucket is a floor Claude can't sort below.",
+    help: "Claude Code reads each item with your policy and decides what you should do with it: now or today (your Inbox), later or FYI (on FYI), or hidden. Where your rules put it is its hint, and holds until it answers. A hard rule's bucket is a floor Claude can't sort below.",
   },
   {
     key: "policy.max_per_hour",
@@ -169,7 +169,7 @@ export const SETTINGS = [
     label: "Notify me when something new needs me",
     type: "boolean",
     default: true,
-    help: "A new item on the queue, once Claude or a hard rule placed it, a PR your agent handed back included.",
+    help: "A new item in the Inbox, once Claude or a hard rule placed it, a PR your agent handed back included.",
   },
   {
     key: "notify.quiet",
@@ -206,7 +206,7 @@ export const SETTINGS = [
   {
     key: "review.auto_ai",
     section: "review",
-    label: "Review PRs in the queue ahead of time",
+    label: "Review PRs in the Inbox ahead of time",
     type: "boolean",
     default: true,
     help: "Other people's PRs, two at a time, once per commit; a PR you open gets one too. Off: a PR's review offers Ask Claude for one.",

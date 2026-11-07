@@ -633,7 +633,7 @@ function updateTray(): void {
         click: showWindow,
       },
       ...(cards.length
-        ? [{ type: "separator" as const }, { label: menuLabel(`Queue (${queueCards.length})`), enabled: false }, ...cards]
+        ? [{ type: "separator" as const }, { label: menuLabel(`Inbox (${queueCards.length})`), enabled: false }, ...cards]
         : []),
       { type: "separator" },
       { label: "Sync now", click: () => void fetch(`${api}/api/sync`, { method: "POST" }).catch(() => {}) },
@@ -653,5 +653,5 @@ function updateBadge(): void {
   const n = queued();
   if (mac) app.dock?.setBadge(n ? String(n) : "");
   else if (linux) app.setBadgeCount(n);
-  else win?.setOverlayIcon(n ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, n ? `${n} in the queue` : "");
+  else win?.setOverlayIcon(n ? nativeImage.createFromPath(asset("overlay-alert.png")) : null, n ? `${n} in the Inbox` : "");
 }

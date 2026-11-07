@@ -160,7 +160,7 @@ test("a hard rule is a floor: Claude picks Now or Today, and caps and the quiet 
   assert.deepEqual(r.order.now, ["acme/api#3"]);
   assert.deepEqual(r.order.today.toSorted(), ["acme/api#1", "acme/api#2", "acme/api#5"], "Today's cap of one leaves hard ones be");
   assert.deepEqual(r.order.later.toSorted(), ["acme/api#4", "acme/api#6"]);
-  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "the queue has 1 from B already"], "not hard: down to Later");
+  assert.deepEqual([p(4).demoted, p(6).demoted], ["quiet for 2 weeks", "the Inbox has 1 from B already"], "not hard: down to Later");
 });
 
 test("caps apply after the judge", () => {

@@ -1,14 +1,14 @@
 ---
 name: review-desk
-description: Use when the user mentions Review Desk or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to add a PR or issue to their review or desk, snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Also use it whenever you need the user to decide or tell you something while you work: ask in their desk (desk_inquire), not in chat. Review Desk is the user's local GitHub review queue (the queue, Merging, and what's sorted away under Later), reached through the review-desk MCP tools (desk_*) or the desk CLI.
+description: Use when the user mentions Review Desk or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to add a PR or issue to their review or desk, snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Also use it whenever you need the user to decide or tell you something while you work: ask in their desk (desk_inquire), not in chat. Review Desk is the user's local GitHub review queue (the Inbox, Blocked, FYI for what's sorted away, Merging and the Archive), reached through the review-desk MCP tools (desk_*) or the desk CLI.
 ---
 
 # Review Desk
 
 Review Desk is a desktop app on the user's machine that turns their GitHub review load (PRs to review, their own PRs, issues) into one queue:
 
-- **The queue**: one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
-- **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted).
+- **The queue** (the Inbox in their window): one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
+- **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted). In their window: FYI, and the Archive for what's done or resolved.
 - **Blocked**: what can't move until something else happens, as the user's rules put it in the `blocked` bucket: a PR that needs another PR merged first (its description says "Requires …", or it's stacked on it), down the chain, and their PRs waiting on reviewers. Only rules fill it, never Claude.
 - **Merging**: the user's own open PRs they've handed off for merge (Hand off for merge in the desk). The coordinator (below) gets them merged; they never show on the queue. One it can't get merged it hands back to their desk, at the top of the queue, with the reason. A PR of theirs that's ready to merge but conflicts goes there too, by itself, for the coordinator to rebase ("rebasing"), and leaves once GitHub sees it mergeable.
 

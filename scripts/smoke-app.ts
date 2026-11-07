@@ -36,9 +36,9 @@ try {
   const page = await app.firstWindow();
   step("window open; waiting for the desk (a fresh home reads your GitHub context first, ~30 s)");
   await page.waitForURL((u) => u.href.startsWith(deskUrl), { timeout: 120_000 });
-  await page.locator(".queue h2", { hasText: "Queue" }).waitFor({ timeout: 30_000 });
+  await page.locator('.side a.side-item[aria-current="page"]', { hasText: "Inbox" }).waitFor({ timeout: 30_000 });
   assert.equal(await page.title(), "Review Desk");
-  step("queue rendered");
+  step("Inbox rendered");
 
   const tray = await app.evaluate(({ app: electronApp, nativeImage }) => {
     const t = (globalThis as { deskTray?: Electron.Tray }).deskTray;
@@ -68,7 +68,7 @@ try {
   assert.equal(typeof bridge.status.hotkey.ok, "boolean");
   step(`bridge: ${JSON.stringify(bridge)}`);
 
-  // The UI's "c" uses navigator.clipboard; put back whatever text was there.
+  // The UI's Copy attach command uses navigator.clipboard; put back whatever text was there.
   const types = await app.evaluate(async ({ clipboard }) => (await clipboard.read()).flatMap((i) => i.types));
   const textOnly = types.every(
     (t) => t.startsWith("text/plain") || t === "electron application/findtext" || t.includes("NSStringPboardType"),
@@ -92,7 +92,7 @@ try {
     items.find((i) => i.label === "Settings…")!.click();
   });
   await page.waitForURL((u) => u.hash.startsWith("#/settings"), { timeout: 5000 });
-  await page.locator('.side a.side-item[aria-current="page"]', { hasText: "GitHub" }).waitFor({ timeout: 10_000 });
+  await page.locator('.side a.side-item[aria-current="page"]', { hasText: "Settings" }).waitFor({ timeout: 10_000 });
   step("Settings… opened #/settings");
 
   await app.close();

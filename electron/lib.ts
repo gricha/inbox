@@ -330,7 +330,7 @@ export const themeColors = (theme: string | null, osDark: boolean): { paper: str
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
 export const trayTooltip = (s: { now: number; today: number } | null): string =>
-  s ? `Review Desk: ${s.now + s.today} in the queue` : "Review Desk";
+  s ? `Review Desk: ${s.now + s.today} in the Inbox` : "Review Desk";
 
 // Menus read a single & as a mnemonic marker; cut first so && is never split.
 export function menuLabel(text: string, max = 60): string {

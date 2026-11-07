@@ -213,7 +213,7 @@ interface Card {
   author_bot: boolean;
   bucket: "now" | "today" | "blocked" | "later" | "fyi" | "hide";
   why: string; // the hard rule's reason, Claude's, or the rule's until Claude answers, e.g. "vaind asked you directly"
-  demoted?: string; // over a board's cap: "3 from PRs to review are urgent already" (now to today), "the queue has 6 from PRs to review already" (today to later)
+  demoted?: string; // over a board's cap: "3 from PRs to review are urgent already" (now to today), "the Inbox has 6 from PRs to review already" (today to later)
   board: string;
   boards: string[]; // every board it's on
   chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"

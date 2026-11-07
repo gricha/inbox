@@ -95,7 +95,7 @@ test("caps demote overflow in order; pinned and nocap are exempt", () => {
   assert.deepEqual(r.order.today, ["acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#4", "acme/api#5"]);
   assert.equal(r.placements.get("acme/api#3")!.demoted, "2 from B are urgent already");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "the queue has 1 from B already");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "the Inbox has 1 from B already");
   assert.equal(r.placements.get("acme/api#4")!.rule_bucket, "now");
 });
 
@@ -109,7 +109,7 @@ test("over a cap, the lightest AI call leaves first: skip, then skim, then not r
   assert.deepEqual(r.order.today, ["acme/api#2", "acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#1", "acme/api#4"]);
   assert.equal(r.placements.get("acme/api#1")!.demoted, "the AI says skip it");
-  assert.equal(r.placements.get("acme/api#4")!.demoted, "the queue has 2 from B already");
+  assert.equal(r.placements.get("acme/api#4")!.demoted, "the Inbox has 2 from B already");
   const calls = classify(
     b,
     items.map((it) => entry(it, { ai: (["skim", undefined, "skim", "look"] as const)[it.number - 1] })),
@@ -326,7 +326,7 @@ test("quiet items leave Now and Today for Later, before caps; pinned items and a
   assert.equal(r.order.now.length, 0);
   // Quiet ones leave before the cap counts, so Today's one slot (the pinned one doesn't count) goes to the fresh ask.
   assert.deepEqual(r.order.today, ["acme/api#3", "acme/api#4"]);
-  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "the queue has 1 from B already"]);
+  assert.deepEqual([p(5).bucket, p(5).demoted], ["later", "the Inbox has 1 from B already"]);
   assert.deepEqual(r.order.later, ["acme/api#5", "acme/api#1", "acme/api#2"]);
 
   const off = classify(b, entries, undefined, 0);

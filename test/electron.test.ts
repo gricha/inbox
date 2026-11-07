@@ -338,8 +338,8 @@ test("the window's colours before the UI paints follow this device's theme, else
 test("tray title and tooltip", () => {
   assert.equal(trayTitle("desk 7 +3"), "7 +3");
   assert.equal(trayTitle(""), "");
-  assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the queue");
-  assert.equal(trayTooltip({ now: 0, today: 5 }), "Review Desk: 5 in the queue");
+  assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the Inbox");
+  assert.equal(trayTooltip({ now: 0, today: 5 }), "Review Desk: 5 in the Inbox");
   assert.equal(trayTooltip(null), "Review Desk");
 });
 

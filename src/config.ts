@@ -249,7 +249,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const personalScope = orgs.map((o) => `-org:${o}`).join(" ");
   const out: string[] = [
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
-    `# Each [[boards]] table feeds the queue: GitHub searches (the space scope is appended), an optional filter,`,
+    `# Each [[boards]] table feeds your desk: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.`,
     `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint. A rule with`,
     `# \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever Claude, quiet`,
