@@ -17,6 +17,10 @@ import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
+// An agent the desk started inherits these; the tests that want them set their own.
+delete process.env.DESK_UI_ORIGIN;
+delete process.env.DESK_DEV;
+
 async function setup(settings?: Record<string, unknown>) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-srv-"));
   // No judge unless a test asks: it must not start a claude here (test/judge.test.ts runs it against a fake).
