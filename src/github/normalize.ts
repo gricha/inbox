@@ -77,7 +77,7 @@ export interface RawNode extends RawHit {
   latestReviews?: Conn<RawReview>;
   latestOpinionatedReviews?: Conn<RawReview>;
   reviews?: Conn<RawReview>;
-  reviewThreads?: Conn<{ isResolved: boolean; comments?: Conn<RawComment> }>;
+  reviewThreads?: Conn<{ isResolved: boolean; isOutdated?: boolean; comments?: Conn<RawComment> }>;
   commits?: Conn<{
     commit: {
       oid: string;
@@ -242,6 +242,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
           trusted: collaborator(c.authorAssociation),
           at: c.createdAt,
           resolved: t.isResolved,
+          outdated: !!t.isOutdated,
         })),
       ),
     ),

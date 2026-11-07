@@ -84,6 +84,7 @@
     "nodes": [
       {
         "isResolved": false,
+        "isOutdated": false,
         "comments": {
           "nodes": [
             {
@@ -98,6 +99,7 @@
       },
       {
         "isResolved": true,
+        "isOutdated": false,
         "comments": {
           "nodes": [
             {
@@ -112,6 +114,7 @@
       },
       {
         "isResolved": false,
+        "isOutdated": true,
         "comments": {
           "nodes": [
             {

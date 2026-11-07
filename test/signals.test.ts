@@ -210,13 +210,14 @@ test("pr.waits, pr.waiting_on and me.owes_reply", () => {
   const mine = (o: Partial<Item>) => makeItem({ author: "me", head_author: "me", ...o });
   const of = (it: Item) => analyze(it, ctx, cfg, NOW).signals;
   // sentry#129460: yours, asked of cvxluo, skaasten and 6 teams; markstory had the last word twice after his COMMENTED review.
+  const asked = [
+    user("cvxluo"),
+    user("skaasten"),
+    ...["a", "b", "c", "d", "e", "f"].map((t) => ({ reviewer: t, type: "team" as const, codeowner: true })),
+  ];
   const live = of(
     mine({
-      review_requests: [
-        user("cvxluo"),
-        user("skaasten"),
-        ...["a", "b", "c", "d", "e", "f"].map((t) => ({ reviewer: t, type: "team" as const, codeowner: true })),
-      ],
+      review_requests: asked,
       reviews: [review("markstory", "commented")],
       thread_last: [said("me", 27), said("markstory", 29), said("markstory", 28), said("me", 26), said("me", 25)],
     }),
@@ -224,6 +225,18 @@ test("pr.waits, pr.waiting_on and me.owes_reply", () => {
   assert.equal(live.pr.waits, "waits on your reply to markstory, then a review from cvxluo, skaasten and 6 more");
   assert.equal(live.pr.waiting_on.length, 8);
   assert.equal(live.me.owes_reply, true);
+  // Then you pushed over both of his threads, which GitHub marks outdated: the push answered them.
+  const stale = (h: number) => ({ ...said("markstory", h), outdated: true });
+  const pushed = of(
+    mine({
+      review_requests: asked,
+      reviews: [review("markstory", "commented")],
+      head_committed_at: hoursAgo(1),
+      updated_at: hoursAgo(0),
+      thread_last: [said("me", 27), stale(29), stale(28), said("me", 26), said("me", 25)],
+    }),
+  );
+  assert.deepEqual([pushed.pr.waits, pushed.me.owes_reply], ["waits on a review from cvxluo, skaasten and 6 more", false]);
   const theirs = of(makeItem({ author: "carol", review_requests: [user("me")], thread_last: [said("carol", 1)] }));
   assert.deepEqual([theirs.pr.waits, theirs.pr.waiting_on, theirs.me.owes_reply], ["waits on your review", [], false]);
   const approved = { review_decision: "approved" as const, reviews: [review("kofi", "approved")], review_requests: [user("sam")] };

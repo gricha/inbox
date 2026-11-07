@@ -832,6 +832,53 @@ test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits
   );
 });
 
+test("Blocked: sentry#129460 once your push changed the code under markstory's last words: no Reply, it waits on its reviews, and the review has nothing waiting on you", async (c) => {
+  const stale = (h: number) => ({ ...said("markstory", h), outdated: true });
+  const pushed = { head_committed_at: hoursAgo(1), updated_at: hoursAgo(0) };
+  const t = await setup([root({ ...pushed, thread_last: [stale(29), stale(28), said("me", 27), said("me", 26), said("me", 25)] })], {
+    settings: QUIET,
+  });
+  c.after(t.cleanup);
+  const say = (id: string, h: number) => ({
+    id,
+    author: "markstory",
+    bot: false,
+    body: "Do we need the primary here?",
+    at: hoursAgo(h),
+    url: "",
+  });
+  const thread = (id: string, h: number) => ({
+    id,
+    resolved: false,
+    outdated: true,
+    path: "src/sentry/auth/access.py",
+    line: null,
+    side: "old" as const,
+    hunk: "",
+    comments: [say(id, h)],
+  });
+  t.gh.contexts.set("PR_getsentry/sentry_129460", {
+    threads: [thread("PRRT_a", 29), thread("PRRT_b", 28)],
+    reviews: [],
+    comments: [],
+    commits: [],
+  });
+  await t.desk.sync();
+  const q = t.desk.queue();
+  assert.deepEqual(
+    q.sections.blocked.map((x) => [x.id, x.why, x.cta ?? null]),
+    [[LIVE, "waits on a review from cvxluo, skaasten and 6 more", null]],
+  );
+  assert.deepEqual([...q.sections.now, ...q.sections.today], []);
+  assert.deepEqual(
+    (await t.desk.convos.list(LIVE)).map((x) => [x.id, x.waiting_on_you]),
+    [
+      ["PRRT_a", false],
+      ["PRRT_b", false],
+    ],
+  );
+});
+
 test("A review asked of you by name that requires an open PR waits in Blocked; once that PR merges it's in Now, notified", async (c) => {
   const ask = reviewAsk(9, { requires: ["acme/api#5"] });
   const t = await setup([ask], { settings: QUIET });

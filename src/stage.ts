@@ -44,9 +44,22 @@ const lc = (s: string) => s.toLowerCase();
 export const waitsOnYou = (last: { author: string; bot: boolean } | undefined, me: string) =>
   !!last && !last.bot && lc(last.author) !== lc(me);
 
+// When you last pushed, as a sync knows it: the head commit's time if it's yours, never after GitHub's updatedAt; "" if not.
+export function pushedAt(it: Item, me: string): string {
+  if (!it.head_committed_at || lc(it.head_author) !== lc(me)) return "";
+  return it.head_committed_at < it.updated_at ? it.head_committed_at : it.updated_at;
+}
+
+// The rule on an open thread: a push of yours after their last word answers it once GitHub marks the code it's on changed.
+export const threadWaitsOnYou = (last: { author: string; bot: boolean; at: string }, outdated: boolean, pushed: string, me: string) =>
+  waitsOnYou(last, me) && !(outdated && last.at < pushed);
+
 // Who waits on your reply, from what a sync knows of your PR: the last word on its open threads (latest first), then on its comments.
 function owedTo(it: Item, me: string): string[] {
-  const open = it.thread_last.filter((t) => t.resolved === false).toSorted((a, b) => b.at.localeCompare(a.at));
+  const pushed = pushedAt(it, me);
+  const open = it.thread_last
+    .filter((t) => t.resolved === false && threadWaitsOnYou({ author: t.author, bot: t.author_bot, at: t.at }, !!t.outdated, pushed, me))
+    .toSorted((a, b) => b.at.localeCompare(a.at));
   const last = it.comments.findLast((c) => !c.author_bot);
   const who = [...open.map((t) => ({ author: t.author, bot: t.author_bot })), ...(last ? [{ author: last.author, bot: false }] : [])];
   const out = new Map<string, string>();
@@ -54,7 +67,7 @@ function owedTo(it: Item, me: string): string[] {
   return [...out.values()];
 }
 
-// The rule on what a sync knows of your PR, for its row: an open thread, or its comments, where someone else spoke last.
+// The rule on what a sync knows of your PR, for its row: an open thread not answered by a push, or its comments, where someone else spoke last.
 export const owesReply = (it: Item, me: string): boolean => owedTo(it, me).length > 0;
 
 // Since the latest ask of those still asked (you aside): a re-request starts the wait again; else since it was opened.

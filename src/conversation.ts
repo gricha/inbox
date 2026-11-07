@@ -6,7 +6,7 @@ import type { PrContext } from "./github/index.ts";
 import { askClaude } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
-import { waitsOnYou } from "./stage.ts";
+import { pushedAt, threadWaitsOnYou, waitsOnYou } from "./stage.ts";
 
 const BATCH = 10; // conversations per call
 const BODY = 1500; // characters of each comment
@@ -25,8 +25,8 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 const said = (c: Said) => ({ id: c.id, author: c.author, bot: c.bot, body: c.body, at: c.at, url: c.url });
 
 // A PR's conversations, those waiting on you first. On your PR, anything a person said after your last word waits on you;
-// on someone else's, a thread you're in, or a comment that @mentions you.
-export function conversation(ctx: PrContext, me: string, mine: boolean): Convo[] {
+// on someone else's, a thread you're in, or a comment that @mentions you. A push of yours since (`pushed`, pushedAt()'s) answers an outdated thread.
+export function conversation(ctx: PrContext, me: string, mine: boolean, pushed: string): Convo[] {
   const isMe = (a: string) => lc(a) === lc(me);
   const threads = ctx.threads
     .filter((t) => t.comments.length)
@@ -40,7 +40,8 @@ export function conversation(ctx: PrContext, me: string, mine: boolean): Convo[]
       resolved: t.resolved,
       state: null,
       comments: t.comments.map(said),
-      waiting_on_you: !t.resolved && waitsOnYou(t.comments.at(-1), me) && (mine || t.comments.some((c) => isMe(c.author))),
+      waiting_on_you:
+        !t.resolved && threadWaitsOnYou(t.comments.at(-1)!, t.outdated, pushed, me) && (mine || t.comments.some((c) => isMe(c.author))),
       url: t.comments[0]!.url,
     }));
   // Bots' comments on the PR are status reports (coverage, previews); their reviews and threads stay.
@@ -179,7 +180,8 @@ export class Conversations {
     const e = this.desk.snapshot().entries.get(id)!;
     const ctx = await this.context(id);
     const takes = (this.desk.store.get(`take:${id}`) as Takes | null) ?? {};
-    return conversation(ctx, this.desk.me(), e.analysis.signals.me.author).map((c) => {
+    const me = this.desk.me();
+    return conversation(ctx, me, e.analysis.signals.me.author, pushedAt(e.item, me)).map((c) => {
       const t = takes[c.id];
       return Object.assign(c, { take: c.waiting_on_you && t?.comment_id === c.comments.at(-1)!.id ? t : null });
     });

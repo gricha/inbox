@@ -102,9 +102,9 @@ test("your PR with red CI, a conflict and unresolved threads (mine fragment)", (
   assert.equal(it.threads_total, 3);
   assert.equal(it.threads_unresolved, 2);
   assert.deepEqual(it.thread_last, [
-    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z", resolved: false },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z", resolved: true },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z", resolved: false },
+    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z", resolved: false, outdated: true },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z", resolved: true, outdated: false },
+    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z", resolved: false, outdated: false },
   ]);
   assert.equal(it.head_oid, "bbbb111122223333444455556666777788889999");
   assert.equal(it.head_author, "octo-dev");

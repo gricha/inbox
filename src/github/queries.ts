@@ -82,7 +82,7 @@ export function detailsMine(n: number): string {
     ... on PullRequest { ${PR}
       mergeable
       repository { viewerDefaultMergeMethod }
-      reviewThreads(first: 60) { totalCount nodes { isResolved comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
+      reviewThreads(first: 60) { totalCount nodes { isResolved isOutdated comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
       checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${check(`$id${i}`)} } } } } } }
     }
   }`;

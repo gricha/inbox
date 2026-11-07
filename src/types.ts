@@ -64,7 +64,7 @@ export interface Item {
   comments_total: number;
   threads_total: number;
   threads_unresolved: number;
-  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string; resolved?: boolean }[]; // last comment per review thread; PRs you authored only
+  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string; resolved?: boolean; outdated?: boolean }[]; // last comment per review thread; PRs you authored only; outdated: the code it's on changed since, absent on items stored before
   detail_at: string; // when details were last fetched
 }
 
@@ -152,7 +152,7 @@ export interface Signals {
     commented: boolean;
     last_action_hours: number; // your latest comment, review, or head commit
     new_activity: boolean; // someone else commented, reviewed or pushed after your latest action
-    owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last; false on others' PRs
+    owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last, outdated threads you pushed after aside; false on others' PRs
   };
   author: {
     login: string;
