@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
 import { askClaude, NOT_LOGGED_IN } from "./review.ts";
-import { andMore } from "./stage.ts";
+import { andMore, pushAnswered, pushesOf } from "./stage.ts";
 import {
   BUCKETS,
   RANK,
@@ -187,13 +187,20 @@ function affinity(s: Signals): string | null {
   return n > 0 ? `they engaged with ${n} of ${s.author.login}'s PRs in 90 days` : null;
 }
 
-// Unresolved threads, and who had the last word on them (known on their own PRs).
-function threads(it: Item): string | null {
+// Unresolved threads, how many their push answered and who had the last word on the rest (known on their own PRs).
+function threads(it: Item, me: string): string | null {
   const n = it.threads_unresolved;
   if (!n) return null;
+  const p = pushesOf(it, me);
   const open = it.thread_last.filter((t) => t.resolved === false).toSorted((a, b) => b.at.localeCompare(a.at));
-  const who = [...new Map(open.map((t) => [t.author, `${t.author}${t.author_bot ? " (bot)" : ""}`])).values()];
-  return `unresolved threads: ${n}${who.length ? `, last word from ${listed(who)}` : ""}`;
+  const rest = open.filter((t) => !pushAnswered(t, !!t.outdated, p, me));
+  const who = [...new Map(rest.map((t) => [t.author, `${t.author}${t.author_bot ? " (bot)" : ""}`])).values()];
+  const pushed = open.length - rest.length;
+  const parts = [
+    pushed ? `${pushed} outdated by their push since the last word` : "",
+    who.length ? `${pushed ? "on the rest, " : ""}last word from ${listed(who)}` : "",
+  ].filter(Boolean);
+  return `unresolved threads: ${n}${parts.length ? `, ${parts.join("; ")}` : ""}`;
 }
 
 // One item for the prompt: its id, title and labels, then a line per fact.
@@ -210,7 +217,7 @@ function describe(g: JudgeItem, ctx: Context | null): string[] {
         ]
       : []),
     theirPush ? `they pushed ${minutesAgo(s.pr.pushed_hours)}` : null,
-    pr ? threads(it) : null,
+    pr ? threads(it, s.me.login) : null,
     s.pr.blocked ? `blocked by ${s.pr.blocker}, which ${s.pr.blocker_waits}: it can't merge before that one does` : null,
     s.pr.requires_closed.length ? `needs ${s.pr.requires_closed.join(", ")}, closed without merging` : null,
     s.pr.blocks.length ? `blocks ${andMore(s.pr.blocks)}` : null,

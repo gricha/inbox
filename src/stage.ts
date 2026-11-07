@@ -55,10 +55,10 @@ interface Pushes {
   commits: { oid: string; at: string; author: string }[];
   pushed: string;
 }
-const pushesOf = (it: Item, me: string): Pushes => ({ commits: it.commits ?? [], pushed: pushedAt(it, me) });
+export const pushesOf = (it: Item, me: string): Pushes => ({ commits: it.commits ?? [], pushed: pushedAt(it, me) });
 
 // Answered when the push that outdated it (the commit after the thread's) is yours, after their last word; that one gone (force-pushed), your latest.
-function pushAnswered(last: { at: string; commit?: string }, outdated: boolean, p: Pushes, me: string): boolean {
+export function pushAnswered(last: { at: string; commit?: string }, outdated: boolean, p: Pushes, me: string): boolean {
   if (!outdated) return false;
   const i = last.commit ? p.commits.findIndex((c) => c.oid === last.commit) : -1;
   if (i < 0) return last.at < p.pushed;

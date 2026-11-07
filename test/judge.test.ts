@@ -375,6 +375,59 @@ test("each item says who it's really from and what state it's in: via a bot, sta
   assert.doesNotMatch(lines(1), /pushed|unresolved|stacked|pinned/);
 });
 
+// sentry#129460: your ac77075 outdated both of markstory's threads (last on 9e8e006); the row owes him nothing.
+test("the judge reads a PR's threads as its row does: those your push answered aren't anyone's last word", () => {
+  const c = makeContext();
+  const mark = (h: number) => ({
+    author: "markstory",
+    author_bot: false,
+    at: hoursAgo(h),
+    resolved: false,
+    outdated: true,
+    commit: "9e8e006",
+  });
+  const pr = (marks: number[]) =>
+    makeItem({
+      repo: "getsentry/sentry",
+      number: 129460,
+      author: "me",
+      head_oid: "e74efbb",
+      head_author: "me",
+      head_committed_at: hoursAgo(1),
+      updated_at: hoursAgo(0.5),
+      commits: [
+        { oid: "9e8e006", at: hoursAgo(27.5), author: "me" },
+        { oid: "ac77075", at: hoursAgo(3), author: "me" },
+        { oid: "e74efbb", at: hoursAgo(1), author: "me" },
+      ],
+      threads_unresolved: marks.length + 1,
+      thread_last: [
+        ...marks.map(mark),
+        { author: "me", author_bot: false, at: hoursAgo(27), resolved: false, outdated: false, commit: "e74efbb" },
+      ],
+    });
+  const line = (it: Item) => {
+    const s = analyze(it, c, cfg, NOW).signals;
+    const p = buildJudgePrompt(
+      [{ item: it, signals: s, board: "B", hint: { bucket: "later", why: "" }, answered: false, bucket: "later", ai: null, key: "" }],
+      "",
+      "me",
+      c,
+      "TAG",
+    );
+    return [s.me.owes_reply, p.match(/\n {2}(unresolved threads: .*)\n/)?.[1]];
+  };
+  assert.deepEqual(line(pr([29, 28])), [
+    false,
+    "unresolved threads: 3, 2 outdated by their push since the last word; on the rest, last word from me",
+  ]);
+  // He asked again on the outdated thread after that push: he waits on you, on the row and for the judge.
+  assert.deepEqual(line(pr([29, 2])), [
+    true,
+    "unresolved threads: 3, 1 outdated by their push since the last word; on the rest, last word from markstory, me",
+  ]);
+});
+
 test("an answer holds until what the judge reads of the item changes: not on a bot's comment or a CI rerun", () => {
   const it = makeItem({ head_oid: "abc", ci: "green" });
   const at = hoursAgo(2);
