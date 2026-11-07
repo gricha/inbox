@@ -91,6 +91,12 @@ export function proxyUpgrades(server: Server, port: number, ui: string): () => v
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;
     }
+    // Node sends every Upgrade here, curl --http2's h2c to the API too, and Vite would leave those hanging.
+    const p = URL.parse(req.url ?? "", "http://localhost")?.pathname ?? "";
+    if (req.headers.upgrade?.toLowerCase() !== "websocket" || p.startsWith("/api") || p.startsWith("/mcp")) {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+      return;
+    }
     const up = net.connect(Number(to.port), to.hostname);
     open.add(socket);
     const drop = () => {

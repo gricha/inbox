@@ -399,10 +399,14 @@ test("from a checkout the page's hot-reload socket goes through to Vite, from th
   const drop = proxyUpgrades(srv, 47823, vite.origin);
   srv.listen(0, "127.0.0.1");
   await once(srv, "listening");
+  c.after(() => {
+    drop();
+    srv.close();
+  });
   const port = (srv.address() as AddressInfo).port;
-  const open = async (host: string, origin: string) => {
+  const open = async (host: string, origin: string, url = "/?token=abc", upgrade = "websocket") => {
     const s = net.connect(port, "127.0.0.1");
-    s.write(`GET /?token=abc HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    s.write(`GET ${url} HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nUpgrade: ${upgrade}\r\nConnection: Upgrade\r\n\r\n`);
     const [head] = (await once(s, "data")) as [Buffer];
     return { s, head: String(head) };
   };
@@ -414,6 +418,11 @@ test("from a checkout the page's hot-reload socket goes through to Vite, from th
   assert.equal(String((await once(ok.s, "data"))[0]), "ping");
   assert.match((await open("localhost:47823", "https://evil.example")).head, /^HTTP\/1.1 403 /);
   assert.match((await open("evil.example", "http://localhost:47823")).head, /^HTTP\/1.1 403 /, "DNS rebinding");
+  const asked = vite.asked.length;
+  const own = (url: string, upgrade: string) => open("localhost:47823", "http://localhost:47823", url, upgrade);
+  assert.match((await own("/api/queue", "h2c")).head, /^HTTP\/1.1 400 /, "curl --http2 fails fast, not hangs");
+  assert.match((await own("/mcp", "websocket")).head, /^HTTP\/1.1 400 /, "the desk's own routes have no socket");
+  assert.equal(vite.asked.length, asked, "neither went to Vite");
   // A server holding an upgraded socket never finishes closing, which would hold up node --watch's restart.
   const gone = once(ok.s, "close");
   drop();
