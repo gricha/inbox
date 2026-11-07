@@ -58,11 +58,12 @@ export interface PrContext {
     line: number | null;
     side: "new" | "old"; // old: on a removed line, numbered in the old file
     hunk: string; // the diff the thread started on
+    commit: string; // the last commit its last comment still applied to, "" if unknown
     comments: Said[];
   }[];
   reviews: (Said & { state: ReviewState })[];
   comments: Said[]; // on the PR itself
-  commits: { oid: string; headline: string; at: string }[]; // the latest 20, oldest first
+  commits: { oid: string; headline: string; at: string; author: string }[]; // the latest 20, oldest first; author: login, "" if unknown
 }
 export interface GitHub {
   viewer(): Promise<string>;
@@ -93,12 +94,16 @@ interface RawPrContext {
         line: number | null;
         diffSide: "LEFT" | "RIGHT";
         hunk?: { nodes: { diffHunk: string }[] };
-        comments: { nodes: RawSaid[] };
+        comments: { nodes: (RawSaid & { commit?: { oid: string } | null })[] };
       }[];
     };
     reviews?: { nodes: (RawSaid & { state: string; submittedAt: string | null })[] };
     comments?: { nodes: RawSaid[] };
-    history?: { nodes: { commit: { abbreviatedOid: string; messageHeadline: string; committedDate: string } }[] };
+    history?: {
+      nodes: {
+        commit: { oid: string; messageHeadline: string; committedDate: string; author: { user: { login: string } | null } | null };
+      }[];
+    };
   } | null;
 }
 
@@ -122,6 +127,7 @@ function parsePrContext(data: RawPrContext): PrContext {
       line: t.line,
       side: t.diffSide === "LEFT" ? "old" : "new",
       hunk: t.hunk?.nodes[0]?.diffHunk ?? "",
+      commit: t.comments.nodes.at(-1)?.commit?.oid ?? "",
       comments: t.comments.nodes.map((c) => said(c)),
     })),
     reviews: (n?.reviews?.nodes ?? []).map((r) =>
@@ -129,9 +135,10 @@ function parsePrContext(data: RawPrContext): PrContext {
     ),
     comments: (n?.comments?.nodes ?? []).map((c) => said(c)),
     commits: (n?.history?.nodes ?? []).map(({ commit: c }) => ({
-      oid: c.abbreviatedOid,
+      oid: c.oid,
       headline: c.messageHeadline,
       at: c.committedDate,
+      author: c.author?.user?.login ?? "",
     })),
   };
 }

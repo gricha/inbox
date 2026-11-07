@@ -75,14 +75,16 @@ export const DETAILS_REVIEW = details(`${PR}
 const check = (id: string) =>
   `__typename ... on CheckRun { name status conclusion isRequired(pullRequestId: ${id}) } ... on StatusContext { context state isRequired(pullRequestId: ${id}) }`;
 
-// Failing check names are for Merging and your cards, so they're only asked of your own PRs too, as is the merge method.
+// Failing check names are for Merging and your cards, so they're only asked of your own PRs too, as are the merge method and
+// the latest commits (whose push outdated a thread).
 export function detailsMine(n: number): string {
   const one = (i: number) => `n${i}: node(id: $id${i}) {
     __typename
     ... on PullRequest { ${PR}
       mergeable
       repository { viewerDefaultMergeMethod }
-      reviewThreads(first: 60) { totalCount nodes { isResolved isOutdated comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt } } } }
+      reviewThreads(first: 60) { totalCount nodes { isResolved isOutdated comments(last: 1) { nodes { author { __typename login } authorAssociation createdAt commit { oid } } } } }
+      recent: commits(last: 20) { nodes { commit { oid committedDate author { user { login } } } } }
       checks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 60) { nodes { ${check(`$id${i}`)} } } } } } }
     }
   }`;
@@ -135,12 +137,12 @@ export const PR_CONTEXT = `query($id: ID!) {
         nodes {
           id isResolved isOutdated path line diffSide
           hunk: comments(first: 1) { nodes { diffHunk } }
-          comments(first: 30) { nodes { id author { __typename login } body createdAt url } }
+          comments(first: 30) { nodes { id author { __typename login } body createdAt url commit { oid } } }
         }
       }
       reviews(last: 30) { nodes { id author { __typename login } state body submittedAt createdAt url } }
       comments(last: 20) { nodes { id author { __typename login } body createdAt url } }
-      history: commits(last: 20) { nodes { commit { abbreviatedOid messageHeadline committedDate } } }
+      history: commits(last: 20) { nodes { commit { oid messageHeadline committedDate author { user { login } } } } }
     }
   }
 }`;

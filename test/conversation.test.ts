@@ -33,6 +33,7 @@ const thread = (id: string, comments: ReturnType<typeof say>[], o: Partial<PrCon
   line: 88,
   side: "new" as const,
   hunk: "@@ -80,3 +80,9 @@\n+  tombstones.push(id)",
+  commit: "",
   comments,
   ...o,
 });
@@ -54,7 +55,7 @@ const CTX: PrContext = {
     say("ic2", "codecov[bot]", "Coverage 81%", 1),
     say("ic3", "me", "Rebased.", 6.5),
   ],
-  commits: [{ oid: "abc1234", headline: "Rename the merge helper", at: hoursAgo(4) }],
+  commits: [{ oid: "abc1234", headline: "Rename the merge helper", at: hoursAgo(4), author: "me" }],
 };
 
 test("on your PR: what a person said after your last word waits on you; resolved, answered, bot and older ones don't", () => {
@@ -124,7 +125,7 @@ test("the row's version of the rule, from what a sync knows of your PR", () => {
 });
 
 // sentry#129460: markstory had the last word on two threads, then your push changed the code they're on.
-test("an outdated thread whose last word came before your latest push is answered by it, on the row and in the review", () => {
+test("an outdated thread whose commit isn't known (force-pushed away) is answered by your latest push after its last word", () => {
   const pushed = hoursAgo(1);
   const pr = (h: number, outdated: boolean, o: Partial<Item> = {}) =>
     makeItem({
@@ -153,6 +154,53 @@ test("an outdated thread whose last word came before your latest push is answere
   assert.equal(waits(ctx(2, true), ""), true, "no push of yours known");
   assert.equal(waits(ctx(2, false), pushed), true, "your push didn't touch the code it's on");
   assert.equal(waits(ctx(0.5, true), pushed), true, "he spoke again after your push");
+});
+
+// markstory's last word `h` hours ago on a thread whose comments last applied to commit aaa, then the PR's commits: whether it
+// waits on you on the row and in the review.
+function markWaits(h: number, ...commits: [oid: string, author: string, h: number][]): [row: boolean, review: boolean] {
+  const log = commits.map(([oid, author, ago]) => ({ oid, author, at: hoursAgo(ago), headline: oid }));
+  const head = log.at(-1)!;
+  const row = owesReply(
+    makeItem({
+      author: "me",
+      head_oid: head.oid,
+      head_author: head.author,
+      head_committed_at: head.at,
+      updated_at: hoursAgo(0),
+      commits: log,
+      thread_last: [{ author: "markstory", author_bot: false, at: hoursAgo(h), resolved: false, outdated: true, commit: "aaa" }],
+    }),
+    "me",
+  );
+  const ctx: PrContext = {
+    threads: [
+      thread("PRRT_mark", [say("m1", "markstory", "The delete path still reads the primary?", h)], { outdated: true, commit: "aaa" }),
+    ],
+    reviews: [],
+    comments: [],
+    commits: log,
+  };
+  return [row, conversation(ctx, "me", true, head.author === "me" ? head.at : "")[0]!.waiting_on_you];
+}
+
+test("a reply on a thread your push already outdated still waits on you after a later push of yours", () => {
+  // 4h: your fix outdates his thread; 2h: he asks again on it; 1h: you push something else, or rebase.
+  assert.deepEqual(markWaits(2, ["aaa", "me", 5], ["bbb", "me", 4], ["ccc", "me", 1]), [true, true]);
+});
+
+test("the push that outdated a thread answers it, whoever's commit is on top", () => {
+  assert.deepEqual(markWaits(2, ["aaa", "me", 5], ["bbb", "me", 1]), [false, false], "your push after his word");
+  assert.deepEqual(
+    markWaits(2, ["aaa", "me", 5], ["bbb", "me", 1], ["ccc", "getsantry[bot]", 0.5]),
+    [false, false],
+    "a bot's commit on top",
+  );
+});
+
+test("a thread someone else's push outdated isn't answered by a later push of yours", () => {
+  assert.deepEqual(markWaits(2, ["aaa", "me", 5], ["bbb", "dana", 1], ["ccc", "me", 0.5]), [true, true]);
+  assert.deepEqual(markWaits(2, ["aaa", "me", 5]), [true, true], "outdated with no push since (the base moved)");
 });
 
 test("Claude's prompt fences GitHub's text, and its answers are checked against what it was asked", () => {

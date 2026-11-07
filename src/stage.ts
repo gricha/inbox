@@ -50,15 +50,35 @@ export function pushedAt(it: Item, me: string): string {
   return it.head_committed_at < it.updated_at ? it.head_committed_at : it.updated_at;
 }
 
-// The rule on an open thread: a push of yours after their last word answers it once GitHub marks the code it's on changed.
-export const threadWaitsOnYou = (last: { author: string; bot: boolean; at: string }, outdated: boolean, pushed: string, me: string) =>
-  waitsOnYou(last, me) && !(outdated && last.at < pushed);
+// A PR's latest commits, oldest first, and when you last pushed (pushedAt()'s).
+interface Pushes {
+  commits: { oid: string; at: string; author: string }[];
+  pushed: string;
+}
+const pushesOf = (it: Item, me: string): Pushes => ({ commits: it.commits ?? [], pushed: pushedAt(it, me) });
+
+// Answered when the push that outdated it (the commit after the thread's) is yours, after their last word; that one gone (force-pushed), your latest.
+function pushAnswered(last: { at: string; commit?: string }, outdated: boolean, p: Pushes, me: string): boolean {
+  if (!outdated) return false;
+  const i = last.commit ? p.commits.findIndex((c) => c.oid === last.commit) : -1;
+  if (i < 0) return last.at < p.pushed;
+  const by = p.commits[i + 1];
+  return !!by && lc(by.author) === lc(me) && last.at < by.at;
+}
+
+// The rule on an open thread: someone else had the last word, and no push of yours answered it.
+export const threadWaitsOnYou = (
+  last: { author: string; bot: boolean; at: string; commit?: string },
+  outdated: boolean,
+  p: Pushes,
+  me: string,
+) => waitsOnYou(last, me) && !pushAnswered(last, outdated, p, me);
 
 // Who waits on your reply, from what a sync knows of your PR: the last word on its open threads (latest first), then on its comments.
 function owedTo(it: Item, me: string): string[] {
-  const pushed = pushedAt(it, me);
+  const p = pushesOf(it, me);
   const open = it.thread_last
-    .filter((t) => t.resolved === false && threadWaitsOnYou({ author: t.author, bot: t.author_bot, at: t.at }, !!t.outdated, pushed, me))
+    .filter((t) => t.resolved === false && threadWaitsOnYou({ ...t, bot: t.author_bot }, !!t.outdated, p, me))
     .toSorted((a, b) => b.at.localeCompare(a.at));
   const last = it.comments.findLast((c) => !c.author_bot);
   const who = [...open.map((t) => ({ author: t.author, bot: t.author_bot })), ...(last ? [{ author: last.author, bot: false }] : [])];

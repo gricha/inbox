@@ -46,6 +46,7 @@ export interface Item {
   head_oid: string;
   head_committed_at: string | null;
   head_author: string; // login of the head commit's author, "" if unknown
+  commits?: { oid: string; at: string; author: string }[]; // the latest 20, oldest first; at: committed; author: login, "" if unknown; PRs you authored only, absent on items stored before
   head_ref?: string; // the PR's head branch; absent on items stored before it was fetched
   head_repo?: string; // "owner/repo" the head branch lives in (a fork's differs), "" if deleted
   // Its latest base change: the branch it was based on before (GitHub moves a stacked PR to main when the one below merges),
@@ -64,7 +65,17 @@ export interface Item {
   comments_total: number;
   threads_total: number;
   threads_unresolved: number;
-  thread_last: { author: string; author_bot: boolean; trusted?: boolean; at: string; resolved?: boolean; outdated?: boolean }[]; // last comment per review thread; PRs you authored only; outdated: the code it's on changed since, absent on items stored before
+  // last comment per review thread; PRs you authored only; outdated: the code it's on changed since; commit: the last one it
+  // still applied to (an outdated thread's stays there); both absent on items stored before
+  thread_last: {
+    author: string;
+    author_bot: boolean;
+    trusted?: boolean;
+    at: string;
+    resolved?: boolean;
+    outdated?: boolean;
+    commit?: string;
+  }[];
   detail_at: string; // when details were last fetched
 }
 
@@ -152,7 +163,7 @@ export interface Signals {
     commented: boolean;
     last_action_hours: number; // your latest comment, review, or head commit
     new_activity: boolean; // someone else commented, reviewed or pushed after your latest action
-    owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last, outdated threads you pushed after aside; false on others' PRs
+    owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last, threads your push outdated after their last word aside; false on others' PRs
   };
   author: {
     login: string;

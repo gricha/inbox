@@ -29,7 +29,9 @@ interface RawComment {
   author: Actor | null;
   authorAssociation?: string;
   createdAt: string;
+  commit?: { oid: string } | null;
 }
+type RawCommit = { oid: string; committedDate: string; author: { user: { login: string } | null } | null };
 
 // Has a say on the repo. Anyone else can comment on a public PR.
 const COLLABORATORS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -78,14 +80,8 @@ export interface RawNode extends RawHit {
   latestOpinionatedReviews?: Conn<RawReview>;
   reviews?: Conn<RawReview>;
   reviewThreads?: Conn<{ isResolved: boolean; isOutdated?: boolean; comments?: Conn<RawComment> }>;
-  commits?: Conn<{
-    commit: {
-      oid: string;
-      committedDate: string;
-      author: { user: { login: string } | null } | null;
-      statusCheckRollup: { state: string } | null;
-    };
-  }>;
+  commits?: Conn<{ commit: RawCommit & { statusCheckRollup: { state: string } | null } }>;
+  recent?: Conn<{ commit: RawCommit }>;
 }
 
 const CI: Record<string, Ci> = { SUCCESS: "green", FAILURE: "red", ERROR: "red", PENDING: "pending", EXPECTED: "pending" };
@@ -199,6 +195,9 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_oid: head?.oid ?? "",
     head_committed_at: head?.committedDate ?? null,
     head_author: head?.author?.user?.login ?? "",
+    ...(n.recent && {
+      commits: n.recent.nodes.map(({ commit: c }) => ({ oid: c.oid, at: c.committedDate, author: c.author?.user?.login ?? "" })),
+    }),
     head_ref: n.headRefName ?? "",
     head_repo: n.headRepository?.nameWithOwner ?? "",
     ...(n.baseChanges && { retargeted: moved ? { from: moved.previousRefName ?? moved.oldBase ?? "", at: moved.createdAt } : null }),
@@ -243,6 +242,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
           at: c.createdAt,
           resolved: t.isResolved,
           outdated: !!t.isOutdated,
+          commit: c.commit?.oid ?? "",
         })),
       ),
     ),

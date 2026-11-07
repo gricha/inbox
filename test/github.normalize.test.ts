@@ -101,13 +101,28 @@ test("your PR with red CI, a conflict and unresolved threads (mine fragment)", (
   assert.deepEqual(it.assignees, ["octo-dev"]);
   assert.equal(it.threads_total, 3);
   assert.equal(it.threads_unresolved, 2);
+  const [a, b] = ["aaaa111122223333444455556666777788889999", "bbbb111122223333444455556666777788889999"];
+  const last = (author: string, at: string, resolved: boolean, outdated: boolean, commit: string) => ({
+    author,
+    author_bot: false,
+    trusted: true,
+    at,
+    resolved,
+    outdated,
+    commit,
+  });
   assert.deepEqual(it.thread_last, [
-    { author: "birch", author_bot: false, trusted: true, at: "2026-03-01T16:00:00Z", resolved: false, outdated: true },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-01T17:00:00Z", resolved: true, outdated: false },
-    { author: "octo-dev", author_bot: false, trusted: true, at: "2026-03-02T17:00:00Z", resolved: false, outdated: false },
+    last("birch", "2026-03-01T16:00:00Z", false, true, a),
+    last("octo-dev", "2026-03-01T17:00:00Z", true, false, b),
+    last("octo-dev", "2026-03-02T17:00:00Z", false, false, b),
   ]);
-  assert.equal(it.head_oid, "bbbb111122223333444455556666777788889999");
+  assert.equal(it.head_oid, b);
   assert.equal(it.head_author, "octo-dev");
+  assert.deepEqual(it.commits, [
+    { oid: a, at: "2026-03-01T12:00:00Z", author: "octo-dev" },
+    { oid: b, at: "2026-03-02T17:30:00Z", author: "octo-dev" },
+  ]);
+  assert.equal("commits" in normalize(fixture("pr-review"), NOW), false, "only asked of your own PRs");
   assert.deepEqual(it.reviews, [
     { author: "birch", author_bot: false, trusted: true, state: "changes_requested", at: "2026-03-01T16:00:00Z", commit: "" },
   ]);

@@ -100,7 +100,7 @@ export const FIELDS: FieldDoc[] = [
   {
     path: "me.owes_reply",
     type: "boolean",
-    doc: "your PR has an open thread or a comment where someone other than you (bots aside) spoke last, outdated threads you pushed after aside: its row's Reply; false on others' PRs",
+    doc: "your PR has an open thread or a comment where someone other than you (bots aside) spoke last, threads your push outdated after their last word aside: its row's Reply; false on others' PRs",
   },
   { path: "author.login", type: "string", doc: "author login" },
   { path: "author.bot", type: "boolean", doc: "author is a bot (GitHub App or listed in signals.bots)" },

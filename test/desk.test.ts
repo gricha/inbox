@@ -833,8 +833,14 @@ test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits
 });
 
 test("Blocked: sentry#129460 once your push changed the code under markstory's last words: no Reply, it waits on its reviews, and the review has nothing waiting on you", async (c) => {
-  const stale = (h: number) => ({ ...said("markstory", h), outdated: true });
-  const pushed = { head_committed_at: hoursAgo(1), updated_at: hoursAgo(0) };
+  // As GitHub had it: both his threads last applied to 9e8e006, which your ac77075 outdated.
+  const stale = (h: number) => ({ ...said("markstory", h), outdated: true, commit: "9e8e006" });
+  const commits = [
+    { oid: "9e8e006", at: hoursAgo(27.5), author: "me", headline: "Keep require_user first" },
+    { oid: "ac77075", at: hoursAgo(1.01), author: "me", headline: "Read the replica" },
+    { oid: "e74efbb", at: hoursAgo(1), author: "me", headline: "Fix the test" },
+  ];
+  const pushed = { head_oid: "e74efbb", head_committed_at: hoursAgo(1), updated_at: hoursAgo(0), commits };
   const t = await setup([root({ ...pushed, thread_last: [stale(29), stale(28), said("me", 27), said("me", 26), said("me", 25)] })], {
     settings: QUIET,
   });
@@ -855,13 +861,14 @@ test("Blocked: sentry#129460 once your push changed the code under markstory's l
     line: null,
     side: "old" as const,
     hunk: "",
+    commit: "9e8e006",
     comments: [say(id, h)],
   });
   t.gh.contexts.set("PR_getsentry/sentry_129460", {
     threads: [thread("PRRT_a", 29), thread("PRRT_b", 28)],
     reviews: [],
     comments: [],
-    commits: [],
+    commits,
   });
   await t.desk.sync();
   const q = t.desk.queue();

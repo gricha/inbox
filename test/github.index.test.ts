@@ -489,6 +489,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
                     body: "Retry?",
                     createdAt: "2026-03-01T10:00:00Z",
                     url: "https://github.com/acme/api/pull/1#discussion_r1",
+                    commit: { oid: "9e8e006aaaabbbbccccddddeeeeffff000011112" },
                   },
                 ],
               },
@@ -512,7 +513,16 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
           nodes: [{ id: "IC_1", url: "", author: null, body: "+1", createdAt: "2026-03-01T11:00:00Z" }],
         },
         history: {
-          nodes: [{ commit: { abbreviatedOid: "abc1234", messageHeadline: "Retry 502s", committedDate: "2026-03-01T12:00:00Z" } }],
+          nodes: [
+            {
+              commit: {
+                oid: "abc1234aaaabbbbccccddddeeeeffff000011112",
+                messageHeadline: "Retry 502s",
+                committedDate: "2026-03-01T12:00:00Z",
+                author: { user: { login: "me" } },
+              },
+            },
+          ],
         },
       },
     },
@@ -530,6 +540,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
       line: null,
       side: "old",
       hunk: "@@ -1 +1 @@\n-a\n+b",
+      commit: "9e8e006aaaabbbbccccddddeeeeffff000011112",
       comments: [
         {
           id: "PRRC_1",
@@ -554,5 +565,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
     },
   ]);
   assert.deepEqual(ctx.comments, [{ id: "IC_1", author: "ghost", bot: false, body: "+1", at: "2026-03-01T11:00:00Z", url: "" }]);
-  assert.deepEqual(ctx.commits, [{ oid: "abc1234", headline: "Retry 502s", at: "2026-03-01T12:00:00Z" }]);
+  assert.deepEqual(ctx.commits, [
+    { oid: "abc1234aaaabbbbccccddddeeeeffff000011112", headline: "Retry 502s", at: "2026-03-01T12:00:00Z", author: "me" },
+  ]);
 });

@@ -25,9 +25,10 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 const said = (c: Said) => ({ id: c.id, author: c.author, bot: c.bot, body: c.body, at: c.at, url: c.url });
 
 // A PR's conversations, those waiting on you first. On your PR, anything a person said after your last word waits on you;
-// on someone else's, a thread you're in, or a comment that @mentions you. A push of yours since (`pushed`, pushedAt()'s) answers an outdated thread.
+// on someone else's, a thread you're in, or a comment that @mentions you. A push of yours can answer an outdated thread (`pushed`: pushedAt()'s).
 export function conversation(ctx: PrContext, me: string, mine: boolean, pushed: string): Convo[] {
   const isMe = (a: string) => lc(a) === lc(me);
+  const pushes = { commits: ctx.commits, pushed };
   const threads = ctx.threads
     .filter((t) => t.comments.length)
     .map((t): Convo => ({
@@ -41,7 +42,9 @@ export function conversation(ctx: PrContext, me: string, mine: boolean, pushed: 
       state: null,
       comments: t.comments.map(said),
       waiting_on_you:
-        !t.resolved && threadWaitsOnYou(t.comments.at(-1)!, t.outdated, pushed, me) && (mine || t.comments.some((c) => isMe(c.author))),
+        !t.resolved &&
+        threadWaitsOnYou({ ...t.comments.at(-1)!, commit: t.commit }, t.outdated, pushes, me) &&
+        (mine || t.comments.some((c) => isMe(c.author))),
       url: t.comments[0]!.url,
     }));
   // Bots' comments on the PR are status reports (coverage, previews); their reviews and threads stay.
@@ -115,7 +118,9 @@ export function buildTakePrompt(it: Item, me: string, convos: Convo[], ctx: PrCo
     `<pr-${tag}>`,
     `${it.id} by ${it.author}: ${oneLine(it.title)}`,
     ...(it.body ? [`description: ${clip(oneLine(it.body), 400)}`] : []),
-    ...(ctx.commits.length ? [`commits, oldest first:`, ...ctx.commits.map((c) => `- ${c.oid} ${c.at} ${oneLine(c.headline)}`)] : []),
+    ...(ctx.commits.length
+      ? [`commits, oldest first:`, ...ctx.commits.map((c) => `- ${c.oid.slice(0, 7)} ${c.at} ${oneLine(c.headline)}`)]
+      : []),
     ``,
     ...convos.flatMap((c) => {
       const hunk = hunks.get(c.id);
