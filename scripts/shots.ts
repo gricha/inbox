@@ -632,7 +632,7 @@ const SHOTS: Shot[] = [
       })(page);
       await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
       await page.locator(".rv-ai").waitFor();
-      const ask = await page.locator(".rv-ai button").textContent();
+      const ask = await page.locator(".rv-ai .link-btn").textContent();
       if (ask !== "Ask Claude for one") failures.push(`review-empty: the AI section offers ${JSON.stringify(ask)}`);
     },
     after: async (page) => {
@@ -648,7 +648,7 @@ const SHOTS: Shot[] = [
         Object.assign(v, { ai: null, generating: false, ai_error: "Claude Code isn't logged in. Run `claude auth login` in a terminal." });
       })(page);
       await review("acme/api#4127")(page);
-      const again = await page.locator(".rv-ai button").textContent();
+      const again = await page.locator(".rv-ai .link-btn").textContent();
       if (again !== "Try again") failures.push(`review-ai-error: the AI section offers ${JSON.stringify(again)}`);
     },
     after: async (page) => {
