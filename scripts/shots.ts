@@ -266,8 +266,32 @@ const systemTheme = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+// The words of the open More menu, top to bottom, its heading as "#On GitHub".
+const moreItems = (page: Page) =>
+  page.evaluate<string[]>(
+    `[...(document.querySelector(".more-pop")?.children ?? [])].map((el) => (el.classList.contains("pop-title") ? "#" : "") + el.textContent.trim())`,
+  );
 const SHOTS: Shot[] = [
-  { name: "queue", go: at("#/") },
+  {
+    // Nothing is selected on load: no row's fill, no filled call to action.
+    name: "queue",
+    go: async (page) => {
+      await at("#/")(page);
+      if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
+      if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
+    },
+  },
+  {
+    // A trip to another page and back: the row you focused before isn't filled any more.
+    name: "queue-after-settings",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".queue [data-id]").nth(1).locator(".row-main").focus();
+      await at("#/settings/github")(page);
+      await at("#/")(page);
+      if (await page.locator(".line.sel").count()) failures.push("queue-after-settings: a row is still selected after a trip to Settings");
+    },
+  },
   {
     // The macOS app between 820 and 880px: the traffic lights' padding, the page links and Ask share the bar.
     name: "queue-840",
@@ -434,13 +458,18 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Enter on a PR opens its review; an issue still opens in place.
+    // A click on a PR opens its review; an issue opens in place, its actions quiet text, Close last.
     name: "expanded",
     go: async (page) => {
       await at("#/")(page);
       await unfold(page);
       await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
+      const acts = await page.evaluate<{ text: string; title: string | null }[]>(
+        `[...document.querySelectorAll(".card-keys .act")].map((b) => ({ text: b.textContent.trim(), title: b.getAttribute("title") }))`,
+      );
+      if (acts[0]?.text !== "Comment" || acts.at(-1)?.text !== "Close" || acts.at(-1)?.title !== "Close (Esc)")
+        failures.push(`expanded: the opened issue's actions read ${JSON.stringify(acts)}`);
     },
   },
   {
@@ -494,6 +523,25 @@ const SHOTS: Shot[] = [
         v.item = { ...v.item, additions: 0, deletions: 0, changed_files: 0 };
       })(page);
       await at(`#/review/${encodeURIComponent("acme/api#4127")}`)(page);
+      await page.locator(".rv-ai").waitFor();
+      const ask = await page.locator(".rv-ai button").textContent();
+      if (ask !== "Ask Claude for one") failures.push(`review-empty: the AI section offers ${JSON.stringify(ask)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
+    // The AI review failed: its error, and Try again beside it.
+    name: "review-ai-error",
+    go: async (page) => {
+      await reviewAs((v) => {
+        Object.assign(v, { ai: null, generating: false, ai_error: "Claude Code isn't logged in. Run `claude auth login` in a terminal." });
+      })(page);
+      await review("acme/api#4127")(page);
+      const again = await page.locator(".rv-ai button").textContent();
+      if (again !== "Try again") failures.push(`review-ai-error: the AI section offers ${JSON.stringify(again)}`);
     },
     after: async (page) => {
       await unroute(page);
@@ -730,18 +778,50 @@ const SHOTS: Shot[] = [
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
   },
-  // Merging: what each waits on and the coordinator's latest note, one merged.
-  { name: "inflight", go: at("#/inflight") },
+  // Merging: what each waits on and the coordinator's latest note, one merged; your agent's line has its buttons.
   {
+    name: "inflight",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      for (const b of ["Copy attach command", "Wake it"])
+        if (!(await page.locator(".lane-coord button", { hasText: b }).count())) failures.push(`inflight: your agent's line has no ${b}`);
+      // Each row's whole phrase, with the note's age, is its tooltip.
+      const note = await page.evaluate<{ first: string; title: string | null } | null>(`(() => {
+        const n = document.querySelector(".lane-row:not(.dim) .line-note");
+        return n && { first: n.querySelector(".dots > span")?.textContent ?? "", title: n.getAttribute("title") };
+      })()`);
+      if (!note?.first || !note.title?.startsWith(note.first) || !note.title.slice(note.first.length).startsWith(" \u00b7 "))
+        failures.push(`inflight: the first row's phrase has the tooltip ${JSON.stringify(note)}`);
+    },
+  },
+  {
+    // One click on a row opens its review.
+    name: "inflight-click",
+    go: async (page) => {
+      await at("#/inflight")(page);
+      await page.locator(".lane-row:not(.dim) .row-main").first().click();
+      await page.waitForTimeout(300);
+      const hash = await page.evaluate<string>("location.hash");
+      if (!hash.startsWith("#/review/")) failures.push(`inflight-click: a click on a row went to ${hash}`);
+    },
+  },
+  {
+    // Nothing handed off yet, and your agent not started: Start it now.
     name: "inflight-empty",
     go: async (page) => {
       await page.route("**/api/inflight", async (route) => {
         const res = await route.fetch();
         const v = (await res.json()) as InflightView;
         v.rows = [];
+        v.coordinator = { ...v.coordinator, id: null, url: null };
         await route.fulfill({ response: res, json: v });
       });
+      await at("#/")(page); // from Merging itself the hash wouldn't change, so nothing would refetch
       await at("#/inflight")(page);
+      await page
+        .locator(".lane-coord button", { hasText: "Start it now" })
+        .waitFor({ timeout: 5000 })
+        .catch(() => failures.push("inflight-empty: your agent's line has no Start it now"));
     },
     after: unroute,
   },
@@ -759,18 +839,19 @@ const SHOTS: Shot[] = [
       await at("#/")(page); // from Merging itself the hash wouldn't change, so nothing would refetch
       await at("#/inflight")(page);
       await page.locator(".lane-coord-error").waitFor({ timeout: 5000 });
+      if (!(await page.locator(".lane-coord-error button", { hasText: "Try again" }).count()))
+        failures.push("inflight-coord-error: your agent's line has no Try again");
     },
     after: unroute,
   },
   {
-    // The selected row's keys: Review, Open on GitHub, Back to desk.
+    // A row Tab reached: its whole phrase under it, and no buttons (a click opens it, a right-click has the rest).
     name: "inflight-selected",
     go: async (page) => {
       await at("#/inflight")(page);
-      await page.keyboard.press("j");
+      await page.locator(".lane [data-id]").nth(1).locator(".row-main").focus();
       await page.waitForTimeout(200);
-      if ((await page.locator(".lane-row.sel .card-keys").textContent())?.includes("Ask"))
-        failures.push("inflight-selected: the row's keys still offer Ask");
+      if (await page.locator(".lane-more .act").count()) failures.push("inflight-selected: the selected row has buttons");
     },
   },
   {
@@ -872,12 +953,11 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Enter on a Merging row: its review says what Merging says, and Esc goes back there.
+    // A click on a Merging row: its review says what Merging says, and Esc goes back there.
     name: "review-inflight",
     go: async (page) => {
       await at("#/inflight")(page);
       await page.locator('.lane [data-id="acme/api#4122"] .row-main').click();
-      await page.keyboard.press("Enter");
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
     },
@@ -1321,7 +1401,38 @@ const SHOTS: Shot[] = [
     },
   },
   // The More menu (.): on your PR's review, on the queue's selected row, and on an old PR of yours under Later.
-  { name: "more-review", go: review("acme/worker#875", ["."]) },
+  {
+    // Done first, then what isn't a write, then the writes under "On GitHub".
+    name: "more-review",
+    go: async (page) => {
+      await review("acme/worker#875", ["."])(page);
+      const items = await moreItems(page);
+      const head = items.indexOf("#On GitHub");
+      if (items[0] !== "Done" || head < 1 || head === items.length - 1 || items[head - 1] !== "Open on GitHub")
+        failures.push(`more-review: the More menu reads ${JSON.stringify(items)}`);
+    },
+  },
+  {
+    // A PR that's done: More puts it back, as its row's menu does.
+    name: "more-review-done",
+    go: async (page) => {
+      await at("#/")(page);
+      await reviewAs((v) => {
+        v.card.status = "done";
+      })(page);
+      await review("acme/api#4127")(page);
+      await page.locator(".rv-actions .more-wrap > button").click();
+      await page.locator(".more-pop").waitFor();
+      const items = await moreItems(page);
+      if (items[0] !== "Back on the desk" || items.includes("Done"))
+        failures.push(`more-review-done: the More menu reads ${JSON.stringify(items)}`);
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await unroute(page);
+      await fresh(page);
+    },
+  },
   {
     name: "more-row",
     after: refold,
@@ -1409,7 +1520,7 @@ const SHOTS: Shot[] = [
       go: async (page) => {
         await pickTheme(id)(page);
         await at("#/inflight")(page);
-        await page.keyboard.press("j");
+        await page.locator(".lane [data-id]").nth(1).locator(".row-main").focus();
       },
       after: systemTheme,
     },
@@ -1425,6 +1536,7 @@ const SHOTS: Shot[] = [
       await page.locator(".ctx-has-sub").hover();
       await page.locator(".ctx-sub").waitFor();
       await page.waitForTimeout(200);
+      if (!(await page.locator(".ctx-item", { hasText: "Why it's here" }).count())) failures.push("row-menu: no Why it's here");
     },
     after: async (page) => {
       await page.keyboard.press("Escape");
@@ -1486,6 +1598,11 @@ try {
         files.push(file);
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
         if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
+        // The window names no key: a button's tooltip names its own. Help, the list of keys, is the one place.
+        const chips = await page.evaluate<number>(
+          `[...document.querySelectorAll("kbd")].filter((k) => !k.closest(".dialog") && k.getClientRects().length).length`,
+        );
+        if (chips) failures.push(`${file}: ${chips} key chip(s) on screen`);
         const spill = await page.evaluate<number>(`(() => {
           const bar = document.querySelector(".topbar");
           const last = bar && [...bar.querySelectorAll(".tb-right > *")].filter((el) => el.getBoundingClientRect().width).at(-1);

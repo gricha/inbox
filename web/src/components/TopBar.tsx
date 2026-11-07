@@ -25,7 +25,6 @@ export function TopBar({
   setFilter,
   filterRef,
   onSync,
-  onHelp,
   ask,
   waiting,
   onAsk,
@@ -41,7 +40,6 @@ export function TopBar({
   setFilter: (s: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
   onSync: () => void;
-  onHelp: () => void;
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
   onAsk: () => void;
@@ -65,9 +63,8 @@ export function TopBar({
         <a
           className="back"
           href={routeHash(question ? { name: "inquiry", id: question } : { name: from })}
-          title={`Back to ${question ? "the question" : BACK[from]} (esc)`}
+          title={`Back to ${question ? "the question" : BACK[from]} (Esc)`}
         >
-          <kbd>esc</kbd>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
@@ -95,7 +92,6 @@ export function TopBar({
               } else if (e.key === "Enter" || e.key === "ArrowDown") e.currentTarget.blur();
             }}
           />
-          {!filter && <kbd>/</kbd>}
         </label>
       )}
       <div className="tb-right">
@@ -103,7 +99,7 @@ export function TopBar({
           type="button"
           className={cls("sync", ((!!o?.sync_error && !o.syncing) || offline) && "err")}
           onClick={onSync}
-          title={o?.sync_error ?? rate ?? "Sync now (r)"}
+          title={o?.sync_error ?? rate ?? "Sync now"}
         >
           <svg className={cls("i", o?.syncing && "spin")} viewBox="0 0 16 16" aria-hidden="true">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
@@ -112,22 +108,27 @@ export function TopBar({
         </button>
         {/* Below 1000px the sidebar is gone: Later, Merging, Blocked and the Archive are reachable from here. */}
         {route.name !== "later" && (
-          <a className="tb-flight" href="#/later" title="Sorted away (g l)">
+          <a className="tb-flight" href="#/later" title="Sorted away">
             Later
           </a>
         )}
-        {!!o?.inflight.total && route.name !== "inflight" && (
-          <a className="tb-flight" href="#/inflight" title={`${o.inflight.total} merging (g m)`}>
+        {/* Merging is your agent's page, so it's here while nothing is handed off too. */}
+        {route.name !== "inflight" && (
+          <a
+            className="tb-flight"
+            href="#/inflight"
+            title={o?.inflight.total ? `${o.inflight.total} merging` : "Your agent and what it merged"}
+          >
             Merging
           </a>
         )}
         {route.name !== "blocked" && (
-          <a className="tb-flight" href="#/blocked" title="What can't move yet (g b)">
+          <a className="tb-flight" href="#/blocked" title="What can't move yet">
             Blocked
           </a>
         )}
         {route.name !== "archive" && (
-          <a className="tb-flight" href="#/archive" title="What's done (g a)">
+          <a className="tb-flight" href="#/archive" title="What's done">
             Archive
           </a>
         )}
@@ -136,9 +137,8 @@ export function TopBar({
             type="button"
             className={cls("tb-ask", waiting && "waiting")}
             onClick={onAsk}
-            title={`Ask your agent about what you're on (t)${waiting ? " \u00b7 waiting for its answer" : ""}`}
+            title={`Ask your agent about what you're on${waiting ? " \u00b7 waiting for its answer" : ""}`}
           >
-            <kbd>t</kbd>
             <span className="tb-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
             <span className="tb-ask-short">{waiting ? "Asked" : "Ask"}</span>
             <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
@@ -146,16 +146,10 @@ export function TopBar({
             </svg>
           </button>
         )}
-        <button type="button" className="icon" onClick={onHelp} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
-          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="1.5" y="4" width="13" height="8.5" rx="1.5" />
-            <path d="M4 7h.01M6.5 7h.01M9 7h.01M11.5 7h.01M5 10h6" />
-          </svg>
-        </button>
         <a
           className={cls("icon", "to-settings", inSettings && "on")}
           href={inSettings ? "#/" : "#/settings/github"}
-          title={inSettings ? "Back to the queue (Esc)" : "Settings (,)"}
+          title={inSettings ? "Back to the queue (Esc)" : "Settings"}
           aria-label="Settings"
         >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

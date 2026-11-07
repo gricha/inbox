@@ -118,15 +118,14 @@ export function Policy({
       />
       <div className="editor-foot">
         <KeyButton
-          k={`${MOD}S`}
           label={busy ? "Saving…" : "Save"}
+          title={`Save (${MOD}S)`}
           disabled={busy || !dirty}
           run={() => {
             void save();
           }}
         />
         <KeyButton
-          k=""
           label="Revert"
           disabled={!dirty}
           run={() => {

@@ -1,6 +1,6 @@
 import type { CoordinatorView, InflightRow, InflightView } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { BACK_TITLE, Dots, KeyButton } from "./Detail.tsx";
+import { Dots } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
@@ -11,12 +11,14 @@ export function Inflight({
   selected,
   select,
   run,
+  act,
 }: {
   view: InflightView | null;
   now: number;
   selected: string | null;
   select: (id: string) => void;
   run: (row: InflightRow, key: string) => void; // Merging's keys: enter o b
+  act: (k: "copy" | "wake") => void; // your agent's line: Copy attach command, Wake it
 }) {
   if (!view)
     return (
@@ -54,13 +56,11 @@ export function Inflight({
   };
   return (
     <div className="queue lane">
-      <Coordinator c={view.coordinator} />
+      <Coordinator c={view.coordinator} act={act} />
       {open.length ? (
         rows(open)
       ) : (
-        <p className="queue-empty">
-          Nothing in Merging yet: press <kbd>m</kbd> on one of your PRs when you're done with it.
-        </p>
+        <p className="queue-empty">Nothing in Merging yet: hand off one of your PRs for merge when you're done with it.</p>
       )}
       {landed.length > 0 && (
         <section className="group" aria-labelledby="h-landed">
@@ -75,19 +75,28 @@ export function Inflight({
   );
 }
 
-// One quiet line: how the coordinator is, where to watch it, and its keys (c copies the attach command, w wakes it).
-function Coordinator({ c }: { c: CoordinatorView }) {
+// One quiet line: how your agent is, where to watch it, Copy attach command and Wake it.
+function Coordinator({ c, act }: { c: CoordinatorView; act: (k: "copy" | "wake") => void }) {
+  const wake = () => {
+    act("wake");
+  };
   if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings \u2192 Agents."}</p>;
   if (c.error)
     return (
       <p className="lane-coord lane-coord-error">
-        <b>Your agent can't run:</b> {withCode(c.error)} <kbd>w</kbd> tries again.
+        <b>Your agent can't run:</b> {withCode(c.error)}{" "}
+        <button type="button" className="link-btn" onClick={wake}>
+          Try again
+        </button>
       </p>
     );
   if (!c.id)
     return (
       <p className="lane-coord">
-        Your agent starts on your first hand-off or ask; <kbd>w</kbd> starts it now.
+        Your agent starts on your first hand-off or ask.{" "}
+        <button type="button" className="link-btn" onClick={wake}>
+          Start it now
+        </button>
       </p>
     );
   return (
@@ -102,12 +111,20 @@ function Coordinator({ c }: { c: CoordinatorView }) {
                 </a>,
               ]
             : []),
-          <span key="attach" title={`claude attach ${c.id}`}>
-            <kbd>c</kbd> copy attach command
-          </span>,
-          <span key="wake">
-            <kbd>w</kbd> wake it
-          </span>,
+          <button
+            key="attach"
+            type="button"
+            className="link-btn"
+            title={`claude attach ${c.id}`}
+            onClick={() => {
+              act("copy");
+            }}
+          >
+            Copy attach command
+          </button>,
+          <button key="wake" type="button" className="link-btn" onClick={wake}>
+            Wake it
+          </button>,
         ]}
       />
     </p>
@@ -115,7 +132,8 @@ function Coordinator({ c }: { c: CoordinatorView }) {
 }
 
 // One line: the title, quietly its ref and place in its stack, what it waits on and the coordinator's latest note, its age.
-// Selected, that phrase moves whole under the row, with the note's age, and its keys.
+// Selected (by Tab, or the row you came back from), its phrase moves whole under the row, with the note's age; on every
+// other row that's its tooltip.
 function Row({
   row: r,
   now,
@@ -131,9 +149,6 @@ function Row({
 }) {
   const c = r.card;
   const live = r.state === "open";
-  const keys = (k: string) => {
-    run(r, k);
-  };
   const since = c.resolved_at ?? c.waiting_since;
   const phrase = [r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])];
   return (
@@ -141,10 +156,10 @@ function Row({
       <button
         type="button"
         className="row-main line-main"
-        onClick={() => {
-          select(c.id);
+        onMouseDown={(e) => {
+          e.preventDefault(); // a click opens without selecting first, as the main page's rows do
         }}
-        onDoubleClick={() => {
+        onClick={() => {
           run(r, "enter");
         }}
         onFocus={() => {
@@ -165,23 +180,20 @@ function Row({
             </span>
           )}
         </span>
-        {!(on && live) && <span className="line-note">{live ? <Dots parts={phrase} /> : r.state}</span>}
+        {!(on && live) && (
+          <span className="line-note" title={live ? [...phrase, ...(r.note ? [age(r.note.at, now)] : [])].join(" \u00b7 ") : undefined}>
+            {live ? <Dots parts={phrase} /> : r.state}
+          </span>
+        )}
         <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
           {age(since, now)}
         </span>
       </button>
-      {on && (
+      {on && live && (
         <div className="lane-more">
-          {live && (
-            <p className="lane-why">
-              <Dots parts={r.note ? [...phrase, age(r.note.at, now)] : phrase} />
-            </p>
-          )}
-          <div className="actions card-keys">
-            <KeyButton k="enter" label="Review" run={keys} className="primary" />
-            <KeyButton k="o" label="Open on GitHub" run={keys} />
-            {live && <KeyButton k="b" label="Back to desk" title={BACK_TITLE} run={keys} />}
-          </div>
+          <p className="lane-why">
+            <Dots parts={r.note ? [...phrase, age(r.note.at, now)] : phrase} />
+          </p>
         </div>
       )}
     </div>

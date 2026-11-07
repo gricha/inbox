@@ -138,8 +138,7 @@ export function Chat({
             {"\u00d7"}
           </button>
         )}
-        <button type="button" className="act" onClick={onClose}>
-          <kbd>esc</kbd>
+        <button type="button" className="act" title="Close (Esc)" onClick={onClose}>
           Close
         </button>
       </div>
@@ -240,16 +239,15 @@ export function Chat({
           mine.length > 0 && <p className="chat-note">{OFF}</p>
         ) : (
           <div className="chat-send">
-            <span className="chat-hint">{"\u21e7\u21b5 new line"}</span>
             <button
               type="button"
               className="act primary"
+              title="Send (Enter; Shift+Enter for a new line)"
               disabled={!text.trim() || busy}
               onClick={() => {
                 void send();
               }}
             >
-              <kbd>{"\u21b5"}</kbd>
               {busy ? "Sending\u2026" : "Send"}
             </button>
           </div>

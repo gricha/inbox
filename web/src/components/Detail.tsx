@@ -112,7 +112,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     </div>
   );
 
-  // Opened in place (an issue): why it's here (its row doesn't say), one line of facts, more on why, its activity, its keys.
+  // Opened in place (an issue): why it's here (its row doesn't say), one line of facts, more on why, its activity, its actions.
   if (!ctx.showSignals) {
     const facts = [
       ...cardFacts(card, ctx.me),
@@ -138,13 +138,14 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         {why}
         {activity}
         <div className="actions card-keys">
-          <KeyButton k="esc" label="Close" run={run} />
           {card.kind === "issue" && !card.resolved && <KeyButton k="w" label="Comment" run={run} />}
           <KeyButton k="o" label="Open on GitHub" run={run} />
           {mine && <HandKey card={card} run={run} />}
-          <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
+          <KeyButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
           <KeyButton k="s" label="Snooze" run={run} />
           {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
+          {/* Last, so a pointer that read down to here closes it here. */}
+          <KeyButton k="esc" label="Close" title="Close (Esc)" run={run} />
         </div>
       </div>
     );
@@ -186,7 +187,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     ]);
   facts.push(["Activity", `${age(card.activity_at, ctx.now)} ago, ${plural(item.comments_total, "comment")}`]);
 
-  // `w`: the item's signals in full, its rule trace and its raw signals.
+  // Why it's here: the item's signals in full, its rule trace and its raw signals.
   return (
     <div className="detail">
       <dl className="facts">
@@ -200,14 +201,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
       {why}
       {activity}
       <div className="actions card-keys">
-        {pr && <KeyButton k="enter" label={card.inflight ? "Show in Merging" : "Review"} run={run} />}
-        <KeyButton k="o" label="Open on GitHub" run={run} />
-        {mine && <HandKey card={card} run={run} />}
-        <KeyButton k="e" label={card.status === "active" ? "Done" : "Restore"} run={run} />
-        <KeyButton k="s" label="Snooze" run={run} />
-        {!mine && <KeyButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
-        <KeyButton k="p" label={card.pinned ? "Unpin" : "Pin"} run={run} />
-        <KeyButton k="w" label="Hide signals" run={run} />
+        <KeyButton k="why" label="Hide signals" run={run} />
       </div>
       <pre className="signals">{JSON.stringify(s, null, 2)}</pre>
     </div>
@@ -264,10 +258,10 @@ export function Dots({ parts }: { parts: ReactNode[] }) {
   );
 }
 
-export const BACK_TITLE = "Out of Merging and back on your desk; your agent leaves it alone";
+const BACK_TITLE = "Out of Merging and back on your desk; your agent leaves it alone";
 
-// Your own open PR: m hands it off for merge (green: a yes, like Approve), b brings it back from Merging. The same on a
-// card, an opened item and a review.
+// Your own open PR: Hand off for merge (green: a yes, like Approve), or Back to desk from Merging. The same on an opened
+// item and a review.
 export function HandKey({
   card,
   run,
@@ -292,14 +286,14 @@ export function HandKey({
 }
 
 export function KeyButton({
-  k,
+  k = "",
   label,
   run,
   disabled,
   title,
   className,
 }: {
-  k: string;
+  k?: string;
   label: string;
   run: (k: string) => void;
   disabled?: boolean;
@@ -316,7 +310,6 @@ export function KeyButton({
       }}
       disabled={disabled}
     >
-      {k && <kbd>{k}</kbd>}
       {label}
     </button>
   );

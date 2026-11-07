@@ -42,12 +42,11 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
         </button>
         <button
           type="button"
-          className={cls("act line-cta line-reply", sel && "primary")}
+          className="act line-cta line-reply"
           onClick={() => {
             ctx.open(q);
           }}
         >
-          {sel && <kbd>enter</kbd>}
           Answer
         </button>
         <span className="line-age" title={`asked ${new Date(q.at).toLocaleString()}`}>
@@ -162,7 +161,7 @@ export function InquiryPage({
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
     if (e.key === "Escape") {
-      onBack(); // loading or failed too: the page says esc goes back
+      onBack(); // loading or failed too
       return;
     }
     if (!v) return;
@@ -198,9 +197,6 @@ export function InquiryPage({
     return (
       <div className="inquiry">
         <p className="t-bad">{q}</p>
-        <p className="quiet">
-          Press <kbd>esc</kbd> to go back to the queue.
-        </p>
       </div>
     );
 
@@ -283,7 +279,6 @@ export function InquiryPage({
                       void send(o.answer);
                     }}
                   >
-                    <kbd>{i + 1}</kbd>
                     <span className="inq-option-text">
                       <span className="inq-option-answer">
                         {o.answer}
@@ -322,13 +317,12 @@ export function InquiryPage({
               <button
                 type="button"
                 className={cls("act", !q.options.length && "primary")}
-                title={`Send it to ${fromName(q.from, false)}: the button or ${MOD}\u21b5`}
+                title={`Send it to ${fromName(q.from, false)} (${MOD}\u21b5)`}
                 disabled={!text.trim()}
                 onClick={() => {
                   void send(text);
                 }}
               >
-                <kbd>{MOD}↵</kbd>
                 Send
               </button>
               <button
@@ -339,7 +333,6 @@ export function InquiryPage({
                   void send("", true);
                 }}
               >
-                <kbd>d</kbd>
                 Dismiss
               </button>
             </div>

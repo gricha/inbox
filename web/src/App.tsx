@@ -24,7 +24,6 @@ import {
   groupsOf,
   inquiryOf,
   isFold,
-  isInquiry,
   navigable,
   parseRoute,
   removeCard,
@@ -161,7 +160,6 @@ export function App() {
   const toastTimer = useRef(0);
   const undoSeq = useRef<number | null>(null);
   const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // u after a close or a draft, instead
-  const lastIndex = useRef(0);
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const gAt = useRef(0);
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
@@ -263,6 +261,16 @@ export function App() {
   }, [settingsSection, flash, load]);
 
   const onLane = route.name === "inflight";
+  // A page opens with nothing selected; a trip into a review or a question and back keeps the row you opened.
+  const lastRoute = useRef(route.name);
+  useEffect(() => {
+    const from = lastRoute.current;
+    lastRoute.current = route.name;
+    const trip = (n: Route["name"]) => n === "review" || n === "inquiry";
+    if (trip(route.name) || trip(from)) return;
+    setSelected(null);
+    setLaneSel(null);
+  }, [route]);
   // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
   useEffect(() => {
     if (route.name === "review") return;
@@ -366,7 +374,7 @@ export function App() {
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
   const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
-  const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? laneRows[0] ?? null;
+  const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? null;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
@@ -449,31 +457,13 @@ export function App() {
       document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [onLane, laneCur]);
 
-  // Keep the selection by id across refreshes; if its card is gone, take whatever now sits at its old position.
+  // Nothing is selected until you focus, right-click or open a row; a row that leaves takes its selection with it.
   useEffect(() => {
-    if ((isFold(selected) || isInquiry(selected)) && cursor.includes(selected!)) return;
-    // The first pick is the page's first row: an agent's question, when one waits; so is the pick after one that went.
-    if ((selected === null || isInquiry(selected)) && isInquiry(cursor[0] ?? null)) {
-      setSelected(cursor[0]!);
-      return;
-    }
-    if (!flat.length) return;
-    const i = flat.findIndex((c) => c.id === selected);
-    if (i >= 0) {
-      lastIndex.current = i;
-      return;
-    }
-    if (pending.current && pending.current.id === selected && Date.now() < pending.current.until) return;
-    const next = flat[Math.min(lastIndex.current, flat.length - 1)];
-    if (!next) return;
-    setSelected(next.id);
-    // The first pick of a session takes focus too, so the keys act on it and Tab goes on from it.
-    if (document.activeElement === document.body && ["queue", "later"].includes(routeRef.current.name))
-      requestAnimationFrame(() => {
-        focusRow(next.id);
-      });
+    if (selected === null || cursor.includes(selected)) return;
+    if (pending.current?.id === selected && Date.now() < pending.current.until) return; // an undo brings it back
+    setSelected(null);
     // tick re-checks once the undo hold has run out.
-  }, [flat, cursor, selected, tick]);
+  }, [cursor, selected, tick]);
 
   // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
   useEffect(() => {
@@ -784,7 +774,7 @@ export function App() {
     setSelected(c.id);
     setSnoozeFor(null);
     if (rowActions(c).length) setMoreFor(c.id);
-    else if (c.actions?.includes("request_changes")) flash("Request changes is in its review: Enter");
+    else if (c.actions?.includes("request_changes")) flash("Request changes is in its review.");
     else flash(`Nothing more to do on GitHub for ${shortRef(c)}`);
   }
 
@@ -867,18 +857,18 @@ export function App() {
     else if (k === "b" && r.state === "open") void back(c);
   }
 
-  // c copies `claude attach <id>`; w starts the coordinator, or has it look at Merging now.
-  async function coordinatorKey(k: "c" | "w") {
+  // Copy attach command copies `claude attach <id>`; Wake it starts your agent, or has it look at Merging now.
+  async function coordinatorAct(k: "copy" | "wake") {
     const id = lane?.coordinator.id;
     try {
-      if (k === "w") {
+      if (k === "wake") {
         await api.wakeCoordinator();
         flash(id ? "Asked your agent to look at Merging." : "Started your agent.");
         refresh(0);
       } else if (id) {
         await copyText(`claude attach ${id}`);
         flash("Copied. Run it in a terminal to open your agent.");
-      } else flash("Your agent isn't started yet: w starts it.");
+      } else flash("Your agent isn't started yet.");
     } catch (e) {
       flash(message(e), true);
     }
@@ -897,17 +887,26 @@ export function App() {
     if (k === "enter") openCard(c);
     else if (k === "esc") setExpanded(null);
     else if (k === "t") openAsk(c.id);
+    else if (k === "why") {
+      if (expanded === c.id && showSignals) {
+        if (c.kind === "pr") setExpanded(null);
+        else setShowSignals(false);
+      } else {
+        if (expanded !== c.id) toggle(c);
+        setShowSignals(true);
+      }
+    }
     // From its review: a PR in Merging is the coordinator's.
     else if (c.inflight && ["e", "d", "s", "m"].includes(k))
-      flash(`${shortRef(c)} is in Merging, so your agent has it. b brings it back to the desk.`);
+      flash(`${shortRef(c)} is in Merging, so your agent has it: Back to desk brings it back.`);
     else if (k === "b") void back(c);
     else if (k === ".") openMore(c);
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {
-      if (c.draft) flash(`${shortRef(c)} is a draft: mark it ready for review first (a)`);
-      else if (c.cta === "reviewers") flash(`Nobody's asked to review ${shortRef(c)}: add reviewers first (a)`);
+      if (c.draft) flash(`${shortRef(c)} is a draft: mark it ready for review first`);
+      else if (c.cta === "reviewers") flash(`Nobody's asked to review ${shortRef(c)}: add reviewers first`);
       else handOff(c);
     } else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
@@ -1031,7 +1030,7 @@ export function App() {
         laneRun(laneCur, k === "Enter" ? "enter" : k);
       } else if (k === "c" || k === "w") {
         e.preventDefault();
-        void coordinatorKey(k);
+        void coordinatorAct(k === "c" ? "copy" : "wake");
       }
     } else if (k === "/") {
       e.preventDefault();
@@ -1167,9 +1166,6 @@ export function App() {
           filterRef={filterRef}
           onSync={() => {
             void sync();
-          }}
-          onHelp={() => {
-            setHelp(true);
           }}
           ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
           waiting={route.name === "review" && askWaiting}
@@ -1325,7 +1321,16 @@ export function App() {
             />
           )}
           {route.name === "inflight" && !broken && (
-            <Inflight view={lane} now={now} selected={laneCur?.card.id ?? null} select={setLaneSel} run={laneRun} />
+            <Inflight
+              view={lane}
+              now={now}
+              selected={laneCur?.card.id ?? null}
+              select={setLaneSel}
+              run={laneRun}
+              act={(k) => {
+                void coordinatorAct(k);
+              }}
+            />
           )}
           {/* Settings stays mounted once opened, so an unsaved Rules draft survives a trip to the queue. */}
           {settingsSeen && (
@@ -1390,7 +1395,7 @@ export function App() {
                 void undo();
               }}
             >
-              <kbd>u</kbd> Undo
+              Undo
             </button>
           )}
         </div>

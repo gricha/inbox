@@ -54,12 +54,7 @@ export function Sidebar({
           <span className="side-count">{view && now + today > 0 ? now + today : ""}</span>
         </a>
         {/* What Claude and the rules sorted away: no count, nothing there needs you. */}
-        <a
-          href="#/later"
-          className={cls("side-item", onLater && "on")}
-          aria-current={onLater ? "page" : undefined}
-          title="Sorted away (g l)"
-        >
+        <a href="#/later" className={cls("side-item", onLater && "on")} aria-current={onLater ? "page" : undefined} title="Sorted away">
           <span className="side-name">Later</span>
         </a>
         {/* No count: nothing there needs you, the coordinator has it. */}
@@ -67,7 +62,7 @@ export function Sidebar({
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight ? `${flight.total} merging (g m)` : "Your PRs your agent is getting merged (g m)"}
+          title={flight?.total ? `${flight.total} merging` : "Your agent and what it merged"}
         >
           <span className="side-name">Merging</span>
         </a>
@@ -76,7 +71,7 @@ export function Sidebar({
           href="#/blocked"
           className={cls("side-item", onBlocked && "on")}
           aria-current={onBlocked ? "page" : undefined}
-          title="What can't move yet: another PR to merge first, or a review (g b)"
+          title="What can't move yet: another PR to merge first, or a review"
         >
           <span className="side-name">Blocked</span>
         </a>
@@ -85,7 +80,7 @@ export function Sidebar({
           href="#/archive"
           className={cls("side-item", onArchive && "on")}
           aria-current={onArchive ? "page" : undefined}
-          title="What's done: what you acted on and what resolved (g a)"
+          title="What's done: what you acted on and what resolved"
         >
           <span className="side-name">Archive</span>
         </a>
@@ -97,7 +92,6 @@ export function Sidebar({
           <circle cx="6" cy="11.5" r="1.5" />
         </svg>
         <span className="side-name">Settings</span>
-        <kbd>,</kbd>
       </a>
     </aside>
   );

@@ -5,7 +5,7 @@ import type { Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 import { MoreButton, MoreMenu, rowActions } from "./More.tsx";
 
-// Everything a row needs from the app; `run` takes the same keys as the keyboard (enter o e d s m b p w i a t .).
+// Everything a row needs from the app; `run` takes an action id (enter esc o e d s m b p w why i a t .).
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"
@@ -120,43 +120,40 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
             }}
           />
         )}
-        {/* Filled and with its key only under the cursor, since that's the row the key acts on. */}
+        {/* Tinted, and filled under the pointer. */}
         {card.cta === "ready" && !why && (
           <button
             type="button"
-            className={cls("act line-cta", sel && "primary")}
+            className="act line-cta"
             title="Mark it ready for review on GitHub"
             onClick={() => {
               ctx.run(card, "a");
             }}
           >
-            {sel && <kbd>a</kbd>}
             Ready for review
           </button>
         )}
         {card.cta === "reviewers" && !why && (
           <button
             type="button"
-            className={cls("act line-cta", sel && "primary")}
+            className="act line-cta"
             title="Nobody's asked to review it: opens its review to pick reviewers"
             onClick={() => {
               ctx.run(card, "a");
             }}
           >
-            {sel && <kbd>a</kbd>}
             Add reviewers
           </button>
         )}
         {card.cta === "reply" && !why && (
           <button
             type="button"
-            className={cls("act line-cta line-reply", sel && "primary")}
-            title="Someone waits on your answer: Enter opens the review, with a reply ready"
+            className="act line-cta line-reply"
+            title="Someone waits on your answer: opens its review with a reply ready"
             onClick={() => {
               ctx.click(card);
             }}
           >
-            {sel && <kbd>enter</kbd>}
             Reply
           </button>
         )}
@@ -217,7 +214,6 @@ function SnoozeMenu({ card, onPick, onClose }: { card: Card; onPick: (until: str
               onPick(o.until);
             }}
           >
-            <kbd>{o.key}</kbd>
             <span>{o.label}</span>
           </button>
         ))}

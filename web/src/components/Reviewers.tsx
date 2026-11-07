@@ -135,7 +135,6 @@ export function Reviewers({
           }}
           onKeyDown={onKeyDown}
         />
-        {!open && <kbd className="rv-reviewers-key">@</kbd>}
         {open && (
           <div className="popover rv-reviewers-pop" aria-label="Reviewers">
             {typeof found === "string" ? (

@@ -352,12 +352,10 @@ function Editor({
         </span>
       </label>
       <div className="actions">
-        <button type="submit" className="act primary" disabled={!ready || busy} title={`Save: the button or ${MOD}S`}>
-          <kbd>{MOD}S</kbd>
+        <button type="submit" className="act primary" disabled={!ready || busy} title={`Save (${MOD}S)`}>
           Save
         </button>
-        <button type="button" className="act" onClick={onCancel}>
-          <kbd>esc</kbd>
+        <button type="button" className="act" title="Cancel (Esc)" onClick={onCancel}>
           Cancel
         </button>
         {onDelete && (

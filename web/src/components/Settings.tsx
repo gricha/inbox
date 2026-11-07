@@ -369,7 +369,7 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   if (s.ok)
     return (
       <p className="s-live">
-        <span className="t-good">Active.</span> Press <kbd>{s.accelerator}</kbd> from any app.
+        <span className="t-good">Active:</span> {s.accelerator} shows or hides the window from any app.
       </p>
     );
   return (

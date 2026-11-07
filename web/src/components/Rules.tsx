@@ -218,25 +218,23 @@ export function Rules({
             }}
           />
           <div className="editor-foot">
-            {/* The key before the label, as on every action line. */}
             <KeyButton
-              k={`${MOD}S`}
               label={busy === "save" ? "Saving…" : "Save"}
+              title={`Save (${MOD}S)`}
               disabled={!!busy || !dirty}
               run={() => {
                 void save();
               }}
             />
             <KeyButton
-              k={`${MOD}↵`}
               label={busy === "preview" ? "Previewing…" : "Preview changes"}
+              title={`Preview changes (${MOD}\u21b5)`}
               disabled={!!busy}
               run={() => {
                 void runPreview();
               }}
             />
             <KeyButton
-              k=""
               label="Revert"
               disabled={!dirty}
               run={() => {
@@ -325,7 +323,7 @@ export function Rules({
           <section className="side-block">
             <h3 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h3>
             {!preview ? (
-              <p className="small">Press {MOD}↵ to see what moves before you save. Nothing changes until you save.</p>
+              <p className="small">Preview changes shows what moves before you save. Nothing changes until you save.</p>
             ) : pvBoards.length === 0 ? (
               <p className="small">Fix the errors to see a preview.</p>
             ) : (

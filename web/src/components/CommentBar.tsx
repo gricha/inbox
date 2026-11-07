@@ -53,17 +53,15 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
         <button
           type="button"
           className="act primary"
-          title={`Comment on GitHub, as you: the button or ${MOD}↵`}
+          title={`Comment on GitHub, as you (${MOD}\u21b5)`}
           disabled={!text.trim() || busy}
           onClick={() => {
             void send();
           }}
         >
-          <kbd>{MOD}↵</kbd>
           {busy ? "Commenting\u2026" : "Comment"}
         </button>
-        <button type="button" className="act" onClick={onClose}>
-          <kbd>esc</kbd>
+        <button type="button" className="act" title="Close (Esc)" onClick={onClose}>
           Close
         </button>
       </div>

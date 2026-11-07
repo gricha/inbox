@@ -16,18 +16,17 @@ export const MORE: Record<GitHubAction, { key: string; label: string }> = {
 // A row has no room to write in: requesting changes is in the PR's review.
 export const rowActions = (c: Card) => (c.actions ?? []).filter((a) => a !== "request_changes");
 
-// The quiet button that opens it, with its key; a row below 1000px says "…", so selecting it never cuts its title shorter.
+// The quiet button that opens it; a row below 1000px says "...", so selecting it never cuts its title shorter.
 export function MoreButton({ className, open, onClick }: { className?: string; open: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       className={cls("act", className)}
-      title="More on GitHub: close, ready for review or convert to draft, merge now, …"
-      aria-label="More on GitHub"
+      title="More actions"
+      aria-label="More actions"
       aria-expanded={open}
       onClick={onClick}
     >
-      <kbd className="dot-key">.</kbd>
       <span className="more-word">More</span>
       <span className="more-dots">…</span>
     </button>
@@ -44,7 +43,7 @@ export function MoreMenu({
 }: {
   card: Card;
   actions: GitHubAction[];
-  links?: { key: string; label: string; run: () => void }[]; // what isn't a write, above them: Open on GitHub
+  links?: { key?: string; label: string; run: () => void }[]; // what isn't a write, above them: Done, Open on GitHub
   pick: (a: GitHubAction) => void;
   onClose: () => void;
 }) {
@@ -88,10 +87,9 @@ export function MoreMenu({
     <>
       <div className="scrim-clear" role="presentation" onClick={onClose} />
       <div ref={menu} className="popover more-pop" role="menu" aria-label="More">
-        <div className="pop-title">On GitHub</div>
         {links?.map((l) => (
           <button
-            key={l.key}
+            key={l.label}
             type="button"
             role="menuitem"
             className="pop-item"
@@ -100,10 +98,10 @@ export function MoreMenu({
               l.run();
             }}
           >
-            <kbd>{l.key}</kbd>
             <span>{l.label}</span>
           </button>
         ))}
+        {actions.length > 0 && <div className="pop-title">On GitHub</div>}
         {actions.map((a) => (
           <button
             key={a}
@@ -114,7 +112,6 @@ export function MoreMenu({
               choose(a);
             }}
           >
-            <kbd>{MORE[a].key}</kbd>
             <span>{a === "close" && card.kind === "issue" ? "Close issue" : MORE[a].label}</span>
           </button>
         ))}
@@ -170,11 +167,10 @@ export function WriteBox({
         <button
           type="button"
           className="act primary"
-          title={`${label} on GitHub, as you: the button or ${MOD}↵`}
+          title={`${label} on GitHub, as you (${MOD}\u21b5)`}
           disabled={!text.trim()}
           onClick={send}
         >
-          <kbd>{MOD}↵</kbd>
           {label}
         </button>
         <button type="button" className="act" onClick={onClose}>

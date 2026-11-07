@@ -347,8 +347,9 @@ kbd {
   flex: none;
 }
 
-.side-foot kbd {
-  margin-left: auto;
+/* The word fills the row, so it sits by its icon: .side-item spreads its parts apart. */
+.side-foot .side-name {
+  flex: 1;
 }
 
 .side-item {
@@ -809,7 +810,7 @@ kbd {
   gap: 14px;
 }
 
-/* The answers as one table: each its number, its words, and what the agent does then; its pick says so. */
+/* The answers as one table: each its words, and what the agent does then; its pick says so. */
 .inq-options {
   display: grid;
   margin: 0;
@@ -852,15 +853,6 @@ kbd {
 
 .inq-options > li:only-child .inq-option {
   border-radius: 9px;
-}
-
-.inq-option kbd {
-  flex: none;
-  width: 1ch;
-}
-
-.inq-option.pick kbd {
-  color: var(--accent-ink);
 }
 
 .inq-option-text {
@@ -1537,7 +1529,7 @@ kbd {
 /* Merging --------------------------------------------------------------------
    Your PRs the coordinator is getting merged, one line each like the main page's, all ink and pencil. */
 
-/* The coordinator's state, where to watch it and its keys, above the rows. */
+/* Your agent's state, where to watch it and its buttons, above the rows. */
 .lane-coord {
   margin: 0 0 12px;
   padding: 0 12px;
@@ -1545,7 +1537,8 @@ kbd {
   font-size: 13px;
 }
 
-.lane-coord a {
+.lane-coord a,
+.lane-coord .link-btn:not(:hover) {
   color: inherit;
 }
 
@@ -1597,7 +1590,7 @@ kbd {
   margin-top: 20px;
 }
 
-/* The selected row's note and keys, under its title, on the row's fill. */
+/* The selected row's whole phrase, under its title, on the row's fill. */
 .lane-row.sel {
   background: var(--row-sel);
 }
@@ -1606,13 +1599,8 @@ kbd {
   padding: 2px 12px 10px;
 }
 
-.lane-more .card-keys {
-  border-top: 0;
-  padding-top: 0;
-}
-
 .lane-why {
-  margin: 4px 0 8px;
+  margin: 4px 0 0;
   color: var(--ink-2);
   font-size: var(--meta-size);
 }
@@ -1918,12 +1906,7 @@ kbd {
   animation: spin 0.8s linear infinite;
 }
 
-/* Full strength: any fade on the accent drops the key below AA in the dark themes. */
-.act.primary kbd {
-  color: inherit;
-}
-
-/* Tinted off the cursor, so each row's action shows without competing with the filled one. */
+/* Tinted, so each row's action shows without shouting; filled under the pointer, the one you're about to press. */
 .line .line-cta:not(.primary) {
   border-color: transparent;
   background: var(--accent-wash);
@@ -1932,9 +1915,9 @@ kbd {
 }
 
 .line .line-cta:not(.primary):hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent-ink) 45%, transparent);
-  background: var(--accent-wash);
-  color: var(--accent-ink);
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .act.primary:disabled {
@@ -1945,14 +1928,10 @@ kbd {
   box-shadow: none;
 }
 
-.act.primary:disabled kbd {
-  color: var(--pencil);
-}
-
-/* On a row, in Merging and in a box you write in, only its call to action (or its send) is a shape; the rest are text that
-   fills on hover, and while the menu it opened is open. A review's few actions are buttons. */
+/* On a row, an item opened in place and in a box you write in, only its call to action (or its send) is a shape; the rest
+   are text that fills on hover, and while the menu it opened is open. A review's few actions are buttons. */
 .line .line-more,
-.lane-more .act:not(.primary),
+.card-keys .act:not(.primary),
 .composer .act:not(.primary),
 .chat .act:not(.primary),
 .rv-inline .act:not(.primary),
@@ -1963,7 +1942,7 @@ kbd {
 
 .line .line-more:hover:not(:disabled),
 .line .line-more[aria-expanded="true"],
-.lane-more .act:not(.primary):hover:not(:disabled),
+.card-keys .act:not(.primary):hover:not(:disabled),
 .composer .act:not(.primary):hover:not(:disabled),
 .chat .act:not(.primary):hover:not(:disabled),
 .rv-inline .act:not(.primary):hover:not(:disabled),
@@ -1973,7 +1952,7 @@ kbd {
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
-.lane-more .actions > .act:first-child:not(.primary) {
+.card-keys > .act:first-child:not(.primary) {
   margin-left: -9px;
 }
 
@@ -2012,7 +1991,7 @@ kbd {
   align-items: center;
   gap: 8px;
   height: 30px;
-  padding: 0 10px 0 12px;
+  padding: 0 12px;
   border: 1px solid var(--rule-strong);
   border-radius: 8px;
   background: var(--sheet);
@@ -2032,10 +2011,6 @@ kbd {
   opacity: 0.45;
 }
 
-.btn:not(:has(kbd)) {
-  padding-right: 12px;
-}
-
 .btn.ghost {
   border-color: transparent;
   background: none;
@@ -2051,6 +2026,11 @@ kbd {
   background: none;
   font-size: 12.5px;
   cursor: pointer;
+}
+
+.lane-coord .link-btn,
+.rv-ai .link-btn {
+  font-size: inherit;
 }
 
 .input {
@@ -2265,18 +2245,6 @@ kbd {
   margin-top: 9px;
 }
 
-/* Letters differ in width too: m would push its label past c's and d's. */
-.more-pop .pop-item kbd {
-  min-width: 1.6ch;
-  text-align: center;
-}
-
-/* Digits differ in width: a fixed key column starts every label on one edge. */
-.pop-item kbd {
-  min-width: 1ch;
-  font-variant-numeric: tabular-nums;
-}
-
 .toast {
   position: fixed;
   bottom: 22px;
@@ -2313,17 +2281,12 @@ kbd {
   align-items: center;
   gap: 8px;
   height: 28px;
-  padding: 0 8px 0 10px;
+  padding: 0 10px;
   border: 0;
   border-radius: 8px;
   background: color-mix(in srgb, var(--paper) 14%, transparent);
   font-weight: 600;
   cursor: pointer;
-}
-
-.toast-btn kbd {
-  color: inherit;
-  opacity: 0.7;
 }
 
 /* Your comment on an issue opened in place, over the page's bottom where the toast shows. */
@@ -2603,7 +2566,7 @@ kbd {
 .chat-send {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -3753,7 +3716,7 @@ kbd {
 .rv-reviewers-input {
   width: 180px;
   height: 28px;
-  padding: 0 28px 0 10px;
+  padding: 0 10px;
   border: 1px solid var(--rule-strong);
   border-radius: 999px;
   background: var(--sheet);
@@ -3764,12 +3727,6 @@ kbd {
 .rv-reviewers-input:focus {
   border-color: var(--accent);
   outline: none;
-}
-
-.rv-reviewers-key {
-  position: absolute;
-  right: 10px;
-  pointer-events: none;
 }
 
 .rv-reviewers-pop {
@@ -4162,11 +4119,6 @@ kbd {
 .cv-quiet .cv-comments {
   padding-left: 12px;
   border-left: 2px solid var(--rule);
-}
-
-.rv-keys {
-  display: flex;
-  gap: 3px;
 }
 
 .rv-file {
@@ -4671,7 +4623,6 @@ kbd {
     padding: 0;
   }
 
-  .tb-ask kbd,
   .tb-ask span {
     display: none;
   }
@@ -4760,12 +4711,4 @@ pre,
   justify-items: start;
   padding: 48px;
   color: var(--ink);
-}
-
-/* A lone dot for a key: heavier, larger and raised to the x-height, so it reads as a key and not a full stop. */
-kbd.dot-key {
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1;
-  translate: 0 -0.2em;
 }

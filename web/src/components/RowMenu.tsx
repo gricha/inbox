@@ -64,6 +64,7 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
             },
           ]),
       { label: card.pinned ? "Unpin" : "Pin", key: "p", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
+      ...(card.inflight ? [] : [{ label: "Why it's here", do: { key: "why" } }]),
       ...(agent ? [key("Ask your agent", "t")] : []),
     ],
     // Its call to action is above already.
@@ -200,7 +201,6 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
       }}
     >
       <span>{en.label}</span>
-      {en.key && <kbd>{en.key}</kbd>}
     </button>
   );
 
@@ -254,7 +254,6 @@ export function RowMenu({ card, x, y, me, agent, run, act, github, reopen, onClo
                     onClick={openSub}
                   >
                     <span>Snooze</span>
-                    <kbd>s</kbd>
                     <span className="ctx-caret" aria-hidden="true">
                       ›
                     </span>
@@ -300,7 +299,6 @@ function SnoozeSub({ options, pick }: { options: ReturnType<typeof snoozeOptions
           }}
         >
           <span>{o.label}</span>
-          <kbd>{o.key}</kbd>
         </button>
       ))}
     </div>

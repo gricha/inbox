@@ -538,7 +538,7 @@ export function Review({
     // With your comment unsent, what acts on the PR (a key or a click) goes back to it first.
     if (comment.trim() && "admb.".includes(k)) {
       document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
-      flash(`Your comment isn't sent: ${MOD}↵ sends it, or empty the box`);
+      flash("Your comment isn't sent: Comment sends it, or empty the box");
       return;
     }
     if (k === "n") goSec(secIdx + 1);
@@ -608,9 +608,6 @@ export function Review({
     return (
       <div className="review">
         <p className="t-bad">{view}</p>
-        <p className="quiet">
-          Press <kbd>esc</kbd> to go back to the queue.
-        </p>
       </div>
     );
 
@@ -714,13 +711,16 @@ export function Review({
     />
   );
   const open = item.state === "open";
+  const aiShown = !isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error;
+  // One way to ask for an AI review in each state: the AI section's own line when it offers one, else More.
+  const aiInline = !!view.ai_error || (!view.ai && open && aiShown);
+  const aiLink = !view.generating && busy !== "ai" && !flying && !aiInline;
 
   return (
     <div className={cls("review", showSide && "side-open")}>
       <div className="rv-main">
         {!showSide && (
-          <button type="button" className="act rv-side-toggle rv-side-show" title="Show the sidebar (f)" onClick={toggleSide}>
-            <kbd>f</kbd>
+          <button type="button" className="act rv-side-toggle rv-side-show" title="Show the sidebar" onClick={toggleSide}>
             {view.stack ? "Stack and files" : "Files"}
           </button>
         )}
@@ -732,8 +732,8 @@ export function Review({
           {((open && !acted) || !!comment.trim()) && (
             <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
           )}
-          {/* Your own PR gets no AI review unless one was asked for; i still asks. */}
-          {(!isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error) && (
+          {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
+          {aiShown && (
             <AiSection
               ai={view.ai}
               stale={view.ai_stale}
@@ -741,6 +741,13 @@ export function Review({
               error={view.ai_error}
               open={open}
               notes={notes.length}
+              onAsk={
+                flying
+                  ? undefined
+                  : () => {
+                      void askAi();
+                    }
+              }
             />
           )}
         </div>
@@ -779,7 +786,7 @@ export function Review({
               title={
                 picked.length
                   ? `Ask ${picked.map((p) => p.login).join(", ")} to review it, on GitHub`
-                  : "Nobody's asked to review it: pick reviewers above (@), then a asks them"
+                  : "Nobody's asked to review it: pick reviewers above, then ask them"
               }
               className="primary"
             />
@@ -811,6 +818,27 @@ export function Review({
                 card={card}
                 actions={card.actions ?? []}
                 links={[
+                  // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
+                  ...(!card.inflight && !acted
+                    ? [
+                        {
+                          label: card.status === "active" ? "Done" : "Back on the desk",
+                          run: () => {
+                            run("d");
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(aiLink
+                    ? [
+                        {
+                          label: view.ai ? "Ask Claude to review it again" : "Ask Claude to review it",
+                          run: () => {
+                            void askAi();
+                          },
+                        },
+                      ]
+                    : []),
                   {
                     key: "o",
                     label: "Open on GitHub",
@@ -882,8 +910,7 @@ export function Review({
       </div>
       {showSide && (
         <aside className="rv-side" aria-label="Stack, files and recent activity">
-          <button type="button" className="act rv-side-toggle" title="Hide the sidebar (f)" onClick={toggleSide}>
-            <kbd>f</kbd>
+          <button type="button" className="act rv-side-toggle" title="Hide the sidebar" onClick={toggleSide}>
             Hide
           </button>
           {view.stack && <StackList stack={view.stack} />}
@@ -892,9 +919,6 @@ export function Review({
               <h2 className="rv-side-head">
                 <span>
                   {files.length} {files.length === 1 ? "file" : "files"}
-                </span>
-                <span className="rv-keys">
-                  <kbd>n</kbd> <kbd>p</kbd>
                 </span>
               </h2>
               <ol>
@@ -1083,7 +1107,7 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
             <SkLines count={1} className="rv-convo sk-short" />
           )}
           {ai || writing || none ? (
-            <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} />
+            <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} onAsk={undefined} />
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
@@ -1166,9 +1190,6 @@ function StackList({ stack }: { stack: Stack }) {
     <section className="rv-stack" aria-label="Stack">
       <h2 className="rv-side-head">
         <span>Stack on {stack.base}</span>
-        <span className="rv-keys" title="Next and previous PR in the stack">
-          <kbd>N</kbd> <kbd>P</kbd>
-        </span>
       </h2>
       <ol>
         {shown.map(member)}
@@ -1207,6 +1228,7 @@ function AiSection({
   error,
   open,
   notes,
+  onAsk,
 }: {
   ai: AiShown | null;
   stale: boolean;
@@ -1214,6 +1236,7 @@ function AiSection({
   error: string | null;
   open: boolean;
   notes: number;
+  onAsk: (() => void) | undefined; // none for a PR in Merging: it's your agent's
 }) {
   return (
     <section className="rv-ai" aria-label="AI review">
@@ -1221,15 +1244,18 @@ function AiSection({
       {!busy && error && (
         <p>
           {withCode(error)}{" "}
-          <span className="quiet">
-            Press <kbd>i</kbd> to try the AI review again.
-          </span>
+          <button type="button" className="link-btn" disabled={!onAsk} onClick={onAsk}>
+            Try again
+          </button>
         </p>
       )}
       {!busy && !ai && !error && !open && <p className="quiet">No AI review.</p>}
       {!busy && !ai && !error && open && (
         <p className="quiet">
-          No AI review yet. Press <kbd>i</kbd> to ask Claude for one.
+          No AI review yet.{" "}
+          <button type="button" className="link-btn" disabled={!onAsk} onClick={onAsk}>
+            Ask Claude for one
+          </button>
         </p>
       )}
       {ai && (
@@ -1351,7 +1377,7 @@ function CommentBox({
       <textarea
         className="rv-comment-input"
         aria-label={`Your comment on ${shortRef(card)}`}
-        placeholder={`Comment on ${shortRef(card)}… (w)`}
+        placeholder={`Comment on ${shortRef(card)}\u2026`}
         value={body}
         onChange={(e) => {
           setBody(e.target.value);
@@ -1370,13 +1396,12 @@ function CommentBox({
           <button
             type="button"
             className="act primary"
-            title={`Comment on GitHub, as you: the button or ${MOD}↵`}
+            title={`Comment on GitHub, as you (${MOD}\u21b5)`}
             disabled={sending}
             onClick={() => {
               void send();
             }}
           >
-            <kbd>{MOD}↵</kbd>
             {sending ? "Commenting\u2026" : "Comment"}
           </button>
         </div>
@@ -1531,7 +1556,7 @@ function SectionView({
           type="button"
           className="rv-fold-btn"
           aria-expanded={!shut}
-          title={shut ? "Show this file (z)" : "Fold this file (z)"}
+          title={shut ? "Show this file" : "Fold this file"}
           onClick={onFold}
         >
           <span className="rv-chev" aria-hidden="true">
@@ -1718,11 +1743,10 @@ function InlineBox({
         <button
           type="button"
           className="act primary"
-          title={`${label} on GitHub, as you: the button or ${MOD}↵`}
+          title={`${label === "Reply" ? "Reply" : "Comment"} on GitHub, as you (${MOD}\u21b5)`}
           disabled={!value.trim() || busy}
           onClick={send}
         >
-          <kbd>{MOD}↵</kbd>
           {label === "Reply" ? "Reply" : "Comment"}
           {busy && <span className="busy" aria-label="posting" />}
         </button>

@@ -6,8 +6,6 @@ import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-const KEY: Partial<Record<GroupKey, string>> = { later: "g l", fyi: "g f", hidden: "g h", cleared: "g x", archive: "g a", blocked: "g b" };
-
 const PART: Record<QueueGroup, string> = {
   back: "Back to you",
   review: "Waiting on your review",
@@ -177,7 +175,7 @@ export function Later({
               className="group-toggle"
               aria-expanded={g.open}
               disabled={g.forced}
-              title={g.forced ? "Opened by the filter" : `${g.open ? "Close" : "Open"}${KEY[g.key] ? ` (${KEY[g.key]})` : ""}`}
+              title={g.forced ? "Opened by the filter" : g.open ? "Close" : "Open"}
               onClick={() => {
                 toggle(g.key);
               }}

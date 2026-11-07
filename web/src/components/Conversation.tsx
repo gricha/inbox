@@ -132,13 +132,12 @@ export function Conversation({
               <button
                 type="button"
                 className="act primary"
-                title={`Post this reply on GitHub, as you: Reply, or ${MOD}\u21b5`}
+                title={`Post this reply on GitHub, as you (${MOD}\u21b5)`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {
                   void send(c, text);
                 }}
               >
-                <kbd>{MOD}↵</kbd>
                 {busy === c.id ? "Replying\u2026" : "Reply"}
               </button>
               <a className="act" href={c.url} target="_blank" rel="noreferrer">
