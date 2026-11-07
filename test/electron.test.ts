@@ -5,9 +5,11 @@ import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   backoff,
   cardLabel,
+  commandOutput,
   DESK_ARGS,
   deskPlan,
   desktopEntry,
@@ -46,6 +48,43 @@ test("parseShellPath ignores rc-file noise around the markers", () => {
   assert.equal(parseShellPath("__DESK_PATH__\n__DESK_PATH__"), null);
   assert.match(SHELL_PATH_COMMAND, /printenv PATH/);
 });
+
+test(
+  "commandOutput stops a shell that ignores SIGTERM, and what it started, at the deadline",
+  { skip: process.platform === "win32" },
+  async () => {
+    assert.deepEqual(await commandOutput("/bin/sh", ["-c", "printf hi"], 5000), { stdout: "hi", timedOut: false });
+    const t0 = Date.now();
+    const { stdout, timedOut } = await commandOutput("/bin/sh", ["-c", "trap '' TERM; sleep 30 & echo $!; wait"], 300);
+    assert.ok(Date.now() - t0 < 2000, `returned after ${Date.now() - t0}ms`);
+    assert.equal(timedOut, true);
+    const pid = Number(stdout.trim());
+    assert.ok(pid > 0, `the background job's pid: ${JSON.stringify(stdout)}`);
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; i < 20 && alive(); i++) await sleep(50);
+    assert.equal(alive(), false, "the rc's child is gone too");
+    if (fs.existsSync("/bin/zsh")) {
+      const zdot = fs.mkdtempSync(path.join(os.tmpdir(), "desk-zdot-"));
+      try {
+        fs.writeFileSync(path.join(zdot, ".zshrc"), "sleep 3\n");
+        process.env.ZDOTDIR = zdot;
+        const t1 = Date.now();
+        assert.equal((await commandOutput("/bin/zsh", ["-ilc", SHELL_PATH_COMMAND], 300)).timedOut, true);
+        assert.ok(Date.now() - t1 < 1000, `interactive zsh returned after ${Date.now() - t1}ms`);
+      } finally {
+        delete process.env.ZDOTDIR;
+        fs.rmSync(zdot, { recursive: true, force: true });
+      }
+    }
+  },
+);
 
 test("loginShellPath tries the login shell once more, for longer, before giving up on it", async () => {
   const tries: number[] = [];

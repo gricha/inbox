@@ -1,4 +1,5 @@
 // Pure helpers for the desktop app: no electron import, so node --test can load them.
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULTS } from "../src/settings.ts";
@@ -15,6 +16,32 @@ export function parseShellPath(out: string): string | null {
   const m = out.match(new RegExp(`${MARK}([^]*?)${MARK}`));
   const p = m?.[1]?.trim() ?? "";
   return p === "" ? null : p;
+}
+
+// SIGKILL to its whole group at the deadline: an interactive shell ignores SIGTERM, and what its rc files started would linger.
+export function commandOutput(cmd: string, args: string[], timeoutMs: number): Promise<{ stdout: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const group = process.platform !== "win32";
+    const child = spawn(cmd, args, { detached: group, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    let stdout = "";
+    let timedOut = false;
+    child.stdout.setEncoding("utf8").on("data", (s: string) => {
+      stdout += s;
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (child.pid) process.kill(group ? -child.pid : child.pid, "SIGKILL");
+      } catch {} // already gone
+      child.stdout.destroy(); // a background job that kept the pipe can't hold up close
+    }, timeoutMs);
+    const done = () => {
+      clearTimeout(timer);
+      resolve({ stdout, timedOut });
+    };
+    child.on("error", done);
+    child.on("close", done);
+  });
 }
 
 // The first login shell after a boot can be slow (nvm, a cold disk), so it gets a second, longer try.

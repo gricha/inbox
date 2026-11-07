@@ -16,7 +16,6 @@ import {
   Tray,
 } from "electron";
 import type { MenuItemConstructorOptions, NativeImage } from "electron";
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +26,7 @@ import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.t
 import {
   backoff,
   cardLabel,
+  commandOutput,
   deskPlan,
   desktopEntry,
   desktopSettings,
@@ -200,15 +200,11 @@ async function loadUi(): Promise<void> {
 async function fixPath(): Promise<void> {
   if (process.platform === "win32") return;
   const sh = envVar("SHELL") ?? (mac ? "/bin/zsh" : "/bin/bash");
-  const fromShell = await loginShellPath(
-    (timeout) =>
-      new Promise<string>((resolve) => {
-        execFile(sh, ["-ilc", SHELL_PATH_COMMAND], { timeout, encoding: "utf8" }, (e, stdout) => {
-          if (e?.killed) log(`${sh} didn't print PATH within ${timeout / 1000}s`);
-          resolve(stdout ?? "");
-        });
-      }),
-  );
+  const fromShell = await loginShellPath(async (timeout) => {
+    const { stdout, timedOut } = await commandOutput(sh, ["-ilc", SHELL_PATH_COMMAND], timeout);
+    if (timedOut) log(`${sh} didn't print PATH within ${timeout / 1000}s`);
+    return stdout;
+  });
   process.env.PATH = mergePath(path.delimiter, fromShell ?? "", process.env.PATH ?? "", ...fallbackDirs(os.homedir()));
   if (!fromShell) log(`couldn't read PATH from ${sh}; added the usual dirs`);
 }
