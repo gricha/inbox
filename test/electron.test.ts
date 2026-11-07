@@ -8,8 +8,8 @@ import path from "node:path";
 import {
   backoff,
   cardLabel,
-  checkoutProblem,
   DESK_ARGS,
+  deskPlan,
   desktopEntry,
   desktopSettings,
   envVar,
@@ -36,6 +36,7 @@ import {
   trayTooltip,
   viteArgs,
   watchEvent,
+  type DeskPlan,
 } from "../electron/lib.ts";
 
 test("parseShellPath ignores rc-file noise around the markers", () => {
@@ -196,23 +197,27 @@ test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => 
   assert.equal(sourceDir("~other/desk", "/Users/me"), path.resolve("~other/desk"), "only ~ and ~/ mean your home");
 });
 
-test("checkoutProblem: a Review Desk clone with its packages installed", () => {
+test("deskPlan: a chosen checkout runs from source or waits for what it lacks, never the app's own desk", () => {
+  const problem = (p: DeskPlan) => (p.run === "source" ? "" : (p.problem ?? ""));
+  assert.deepEqual(deskPlan("", null), { run: "in-process" }, "no checkout chosen: the app's own desk, as before");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
   try {
-    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /isn't a Review Desk checkout/);
+    const notCheckout = deskPlan(dir, "/bin/node");
+    assert.equal(notCheckout.run, "in-process", "a wrong folder can still be fixed in Settings");
+    assert.match(problem(notCheckout), /isn't a Review Desk checkout/);
     for (const f of ["src/cli.ts", "web/vite.config.ts"]) {
       fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
       fs.writeFileSync(path.join(dir, f), "");
     }
-    assert.match(checkoutProblem(dir, "/bin/node") ?? "", /run npm install there/);
+    const noModules = deskPlan(dir, "/bin/node");
+    assert.equal(noModules.run, "wait");
+    assert.match(problem(noModules), /run npm install there/);
     fs.mkdirSync(path.join(dir, "node_modules/vite/bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, "node_modules/vite/bin/vite.js"), "");
-    assert.match(
-      checkoutProblem(dir, null) ?? "",
-      /find node on your login shell/,
-      "without node it runs in-process, never a stuck window",
-    );
-    assert.equal(checkoutProblem(dir, "/bin/node"), null);
+    const noNode = deskPlan(dir, null);
+    assert.equal(noNode.run, "wait", "without node it waits for node; an older bundled desk can't read today's config");
+    assert.match(problem(noNode), /Couldn't find node .*Node 22\.18/);
+    assert.deepEqual(deskPlan(dir, "/bin/node"), { run: "source", node: "/bin/node" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

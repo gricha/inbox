@@ -27,7 +27,7 @@ import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.t
 import {
   backoff,
   cardLabel,
-  checkoutProblem,
+  deskPlan,
   desktopEntry,
   desktopSettings,
   envVar,
@@ -51,6 +51,7 @@ import {
   trayTitle,
   trayTooltip,
   type Bounds,
+  type DeskPlan,
   type DesktopSettings,
 } from "./lib.ts";
 import { reap, startSource, type Source } from "./source.ts";
@@ -68,8 +69,7 @@ const envSource = envVar("DESK_SOURCE");
 const launchSource = desktopSettings(readSettings(settingsPath(home)).overrides).source;
 const sourceWanted = sourceDir(envSource ?? launchSource, os.homedir());
 // Set once the login shell's PATH is in: the desk from a checkout needs its node.
-let node: string | null = null;
-let sourceProblem: string | null = null;
+let plan: DeskPlan = { run: "in-process" };
 let fromSource = "";
 const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
@@ -171,10 +171,8 @@ async function main(): Promise<void> {
   createTray();
   createWindow();
   await pathReady;
-  node = findNode(process.env.PATH ?? "");
-  sourceProblem = sourceWanted ? checkoutProblem(sourceWanted, node) : null;
-  fromSource = sourceProblem ? "" : sourceWanted;
-  if (sourceProblem) log(`not running from a checkout: ${sourceProblem}`);
+  planDesk();
+  if (plan.run === "in-process" && plan.problem) log(`not running from a checkout: ${plan.problem}`);
   await reap(home, log);
   if (!(await connect())) return;
   // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
@@ -217,8 +215,14 @@ async function fixPath(): Promise<void> {
 
 // ---------------------------------------------------------------- the desk
 
+function planDesk(): void {
+  plan = deskPlan(sourceWanted, findNode(process.env.PATH ?? ""));
+  fromSource = plan.run === "in-process" ? "" : sourceWanted;
+}
+
 // Attach to the desk on the port, or start one here. False when the user chose Quit.
 async function connect(): Promise<boolean> {
+  let waitingOn = "";
   for (;;) {
     const probe = await probeHealth(api);
     if (probe.kind === "desk") {
@@ -233,9 +237,24 @@ async function connect(): Promise<boolean> {
       app.quit();
       return false;
     }
-    // A desk from source that fails shows that in the window and waits for a fix; never an in-process desk in its place.
-    if (fromSource && node) {
-      source = await startSource({ dir: fromSource, node, port, home, log });
+    // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
+    if (plan.run === "wait") {
+      if (plan.problem !== waitingOn) {
+        waitingOn = plan.problem;
+        log(`waiting to run the desk from ${fromSource}: ${plan.problem}`);
+        void win?.loadURL(
+          startPage(`${plan.problem}. The desk starts from ${fromSource} once that's fixed; the app looks again every 15 seconds.`),
+        );
+      }
+      await sleep(15_000);
+      if (quitting) return false;
+      await fixPath();
+      planDesk();
+      continue;
+    }
+    if (plan.run === "source") {
+      if (waitingOn) void win?.loadURL(startPage("Starting Review Desk\u2026"));
+      source = await startSource({ dir: fromSource, node: plan.node, port, home, log });
       uiUrl = source.ui;
       origins.push(source.ui);
       log(`running the desk on ${deskUrl} and the UI on ${source.ui} from ${fromSource}`);
@@ -298,7 +317,7 @@ async function watch(): Promise<void> {
 
 function sourceStatus(): SourceStatus | null {
   if (!sourceWanted) return null;
-  if (sourceProblem) return { dir: sourceWanted, state: "invalid", detail: sourceProblem };
+  if (plan.run !== "source" && plan.problem) return { dir: sourceWanted, state: "invalid", detail: plan.problem };
   return source?.status() ?? { dir: sourceWanted, state: "attached" };
 }
 

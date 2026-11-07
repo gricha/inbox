@@ -209,13 +209,21 @@ function executable(p: string): boolean {
   }
 }
 
-// Why the desk and its UI can't run from `dir` with `node`, or null when they can.
-export function checkoutProblem(dir: string, node: string | null, exists: (p: string) => boolean = fs.existsSync): string | null {
+export type DeskPlan = { run: "source"; node: string } | { run: "wait"; problem: string } | { run: "in-process"; problem?: string };
+
+// A chosen checkout waits for what it lacks rather than fall back to the app's own desk, which may be too old for today's config.
+export function deskPlan(dir: string, node: string | null, exists: (p: string) => boolean = fs.existsSync): DeskPlan {
+  if (!dir) return { run: "in-process" };
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
-    return `${dir} isn't a Review Desk checkout`;
-  if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js"))) return `${dir} has no node_modules yet; run npm install there`;
-  if (!node) return "Couldn't find node on your login shell's PATH, so the app runs its own desk";
-  return null;
+    return { run: "in-process", problem: `${dir} isn't a Review Desk checkout` };
+  if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js")))
+    return { run: "wait", problem: `${dir} has no node_modules yet; run npm install there` };
+  if (!node)
+    return {
+      run: "wait",
+      problem: "Couldn't find node on your login shell's PATH or where nvm, Volta, mise, asdf or fnm keep it; install Node 22.18 or newer",
+    };
+  return { run: "source", node };
 }
 
 // --watch-path, not node's own module tracking: a file that doesn't parse is watched too, so saving a fix restarts it.
