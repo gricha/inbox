@@ -898,6 +898,22 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
+    // t on Blocked's first row: beside the chat, every row's why wraps whole rather than run under More.
+    name: "ask-blocked",
+    go: async (page) => {
+      await at("#/blocked")(page);
+      await page.locator(".queue [data-id]").first().locator(".row-main").focus();
+      await page.keyboard.press("t");
+      await page.locator(".chat-input").waitFor();
+      await page.waitForTimeout(300);
+      const cut = await page.evaluate<number[]>(
+        `[...document.querySelectorAll(".queue .row-main")].map((b) => b.scrollWidth - b.clientWidth).filter((d) => d > 0)`,
+      );
+      if (cut.length) failures.push(`ask-blocked: ${cut.length} row(s) overflow and clip, by ${cut.join(", ")}px`);
+    },
+    after: closeChat,
+  },
+  {
     // In a review, about the conversation you were on: sent, it waits for the answer under it.
     name: "ask-review",
     go: async (page) => {

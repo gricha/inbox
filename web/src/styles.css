@@ -1075,7 +1075,7 @@ kbd {
 
 .blocked-row .line-note {
   flex: 0 1 auto;
-  min-width: calc-size(max-content, min(size, 40%));
+  min-width: 0;
   white-space: normal;
 }
 
