@@ -1,16 +1,19 @@
+import { once } from "node:events";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import type { AddressInfo } from "node:net";
+import http from "node:http";
+import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Desk } from "../src/desk.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
-import { createApp } from "../src/server.ts";
+import { createApp, proxyUpgrades } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
 async function setup(settings?: Record<string, unknown>) {
@@ -263,6 +266,98 @@ test("DESK_UI_ORIGIN lets in exactly the desktop app's Vite page, approve includ
     [409, 403, 403],
   );
   t.cleanup();
+});
+
+// A stand-in for the app's Vite server: it answers with the path it was asked and the request's Accept, and echoes upgraded sockets.
+async function fakeVite(c: { after(fn: () => unknown): void }) {
+  const asked: { url: string; headers: http.IncomingHttpHeaders }[] = [];
+  const up = http.createServer((req, res) => {
+    asked.push({ url: req.url!, headers: req.headers });
+    if (req.headers["if-none-match"] === '"v1"') res.writeHead(304).end();
+    else res.writeHead(200, { "content-type": "text/javascript", etag: '"v1"' }).end(`served ${req.url} for ${req.headers.accept}`);
+  });
+  up.on("upgrade", (req: http.IncomingMessage, socket: net.Socket) => {
+    asked.push({ url: req.url!, headers: req.headers });
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+    socket.pipe(socket);
+  });
+  up.listen(0, "127.0.0.1");
+  await once(up, "listening");
+  c.after(() => {
+    up.closeAllConnections();
+    up.close();
+  });
+  return { up, asked, origin: `http://127.0.0.1:${(up.address() as AddressInfo).port}` };
+}
+
+const withUiOrigin = (c: { after(fn: () => unknown): void }, origin: string) => {
+  const prev = process.env.DESK_UI_ORIGIN;
+  c.after(() => {
+    if (prev === undefined) delete process.env.DESK_UI_ORIGIN;
+    else process.env.DESK_UI_ORIGIN = prev;
+  });
+  process.env.DESK_UI_ORIGIN = origin;
+};
+
+test("from a checkout the desk's own address serves the app's Vite UI, the API still its own", async (c) => {
+  const vite = await fakeVite(c);
+  withUiOrigin(c, vite.origin);
+  const t = await setup();
+  c.after(t.cleanup);
+  const app = createApp(t.desk, 47823);
+  const get = (p: string, headers: Record<string, string> = {}) => app.request(`http://localhost:47823${p}`, { headers });
+  const mod = await get("/src/main.tsx?t=5", { accept: "*/*", "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors" });
+  assert.equal(mod.status, 200);
+  assert.equal(await mod.text(), "served /src/main.tsx?t=5 for */*");
+  assert.equal(mod.headers.get("content-type"), "text/javascript");
+  assert.equal(mod.headers.get("x-frame-options"), "DENY", "framed by no site, as the desk's pages");
+  assert.equal((await get("/", { "if-none-match": '"v1"' })).status, 304, "Vite's cache answers pass through");
+  const asked = vite.asked.length;
+  assert.equal((await get("/api/queue")).status, 200);
+  assert.equal(vite.asked.length, asked, "the API is the desk's own");
+  const site = (s: string, mode: string) => get("/src/App.tsx", { "sec-fetch-site": s, "sec-fetch-mode": mode });
+  assert.equal((await site("cross-site", "navigate")).status, 200, "a link from another site opens the desk");
+  assert.equal((await site("cross-site", "no-cors")).status, 403, "another site can't load the checkout's files");
+  assert.equal((await site("same-site", "cors")).status, 403, "nor another localhost port");
+  vite.up.closeAllConnections();
+  vite.up.close();
+  await once(vite.up, "close");
+  const down = await get("/");
+  assert.equal(down.status, 503);
+  assert.match(await down.text(), /http-equiv="refresh"/, "the page tries again while Vite starts");
+});
+
+test("from a checkout the page's hot-reload socket goes through to Vite, from the desk's own page only", async (c) => {
+  const vite = await fakeVite(c);
+  const srv = http.createServer();
+  const drop = proxyUpgrades(srv, 47823, vite.origin);
+  srv.listen(0, "127.0.0.1");
+  await once(srv, "listening");
+  const port = (srv.address() as AddressInfo).port;
+  const open = async (host: string, origin: string) => {
+    const s = net.connect(port, "127.0.0.1");
+    s.write(`GET /?token=abc HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    const [head] = (await once(s, "data")) as [Buffer];
+    return { s, head: String(head) };
+  };
+  const ok = await open("localhost:47823", "http://localhost:47823");
+  assert.match(ok.head, /^HTTP\/1.1 101 /);
+  assert.equal(vite.asked.at(-1)?.url, "/?token=abc");
+  assert.equal(vite.asked.at(-1)?.headers.origin, "http://localhost:47823");
+  ok.s.write("ping");
+  assert.equal(String((await once(ok.s, "data"))[0]), "ping");
+  assert.match((await open("localhost:47823", "https://evil.example")).head, /^HTTP\/1.1 403 /);
+  assert.match((await open("evil.example", "http://localhost:47823")).head, /^HTTP\/1.1 403 /, "DNS rebinding");
+  // A server holding an upgraded socket never finishes closing, which would hold up node --watch's restart.
+  const gone = once(ok.s, "close");
+  drop();
+  const closed = new Promise((r) => {
+    srv.close(() => {
+      r("closed");
+    });
+  });
+  assert.equal(await Promise.race([closed, sleep(2000, "still open", { ref: false })]), "closed");
+  await gone;
 });
 
 test("an app attached with /api/events?notify=1 gets the desk's notifications", async (c) => {

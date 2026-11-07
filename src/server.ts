@@ -1,7 +1,10 @@
 // HTTP API + web UI on 127.0.0.1.
 import fs from "node:fs";
+import type { IncomingMessage, Server } from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -33,6 +36,79 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
+const LOCAL = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// Where a browser page may call the desk from: its own address, and the Vite servers that serve its UI in development.
+function originsOf(port: number): Set<string> {
+  const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+  // Vite's default ports, or DESK_DEV_PORT when it runs on another.
+  if (process.env.DESK_DEV)
+    for (const p of [5173, 5174, Number(process.env.DESK_DEV_PORT) || 5173]) {
+      origins.add(`http://localhost:${p}`);
+      origins.add(`http://127.0.0.1:${p}`);
+    }
+  // The desktop app running from a checkout serves the UI from its own Vite server, on exactly this origin.
+  if (process.env.DESK_UI_ORIGIN) origins.add(process.env.DESK_UI_ORIGIN);
+  return origins;
+}
+
+// Per connection, not per request; and fetch undoes the encoding it asked for.
+const HOP = ["host", "connection", "keep-alive", "transfer-encoding", "upgrade", "accept-encoding", "content-encoding", "content-length"];
+const UI_STARTING =
+  '<!doctype html><meta http-equiv="refresh" content="2"><title>Review Desk</title><p>The UI from your checkout is starting; this page tries again every 2 seconds.</p>';
+
+// The app's Vite UI, passed through so this address always shows the checkout's current UI.
+async function fromUi(req: Request, ui: string): Promise<Response> {
+  const site = req.headers.get("sec-fetch-site");
+  // Another site may link to the desk, but not load the checkout's files into its own page.
+  if ((site === "cross-site" || site === "same-site") && req.headers.get("sec-fetch-mode") !== "navigate")
+    throw new DeskError(403, "forbidden cross-site request");
+  const { pathname, search } = new URL(req.url);
+  const headers = new Headers(req.headers);
+  for (const h of HOP) headers.delete(h);
+  let res: Response;
+  try {
+    res = await fetch(`${ui}${pathname}${search}`, { headers, redirect: "manual", signal: req.signal });
+  } catch {
+    return new Response(UI_STARTING, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  }
+  const out = new Headers(res.headers);
+  for (const h of HOP) out.delete(h);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+}
+
+// The Vite page's hot-reload socket, through the desk like the page. Returns what drops the open ones: a server holding one
+// never finishes closing.
+export function proxyUpgrades(server: Server, port: number, ui: string): () => void {
+  const origins = originsOf(port);
+  const to = new URL(ui);
+  const open = new Set<Duplex>();
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const origin = req.headers.origin;
+    if (!LOCAL.has(URL.parse(`http://${req.headers.host ?? ""}`)?.hostname ?? "") || (origin && !origins.has(origin))) {
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const up = net.connect(Number(to.port), to.hostname);
+    open.add(socket);
+    const drop = () => {
+      open.delete(socket);
+      socket.destroy();
+      up.destroy();
+    };
+    up.on("error", drop).on("close", drop);
+    socket.on("error", drop).on("close", drop);
+    const lines = [`${req.method} ${req.url} HTTP/1.1`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    up.write(`${lines.join("\r\n")}\r\n\r\n`);
+    up.write(head);
+    up.pipe(socket).pipe(up);
+  });
+  return () => {
+    for (const s of open) s.destroy();
+  };
+}
+
 // The desk's own page, for its GitHub writes (approve, a reply, ready for review, the More menu's), hand-offs and asks: a browser marks the request same-origin and sends an Origin, which
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
@@ -53,20 +129,13 @@ function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
 export function createApp(desk: Desk, port: number): Hono {
   const app = new Hono();
   instrument(app);
-  const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
-  // Vite's default ports, or DESK_DEV_PORT when it runs on another.
-  if (process.env.DESK_DEV)
-    for (const p of [5173, 5174, Number(process.env.DESK_DEV_PORT) || 5173]) {
-      origins.add(`http://localhost:${p}`);
-      origins.add(`http://127.0.0.1:${p}`);
-    }
-  // The desktop app running from a checkout serves the UI from its own Vite server, on exactly this origin.
-  if (process.env.DESK_UI_ORIGIN) origins.add(process.env.DESK_UI_ORIGIN);
+  const origins = originsOf(port);
+  const ui = process.env.DESK_UI_ORIGIN;
 
   // Only this machine's browser and tools: blocks DNS rebinding (Host) and cross-site requests (Origin).
   app.use("*", async (c, next) => {
     const host = new URL(c.req.url).hostname;
-    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new DeskError(403, "forbidden host");
+    if (!LOCAL.has(host)) throw new DeskError(403, "forbidden host");
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin)) throw new DeskError(403, "forbidden origin");
     // A no-cors GET (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
@@ -436,6 +505,7 @@ export function createApp(desk: Desk, port: number): Hono {
 
   app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
 
+  if (ui) app.get("*", (c) => fromUi(c.req.raw, ui));
   app.get("*", (c) => {
     const rel = decodeURIComponent(c.req.path).replace(/^\/+/, "") || "index.html";
     let file = path.resolve(DIST, rel);
@@ -486,7 +556,9 @@ export async function startServer(
       reject(e.code === "EADDRINUSE" ? new Error(`port ${port} is in use; is desk already running? (${url})`) : e);
     });
   });
-  log(`Review Desk on ${url} (home ${home})`);
+  const ui = process.env.DESK_UI_ORIGIN;
+  const dropUpgrades = ui ? proxyUpgrades(server as Server, port, ui) : () => {};
+  log(`Review Desk on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
 
   try {
     await desk.init();
@@ -508,6 +580,7 @@ export async function startServer(
           r();
         });
         (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+        dropUpgrades();
       });
       await agentsGone;
     },
