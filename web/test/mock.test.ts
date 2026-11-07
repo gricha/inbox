@@ -517,6 +517,7 @@ test("Blocked: api#1294's chain together, saying once what it waits on, Merging'
       ["acme/billing#2299", "blocked by api#1294", false],
       ["acme/billing#2300", "blocked by api#1294", false],
       ["acme/billing#2301", "in Merging \u00b7 blocked by api#1294", true],
+      ["acme/billing#2302", "blocked by api#1294 (through billing#2300)", false],
       ["acme/api#1301", "blocked by api#1299, which waits on a review from kai", false],
       ["acme/web#2306", "waits on a review from sam, @backend and 1 more", false],
     ],
@@ -533,7 +534,11 @@ test("Blocked: api#1294's chain together, saying once what it waits on, Merging'
   const root = q.sections.today.find((c) => c.id === "acme/api#1294")!;
   assert.deepEqual(
     [root.why, root.cta, root.blocks],
-    [`blocks billing#2298, billing#2299 and 2 more; it ${silo}`, "reply", ["billing#2298", "billing#2299", "billing#2300", "billing#2301"]],
+    [
+      `blocks billing#2298, billing#2299 and 3 more; it ${silo}`,
+      "reply",
+      ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302"],
+    ],
   );
 
   const { data: lane } = await call<InflightView>("GET", "/api/inflight");

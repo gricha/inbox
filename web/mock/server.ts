@@ -1140,8 +1140,8 @@ const SEEDS: Seed[] = [
     on: {},
   },
   // The live example in acme's names: your api#1294 waits on your reply to dana, then on reviews, and four billing PRs of
-  // yours need it merged first (one handed back, its hand-back held; one in Merging). Dana's api#1301 asks you directly
-  // but needs her api#1299 first. Your web#2306 waits on reviewers.
+  // yours need it merged first (one handed back, its hand-back held; one in Merging), a fifth through billing#2300. Dana's
+  // api#1301 asks you directly but needs her api#1299 first. Your web#2306 waits on reviewers.
   {
     repo: "acme/api",
     n: 1294,
@@ -1155,7 +1155,7 @@ const SEEDS: Seed[] = [
     size: [214, 38, 7],
     threads: [1, 1],
     asked2: ["sam", "kai", "@hybrid-cloud", "@security", "@api", "@billing", "@enterprise", "@owners-auth"],
-    blocks: ["billing#2298", "billing#2299", "billing#2300", "billing#2301"],
+    blocks: ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302"],
     waits: SILO,
     on: { "work-mine": ["root"] },
   },
@@ -1171,7 +1171,12 @@ const SEEDS: Seed[] = [
         },
       ],
       [2299, "Bill service accounts' API calls to the team that owns them", 56, { reviews: [["shan", "approved", 9]] }],
-      [2300, "Show service-account usage on the billing page", 44, { review: "required", on: { "work-mine": ["mineBlocked"] } }],
+      [
+        2300,
+        "Show service-account usage on the billing page",
+        44,
+        { review: "required", blocks: ["billing#2302"], on: { "work-mine": ["mineBlocked"] } },
+      ],
       [
         2301,
         "Alert when a service account's usage spikes",
@@ -1183,6 +1188,7 @@ const SEEDS: Seed[] = [
           fly: { note: ["Nothing to fix here: its CI needs service accounts on control silo, which api#1294 adds", 2] },
         },
       ],
+      [2302, "Email teams a monthly service-account usage summary", 20, { blocker: ["api#1294 (through billing#2300)", SILO] }],
     ] as [number, string, number, Partial<Seed>][]
   ).map(([n, title, age, o]): Seed =>
     Object.assign(
@@ -1427,6 +1433,8 @@ function signals(r: Rec): Signals {
   // Removing the ask, or your approval, clears it.
   const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
   const myAreaFiles = areaFiles({ repo: s.repo, paths: r.paths }, { areas: AREAS });
+  // The PR it needs directly: the one a chain goes through, else its blocker.
+  const direct = s.blocker ? (/\(through (\S+)\)/.exec(s.blocker[0])?.[1] ?? s.blocker[0]) : "";
   return {
     item: {
       kind,
@@ -1462,9 +1470,9 @@ function signals(r: Rec): Signals {
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
-      requires: s.blocker ? [s.blocker[0]] : [],
+      requires: direct ? [direct] : [],
       blocked: !!s.blocker,
-      blocked_by: s.blocker ? [s.blocker[0]] : [],
+      blocked_by: direct ? [direct] : [],
       blocker: s.blocker?.[0] ?? "",
       blocker_waits: s.blocker?.[1] ?? "",
       blocks: s.blocks ?? [],
