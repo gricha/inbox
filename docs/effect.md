@@ -35,8 +35,9 @@ services, `Data.TaggedError`, the desk's own `log`.
   (`ListenFailed`), the rules' expressions, files, child processes, Claude Code, GitHub. The UI's own (the desk
   unreachable, an API refusal) live in `web/src/api.ts`; the CLI's and MCP's client's (`DeskDown`, `DeskNoAnswer`,
   `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
-  `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. Tags are unique across families: GitHub's 403 is
-  `GitHubForbidden`, never `Forbidden`.
+  `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. The desktop app's own (`DeskCallFailed`, `DeskFailed`,
+  `ElectronRefused`, `NoFreePort`) live in `electron/lib.ts`, beside the `FsError` and `CommandFailed` it shares with
+  the desk. Tags are unique across families: GitHub's 403 is `GitHubForbidden`, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
 - Every error has a message the owner can read, in fixed words (tests, toasts, the CLI and the stored `*_error` fields
@@ -45,9 +46,9 @@ services, `Data.TaggedError`, the desk's own `log`.
   keeps them: `CommandNotFound`'s `hint` is its whole message, and `CommandFailed` and `CommandTimeout` take a `summary`
   ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …"). Deliberate changes, each with a test: a
   `CommandFailed` whose stderr is blank says "<command> exited with <code or signal>", and a `ClaudeApiError` with no
-  words "claude failed: API error <status>" (both were empty); a stderr's tail keeps at most its last 8 KB (one long line
-  was kept whole, up to 64 MB); and a command started through cmd.exe (a Windows `claude.cmd`) is named alone in what
-  fails it (it was cmd.exe's whole line, an ask's text and a `--json-schema` included).
+  words "claude failed: API error <status>" (both were empty); a stderr's tail keeps at most its last 8 KB (one long
+  line was kept whole, up to 64 MB); and a command started through cmd.exe (a Windows `claude.cmd`) is named alone in
+  what fails it (it was cmd.exe's whole line, an ask's text and a `--json-schema` included).
 - `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
   that aren't an error go in a field of their own (Claude's login `detail`).
 - The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix
@@ -80,13 +81,15 @@ answers 409 `Stale`, and a held lock 409 `Busy`; the UI shows any of them by its
 Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
 `wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus`, an ask about an item and a
 wake that sends one again (`askAbout`) with broken rules answer `Unavailable` "config" (was a TypeError 500); a body
-that isn't a JSON object at the routes that parse one (`json`) is a `BadRequest` "the body must be a JSON object" (was a
-500), and `bodyOf`, for the routes that say what they need of it, reads JSON `null` or an array as `{}` too.
-`Unavailable` and `ReviewersNotAsked` say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can
-take a minute" and "Marked it ready, but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path
-the desk doesn't route, and one under `/api` or `/health` that `fromUi` won't pass to Vite, answer
-`{ error: "not found", tag: "NotFound" }` (there was no tag), and the host/origin/cross-site middleware's 403s carry
-`Forbidden`.
+that isn't a JSON object (not JSON, `null` or an array) at a route that needs one (`json()`: `/api/act`,
+`/api/config/preview`, PUT `/api/config`, `/api/policy` and `/api/settings`) is a `BadRequest` "the body must be a JSON
+object" (was a 500, or for an array the route's own `need { … }` or a 200); every other route reads one as `{}`
+(`bodyOf`) and says what it needs; a bug in a GitHub write, in `hold`'s fetch or in reading a PR's conversations before
+a reply is a logged 500 `Internal` in its own words (it was a 502 in the write's). `Unavailable` and `ReviewersNotAsked`
+say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can take a minute" and "Marked it ready,
+but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path the desk doesn't route answers
+`{ error: "not found", tag: "NotFound" }` (it had no tag); the host/origin/cross-site middleware's 403s and `fromUi`'s
+403 and 404 keep the `Forbidden` and `NotFound` tags they already had, now through `respond`.
 
 ## Writing Effect code
 
@@ -121,11 +124,12 @@ the desk doesn't route, and one under `/api` or `/health` that `fromUi` won't pa
   clears the child's timer and listeners, then calls `resume` once; the cleanup kills the group through `children.ts`'s
   `kill` and waits for `close` (bounded by SIGKILL after the grace period), so an interrupted run has exited before its
   fiber ends. A child's own timeout stays an unref'd `setTimeout` inside the callback. `children.ts` tracks every child,
-  so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings → Agents)
-  runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile` can't start
-  one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an `Effect.callback` too, and
-  interrupted it stops a `gh` that started and signals nothing for one that didn't (`execFile`'s `signal` option sent
-  SIGTERM to the desk's own process group, the desktop app's included, when `gh` wasn't there).
+  so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings →
+  Agents) runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile`
+  can't start one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an
+  `Effect.callback` too, and interrupted it stops a `gh` that started and signals nothing for one that didn't
+  (`execFile`'s `signal` option sent SIGTERM to the desk's own process group, the desktop app's included, when `gh`
+  wasn't there).
 - Retries: GitHub reads retry with
   `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
   3 attempts, the delay then 3× it, no jitter, a log line for each retry. Not the `{ times, while }` options together
@@ -141,9 +145,9 @@ the desk doesn't route, and one under `/api` or `/health` that `fromUi` won't pa
   reply, comment, inline, ready and asking reviewers, the More menu's), then `logWrite`, `doneAfterWrite`/`act`/`undo`,
   `wrote`, and `ask`'s rollback. A request going away never cancels a write the desk started or skips its bookkeeping;
   the write's own timeout still applies inside it. Never `restore` around the write.
-- Locks (`approving`, `sending`): taken before the region, released with `Effect.ensuring` after it; a held lock fails
-  at once with `Busy`, never queues. The region (`Desk.locked`) is the lock's check, the write, its bookkeeping and the
-  release, so nothing can interrupt it between taking the lock and the write.
+- Locks (`approving`, `sending`): checked and taken at the start of the write's uninterruptible region (`Desk.locked`)
+  and released by its `Effect.ensuring` at the end, so nothing can interrupt between taking the lock and the write; a
+  held lock fails at once with `Busy`, never queues.
 - Caches and singleflight: never `Effect.cached` where a failure must be retried (it caches failures). A keyed cache
   (`prContext` by the PR's id, node and `updated_at`, the GitHub token) is
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
@@ -206,11 +210,12 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
   `void Effect.runPromise(…)` (an unhandled rejection ends the desk). A promise nobody waits on is a lint error, `void`
   included (`typescript/no-floating-promises` without `ignoreVoid`; `.oxlintrc.json` says where): fork its work
   through the runner, await it, or, only where dropping it is right, handle it with a one-line why.
-- `desk.sync()` runs its pass in its caller's fiber (tests and `init` await it); only the timers' passes and `POST
-/api/sync`'s are forked.
-- Deliberate change, with a test: a file the desk watches (policy.md, settings.json, config.toml) that changed on disk is
-  read again through the runner (`Desk.edited`), so one it can't read is logged (`config.toml failed: …`) and reported,
-  and the desk keeps what it had (it was an uncaught exception from the watcher, which ended the desk).
+- `desk.sync()` runs its pass in its caller's fiber (tests await it); a config reload's and `POST /api/sync`'s are
+  forked through the runner, and a write's refresh runs it after the PR's own refresh in the same runner fiber
+  (`refreshAfter`).
+- Deliberate change, with a test: a file the desk watches (policy.md, settings.json, config.toml) that changed on disk
+  is read again through the runner (`Desk.edited`), so one it can't read is logged (`config.toml failed: …`) and
+  reported, and the desk keeps what it had (it was an uncaught exception from the watcher, which ended the desk).
 - An AI review (`runAi`) keeps what fails it, a bug too, as that commit's `aiErrors` in its words, reported once and
   logged with the login's own words when it's `ClaudeNotLoggedIn` (told by its tag); `retryAgents` and `paused()`
   read the stored words by suffix. `aiReview` answers it as `Upstream` 502 with it as the cause.
@@ -219,18 +224,19 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
 
 Each runs an Effect whose failures it answers for, and nothing gets past it unhandled.
 
-- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through `respond(c, effect, { log, read? })`,
-  every route (one that can't fail through `Effect.sync`, the static files, `fromUi` and the SSE stream as the
-  `Response` they build, which `respond` passes on); the host/origin/cross-site middleware runs its check with
-  `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only a bug. Only reads and waits (GET views,
-  `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a client going away interrupts them; a write
-  and any work shared with other callers never take the request's signal: nor does opening a PR (`GET /api/review/:id`),
-  which starts its AI review and Claude's read once its diff and conversation are in; its `?ahead=1` prefetch does. A
-  `DeskHttpError` answers with its status and `errorBody`. An interrupt-only exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null,
-{ status: 499 })`, log and report nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged
-  with `Cause.pretty`. For an answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets
-  `c.error` to `Cause.squash(exit.cause)` (the failure itself, never a Cause) before returning, so the Sentry middleware
-  decides: it reports a 5xx except a 503 or one whose cause `report()` already sent.
+- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through
+  `respond(c, effect, { log, read? })`, every route (one that can't fail through `Effect.sync`, the static files,
+  `fromUi` and the SSE stream as the `Response` they build, which `respond` passes on); the host/origin/cross-site
+  middleware runs its check with `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only
+  a bug. Only reads and waits (GET views, `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a
+  client going away interrupts them; a write and any work shared with other callers never take the request's signal: nor
+  does opening a PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation
+  are in; its `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only
+  exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null, { status: 499 })`, log and report
+  nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged with `Cause.pretty`. For an
+  answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets `c.error` to
+  `Cause.squash(exit.cause)` (the failure itself, never a Cause) before returning, so the Sentry middleware decides: it
+  reports a 5xx except a 503 or one whose cause `report()` already sent.
 - **Background**: the runner, above.
 - **CLI** (`src/cli.ts`): `main` runs one Effect and maps its exit. `UsageError` (and parseArgs' `ERR_PARSE_ARGS_*`,
   turned into one where parseArgs is called) exits 2 with `desk: <msg>` and "run 'desk help' for usage". `DeskDown`
@@ -238,8 +244,9 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   before `process.exit`. `DeskApiError`'s message ends in " — candidates: a, b"; a client timeout (`DeskNoAnswer`) says
   "The operation was aborted due to timeout". `ls` lists the boards on a `NotFound` and `config` works offline on
   `DeskDown`, both by tag. `status --short` ends in `Effect.catchCause`: whatever happens it prints a status word, exit
-  0, and tells a config error from starting by the 503's `reason`. `serve` yields `startDesk`, and refreshes the
-  skill through the desk's runner.
+  0, and tells a config error from starting by the 503's `reason`. `serve` yields `startDesk`, and refreshes the skill
+  through the desk's runner: a file it can't write is logged in its words ("couldn't refresh the Review Desk skill: …"),
+  and a bug in it is the runner's, logged and reported.
 - **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged (the desk's log at `/mcp`,
   stderr for `desk mcp`). Tools take no signal: `desk_inquiry`'s wait is an `Effect.sleep` loop of at most a minute.
 - **Electron** (`electron/main.ts`): an IPC handler runs its Effect and rejects with a plain `Error(message)` (only the

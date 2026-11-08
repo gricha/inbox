@@ -114,7 +114,7 @@ Areas (daily, apart from the context; see api.md's "Your areas"): `search` with 
 
 Context (refreshed daily): your name and teams via `viewer { name organizations.teams(userLogins:[me]) }`; affinity from `is:pr reviewed-by:@me -author:@me updated:>=<90d>` and `is:pr commenter:@me -author:@me updated:>=<90d>` (distinct PRs per author, up to 1000 each); `repo_prs` from `is:pr author:@me created:>=<90d>`, whose 20 latest updated titles are `recent` (the light search carries `title`); `orgs` from `is:open involves:@me` counted by owner.
 
-Errors: retries 502/503/timeouts twice with backoff; on secondary rate limit or `remaining < 200`, it throws `RateLimitedError(resetAt)` and the sync loop waits.
+Errors: retries 502/503/504, a request with no answer and GraphQL's own timeout twice with backoff; on a rate limit (a 429, a 403 GitHub calls one, GraphQL's `RATE_LIMITED`) or `remaining < 200`, it fails with `GitHubRateLimited` (its `resetAt`: Retry-After, else the limit's reset, else a minute on) and the sync loop waits.
 
 ## Store (`src/store.ts`)
 
