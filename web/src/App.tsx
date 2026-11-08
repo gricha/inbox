@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
   Action,
@@ -87,6 +87,7 @@ const go = (r: Route) => {
 type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
+const LIST_PAGES = new Set<Route["name"]>(["queue", "later", "blocked", "archive"]);
 // What FYI, Blocked and the Archive say with nothing on them.
 const EMPTY = {
   later: "Nothing sorted away.",
@@ -269,9 +270,12 @@ export function App() {
     [load],
   );
 
+  // Where a list page was scrolled when a review or a question was opened from it: coming back, it opens there again.
+  const left = useRef<{ page: Route["name"]; y: number } | null>(null);
   useEffect(() => {
     const on = () => {
       const next = parseRoute(location.hash);
+      if (LIST_PAGES.has(routeRef.current.name)) left.current = { page: routeRef.current.name, y: window.scrollY };
       setRoute(next);
       setSpot(null); // a review you come back to asks about the PR until you pick a spot in it again
       // Your chat follows you into another PR's review, and closes when you leave for any other page.
@@ -282,6 +286,17 @@ export function App() {
       window.removeEventListener("hashchange", on);
     };
   }, []);
+
+  // A list page opens at its top, or, back from a review or a question opened from it, where it was: never at the scroll of
+  // the page before. Before the selection effect, which then brings a kept row into view.
+  const lastPage = useRef(route.name);
+  useLayoutEffect(() => {
+    const from = lastPage.current;
+    lastPage.current = route.name;
+    if (from === route.name || !LIST_PAGES.has(route.name)) return;
+    const returning = (from === "review" || from === "inquiry") && left.current?.page === route.name;
+    window.scrollTo(0, returning ? left.current!.y : 0);
+  }, [route.name]);
 
   const settingsSection = route.name === "settings" ? route.section : null;
   useEffect(() => {
@@ -519,7 +534,7 @@ export function App() {
 
   // A group's first row brings its heading along (the page's first, the top of the page), so no heading sits under the page head.
   useEffect(() => {
-    if (!selected || !["queue", "later", "blocked", "archive"].includes(route.name) || stay.current === selected) return;
+    if (!selected || !LIST_PAGES.has(route.name) || stay.current === selected) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
     const head = el?.closest(".group")?.querySelector(".group-head");
     if (!el) return;
@@ -986,14 +1001,15 @@ export function App() {
     if (target instanceof HTMLElement) target.focus({ preventScroll: true });
   }
 
-  // A group's "n more" line opens in place; the selection goes on to the first card it showed.
-  function unfold(k: GroupKey) {
+  // A group's "n more" line opens in place; from the keyboard, the selection and focus go on to the first card it showed (a
+  // click leaves both where they were: focus there would draw Tab's ring on a row nobody touched).
+  function unfold(k: GroupKey, keyboard: boolean) {
     const shown = new Set(groups.find((g) => g.key === k)?.cards.map((c) => c.id));
     const first = groupsOf(view, open, filter, { ...unfolded, [k]: true })
       .find((g) => g.key === k)
       ?.cards.find((c) => !shown.has(c.id));
     setUnfolded((u) => ({ ...u, [k]: true }));
-    if (first) {
+    if (first && keyboard) {
       setSelected(first.id);
       requestAnimationFrame(() => {
         focusRow(first.id);
@@ -1012,7 +1028,7 @@ export function App() {
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
     if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
-    const onList = ["queue", "later", "blocked", "archive"].includes(route.name); // where the filter is drawn
+    const onList = LIST_PAGES.has(route.name); // where the filter is drawn
     const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && expanded) setExpanded(null);
     else if (onList && filter) setFilter("");

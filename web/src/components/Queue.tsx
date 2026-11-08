@@ -39,7 +39,7 @@ export function Queue({
   inquiries: Inquiry[];
   inq: InquiryCtx;
   filter: string;
-  unfold: (k: GroupKey) => void;
+  unfold: (k: GroupKey, keyboard: boolean) => void;
   selectFold: (k: GroupKey) => void;
 }) {
   if (!view) {
@@ -116,8 +116,8 @@ export function Queue({
           onMouseDown={(e) => {
             e.preventDefault();
           }}
-          onClick={() => {
-            unfold(g.key);
+          onClick={(e) => {
+            unfold(g.key, e.detail === 0); // 0: Enter or Space, not a click
           }}
           onFocus={() => {
             selectFold(g.key);

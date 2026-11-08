@@ -1297,9 +1297,10 @@ p {
   font-size: 14px;
 }
 
-/* The fill is its cursor, as on a row. */
+/* Its fill is its cursor, and keyboard focus the rows' own ring. */
 .queue .fold:focus-visible {
-  outline: none;
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
 }
 
 /* Later's groups open and close on their heading. */
