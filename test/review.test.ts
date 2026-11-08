@@ -18,6 +18,7 @@ import {
   NOT_LOGGED_IN,
 } from "../src/errors.ts";
 import { GH_MISSING } from "../src/github/client.ts";
+import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
   agentDir,
@@ -1576,6 +1577,66 @@ test("an AI review runs to the end when the one asking leaves; a bug in it is it
   const after = await Effect.runPromiseExit(t.desk.generate("acme/api#1"));
   assert.ok(Exit.isFailure(after) && Cause.hasInterruptsOnly(after.cause));
   assert.equal(t.f.started.length, 2, "a stopped desk starts no claude");
+});
+
+test("the desk stopping while an AI review waits on its PR's diff records nothing and notifies nothing", async () => {
+  const t = await setup([ask(1)]);
+  t.f.deps.fetchPr = () => Effect.never;
+  await t.sync();
+  assert.deepEqual([t.desk.generating.size, t.desk.fetching.size], [1, 1], "the review waits on the diff");
+  const after: string[] = [];
+  const set = t.desk.store.set.bind(t.desk.store);
+  t.desk.store.set = (key, value) => {
+    after.push(`set ${key}`);
+    set(key, value);
+  };
+  t.desk.notifyNew = () => {
+    after.push("notifyNew");
+  };
+  t.desk.onChange(() => {
+    after.push("changed");
+  });
+  const notes = t.notes.length;
+  t.cleanup();
+  assert.deepEqual(after, [], "a stopped desk records nothing");
+  assert.equal(t.notes.length, notes);
+  assert.deepEqual([t.desk.generating.size, t.desk.fetching.size, t.f.started.length], [0, 0, 0]);
+});
+
+test("opening a PR starts its AI review even when the window leaves before its diff is in; a prefetch that leaves starts nothing", async (c) => {
+  const t = await setup([ask(1), ask(2), ask(3)]);
+  c.after(t.cleanup);
+  const diffs = new Map<string, () => void>();
+  t.f.deps.fetchPr = (item) =>
+    Effect.callback<PrText>((resume) => {
+      diffs.set(item.id, () => {
+        resume(Effect.succeed({ body: "", files: [FILE] }));
+      });
+    });
+  await t.sync();
+  assert.equal(t.desk.generating.size, 2, "the pump's two wait on their diffs");
+  const target = ["acme/api#1", "acme/api#2", "acme/api#3"].find((id) => !t.desk.generating.has(id))!;
+  const app = createApp(t.desk, 47823);
+  const open = (ahead: boolean, signal: AbortSignal) =>
+    app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent(target)}${ahead ? "?ahead=1" : ""}`, { signal });
+
+  const prefetch = new AbortController();
+  const ahead = open(true, prefetch.signal);
+  await flush();
+  prefetch.abort();
+  assert.equal((await ahead).status, 499, "a prefetch is a read the window can cut");
+
+  const left = new AbortController();
+  const opened = open(false, left.signal);
+  await flush();
+  left.abort();
+  await flush();
+  diffs.get(target)!();
+  assert.equal((await opened).status, 200, "an open runs to the end");
+  await flush();
+  assert.deepEqual(t.f.started, [target], "and starts its AI review, the pump's two still waiting");
+  await t.f.release(target);
+  assert.equal(runSync(t.desk.item(target)).ai?.summary, `Review of ${target}`, "kept");
 });
 
 test("reviews are for PRs: an issue answers 400", async () => {

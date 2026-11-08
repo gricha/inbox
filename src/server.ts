@@ -292,14 +292,16 @@ export function createApp(desk: Desk, port: number): Hono {
       { log, read: true },
     ),
   );
-  // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
-  app.get("/api/review/:id{.+}", (c) =>
-    respond(
+  // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123. An open starts its AI review and Claude's
+  // read once its diff and conversation are in, so it runs to the end whoever still waits; only a prefetch is a read.
+  app.get("/api/review/:id{.+}", (c) => {
+    const ahead = c.req.query("ahead") === "1";
+    return respond(
       c,
-      Effect.andThen(up, () => desk.reviewView(c.req.param("id"), c.req.query("ahead") === "1")),
-      { log, read: true },
-    ),
-  );
+      Effect.andThen(up, () => desk.reviewView(c.req.param("id"), ahead)),
+      { log, read: ahead },
+    );
+  });
   // Joins the PR's AI review, which runs to the end whoever still waits: the request's signal never reaches it.
   app.post("/api/review/:id{.+}/ai", (c) => {
     const ai = Effect.gen(function* () {

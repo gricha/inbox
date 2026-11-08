@@ -1673,6 +1673,7 @@ export class Desk {
     const running = this.generating.get(id);
     if (running) return running;
     const d = this.shared(this.generating, "ai_review", id, this.runAi(id), (ok) => {
+      if (this.stopped) return;
       this.changed();
       this.notifyNew();
       if (ok) this.pumpAi();
@@ -1683,7 +1684,8 @@ export class Desk {
 
   // Work its callers share (an AI review, a PR's diff), kept in `runs` while it's on its way. Forked through the runner: a
   // caller leaving never stops it, and the desk stopping does, which ends its callers too. The fiber frees its slot and
-  // does `after` before they resume; one the stopped desk won't start ends them at once.
+  // does `after` before they resume, unless the work was interrupted (the diff it waits on, ended by the desk stopping
+  // first): that does nothing more. One the stopped desk won't start ends them at once.
   private shared<A, E>(
     runs: Map<string, Deferred.Deferred<A, E>>,
     what: string,
@@ -1699,6 +1701,7 @@ export class Desk {
       Effect.tap((exit) =>
         Effect.sync(() => {
           runs.delete(id);
+          if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return;
           after(Exit.isSuccess(exit));
         }),
       ),

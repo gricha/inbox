@@ -198,8 +198,9 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
 
 - **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through `respond(c, effect, { log, read? })`. Only reads and waits (GET views,
   `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a client going away interrupts them; a write
-  and any work shared with other callers never take the request's signal. A `DeskHttpError` answers with its status and
-  `errorBody`. An interrupt-only exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null,
+  and any work shared with other callers never take the request's signal: nor does opening a PR (`GET /api/review/:id`),
+  which starts its AI review and Claude's read once its diff and conversation are in; its `?ahead=1` prefetch does. A
+  `DeskHttpError` answers with its status and `errorBody`. An interrupt-only exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null,
 { status: 499 })`, log and report nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged
   with `Cause.pretty`. For an answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets
   `c.error` to `Cause.squash(exit.cause)` (the failure itself, never a Cause) before returning, so the Sentry middleware
