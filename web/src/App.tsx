@@ -32,6 +32,7 @@ import {
   removeCard,
   routeHash,
   PAGE_GROUPS,
+  settingsBack,
   SORTED_AWAY,
   type Acted,
   type ListPage,
@@ -1004,15 +1005,18 @@ export function App() {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
-  // Esc is the one key: on a list it closes the item opened in place, then clears the filter; then it goes back to the Inbox.
+  // Esc is the one key: on a list it closes the item opened in place, then clears the filter; a Settings view goes back to its
+  // part; then it goes back to the Inbox.
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
     if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
     const onList = ["queue", "later", "blocked", "archive"].includes(route.name); // where the filter is drawn
+    const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && expanded) setExpanded(null);
     else if (onList && filter) setFilter("");
+    else if (part) go({ name: "settings", section: part });
     else if (route.name !== "queue") go({ name: "queue" });
   };
   // Capture phase: this runs before any other keydown listener, the review's included.
@@ -1342,6 +1346,7 @@ export function App() {
               view={settings}
               now={now}
               loads={loads}
+              configErrors={configErrors}
               onView={saveSettingsView}
               flash={flash}
               onRulesSaved={() => {

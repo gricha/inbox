@@ -33,6 +33,8 @@ import {
   routeHash,
   says,
   sections,
+  settingsBack,
+  SETTINGS_VIEWS,
   stops,
   threadsOn,
   valueOf,
@@ -127,6 +129,18 @@ test("Settings' old section ids land on the part their settings live in now", ()
   for (const section of ["github", "agent", "queue", "automations", "app"])
     assert.deepEqual(parseRoute(routeHash({ name: "settings", section })), { name: "settings", section });
   assert.equal(pageOf(part("notify"), "queue"), null);
+});
+
+test("Searches and rules and your policy are views inside Settings: each goes back to the part its Edit row is in", () => {
+  assert.equal(settingsBack("rules"), "github");
+  assert.equal(settingsBack("policy"), "agent");
+  for (const part of ["github", "agent", "queue", "automations", "app", "nowhere"]) assert.equal(settingsBack(part), null);
+  for (const id of ["rules", "policy"]) {
+    assert.deepEqual(parseRoute(routeHash({ name: "settings", section: id })), { name: "settings", section: id });
+    assert.equal(pageOf({ name: "settings", section: id }, "queue"), null);
+  }
+  assert.equal(SETTINGS_VIEWS.rules?.name, "Searches and rules");
+  assert.equal(SETTINGS_VIEWS.policy?.name, "Your policy");
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {

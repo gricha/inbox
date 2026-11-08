@@ -1,7 +1,7 @@
 // Settings → Claude → Your policy: ~/.review-desk/policy.md, prose Claude sorts by. Saved with ⌘S, like the rules.
 // While the file is empty the starter is in effect, so the editor shows it: editing it and saving makes it yours.
 import { Effect } from "effect";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls, MOD, tilde } from "../format.ts";
@@ -10,25 +10,31 @@ import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
 
 // What the editor starts from: the file, or the starter while it's empty.
-const shown = (d: PolicyDoc) => (d.text.trim() ? d.text : d.starter);
+const startOf = (d: PolicyDoc) => (d.text.trim() ? d.text : d.starter);
 
 export function Policy({
   active,
+  shown,
   refresh,
   now,
   flash,
+  onDoc,
+  children,
 }: {
-  active: boolean;
+  active: boolean; // Settings is open: the file loads with it, for its row's help and so the view opens on it
+  shown: boolean; // its view is on screen: ⌘S works
   refresh: number; // bumps on every app refresh: a clean editor re-reads the file
   now: number;
   flash: (text: string, error?: boolean) => void;
+  onDoc: (d: PolicyDoc | null) => void; // the file as saved, and the judge's status
+  children?: ReactNode; // the view's last rows: the hourly cap
 }) {
   const [doc, setDoc] = useState<PolicyDoc | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
-  const dirty = doc !== null && text !== shown(doc);
+  const dirty = doc !== null && text !== startOf(doc);
   const starter = doc !== null && !doc.text.trim();
   const latest = useRef({ doc, text });
   latest.current = { doc, text };
@@ -40,10 +46,10 @@ export function Policy({
         Effect.match({
           onSuccess: (p) => {
             const { doc: d, text: t } = latest.current;
-            if (d !== null && t !== shown(d)) setDoc({ ...d, judge: p.judge });
+            if (d !== null && t !== startOf(d)) setDoc({ ...d, judge: p.judge });
             else {
               setDoc(p);
-              setText(shown(p));
+              setText(startOf(p));
             }
             setLoadError("");
           },
@@ -106,7 +112,11 @@ export function Policy({
     );
   }
 
-  // ⌘S saves the editor you're in: Rules has its own on the same page.
+  useEffect(() => {
+    onDoc(doc);
+  }, [doc, onDoc]);
+
+  // ⌘S saves the editor you're in.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s" || !wrap.current?.contains(document.activeElement)) return;
@@ -117,11 +127,11 @@ export function Policy({
     const h = (e: KeyboardEvent) => {
       keys.current(e);
     };
-    if (active) window.addEventListener("keydown", h);
+    if (shown) window.addEventListener("keydown", h);
     return () => {
       window.removeEventListener("keydown", h);
     };
-  }, [active]);
+  }, [shown]);
 
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
@@ -152,7 +162,7 @@ export function Policy({
       <div className="editor-foot">
         <ActButton
           label={busy ? "Saving…" : "Save"}
-          title={`Save (${MOD}S)`}
+          title={doc ? `Save to ${tilde(doc.path)} (${MOD}S)` : `Save (${MOD}S)`}
           disabled={busy || !dirty}
           run={() => {
             save();
@@ -162,7 +172,7 @@ export function Policy({
           label="Revert"
           disabled={!dirty}
           run={() => {
-            if (doc) setText(shown(doc));
+            if (doc) setText(startOf(doc));
           }}
         />
         <span className="grow" />
@@ -171,9 +181,7 @@ export function Policy({
       {starter && <p className="s-live quiet">This is the starter policy. Claude sorts by it until you change it.</p>}
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
-      <p className="s-path quiet" title={doc?.path}>
-        <code>{doc ? tilde(doc.path) : "…"}</code>
-      </p>
+      {children}
     </div>
   );
 }

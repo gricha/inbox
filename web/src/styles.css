@@ -712,8 +712,13 @@ p {
   padding: 28px 24px 84px;
 }
 
-/* Settings is wider, so the rules editor on it fits; the page head's name follows it. */
+/* Settings is a short page of rows; its Searches and rules view is wider, so the editor and its rail fit side by side. The
+   page head's name or back link follows it. */
 .col:has(.settings:not([hidden])) {
+  --col-w: 760px;
+}
+
+.col:has(.rules-wrap:not([hidden])) {
   --col-w: 1180px;
 }
 
@@ -3107,9 +3112,7 @@ p {
 /* Settings ----------------------------------------------------------------- */
 
 /* A part: the Inbox's part heading over one sheet of rows; a jump to it stops just under the page head. */
-.s-part,
-.s-rules,
-.s-block {
+.s-part {
   scroll-margin-top: 64px;
 }
 
@@ -3137,14 +3140,6 @@ p {
   color: var(--ink);
   font-size: 13.5px;
   font-weight: 650;
-}
-
-.s-path {
-  margin-top: 28px;
-  overflow: hidden;
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .s-file-err {
@@ -3297,27 +3292,33 @@ p {
   transform: rotate(180deg);
 }
 
-/* Searches and rules, after GitHub's sheet: its name and one line where the part's heading starts, then the editor. */
-.s-rules {
-  margin-top: 28px;
+/* A row that opens a view: its name in ink like a label, only its words a link, and Edit in the accent's ink. */
+.s-name {
+  justify-self: start;
 }
 
-.s-block-head {
+.s-edit {
+  color: var(--accent-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* A view inside Settings: its name and one line where a part's heading starts, then its editor. */
+.s-view-name {
   margin: 0;
   padding: 0 12px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.s-rules > .s-help {
-  max-width: none;
-  margin-top: 2px;
-  padding: 0 12px;
-}
-
-.s-block .policy {
+.s-view-line {
+  max-width: 72ch;
   margin-top: 4px;
+  padding: 0 12px;
+  color: var(--pencil);
+  font-size: 13px;
 }
 
 .agent {
@@ -3405,7 +3406,7 @@ p {
 /* Rules editor ------------------------------------------------------------- */
 
 .rules-wrap {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 
 .rules {
@@ -3456,20 +3457,14 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
-.rules-wrap .s-path {
-  margin-top: 8px;
-}
-
-/* Policy: prose, so the UI font and wrapped lines, in the Rules editor's column. */
+/* Policy: prose, so the UI font and wrapped lines, across its view's column. */
 .policy {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
-  column-gap: 28px;
-  margin-top: 24px;
+  margin-top: 18px;
 }
 
-.policy > * {
-  grid-column: 1;
+/* The hourly cap: one row on a sheet of its own, under how much of it this hour took. */
+.policy > .s-sheet {
+  margin-top: 24px;
 }
 
 .editor.prose {
@@ -3481,10 +3476,6 @@ p {
 
 .editor.prose::placeholder {
   color: var(--pencil);
-}
-
-.policy .s-path {
-  margin-top: 6px;
 }
 
 /* Automations: one table of them, each its switch, name and schedule, its buttons, and its last run under it. */
@@ -5007,8 +4998,7 @@ p {
     display: none;
   }
 
-  .rules,
-  .policy {
+  .rules {
     grid-template-columns: minmax(0, 1fr);
   }
 

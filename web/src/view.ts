@@ -70,6 +70,15 @@ export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "blocked", Grou
 // Settings' old section ids, still in links and habits, and the part each one's settings live in now.
 const SETTINGS_ALIAS: Record<string, string> = { notify: "queue", review: "github", appearance: "app", handoff: "github" };
 
+// The editors that open as views of their own inside Settings, by id, and the part each one's Edit row is in.
+export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | undefined> = {
+  rules: { name: "Searches and rules", part: "github" },
+  policy: { name: "Your policy", part: "agent" },
+};
+
+// Where a Settings view's back link and Esc go: the part it opened from; null on the page itself.
+export const settingsBack = (section: string): string | null => SETTINGS_VIEWS[section]?.part ?? null;
+
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };

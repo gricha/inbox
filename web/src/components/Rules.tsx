@@ -8,12 +8,14 @@ import { ActButton } from "./Detail.tsx";
 
 export function Rules({
   active,
+  shown,
   refresh,
   flash,
   onSaved,
   onDirty,
 }: {
-  active: boolean;
+  active: boolean; // Settings is open: the file loads with it, so the view opens on it
+  shown: boolean; // its view is on screen: its keys work
   refresh: number; // bumps on every app refresh: a clean editor re-reads the file in case it changed on disk
   flash: (text: string, error?: boolean) => void;
   onSaved: () => void;
@@ -149,10 +151,10 @@ export function Rules({
     );
   }
 
-  // Window-level so ⌘S / ⌘↵ work wherever focus is on this page; a ref keeps the latest text.
+  // Window-level so ⌘S / ⌘↵ work wherever focus is on this view; a ref keeps the latest text.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
-    // The policy editor on the same page saves itself.
+    // An editor that saves itself (your policy's, an automation's) keeps its own ⌘S.
     if (!(e.metaKey || e.ctrlKey) || document.activeElement?.closest("[data-own-save]")) return;
     if (e.key.toLowerCase() === "s") {
       e.preventDefault();
@@ -166,11 +168,11 @@ export function Rules({
     const h = (e: KeyboardEvent) => {
       keys.current(e);
     };
-    if (active) window.addEventListener("keydown", h);
+    if (shown) window.addEventListener("keydown", h);
     return () => {
       window.removeEventListener("keydown", h);
     };
-  }, [active]);
+  }, [shown]);
 
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
@@ -216,7 +218,7 @@ export function Rules({
   }
 
   const q = query.trim().toLowerCase();
-  const shown = q ? fields.filter((f) => f.path.includes(q) || f.doc.toLowerCase().includes(q)) : fields;
+  const listed = q ? fields.filter((f) => f.path.includes(q) || f.doc.toLowerCase().includes(q)) : fields;
   const stale = preview !== null && preview.text !== text;
   const pvBoards = preview?.result.boards ?? [];
   const same = (b: PreviewResult["boards"][number]) =>
@@ -225,7 +227,7 @@ export function Rules({
   const unchanged = pvBoards.filter(same);
 
   return (
-    <div className="rules-wrap" hidden={!active}>
+    <div className="rules-wrap" hidden={!shown}>
       {loadError && (
         <div className="notice err">
           <span>Couldn't load the rules: {loadError}</span>
@@ -251,6 +253,7 @@ export function Rules({
             autoCorrect="off"
             wrap="off"
             aria-label="Config TOML"
+            title="Tab indents, Esc leaves the editor."
             onChange={(e) => {
               setText(e.target.value);
             }}
@@ -265,7 +268,7 @@ export function Rules({
           <div className="editor-foot">
             <ActButton
               label={busy === "save" ? "Saving…" : "Save"}
-              title={`Save (${MOD}S)`}
+              title={doc ? `Save to ${tilde(doc.path)} (${MOD}S)` : `Save (${MOD}S)`}
               disabled={!!busy || !dirty}
               run={() => {
                 save();
@@ -292,9 +295,6 @@ export function Rules({
             {dirty && <span className="unsaved">Unsaved changes</span>}
             <span className="pos">Line {pos.replace(":", ", column ")}</span>
           </div>
-          <p className="s-path quiet">
-            <code>{doc ? tilde(doc.path) : "…"}</code>. Tab indents, Esc leaves the editor.
-          </p>
         </div>
 
         <div className="side-col">
@@ -434,7 +434,7 @@ export function Rules({
               aria-label="Search fields"
             />
             <div className="fields-list">
-              {shown.map((f) => (
+              {listed.map((f) => (
                 <button
                   key={f.path}
                   type="button"
@@ -449,7 +449,7 @@ export function Rules({
                   <span className="doc">{f.doc}</span>
                 </button>
               ))}
-              {!shown.length && <p className="small">No fields match.</p>}
+              {!listed.length && <p className="small">No fields match.</p>}
             </div>
           </section>
 

@@ -270,6 +270,36 @@ const linesInChat = async (page: Page) => {
   await page.locator(".chat-input").waitFor();
 };
 const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
+// A Settings view: the head is its way back to Settings' part `part`, the view names itself, and the column is `col` at most.
+const settingsView = async (page: Page, name: string, title: string, part: string, col: string) => {
+  const seen = await page.evaluate<{ back: string | null; href: string | null; h2: string | null; col: string }>(`(() => {
+    const back = document.querySelector(".page-head a.back");
+    return {
+      back: back?.textContent.trim() ?? null,
+      href: back?.getAttribute("href") ?? null,
+      h2: [...document.querySelectorAll(".s-view")].find((v) => !v.hidden)?.querySelector("h2")?.textContent.trim() ?? null,
+      col: getComputedStyle(document.querySelector(".main")).maxWidth,
+    };
+  })()`);
+  if (seen.back !== "Settings") failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}`);
+  if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
+  if (seen.h2 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h2)}`);
+  if (seen.col !== col) failures.push(`${name}: the column is ${seen.col}, not ${col}`);
+  if (await page.locator(".s-page").isVisible()) failures.push(`${name}: Settings' parts show beside the view`);
+};
+// The policy view's hourly cap: its row, on screen once scrolled to, under the judge's status line.
+const capUnderStatus = async (page: Page, name: string) => {
+  const cap = page.locator('[id="row-policy.max_per_hour"]');
+  if (!(await cap.isVisible())) {
+    failures.push(`${name}: no hourly cap in the policy view`);
+    return;
+  }
+  const [status, row] = await page.evaluate<number[]>(`[
+    [...document.querySelectorAll(".policy > .s-live")].at(-1)?.getBoundingClientRect().bottom ?? -1,
+    document.getElementById("row-policy.max_per_hour").getBoundingClientRect().top,
+  ]`);
+  if (status! < 0 || row! < status!) failures.push(`${name}: the hourly cap isn't under the judge's status`);
+};
 // A theme picked in Settings → This device, as its select sets it; `after` puts System back.
 const pickTheme = (id: string) => async (page: Page) => {
   await page.evaluate(`localStorage.setItem("desk.theme", ${JSON.stringify(id)}); location.hash = "#/"`);
@@ -1769,9 +1799,62 @@ const SHOTS: Shot[] = [
     },
   },
   { name: "settings-queue", go: at("#/settings/queue") },
-  { name: "settings-rules", go: at("#/settings/rules") },
+  {
+    // Searches and rules, a view of its own: the head's way back to Settings, its name, the column at 1180px, and Save on screen.
+    name: "settings-rules",
+    go: async (page) => {
+      await at("#/settings/rules")(page);
+      await settingsView(page, "settings-rules", "Searches and rules", "github", "1180px");
+      const foot = await page.evaluate<number>(
+        `document.querySelector(".rules-wrap .editor-foot").getBoundingClientRect().bottom - innerHeight`,
+      );
+      if (foot > 0) failures.push(`settings-rules: the editor's foot ends ${Math.round(foot)}px below the window`);
+    },
+  },
+  {
+    // A draft survives a trip to another part and back; Esc, once the editor's left, goes back to GitHub's part; #/rules
+    // opens the view again with the draft still in it, which is what's shot.
+    name: "settings-rules-keeps",
+    go: async (page) => {
+      const draft = "# a draft kept across the trip";
+      const kept = () => page.evaluate<boolean>(`document.querySelector(".rules-wrap .editor").value.includes(${JSON.stringify(draft)})`);
+      await at("#/settings/rules")(page);
+      await page.evaluate(`(() => {
+        const el = document.querySelector(".rules-wrap .editor");
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      })()`);
+      await page.keyboard.type(`\n${draft}`);
+      await at("#/settings/agent")(page);
+      await at("#/settings/rules")(page);
+      if (!(await kept())) failures.push("settings-rules-keeps: the draft is gone after a trip to Claude's part");
+      await page.locator(".rules-wrap .editor").focus();
+      await page.keyboard.press("Escape");
+      if (await page.evaluate<boolean>(`location.hash !== "#/settings/rules"`))
+        failures.push("settings-rules-keeps: Esc in the editor left the view, not the editor");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/settings/github") failures.push(`settings-rules-keeps: Esc goes to ${hash}, not GitHub's part`);
+      await at("#/rules")(page);
+      await settingsView(page, "settings-rules-keeps", "Searches and rules", "github", "1180px");
+      if (!(await kept())) failures.push("settings-rules-keeps: #/rules opens the view without the draft");
+    },
+    after: async (page) => {
+      await page.getByRole("button", { name: "Revert" }).click();
+      await at("#/")(page);
+    },
+  },
   { name: "settings-agent", go: at("#/settings/agent") },
-  { name: "settings-policy", go: at("#/settings/policy") },
+  {
+    // Your policy, a view of its own: the editor, the judge's status, then the hourly cap's row under it.
+    name: "settings-policy",
+    go: async (page) => {
+      await at("#/settings/policy")(page);
+      await settingsView(page, "settings-policy", "Your policy", "agent", "760px");
+      await capUnderStatus(page, "settings-policy");
+    },
+  },
   { name: "settings-automations", go: at("#/settings/automations") },
   {
     // An automation's runs: its instruction, what each run found, and what came of each item.
@@ -1796,7 +1879,13 @@ const SHOTS: Shot[] = [
         await fetch("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "", base: p.hash }) });
       })()`);
       await at("#/settings/agent")(page);
+      const help = await page.evaluate<string | null>(
+        `[...document.querySelectorAll(".s-view-row")].find((r) => r.querySelector(".s-name")?.textContent === "Your policy")?.querySelector(".s-help")?.textContent ?? null`,
+      );
+      if (help !== "The starter policy, until you change it.")
+        failures.push(`settings-policy-starter: Your policy's row says ${JSON.stringify(help)}`);
       await at("#/settings/policy")(page);
+      await capUnderStatus(page, "settings-policy-starter");
     },
     after: async (page) => {
       await page.evaluate(`(async () => {
@@ -1814,6 +1903,9 @@ const SHOTS: Shot[] = [
       if (on !== "Settings") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
       const head = await headSays(page);
       if (head !== "Settings") failures.push(`settings-app: the page head reads ${JSON.stringify(head)}`);
+      if (await page.locator(".page-head a.back").count()) failures.push("settings-app: the page head is a way back");
+      const col = await page.evaluate<string>(`getComputedStyle(document.querySelector(".main")).maxWidth`);
+      if (col !== "760px") failures.push(`settings-app: the column is ${col}, not 760px`);
     },
   },
   {

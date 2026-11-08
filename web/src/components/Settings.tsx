@@ -1,7 +1,16 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
 import { Effect } from "effect";
 import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
+import type {
+  AgentStatus,
+  DesktopBridge,
+  GitHubStatus,
+  PolicyDoc,
+  SettingDef,
+  SettingsView,
+  SettingType,
+  SettingValue,
+} from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, cls, MAC, when } from "../format.ts";
 import { Automations } from "./Automations.tsx";
@@ -10,7 +19,7 @@ import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
 import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
-import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
+import { acceleratorOf, authProblem, draftOf, judgeStatusText, routeHash, SETTINGS_VIEWS, settingsBack, valueOf } from "../view.ts";
 import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
@@ -562,7 +571,8 @@ function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
             </tbody>
           </table>
           <p className="quiet small">
-            Spaces decide which searches run for which orgs. Change them in <a href="#/settings/rules">Searches and rules</a>.
+            Spaces decide which searches run for which orgs. Change them in{" "}
+            <a href={routeHash({ name: "settings", section: "rules" })}>Searches and rules</a>.
           </p>
         </div>
       )}
@@ -608,38 +618,81 @@ function ThemeRow() {
   );
 }
 
+// A row that opens one of Settings' views: its name and its Edit both go there.
+function ViewRow({ id, help, bad }: { id: string; help: ReactNode; bad?: boolean }) {
+  const href = routeHash({ name: "settings", section: id });
+  const name = SETTINGS_VIEWS[id]?.name ?? id;
+  return (
+    <div className="setting s-view-row">
+      <div className="s-label-col">
+        {/* Edit is the one stop for Tab; the name is there for the mouse. */}
+        <a className="s-label s-name" href={href} tabIndex={-1}>
+          {name}
+        </a>
+        <p className={cls("s-help", bad && "t-bad")}>{help}</p>
+      </div>
+      <div className="s-control">
+        <a className="s-edit" href={href} aria-label={`Edit ${name.toLowerCase()}`}>
+          Edit
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // What a part's lookups get: the page's state, and a setting's row by its key.
 interface PartProps {
-  active: boolean;
-  loads: number;
   now: number;
-  flash: (text: string, error?: boolean) => void;
-  row: (key: string) => ReactNode;
+  configErrors: number;
+  policy: PolicyDoc | null;
 }
 
 // Rows a part's sheet starts with, before its settings', by the part's id: a plugin's part adds one entry.
 const LEAD: Record<string, (p: PartProps) => ReactNode> = {
+  github: (p) => (
+    <ViewRow
+      id="rules"
+      bad={p.configErrors > 0}
+      help={
+        p.configErrors > 0
+          ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
+          : "Which GitHub searches feed your desk, and where each item starts."
+      }
+    />
+  ),
   app: () => <ThemeRow />,
 };
 
-// Rows after a setting's own, by its key: your policy and its hourly cap under the switch that sorts by it.
+// Rows after a setting's own, by its key: your policy under the switch that sorts by it.
 const AFTER: Record<string, (p: PartProps) => ReactNode> = {
-  "policy.judge": (p) => (
-    <>
-      <div className="setting wide s-block" id="s-policy">
-        <div className="s-label-col">
-          <h3 className="s-label">Your policy</h3>
-          <p className="s-help">How you want Claude to sort your desk, in your words. An agent can change it when you ask.</p>
-        </div>
-        <Policy active={p.active} refresh={p.loads} now={p.now} flash={p.flash} />
-      </div>
-      {p.row("policy.max_per_hour")}
-    </>
+  "policy.judge": ({ policy, now }) => (
+    <ViewRow
+      id="policy"
+      help={
+        policy?.judge.state === "error"
+          ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
+          : policy && !policy.text.trim()
+            ? "The starter policy, until you change it."
+            : "How Claude sorts, in your words."
+      }
+    />
   ),
 };
 
-// Settings an AFTER entry draws, not their part's run of rows.
+// Settings a view draws, not their part: the hourly cap sits in Your policy, next to how much of it this hour took.
 const ELSEWHERE = new Set(["policy.max_per_hour"]);
+
+// A view's own head under the page's: its name and one line.
+function ViewHead({ id, line }: { id: string; line: string }) {
+  return (
+    <>
+      <h2 id={`s-view-${id}`} className="s-view-name">
+        {SETTINGS_VIEWS[id]?.name}
+      </h2>
+      <p className="s-view-line">{line}</p>
+    </>
+  );
+}
 
 // A part's folded settings: tuning and prompts, one click away, in the same sheet.
 function MoreToggle({ title, open, controls, onToggle }: { title: string; open: boolean; controls: string; onToggle: () => void }) {
@@ -661,16 +714,18 @@ export function Settings({
   view,
   now,
   loads,
+  configErrors,
   onView,
   flash,
   onRulesSaved,
   onRulesDirty,
 }: {
   active: boolean;
-  section: string;
+  section: string; // a part's id, or a view's (rules, policy)
   view: SettingsView | null;
   now: number;
   loads: number;
+  configErrors: number; // the saved rules' errors, for Searches and rules' row
   onView: (v: SettingsView) => void;
   flash: (text: string, error?: boolean) => void;
   onRulesSaved: () => void;
@@ -678,6 +733,8 @@ export function Settings({
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const [more, setMore] = useState<Record<string, boolean>>({});
+  const [policy, setPolicy] = useState<PolicyDoc | null>(null);
+  const inView = settingsBack(section) !== null;
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
@@ -700,13 +757,13 @@ export function Settings({
     };
   }, [view]);
 
-  // One page of parts; a link to a part, or to Rules or your policy (#/settings/rules), scrolls to it.
+  // One page of parts; a link to a part scrolls to it, and a view opens at its top.
   const ready = view !== null;
   useEffect(() => {
     if (!active || !ready) return;
-    if (section === "github") window.scrollTo({ top: 0 });
+    if (section === "github" || inView) window.scrollTo({ top: 0 });
     else document.querySelector(`#s-${section}`)?.scrollIntoView({ block: "start" });
-  }, [active, section, ready]);
+  }, [active, section, ready, inView]);
 
   const row = (d: SettingDef | undefined, folded = false) =>
     view &&
@@ -724,107 +781,117 @@ export function Settings({
         }
       />
     );
-  const p: PartProps = { active, loads, now, flash, row: (key) => row(view?.defs.find((d) => d.key === key)) };
+  const p: PartProps = { now, configErrors, policy };
 
   return (
     <div className="settings" hidden={!active}>
-      {!view && (
-        <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
-          <h2 className="group-head">
-            <span className="sk" />
-          </h2>
-          <div className="lines s-sheet">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="setting" aria-hidden="true">
-                <SkLines count={2} />
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      {view && view.errors.length > 0 && (
-        <div className="notice warn" role="alert">
-          <span>
-            settings.json has{" "}
-            {view.errors.length === 1
-              ? "a problem, so that setting uses its default"
-              : `${view.errors.length} problems, so those settings use their defaults`}
-            :
-            {view.errors.map((e) => {
-              const d = view.defs.find((x) => x.key === e.path);
-              return (
-                <span key={e.path} className="s-file-err">
-                  {d ? (
-                    <>
-                      {d.label} (<code>{e.path}</code>):
-                    </>
-                  ) : (
-                    <code>{e.path}</code>
-                  )}{" "}
-                  {e.message}
-                </span>
-              );
-            })}
-          </span>
-        </div>
-      )}
-      {view?.sections.map((x) => {
-        const defs = view.defs.filter((d) => d.section === x.id && !ELSEWHERE.has(d.key));
-        const folded = defs.filter((d) => d.more);
-        // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
-        const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));
-        const lead = LEAD[x.id];
-        return (
-          <section key={x.id} id={`s-${x.id}`} className="s-part" aria-labelledby={`s-${x.id}-title`}>
-            <h2 id={`s-${x.id}-title`} className="group-head">
-              {x.title}
+      <div className="s-page" hidden={inView}>
+        {!view && (
+          <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
+            <h2 className="group-head">
+              <span className="sk" />
             </h2>
-            {x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
-            {x.id === "agent" && (
-              <>
-                <AgentLink active={active} loads={loads} />
-                {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
-                <PausedLine p={view.paused.ai} now={now} />
-              </>
-            )}
-            {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
-            {(lead !== undefined || defs.length > 0) && (
-              <div className="lines s-sheet">
-                {lead?.(p)}
-                {defs
-                  .filter((d) => !d.more)
-                  .map((d) => (
-                    <Fragment key={d.key}>
-                      {row(d)}
-                      {AFTER[d.key]?.(p)}
-                    </Fragment>
-                  ))}
-                {folded.length > 0 && (
-                  <MoreToggle
-                    title={x.title}
-                    open={open}
-                    controls={folded.map((d) => `row-${d.key}`).join(" ")}
-                    onToggle={() => {
-                      setMore({ ...more, [x.id]: !open });
-                    }}
-                  />
-                )}
-                {folded.map((d) => row(d, !open))}
-              </div>
-            )}
-            {/* Rules stays mounted with the page, so an unsaved draft survives a trip to the Inbox. */}
-            {x.id === "github" && (
-              <section id="s-rules" className="s-rules" aria-labelledby="s-rules-title">
-                <h3 id="s-rules-title" className="s-block-head">
-                  Searches and rules
-                </h3>
-                <p className="s-help">Which GitHub searches feed your desk, and where each item starts before Claude sorts it.</p>
-                <Rules active={active} refresh={loads} flash={flash} onSaved={onRulesSaved} onDirty={onRulesDirty} />
-              </section>
-            )}
+            <div className="lines s-sheet">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="setting" aria-hidden="true">
+                  <SkLines count={2} />
+                </div>
+              ))}
+            </div>
           </section>
-        );
-      })}
+        )}
+        {view && view.errors.length > 0 && (
+          <div className="notice warn" role="alert">
+            <span>
+              settings.json has{" "}
+              {view.errors.length === 1
+                ? "a problem, so that setting uses its default"
+                : `${view.errors.length} problems, so those settings use their defaults`}
+              :
+              {view.errors.map((e) => {
+                const d = view.defs.find((x) => x.key === e.path);
+                return (
+                  <span key={e.path} className="s-file-err">
+                    {d ? (
+                      <>
+                        {d.label} (<code>{e.path}</code>):
+                      </>
+                    ) : (
+                      <code>{e.path}</code>
+                    )}{" "}
+                    {e.message}
+                  </span>
+                );
+              })}
+            </span>
+          </div>
+        )}
+        {view?.sections.map((x) => {
+          const defs = view.defs.filter((d) => d.section === x.id && !ELSEWHERE.has(d.key));
+          const folded = defs.filter((d) => d.more);
+          // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
+          const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));
+          const lead = LEAD[x.id];
+          return (
+            <section key={x.id} id={`s-${x.id}`} className="s-part" aria-labelledby={`s-${x.id}-title`}>
+              <h2 id={`s-${x.id}-title`} className="group-head">
+                {x.title}
+              </h2>
+              {x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
+              {x.id === "agent" && (
+                <>
+                  <AgentLink active={active} loads={loads} />
+                  {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
+                  <PausedLine p={view.paused.ai} now={now} />
+                </>
+              )}
+              {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
+              {(lead !== undefined || defs.length > 0) && (
+                <div className="lines s-sheet">
+                  {lead?.(p)}
+                  {defs
+                    .filter((d) => !d.more)
+                    .map((d) => (
+                      <Fragment key={d.key}>
+                        {row(d)}
+                        {AFTER[d.key]?.(p)}
+                      </Fragment>
+                    ))}
+                  {folded.length > 0 && (
+                    <MoreToggle
+                      title={x.title}
+                      open={open}
+                      controls={folded.map((d) => `row-${d.key}`).join(" ")}
+                      onToggle={() => {
+                        setMore({ ...more, [x.id]: !open });
+                      }}
+                    />
+                  )}
+                  {folded.map((d) => row(d, !open))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      {/* The views stay mounted with the page, so an unsaved draft in either survives leaving it and coming back. */}
+      <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">
+        <ViewHead id="rules" line="Which GitHub searches feed your desk, and where each item starts before Claude sorts it." />
+        <Rules
+          active={active}
+          shown={active && section === "rules"}
+          refresh={loads}
+          flash={flash}
+          onSaved={onRulesSaved}
+          onDirty={onRulesDirty}
+        />
+      </section>
+      <section className="s-view" hidden={section !== "policy"} aria-labelledby="s-view-policy">
+        <ViewHead id="policy" line="How you want Claude to sort your desk, in your words. An agent can change it when you ask." />
+        <Policy active={active} shown={active && section === "policy"} refresh={loads} now={now} flash={flash} onDoc={setPolicy}>
+          {view && <div className="lines s-sheet">{row(view.defs.find((d) => d.key === "policy.max_per_hour"))}</div>}
+        </Policy>
+      </section>
     </div>
   );
 }
