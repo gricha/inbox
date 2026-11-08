@@ -739,7 +739,7 @@ test("a claude agents --json that isn't a list is bad output in words of its own
   });
   const e = await failure(t.desk.coordinator.find());
   assert.deepEqual([e._tag, e.message], ["CommandBadOutput", "claude agents --json didn't print a list"]);
-  assert.equal(e._tag === "CommandBadOutput" && e.cause, null, "its cause is what it printed, its words a field of their own");
+  assert.ok(e._tag === "CommandBadOutput" && !("cause" in e), "no cause, since nothing failed: its words are a field of their own");
   await run(t.desk.coordinator.run());
   assert.equal(t.desk.coordinator.error(), "claude agents --json didn't print a list");
 });

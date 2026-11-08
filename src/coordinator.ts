@@ -485,7 +485,7 @@ export class Coordinator {
         catch: (cause) => new CommandBadOutput({ command: claudeCommand(), cause }),
       });
       if (!Array.isArray(listed))
-        return yield* new CommandBadOutput({ command: claudeCommand(), cause: listed, detail: "claude agents --json didn't print a list" });
+        return yield* new CommandBadOutput({ command: claudeCommand(), detail: "claude agents --json didn't print a list" });
       const all = (listed as (Agent | null)[]).filter((a): a is Agent => a?.kind === "background");
       const dir = yield* this.dir();
       const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
