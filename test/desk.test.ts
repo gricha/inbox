@@ -1345,4 +1345,19 @@ test("a file edited outside the desk is read again through the runner: one it ca
     logs.some((l) => l.startsWith("config.toml failed: ") && l.includes("EISDIR")),
     logs.join("\n"),
   );
+  // settings.json it can't read is a problem on the Settings page, with the defaults, until it's gone.
+  const settings = path.join(t.home, "settings.json");
+  fs.writeFileSync(settings, JSON.stringify({ "notify.enabled": false }));
+  t.desk.edited("settings.json");
+  assert.equal(t.desk.settings["notify.enabled"], false);
+  fs.rmSync(settings);
+  fs.mkdirSync(settings);
+  t.desk.edited("settings.json");
+  const [problem, ...more] = t.desk.getSettings().errors;
+  assert.deepEqual([problem?.path, more, t.desk.settingsText], ["settings.json", [], null]);
+  assert.match(problem?.message ?? "", /^EISDIR: illegal operation on a directory/);
+  assert.equal(t.desk.settings["notify.enabled"], true, "the defaults");
+  fs.rmdirSync(settings);
+  t.desk.edited("settings.json");
+  assert.deepEqual(t.desk.getSettings().errors, [], "gone, so no problem");
 });

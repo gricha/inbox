@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { Cause, Effect, Exit } from "effect";
 import { main } from "../src/cli.ts";
 import * as api from "../src/client.ts";
-import { plistFor } from "../src/launchd.ts";
+import { install, plistFor, uninstall } from "../src/launchd.ts";
 import { startFakeApi, unusedPort, type FakeApi } from "./helpers/fake-api.ts";
 import { failure, run as runFx } from "./helpers/run.ts";
 
@@ -400,6 +400,21 @@ test("config path, check, edit", async () => {
   }
 });
 
+test("config works with the desk down: path, and check reads the file itself", async (c) => {
+  const home = mkdtempSync(join(tmpdir(), "desk-offline-"));
+  c.after(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+  writeFileSync(join(home, "config.toml"), "INVALID\n");
+  await withEnv({ DESK_HOME: home, DESK_PORT: String(await unusedPort()) }, async () => {
+    const bad = await run(["config", "check"]);
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /^✗ line 1: Invalid TOML document/m);
+    assert.match(bad.out, /desk isn't running; start it with: desk serve\n$/);
+    assert.equal((await run(["config", "path"])).out, `${join(home, "config.toml")}\n`);
+  });
+});
+
 test("settings lists effective values by section and stars overrides", async () => {
   fake.settings = { "github.poll_seconds": 120 };
   const r = await run(["settings"]);
@@ -533,6 +548,46 @@ test("install and uninstall are macOS-only", async () => {
     }
   }
 });
+
+test(
+  "install retries launchctl bootstrap 5 times, 500 ms apart, then says its words; uninstall removes the plist",
+  { skip: process.platform !== "darwin" },
+  async (c) => {
+    const saved = { HOME: process.env.HOME, PATH: process.env.PATH };
+    c.after(() => {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+    const bin = mkdtempSync(join(tmpdir(), "desk-launchctl-"));
+    const home = mkdtempSync(join(tmpdir(), "desk-launchd-home-"));
+    c.after(() => {
+      for (const dir of [bin, home]) rmSync(dir, { recursive: true, force: true });
+    });
+    writeFileSync(
+      join(bin, "launchctl"),
+      `#!/bin/sh\necho "$*" >> "$HOME/calls"\n[ "$1" = bootstrap ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 1; }\nexit 0\n`,
+    );
+    chmodSync(join(bin, "launchctl"), 0o755);
+    // The fake alone on PATH: the real launchctl, and the owner's own dev.review-desk.desk job, are out of reach.
+    process.env.HOME = home;
+    process.env.PATH = bin;
+    const e = await failure(install("/x/cli.ts", 47999));
+    assert.deepEqual([e._tag, e.message], ["CommandFailed", "launchctl bootstrap failed: Bootstrap failed: 5: Input/output error"]);
+    const uid = process.getuid!();
+    const plist = join(home, "Library", "LaunchAgents", "dev.review-desk.desk.plist");
+    const calls = () => readFileSync(join(home, "calls"), "utf8").trim().split("\n");
+    assert.deepEqual(calls(), [
+      `bootout gui/${uid}/dev.review-desk.desk`,
+      ...Array.from({ length: 5 }, () => `bootstrap gui/${uid} ${plist}`),
+    ]);
+    assert.ok(existsSync(plist));
+    assert.equal(await runFx(uninstall()), plist);
+    assert.ok(!existsSync(plist));
+    assert.equal(calls().at(-1), `bootout gui/${uid}/dev.review-desk.desk`);
+  },
+);
 
 // oxlint-disable-next-line typescript/strict-void-return -- promisify picks execFile's util.promisify.custom form, so no return value is discarded
 const execBin = promisify(execFile);

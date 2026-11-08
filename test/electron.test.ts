@@ -755,3 +755,84 @@ test("startSource: a node that spawn refuses to start is a failure the restart l
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test(
+  "startSource's restart loop: a node that exits backs off up to 30 s, a minute up starts the count again, and a node_modules change restarts the desk at once",
+  { skip: process.platform === "win32", timeout: 30_000 },
+  async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-source-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-checkout-"));
+    fs.mkdirSync(path.join(dir, "node_modules"));
+    const lock = path.join(dir, "node_modules", ".package-lock.json");
+    fs.writeFileSync(lock, "{}");
+    // A fake node: Vite exits 1 at once (or once hold is gone); the desk says a line and runs until it's stopped.
+    const node = path.join(home, "node");
+    const hold = path.join(home, "hold");
+    fs.writeFileSync(
+      node,
+      `#!/bin/sh\ncase "$*" in *vite*) while [ -f "${hold}" ]; do sleep 0.02; done; exit 1;; esac\necho desk up\nexec sleep 30\n`,
+    );
+    fs.chmodSync(node, 0o755);
+    const liveLog = () => tryRead(path.join(home, "live.log"));
+    const lines = () => liveLog().split("\n");
+    // Real time, by setImmediate: setTimeout and Date are the test's.
+    const until = async (cond: () => boolean, what: string) => {
+      const deadline = performance.now() + 10_000;
+      while (!cond()) {
+        if (performance.now() > deadline) assert.fail(`timed out waiting for ${what}:\n${liveLog()}`);
+        await new Promise((r) => {
+          setImmediate(r);
+        });
+      }
+    };
+    const count = (re: RegExp) => lines().filter((l) => re.test(l)).length;
+    const viteBackoff = (s: number) => new RegExp(`vite: node exited \\(1\\); starting it again in ${s}s$`);
+    const source = await run(startSource({ dir, node, port: 1, home, log: () => {} }));
+    try {
+      await until(() => count(viteBackoff(2)) === 1, "vite's first backoff");
+      for (const [waited, next] of [
+        [2, 4],
+        [4, 8],
+        [8, 16],
+        [16, 30],
+      ] as const) {
+        t.mock.timers.tick(waited * 1000);
+        await until(() => count(viteBackoff(next)) === 1, `vite backing off ${next}s`);
+      }
+      // Up for over a minute before it exits: the count starts again.
+      fs.writeFileSync(hold, "");
+      const starts = count(/app \| .* starting .*vite/);
+      t.mock.timers.tick(30_000);
+      await until(() => count(/app \| .* starting .*vite/) === starts + 1, "vite started again");
+      t.mock.timers.tick(61_000);
+      fs.rmSync(hold);
+      await until(() => count(viteBackoff(1)) === 1, "vite's backoff starting over");
+
+      // npm install: the desk's node is stopped and started again with no backoff (watchFile polls every 2 s).
+      await until(() => liveLog().includes("desk | desk up"), "the desk up");
+      const desks = count(/app \| .* starting .*--watch/);
+      const later = new Date(Date.now() + 5000);
+      fs.utimesSync(lock, later, later);
+      await until(() => count(/app \| .* starting .*--watch/) === desks + 1, "the desk started again");
+      const changed = lines().findIndex((l) => l.includes("node_modules changed; starting the desk again"));
+      assert.ok(changed >= 0, liveLog());
+      assert.ok(
+        lines()
+          .slice(changed)
+          .every((l) => !/desk: .*starting it again in/.test(l)),
+        "no backoff between",
+      );
+    } finally {
+      await run(source.stop());
+    }
+    assert.equal(fs.existsSync(path.join(home, "live.json")), false);
+    assert.match(liveLog(), /stopped\n$/);
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  },
+);
+
+function tryRead(file: string): string {
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+}
