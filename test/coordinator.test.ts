@@ -717,6 +717,9 @@ test("w says so when claude can't start it", async (c) => {
     logs.some((l) => l.startsWith("coordinator: /nonexistent/claude not found")),
     logs.join("\n"),
   );
+  const e = await failure(t.desk.wakeCoordinator());
+  assert.equal(e._tag, "Upstream");
+  assert.match(String((e as { cause?: Error }).cause?.message), /not found/, "what stopped its run is the cause");
   assert.equal(runSync(t.desk.inflight()).coordinator.id, null);
 });
 

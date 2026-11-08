@@ -12,6 +12,7 @@ import {
   Conflict,
   Forbidden,
   fsError,
+  messageOf,
   NotFound,
   ReviewersNotAsked,
   Stale,
@@ -260,7 +261,6 @@ export interface ReviewDeps {
 // What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
 type PrTextError = Conflict | FetchPrError;
 type AiError = PrTextError | CommandError | ClaudeError;
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export class Desk {
   store: Store;

@@ -20,7 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Cause, Effect, Exit, Fiber, Result } from "effect";
-import { BadRequest, Forbidden, type FsError } from "../src/errors.ts";
+import { BadRequest, Forbidden, messageOf, type FsError } from "../src/errors.ts";
 import { report } from "../src/sentry.ts";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
@@ -51,7 +51,6 @@ import {
   makeDir,
   menuLabel,
   mergePath,
-  messageOf,
   parseNotice,
   probeHealth,
   quietly,

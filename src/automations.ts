@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { Effect, Result, type Fiber } from "effect";
 import { DENY as COORDINATOR_DENY, denyDir } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
-import { BadRequest, ClaudeBadOutput, NotFound, type FsError } from "./errors.ts";
+import { BadRequest, ClaudeBadOutput, messageOf, NotFound, type FsError } from "./errors.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { Automation, AutomationRun, AutomationView } from "./types.ts";
 import { report } from "./sentry.ts";
@@ -366,7 +366,7 @@ export class Automations {
         return true;
       });
     return body.pipe(
-      Effect.catchDefect((bug) => failed(bug, bug instanceof Error ? bug.message : String(bug))),
+      Effect.catchDefect((bug) => failed(bug, messageOf(bug))),
       Effect.catch((e) => failed(e, e.message)),
       Effect.flatMap((kept) =>
         Effect.sync(() => {

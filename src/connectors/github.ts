@@ -2,7 +2,7 @@
 import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
 import { Cause, Effect, Result } from "effect";
-import { GitHubNotFetched, GitHubRateLimited, GitHubSearchesFailed, type GitHubReadError } from "../errors.ts";
+import { GitHubNotFetched, GitHubRateLimited, GitHubSearchesFailed, messageOf, type GitHubReadError } from "../errors.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
@@ -42,8 +42,6 @@ const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at:
   updated_at: m.updated_at,
   author: m.author,
 });
-
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 // A pass's boundary: a failure or a bug goes to `handle`; the desk stopping never gets here, an inner interrupt records nothing.
 const settle =

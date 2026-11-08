@@ -4,6 +4,9 @@
 // families (GitHub's 403 is GitHubForbidden, never Forbidden).
 import { Data } from "effect";
 
+// What was thrown, in its words: an Error's message, else the value as text.
+export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 // ---------------------------------------------------------------- what the HTTP API refuses with (status: its answer)
 
 // What you sent can't be read or isn't allowed.

@@ -3,15 +3,13 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { Cause, Data, Effect, Result } from "effect";
-import { fsError, type FsError } from "../src/errors.ts";
+import { fsError, messageOf, type FsError } from "../src/errors.ts";
 import { Runner } from "../src/runner.ts";
 import { detached, report } from "../src/sentry.ts";
 import { DEFAULTS } from "../src/settings.ts";
 import { themeOf } from "../src/themes.ts";
 
 // ---------------------------------------------------------------- what the app's own calls fail with (docs/effect.md)
-
-export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 // The desk (or its UI's dev server) didn't answer the app (cause: fetch's error), or answered with an HTTP error. The app
 // tries again, or reads it as nothing there yet.

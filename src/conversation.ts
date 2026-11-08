@@ -3,7 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { Cache, Cause, Duration, Effect, Exit, type Fiber } from "effect";
 import type { Desk } from "./desk.ts";
-import type { GitHubReadError } from "./errors.ts";
+import { messageOf, type GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
 import { askClaude, makeAgentDir } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
@@ -24,7 +24,6 @@ const lc = (s: string) => s.toLowerCase();
 // oxlint-disable-next-line no-control-regex -- one plain line, whatever Claude sent
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029\s]+/g, " ").trim();
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 const said = (c: Said) => ({ id: c.id, author: c.author, bot: c.bot, body: c.body, at: c.at, url: c.url });
 

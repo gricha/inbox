@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
-import { ClaudeBadOutput, CommandBadOutput, fsError, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
+import { ClaudeBadOutput, CommandBadOutput, fsError, messageOf, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
 import { report } from "./sentry.ts";
@@ -418,7 +418,7 @@ export class Coordinator {
     return body.pipe(
       Effect.catchDefect((bug) =>
         Effect.sync(() => {
-          this.broke(bug, (bug instanceof Error ? bug.message : String(bug)).trim() || "your agent's run failed");
+          this.broke(bug, messageOf(bug).trim() || "your agent's run failed");
         }),
       ),
       Effect.catch((e) =>

@@ -9,7 +9,7 @@ import { Cause, Data, Effect, Exit, Option } from "effect";
 import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { untilText } from "./client.ts";
-import { fsError } from "./errors.ts";
+import { fsError, messageOf } from "./errors.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
@@ -631,7 +631,7 @@ export async function main(argv: string[], io: IO = STDIO): Promise<number> {
     return 1;
   }
   const e = failed ?? Cause.squash(exit.cause);
-  io.stderr.write(`desk: ${e instanceof Error ? e.message : String(e)}\n`);
+  io.stderr.write(`desk: ${messageOf(e)}\n`);
   return 1;
 }
 
