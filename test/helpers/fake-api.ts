@@ -495,8 +495,7 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
   return api;
 }
 
-// A port with nothing listening on it, below every ephemeral range (Linux's starts at 32768, macOS's and Windows' at 49152), so
-// no listen(0) or outgoing connection elsewhere takes it before a desk does, or between one desk letting it go and the next.
+// A free port below every ephemeral range (Linux's starts at 32768), so no listen(0) or outgoing connection takes it from a desk.
 export async function unusedPort(): Promise<number> {
   const first = 20_000 + (process.pid % 10_000); // parallel test files start apart
   for (let i = 0; i < 12_000; i++) {

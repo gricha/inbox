@@ -37,8 +37,8 @@ services, `Data.TaggedError`, the desk's own `log`.
   `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
   `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. The desktop app's own (`DeskCallFailed`, `DeskFailed`,
   `ElectronRefused`, `NoFreePort`) live in `electron/lib.ts`, beside the `FsError` and `CommandFailed` it shares with
-  the desk. Tags are unique across families: GitHub's 403 is `GitHubHttpError` (its `status`), or `GitHubRateLimited`
-  for a rate limit, never `Forbidden`.
+  the desk. Tags are unique across families: GitHub's 403 is `GitHubHttpError` (its `status`), a write's rate limit
+  included, or `GitHubRateLimited` for a read's, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
 - Every error has a message the owner can read, in fixed words (tests, toasts, the CLI and the stored `*_error` fields
@@ -174,8 +174,9 @@ middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound`
   answered 502 with the bug's words).
 - Interruption records nothing: no `onExit`, `ensuring` or `onInterrupt` writes the store or notifies (a cut automation
   run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
-  locks. An `ensuring` inside a write's uninterruptible region never sees an interruption: `markReady`'s and
-  `askReviewers`' refresh of the PR, forked whatever GitHub said, is one.
+  locks, and on a stopped desk the last write's lock closes the store (`closeIfIdle`). An `ensuring` inside a write's
+  uninterruptible region never sees an interruption: `markReady`'s and `askReviewers`' refresh of the PR, forked
+  whatever GitHub said, is one.
 
 ## No throw, no catch
 
@@ -186,7 +187,8 @@ Outside these exceptions there is no `throw`, `try`/`catch`, `.catch(` or `Promi
   `Result` or an Effect (`expr.ts`'s `compile` and `Compiled.eval`, with `Result.try`).
 - `Store.tx`'s rollback: `catch (e) { ROLLBACK; throw e }` rethrows the defect it caught.
 - `electron/preload.cjs`: sandboxed CommonJS, it can't load `effect`.
-- Tests are `node:test` code: they run Effects through `test/helpers/run.ts`.
+- Tests are `node:test` code: they run Effects through `test/helpers/run.ts`, or with `Effect.runPromiseExit`,
+  `runFork` or `runPromise` themselves where they assert on an exit, hold or interrupt a fiber, or expect a rejection.
 - `scripts/` (the shots, `dev-app.ts`, `icons.ts`, the smoke checks) are plain Node, Electron and Playwright tools: a
   `throw` fails the run, and a `try`/`catch`/`finally` or a promise's `.catch` retries a step, cleans up after one,
   passes over a request a reload dropped, or says what failed.
@@ -247,12 +249,12 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   `fromUi` and the SSE stream as the `Response` they build, which `respond` passes on); the host/origin/cross-site
   middleware runs its check with `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only
   a bug. Only reads and waits pass `{ signal: c.req.raw.signal }` (`read: true`: every GET but `total`'s, which can't
-  fail, and opening a PR, below; `/api/activity`'s wait, the static files and `fromUi` included), so a client going
-  away interrupts them; the SSE stream, one of `total`'s, is the `Response` it builds, and its own `onAbort`
-  unsubscribes it. A write and any work shared with other callers never take the request's signal: nor does opening a
-  PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation are in; its
-  `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only
-  exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null, { status: 499 })`, log and report
+  fail, the `/api/*` 404 and opening a PR, below; `/api/activity`'s wait, the static files and `fromUi` included), so a
+  client going away interrupts them; the SSE stream, one of `total`'s, is the `Response` it builds, and its own
+  `onAbort` unsubscribes it. A write and any work shared with other callers never take the request's signal: nor does
+  opening a PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation are
+  in; its `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only exit
+  (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null, { status: 499 })`, log and report
   nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged with `Cause.pretty`. For an
   answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets `c.error` to
   `Cause.squash(exit.cause)` (the failure itself, never a Cause) before returning, so the Sentry middleware decides: it
