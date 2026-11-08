@@ -19,7 +19,7 @@ import type { GitHubWriter } from "../src/github/write.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond } from "../src/server.ts";
-import { myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
+import { idle, myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
@@ -849,3 +849,101 @@ test("a desk whose config never loaded answers 503: starting until the config's 
   for (const p of ["/api/focus", "/api/queue", "/api/overview", "/api/status", "/api/inflight", "/api/item?id=web%233"])
     assert.deepEqual(await get(p), [503, broken], `${p}: focus was a TypeError 500`);
 });
+
+test("the desk's reviews, AI, asks, wakes, agents and event log answer through respond: the run's words as Upstream, your agent off a Conflict, a client gone from the long-poll 499", async (c) => {
+  const issue = makeItem({
+    number: 9,
+    kind: "issue",
+    author: "carol",
+    review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
+  });
+  const t = await withItems([reviewAsk(1), issue], { settings: { "policy.judge": false, "agent.coordinator": false } });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const app = createApp(t.desk, 47823);
+  const DESK = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  const call = async (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, {
+      method,
+      headers: { "content-type": "application/json", ...headers },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    });
+    return [res.status, await res.json()];
+  };
+  const no = (tag: string, error: string) => ({ error, tag });
+  const review = (ref: string, what = "") => `/api/review/${encodeURIComponent(ref)}${what && `/${what}`}`;
+
+  const [ok, view] = (await call("GET", review("acme/api#1"))) as [number, { files_error: string }];
+  assert.deepEqual([ok, view.files_error], [200, "diffs aren't available in this desk"]);
+  assert.deepEqual(await call("GET", review("acme/api#9")), [
+    400,
+    no("BadRequest", "acme/api#9 is an issue; reviews are for pull requests"),
+  ]);
+  assert.deepEqual(await call("POST", review("acme/api#1", "ai"), {}), [502, no("Upstream", "AI review isn't available in this desk")]);
+  assert.equal(t.desk.aiErrors.get("acme/api#1")?.message, "AI review isn't available in this desk", "kept as its error");
+
+  const off = no("Conflict", "your agent is off: Settings → Agents");
+  assert.deepEqual(await call("POST", "/api/coordinator/wake", {}), [409, off]);
+  assert.deepEqual(await call("POST", "/api/ask", { text: "hi" }), [403, no("Forbidden", "ask your agent from the desk's window")]);
+  assert.deepEqual(await call("POST", "/api/ask", {}, DESK), [400, no("BadRequest", "need { text }")]);
+  assert.deepEqual(await call("POST", "/api/ask", { text: "hi", item_id: 5 }, DESK), [400, no("BadRequest", "item_id must be a string")]);
+  assert.deepEqual(await call("POST", "/api/ask", { text: "hi", lines: 5 }, DESK), [
+    400,
+    no("BadRequest", "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/ask", { text: "hi" }, DESK), [409, off]);
+
+  assert.deepEqual(await call("GET", "/api/activity?limit=x"), [400, no("BadRequest", "limit must be a whole number")]);
+  assert.deepEqual(await call("GET", "/api/activity?item=api%2399"), [404, no("NotFound", 'no item "api#99" on the desk')]);
+  // The request kept here: a Request built from init follows its signal only while something holds it.
+  const gone = new AbortController();
+  const waiting = app.request(new Request("http://127.0.0.1:47823/api/activity?after=99&wait=30", { signal: gone.signal }));
+  await sleep(20);
+  assert.equal(t.desk.waiters.size, 1);
+  gone.abort();
+  assert.equal((await waiting).status, 499);
+  assert.equal(t.desk.waiters.size, 0, "the wait ends with the client");
+
+  t.gh.items.set("acme/api#2", reviewAsk(2));
+  assert.deepEqual(await call("POST", "/api/sync"), [200, { ok: true }]);
+  await idle(t.desk);
+  assert.equal(runSync(t.desk.item("api#2")).item.id, "acme/api#2", "the pass it forked ran");
+});
+
+test(
+  "agents: what stops the connect is Upstream in its CLI's words; a skill it can't read is a 500 in Node's",
+  { skip: process.platform === "win32" },
+  async () => {
+    const t = await setup();
+    const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH };
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    Object.assign(process.env, { HOME: home, USERPROFILE: home, PATH: path.join(home, "empty") });
+    try {
+      const res = await t.req("/api/agents/connect", { method: "POST" });
+      assert.deepEqual(
+        [res.status, await res.json()],
+        [
+          502,
+          {
+            error:
+              "claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp",
+            tag: "Upstream",
+          },
+        ],
+      );
+      const skill = path.join(home, ".claude", "skills", "review-desk", "SKILL.md");
+      fs.rmSync(skill);
+      fs.mkdirSync(skill);
+      const broken = await t.req("/api/agents");
+      const body = (await broken.json()) as { error: string; tag: string };
+      assert.deepEqual([broken.status, body.tag], [500, "Internal"]);
+      assert.match(body.error, /EISDIR/);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      t.cleanup();
+    }
+  },
+);

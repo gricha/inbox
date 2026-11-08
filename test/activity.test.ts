@@ -5,7 +5,7 @@ import type { Item } from "../src/types.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 
 const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
@@ -349,14 +349,22 @@ test("activity: after, item and limit; a long-poll answers when an event lands, 
   );
   assert.ok(Date.now() - started < 5000);
 
+  // The client going away interrupts the wait, which leaves nothing behind.
   const ac = new AbortController();
-  const aborted = run(t.desk.activity({ after: 3, wait: 30, signal: ac.signal }));
+  const aborted = Effect.runPromiseExit(t.desk.activity({ after: 3, wait: 30 }), { signal: ac.signal });
+  assert.equal(t.desk.waiters.size, 1);
   ac.abort();
-  assert.deepEqual(await aborted, { events: [], last_seq: 3 });
+  const cut = await aborted;
+  assert.ok(Exit.isFailure(cut) && Cause.hasInterruptsOnly(cut.cause));
+  assert.equal(t.desk.waiters.size, 0);
 
   // An exact id still works once the item is gone from the desk.
   assert.deepEqual((await run(t.desk.activity({ item: "acme/gone#9" }))).events, []);
+
+  // The desk stopping answers a wait at once, with nothing.
+  const stopping = run(t.desk.activity({ after: 3, wait: 30 }));
   t.cleanup();
+  assert.deepEqual(await stopping, { events: [], last_seq: 3 });
 });
 
 test("done on a resolved item stays done when it comes back", async () => {

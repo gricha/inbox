@@ -293,14 +293,21 @@ export function createApp(desk: Desk, port: number): Hono {
     ),
   );
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
-  app.get("/api/review/:id{.+}", async (c) => {
-    ready();
-    return c.json(await desk.reviewView(c.req.param("id"), c.req.query("ahead") === "1"));
-  });
-  app.post("/api/review/:id{.+}/ai", async (c) => {
-    ready();
-    const { force } = await input(c);
-    return c.json({ ok: true, ai: await desk.aiReview(c.req.param("id"), force === true) });
+  app.get("/api/review/:id{.+}", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.reviewView(c.req.param("id"), c.req.query("ahead") === "1")),
+      { log, read: true },
+    ),
+  );
+  // Joins the PR's AI review, which runs to the end whoever still waits: the request's signal never reaches it.
+  app.post("/api/review/:id{.+}/ai", (c) => {
+    const ai = Effect.gen(function* () {
+      yield* up;
+      const { force } = yield* bodyOf(c);
+      return { ok: true, ai: yield* desk.aiReview(c.req.param("id"), force === true) };
+    });
+    return respond(c, ai, { log });
   });
   // The desk's GitHub writes below: from its own window only (`refused` otherwise), once it's up, with the body read as
   // each says. A write never takes the request's signal: once sent it lands and is recorded, whoever still listens.
@@ -400,35 +407,40 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, back, { log });
   });
-  app.post("/api/coordinator/wake", async (c) => {
-    ready();
-    const { ask } = await input(c);
-    await desk.wakeCoordinator(typeof ask === "string" ? ask : undefined);
-    return c.json({ ok: true });
+  app.post("/api/coordinator/wake", (c) => {
+    const wake = Effect.gen(function* () {
+      yield* up;
+      const { ask } = yield* bodyOf(c);
+      yield* desk.wakeCoordinator(typeof ask === "string" ? ask : undefined);
+      return { ok: true };
+    });
+    return respond(c, wake, { log });
   });
   // Your words to the coordinator, from the desk's own window only: it's woken with them at once.
-  app.post("/api/ask", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "ask your agent from the desk's window");
-    const b = await input(c);
-    if (typeof b.text !== "string") throw new DeskError(400, "need { text }");
-    let lines: AskLines | undefined;
-    if (b.lines !== undefined) {
-      const l = typeof b.lines === "object" && b.lines !== null ? (b.lines as Record<string, unknown>) : null;
-      const at = l && inlineAtOf(l);
-      if (!l || !at || typeof l.head !== "string" || (l.note !== undefined && typeof l.note !== "boolean"))
-        throw new DeskError(400, "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }");
-      lines = { ...at, head: l.head, ...(l.note === true && { note: true }) };
-    }
-    const ask = await desk.ask({
-      text: b.text,
-      // effect-bridge(C5c): the ask's route yields them
-      item_id: Effect.runSync(str(b, "item_id")),
-      thread_id: Effect.runSync(str(b, "thread_id")),
-      thread_url: Effect.runSync(str(b, "thread_url")),
-      lines,
+  app.post("/api/ask", (c) => {
+    const ask = Effect.gen(function* () {
+      yield* up;
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "ask your agent from the desk's window" });
+      const b = yield* bodyOf(c);
+      if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
+      let lines: AskLines | undefined;
+      if (b.lines !== undefined) {
+        const l = typeof b.lines === "object" && b.lines !== null ? (b.lines as Record<string, unknown>) : null;
+        const at = l && inlineAtOf(l);
+        if (!l || !at || typeof l.head !== "string" || (l.note !== undefined && typeof l.note !== "boolean"))
+          return yield* new BadRequest({ message: "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }" });
+        lines = { ...at, head: l.head, ...(l.note === true && { note: true }) };
+      }
+      const asked = yield* desk.ask({
+        text: b.text,
+        item_id: yield* str(b, "item_id"),
+        thread_id: yield* str(b, "thread_id"),
+        thread_url: yield* str(b, "thread_url"),
+        lines,
+      });
+      return { ok: true, ask: asked };
     });
-    return c.json({ ok: true, ask });
+    return respond(c, ask, { log });
   });
   app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
   // desk_ask: local only, so agents may read where an ask is.
@@ -548,7 +560,7 @@ export function createApp(desk: Desk, port: number): Hono {
     return respond(c, undo, { log });
   });
   app.post("/api/sync", (c) => {
-    void desk.sync();
+    desk.runner.fork("sync", desk.sync());
     return c.json({ ok: true });
   });
   app.get("/api/config", (c) =>
@@ -595,8 +607,8 @@ export function createApp(desk: Desk, port: number): Hono {
     return respond(c, put, { log });
   });
   const mcpUrl = `http://localhost:${port}/mcp`;
-  app.get("/api/agents", (c) => c.json(desk.agentStatus(mcpUrl)));
-  app.post("/api/agents/connect", async (c) => c.json(await desk.connectAgent(mcpUrl)));
+  app.get("/api/agents", (c) => respond(c, desk.agentStatus(mcpUrl), { log, read: true }));
+  app.post("/api/agents/connect", (c) => respond(c, desk.connectAgent(mcpUrl), { log }));
   app.get("/api/status", (c) =>
     respond(
       c,
@@ -604,16 +616,19 @@ export function createApp(desk: Desk, port: number): Hono {
       { log, read: true },
     ),
   );
-  // The event log. A long-poll: with ?wait= it answers as soon as there's an event after ?after=.
-  app.get("/api/activity", async (c) => {
-    const int = (key: string) => {
+  // The event log. A long-poll: with ?wait= it answers as soon as there's an event after ?after=, or the client goes away.
+  app.get("/api/activity", (c) => {
+    const int = (key: string): Effect.Effect<number | undefined, BadRequest> => {
       const v = c.req.query(key);
       const n = Number(v);
-      if (v && (!Number.isInteger(n) || n < 0)) throw new DeskError(400, `${key} must be a whole number`);
-      return v ? n : undefined;
+      if (v && (!Number.isInteger(n) || n < 0)) return Effect.fail(new BadRequest({ message: `${key} must be a whole number` }));
+      return Effect.succeed(v ? n : undefined);
     };
-    const q = { after: int("after"), limit: int("limit"), wait: int("wait"), item: c.req.query("item") };
-    return c.json(await desk.activity({ ...q, signal: c.req.raw.signal }));
+    const activity = Effect.gen(function* () {
+      const q = { after: yield* int("after"), limit: yield* int("limit"), wait: yield* int("wait"), item: c.req.query("item") };
+      return yield* desk.activity(q);
+    });
+    return respond(c, activity, { log, read: true });
   });
 
   app.get("/api/events", (c) =>
@@ -705,7 +720,7 @@ export async function startServer(
   log(`Review Desk on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
 
   try {
-    await desk.init();
+    await Effect.runPromise(desk.init()); // effect-bridge(C6): startServer runs it as its own Effect
   } catch (e) {
     desk.stop(); // the desktop app retries; don't leak the SQLite handle each time
     server.close();
@@ -718,7 +733,7 @@ export async function startServer(
     url,
     desk,
     close: async () => {
-      const agentsGone = desk.close(); // stops the desk at once; its agents may take a moment
+      const agentsGone = Effect.runPromise(desk.close()); // effect-bridge(C6): it stops the desk at once; its agents may take a moment
       await new Promise<void>((r) => {
         server.close(() => {
           r();

@@ -135,7 +135,9 @@ The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the 
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
   with `Cache.invalidate` on a 401. Work shared by callers who may leave (an AI review, `fetching`) is forked through the
   runner and completes a `Deferred` kept in the existing Map, so `generating.has(id)` and `.size` stay synchronous;
-  callers `Deferred.await` it, and the fiber deletes the entry before it completes the Deferred.
+  callers `Deferred.await` it, and the fiber deletes the entry (and does its bookkeeping) before it completes the
+  Deferred, which keeps no failure: the next caller starts a fresh run (`Desk.shared`). The desk stopping interrupts the
+  fiber, which ends its callers with it; a stopped desk starts none and ends them at once.
 - Interruption records nothing: no `onExit`, `ensuring` or `onInterrupt` writes the store or notifies (a cut automation
   run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
   locks. An `ensuring` inside a write's uninterruptible region never sees an interruption: `markReady`'s and
@@ -183,6 +185,12 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
   `void Effect.runPromise(…)` (an unhandled rejection ends the desk).
 - `desk.sync()` runs its pass in its caller's fiber (tests and `init` await it); only the timers' passes and `POST
 /api/sync`'s are forked.
+- Deliberate change, with a test: a file the desk watches (policy.md, settings.json, config.toml) that changed on disk is
+  read again through the runner (`Desk.edited`), so one it can't read is logged (`config.toml failed: …`) and reported,
+  and the desk keeps what it had (it was an uncaught exception from the watcher, which ended the desk).
+- An AI review (`runAi`) keeps what fails it, a bug too, as that commit's `aiErrors` in its words, reported once and
+  logged with the login's own words when it's `ClaudeNotLoggedIn` (told by its tag); `retryAgents` and `paused()`
+  still read the stored words by suffix. `aiReview` answers it as `Upstream` 502 with it as the cause, as before.
 
 ## Boundaries
 
@@ -225,9 +233,11 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
   caller shows. A `settings.json` it can't read is a problem on the Settings page: the constructor, the file's watcher
   and the desktop app read it once with `readSettings`, which folds `loadSettings`' `FsError` into the errors and gives
   the text it read (`null` for one it couldn't). Deliberate change, with a test: one that can't be read (a directory)
-  threw from the constructor, and from the watcher. `init()` returns an Effect. `stop()` stays synchronous: it
-  interrupts the runner's fibers, unwatches the files and closes the store. `close()` is an Effect that also waits for
-  `stopAll()`.
+  threw from the constructor, and from the watcher. `init()` returns an Effect: GitHub's viewer failing, a first config
+  it can't write for want of your GitHub context (`Upstream`, "couldn't read your GitHub context to write a first
+  config: …") or a file it can't read or write (`FsError`) fails it, and `startServer`'s caller shows the words.
+  `stop()` stays synchronous: it interrupts the runner's fibers, unwatches the files and closes the store. `close()` is
+  an Effect that stops the desk at once and also waits for `stopAll()`.
 - Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
   config (`this.loaded!`, a defect); only an entry point checks it as a failure (`requireConfig`, or `resolve`, which
   checks it first). The hooks the connectors call (`synced`, `rebaseConflicts`, `handBackUnasked`, `trackBlocked`,
@@ -238,7 +248,8 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
   marked bridge.
 - The fields tests watch stay, with their types: `coordinator.flushing` (a `Promise<void> | null` that never rejects),
   `automations.running` (a Map whose values keep `.p`), `judge.running` and `judge.timer`, the connector's `syncing`,
-  `polling`, `pausedUntil` and `feedError`. A step that drops one rewrites the tests that read it.
+  `polling`, `pausedUntil` and `feedError`, the desk's `generating` (`.has`, `.size`), `warming`, `waiters`,
+  `aiErrors` and `aiPaused`. A step that drops one rewrites the tests that read it.
 
 ## Testing
 

@@ -800,10 +800,7 @@ test(
       const woke = await post("/api/coordinator/wake", { ask: "a1" });
       const body = (await woke.json()) as { error: string; tag: string };
       assert.deepEqual([woke.status, body.tag, body.error], [400, "BadRequest", told.message], "as an ask is: it was a 500");
-      assert.equal(
-        (await failure(Effect.tryPromise({ try: () => run(t.desk.wakeCoordinator("a1")), catch: (e) => e as Error }))).message,
-        told.message,
-      );
+      assert.equal((await failure(t.desk.wakeCoordinator("a1"))).message, told.message);
       runSync(t.desk.answerInquiry(question.id, "yes & then merge"));
       assert.ok(logs.includes(`coordinator: couldn't pass on your answer to ${question.id}: ${told.message}`), logs.join("\n"));
       assert.ok(runSync(t.desk.inquiry(question.id)).answer, "your answer is kept");

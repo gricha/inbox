@@ -1307,3 +1307,42 @@ test("a coordinator's desk_add on no other board stays on Added after you act on
     [["acme/api#77", "added"]],
   );
 });
+
+test("a file edited outside the desk is read again through the runner: one it can't read is logged, and the desk keeps what it had", async (c) => {
+  const logs: string[] = [];
+  const t = await setup([reviewAsk(1)], {
+    desk: {
+      log: (m) => {
+        logs.push(m);
+      },
+    },
+  });
+  c.after(t.cleanup);
+  const policy = path.join(t.home, "policy.md");
+  fs.writeFileSync(policy, "Only what blocks a release.");
+  t.desk.edited("policy.md");
+  assert.equal(t.desk.policy.text, "Only what blocks a release.");
+  const rev = t.desk.rev;
+  t.desk.edited("policy.md");
+  assert.equal(t.desk.rev, rev, "unchanged: nothing happens");
+
+  // Each was an uncaught exception from the watcher, which ended the desk.
+  fs.rmSync(policy);
+  fs.mkdirSync(policy);
+  t.desk.edited("policy.md");
+  assert.equal(t.desk.policy.text, "Only what blocks a release.", "the last one it read stays");
+  assert.ok(
+    logs.some((l) => l.startsWith("policy.md failed: ") && l.includes("EISDIR")),
+    logs.join("\n"),
+  );
+  const config = path.join(t.home, "config.toml");
+  const loaded = t.desk.loaded;
+  fs.rmSync(config);
+  fs.mkdirSync(config);
+  t.desk.edited("config.toml");
+  assert.equal(t.desk.loaded, loaded, "the loaded config stays");
+  assert.ok(
+    logs.some((l) => l.startsWith("config.toml failed: ") && l.includes("EISDIR")),
+    logs.join("\n"),
+  );
+});

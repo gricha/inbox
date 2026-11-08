@@ -2,12 +2,13 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Effect } from "effect";
+import { Cause, Deferred, Effect, Exit } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
   BadRequest,
   Busy,
+  ClaudeNotLoggedIn,
   Conflict,
   DeskError,
   Forbidden,
@@ -22,6 +23,7 @@ import {
   type FsError,
   type GitHubError,
   type GitHubNotFetched,
+  type GitHubReadError,
   type GitHubWriteError,
 } from "./errors.ts";
 import { Automations } from "./automations.ts";
@@ -258,6 +260,11 @@ export interface ReviewDeps {
   generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Effect.Effect<AiReview, CommandError | ClaudeError>;
 }
 
+// What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
+type PrTextError = Conflict | FetchPrError;
+type AiError = PrTextError | CommandError | ClaudeError;
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 export class Desk {
   store: Store;
   gh: GitHubConnector;
@@ -293,11 +300,11 @@ export class Desk {
   waiters = new Set<() => void>(); // long-polls on the event log
   snap: Snapshot | null = null;
   stopped = false;
-  generating = new Map<string, Promise<AiReview>>();
+  generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared())
   aiErrors = new Map<string, { head_oid: string; message: string; at: number }>();
   aiFailures = 0; // in a row, across PRs
   aiPaused: { why: string; until: number } | null = null;
-  fetching = new Map<string, Promise<PrText>>();
+  fetching = new Map<string, Deferred.Deferred<PrText, FetchPrError>>(); // the diffs on their way
   warming = false;
   warmAgain = false; // a sync landed while warming: go round once more
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
@@ -359,35 +366,68 @@ export class Desk {
 
   // ---------------------------------------------------------------- lifecycle
 
-  async init(): Promise<void> {
-    if (!this.ctx) await Effect.runPromise(this.gh.refreshContext()); // effect-bridge(C5c): init yields it; viewer's failure fails init
-    if (!fs.existsSync(this.configPath)) {
-      // The default spaces come from where your work is; don't guess them from a failed fetch.
+  // GitHub's viewer failing (no context yet), or a file it can't read or write, fails it: startServer's caller shows why.
+  init(): Effect.Effect<void, GitHubReadError | Upstream | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (!this.ctx) yield* this.gh.refreshContext();
+      if (!fs.existsSync(this.configPath)) yield* this.firstConfig();
+      yield* this.migrateSettings();
+      yield* this.migrateRules();
+      yield* this.readPolicy();
+      yield* this.reloadConfig();
+      fs.watchFile(this.policyPath, { interval: 2000 }, () => {
+        this.edited("policy.md");
+      });
+      fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
+        this.edited("settings.json");
+      });
+      fs.watchFile(this.configPath, { interval: 2000 }, (cur) => {
+        if (cur.nlink !== 0) this.edited("config.toml"); // deleted or mid-rename: keep the loaded config
+      });
+    });
+  }
+
+  // The default spaces come from where your work is; don't guess them from a failed fetch.
+  private firstConfig(): Effect.Effect<void, Upstream | FsError> {
+    return Effect.suspend((): Effect.Effect<void, Upstream | FsError> => {
       if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.now().getTime() - 24 * HOUR)
-        throw new Error(`couldn't read your GitHub context to write a first config: ${this.gh.contextError ?? "unknown error"}`);
+        return Effect.fail(
+          new Upstream({
+            message: `couldn't read your GitHub context to write a first config: ${this.gh.contextError ?? "unknown error"}`,
+          }),
+        );
       const orgs = Object.entries(this.ctx?.orgs ?? {})
         .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 1)
         .map(([o]) => o);
-      fs.writeFileSync(this.configPath, defaultConfigText({ workOrgs: orgs }));
-      this.log(`wrote ${this.configPath}`);
-    }
-    // effect-bridge(C5c): init yields them; what they fail with rejects init as before
-    Effect.runSync(Effect.all([this.migrateSettings(), this.migrateRules(), this.readPolicy(), this.reloadConfig()], { discard: true }));
-    fs.watchFile(this.policyPath, { interval: 2000 }, () => {
-      const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
-      if (text !== this.policy.text) Effect.runSync(this.policyChanged()); // effect-bridge(C5c): it throws from the watcher as before
+      const text = defaultConfigText({ workOrgs: orgs });
+      const write = Effect.try({
+        try: () => {
+          fs.writeFileSync(this.configPath, text);
+        },
+        catch: fsError("write", this.configPath),
+      });
+      return Effect.map(write, () => {
+        this.log(`wrote ${this.configPath}`);
+      });
     });
-    // One read: one it can't read is a problem on the Settings page, as at the start.
-    fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
-      const file = readSettings(this.settingsPath);
-      if (file.text !== this.settingsText) Effect.runSync(this.reloadSettings(file)); // effect-bridge(C5c): it throws from the watcher as before
+  }
+
+  // One of the desk's files changed on disk (an editor, an agent): read again through the runner, so one it can't read is
+  // logged and reported and the desk keeps what it had. Unchanged, nothing happens.
+  edited(file: "policy.md" | "settings.json" | "config.toml"): void {
+    const reread = Effect.suspend((): Effect.Effect<void, FsError> => {
+      if (file === "policy.md")
+        return Effect.flatMap(this.policyFile(), (text) => (text === this.policy.text ? Effect.void : this.policyChanged()));
+      if (file === "settings.json") {
+        // One read: one it can't read is a problem on the Settings page, as at the start.
+        const read = readSettings(this.settingsPath);
+        return read.text === this.settingsText ? Effect.void : this.reloadSettings(read);
+      }
+      return Effect.flatMap(this.readConfig(), (text) => (text === this.configText ? Effect.void : this.reloadConfig(true)));
     });
-    fs.watchFile(this.configPath, { interval: 2000 }, (cur) => {
-      if (cur.nlink === 0) return; // deleted or mid-rename; keep the loaded config
-      if (fs.readFileSync(this.configPath, "utf8") !== this.configText) Effect.runSync(this.reloadConfig(true)); // effect-bridge(C5c): it throws from the watcher as before
-    });
+    this.runner.fork(file, reread);
   }
 
   start(): void {
@@ -413,10 +453,12 @@ export class Desk {
     this.store.close();
   }
 
-  // stop(), and back once every agent process is gone: an AI review's too, and a SIGKILL for what ignores SIGTERM.
-  async close(): Promise<void> {
-    this.stop();
-    await stopAll();
+  // stop() at once, and back once every agent process is gone: an AI review's too, and a SIGKILL for what ignores SIGTERM.
+  close(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      this.stop();
+      return Effect.promise(() => stopAll()); // it never rejects
+    });
   }
 
   onChange(fn: (rev: number) => void): () => void {
@@ -473,22 +515,22 @@ export class Desk {
       else this.log(`config has ${errors.length} error(s); keeping the last good config`);
       this.changed();
       this.judge.pump();
-      if (sync && loaded)
-        this.runner.fork(
-          "sync",
-          Effect.promise(() => this.sync()),
-        ); // effect-bridge(C5c): sync becomes an Effect
+      if (sync && loaded) this.runner.fork("sync", this.sync());
     });
   }
 
   // ---------------------------------------------------------------- policy
 
-  readPolicy(): Effect.Effect<void, FsError> {
-    const read = Effect.try({
+  // policy.md as it is now, "" for none.
+  policyFile(): Effect.Effect<string, FsError> {
+    return Effect.try({
       try: () => (fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : ""),
       catch: fsError("read", this.policyPath),
     });
-    return Effect.map(read, (text) => {
+  }
+
+  readPolicy(): Effect.Effect<void, FsError> {
+    return Effect.map(this.policyFile(), (text) => {
       this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
     });
   }
@@ -700,27 +742,21 @@ export class Desk {
 
   // ---------------------------------------------------------------- agents
 
-  agentStatus(mcpUrl: string): AgentStatus {
-    return Effect.runSync(agents.status("claude-code", mcpUrl)); // effect-bridge(C5c): agentStatus yields it; it throws its FsError, a 500 as before
+  // A file it can't read fails it, in Node's words: a 500, as before.
+  agentStatus(mcpUrl: string): Effect.Effect<AgentStatus, FsError> {
+    return agents.status("claude-code", mcpUrl);
   }
 
-  async connectAgent(mcpUrl: string): Promise<AgentStatus> {
-    try {
-      return await Effect.runPromise(agents.connect("claude-code", mcpUrl)); // effect-bridge(C5c): connectAgent maps what it fails with to Upstream
-    } catch (e) {
-      throw new DeskError(502, (e as Error).message);
-    }
+  // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause.
+  connectAgent(mcpUrl: string): Effect.Effect<AgentStatus, Upstream> {
+    return agents.connect("claude-code", mcpUrl).pipe(Effect.mapError((e) => new Upstream({ message: e.message, cause: e })));
   }
 
   // ---------------------------------------------------------------- sync and the event log
 
-  // A full pass on every connector; their own loops also run it on github.poll_seconds.
-  async sync(): Promise<void> {
-    await Effect.runPromise(this.reconcileAll()); // effect-bridge(C5c): sync becomes an Effect that yields every connector's pass
-  }
-
-  // Every connector's full pass at once. Never fails: what fails a pass is in its status().
-  reconcileAll(): Effect.Effect<void> {
+  // A full pass on every connector at once, in its caller's fiber; their own loops also run it on github.poll_seconds. Never
+  // fails: what fails a pass is in its status().
+  sync(): Effect.Effect<void> {
     return Effect.forEach(this.connectors, (c) => c.reconcile(), { concurrency: "unbounded", discard: true });
   }
 
@@ -744,41 +780,53 @@ export class Desk {
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
       const replies = [...top.now, ...top.today].filter((c) => c.cta === "reply").map((c) => c.id);
-      this.runner.fork("conversations", this.convos.warm(replies)); // effect-bridge(C5c): warm is an Effect; this void hook forks it
+      this.runner.fork("conversations", this.convos.warm(replies));
     }
-    void this.warmReviews();
+    this.runner.fork("warm", this.warmReviews());
     this.judge.pump();
   }
 
-  // The main page's PRs' diffs and conversations, fetched ahead (only what changed: both are kept) so opening one doesn't wait.
-  async warmReviews(): Promise<void> {
-    if (this.warming) {
-      this.warmAgain = true;
-      return;
-    }
-    this.warming = true;
-    try {
+  // The main page's PRs' diffs and conversations, fetched ahead (only what changed: both are kept) so opening one doesn't
+  // wait. One pass at a time: a sync landing meanwhile has it go round once more.
+  warmReviews(): Effect.Effect<void> {
+    const warm = Effect.gen({ self: this }, function* () {
       do {
         this.warmAgain = false;
-        if (this.stopped || !this.loaded || !this.review) return;
+        if (!this.loaded || !this.review) return;
         const top = this.top(this.snapshot(), new Set());
         const ids = [...top.now, ...top.today]
           .filter((c) => c.kind === "pr")
           .map((c) => c.id)
           .values();
-        const next = async () => {
+        // WARM_AT_ONCE of these share the one list. Ahead of time, what fails is ignored: opening it says what failed.
+        const next = Effect.gen({ self: this }, function* () {
           for (const id of ids) {
-            if (this.stopped) return;
-            if (!this.snapshot().entries.has(id)) continue; // gone since: both would throw on it
-            // effect-bridge(C5c): warmReviews becomes an Effect that yields both, ignoring what they fail with
-            await Promise.all([this.prText(id).catch(() => {}), Effect.runPromise(this.convos.context(id)).catch(() => {})]);
+            if (!this.snapshot().entries.has(id)) continue; // gone since: both would fail on it
+            yield* Effect.all([Effect.ignore(this.prText(id)), Effect.ignore(this.convos.context(id))], {
+              concurrency: "unbounded",
+              discard: true,
+            });
           }
-        };
-        await Promise.all(Array.from({ length: WARM_AT_ONCE }, next));
+        });
+        yield* Effect.all(
+          Array.from({ length: WARM_AT_ONCE }, () => next),
+          { concurrency: "unbounded", discard: true },
+        );
       } while (this.warmAgain);
-    } finally {
-      this.warming = false;
-    }
+    });
+    return Effect.suspend(() => {
+      if (this.warming) {
+        this.warmAgain = true;
+        return Effect.void;
+      }
+      this.warming = true;
+      return Effect.ensuring(
+        warm,
+        Effect.sync(() => {
+          this.warming = false;
+        }),
+      );
+    });
   }
 
   // Stores fresh snapshots and logs what changed: the connector's own events, plus resolved and unresolved flips. `quiet`:
@@ -832,29 +880,39 @@ export class Desk {
     return !!item && this.resolutionOf(item) !== null;
   }
 
-  // Events after `after`, oldest first. With `wait` (seconds, up to 60) it answers as soon as one arrives.
-  async activity(q: { after?: number; limit?: number; item?: string; wait?: number; signal?: AbortSignal }): Promise<ActivityPage> {
-    const after = q.after ?? 0;
-    const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
-    const item = q.item ? Effect.runSync(this.itemId(q.item)) : undefined; // effect-bridge(C5c): activity yields it
-    const deadline = Date.now() + Math.min(q.wait ?? 0, 60) * 1000;
-    for (;;) {
-      if (this.stopped) return { events: [], last_seq: after };
-      const events = this.store.activity({ after, limit, item });
-      const left = deadline - Date.now();
-      if (events.length || left <= 0 || q.signal?.aborted) return { events, last_seq: events.at(-1)?.seq ?? this.store.lastSeq() };
-      await new Promise<void>((resolve) => {
-        const done = () => {
-          clearTimeout(timer);
-          this.waiters.delete(done);
-          q.signal?.removeEventListener("abort", done);
-          resolve();
-        };
-        const timer = setTimeout(done, left);
-        this.waiters.add(done);
-        q.signal?.addEventListener("abort", done);
+  // Events after `after`, oldest first. With `wait` (seconds, up to 60) it answers as soon as one arrives; interrupted (the
+  // client went away), it stops waiting.
+  activity(q: { after?: number; limit?: number; item?: string; wait?: number }): Effect.Effect<ActivityPage, RefError> {
+    return Effect.gen({ self: this }, function* () {
+      const after = q.after ?? 0;
+      const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
+      const item = q.item ? yield* this.itemId(q.item) : undefined;
+      const deadline = Date.now() + Math.min(q.wait ?? 0, 60) * 1000;
+      for (;;) {
+        if (this.stopped) return { events: [], last_seq: after };
+        const events = this.store.activity({ after, limit, item });
+        const left = deadline - Date.now();
+        if (events.length || left <= 0) return { events, last_seq: events.at(-1)?.seq ?? this.store.lastSeq() };
+        yield* this.nextEvent(left);
+      }
+    });
+  }
+
+  // Until an event lands (record() wakes it), the desk stops, or `ms` is up.
+  private nextEvent(ms: number): Effect.Effect<void> {
+    return Effect.callback<void>((resume) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.waiters.delete(done);
+        resume(Effect.void);
+      };
+      const timer = setTimeout(done, ms);
+      this.waiters.add(done);
+      return Effect.sync(() => {
+        clearTimeout(timer);
+        this.waiters.delete(done);
       });
-    }
+    });
   }
 
   // A ref on the desk, or an exact id the desk no longer holds (its events outlive it).
@@ -1519,145 +1577,188 @@ export class Desk {
   }
 
   // GET /api/review/:id. Opening a PR starts its AI review (auto_ai, none for this commit) and Claude's read; `ahead` neither.
-  async reviewView(ref: string, ahead = false): Promise<ReviewView> {
-    const id = Effect.runSync(this.pr(ref)).item.id; // effect-bridge(C5c): reviewView yields pr
-    let files: ReviewFile[] = [];
-    let diffHead: string | null = null;
-    let filesError: string | null = null;
-    const talk = Effect.runPromise(this.convos.view(id, !ahead)); // effect-bridge(C5c): reviewView yields it alongside the diff
-    try {
-      const t = await this.prText(id);
-      files = t.files;
-      diffHead = t.head ?? null;
-    } catch (err) {
-      filesError = (err as Error).message;
-      report(err, "diff", id);
-    }
-    const snap = this.snapshot();
-    const e = snap.entries.get(id)!;
-    if (!ahead && this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
-    const d = Effect.runSync(this.item(id)); // effect-bridge(C5c): reviewView yields item
-    const err = this.aiErrors.get(id);
-    const own = err?.head_oid === e.item.head_oid ? err.message : null;
-    // A PR the desk would have reviewed on its own says why it didn't.
-    const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
-    return {
-      card: this.replyOnly(e) && d.card.cta !== "reviewers" ? { ...d.card, cta: "reply" } : d.card,
-      item: d.item,
-      handoff_prompt: d.handoff_prompt,
-      files,
-      diff_head: diffHead ?? e.item.head_oid,
-      files_error: filesError,
-      order: reviewOrder(files, d.ai, d.ai_stale),
-      ai: d.ai,
-      ai_stale: d.ai_stale,
-      ai_error: this.generating.has(id) ? null : (own ?? paused),
-      generating: this.generating.has(id),
-      approve: this.canApprove(e),
-      activity: d.activity,
-      stack: d.stack,
-      asks: this.asks(id),
-      ...(await talk),
-    };
+  // What fails the diff is files_error, reported; what fails the conversation, conversation_error.
+  reviewView(ref: string, ahead = false): Effect.Effect<ReviewView, RefError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = (yield* this.pr(ref)).item.id;
+      const diff = this.prText(id).pipe(
+        Effect.matchCauseEffect({
+          onFailure: (cause) => {
+            if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt;
+            const err = Cause.squash(cause);
+            return Effect.sync(() => {
+              report(err, "diff", id);
+              return { files: [] as ReviewFile[], head: null, error: messageOf(err) };
+            });
+          },
+          onSuccess: (t) => Effect.succeed({ files: t.files, head: t.head ?? null, error: null }),
+        }),
+      );
+      const [talk, got] = yield* Effect.all([this.convos.view(id, !ahead), diff], { concurrency: "unbounded" });
+      const snap = this.snapshot();
+      const e = snap.entries.get(id)!;
+      if (!ahead && this.autoAi() && this.wantsAi(e, snap)) this.startAi(id);
+      const d = yield* this.item(id);
+      const err = this.aiErrors.get(id);
+      const own = err?.head_oid === e.item.head_oid ? err.message : null;
+      // A PR the desk would have reviewed on its own says why it didn't.
+      const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
+      return {
+        card: this.replyOnly(e) && d.card.cta !== "reviewers" ? { ...d.card, cta: "reply" } : d.card,
+        item: d.item,
+        handoff_prompt: d.handoff_prompt,
+        files: got.files,
+        diff_head: got.head ?? e.item.head_oid,
+        files_error: got.error,
+        order: reviewOrder(got.files, d.ai, d.ai_stale),
+        ai: d.ai,
+        ai_stale: d.ai_stale,
+        ai_error: this.generating.has(id) ? null : (own ?? paused),
+        generating: this.generating.has(id),
+        approve: this.canApprove(e),
+        activity: d.activity,
+        stack: d.stack,
+        asks: this.asks(id),
+        ...talk,
+      };
+    });
   }
 
-  // The changed files and description, kept per head commit.
-  prText(id: string): Promise<PrText> {
-    const review = this.review;
-    if (!review) return Promise.reject(new Error("diffs aren't available in this desk"));
-    const e = this.snapshot().entries.get(id)!;
-    const item = e.item;
-    // Pushed since you reviewed it: the diff since your review's commit too, for a "since your review" line.
-    const me = e.analysis.signals.me;
-    const since = me.pushed_since_review
-      ? item.reviews.findLast((r) => r.author.toLowerCase() === me.login.toLowerCase() && !!r.commit)?.commit
-      : undefined;
-    const cached = this.store.get(`pr:${id}`) as (PrText & { head_oid: string }) | null;
-    if (cached?.head_oid === item.head_oid) return Promise.resolve(cached);
-    const running = this.fetching.get(id);
-    if (running) return running;
-    const p = Effect.runPromise(review.fetchPr(item, since)) // effect-bridge(C5c): prText becomes an Effect
-      .then((t) => {
-        if (!this.stopped) this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
-        return t;
-      })
-      .finally(() => {
-        this.fetching.delete(id);
-      });
-    this.fetching.set(id, p);
-    return p;
+  // The changed files and description, kept per head commit; a fetch on its way is shared (see shared()).
+  prText(id: string): Effect.Effect<PrText, PrTextError> {
+    return Effect.suspend((): Effect.Effect<PrText, PrTextError> => {
+      const review = this.review;
+      if (!review) return Effect.fail(new Conflict({ message: "diffs aren't available in this desk" }));
+      const e = this.snapshot().entries.get(id)!;
+      const item = e.item;
+      // Pushed since you reviewed it: the diff since your review's commit too, for a "since your review" line.
+      const me = e.analysis.signals.me;
+      const since = me.pushed_since_review
+        ? item.reviews.findLast((r) => r.author.toLowerCase() === me.login.toLowerCase() && !!r.commit)?.commit
+        : undefined;
+      const cached = this.store.get(`pr:${id}`) as (PrText & { head_oid: string }) | null;
+      if (cached?.head_oid === item.head_oid) return Effect.succeed(cached);
+      const fetch = Effect.tap(review.fetchPr(item, since), (t) =>
+        Effect.sync(() => {
+          this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
+        }),
+      );
+      return Deferred.await(this.shared(this.fetching, "diff", id, fetch));
+    });
   }
 
-  // POST /api/review/:id/ai (and desk_brief, `desk brief`): the cached review for this commit unless `force`.
-  async aiReview(ref: string, force = false): Promise<AiReview> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5c): aiReview yields pr
-    const cached = this.snapshot().reviews.get(e.item.id);
-    if (cached && cached.head_oid === e.item.head_oid && !force) return cached;
-    try {
-      return await this.generate(e.item.id);
-    } catch (err) {
-      throw Object.assign(new DeskError(502, (err as Error).message), { cause: err });
-    }
+  // POST /api/review/:id/ai (and desk_brief, `desk brief`): the cached review for this commit unless `force`. What fails the
+  // run is passed on in its words, its error the cause: the run reported it already.
+  aiReview(ref: string, force = false): Effect.Effect<AiReview, RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const cached = this.snapshot().reviews.get(e.item.id);
+      if (cached && cached.head_oid === e.item.head_oid && !force) return cached;
+      return yield* this.generate(e.item.id).pipe(
+        Effect.mapError((err) => new Upstream({ message: err.message, cause: err })),
+        // A bug in the run is its ai_error as a failure is, and answered the same way.
+        Effect.catchDefect((bug) => Effect.fail(new Upstream({ message: messageOf(bug), cause: bug }))),
+      );
+    });
   }
 
-  // One run per PR at a time; asking again joins it.
-  generate(id: string): Promise<AiReview> {
+  // One run per PR at a time; asking again joins it, and a caller leaving never stops it.
+  generate(id: string): Effect.Effect<AiReview, AiError> {
+    return Effect.suspend(() => Deferred.await(this.startAi(id)));
+  }
+
+  // The PR's AI review, started unless one is on its way. Once it's done, a PR that waited on it is on your desk; after a
+  // success the pump starts the next, after a failure it waits for the next sync.
+  startAi(id: string): Deferred.Deferred<AiReview, AiError> {
     const running = this.generating.get(id);
     if (running) return running;
-    const p = this.runAi(id);
-    this.generating.set(id, p);
-    this.changed();
-    // Awaits p before any caller can, so the slot is free by the time they resume.
-    void (async () => {
-      let ok = true;
-      try {
-        await p;
-      } catch {
-        ok = false;
-      }
-      this.generating.delete(id);
-      if (this.stopped) return;
+    const d = this.shared(this.generating, "ai_review", id, this.runAi(id), (ok) => {
       this.changed();
-      this.notifyNew(); // a PR that waited on this review is on your desk now
-      if (ok) this.pumpAi(); // after a failure, wait for the next sync
-    })();
-    return p;
+      this.notifyNew();
+      if (ok) this.pumpAi();
+    });
+    this.changed();
+    return d;
   }
 
-  async runAi(id: string): Promise<AiReview> {
-    const snap = this.snapshot();
-    const e = snap.entries.get(id)!;
-    try {
-      if (!this.review) throw new Error("AI review isn't available in this desk");
-      const pr = await this.prText(id);
-      if (this.stopped) throw new Error("stopped"); // close() has stopped the agents already: don't start one it misses
-      // effect-bridge(C5c): runAi becomes an Effect; aiErrors, aiPaused and retryAgents still match NOT_LOGGED_IN by suffix
-      const ai = await Effect.runPromise(
-        this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir()),
+  // Work its callers share (an AI review, a PR's diff), kept in `runs` while it's on its way. Forked through the runner: a
+  // caller leaving never stops it, and the desk stopping does, which ends its callers too. The fiber frees its slot and
+  // does `after` before they resume; one the stopped desk won't start ends them at once.
+  private shared<A, E>(
+    runs: Map<string, Deferred.Deferred<A, E>>,
+    what: string,
+    id: string,
+    work: Effect.Effect<A, E>,
+    after: (ok: boolean) => void = () => {},
+  ): Deferred.Deferred<A, E> {
+    const running = runs.get(id);
+    if (running) return running;
+    const d = Deferred.makeUnsafe<A, E>();
+    runs.set(id, d);
+    const run = Effect.exit(work).pipe(
+      Effect.tap((exit) =>
+        Effect.sync(() => {
+          runs.delete(id);
+          after(Exit.isSuccess(exit));
+        }),
+      ),
+      Effect.onExit((ended) =>
+        Effect.sync(() => {
+          if (runs.get(id) === d) runs.delete(id);
+          Deferred.doneUnsafe(d, Exit.isSuccess(ended) ? ended.value : Exit.failCause(ended.cause));
+        }),
+      ),
+    );
+    if (!this.runner.fork(what, run, id)) {
+      runs.delete(id);
+      Deferred.doneUnsafe(d, Exit.interrupt());
+    }
+    return d;
+  }
+
+  // What fails it, a bug too, is its ai_error for this commit (reported, and logged with the login's own words), and
+  // AI_PAUSE_AFTER of them in a row pause the reviews nobody asked for. The desk stopping interrupts it: nothing is kept.
+  runAi(id: string): Effect.Effect<AiReview, AiError> {
+    return Effect.gen({ self: this }, function* () {
+      const snap = this.snapshot();
+      const e = snap.entries.get(id)!;
+      const review = Effect.gen({ self: this }, function* () {
+        if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
+        const pr = yield* this.prText(id);
+        const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
+        this.store.set(`review:${id}`, ai);
+        this.aiErrors.delete(id);
+        this.aiFailures = 0;
+        if (this.aiPaused) this.log("AI reviews resume");
+        this.aiPaused = null;
+        this.log(
+          `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}`,
+        );
+        this.retryAgents(NOT_LOGGED_IN);
+        return ai;
+      });
+      return yield* review.pipe(
+        Effect.tapCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.sync(() => {
+                this.aiFailed(id, e.item.head_oid, Cause.squash(cause));
+              }),
+        ),
       );
-      if (this.stopped) return ai;
-      this.store.set(`review:${id}`, ai);
-      this.aiErrors.delete(id);
-      this.aiFailures = 0;
-      if (this.aiPaused) this.log("AI reviews resume");
-      this.aiPaused = null;
-      this.log(
-        `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}`,
-      );
-      this.retryAgents(NOT_LOGGED_IN);
-      return ai;
-    } catch (err) {
-      if (this.stopped) throw err; // killed with the desk
-      const message = (err as Error).message;
-      report(err, "ai_review", id);
-      this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
-      const detail = (err as { detail?: unknown }).detail; // effect-bridge(C5c): the login's own words, ClaudeNotLoggedIn's detail
-      this.log(`AI review of ${id} failed: ${message}${typeof detail === "string" ? ` (${detail})` : ""}`);
-      if (++this.aiFailures >= AI_PAUSE_AFTER) {
-        if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
-        this.aiPaused = { why: message, until: Date.now() + AI_RETRY };
-      }
-      throw err;
+    });
+  }
+
+  private aiFailed(id: string, head: string, err: unknown): void {
+    if (this.stopped) return; // killed with the desk
+    const message = messageOf(err);
+    report(err, "ai_review", id);
+    this.aiErrors.set(id, { head_oid: head, message, at: Date.now() });
+    const detail = err instanceof ClaudeNotLoggedIn ? ` (${err.detail})` : ""; // the login's own words, for the log
+    this.log(`AI review of ${id} failed: ${message}${detail}`);
+    if (++this.aiFailures >= AI_PAUSE_AFTER) {
+      if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
+      this.aiPaused = { why: message, until: Date.now() + AI_RETRY };
     }
   }
 
@@ -1693,7 +1794,7 @@ export class Desk {
     for (const c of [...top.now, ...top.today]) {
       if (this.generating.size >= AI_AT_ONCE) return;
       const e = snap.entries.get(c.id);
-      if (e && this.wantsAi(e, snap)) void this.generate(c.id).catch(() => {});
+      if (e && this.wantsAi(e, snap)) this.startAi(c.id);
     }
   }
 
@@ -1752,7 +1853,7 @@ export class Desk {
   // After a write: the PR itself first, so it resolves (as "you approved") within seconds, as a full pass alone wouldn't
   // while the search index lags; then the full pass. One fiber the runner holds, so the desk stopping interrupts both.
   private refreshAfter(id: string): void {
-    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(this.reconcileAll())), id);
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(this.sync())), id);
   }
 
   // The More menu's GitHub writes this item allows now. A PR in Merging is the coordinator's: Back to desk brings it back first.
@@ -2020,8 +2121,8 @@ export class Desk {
   // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to AI_AT_ONCE.
   warmAdded(id: string): void {
     if (this.snapshot().entries.get(id)!.item.kind === "pr") {
-      void this.prText(id).catch(() => {});
-      this.runner.fork("conversations", this.convos.warm([id]), id); // effect-bridge(C5c): warm is an Effect; warmAdded forks it
+      this.runner.fork("diff", Effect.ignore(this.prText(id)), id); // ahead of time: opening it says what failed
+      this.runner.fork("conversations", this.convos.warm([id]), id);
     }
     this.pumpAi();
     this.judge.pump();
@@ -2103,16 +2204,24 @@ export class Desk {
 
   // POST /api/coordinator/wake: Wake it (or Start it now) in Merging has it look now (and starts it, if it isn't running).
   // w, or Wake it under an ask it stopped without answering: that ask goes to it again, your words as you wrote them.
-  async wakeCoordinator(askId?: string): Promise<void> {
-    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
-    const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
-    if (a) {
-      const tell = this.coordinator.tell(askLine(a, this.askAbout(a.item_id)));
-      // effect-bridge(C5c): wakeCoordinator yields it; what cmd.exe can't pass is a BadRequest, as in ask
-      await Effect.runPromise(Effect.flatten(Effect.mapError(tell, (e) => new BadRequest({ message: e.message }))));
-    } else await this.coordinator.now();
-    if (!this.coordinator.saved())
-      throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), { cause: this.coordinator.failure });
+  // What cmd.exe can't pass is a BadRequest, as in ask; one that didn't start says so, with what stopped its run (reported
+  // there) as the cause.
+  wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
+      const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
+      if (a) {
+        const told = yield* this.coordinator
+          .tell(askLine(a, this.askAbout(a.item_id)))
+          .pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
+        yield* told;
+      } else yield* Effect.promise(() => this.coordinator.now()); // it never rejects
+      return yield* this.coordinator.saved() ? Effect.void : this.didntStart();
+    });
+  }
+
+  private didntStart(): Effect.Effect<never, Upstream> {
+    return Effect.fail(new Upstream({ message: "your agent didn't start; the desk's log says why", cause: this.coordinator.failure }));
   }
 
   merging(id: string): Merging {
@@ -2341,63 +2450,70 @@ export class Desk {
   }
 
   // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread or lines) you were on.
-  async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }): Promise<Ask> {
-    if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
-    const item = b.item_id ? this.snapshot().entries.get(Effect.runSync(this.resolve(b.item_id)))!.item : null; // effect-bridge(C5c): ask yields resolve
-    const l = b.lines;
-    if (l) {
-      if (!item) throw new DeskError(400, "lines are on a PR's diff: send its item_id");
-      if (item.kind !== "pr") throw new DeskError(400, "lines are on a PR's diff");
-      if (b.thread_id || b.thread_url) throw new DeskError(400, "an ask is on a thread or on lines, not both");
-      if (!/^[0-9a-f]{40}$/.test(l.head)) throw new DeskError(400, "lines need head: the 40-character commit they were read at");
-      // desk_ask hands the name to a shell, quoted: what could break a line or read as something else is refused, not stripped.
-      // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
-      const bad = /[\u0000-\u001f\u2028\u2029]/.test(l.path) || l.path.replaceAll(INVISIBLE, "") !== l.path;
-      if (!l.path || l.path.length > 1000 || bad) throw new DeskError(400, "lines need path: a file name with no control characters");
-    }
-    if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) throw new DeskError(400, "thread_url must be a GitHub URL");
-    const a: Ask = {
-      id: randomBytes(4).toString("hex"),
-      at: this.now().toISOString(),
-      text: Effect.runSync(this.paragraphs(b.text, "ask", MAX_ASK)), // effect-bridge(C5c): ask yields paragraphs
-      item_id: item?.id ?? null,
-      thread_id: item && b.thread_id ? b.thread_id : null,
-      thread_url: item && b.thread_url ? b.thread_url : null,
-      // Rebuilt, so keys the window didn't mean to send never reach the store.
-      lines: l
-        ? {
-            path: l.path,
-            line: l.line,
-            side: l.side,
-            ...(l.start && { start: { line: l.start.line, side: l.start.side } }),
-            head: l.head,
-            ...(l.note && { note: true }),
-          }
-        : null,
-      answer: null,
-    };
-    const line = askLine(a, this.askAbout(a.item_id));
-    const started = !!this.coordinator.saved();
-    // effect-bridge(C5c): ask yields it; what cmd.exe can't pass throws its BadRequest, a 400 as before
-    const told = Effect.runSync(Effect.mapError(this.coordinator.tell(line), (e) => new BadRequest({ message: e.message })));
-    this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
-    this.changed();
-    // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
-    if (!started) {
-      await Effect.runPromise(told); // effect-bridge(C5c): ask yields it
-      if (!this.coordinator.saved()) {
+  // What cmd.exe can't pass is refused before anything is kept; once told, the ask and its rollback run to the end.
+  ask(b: {
+    text: string;
+    item_id?: string;
+    thread_id?: string;
+    thread_url?: string;
+    lines?: AskLines;
+  }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
+      const item = b.item_id ? this.snapshot().entries.get(yield* this.resolve(b.item_id))!.item : null;
+      const bad = (message: string) => new BadRequest({ message });
+      const l = b.lines;
+      if (l) {
+        if (!item) return yield* bad("lines are on a PR's diff: send its item_id");
+        if (item.kind !== "pr") return yield* bad("lines are on a PR's diff");
+        if (b.thread_id || b.thread_url) return yield* bad("an ask is on a thread or on lines, not both");
+        if (!/^[0-9a-f]{40}$/.test(l.head)) return yield* bad("lines need head: the 40-character commit they were read at");
+        // desk_ask hands the name to a shell, quoted: what could break a line or read as something else is refused, not stripped.
+        // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+        const odd = /[\u0000-\u001f\u2028\u2029]/.test(l.path) || l.path.replaceAll(INVISIBLE, "") !== l.path;
+        if (!l.path || l.path.length > 1000 || odd) return yield* bad("lines need path: a file name with no control characters");
+      }
+      if (b.thread_url && !/^https:\/\/github\.com\/\S+$/.test(b.thread_url)) return yield* bad("thread_url must be a GitHub URL");
+      const a: Ask = {
+        id: randomBytes(4).toString("hex"),
+        at: this.now().toISOString(),
+        text: yield* this.paragraphs(b.text, "ask", MAX_ASK),
+        item_id: item?.id ?? null,
+        thread_id: item && b.thread_id ? b.thread_id : null,
+        thread_url: item && b.thread_url ? b.thread_url : null,
+        // Rebuilt, so keys the window didn't mean to send never reach the store.
+        lines: l
+          ? {
+              path: l.path,
+              line: l.line,
+              side: l.side,
+              ...(l.start && { start: { line: l.start.line, side: l.start.side } }),
+              head: l.head,
+              ...(l.note && { note: true }),
+            }
+          : null,
+        answer: null,
+      };
+      const line = askLine(a, this.askAbout(a.item_id));
+      const started = !!this.coordinator.saved();
+      const send = Effect.gen({ self: this }, function* () {
+        const told = yield* this.coordinator.tell(line).pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
+        this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
+        this.changed();
+        // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
+        if (started) return a;
+        yield* told;
+        if (this.coordinator.saved()) return a;
         this.coordinator.untell(line);
         this.store.set(
           "asks",
           this.asks().filter((x) => x.id !== a.id),
         );
         this.changed();
-        throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), {
-          cause: this.coordinator.failure,
-        });
-      }
-    }
-    return a;
+        return yield* this.didntStart();
+      });
+      return yield* Effect.uninterruptible(send);
+    });
   }
 
   // Questions asked before options said what follows had plain options and no links.

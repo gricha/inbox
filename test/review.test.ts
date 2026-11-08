@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect, Fiber } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
 import {
@@ -1095,7 +1095,11 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
   const notify = (_t: string, body: string) => {
     notes.push(body);
   };
-  const desk = new Desk({ home, github: gh, now: () => NOW, notify, log: () => {}, review: f.deps, writer: opts.writer });
+  const logs: string[] = [];
+  const log = (m: string) => {
+    logs.push(m);
+  };
+  const desk = new Desk({ home, github: gh, now: () => NOW, notify, log, review: f.deps, writer: opts.writer });
   await run(desk.init());
   // Waits out a sync already running (approve starts one), then runs a fresh one.
   const sync = async () => {
@@ -1109,6 +1113,7 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
     f,
     sync,
     notes,
+    logs,
     cleanup: () => {
       desk.stop();
       fs.rmSync(home, { recursive: true });
@@ -1279,6 +1284,10 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
     (await run(t.desk.reviewView(first!))).ai_error ?? "",
     /^Claude Code isn't logged in/,
     "a PR that was tried shows its own error",
+  );
+  assert.ok(
+    t.logs.includes(`AI review of ${first} failed: ${LOGGED_OUT} (401 OAuth access token has expired)`),
+    "told by its tag: the login's own words, for the log",
   );
   assert.equal((await run(t.desk.reviewView("api#4"))).ai_error, null, "not on one it wouldn't review on its own (merged)");
 
@@ -1531,6 +1540,42 @@ test("AI reviews run in the queue's order: Now, then Today from the top, so the 
     order,
     "each on the queue once reviewed, in that order",
   );
+});
+
+test("an AI review runs to the end when the one asking leaves; a bug in it is its error; the desk stopping ends it and keeps nothing", async () => {
+  const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
+  await t.sync();
+  const gone = new AbortController();
+  const left = Effect.runPromiseExit(t.desk.aiReview("api#1"), { signal: gone.signal });
+  await flush();
+  assert.deepEqual(t.f.started, ["acme/api#1"]);
+  gone.abort();
+  const cut = await left;
+  assert.ok(Exit.isFailure(cut) && Cause.hasInterruptsOnly(cut.cause));
+  assert.equal(t.desk.generating.size, 1, "still running for whoever asks next");
+  await t.f.release("acme/api#1");
+  assert.equal(t.desk.generating.size, 0);
+  assert.equal(runSync(t.desk.item("api#1")).ai?.summary, "Review of acme/api#1", "and kept");
+
+  const generate = t.f.deps.generate.bind(t.f.deps);
+  t.f.deps.generate = () => Effect.die(new TypeError("x is undefined"));
+  const bug = await failure(t.desk.aiReview("api#1", true));
+  assert.deepEqual([bug._tag, bug.message], ["Upstream", "x is undefined"]);
+  assert.equal(t.desk.aiErrors.get("acme/api#1")?.message, "x is undefined", "its ai_error, as a failure's is");
+  t.f.deps.generate = generate;
+
+  const forced = Effect.runPromiseExit(t.desk.aiReview("api#1", true));
+  await flush();
+  assert.equal(t.f.started.length, 2);
+  t.desk.aiErrors.clear();
+  const failures = t.desk.aiFailures;
+  t.cleanup();
+  const stopped = await forced;
+  assert.ok(Exit.isFailure(stopped) && Cause.hasInterruptsOnly(stopped.cause), "its caller ends with it");
+  assert.deepEqual([t.desk.generating.size, t.desk.aiErrors.size, t.desk.aiFailures], [0, 0, failures], "nothing kept");
+  const after = await Effect.runPromiseExit(t.desk.generate("acme/api#1"));
+  assert.ok(Exit.isFailure(after) && Cause.hasInterruptsOnly(after.cause));
+  assert.equal(t.f.started.length, 2, "a stopped desk starts no claude");
 });
 
 test("reviews are for PRs: an issue answers 400", async () => {
