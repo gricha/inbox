@@ -20,7 +20,7 @@ import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond, startServer } from "../src/server.ts";
 import { idle, myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
-import { unusedPort } from "./helpers/fake-api.ts";
+import { connectTo, unusedPort } from "./helpers/fake-api.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
@@ -116,6 +116,16 @@ test("an /api path the desk doesn't route is a NotFound, and a window-only delet
   t.cleanup();
 });
 
+// A spawn of a gh that isn't there forks a child that holds the desk's socket until it exits: how a connection ends once nothing answers, or after 2 s.
+async function whenLetGo(port: number): Promise<string> {
+  let ended = await connectTo(port);
+  for (let i = 0; i < 200 && (ended === "connected" || ended === "ECONNRESET"); i++) {
+    await sleep(10);
+    ended = await connectTo(port);
+  }
+  return ended;
+}
+
 test("startServer rejects with what stopped the desk, in its words: its port in use, or GitHub's viewer when gh isn't there", async (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-start-"));
   fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false }));
@@ -143,8 +153,10 @@ test("startServer rejects with what stopped the desk, in its words: its port in 
   process.env.PATH = home;
   delete process.env.GITHUB_TOKEN;
   const free = await unusedPort();
-  for (const _ of [1, 2])
+  for (const _ of [1, 2]) {
     await assert.rejects(startServer({ port: free, home, log: () => {} }), { message: /GitHub CLI \(gh\) not found/ });
+    assert.equal(await whenLetGo(free), "ECONNREFUSED");
+  }
 });
 
 test("startServer's close lets go of its port: a second desk on the same port and home starts", async (c) => {
@@ -165,21 +177,10 @@ test("startServer's close lets go of its port: a second desk on the same port an
   process.env.PATH = home; // no gh: its syncs fail at once, and nothing reaches GitHub
   delete process.env.GITHUB_TOKEN;
   const port = await unusedPort();
-  const refusedAt = () =>
-    new Promise<string>((resolve) => {
-      const s = net.connect(port, "127.0.0.1");
-      s.once("connect", () => {
-        s.destroy();
-        resolve("connected");
-      });
-      s.once("error", (e: NodeJS.ErrnoException) => {
-        resolve(e.code ?? "error");
-      });
-    });
   const srv = await startServer({ port, home, log: () => {} });
-  assert.equal(await refusedAt(), "connected");
+  assert.equal(await connectTo(port), "connected");
   await srv.close();
-  assert.equal(await refusedAt(), "ECONNREFUSED");
+  assert.equal(await whenLetGo(port), "ECONNREFUSED");
   const again = await startServer({ port, home, log: () => {} });
   await again.close();
 });

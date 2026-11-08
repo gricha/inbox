@@ -1,7 +1,7 @@
 // A tiny node:http stand-in for the desk API, with canned data. Sets DESK_PORT for the client.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { checkSetting, DEFAULTS, SECTIONS, SETTINGS } from "../../src/settings.ts";
 import type {
   AskPlace,
@@ -496,11 +496,27 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
   return api;
 }
 
+// How a connection to the port on 127.0.0.1 ends: "connected", or its error's code.
+export function connectTo(port: number): Promise<string> {
+  return new Promise((r) => {
+    const s = connect(port, "127.0.0.1");
+    s.once("connect", () => {
+      s.destroy();
+      r("connected");
+    });
+    s.once("error", (e: NodeJS.ErrnoException) => {
+      r(e.code ?? "error");
+    });
+  });
+}
+
 // A free port below every ephemeral range (Linux's starts at 32768), so no listen(0) or outgoing connection takes it from a desk.
 export async function unusedPort(): Promise<number> {
   const first = 20_000 + (process.pid % 10_000); // parallel test files start apart
   for (let i = 0; i < 12_000; i++) {
     const port = 20_000 + ((first - 20_000 + i) % 12_000);
+    // macOS lets the probe below listen on 127.0.0.1 while another app listens on every address (Steam on 27036), which answers once a desk lets go.
+    if ((await connectTo(port)) !== "ECONNREFUSED") continue;
     const s = createServer();
     const free = await new Promise<boolean>((r) => {
       s.once("error", () => {
