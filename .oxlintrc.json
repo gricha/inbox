@@ -38,7 +38,7 @@
     "unicorn/no-negated-condition": "off",
     "unicorn/prefer-top-level-await": "off"
   },
-  "ignorePatterns": ["node_modules", "web/dist", "release", "research", "integrations"],
+  "ignorePatterns": ["node_modules", "web/dist", "release", "research", "integrations", ".claude/workflows"],
   "overrides": [
     {
       "files": ["test/**", "web/test/**", "scripts/smoke-*.ts"],

@@ -123,6 +123,8 @@ The kit's information architecture, in the desk's terms. It names no state, owne
 
 A handoff (a kit, a mock-up, a review of the window) is input, not law: it was likely made without this repository.
 
+The `design-handoff` workflow (`.claude/workflows/design-handoff.js`, args `{ kit, notes? }`) does steps 1 to 4: it reads the handoff as untrusted data, maps each recommendation by area and returns the brief and the questions for the owner.
+
 1. Read all of it, then AGENTS.md's product principle and Rules, ui.md and this file.
 2. Map every recommendation onto what the desk really has: its pages, buckets and parts, a card's fields, its actions and their words. Write the mapping down, as the table above. Never invent a state, an owner, a progress or an action: where the handoff assumes one, map it honestly to what exists, or leave it out.
 3. List the conflicts, with the product principle (one line a row, no chips, every action a click named in words, no key named in the window), with the Rules, and with what already works. Put each to the owner as a decision, its options and what each costs; never settle one yourself. Write the answers into the brief.
@@ -133,6 +135,8 @@ A handoff (a kit, a mock-up, a review of the window) is input, not law: it was l
 ## Checking a design change
 
 A design change is never done from code alone: look at the shots yourself, light and dark, and say what you didn't verify.
+
+The `design-check` workflow (`.claude/workflows/design-check.js`, args `{ base?, only?, dir? }`, `dir` for another checkout) runs the list below: the shots, a critic per group of states, a script for what the shots don't check, the diff against the design rules, and a skeptic per finding. Look at the shots yourself as well.
 
 - **The shots**: `npm run shots` drives Chrome against the mock, so the data is the same on every run (it syncs only when a shot asks, never on a timer, so a slow run shows what a quick one does), and writes `.shots/` (`index.html` shows them all). Each shot runs in light and dark at wide 1280×820, mid 900×700, min 780×600 and mac 1280×820 (the macOS app's shell, traffic lights and all); xl 1440×900 only for the shots that ask for it (`queue`, `settings-github`, the `beside-*` ones); and the `zoom-*` ones (`zoom-queue`, `zoom-review`, `zoom-inquiry`, `zoom-settings`) are a 1280×820 window at 200 %, 640×410 at 2x, and `zoom-512` the Inbox at 250 % (512×328), its sidebar's row scrolling to Settings. Each theme has `theme-<id>`, `-review`, `-ask` and `-inflight` at the four main sizes and `-settings` at wide. While iterating, `npm run shots -- --only queue,beside` runs the shots whose names contain one of those words; `SHOTS_MOCK_PORT` and `SHOTS_VITE_PORT` keep two checkouts' runs apart.
 - **What to look at**: for a change to the shell, the rows or the palette, run them all, then look at `queue`, `review`, `beside-review`, `beside-folded`, `inquiry` and `settings-github` at each size and the `zoom-*` ones, in light and dark, and `theme-<id>` and `theme-<id>-review` for at least three other themes (a light one, a dark one and one with its own diff colours: Sand, Slate and Gruvbox, say).
