@@ -60,6 +60,32 @@ query = "x"
   assert.ok(errors.some((e) => e.message.includes("duplicate board id")));
 });
 
+test("only GitHub's boards need a search query, and a board that names no source parses as before", () => {
+  const { errors } = parseConfig(`
+[[spaces]]
+id = "w"
+[[boards]]
+id = "a"
+source = "notes"
+[[boards]]
+id = "b"
+source = "github"
+[[boards]]
+id = "c"
+source = 1
+`);
+  assert.deepEqual(
+    errors.map((e) => `${e.path}: ${e.message}`),
+    [
+      "boards[1].queries: needs at least one GitHub search query",
+      "boards[2].source: must be a string",
+      "boards[2].queries: needs at least one GitHub search query",
+    ],
+  );
+  const board = parseConfig(`[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nquery = "x"\n`).loaded!.config.boards[0]!;
+  assert.equal("source" in board, false);
+});
+
 test("settings left in config.toml are ignored with a warning pointing to Settings", () => {
   const { loaded, errors, warnings } = parseConfig(
     `poll_seconds = 5\n[signals]\nbots = ["x"]\n[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nquery = "x"\n`,

@@ -117,15 +117,30 @@ export function parseConfig(
   rawBoards.forEach((b, i) => {
     const path = `boards[${i}]`;
     const t = table(b, path);
-    known(t, path, ["id", "space", "name", "query", "queries", "filter", "priority", "rules", "default", "default_why", "sort", "caps"]);
+    known(t, path, [
+      "id",
+      "space",
+      "name",
+      "source",
+      "query",
+      "queries",
+      "filter",
+      "priority",
+      "rules",
+      "default",
+      "default_why",
+      "sort",
+      "caps",
+    ]);
     const id = str(t.id, `${path}.id`, "");
     if (!id) err(`${path}.id`, "is required");
     else if (boards.some((x) => x.id === id)) err(`${path}.id`, `duplicate board id "${id}"`);
     else if (!/^[A-Za-z0-9_-]+$/.test(id)) err(`${path}.id`, "use letters, digits, - and _ only");
     const space = str(t.space, `${path}.space`, spaces[0]?.id ?? "");
     if (!spaces.some((s) => s.id === space)) err(`${path}.space`, `no space with id "${space}"`);
+    const source = t.source === undefined ? undefined : str(t.source, `${path}.source`, "github");
     const queries = [...strs(t.query, `${path}.query`), ...strs(t.queries, `${path}.queries`)];
-    if (queries.length === 0) err(`${path}.queries`, "needs at least one GitHub search query");
+    if (queries.length === 0 && (source ?? "github") === "github") err(`${path}.queries`, "needs at least one GitHub search query");
     const rawRules = t.rules === undefined ? [] : Array.isArray(t.rules) ? t.rules : (err(`${path}.rules`, "must be a list"), []);
     const rules: Rule[] = rawRules.map((r, j) => {
       const rp = `${path}.rules[${j}]`;
@@ -158,6 +173,7 @@ export function parseConfig(
       id,
       space,
       name: str(t.name, `${path}.name`, id),
+      ...(source !== undefined && { source }),
       queries,
       filter: filter === "" ? undefined : filter,
       priority: priority === "" ? undefined : priority,

@@ -1,12 +1,26 @@
 // A connector turns one source (GitHub today) into item snapshots and events. The desk runs every connector it has.
 import type { Effect } from "effect";
+import type { LoadedConfig } from "../config.ts";
 import type { NotFound, Upstream } from "../errors.ts";
+import type { CompiledBoard } from "../rules.ts";
 import type { ActivityEvent, ConnectorStatus, Item } from "../types.ts";
 
 export type NewEvent = Omit<ActivityEvent, "seq" | "source">;
 
+// A resolved item shows on its boards this long, under Resolved, still listed or kept by its source.
+export const KEEP_RESOLVED = 3 * 24 * 3_600_000;
+
+// What one of a source's boards lists.
+export interface Members {
+  ids: ReadonlySet<string>;
+  kept: ReadonlySet<string>; // listed only to show as resolved
+  queries: string[]; // what it reads (GitHub's searches), shown with the board
+  unfetched: string[]; // of those, the ones not read yet
+  error?: string; // what the last read of one failed with
+}
+
 export interface Connector {
-  readonly id: string; // "github"; the `source` of its events
+  readonly id: string; // "github"; the `source` of its events and of its boards
   readonly name: string; // "GitHub"
   start(): void; // its loops: the full reconcile and the cheap change feed
   stop(): void;
@@ -18,4 +32,5 @@ export interface Connector {
   // The held ids `text` names, and `id` when it names one exactly (what fetchOne reads; a short ref doesn't); null: not its ref.
   refOf(text: string, held: readonly string[]): { held: string[]; id?: string } | null;
   fetchOne(id: string): Effect.Effect<string, Upstream | NotFound>; // reads the item `id` names and stores it; answers the id it's stored under
+  boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members; // scope: its space's; loaded: its config, which a preview's isn't the desk's
 }

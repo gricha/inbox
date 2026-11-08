@@ -205,6 +205,7 @@ export interface BoardConfig {
   id: string;
   space: string;
   name: string;
+  source?: string; // the connector whose items it lists ("notes"); none: GitHub's
   queries: string[]; // GitHub search; the space scope is appended. {me} and {close_authors} expand.
   filter?: string;
   priority?: string; // number expression; higher sorts first within a bucket, before `sort`

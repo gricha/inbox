@@ -28,8 +28,8 @@ import {
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
-import type { Connector, NewEvent } from "./connectors/connector.ts";
-import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
+import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connectors/connector.ts";
+import { GitHubConnector } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
 import { askedAt, owesReply, stage, verdicts } from "./stage.ts";
@@ -186,6 +186,7 @@ const ADDED: CompiledBoard = {
   rules: [],
 };
 const boardsOf = (loaded: LoadedConfig) => [...loaded.boards, ADDED];
+const NO_MEMBERS: Members = { ids: new Set(), kept: new Set(), queries: [], unfetched: [] }; // a board whose source the desk doesn't run
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
@@ -1016,9 +1017,6 @@ export class Desk {
       }
     }
 
-    const hits = this.store.hits();
-    const kept = this.store.kept();
-    const fetched = this.store.queries();
     // A recently resolved item still in a search (you approved: reviewed-by:@me) passes its board's filter, to show under Resolved.
     // Only one that says when: updated_at moves with every bot or CI touch, so it would never age out.
     const keepSince = new Date(now.getTime() - KEEP_RESOLVED).toISOString();
@@ -1067,9 +1065,10 @@ export class Desk {
         }
       : undefined;
     for (const board of boardsOf(loaded)) {
-      const queries = this.gh.queriesFor(loaded, board);
-      const ids = new Set<string>();
-      for (const q of queries) for (const id of hits.get(q) ?? []) ids.add(id);
+      const scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "";
+      const source = this.connectors.find((c) => c.id === (board.config.source ?? "github"));
+      const m = source?.boardIds(board, scope, loaded) ?? NO_MEMBERS;
+      const ids = new Set(m.ids);
       // A coordinator's desk_add too, after you act on it, so it doesn't vanish once its pin stops counting as yours.
       if (board === ADDED)
         for (const [id, by] of pins)
@@ -1077,7 +1076,7 @@ export class Desk {
       // A kept item is only there to show as resolved.
       const list = [...ids]
         .map((id) => entries.get(id))
-        .filter((e): e is Entry => e !== undefined && (!kept.has(e.item.id) || e.resolved !== null));
+        .filter((e): e is Entry => e !== undefined && (!m.kept.has(e.item.id) || e.resolved !== null));
       const result = classify(
         board,
         list.map((e) => ({
@@ -1092,15 +1091,14 @@ export class Desk {
           floor_why: auto.get(e.item.id),
           // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
           active: e.status === "active" && !e.resolved && !e.inflight,
-          kept: kept.has(e.item.id) || recent(e),
+          kept: m.kept.has(e.item.id) || recent(e),
           ai: call(e),
         })),
         judge,
         this.settings["queue.quiet_days"],
       );
       if (board === ADDED) for (const [id, p] of result.placements) p.why = auto.get(id) ?? p.why;
-      const error = queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined;
-      boards.set(board.config.id, { result, queries, unfetched: queries.filter((q) => !fetched.has(q)), error });
+      boards.set(board.config.id, { result, queries: m.queries, unfetched: m.unfetched, error: m.error });
       for (const [id, p] of result.placements) {
         const e = entries.get(id)!;
         if (e.status !== "active" || e.resolved || e.inflight) continue;
@@ -2863,7 +2861,6 @@ export class Desk {
     if (!loaded) return { errors, warnings, boards: [] };
     const cur = this.loaded ? this.snapshot() : null;
     const next = this.compute(loaded, -1);
-    const fetched = this.store.queries();
     return {
       errors,
       warnings,
@@ -2885,7 +2882,7 @@ export class Desk {
           counts,
           before: before ? countsOf(before.result) : null,
           moved: moved.slice(0, 50),
-          unfetched: after.queries.filter((q) => !fetched.has(q)),
+          unfetched: after.unfetched,
         };
       }),
     };

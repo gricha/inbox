@@ -15,14 +15,13 @@ import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
-import type { Connector, NewEvent } from "./connector.ts";
+import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
 import { botCheck } from "../signals.ts";
 import { report } from "../sentry.ts";
 
 const HOUR = 3_600_000;
 const MAX_QUERY = 256; // GitHub search rejects longer queries
-export const KEEP_RESOLVED = 3 * 24 * HOUR; // an item that left every search stays on its boards this long, under Resolved
 const FEED_RETRY = 10 * 60_000;
 // Notification reasons that mean an item the desk doesn't have yet may belong on it.
 const FRESH_REASONS = new Set(["review_requested", "mention", "team_mention", "assign", "author"]);
@@ -233,9 +232,26 @@ export class GitHubConnector implements Connector {
     return out === base ? null : out;
   }
 
-  queriesFor(loaded: LoadedConfig, board: CompiledBoard): string[] {
-    const scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "";
+  queriesFor(
+    loaded: LoadedConfig,
+    board: CompiledBoard,
+    scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "",
+  ): string[] {
     return board.config.queries.map((q) => this.expandQuery(q, scope, loaded)).filter((q): q is string => q !== null);
+  }
+
+  // Its searches' last hits. `kept` is every search's, not this board's: an unresolved item one keeps is on no board, Added's included.
+  boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members {
+    const queries = this.queriesFor(loaded, board, scope);
+    const hits = this.desk.store.hits(queries);
+    const fetched = this.desk.store.queries();
+    return {
+      ids: new Set(queries.flatMap((q) => [...(hits.get(q) ?? [])])),
+      kept: this.desk.store.kept(),
+      queries,
+      unfetched: queries.filter((q) => !fetched.has(q)),
+      error: queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined,
+    };
   }
 
   // ---------------------------------------------------------------- reconcile: every board search, then details
@@ -289,7 +305,8 @@ export class GitHubConnector implements Connector {
       if (now.getTime() - (Date.parse(desk.ctx?.areas_at ?? "") || 0) > 24 * HOUR) yield* this.refreshAreas();
       const loaded = desk.loaded!; // reconcile checked it, and a reload never unsets it
       const me = desk.me().toLowerCase();
-      const queries = [...new Set(loaded.boards.flatMap((b) => this.queriesFor(loaded, b)))];
+      const own = loaded.boards.filter((b) => (b.config.source ?? this.id) === this.id);
+      const queries = [...new Set(own.flatMap((b) => this.queriesFor(loaded, b)))];
       const listed = desk.store.hits(); // what each search returned last time
       const found = new Map<string, { ids: string[]; total: number }>();
       const hits = new Map<string, SearchHit>();

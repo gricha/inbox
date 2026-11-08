@@ -208,9 +208,12 @@ export class Store {
       .run(query, now, error);
   }
 
-  hits(): Map<string, Set<string>> {
+  hits(queries?: readonly string[]): Map<string, Set<string>> {
     const out = new Map<string, Set<string>>();
-    for (const r of this.db.prepare("SELECT query, item_id FROM hits").all()) {
+    const rows = queries
+      ? this.db.prepare("SELECT query, item_id FROM hits WHERE query IN (SELECT value FROM json_each(?))").all(JSON.stringify(queries))
+      : this.db.prepare("SELECT query, item_id FROM hits").all();
+    for (const r of rows) {
       const q = r.query as string;
       if (!out.has(q)) out.set(q, new Set());
       out.get(q)!.add(r.item_id as string);

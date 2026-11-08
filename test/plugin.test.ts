@@ -1,8 +1,10 @@
 // A source that isn't GitHub, held in memory (ids notes:1, notes:2…): the guard that the core stops assuming GitHub.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { Effect } from "effect";
-import type { Connector } from "../src/connectors/connector.ts";
+import type { Connector, Members } from "../src/connectors/connector.ts";
 import type { Desk } from "../src/desk.ts";
 import { NotFound } from "../src/errors.ts";
 import type { ConnectorStatus, Head } from "../src/types.ts";
@@ -52,6 +54,11 @@ class Notes implements Connector {
       this.desk.store.putItems([note], this.desk.now().toISOString());
       return Effect.succeed(note.id);
     });
+  }
+
+  // A notes board lists every note.
+  boardIds(): Members {
+    return { ids: new Set(this.notes.map((n) => n.id)), kept: new Set(), queries: [], unfetched: [] };
   }
 
   // Nothing to sync: its notes are in memory.
@@ -104,4 +111,45 @@ test("a note's ref is its source's: the desk holds one by fetching it from there
   assert.equal(await run(t.desk.hold(note.id)), note.id);
   assert.deepEqual(t.desk.store.itemsById([note.id]).get(note.id), note, "fetched from its source and held whole");
   // Resolving it now would recompute the queue, which still reads every item as GitHub's.
+});
+
+// The notes board's query is GitHub's words, which it doesn't read: GitHub would answer it with acme/api#1.
+const boards = `[[spaces]]
+id = "acme"
+name = "acme"
+scope = "org:acme"
+
+[[boards]]
+id = "review"
+space = "acme"
+name = "PRs to review"
+queries = ["is:pr is:open review-requested:@me"]
+default = "today"
+
+[[boards]]
+id = "notes"
+space = "acme"
+name = "Notes"
+source = "notes"
+queries = ["is:open review-requested:@me label:notes"]
+default = "today"
+`;
+
+test("a board lists only its source's items: a notes board the notes, which GitHub's boards don't, and GitHub doesn't search it", async (c) => {
+  const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  fs.writeFileSync(path.join(t.home, "config.toml"), boards);
+  runSync(t.desk.reloadConfig());
+  const notes = new Notes(t.desk);
+  t.desk.connectors.push(notes);
+  // What a board places is still read as GitHub's, so this note carries GitHub's fields under its own id.
+  const note = { ...makeItem({ kind: "issue", number: 1 }), ...notes.write("Call Ann about the release") };
+  t.desk.store.putItems([note], note.updated_at);
+  await run(t.desk.sync());
+
+  const listed = (board: string) => [...t.desk.snapshot().boards.get(board)!.result.placements.keys()];
+  assert.deepEqual(listed("notes"), [note.id]);
+  assert.deepEqual(listed("review"), [reviewAsk(1).id]);
+  assert.deepEqual(runSync(t.desk.board("notes")).board.queries, [], "its source's, not GitHub's");
+  assert.ok(![...t.desk.store.queries().keys()].some((q) => q.includes("label:notes")), "GitHub searches its own boards only");
 });
