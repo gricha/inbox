@@ -1,5 +1,5 @@
-// This device's storage, which can be off (a private window, blocked site data): a read then finds nothing, and what's
-// written holds until the window closes.
+// This device's storage, which can be off (a private window, blocked site data): a read then finds nothing and a write
+// is dropped, so a choice lasts only as long as this window's state.
 import { Effect } from "effect";
 
 const area = (session: boolean) => (session ? sessionStorage : localStorage);

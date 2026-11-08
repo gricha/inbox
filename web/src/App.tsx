@@ -828,7 +828,7 @@ export function App() {
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
     const write = api.ready(c.id, ask).pipe(
       Effect.as({ text: `Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub` }),
-      Effect.catchTag("ReviewersNotAsked", (e) => Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true })),
+      Effect.catchTag("DeskReviewersNotAsked", (e) => Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true })),
     );
     return finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, write);
   }

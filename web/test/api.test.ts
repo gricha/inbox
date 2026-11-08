@@ -53,7 +53,7 @@ test("a refusal with a tag is decoded by its tag, its words verbatim", async () 
 
   refusing(502, { error: "Marked it ready, but GitHub didn't ask for the reviews: boom", tag: "ReviewersNotAsked" });
   const half = await failure(api.ready("acme/api#1", { users: ["u"], teams: [] }));
-  assert.equal(half._tag, "ReviewersNotAsked");
+  assert.equal(half._tag, "DeskReviewersNotAsked");
   assert.equal(half.message, "Marked it ready, but GitHub didn't ask for the reviews: boom");
 
   refusing(404, { error: "unknown item acme/api#9", tag: "NotFound" });
@@ -180,11 +180,24 @@ test("runUi: an interrupted read aborts its request and says nothing", async (t)
         fail(new DOMException("aborted", "AbortError"));
       });
     });
+  // An abort that turned into a failure would reach a load with no guard against a late answer (Policy, Rules, Automations).
+  let failed = 0;
   const stop = new AbortController();
-  runUi(api.queue().pipe(Effect.ignore), { signal: stop.signal });
+  runUi(
+    api.queue().pipe(
+      Effect.match({
+        onFailure: () => {
+          failed++;
+        },
+        onSuccess: () => {},
+      }),
+    ),
+    { signal: stop.signal },
+  );
   stop.abort(); // the effect's cleanup
   assert.equal(signal?.aborted, true);
   await Sentry.flush(500);
+  assert.equal(failed, 0);
   assert.equal(logged.mock.callCount(), 0);
   assert.equal(events.length, 0);
 });

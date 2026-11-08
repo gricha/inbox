@@ -57,8 +57,9 @@ class DeskConflict extends Data.TaggedError("DeskConflict")<{
   readonly candidates?: readonly string[];
 }> {}
 
-// Ready for review landed on GitHub, asking the reviewers didn't: half done, so the item stays gone.
-class ReviewersNotAsked extends Data.TaggedError("ReviewersNotAsked")<{ readonly message: string }> {}
+// Ready for review landed on GitHub, asking the reviewers didn't (the wire's ReviewersNotAsked): half done, so the item
+// stays gone.
+class DeskReviewersNotAsked extends Data.TaggedError("DeskReviewersNotAsked")<{ readonly message: string }> {}
 
 // Any other refusal (what you sent, not found, GitHub refused, a bug on the desk): its words, verbatim, in a toast.
 class DeskRequestFailed extends Data.TaggedError("DeskRequestFailed")<{
@@ -75,7 +76,7 @@ class DeskBadResponse extends Data.TaggedError("DeskBadResponse")<{ readonly sta
 }
 
 export type ApiError =
-  DeskUnreachable | DeskStarting | DeskConfigBroken | DeskConflict | ReviewersNotAsked | DeskRequestFailed | DeskBadResponse;
+  DeskUnreachable | DeskStarting | DeskConfigBroken | DeskConflict | DeskReviewersNotAsked | DeskRequestFailed | DeskBadResponse;
 
 // ---------------------------------------------------------------- this window's own
 
@@ -111,7 +112,7 @@ function refusal(status: number, body: Partial<ErrorBody> | null, statusText: st
     return (body?.reason ?? (message.includes("config") ? "config" : "starting")) === "config"
       ? new DeskConfigBroken({ message })
       : new DeskStarting({ message });
-  if (tag === "ReviewersNotAsked") return new ReviewersNotAsked({ message });
+  if (tag === "ReviewersNotAsked") return new DeskReviewersNotAsked({ message });
   return new DeskRequestFailed({ message, status, kind: tag });
 }
 
