@@ -65,8 +65,11 @@ services, `Data.TaggedError`, the desk's own `log`.
 | `ReviewersNotAsked` | 502    | ready for review landed, asking the reviewers didn't: nothing is rolled back                                         |
 | `Unavailable`       | 503    | `reason: "starting"` (the first sync), `reason: "config"` (the rules have errors)                                    |
 
-Recoveries: `itemId` catches `NotFound` (plus the exact-id check); `hold` catches `NotFound` and lets `AmbiguousRef` and
-`Unavailable` through; `inquiryView` turns any `DeskHttpError` into `card: null`.
+Recoveries: `itemId` catches `NotFound` by its tag (plus the exact-id check); `hold` catches `NotFound` and lets
+`AmbiguousRef` and `Unavailable` through; `inquiryView` turns any `DeskHttpError` into `card: null`. A file the desk
+writes or reads for a request (`replaceFile`, config.toml, policy.md, settings.json) fails with `FsError` in Node's
+words, which a route answers as a logged 500, as before. The 409 of `putPolicy`'s and `putConfig`'s stale base now
+carries `Stale` as its tag (the legacy answer said `Conflict`); readers already read any 409 there as stale.
 
 Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
 `wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus` and `askAbout` with broken rules
@@ -207,14 +210,21 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
 
 ## Desk's shape
 
-- `new Desk(opts)` stays a constructor; its I/O failing (the home, `desk.db`) is a startup defect that
-  `startServer`'s caller shows. A `settings.json` it can't read is a problem on the Settings page, as before: the
-  constructor and the desktop app read it with `readSettings`, which folds `loadSettings`' `FsError` into the errors. `init()` returns an Effect. `stop()` stays synchronous: it interrupts the runner's
-  fibers, unwatches the files and closes the store. `close()` is an Effect that also waits for `stopAll()`.
-- Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `compute`) assert the config
-  (`this.loaded!`, a defect); only an entry point checks it as a failure. The hooks the connectors call (`synced`,
-  `rebaseConflicts`, `handBackUnasked`, `trackBlocked`, `notifyNew`, `pumpAi`) stay `void` and never fail: a check they
-  share with a request keeps a non-failing core.
+- `new Desk(opts)` stays a constructor; its I/O failing (the home, `desk.db`) is a startup defect that `startServer`'s
+  caller shows. A `settings.json` it can't read is a problem on the Settings page: the constructor, the file's watcher
+  and the desktop app read it once with `readSettings`, which folds `loadSettings`' `FsError` into the errors and gives
+  the text it read (`null` for one it couldn't). Deliberate change, with a test: one that can't be read (a directory)
+  threw from the constructor, and from the watcher. `init()` returns an Effect. `stop()` stays synchronous: it
+  interrupts the runner's fibers, unwatches the files and closes the store. `close()` is an Effect that also waits for
+  `stopAll()`.
+- Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
+  config (`this.loaded!`, a defect); only an entry point checks it as a failure (`requireConfig`, or `resolve`, which
+  checks it first). The hooks the connectors call (`synced`, `rebaseConflicts`, `handBackUnasked`, `trackBlocked`,
+  `notifyNew`, `pumpAi`) stay `void` and never fail: a check they share with a request keeps a non-failing core
+  (`handBackUnasked` calls `sendBack`, the core `handBack` runs after validating).
+- The desk's synchronous layer (the validators, `act`, `undo`, the views, the inquiries, the policy, settings and config
+  writes) answers with Effects that have no async step, so a still-async caller can `Effect.runSync` one through a
+  marked bridge.
 - The fields tests watch stay, with their types: `coordinator.flushing` (a `Promise<void> | null` that never rejects),
   `automations.running` (a Map whose values keep `.p`), `judge.running` and `judge.timer`, the connector's `syncing`,
   `polling`, `pausedUntil` and `feedError`. A step that drops one rewrites the tests that read it.

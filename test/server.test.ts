@@ -18,6 +18,7 @@ import { DeskError, NotFound, Upstream } from "../src/errors.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond } from "../src/server.ts";
+import { myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { runSync } from "./helpers/run.ts";
 
@@ -615,4 +616,119 @@ test("a route's Effect answers a refusal with its status and tag, a client that 
   gone.abort();
   assert.equal((await waiting).status, 499, "nothing to answer, and nothing logged");
   assert.equal(logs.length, 1);
+});
+
+test("the desk's refusals answer through respond with their tag, words and status, and a body that isn't JSON is a 400", async (c) => {
+  const t = await withItems([reviewAsk(1), myPr(1, { ci: "green" }), myPr(3, { ci: "green" })], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const app = createApp(t.desk, 47823);
+  const DESK = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  const call = async (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, {
+      method,
+      headers: { "content-type": "application/json", ...headers },
+      ...(body !== undefined && { body: typeof body === "string" ? body : JSON.stringify(body) }),
+    });
+    return [res.status, await res.json()];
+  };
+  const no = (tag: string, error: string) => ({ error, tag });
+  assert.deepEqual(await call("GET", "/api/item"), [400, no("BadRequest", "missing ?id=")]);
+  assert.deepEqual(await call("GET", "/api/item?id=nope%2399"), [404, no("NotFound", 'no item "nope#99" on the desk')]);
+  assert.deepEqual(await call("GET", "/api/item?id=what"), [
+    404,
+    no("NotFound", `can't read "what"; use owner/repo#123, repo#123 or a GitHub URL`),
+  ]);
+  const [status, ambiguous] = (await call("GET", "/api/item?id=%231")) as [number, { candidates: string[] }];
+  assert.deepEqual(
+    [status, { ...ambiguous, candidates: ambiguous.candidates.toSorted() }],
+    [409, { error: '"#1" matches 2 items', tag: "AmbiguousRef", candidates: ["acme/api#1", "acme/web#1"] }],
+  );
+  assert.deepEqual(await call("GET", "/api/boards/nope"), [404, no("NotFound", 'no board "nope"')]);
+  assert.deepEqual(await call("POST", "/api/act", "nope"), [400, no("BadRequest", "the body must be a JSON object")], "it was a 500");
+  assert.deepEqual(await call("POST", "/api/act", {}), [400, no("BadRequest", "need { id, action }")]);
+  assert.deepEqual(await call("POST", "/api/act", { id: "web#3", action: "inflight" }), [
+    403,
+    no("Forbidden", "hand a PR off for merge from the desk's window"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/act", { id: "api#1", action: "snooze", until: "someday" }), [
+    400,
+    no("BadRequest", `can't read snooze time "someday"; use 1h, 3h, 2d, tomorrow, monday, activity or a future ISO time`),
+  ]);
+  assert.deepEqual(await call("POST", "/api/act", { id: "web#3", action: "takeback" }), [
+    409,
+    no("Conflict", "acme/web#3 isn't in Merging"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/act", { id: "api#1", action: "nope" }), [400, no("BadRequest", 'unknown action "nope"')]);
+  assert.deepEqual(await call("POST", "/api/undo", "null"), [404, no("NotFound", "nothing to undo")], "JSON null reads as {}");
+  assert.deepEqual(await call("POST", "/api/inflight/web%233/note", { text: "rebasing" }), [
+    409,
+    no("Conflict", "acme/web#3 isn't one of your open PRs in Merging"),
+  ]);
+  assert.equal((await call("POST", "/api/act", { id: "web#3", action: "inflight" }, DESK))[0], 200);
+  assert.deepEqual(await call("POST", "/api/inflight/web%233/note", { text: " ‮ " }), [400, no("BadRequest", "the note is empty")]);
+  assert.deepEqual(await call("POST", "/api/inflight/web%233/handback", {}), [400, no("BadRequest", "need { why }")]);
+  assert.deepEqual(await call("PUT", "/api/policy", { text: "x", base: "stale" }), [
+    409,
+    no("Stale", "policy.md changed since you opened it; reload to see it, then reapply your edit"),
+  ]);
+  assert.deepEqual(await call("PUT", "/api/config", { text: "x", base: "stale" }), [
+    409,
+    no("Stale", "config.toml changed on disk since you opened it; reload to see it, then reapply your edit"),
+  ]);
+  assert.deepEqual(await call("PUT", "/api/policy", "null"), [400, no("BadRequest", "the body must be a JSON object")]);
+  assert.deepEqual(await call("PUT", "/api/settings", "[]"), [400, no("BadRequest", "the body must be a JSON object")]);
+  assert.deepEqual(await call("POST", "/api/config/preview", "{"), [400, no("BadRequest", "the body must be a JSON object")]);
+  assert.deepEqual(await call("POST", "/api/add", "[]"), [400, no("BadRequest", "need { id }: owner/repo#123 or a GitHub URL")]);
+  assert.deepEqual(await call("POST", "/api/inquiries/nope/answer", { text: "yes" }), [
+    403,
+    no("Forbidden", "answer it in the desk's window"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/inquiries/nope/answer", { text: "yes" }, DESK), [404, no("NotFound", 'no inquiry "nope"')]);
+  assert.deepEqual(
+    await call("POST", "/api/inquiries", {
+      question: "Merge it?",
+      from: "a session",
+      context: "x ".repeat(120),
+      links: [{ label: "the run", url: "http://ci.example/1" }],
+    }),
+    [400, no("BadRequest", "a link is https, not http:")],
+  );
+  assert.deepEqual(await call("POST", "/api/asks/nope/answer", { text: "done" }), [404, no("NotFound", 'no ask "nope"')]);
+  // settings.json that can't be written: Node's words, a 500 as before
+  fs.rmSync(path.join(t.home, "settings.json"));
+  fs.mkdirSync(path.join(t.home, "settings.json"));
+  const [failed, why] = (await call("PUT", "/api/settings", { set: { "notify.enabled": false } })) as [
+    number,
+    { error: string; tag: string },
+  ];
+  assert.deepEqual([failed, why.tag], [500, "Internal"]);
+  assert.match(why.error, /settings\.json/);
+});
+
+test("a desk whose config never loaded answers 503: starting until the config's errors say why, and Focus says so too", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-srv-"));
+  const cold = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    cold.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const app = createApp(cold, 47823);
+  const get = async (p: string) => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`);
+    return [res.status, await res.json()];
+  };
+  const starting = { error: "desk is starting; the first sync can take a minute", tag: "Unavailable", reason: "starting" };
+  assert.deepEqual(await get("/api/queue"), [503, starting]);
+  assert.deepEqual(await get("/api/status"), [503, starting]);
+  fs.writeFileSync(path.join(home, "config.toml"), "[[boards]]\nid = 7\n");
+  runSync(cold.reloadConfig());
+  const broken = {
+    error: `config has errors: ${cold.configErrors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+    tag: "Unavailable",
+    reason: "config",
+  };
+  assert.ok(cold.configErrors.length);
+  for (const p of ["/api/focus", "/api/queue", "/api/overview", "/api/status", "/api/inflight", "/api/item?id=web%233"])
+    assert.deepEqual(await get(p), [503, broken], `${p}: focus was a TypeError 500`);
 });

@@ -15,7 +15,6 @@ export class BadRequest extends Data.TaggedError("BadRequest")<{ readonly messag
 }
 
 // Not from here: another site, another host, or a write only the desk's own window may send.
-/** @public until C5a */
 export class Forbidden extends Data.TaggedError("Forbidden")<{ readonly message: string }> {
   get status(): 403 {
     return 403;
@@ -30,7 +29,6 @@ export class NotFound extends Data.TaggedError("NotFound")<{ readonly message: s
 }
 
 // A ref that matches more than one item: the candidates go back so the caller can pick.
-/** @public until C5a */
 export class AmbiguousRef extends Data.TaggedError("AmbiguousRef")<{
   readonly message: string;
   readonly ref: string;
@@ -49,7 +47,6 @@ export class Conflict extends Data.TaggedError("Conflict")<{ readonly message: s
 }
 
 // You changed an older version than the one there now (the policy's or rules' base, the head you approved).
-/** @public until C5a */
 export class Stale extends Data.TaggedError("Stale")<{ readonly message: string }> {
   get status(): 409 {
     return 409;
@@ -83,7 +80,6 @@ export class ReviewersNotAsked extends Data.TaggedError("ReviewersNotAsked")<{ r
 }
 
 // The desk can't answer yet: it's starting (the first sync), or its rules have errors.
-/** @public until C5a */
 export class Unavailable extends Data.TaggedError("Unavailable")<{ readonly message: string; readonly reason: "starting" | "config" }> {
   get status(): 503 {
     return 503;

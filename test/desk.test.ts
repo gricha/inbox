@@ -9,7 +9,7 @@ import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { run, runSync } from "./helpers/run.ts";
+import { failureSync, run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubAuthError, GitHubHttpError } from "../src/errors.ts";
 
@@ -318,6 +318,42 @@ test("done remembers the activity you saw: activity synced after the click still
   t.cleanup();
 });
 
+test("refs fail with tagged errors: an ambiguous one has its candidates, one the desk no longer holds still names its events", async (c) => {
+  const t = await setup([reviewAsk(1), myPr(1)]);
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const many = failureSync(t.desk.resolve("#1"));
+  assert.deepEqual(
+    [many._tag, many.message, many._tag === "AmbiguousRef" && [many.ref, [...many.candidates].sort()]],
+    ["AmbiguousRef", '"#1" matches 2 items', ["#1", ["acme/api#1", "acme/web#1"]]],
+  );
+  await assert.rejects(
+    t.desk.add("#1"),
+    (e: { _tag: string; candidates: string[] }) => e._tag === "AmbiguousRef" && e.candidates.length === 2,
+  );
+  assert.equal(runSync(t.desk.itemId("acme/gone#5")), "acme/gone#5", "an exact id: its events outlive it");
+  assert.deepEqual([failureSync(t.desk.itemId("gone#5"))._tag, failureSync(t.desk.item("acme/gone#5"))._tag], ["NotFound", "NotFound"]);
+  assert.deepEqual(
+    [failureSync(t.desk.act("api#1", "takeback"))._tag, failureSync(t.desk.act("web#1", "inflight", undefined, "agent"))._tag],
+    ["Conflict", "Forbidden"],
+  );
+  assert.equal(failureSync(t.desk.board("nope")).message, 'no board "nope"');
+});
+
+test("policy.md that can't be written fails putPolicy with FsError, in Node's words", (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  fs.mkdirSync(path.join(home, "policy.md"));
+  const desk = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    desk.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const e = failureSync(desk.putPolicy("Waiting PRs are fyi."));
+  assert.deepEqual([e._tag, e._tag === "FsError" && e.op], ["FsError", "rename"]);
+  assert.match(e.message, /policy\.md/, "Node's own message names the file");
+  assert.equal(desk.policy.text, "", "nothing changed");
+});
+
 test("undo by seq refuses to overwrite a later action on the same item", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
@@ -565,6 +601,29 @@ test("synced_at is when the sync finished; hits keep its start time", async () =
   assert.equal(t.desk.store.get("synced_at"), done.toISOString());
   assert.ok([...t.desk.store.queries().values()].every((x) => x.fetched_at === NOW.toISOString()));
   t.cleanup();
+});
+
+test("a settings.json that can't be read doesn't stop the desk: the Settings page shows it, and a save won't write over it", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  const file = path.join(home, "settings.json");
+  fs.mkdirSync(file);
+  const desk = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    desk.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  await desk.init();
+  const [problem, ...more] = desk.getSettings().errors;
+  assert.deepEqual([problem?.path, more], ["settings.json", []]);
+  assert.match(problem?.message ?? "", /^EISDIR: illegal operation on a directory/, "Node's words");
+  assert.equal(desk.settings["notify.enabled"], true, "the defaults");
+  const saved = runSync(desk.putSettings({ set: { "notify.enabled": false } }));
+  assert.deepEqual([saved.ok, saved.errors.map((e) => e.path)], [false, ["settings.json"]]);
+  assert.ok(fs.statSync(file).isDirectory(), "nothing written over it");
+  fs.rmdirSync(file);
+  runSync(desk.reloadSettings());
+  assert.deepEqual(desk.getSettings().errors, [], "gone, so no problem");
+  assert.equal(runSync(desk.putSettings({ set: { "notify.enabled": false } })).ok, true);
 });
 
 test("saving settings keeps entries in settings.json it can't use", async () => {

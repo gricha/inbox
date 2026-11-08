@@ -272,19 +272,26 @@ const REMOVED = new Set([
 ]);
 
 // What settings.json holds. Bad entries fall back to their defaults; `raw` keeps them (null if unusable) so a save doesn't drop them.
+// `text` is what was read, so a watcher can tell a change: "" for no file, null for one that couldn't be read.
 export interface SettingsFile {
   overrides: Record<string, SettingValue>;
   errors: ConfigError[];
   raw: Record<string, unknown> | null;
+  text: string | null;
 }
 
-const unusable = (message: string): SettingsFile => ({ overrides: {}, errors: [{ path: "settings.json", message }], raw: null });
+const unusable = (message: string, text: string | null): SettingsFile => ({
+  overrides: {},
+  errors: [{ path: "settings.json", message }],
+  raw: null,
+  text,
+});
 
 function settingsFrom(text: string): SettingsFile {
   const parsed = Result.try({ try: (): unknown => JSON.parse(text), catch: (e) => (e as Error).message });
-  if (Result.isFailure(parsed)) return unusable(parsed.failure);
+  if (Result.isFailure(parsed)) return unusable(parsed.failure, text);
   const raw = parsed.success;
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return unusable("must be a JSON object");
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return unusable("must be a JSON object", text);
   const overrides: Record<string, SettingValue> = {};
   const errors: ConfigError[] = [];
   for (const [k, v] of Object.entries(raw)) {
@@ -293,7 +300,7 @@ function settingsFrom(text: string): SettingsFile {
     if (err) errors.push({ path: k, message: err });
     else overrides[k] = v as SettingValue;
   }
-  return { overrides, errors, raw: raw as Record<string, unknown> };
+  return { overrides, errors, raw: raw as Record<string, unknown>, text };
 }
 
 // Reads settings.json, none yet being no overrides. Only reading it fails: what's in it is checked entry by entry.
@@ -301,13 +308,13 @@ export const loadSettings = (file: string): Effect.Effect<SettingsFile, FsError>
   Effect.suspend((): Effect.Effect<SettingsFile, FsError> =>
     fs.existsSync(file)
       ? Effect.try({ try: () => fs.readFileSync(file, "utf8"), catch: fsError("read", file) }).pipe(Effect.map(settingsFrom))
-      : Effect.succeed({ overrides: {}, errors: [], raw: {} }),
+      : Effect.succeed({ overrides: {}, errors: [], raw: {}, text: "" }),
   );
 
 // For what reads it synchronously and goes on regardless (the desk starting, the desktop app): one it can't read is a
 // problem on settings.json, like one that isn't JSON, and nothing a save may write over.
 export const readSettings = (file: string): SettingsFile =>
-  Effect.runSync(loadSettings(file).pipe(Effect.catch((e) => Effect.succeed(unusable(e.message)))));
+  Effect.runSync(loadSettings(file).pipe(Effect.catch((e) => Effect.succeed(unusable(e.message, null)))));
 
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });
 

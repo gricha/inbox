@@ -4,7 +4,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import { stopAll } from "./children.ts";
-import { BadRequest, DeskError, type ClaudeError, type CommandError } from "./errors.ts";
+import {
+  AmbiguousRef,
+  BadRequest,
+  Conflict,
+  DeskError,
+  Forbidden,
+  fsError,
+  NotFound,
+  Stale,
+  Unavailable,
+  type ClaudeError,
+  type CommandError,
+  type FsError,
+} from "./errors.ts";
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
@@ -90,6 +103,7 @@ import {
   settingsPath,
   writeSettings,
   type Settings,
+  type SettingsFile,
 } from "./settings.ts";
 
 const HOUR = 3_600_000;
@@ -198,12 +212,31 @@ interface Merging {
 const MAX_POLICY = 20_000; // it goes with every judge call
 
 // Through a symlink to the real file, swapped in whole so a watcher never reads half of it.
-function replaceFile(file: string, text: string, backup = false): void {
-  const real = fs.existsSync(file) ? fs.realpathSync(file) : file;
-  if (backup) fs.copyFileSync(real, `${real}.bak`);
-  fs.writeFileSync(`${real}.tmp`, text);
-  fs.renameSync(`${real}.tmp`, real);
-}
+const replaceFile = Effect.fnUntraced(function* (file: string, text: string, backup = false): Effect.fn.Return<void, FsError> {
+  const real = fs.existsSync(file) ? yield* Effect.try({ try: () => fs.realpathSync(file), catch: fsError("realpath", file) }) : file;
+  if (backup)
+    yield* Effect.try({
+      try: () => {
+        fs.copyFileSync(real, `${real}.bak`);
+      },
+      catch: fsError("copy", real),
+    });
+  yield* Effect.try({
+    try: () => {
+      fs.writeFileSync(`${real}.tmp`, text);
+    },
+    catch: fsError("write", `${real}.tmp`),
+  });
+  yield* Effect.try({
+    try: () => {
+      fs.renameSync(`${real}.tmp`, real);
+    },
+    catch: fsError("rename", real),
+  });
+}, Effect.uninterruptible);
+
+// What resolving a ref fails with: the rules have errors, no such item, or several.
+type RefError = Unavailable | NotFound | AmbiguousRef;
 
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Effect.Effect<PrText, FetchPrError>;
@@ -221,7 +254,7 @@ export class Desk {
   settingsOverrides: Record<string, SettingValue> = {};
   settingsRaw: Record<string, unknown> | null = {};
   settingsErrors: ConfigError[] = [];
-  settingsText = "";
+  settingsText: string | null = ""; // as last read: "" for none, null for one that couldn't be read
   now: () => Date;
   notifyFn: (title: string, body: string) => void;
   log: (msg: string) => void;
@@ -325,21 +358,20 @@ export class Desk {
       fs.writeFileSync(this.configPath, defaultConfigText({ workOrgs: orgs }));
       this.log(`wrote ${this.configPath}`);
     }
-    this.migrateSettings();
-    this.migrateRules();
-    this.readPolicy();
-    this.reloadConfig();
+    // effect-bridge(C5c): init yields them; what they fail with rejects init as before
+    Effect.runSync(Effect.all([this.migrateSettings(), this.migrateRules(), this.readPolicy(), this.reloadConfig()], { discard: true }));
     fs.watchFile(this.policyPath, { interval: 2000 }, () => {
       const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
-      if (text !== this.policy.text) this.policyChanged();
+      if (text !== this.policy.text) Effect.runSync(this.policyChanged()); // effect-bridge(C5c): it throws from the watcher as before
     });
+    // One read: one it can't read is a problem on the Settings page, as at the start.
     fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
-      const text = fs.existsSync(this.settingsPath) ? fs.readFileSync(this.settingsPath, "utf8") : "";
-      if (text !== this.settingsText) this.reloadSettings();
+      const file = readSettings(this.settingsPath);
+      if (file.text !== this.settingsText) Effect.runSync(this.reloadSettings(file)); // effect-bridge(C5c): it throws from the watcher as before
     });
     fs.watchFile(this.configPath, { interval: 2000 }, (cur) => {
       if (cur.nlink === 0) return; // deleted or mid-rename; keep the loaded config
-      if (fs.readFileSync(this.configPath, "utf8") !== this.configText) this.reloadConfig(true);
+      if (fs.readFileSync(this.configPath, "utf8") !== this.configText) Effect.runSync(this.reloadConfig(true)); // effect-bridge(C5c): it throws from the watcher as before
     });
   }
 
@@ -411,28 +443,39 @@ export class Desk {
     return agentDir(this.home);
   }
 
-  reloadConfig(sync = false): void {
-    const text = fs.readFileSync(this.configPath, "utf8");
-    const { loaded, errors, warnings } = parseConfig(text, this.settings);
-    this.configText = text;
-    this.configErrors = errors;
-    this.configWarnings = warnings;
-    if (loaded) this.loaded = loaded;
-    else this.log(`config has ${errors.length} error(s); keeping the last good config`);
-    this.changed();
-    this.judge.pump();
-    if (sync && loaded)
-      this.runner.fork(
-        "sync",
-        Effect.promise(() => this.sync()),
-      ); // effect-bridge(C5c): sync becomes an Effect
+  // config.toml as it is now, in Node's words when it can't be read.
+  readConfig(): Effect.Effect<string, FsError> {
+    return Effect.try({ try: () => fs.readFileSync(this.configPath, "utf8"), catch: fsError("read", this.configPath) });
+  }
+
+  reloadConfig(sync = false): Effect.Effect<void, FsError> {
+    return Effect.map(this.readConfig(), (text) => {
+      const { loaded, errors, warnings } = parseConfig(text, this.settings);
+      this.configText = text;
+      this.configErrors = errors;
+      this.configWarnings = warnings;
+      if (loaded) this.loaded = loaded;
+      else this.log(`config has ${errors.length} error(s); keeping the last good config`);
+      this.changed();
+      this.judge.pump();
+      if (sync && loaded)
+        this.runner.fork(
+          "sync",
+          Effect.promise(() => this.sync()),
+        ); // effect-bridge(C5c): sync becomes an Effect
+    });
   }
 
   // ---------------------------------------------------------------- policy
 
-  readPolicy(): void {
-    const text = fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : "";
-    this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
+  readPolicy(): Effect.Effect<void, FsError> {
+    const read = Effect.try({
+      try: () => (fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : ""),
+      catch: fsError("read", this.policyPath),
+    });
+    return Effect.map(read, (text) => {
+      this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
+    });
   }
 
   // What the judge follows: policy.md, or the starter while it's empty.
@@ -440,10 +483,11 @@ export class Desk {
     return this.policy.text.trim() ? this.policy.text : DEFAULT_POLICY;
   }
 
-  policyChanged(): void {
-    this.readPolicy();
-    this.changed();
-    this.judge.pump();
+  policyChanged(): Effect.Effect<void, FsError> {
+    return Effect.map(this.readPolicy(), () => {
+      this.changed();
+      this.judge.pump();
+    });
   }
 
   getPolicy(): PolicyDoc {
@@ -451,20 +495,24 @@ export class Desk {
   }
 
   // `base` is the hash from GET: a stale one means it changed since (an agent, an editor) and nothing is written.
-  putPolicy(text: string, base?: string): { ok: true; hash: string } {
-    if (base !== undefined && base !== this.policy.hash)
-      throw new DeskError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
-    if (text.length > MAX_POLICY) throw new DeskError(400, `the policy is ${text.length} characters; keep it under ${MAX_POLICY}`);
-    replaceFile(this.policyPath, text);
-    this.policyChanged();
-    return { ok: true, hash: this.policy.hash };
+  putPolicy(text: string, base?: string): Effect.Effect<{ ok: true; hash: string }, Stale | BadRequest | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (base !== undefined && base !== this.policy.hash)
+        return yield* new Stale({ message: "policy.md changed since you opened it; reload to see it, then reapply your edit" });
+      if (text.length > MAX_POLICY)
+        return yield* new BadRequest({ message: `the policy is ${text.length} characters; keep it under ${MAX_POLICY}` });
+      yield* replaceFile(this.policyPath, text);
+      yield* this.policyChanged();
+      return { ok: true as const, hash: this.policy.hash };
+    });
   }
 
   // ---------------------------------------------------------------- settings
 
-  readSettings(): Settings {
-    this.settingsText = fs.existsSync(this.settingsPath) ? fs.readFileSync(this.settingsPath, "utf8") : "";
-    const { overrides, errors, raw } = readSettings(this.settingsPath);
+  // From one read of settings.json (`file`: the caller's), what it says and what's wrong with it.
+  readSettings(file: SettingsFile = readSettings(this.settingsPath)): Settings {
+    const { overrides, errors, raw, text } = file;
+    this.settingsText = text;
     this.settingsOverrides = overrides;
     this.settingsRaw = raw;
     this.settingsErrors = errors;
@@ -472,24 +520,26 @@ export class Desk {
     return effective(overrides);
   }
 
-  reloadSettings(): void {
-    const poll = this.settings["github.poll_seconds"];
-    const agent = agentKey(this.settings);
-    const searches = searchKey(this.settings);
-    const coordinator = this.settings["agent.coordinator"];
-    const bypass = this.settings["agent.coordinator_bypass"];
-    this.settings = this.readSettings();
-    if (coordinator && !this.settings["agent.coordinator"]) void this.coordinator.stop();
-    if (!coordinator && this.settings["agent.coordinator"]) void this.coordinator.flush();
-    else if (bypass !== this.settings["agent.coordinator_bypass"] && this.settings["agent.coordinator"]) void this.coordinator.again();
-    // Sync now only when the searches change; other settings apply to what the desk already has.
-    if (this.configText) this.reloadConfig(searchKey(this.settings) !== searches);
-    else this.changed();
-    if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
-    // A changed agent starts afresh: whatever failed on the old one tries again now.
-    if (agentKey(this.settings) !== agent) this.retryAgents();
-    this.pumpAi();
-    this.judge.pump();
+  reloadSettings(file?: SettingsFile): Effect.Effect<void, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const poll = this.settings["github.poll_seconds"];
+      const agent = agentKey(this.settings);
+      const searches = searchKey(this.settings);
+      const coordinator = this.settings["agent.coordinator"];
+      const bypass = this.settings["agent.coordinator_bypass"];
+      this.settings = this.readSettings(file);
+      if (coordinator && !this.settings["agent.coordinator"]) void this.coordinator.stop();
+      if (!coordinator && this.settings["agent.coordinator"]) void this.coordinator.flush();
+      else if (bypass !== this.settings["agent.coordinator_bypass"] && this.settings["agent.coordinator"]) void this.coordinator.again();
+      // Sync now only when the searches change; other settings apply to what the desk already has.
+      if (this.configText) yield* this.reloadConfig(searchKey(this.settings) !== searches);
+      else this.changed();
+      if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
+      // A changed agent starts afresh: whatever failed on the old one tries again now.
+      if (agentKey(this.settings) !== agent) this.retryAgents();
+      this.pumpAi();
+      this.judge.pump();
+    });
   }
 
   // What failed on the agent (AI reviews, the judge) tries again now instead of after its
@@ -520,56 +570,60 @@ export class Desk {
   }
 
   // Settings used to live in config.toml; move them to settings.json once.
-  migrateSettings(): void {
-    if (this.store.get("settings_migrated") || !fs.existsSync(this.configPath)) return;
-    const text = fs.readFileSync(this.configPath, "utf8");
-    const m = migrateLegacy(text);
-    if (!m) {
-      // Nothing to move, so it's done: legacy keys saved later (desk_config save, an agent) only warn, never become settings.
-      if (parseConfig(text, this.settings).loaded) this.store.set("settings_migrated", this.now().toISOString());
-      return;
-    }
-    if (this.settingsErrors.some((e) => e.path === "settings.json")) {
-      this.log("settings.json can't be read; not moving settings out of config.toml until it's fixed");
-      return;
-    }
-    const merged = { ...m.moved, ...this.settingsRaw };
-    if (Object.keys(merged).length) Effect.runSync(writeSettings(this.settingsPath, merged)); // effect-bridge(C5a): migrateSettings yields it; init fails with its FsError
-    this.store.set("settings_migrated", this.now().toISOString());
-    this.settings = this.readSettings();
-    if (m.text === null) {
-      this.log("config.toml still has settings sections; delete them (they now live in settings.json)");
-      return;
-    }
-    replaceFile(this.configPath, m.text, true);
-    this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
+  migrateSettings(): Effect.Effect<void, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (this.store.get("settings_migrated") || !fs.existsSync(this.configPath)) return;
+      const text = yield* this.readConfig();
+      const m = migrateLegacy(text);
+      if (!m) {
+        // Nothing to move, so it's done: legacy keys saved later (desk_config save, an agent) only warn, never become settings.
+        if (parseConfig(text, this.settings).loaded) this.store.set("settings_migrated", this.now().toISOString());
+        return;
+      }
+      if (this.settingsErrors.some((e) => e.path === "settings.json")) {
+        this.log("settings.json can't be read; not moving settings out of config.toml until it's fixed");
+        return;
+      }
+      const merged = { ...m.moved, ...this.settingsRaw };
+      if (Object.keys(merged).length) yield* writeSettings(this.settingsPath, merged);
+      this.store.set("settings_migrated", this.now().toISOString());
+      this.settings = this.readSettings();
+      if (m.text === null) {
+        this.log("config.toml still has settings sections; delete them (they now live in settings.json)");
+        return;
+      }
+      yield* replaceFile(this.configPath, m.text, true);
+      this.log(`moved settings from config.toml to ${this.settingsPath} (backup: config.toml.bak)`);
+    });
   }
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
   // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
   // on the desk (migrateDrafts), and the rule putting a merge conflict on the desk goes (migrateConflict).
-  migrateRules(): void {
-    const due = [
-      { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
-      { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
-      { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
-      { key: "conflict_migrated", migrate: migrateConflict, did: "removed the rule putting a merge conflict on your desk" },
-    ].filter((m) => !this.store.get(m.key));
-    if (!due.length) return;
-    const before = fs.readFileSync(this.configPath, "utf8");
-    let text = before;
-    const did: string[] = [];
-    for (const m of due) {
-      const next = m.migrate(text);
-      if (next === null) continue;
-      text = next;
-      did.push(m.did);
-    }
-    if (text !== before) {
-      replaceFile(this.configPath, text, true);
-      this.log(`${did.join("; ")} (backup: config.toml.bak)`);
-    }
-    for (const m of due) this.store.set(m.key, this.now().toISOString());
+  migrateRules(): Effect.Effect<void, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const due = [
+        { key: "hard_migrated", migrate: migrateHard, did: "made the rule for reviews asked of you by name hard" },
+        { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
+        { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
+        { key: "conflict_migrated", migrate: migrateConflict, did: "removed the rule putting a merge conflict on your desk" },
+      ].filter((m) => !this.store.get(m.key));
+      if (!due.length) return;
+      const before = yield* this.readConfig();
+      let text = before;
+      const did: string[] = [];
+      for (const m of due) {
+        const next = m.migrate(text);
+        if (next === null) continue;
+        text = next;
+        did.push(m.did);
+      }
+      if (text !== before) {
+        yield* replaceFile(this.configPath, text, true);
+        this.log(`${did.join("; ")} (backup: config.toml.bak)`);
+      }
+      for (const m of due) this.store.set(m.key, this.now().toISOString());
+    });
   }
 
   getSettings(): SettingsView {
@@ -600,28 +654,33 @@ export class Desk {
   }
 
   // `set` changes values; `reset` drops keys back to their defaults. Nothing is written if any value is invalid.
-  putSettings(patch: { set?: Record<string, unknown>; reset?: string[] }): { ok: boolean; errors: ConfigError[]; settings: SettingsView } {
-    if (this.settingsErrors.some((e) => e.path === "settings.json")) {
-      const message = "settings.json can't be read, so saving now would overwrite it. Fix or delete the file first.";
-      return { ok: false, errors: [{ path: "settings.json", message }], settings: this.getSettings() };
-    }
-    const errors: ConfigError[] = [];
-    for (const [k, v] of Object.entries(patch.set ?? {})) {
-      const e = checkSetting(k, v);
-      if (e) errors.push({ path: k, message: e });
-    }
-    for (const k of patch.reset ?? []) if (!settingDef(k)) errors.push({ path: k, message: `unknown setting "${k}"` });
-    if (errors.length) return { ok: false, errors, settings: this.getSettings() };
-    // Start from the file as written, so entries that are invalid or unknown survive the save.
-    const next = { ...this.settingsRaw };
-    for (const [k, v] of Object.entries(patch.set ?? {})) {
-      if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
-      else next[k] = v;
-    }
-    for (const k of patch.reset ?? []) delete next[k];
-    Effect.runSync(writeSettings(this.settingsPath, next)); // effect-bridge(C5a): putSettings yields it; it throws its FsError, a 500 as before
-    this.reloadSettings();
-    return { ok: true, errors: [], settings: this.getSettings() };
+  putSettings(patch: {
+    set?: Record<string, unknown>;
+    reset?: string[];
+  }): Effect.Effect<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (this.settingsErrors.some((e) => e.path === "settings.json")) {
+        const message = "settings.json can't be read, so saving now would overwrite it. Fix or delete the file first.";
+        return { ok: false, errors: [{ path: "settings.json", message }], settings: this.getSettings() };
+      }
+      const errors: ConfigError[] = [];
+      for (const [k, v] of Object.entries(patch.set ?? {})) {
+        const e = checkSetting(k, v);
+        if (e) errors.push({ path: k, message: e });
+      }
+      for (const k of patch.reset ?? []) if (!settingDef(k)) errors.push({ path: k, message: `unknown setting "${k}"` });
+      if (errors.length) return { ok: false, errors, settings: this.getSettings() };
+      // Start from the file as written, so entries that are invalid or unknown survive the save.
+      const next = { ...this.settingsRaw };
+      for (const [k, v] of Object.entries(patch.set ?? {})) {
+        if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
+        else next[k] = v;
+      }
+      for (const k of patch.reset ?? []) delete next[k];
+      yield* writeSettings(this.settingsPath, next);
+      yield* this.reloadSettings();
+      return { ok: true, errors: [], settings: this.getSettings() };
+    });
   }
 
   // ---------------------------------------------------------------- agents
@@ -758,7 +817,7 @@ export class Desk {
   async activity(q: { after?: number; limit?: number; item?: string; wait?: number; signal?: AbortSignal }): Promise<ActivityPage> {
     const after = q.after ?? 0;
     const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
-    const item = q.item ? this.itemId(q.item) : undefined;
+    const item = q.item ? Effect.runSync(this.itemId(q.item)) : undefined; // effect-bridge(C5c): activity yields it
     const deadline = Date.now() + Math.min(q.wait ?? 0, 60) * 1000;
     for (;;) {
       if (this.stopped) return { events: [], last_seq: after };
@@ -780,13 +839,10 @@ export class Desk {
   }
 
   // A ref on the desk, or an exact id the desk no longer holds (its events outlive it).
-  itemId(ref: string): string {
-    try {
-      return this.resolve(ref);
-    } catch (e) {
-      if (e instanceof DeskError && e.status === 404 && /^[\w.-]+\/[\w.-]+#\d+$/.test(ref)) return ref;
-      throw e;
-    }
+  itemId(ref: string): Effect.Effect<string, RefError> {
+    return Effect.catchTag(this.resolve(ref), "NotFound", (e) =>
+      /^[\w.-]+\/[\w.-]+#\d+$/.test(ref) ? Effect.succeed(ref) : Effect.fail(e),
+    );
   }
 
   // New on the queue once placed (not while Claude hasn't sorted it, nor what you pinned or added, nor your own draft: you just
@@ -1103,13 +1159,17 @@ export class Desk {
 
   // ---------------------------------------------------------------- views
 
-  requireConfig(): LoadedConfig {
-    if (!this.loaded) throw new DeskError(503, `config has errors: ${this.configErrors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
-    return this.loaded;
+  // What an entry point checks first; what runs after a snapshot asserts it (this.loaded!).
+  requireConfig(): Effect.Effect<LoadedConfig, Unavailable> {
+    return Effect.suspend((): Effect.Effect<LoadedConfig, Unavailable> => {
+      if (this.loaded) return Effect.succeed(this.loaded);
+      const errors = this.configErrors.map((e) => `${e.path}: ${e.message}`).join("; ");
+      return Effect.fail(new Unavailable({ message: `config has errors: ${errors}`, reason: "config" }));
+    });
   }
 
   summary(id: string, snap: Snapshot): BoardSummary {
-    const cfg = this.requireConfig().config.boards.find((b) => b.id === id)!;
+    const cfg = this.loaded!.config.boards.find((b) => b.id === id)!;
     const b = snap.boards.get(id)!;
     const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!)).length;
     const counts = { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0, cleared };
@@ -1121,33 +1181,35 @@ export class Desk {
     return { id, name: cfg.name, space: cfg.space, counts, new: fresh, error: b.error };
   }
 
-  overview(): Overview {
-    const loaded = this.requireConfig();
-    const snap = this.snapshot();
-    const focus = this.focus();
-    return {
-      me: this.me(),
-      synced_at: this.syncedAt,
-      syncing: this.syncing,
-      sync_error: this.syncError,
-      sentry: webSentry(),
-      config_errors: this.configErrors,
-      connectors: this.connectors.map((c) => c.status()),
-      spaces: loaded.config.spaces.map((s) => ({
-        id: s.id,
-        name: s.name,
-        boards: loaded.config.boards.filter((b) => b.space === s.id).map((b) => this.summary(b.id, snap)),
-      })),
-      focus: {
-        now: focus.sections.now.length,
-        today: focus.sections.today.length,
-        new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
-        asks: this.inquiries().filter((q) => !q.answer).length,
-      },
-      inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
-      agent: this.settings["agent.coordinator"],
-      rate_limit: this.gh.api.rateLimit(),
-    };
+  overview(): Effect.Effect<Overview, Unavailable> {
+    return Effect.gen({ self: this }, function* () {
+      const loaded = yield* this.requireConfig();
+      const snap = this.snapshot();
+      const focus = yield* this.focus();
+      return {
+        me: this.me(),
+        synced_at: this.syncedAt,
+        syncing: this.syncing,
+        sync_error: this.syncError,
+        sentry: webSentry(),
+        config_errors: this.configErrors,
+        connectors: this.connectors.map((c) => c.status()),
+        spaces: loaded.config.spaces.map((s) => ({
+          id: s.id,
+          name: s.name,
+          boards: loaded.config.boards.filter((b) => b.space === s.id).map((b) => this.summary(b.id, snap)),
+        })),
+        focus: {
+          now: focus.sections.now.length,
+          today: focus.sections.today.length,
+          new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
+          asks: this.inquiries().filter((q) => !q.answer).length,
+        },
+        inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
+        agent: this.settings["agent.coordinator"],
+        rate_limit: this.gh.api.rateLimit(),
+      };
+    });
   }
 
   // Your PRs back on top of the queue: handed back, or ready and nobody's asked to review them.
@@ -1215,16 +1277,18 @@ export class Desk {
   }
 
   // A stack is one line here, as in the queue.
-  focus(): FocusView {
-    const snap = this.snapshot();
-    const sections = this.top(snap, new Set());
-    oneLinePerStack(sections, ["now", "today"], snap.stacks);
-    return {
-      sections,
-      reviewing: this.reviewing(snap),
-      cards: this.settings["queue.cards"],
-      paused: this.paused(),
-    };
+  focus(): Effect.Effect<FocusView, Unavailable> {
+    return Effect.map(this.requireConfig(), () => {
+      const snap = this.snapshot();
+      const sections = this.top(snap, new Set());
+      oneLinePerStack(sections, ["now", "today"], snap.stacks);
+      return {
+        sections,
+        reviewing: this.reviewing(snap),
+        cards: this.settings["queue.cards"],
+        paused: this.paused(),
+      };
+    });
   }
 
   // Someone else's open PR reaches your desk once Claude has reviewed it: until its first AI review is written it waits,
@@ -1245,7 +1309,7 @@ export class Desk {
   // Now and Today in the queue's order, which the AI reviews run in too: what was handed back, then each board's. `all` keeps
   // what waits on Claude's first review (awaitsAi), for the AI reviews and the notifications.
   top(snap: Snapshot, seen: Set<string>, all = false): FocusView["sections"] {
-    const loaded = this.requireConfig();
+    const loaded = this.loaded!;
     const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
     for (const bucket of ["now", "today"] as const) {
       for (const board of boardsOf(loaded)) {
@@ -1263,76 +1327,77 @@ export class Desk {
   }
 
   // The single surface: every item once, at its best placement across boards.
-  queue(): QueueView {
-    const loaded = this.requireConfig();
-    const snap = this.snapshot();
-    const seen = new Set<string>();
-    const sections: QueueView["sections"] = { ...this.top(snap, seen), blocked: [], later: [], fyi: [] };
-    const reviewing = this.reviewing(snap);
-    const hidden: Card[] = [];
-    for (const bucket of ["blocked", "later", "fyi", "hide"] as const) {
-      for (const board of boardsOf(loaded)) {
-        for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
-          const p = snap.best.get(id);
-          if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
-          seen.add(id);
-          (bucket === "hide" ? hidden : sections[bucket]).push(this.card(snap.entries.get(id)!, p, snap));
+  queue(): Effect.Effect<QueueView, Unavailable> {
+    return Effect.map(this.requireConfig(), (loaded) => {
+      const snap = this.snapshot();
+      const seen = new Set<string>();
+      const sections: QueueView["sections"] = { ...this.top(snap, seen), blocked: [], later: [], fyi: [] };
+      const reviewing = this.reviewing(snap);
+      const hidden: Card[] = [];
+      for (const bucket of ["blocked", "later", "fyi", "hide"] as const) {
+        for (const board of boardsOf(loaded)) {
+          for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
+            const p = snap.best.get(id);
+            if (seen.has(id) || !p || p.bucket !== bucket || p.board !== board.config.id) continue;
+            seen.add(id);
+            (bucket === "hide" ? hidden : sections[bucket]).push(this.card(snap.entries.get(id)!, p, snap));
+          }
         }
       }
-    }
-    const leads = oneLinePerStack(sections, ["now", "today", "blocked", "later", "fyi"], snap.stacks);
-    const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
-    const aged = (c: Card): Card => {
-      const e = snap.entries.get(c.id)!;
-      const asked = e.analysis.signals.me.author && e.analysis.signals.pr.waiting_on.length > 0;
-      return { ...c, waiting_since: blockedSince[c.id]?.since ?? (asked ? askedAt(e.item, this.me()) : c.waiting_since) };
-    };
-    // Your PRs in Merging that another PR blocks: Merging has them, and Blocked lists them in their chain too.
-    const merging = [...snap.entries.values()]
-      .filter((e) => laneOwned(e) && e.analysis.signals.pr.blocked)
-      .map((e) => {
-        const pr = e.analysis.signals.pr;
-        const c = this.card(e, this.shownAt(e, snap), snap);
-        c.why = `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}`;
-        return c;
-      });
-    sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged));
-    const cleared: Card[] = [];
-    const resolved: Card[] = [];
-    // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
-    // items, and the rest of Later, resolve silently.
-    const since = new Date(this.now().getTime() - RESOLVED_SHOWN).toISOString();
-    const yours = (e: Entry, p: Placement | null) =>
-      (e.resolved?.at ?? e.item.updated_at) >= since &&
-      (p?.bucket === "now" ||
-        p?.bucket === "today" ||
-        !!e.state.seen_at ||
-        e.resolved?.reason === "no longer requested" ||
-        e.resolved?.actor.toLowerCase() === this.me().toLowerCase());
-    for (const board of boardsOf(loaded)) {
-      const b = snap.boards.get(board.config.id)!;
-      for (const id of b.result.inactive) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        const e = snap.entries.get(id)!;
-        if (laneOwned(e)) continue; // Merging shows it
-        if (e.resolved) {
-          const p = this.placementOf(id, snap);
-          if (yours(e, p)) resolved.push(this.card(e, p, snap));
-        } else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
+      const leads = oneLinePerStack(sections, ["now", "today", "blocked", "later", "fyi"], snap.stacks);
+      const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
+      const aged = (c: Card): Card => {
+        const e = snap.entries.get(c.id)!;
+        const asked = e.analysis.signals.me.author && e.analysis.signals.pr.waiting_on.length > 0;
+        return { ...c, waiting_since: blockedSince[c.id]?.since ?? (asked ? askedAt(e.item, this.me()) : c.waiting_since) };
+      };
+      // Your PRs in Merging that another PR blocks: Merging has them, and Blocked lists them in their chain too.
+      const merging = [...snap.entries.values()]
+        .filter((e) => laneOwned(e) && e.analysis.signals.pr.blocked)
+        .map((e) => {
+          const pr = e.analysis.signals.pr;
+          const c = this.card(e, this.shownAt(e, snap), snap);
+          c.why = `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}`;
+          return c;
+        });
+      sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged));
+      const cleared: Card[] = [];
+      const resolved: Card[] = [];
+      // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
+      // items, and the rest of Later, resolve silently.
+      const since = new Date(this.now().getTime() - RESOLVED_SHOWN).toISOString();
+      const yours = (e: Entry, p: Placement | null) =>
+        (e.resolved?.at ?? e.item.updated_at) >= since &&
+        (p?.bucket === "now" ||
+          p?.bucket === "today" ||
+          !!e.state.seen_at ||
+          e.resolved?.reason === "no longer requested" ||
+          e.resolved?.actor.toLowerCase() === this.me().toLowerCase());
+      for (const board of boardsOf(loaded)) {
+        const b = snap.boards.get(board.config.id)!;
+        for (const id of b.result.inactive) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const e = snap.entries.get(id)!;
+          if (laneOwned(e)) continue; // Merging shows it
+          if (e.resolved) {
+            const p = this.placementOf(id, snap);
+            if (yours(e, p)) resolved.push(this.card(e, p, snap));
+          } else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
+        }
       }
-    }
-    return {
-      inquiries: this.inquiries().filter((q) => !q.answer),
-      sections,
-      reviewing,
-      hidden,
-      cleared,
-      resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-      cards: this.settings["queue.cards"],
-      paused: this.paused(),
-      stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
-    };
+      return {
+        inquiries: this.inquiries().filter((q) => !q.answer),
+        sections,
+        reviewing,
+        hidden,
+        cleared,
+        resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
+        cards: this.settings["queue.cards"],
+        paused: this.paused(),
+        stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
+      };
+    });
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).
@@ -1347,88 +1412,96 @@ export class Desk {
     return p && laneOwned(e) ? { ...p, bucket: "fyi", why: "merging" } : p;
   }
 
-  board(id: string): BoardView {
-    const loaded = this.requireConfig();
-    if (!loaded.config.boards.some((b) => b.id === id)) throw new DeskError(404, `no board "${id}"`);
-    const snap = this.snapshot();
-    const b = snap.boards.get(id)!;
-    const cards = (ids: string[]) => ids.map((x) => this.card(snap.entries.get(x)!, b.result.placements.get(x)!, snap));
-    return {
-      board: { ...this.summary(id, snap), queries: b.queries },
-      sections: {
-        now: cards(b.result.order.now),
-        today: cards(b.result.order.today),
-        blocked: cards(b.result.order.blocked),
-        later: cards(b.result.order.later),
-        fyi: cards(b.result.order.fyi),
-      },
-      hidden: cards(b.result.order.hide),
-      cleared: cards(b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!))),
-    };
-  }
-
-  resolve(ref: string): string {
-    this.requireConfig();
-    const ids = [...this.snapshot().entries.keys()];
-    if (ids.includes(ref)) return ref;
-    const m = REF.exec(normRef(ref));
-    if (!m) throw new DeskError(404, `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL`);
-    const [, owner, name, num] = m;
-    const found = ids.filter((id) => {
-      const [repo = "", n] = id.split("#");
-      const [o = "", repoName = ""] = repo.split("/");
-      return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
+  board(id: string): Effect.Effect<BoardView, Unavailable | NotFound> {
+    return Effect.gen({ self: this }, function* () {
+      const loaded = yield* this.requireConfig();
+      if (!loaded.config.boards.some((b) => b.id === id)) return yield* new NotFound({ message: `no board "${id}"` });
+      const snap = this.snapshot();
+      const b = snap.boards.get(id)!;
+      const cards = (ids: string[]) => ids.map((x) => this.card(snap.entries.get(x)!, b.result.placements.get(x)!, snap));
+      return {
+        board: { ...this.summary(id, snap), queries: b.queries },
+        sections: {
+          now: cards(b.result.order.now),
+          today: cards(b.result.order.today),
+          blocked: cards(b.result.order.blocked),
+          later: cards(b.result.order.later),
+          fyi: cards(b.result.order.fyi),
+        },
+        hidden: cards(b.result.order.hide),
+        cleared: cards(b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!))),
+      };
     });
-    const [first] = found;
-    if (found.length === 1 && first !== undefined) return first;
-    if (found.length === 0) throw new DeskError(404, `no item "${ref}" on the desk`);
-    throw new DeskError(409, `"${ref}" matches ${found.length} items`, found);
   }
 
-  item(ref: string): ItemDetail {
-    const loaded = this.requireConfig();
-    const snap = this.snapshot();
-    const id = this.resolve(ref);
-    const e = snap.entries.get(id)!;
-    const placements = boardsOf(loaded)
-      .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
-      .filter((p): p is Placement => p !== undefined);
-    const { snoozed_at: _, acked_at: __, ...state } = e.state;
-    return {
-      card: this.card(e, this.shownAt(e, snap), snap),
-      item: e.item,
-      signals: e.analysis.signals,
-      placements,
-      state,
-      handoff_prompt: renderTemplate(
-        e.item.kind === "issue"
-          ? loaded.config.handoff.issue
-          : e.analysis.signals.me.author
-            ? loaded.config.handoff.mine
-            : loaded.config.handoff.prompt,
-        e.analysis.signals,
-      ),
-      ai: snap.reviews.get(id) ?? null,
-      ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
-      generating: this.generating.has(id),
-      held: this.awaitsAi(e, snap) && ["now", "today"].includes(snap.best.get(id)?.bucket ?? ""),
-      activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
-      stack: this.stack(id, snap),
-    };
+  resolve(ref: string): Effect.Effect<string, RefError> {
+    return Effect.gen({ self: this }, function* () {
+      yield* this.requireConfig();
+      const ids = [...this.snapshot().entries.keys()];
+      if (ids.includes(ref)) return ref;
+      const m = REF.exec(normRef(ref));
+      if (!m) return yield* new NotFound({ message: `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL` });
+      const [, owner, name, num] = m;
+      const found = ids.filter((id) => {
+        const [repo = "", n] = id.split("#");
+        const [o = "", repoName = ""] = repo.split("/");
+        return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
+      });
+      const [first] = found;
+      if (found.length === 1 && first !== undefined) return first;
+      if (found.length === 0) return yield* new NotFound({ message: `no item "${ref}" on the desk` });
+      return yield* new AmbiguousRef({ message: `"${ref}" matches ${found.length} items`, ref, candidates: found });
+    });
+  }
+
+  item(ref: string): Effect.Effect<ItemDetail, RefError> {
+    return Effect.gen({ self: this }, function* () {
+      const loaded = yield* this.requireConfig();
+      const snap = this.snapshot();
+      const id = yield* this.resolve(ref);
+      const e = snap.entries.get(id)!;
+      const placements = boardsOf(loaded)
+        .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
+        .filter((p): p is Placement => p !== undefined);
+      const { snoozed_at: _, acked_at: __, ...state } = e.state;
+      return {
+        card: this.card(e, this.shownAt(e, snap), snap),
+        item: e.item,
+        signals: e.analysis.signals,
+        placements,
+        state,
+        handoff_prompt: renderTemplate(
+          e.item.kind === "issue"
+            ? loaded.config.handoff.issue
+            : e.analysis.signals.me.author
+              ? loaded.config.handoff.mine
+              : loaded.config.handoff.prompt,
+          e.analysis.signals,
+        ),
+        ai: snap.reviews.get(id) ?? null,
+        ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
+        generating: this.generating.has(id),
+        held: this.awaitsAi(e, snap) && ["now", "today"].includes(snap.best.get(id)?.bucket ?? ""),
+        activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
+        stack: this.stack(id, snap),
+      };
+    });
   }
 
   // ---------------------------------------------------------------- review
 
-  pr(ref: string): Entry {
-    this.requireConfig();
-    const e = this.snapshot().entries.get(this.resolve(ref))!;
-    if (e.item.kind !== "pr") throw new DeskError(400, `${e.item.id} is an issue; reviews are for pull requests`);
-    return e;
+  pr(ref: string): Effect.Effect<Entry, RefError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const e = this.snapshot().entries.get(id)!;
+      if (e.item.kind !== "pr") return yield* new BadRequest({ message: `${e.item.id} is an issue; reviews are for pull requests` });
+      return e;
+    });
   }
 
   // GET /api/review/:id. Opening a PR starts its AI review (auto_ai, none for this commit) and Claude's read; `ahead` neither.
   async reviewView(ref: string, ahead = false): Promise<ReviewView> {
-    const id = this.pr(ref).item.id;
+    const id = Effect.runSync(this.pr(ref)).item.id; // effect-bridge(C5c): reviewView yields pr
     let files: ReviewFile[] = [];
     let diffHead: string | null = null;
     let filesError: string | null = null;
@@ -1444,7 +1517,7 @@ export class Desk {
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
     if (!ahead && this.autoAi() && this.wantsAi(e, snap)) void this.generate(id).catch(() => {});
-    const d = this.item(id);
+    const d = Effect.runSync(this.item(id)); // effect-bridge(C5c): reviewView yields item
     const err = this.aiErrors.get(id);
     const own = err?.head_oid === e.item.head_oid ? err.message : null;
     // A PR the desk would have reviewed on its own says why it didn't.
@@ -1498,7 +1571,7 @@ export class Desk {
 
   // POST /api/review/:id/ai (and desk_brief, `desk brief`): the cached review for this commit unless `force`.
   async aiReview(ref: string, force = false): Promise<AiReview> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5c): aiReview yields pr
     const cached = this.snapshot().reviews.get(e.item.id);
     if (cached && cached.head_oid === e.item.head_oid && !force) return cached;
     try {
@@ -1619,7 +1692,7 @@ export class Desk {
 
   // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your click; `head` is the commit the view showed, so a newer push isn't approved unread.
   async approve(ref: string, head: string, body?: string): Promise<{ url: string }> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): approve yields pr
     const id = e.item.id;
     const can = this.canApprove(e);
     if (!can.ok) throw new DeskError(409, `can't approve ${id}: ${can.reason}`);
@@ -1666,8 +1739,8 @@ export class Desk {
   // POST /api/github: a More menu write, on your click in the desk's window. A change request needs `head`
   // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
   async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
-    this.requireConfig();
-    const e = this.snapshot().entries.get(this.resolve(ref))!;
+    const found = Effect.runSync(this.resolve(ref)); // effect-bridge(C5b): githubAct yields resolve, which checks the config first
+    const e = this.snapshot().entries.get(found)!;
     const it = e.item;
     const id = it.id;
     const [verb, done] = GITHUB_VERB[action].map((x) => x.replace("%", id));
@@ -1701,8 +1774,9 @@ export class Desk {
       if (action === "reopen") {
         // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
         const ev = this.store.lastActionFor(id);
-        if (ev?.action === "done") this.undo(ev.seq);
-        else if (this.store.state(id).done_at) this.act(id, "restore");
+        // effect-bridge(C5b): githubAct yields them inside the write's region
+        if (ev?.action === "done") Effect.runSync(this.undo(ev.seq));
+        else if (this.store.state(id).done_at) Effect.runSync(this.act(id, "restore"));
       } else if (action !== "draft") this.doneAfterWrite(id);
       this.changed();
       // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
@@ -1722,144 +1796,154 @@ export class Desk {
   // else acts. A PR in Merging stays the coordinator's.
   private doneAfterWrite(id: string): void {
     if (this.snapshot().entries.get(id)?.inflight) return;
-    this.act(id, "done");
+    Effect.runSync(this.act(id, "done")); // effect-bridge(C5b): doneAfterWrite yields act
   }
 
   // `agent`: not the desk's own window. Hand-offs are yours.
-  act(ref: string, action: Action, until?: string, agent?: string): { state: ItemState; undo_seq: number } {
-    const id = this.resolve(ref);
-    if (action === "undo") {
-      const ev = this.store.lastActionFor(id);
-      if (!ev) throw new DeskError(404, `nothing to undo for ${id}`);
-      return { state: this.undo(ev.seq, agent).state, undo_seq: 0 };
-    }
-    // The coordinator merges what's in Merging, so only you put a PR there.
-    if (agent && action === "inflight") throw new DeskError(403, "hand a PR off for merge from the desk's window");
-    const now = this.now();
-    const before = this.store.state(id);
-    const s: StateRow = { ...before };
-    const entry = this.snapshot().entries.get(id)!;
-    // The coordinator keeps working on it whatever its status, so it comes back to the desk first.
-    if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
-      throw new DeskError(409, `${id} is in Merging, so your agent has it; bring it back to the desk first`);
-    // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
-    const seen = entry.activityAt;
-    switch (action) {
-      case "done":
-        s.done_at = now.toISOString();
-        s.acked_at = seen;
-        s.snooze_until = null;
-        s.snooze_when = null;
-        s.snoozed_at = null;
-        break;
-      case "snooze": {
-        const u = until ?? "tomorrow";
-        if (u === "activity") {
+  act(
+    ref: string,
+    action: Action,
+    until?: string,
+    agent?: string,
+  ): Effect.Effect<{ state: ItemState; undo_seq: number }, RefError | Forbidden | Conflict | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      if (action === "undo") {
+        const ev = this.store.lastActionFor(id);
+        if (!ev) return yield* new NotFound({ message: `nothing to undo for ${id}` });
+        return { state: (yield* this.undo(ev.seq, agent)).state, undo_seq: 0 };
+      }
+      // The coordinator merges what's in Merging, so only you put a PR there.
+      if (agent && action === "inflight") return yield* new Forbidden({ message: "hand a PR off for merge from the desk's window" });
+      const now = this.now();
+      const before = this.store.state(id);
+      const s: StateRow = { ...before };
+      const entry = this.snapshot().entries.get(id)!;
+      // The coordinator keeps working on it whatever its status, so it comes back to the desk first.
+      if (entry.inflight && (action === "done" || action === "snooze" || action === "mute"))
+        return yield* new Conflict({ message: `${id} is in Merging, so your agent has it; bring it back to the desk first` });
+      // Resurface on activity newer than what you saw, not newer than the click: a sync may land just after it.
+      const seen = entry.activityAt;
+      switch (action) {
+        case "done":
           s.done_at = now.toISOString();
           s.acked_at = seen;
           s.snooze_until = null;
           s.snooze_when = null;
+          s.snoozed_at = null;
           break;
-        }
-        if (Object.hasOwn(UNTIL, u)) {
-          const can = waitable(entry.analysis.signals, entry.item, this.me());
-          if (!can.includes(u as Until))
-            throw new DeskError(
-              409,
-              `${id} can't wait until ${UNTIL[u as Until]}${can.length ? `; it can until ${can.map((x) => UNTIL[x]).join(", ")}` : ""}`,
-            );
-          s.snooze_when = u === "push" ? `push:${entry.item.head_oid}` : u;
-          s.snooze_until = null;
+        case "snooze": {
+          const u = until ?? "tomorrow";
+          if (u === "activity") {
+            s.done_at = now.toISOString();
+            s.acked_at = seen;
+            s.snooze_until = null;
+            s.snooze_when = null;
+            break;
+          }
+          if (Object.hasOwn(UNTIL, u)) {
+            const can = waitable(entry.analysis.signals, entry.item, this.me());
+            if (!can.includes(u as Until))
+              return yield* new Conflict({
+                message: `${id} can't wait until ${UNTIL[u as Until]}${can.length ? `; it can until ${can.map((x) => UNTIL[x]).join(", ")}` : ""}`,
+              });
+            s.snooze_when = u === "push" ? `push:${entry.item.head_oid}` : u;
+            s.snooze_until = null;
+            s.snoozed_at = now.toISOString();
+            s.acked_at = seen;
+            s.snooze_on_activity = false;
+            s.done_at = null;
+            break;
+          }
+          s.snooze_when = null;
+          s.snooze_until = (yield* parseUntil(u, now)).toISOString();
           s.snoozed_at = now.toISOString();
           s.acked_at = seen;
-          s.snooze_on_activity = false;
+          s.snooze_on_activity = true;
           s.done_at = null;
           break;
         }
-        s.snooze_when = null;
-        s.snooze_until = parseUntil(u, now).toISOString();
-        s.snoozed_at = now.toISOString();
-        s.acked_at = seen;
-        s.snooze_on_activity = true;
-        s.done_at = null;
-        break;
+        case "mute":
+          s.muted = true;
+          break;
+        case "unmute":
+          s.muted = false;
+          break;
+        case "pin":
+          s.pinned = true;
+          break;
+        case "unpin":
+          s.pinned = false;
+          break;
+        case "seen":
+          s.seen_at = now.toISOString();
+          break;
+        case "restore":
+          Object.assign(s, ACTIVE);
+          break;
+        case "inflight":
+          // Handed off for merge: only your own open PR, and the coordinator takes it from here.
+          if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
+            return yield* new Conflict({ message: `only your own open PRs are handed off for merge; ${id} isn't one` });
+          if (s.inflight_at) return yield* new Conflict({ message: `${id} is in Merging already` });
+          // Ready for review is yours, so a draft in Merging would wait on you there.
+          if (entry.item.draft) return yield* new Conflict({ message: `${id} is a draft: mark it ready for review first` });
+          // Nobody would review it, so the coordinator would wait on nothing.
+          if (entry.analysis.signals.pr.unasked)
+            return yield* new Conflict({ message: `nobody's asked to review ${id}: add reviewers first` });
+          s.inflight_at = now.toISOString();
+          // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
+          Object.assign(s, ACTIVE);
+          this.store.set(`sitter:${id}`, null); // a fresh start: no hand-back or note from last time
+          break;
+        case "takeback":
+          if (!s.inflight_at) return yield* new Conflict({ message: `${id} isn't in Merging` });
+          s.inflight_at = null;
+          this.store.set(`sitter:${id}`, { ...this.merging(id), back: now.toISOString() }); // yours now: not sent to rebase
+          break;
+        default:
+          return yield* new BadRequest({ message: `unknown action "${action as string}"` }); // reachable: the HTTP body isn't checked against Action
       }
-      case "mute":
-        s.muted = true;
-        break;
-      case "unmute":
-        s.muted = false;
-        break;
-      case "pin":
-        s.pinned = true;
-        break;
-      case "unpin":
+      // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
+      if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
         s.pinned = false;
-        break;
-      case "seen":
-        s.seen_at = now.toISOString();
-        break;
-      case "restore":
-        Object.assign(s, ACTIVE);
-        break;
-      case "inflight":
-        // Handed off for merge: only your own open PR, and the coordinator takes it from here.
-        if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
-          throw new DeskError(409, `only your own open PRs are handed off for merge; ${id} isn't one`);
-        if (s.inflight_at) throw new DeskError(409, `${id} is in Merging already`);
-        // Ready for review is yours, so a draft in Merging would wait on you there.
-        if (entry.item.draft) throw new DeskError(409, `${id} is a draft: mark it ready for review first`);
-        // Nobody would review it, so the coordinator would wait on nothing.
-        if (entry.analysis.signals.pr.unasked) throw new DeskError(409, `nobody's asked to review ${id}: add reviewers first`);
-        s.inflight_at = now.toISOString();
-        // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
-        Object.assign(s, ACTIVE);
-        this.store.set(`sitter:${id}`, null); // a fresh start: no hand-back or note from last time
-        break;
-      case "takeback":
-        if (!s.inflight_at) throw new DeskError(409, `${id} isn't in Merging`);
-        s.inflight_at = null;
-        this.store.set(`sitter:${id}`, { ...this.merging(id), back: now.toISOString() }); // yours now: not sent to rebase
-        break;
-      default:
-        throw new DeskError(400, `unknown action "${action as string}"`); // reachable: the HTTP body isn't checked against Action
-    }
-    // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
-    if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
-      s.pinned = false;
-    this.store.putState(s);
-    const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
-    // What you bring onto your desk is there now, reviewed or not.
-    if (action === "pin" || action === "restore" || action === "unmute") this.store.set(`shown:${id}`, true);
-    this.changed();
-    if (action === "inflight") this.coordinator.wake(id, "handed off");
-    const { snoozed_at: _, acked_at: __, ...state } = s;
-    return { state, undo_seq: seq };
+      this.store.putState(s);
+      const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
+      // What you bring onto your desk is there now, reviewed or not.
+      if (action === "pin" || action === "restore" || action === "unmute") this.store.set(`shown:${id}`, true);
+      this.changed();
+      if (action === "inflight") this.coordinator.wake(id, "handed off");
+      const { snoozed_at: _, acked_at: __, ...state } = s;
+      return { state, undo_seq: seq };
+    });
   }
 
   // `agent`: not the desk's own window. Hand-offs are yours.
-  undo(seq?: number, agent?: string): { id: string; state: ItemState; action: Action } {
-    const ev = this.store.lastAction(seq);
-    if (!ev) throw new DeskError(404, "nothing to undo");
-    if (agent && (ev.action === "inflight" || ev.action === "takeback"))
-      throw new DeskError(
-        409,
-        `undo ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"} in the desk's window`,
-      );
-    if (this.store.hasLaterAction(ev.item_id, ev.seq)) throw new DeskError(409, `undo the later action on ${ev.item_id} first`);
-    const cur = this.store.state(ev.item_id);
-    const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
-    this.store.putState(restored);
-    this.store.markUndone(ev.seq);
-    this.changed();
-    const { snoozed_at: _, acked_at: __, ...state } = restored;
-    return { id: ev.item_id, state, action: ev.action as Action };
+  undo(seq?: number, agent?: string): Effect.Effect<{ id: string; state: ItemState; action: Action }, NotFound | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const ev = this.store.lastAction(seq);
+      if (!ev) return yield* new NotFound({ message: "nothing to undo" });
+      if (agent && (ev.action === "inflight" || ev.action === "takeback"))
+        return yield* new Conflict({
+          message: `undo ${ev.action === "inflight" ? "a hand-off for merge" : "bringing a PR back to the desk"} in the desk's window`,
+        });
+      if (this.store.hasLaterAction(ev.item_id, ev.seq))
+        return yield* new Conflict({ message: `undo the later action on ${ev.item_id} first` });
+      const cur = this.store.state(ev.item_id);
+      const restored = { ...ev.before, inflight_at: ev.before.inflight_at ?? null, seen_at: cur.seen_at };
+      this.store.putState(restored);
+      this.store.markUndone(ev.seq);
+      this.changed();
+      const { snoozed_at: _, acked_at: __, ...state } = restored;
+      return { id: ev.item_id, state, action: ev.action as Action };
+    });
   }
 
   // `why` and `from`: an agent's hand-off, what needs you and which task sends it; the item's why while this pin stays.
   async add(ref: string, why?: string, from?: string): Promise<{ item: ItemDetail; undo_seq: number }> {
-    const note = why === undefined ? null : this.line(why, "why");
-    const who = note === null || !from?.trim() ? "" : this.line(from, "from", MAX_FROM);
+    // effect-bridge(C5b): add yields line, and item below
+    const note = why === undefined ? null : Effect.runSync(this.line(why, "why"));
+    const who = note === null || !from?.trim() ? "" : Effect.runSync(this.line(from, "from", MAX_FROM));
     const id = await this.hold(ref);
     // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
     const before = this.store.state(id);
@@ -1870,14 +1954,14 @@ export class Desk {
       this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
     this.changed();
     this.warmAdded(id);
-    return { item: this.item(id), undo_seq };
+    return { item: Effect.runSync(this.item(id)), undo_seq };
   }
 
   // An automation's find: on your desk as desk_add puts it, with its why. One that's on your queue already stays as it is;
   // one you dealt with (done, snoozed, muted, handed off for merge), or that nobody needs now, stays that way too.
   async push(ref: string, why: string, a: Automation): Promise<AutomationRun["items"][number]> {
     const id = await this.hold(ref);
-    const note = this.line(why, "why", 300);
+    const note = Effect.runSync(this.line(why, "why", 300)); // effect-bridge(C5b): push yields line
     this.store.set(`pushed:${id}`, { automation: a.id, name: a.name, why: note, at: this.now().toISOString() });
     const snap = this.snapshot();
     const e = snap.entries.get(id)!;
@@ -1908,80 +1992,77 @@ export class Desk {
 
   // The item's id, fetched read only if the desk doesn't hold it.
   async hold(ref: string): Promise<string> {
-    this.requireConfig();
+    Effect.runSync(this.requireConfig()); // effect-bridge(C5b): hold yields it
     const r = normRef(ref);
     if (!REF.test(r)) throw new DeskError(400, `can't read "${ref}"; use owner/repo#123 or a GitHub URL`);
-    let id: string;
-    try {
-      id = this.resolve(r);
-    } catch (e) {
-      if (!(e instanceof DeskError) || e.status !== 404) throw e;
-      const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
-      if (repo === undefined || num === undefined)
-        throw new DeskError(400, `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`);
-      // effect-bridge(C5b): hold becomes an Effect that maps what fetchOne fails with to Upstream
-      const got = await Effect.runPromise(this.gh.fetchOne(repo, Number(num))).catch((err: unknown) => {
-        throw new DeskError(502, (err as Error).message);
-      });
-      if (got === null) throw new DeskError(404, `GitHub has no PR or issue ${r}`);
-      this.changed();
-      id = got;
-    }
-    return id;
+    // effect-bridge(C5b): hold yields resolve; what it doesn't hold is fetched, an ambiguous ref goes back
+    const held = Effect.runSync(Effect.catchTag(this.resolve(r), "NotFound", () => Effect.succeed(null)));
+    if (held !== null) return held;
+    const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
+    if (repo === undefined || num === undefined)
+      throw new DeskError(400, `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`);
+    // effect-bridge(C5b): hold becomes an Effect that maps what fetchOne fails with to Upstream
+    const got = await Effect.runPromise(this.gh.fetchOne(repo, Number(num))).catch((err: unknown) => {
+      throw new DeskError(502, (err as Error).message);
+    });
+    if (got === null) throw new DeskError(404, `GitHub has no PR or issue ${r}`);
+    this.changed();
+    return got;
   }
 
   // ---------------------------------------------------------------- merging (in flight)
 
   // GET /api/inflight: your PRs in Merging, open ones first (latest activity on top), then any that merged or closed in the last 3 days.
-  inflight(): InflightView {
-    this.requireConfig();
-    const snap = this.snapshot();
-    const me = this.me().toLowerCase();
-    const cutoff = new Date(this.now().getTime() - LANDED).toISOString();
-    const rows: InflightRow[] = [];
-    for (const e of snap.entries.values()) {
-      const it = e.item;
-      if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
-      if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
-      const m = this.merging(it.id);
-      const { approved_by, changes_by } = verdicts(it, me);
-      const row = {
-        state: it.state,
-        base: it.base,
-        stacked: e.analysis.signals.pr.stacked,
-        merge_method: it.merge_method ?? null,
-        ci: it.ci,
-        failing: it.checks_failed ?? [],
-        approved_by,
-        changes_by,
-        waiting_on: it.review_requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer)),
-        threads_unresolved: it.threads_unresolved,
-        mergeable: it.mergeable,
-        draft: it.draft,
-        rebase: !!m.rebase,
-        blocked_by: e.analysis.signals.pr.blocked
-          ? { ref: e.analysis.signals.pr.blocker, waits: e.analysis.signals.pr.blocker_waits }
-          : null,
-        requires_closed: e.analysis.signals.pr.requires_closed,
+  inflight(): Effect.Effect<InflightView, Unavailable> {
+    return Effect.map(this.requireConfig(), () => {
+      const snap = this.snapshot();
+      const me = this.me().toLowerCase();
+      const cutoff = new Date(this.now().getTime() - LANDED).toISOString();
+      const rows: InflightRow[] = [];
+      for (const e of snap.entries.values()) {
+        const it = e.item;
+        if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
+        if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
+        const m = this.merging(it.id);
+        const { approved_by, changes_by } = verdicts(it, me);
+        const row = {
+          state: it.state,
+          base: it.base,
+          stacked: e.analysis.signals.pr.stacked,
+          merge_method: it.merge_method ?? null,
+          ci: it.ci,
+          failing: it.checks_failed ?? [],
+          approved_by,
+          changes_by,
+          waiting_on: it.review_requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer)),
+          threads_unresolved: it.threads_unresolved,
+          mergeable: it.mergeable,
+          draft: it.draft,
+          rebase: !!m.rebase,
+          blocked_by: e.analysis.signals.pr.blocked
+            ? { ref: e.analysis.signals.pr.blocker, waits: e.analysis.signals.pr.blocker_waits }
+            : null,
+          requires_closed: e.analysis.signals.pr.requires_closed,
+        };
+        rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
+      }
+      rows.sort(
+        (a, b) =>
+          Number(a.state !== "open") - Number(b.state !== "open") ||
+          (a.state === "open"
+            ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
+            : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
+      );
+      const lane = grouped(rows, (r) => r.card.id, snap.stacks);
+      return {
+        rows: lane,
+        stacks: this.stacksOf(
+          lane.map((r) => r.card),
+          snap,
+        ),
+        coordinator: this.coordinator.view(),
       };
-      rows.push({ card: this.card(e, this.shownAt(e, snap), snap), ...row, waits_on: waitsOn(row), note: m.note ?? null });
-    }
-    rows.sort(
-      (a, b) =>
-        Number(a.state !== "open") - Number(b.state !== "open") ||
-        (a.state === "open"
-          ? (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")
-          : (b.card.resolved_at ?? "").localeCompare(a.card.resolved_at ?? "")),
-    );
-    const lane = grouped(rows, (r) => r.card.id, snap.stacks);
-    return {
-      rows: lane,
-      stacks: this.stacksOf(
-        lane.map((r) => r.card),
-        snap,
-      ),
-      coordinator: this.coordinator.view(),
-    };
+    });
   }
 
   // POST /api/coordinator/wake: Wake it (or Start it now) in Merging has it look now (and starts it, if it isn't running).
@@ -2042,26 +2123,28 @@ export class Desk {
   }
 
   // Your own open PR in Merging: what the coordinator's tools may touch.
-  inflightEntry(ref: string): Entry {
-    const e = this.pr(ref);
-    if (!e.inflight) throw new DeskError(409, `${e.item.id} isn't one of your open PRs in Merging`);
-    return e;
+  inflightEntry(ref: string): Effect.Effect<Entry, RefError | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      if (!e.inflight) return yield* new Conflict({ message: `${e.item.id} isn't one of your open PRs in Merging` });
+      return e;
+    });
   }
 
   // One plain line from an agent, whatever it sent.
-  line(text: string, what: string, max = MAX_LINE): string {
+  line(text: string, what: string, max = MAX_LINE): Effect.Effect<string, BadRequest> {
     const t = text
       .replaceAll(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "") // bidi marks, which make text read as something else
       // oxlint-disable-next-line no-control-regex -- one plain line, whatever the agent sent
       .replaceAll(/[\u0000-\u001f\u007f\s]+/g, " ")
       .trim();
-    if (!t) throw new DeskError(400, `the ${what} is empty`);
-    return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+    if (!t) return Effect.fail(new BadRequest({ message: `the ${what} is empty` }));
+    return Effect.succeed(t.length > max ? `${t.slice(0, max - 1)}…` : t);
   }
 
   // Words in paragraphs, yours or an agent's: refused, not cut, over max; newlines and tabs stay, at most one blank line in a row.
-  paragraphs(text: string, what: string, max: number): string {
-    if (text.length > max) throw new DeskError(400, `keep the ${what} under ${max} characters`);
+  paragraphs(text: string, what: string, max: number): Effect.Effect<string, BadRequest> {
+    if (text.length > max) return Effect.fail(new BadRequest({ message: `keep the ${what} under ${max} characters` }));
     const t = text
       .replaceAll(/\r\n?|[\u0085\u2028\u2029]/g, "\n")
       .replaceAll(INVISIBLE, "")
@@ -2070,26 +2153,34 @@ export class Desk {
       .join("\n")
       .replaceAll(/\n{3,}/g, "\n\n")
       .trim();
-    if (!t) throw new DeskError(400, `the ${what} is empty`);
-    return t;
+    if (!t) return Effect.fail(new BadRequest({ message: `the ${what} is empty` }));
+    return Effect.succeed(t);
   }
 
   // desk_note: the coordinator's latest status line on a PR in Merging, shown on its row.
-  note(ref: string, text: string): { text: string } {
-    const e = this.inflightEntry(ref);
-    const note = { text: this.line(text, "note"), at: this.now().toISOString() };
-    this.store.set(`sitter:${e.item.id}`, { ...this.merging(e.item.id), note });
-    this.changed();
-    return { text: note.text };
+  note(ref: string, text: string): Effect.Effect<{ text: string }, RefError | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.inflightEntry(ref);
+      const note = { text: yield* this.line(text, "note"), at: this.now().toISOString() };
+      this.store.set(`sitter:${e.item.id}`, { ...this.merging(e.item.id), note });
+      this.changed();
+      return { text: note.text };
+    });
   }
 
   // desk_hand_back: the coordinator can't realistically get it merged. The PR leaves Merging for your desk with the line as its
   // why, on top. Nothing goes to GitHub.
-  // `by`: the desk itself hands back a PR nobody's asked to review (handBackUnasked).
-  handBack(ref: string, why: string, by: "agent" | "desk" = "agent"): { reason: string } {
-    const e = this.inflightEntry(ref);
-    const id = e.item.id;
-    const reason = this.line(why, "reason");
+  handBack(ref: string, why: string): Effect.Effect<{ reason: string }, RefError | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.inflightEntry(ref);
+      const reason = yield* this.line(why, "reason");
+      this.sendBack(e.item.id, reason, "agent");
+      return { reason };
+    });
+  }
+
+  // What a hand-back does once it's checked. `by`: the desk itself hands back a PR nobody's asked to review (handBackUnasked).
+  private sendBack(id: string, reason: string, by: "agent" | "desk"): void {
     const before = this.store.state(id);
     const at = this.now().toISOString();
     this.store.putState({ ...before, inflight_at: null });
@@ -2098,16 +2189,15 @@ export class Desk {
     this.log(`${by === "desk" ? "the desk" : "an agent"} handed ${id} back: ${reason}`);
     this.changed();
     this.notifyNew();
-    return { reason };
   }
 
   // A PR in Merging nobody's asked to review (its request taken back, say): the coordinator can't get it reviewed, so it
-  // comes back to you to ask someone.
+  // comes back to you to ask someone. In Merging it's your open PR, and UNASKED is one line already: nothing to check.
   handBackUnasked(): void {
     if (!this.loaded) return;
     for (const e of this.snapshot().entries.values())
       if (e.inflight && e.status === "active" && this.stuckUnasked(e) && !e.analysis.signals.pr.blocked)
-        this.handBack(e.item.id, UNASKED, "desk");
+        this.sendBack(e.item.id, UNASKED, "desk");
   }
 
   // Your PRs a board lists or Merging has: log when one becomes blocked by another PR or stops being, which wakes the
@@ -2150,7 +2240,7 @@ export class Desk {
   // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (Ask reviewers in its review), one of the desk's
   // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
   async askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Promise<void> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): askReviewers yields pr
     const id = e.item.id;
     if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
     if (e.item.state !== "open" || e.item.draft) throw new DeskError(409, `${id} isn't open and ready for review`);
@@ -2191,27 +2281,29 @@ export class Desk {
   }
 
   // GET /api/asks/:id (desk_ask): where an ask is, and the only branch a change it asks for may be pushed to.
-  askPlace(id: string): AskPlace {
-    this.requireConfig();
-    const ask = this.asks().find((x) => x.id === id);
-    if (!ask) throw new DeskError(404, `no ask "${id}"`);
-    const about = this.askAbout(ask.item_id);
-    const it = about && ask.item_id ? this.snapshot().entries.get(ask.item_id)?.item : undefined;
-    const pr = it?.kind === "pr" ? it : null;
-    const mayPush = !!pr && about?.whose === "mine" && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
-    return {
-      ask,
-      about,
-      head: pr ? pr.head_oid || null : null,
-      base: pr ? pr.base || null : null,
-      push: mayPush ? { repo: pr.head_repo!, branch: pr.head_ref! } : null,
-    };
+  askPlace(id: string): Effect.Effect<AskPlace, Unavailable | NotFound> {
+    return Effect.gen({ self: this }, function* () {
+      yield* this.requireConfig();
+      const ask = this.asks().find((x) => x.id === id);
+      if (!ask) return yield* new NotFound({ message: `no ask "${id}"` });
+      const about = this.askAbout(ask.item_id);
+      const it = about && ask.item_id ? this.snapshot().entries.get(ask.item_id)?.item : undefined;
+      const pr = it?.kind === "pr" ? it : null;
+      const mayPush = !!pr && about?.whose === "mine" && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
+      return {
+        ask,
+        about,
+        head: pr ? pr.head_oid || null : null,
+        base: pr ? pr.base || null : null,
+        push: mayPush ? { repo: pr.head_repo!, branch: pr.head_ref! } : null,
+      };
+    });
   }
 
   // POST /api/ask, from the desk's window: your words to the coordinator, about the item (and thread or lines) you were on.
   async ask(b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }): Promise<Ask> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
-    const item = b.item_id ? this.snapshot().entries.get(this.resolve(b.item_id))!.item : null;
+    const item = b.item_id ? this.snapshot().entries.get(Effect.runSync(this.resolve(b.item_id)))!.item : null; // effect-bridge(C5c): ask yields resolve
     const l = b.lines;
     if (l) {
       if (!item) throw new DeskError(400, "lines are on a PR's diff: send its item_id");
@@ -2227,7 +2319,7 @@ export class Desk {
     const a: Ask = {
       id: randomBytes(4).toString("hex"),
       at: this.now().toISOString(),
-      text: this.paragraphs(b.text, "ask", MAX_ASK),
+      text: Effect.runSync(this.paragraphs(b.text, "ask", MAX_ASK)), // effect-bridge(C5c): ask yields paragraphs
       item_id: item?.id ?? null,
       thread_id: item && b.thread_id ? b.thread_id : null,
       thread_url: item && b.thread_url ? b.thread_url : null,
@@ -2278,22 +2370,26 @@ export class Desk {
     );
   }
 
-  inquiry(id: string): Inquiry {
-    const q = this.inquiries().find((x) => x.id === id);
-    if (!q) throw new DeskError(404, `no inquiry "${id}"`);
-    return q;
+  inquiry(id: string): Effect.Effect<Inquiry, NotFound> {
+    return Effect.suspend((): Effect.Effect<Inquiry, NotFound> => {
+      const q = this.inquiries().find((x) => x.id === id);
+      return q ? Effect.succeed(q) : Effect.fail(new NotFound({ message: `no inquiry "${id}"` }));
+    });
   }
 
   // GET /api/inquiries/:id: the question, with its item's card wherever the desk shows it (the queue, Merging, a stack).
-  inquiryView(id: string): InquiryView {
-    const q = this.inquiry(id);
-    let card: Card | null = null;
-    try {
-      card = q.item_id ? this.item(q.item_id).card : null;
-    } catch (e) {
-      if (!(e instanceof DeskError)) throw e; // not on the desk: its ref still links to GitHub
-    }
-    return { ...q, card };
+  inquiryView(id: string): Effect.Effect<InquiryView, NotFound> {
+    return Effect.gen({ self: this }, function* () {
+      const q = yield* this.inquiry(id);
+      // Not on the desk, or the desk can't say yet: its ref still links to GitHub.
+      const card = q.item_id
+        ? yield* this.item(q.item_id).pipe(
+            Effect.map((d): Card | null => d.card),
+            Effect.catch(() => Effect.succeed(null)),
+          )
+        : null;
+      return { ...q, card };
+    });
   }
 
   // desk_inquire: an agent session's question for you, a row on your main page and a notification, until you answer it. You
@@ -2305,104 +2401,114 @@ export class Desk {
     options?: InquiryOption[];
     links?: InquiryLink[];
     item?: string;
-  }): Inquiry {
-    // Refused, not cut: what's past the limit is often what an answer costs.
-    const one = (text: string, what: string, max: number) => {
-      const t = this.line(text, what, Infinity);
-      if (t.length > max) throw new DeskError(400, `keep the ${what} under ${max} characters`);
-      return t;
-    };
-    const from = one(b.from, "from", 60);
-    const question = one(b.question, "question", 300);
-    // oxlint-disable-next-line no-control-regex -- paragraphs stay, anything else invisible goes, bidi marks too
-    const context = b.context.replaceAll(/[\u0000-\u0008\u000b-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
-    if (context.length < MIN_CONTEXT)
-      throw new DeskError(
-        400,
-        `context is too thin to decide from (${context.length} of at least ${MIN_CONTEXT} characters): say what you're doing, what you found, what the choice turns on, and why your pick`,
+  }): Effect.Effect<Inquiry, BadRequest | RefError> {
+    return Effect.gen({ self: this }, function* () {
+      // Refused, not cut: what's past the limit is often what an answer costs.
+      const one = (text: string, what: string, max: number) =>
+        Effect.filterOrFail(
+          this.line(text, what, Infinity),
+          (t) => t.length <= max,
+          () => new BadRequest({ message: `keep the ${what} under ${max} characters` }),
+        );
+      const from = yield* one(b.from, "from", 60);
+      const question = yield* one(b.question, "question", 300);
+      // oxlint-disable-next-line no-control-regex -- paragraphs stay, anything else invisible goes, bidi marks too
+      const context = b.context.replaceAll(/[\u0000-\u0008\u000b-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+      if (context.length < MIN_CONTEXT)
+        return yield* new BadRequest({
+          message: `context is too thin to decide from (${context.length} of at least ${MIN_CONTEXT} characters): say what you're doing, what you found, what the choice turns on, and why your pick`,
+        });
+      if (context.length > MAX_CONTEXT) return yield* new BadRequest({ message: `keep the context under ${MAX_CONTEXT} characters` });
+      const options = b.options ?? [];
+      if (options.length > 6) return yield* new BadRequest({ message: "at most 6 options" });
+      const links = b.links ?? [];
+      if (links.length > MAX_LINKS) return yield* new BadRequest({ message: `at most ${MAX_LINKS} links` });
+      if (!b.item && !links.length)
+        return yield* new BadRequest({ message: "link what it's about: the PR or issue as item, or links to what you read" });
+      const q: Inquiry = {
+        id: randomBytes(4).toString("hex"),
+        at: this.now().toISOString(),
+        from,
+        question,
+        context,
+        options: yield* Effect.forEach(options, (o) =>
+          Effect.all({ answer: one(o.answer, "option", 80), next: one(o.next, `"next" of "${o.answer}"`, 400) }),
+        ),
+        links: yield* Effect.forEach(links, (l) => Effect.all({ label: one(l.label, "link's label", 80), url: linkUrl(l.url) })),
+        item_id: b.item ? yield* this.itemId(b.item) : null,
+        answer: null,
+      };
+      // Only answered ones age out: a question still waiting on you never goes unseen.
+      const all = [...this.inquiries(), q];
+      const answered = all.filter((x) => x.answer);
+      const drop = new Set(answered.slice(0, Math.max(0, all.length - INQUIRIES_KEPT)));
+      this.store.set(
+        "inquiries",
+        all.filter((x) => !drop.has(x)),
       );
-    if (context.length > MAX_CONTEXT) throw new DeskError(400, `keep the context under ${MAX_CONTEXT} characters`);
-    const options = b.options ?? [];
-    if (options.length > 6) throw new DeskError(400, "at most 6 options");
-    const links = b.links ?? [];
-    if (links.length > MAX_LINKS) throw new DeskError(400, `at most ${MAX_LINKS} links`);
-    if (!b.item && !links.length) throw new DeskError(400, "link what it's about: the PR or issue as item, or links to what you read");
-    const q: Inquiry = {
-      id: randomBytes(4).toString("hex"),
-      at: this.now().toISOString(),
-      from,
-      question,
-      context,
-      options: options.map((o) => ({ answer: one(o.answer, "option", 80), next: one(o.next, `"next" of "${o.answer}"`, 400) })),
-      links: links.map((l) => ({ label: one(l.label, "link's label", 80), url: linkUrl(l.url) })),
-      item_id: b.item ? this.itemId(b.item) : null,
-      answer: null,
-    };
-    // Only answered ones age out: a question still waiting on you never goes unseen.
-    const all = [...this.inquiries(), q];
-    const answered = all.filter((x) => x.answer);
-    const drop = new Set(answered.slice(0, Math.max(0, all.length - INQUIRIES_KEPT)));
-    this.store.set(
-      "inquiries",
-      all.filter((x) => !drop.has(x)),
-    );
-    this.log(`${q.from} asks: ${q.question}`);
-    this.changed();
-    if (this.mayNotify()) this.notify(q.from === COORDINATOR ? "Your agent asks" : `${q.from} asks`, q.question);
-    return q;
+      this.log(`${q.from} asks: ${q.question}`);
+      this.changed();
+      if (this.mayNotify()) this.notify(q.from === COORDINATOR ? "Your agent asks" : `${q.from} asks`, q.question);
+      return q;
+    });
   }
 
   // POST /api/inquiries/:id/answer, from the desk's window: your answer, for the agent to read; it leaves your desk.
-  answerInquiry(id: string, text: string, dismissed = false): Inquiry {
-    const q = this.inquiry(id);
-    if (q.answer) throw new DeskError(409, "already answered");
-    const answer = dismissed ? "" : text.trim();
-    if (!dismissed && !answer) throw new DeskError(400, "the answer is empty");
-    if (answer.length > MAX_ASK) throw new DeskError(400, `keep an answer under ${MAX_ASK} characters`);
-    const done: Inquiry = { ...q, answer: { text: answer, at: this.now().toISOString(), dismissed } };
-    this.store.set(
-      "inquiries",
-      this.inquiries().map((x) => (x.id === id ? done : x)),
-    );
-    this.changed();
-    // The coordinator ends its turn once it asks; your answer is what wakes it.
-    if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
-      const asked = `your question ${q.id} ("${q.question}")`;
-      const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
-      // effect-bridge(C5c): answerInquiry yields it; what cmd.exe can't pass is logged, as before
-      Effect.runSync(
-        this.coordinator.tell(line).pipe(
+  answerInquiry(id: string, text: string, dismissed = false): Effect.Effect<Inquiry, NotFound | Conflict | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const q = yield* this.inquiry(id);
+      if (q.answer) return yield* new Conflict({ message: "already answered" });
+      const answer = dismissed ? "" : text.trim();
+      if (!dismissed && !answer) return yield* new BadRequest({ message: "the answer is empty" });
+      if (answer.length > MAX_ASK) return yield* new BadRequest({ message: `keep an answer under ${MAX_ASK} characters` });
+      const done: Inquiry = { ...q, answer: { text: answer, at: this.now().toISOString(), dismissed } };
+      this.store.set(
+        "inquiries",
+        this.inquiries().map((x) => (x.id === id ? done : x)),
+      );
+      this.changed();
+      // The coordinator ends its turn once it asks; your answer is what wakes it. What cmd.exe can't pass is only logged: your
+      // answer is kept.
+      if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
+        const asked = `your question ${q.id} ("${q.question}")`;
+        const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
+        const tell = Effect.flatten(this.coordinator.tell(line)).pipe(
           Effect.catch((e) =>
             Effect.sync(() => {
               this.log(`coordinator: couldn't pass on your answer to ${q.id}: ${e.message}`);
             }),
           ),
-        ),
-      );
-    }
-    return done;
+        );
+        this.runner.fork("coordinator", tell);
+      }
+      return done;
+    });
   }
 
   // desk_answer: the coordinator's answer to one of your asks, in your chat with it in the desk, and a notification.
-  answer(id: string, text: string): Ask {
-    const all = this.asks();
-    const a = all.find((x) => x.id === id);
-    if (!a) throw new DeskError(404, `no ask "${id}"`);
-    const done: Ask = { ...a, answer: { text: this.paragraphs(text, "answer", MAX_ANSWER), at: this.now().toISOString() } };
-    this.store.set(
-      "asks",
-      all.map((x) => (x === a ? done : x)),
-    );
-    this.changed();
-    const said = lead(done.answer!.text);
-    if (!a.answer && this.mayNotify())
-      this.notify("Your agent", `${a.item_id ? `${a.item_id}: ` : ""}${said ? this.line(said, "answer") : "It answered your ask."}`);
-    return done;
+  answer(id: string, text: string): Effect.Effect<Ask, NotFound | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const all = this.asks();
+      const a = all.find((x) => x.id === id);
+      if (!a) return yield* new NotFound({ message: `no ask "${id}"` });
+      const done: Ask = { ...a, answer: { text: yield* this.paragraphs(text, "answer", MAX_ANSWER), at: this.now().toISOString() } };
+      this.store.set(
+        "asks",
+        all.map((x) => (x === a ? done : x)),
+      );
+      this.changed();
+      const said = lead(done.answer!.text);
+      if (!a.answer && this.mayNotify()) {
+        const words = said ? yield* this.line(said, "answer") : "It answered your ask.";
+        this.notify("Your agent", `${a.item_id ? `${a.item_id}: ` : ""}${words}`);
+      }
+      return done;
+    });
   }
 
   // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your click. One of the desk's GitHub writes.
   async reply(ref: string, convoId: string, body: string): Promise<{ url: string }> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): reply yields pr
     const id = e.item.id;
     const text = body.trim();
     if (e.item.state !== "open") throw new DeskError(409, `can't reply on ${id}: it's ${e.item.state}`);
@@ -2442,8 +2548,8 @@ export class Desk {
   // POST /api/review/:id/comment: your comment on the PR (Comment in its review) or the issue (Comment on it opened
   // in place), on your click. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
   async comment(ref: string, body: string): Promise<{ url: string }> {
-    this.requireConfig();
-    const e = this.snapshot().entries.get(this.resolve(ref))!;
+    const found = Effect.runSync(this.resolve(ref)); // effect-bridge(C5b): comment yields resolve, which checks the config first
+    const e = this.snapshot().entries.get(found)!;
     const id = e.item.id;
     const text = body.trim();
     if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
@@ -2472,7 +2578,7 @@ export class Desk {
   // POST /api/review/:id/inline: your comment on a line (or a range ending at it) of the diff, on your press, pinned to the
   // commit the review showed so its line numbers are the ones you read. Part of reviewing, not its end: the PR stays put.
   async inlineComment(ref: string, at: InlineAt, body: string, head: string): Promise<{ url: string }> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): inlineComment yields pr
     const id = e.item.id;
     const text = body.trim();
     if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
@@ -2513,7 +2619,7 @@ export class Desk {
   // POST /api/review/:id/ready: your own draft's "Ready for review", one of the desk's GitHub writes, on your click,
   // then a review request to whoever you picked with it (node ids from reviewers()).
   async markReady(ref: string, ask?: { users: string[]; teams: string[] }): Promise<void> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): markReady yields pr
     const id = e.item.id;
     if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
     if (e.item.state !== "open" || !e.item.draft) throw new DeskError(409, `${id} isn't an open draft`);
@@ -2549,7 +2655,7 @@ export class Desk {
 
   // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first. Read only.
   async reviewers(ref: string, q: string): Promise<Reviewer[]> {
-    const e = this.pr(ref);
+    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): reviewers yields pr
     if (!e.analysis.signals.me.author) throw new DeskError(409, `${e.item.id} isn't your PR`);
     const me = this.me().toLowerCase();
     // effect-bridge(C5b): it rejects with what GitHub fails with, a 500 as before (Upstream 502 once reviewers is an Effect)
@@ -2612,24 +2718,27 @@ export class Desk {
   }
 
   // `base`: the text you started from, or its hash from GET /api/config.
-  putConfig(text: string, base?: string): { ok: boolean; errors: ConfigError[]; warnings: ConfigError[] } {
-    if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
-      throw new DeskError(409, "config.toml changed on disk since you opened it; reload to see it, then reapply your edit");
-    const { loaded, errors, warnings } = parseConfig(text, this.settings);
-    if (!loaded) return { ok: false, errors, warnings };
-    // A save never brings settings back into config.toml: an unmigrated desk would move them to settings.json on its next start.
-    if (warnings.length) return { ok: false, errors: warnings, warnings: [] };
-    replaceFile(this.configPath, text);
-    this.reloadConfig(true);
-    return { ok: true, errors: [], warnings };
+  putConfig(text: string, base?: string): Effect.Effect<{ ok: boolean; errors: ConfigError[]; warnings: ConfigError[] }, Stale | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
+        return yield* new Stale({ message: "config.toml changed on disk since you opened it; reload to see it, then reapply your edit" });
+      const { loaded, errors, warnings } = parseConfig(text, this.settings);
+      if (!loaded) return { ok: false, errors, warnings };
+      // A save never brings settings back into config.toml: an unmigrated desk would move them to settings.json on its next start.
+      if (warnings.length) return { ok: false, errors: warnings, warnings: [] };
+      yield* replaceFile(this.configPath, text);
+      yield* this.reloadConfig(true);
+      return { ok: true, errors: [], warnings };
+    });
   }
 
   // The tray's and the dock's count: an agent's question waiting on you counts as now.
-  status(): { now: number; today: number; new: number; text: string } {
-    const f = this.overview().focus;
-    const now = f.now + f.asks;
-    const parts = [`${now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
-    return { now, today: f.today, new: f.new, text: now || f.today ? `desk ${parts.join(" ")}` : "" };
+  status(): Effect.Effect<{ now: number; today: number; new: number; text: string }, Unavailable> {
+    return Effect.map(this.overview(), ({ focus: f }) => {
+      const now = f.now + f.asks;
+      const parts = [`${now + f.today}`, f.new ? `+${f.new}` : ""].filter(Boolean);
+      return { now, today: f.today, new: f.new, text: now || f.today ? `desk ${parts.join(" ")}` : "" };
+    });
   }
 }
 
@@ -2677,16 +2786,12 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
 }
 
 // A question's link: https, the one scheme the desktop app's window opens; nothing a click would run.
-function linkUrl(url: string): string {
-  let u: URL;
-  try {
-    u = new URL(url.trim());
-  } catch {
-    throw new DeskError(400, `not a link: ${url.slice(0, 80)}`);
-  }
-  if (u.protocol !== "https:") throw new DeskError(400, `a link is https, not ${u.protocol}`);
-  if (u.href.length > 2_000) throw new DeskError(400, "keep a link under 2000 characters");
-  return u.href;
+function linkUrl(url: string): Effect.Effect<string, BadRequest> {
+  const u = URL.parse(url.trim());
+  if (!u) return Effect.fail(new BadRequest({ message: `not a link: ${url.slice(0, 80)}` }));
+  if (u.protocol !== "https:") return Effect.fail(new BadRequest({ message: `a link is https, not ${u.protocol}` }));
+  if (u.href.length > 2_000) return Effect.fail(new BadRequest({ message: "keep a link under 2000 characters" }));
+  return Effect.succeed(u.href);
 }
 
 // A notification's words: the answer's first paragraph outside a ``` block, without ** or backticks.
@@ -2711,16 +2816,16 @@ function shortRef(c: { repo: string; number: number }): string {
   return `${c.repo.split("/")[1]}#${c.number}`;
 }
 
-export function parseUntil(until: string, now: Date): Date {
+export function parseUntil(until: string, now: Date): Effect.Effect<Date, BadRequest> {
   const rel = /^(\d+)([hd])$/.exec(until);
-  if (rel && Number(rel[1]) > 0) return new Date(now.getTime() + Number(rel[1]) * (rel[2] === "h" ? HOUR : 24 * HOUR));
+  if (rel && Number(rel[1]) > 0) return Effect.succeed(new Date(now.getTime() + Number(rel[1]) * (rel[2] === "h" ? HOUR : 24 * HOUR)));
   if (until === "tomorrow" || until === "monday") {
     const d = new Date(now);
     d.setHours(9, 0, 0, 0);
     // After midnight, "tomorrow" still means the coming morning; on a Monday before 09:00, "monday" means today.
     if (until === "tomorrow" && now.getHours() >= 5) d.setDate(d.getDate() + 1);
     if (until === "monday" && !(now.getDay() === 1 && now.getHours() < 9)) d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-    return d;
+    return Effect.succeed(d);
   }
   const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(until);
   const t = day
@@ -2729,6 +2834,8 @@ export function parseUntil(until: string, now: Date): Date {
       ? Date.parse(until)
       : NaN;
   if (Number.isNaN(t) || t <= now.getTime())
-    throw new DeskError(400, `can't read snooze time "${until}"; use 1h, 3h, 2d, tomorrow, monday, activity or a future ISO time`);
-  return new Date(t);
+    return Effect.fail(
+      new BadRequest({ message: `can't read snooze time "${until}"; use 1h, 3h, 2d, tomorrow, monday, activity or a future ISO time` }),
+    );
+  return Effect.succeed(new Date(t));
 }

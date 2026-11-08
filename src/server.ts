@@ -15,7 +15,7 @@ import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
 import { Desk, DeskError } from "./desk.ts";
-import { BadRequest, Conflict, errorBody, isDeskHttpError, legacyBody, type ErrorBody } from "./errors.ts";
+import { BadRequest, Conflict, errorBody, Forbidden, isDeskHttpError, legacyBody, Unavailable, type ErrorBody } from "./errors.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
@@ -191,39 +191,84 @@ export function createApp(desk: Desk, port: number): Hono {
     return c.json({ error: e.message, tag: "Internal" } satisfies ErrorBody, 500);
   });
 
-  const ready = () => {
-    if (!desk.loaded && !desk.configErrors.length) throw new DeskError(503, "desk is starting; the first sync can take a minute");
+  const log = (m: string) => {
+    desk.log(m);
   };
-  const input = (c: { req: { json<T>(): Promise<T> } }) => c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const STARTING = "desk is starting; the first sync can take a minute";
+  // Before the first sync there's nothing to show, unless it's the config's errors.
+  const starting = () => !desk.loaded && !desk.configErrors.length;
+  const ready = () => {
+    if (starting()) throw new DeskError(503, STARTING);
+  };
+  const up = Effect.suspend((): Effect.Effect<void, Unavailable> =>
+    starting() ? Effect.fail(new Unavailable({ message: STARTING, reason: "starting" })) : Effect.void,
+  );
+  type Req = { req: { json<T>(): Promise<T> } };
+  const notJson = () => new BadRequest({ message: "the body must be a JSON object" });
+  const json = (c: Req): Effect.Effect<Record<string, unknown>, BadRequest> =>
+    Effect.tryPromise({ try: () => c.req.json<unknown>(), catch: notJson }).pipe(
+      Effect.filterOrFail((b): b is Record<string, unknown> => typeof b === "object" && b !== null && !Array.isArray(b), notJson),
+    );
+  // A body that isn't a JSON object reads as {}: each route says what it needs.
+  const bodyOf = (c: Req) => Effect.orElseSucceed(json(c), (): Record<string, unknown> => ({}));
+  const input = (c: Req) => Effect.runPromise(bodyOf(c)); // effect-bridge(C6): the routes yield bodyOf
+  // A string the body may leave out.
+  const str = (b: Record<string, unknown>, k: string): Effect.Effect<string | undefined, BadRequest> => {
+    const v = b[k] ?? undefined;
+    return v === undefined || typeof v === "string" ? Effect.succeed(v) : Effect.fail(new BadRequest({ message: `${k} must be a string` }));
+  };
+  // A string the body must have.
+  const field = (c: Req, key: string) =>
+    Effect.flatMap(bodyOf(c), (b): Effect.Effect<string, BadRequest> =>
+      typeof b[key] === "string" ? Effect.succeed(b[key]) : Effect.fail(new BadRequest({ message: `need { ${key} }` })),
+    );
 
   app.get("/health", (c) => c.json({ ok: true, version: VERSION }));
-  app.get("/api/overview", (c) => {
-    ready();
-    return c.json(desk.overview());
-  });
-  app.get("/api/focus", (c) => {
-    ready();
-    return c.json(desk.focus());
-  });
-  app.get("/api/queue", (c) => {
-    ready();
-    return c.json(desk.queue());
-  });
-  app.get("/api/boards/:id", (c) => {
-    ready();
-    return c.json(desk.board(c.req.param("id")));
-  });
+  app.get("/api/overview", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.overview()),
+      { log, read: true },
+    ),
+  );
+  app.get("/api/focus", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.focus()),
+      { log, read: true },
+    ),
+  );
+  app.get("/api/queue", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.queue()),
+      { log, read: true },
+    ),
+  );
+  app.get("/api/boards/:id", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.board(c.req.param("id"))),
+      { log, read: true },
+    ),
+  );
   app.get("/api/item", (c) => {
-    ready();
     const id = c.req.query("id");
-    if (!id) throw new DeskError(400, "missing ?id=");
-    return c.json(desk.item(id));
+    const item = Effect.gen(function* () {
+      yield* up;
+      if (!id) return yield* new BadRequest({ message: "missing ?id=" });
+      return yield* desk.item(id);
+    });
+    return respond(c, item, { log, read: true });
   });
-  app.post("/api/act", async (c) => {
-    ready();
-    const body = await c.req.json<{ id?: string; action?: Action; until?: string }>();
-    if (!body.id || !body.action) throw new DeskError(400, "need { id, action }");
-    return c.json({ ok: true, ...desk.act(body.id, body.action, body.until, fromDesk(c) ? undefined : "agent") });
+  app.post("/api/act", (c) => {
+    const act = Effect.gen(function* () {
+      yield* up;
+      const b = (yield* json(c)) as { id?: string; action?: Action; until?: string };
+      if (!b.id || !b.action) return yield* new BadRequest({ message: "need { id, action }" });
+      return { ok: true, ...(yield* desk.act(b.id, b.action, b.until, fromDesk(c) ? undefined : "agent")) };
+    });
+    return respond(c, act, { log });
   });
   // desk_add and `desk add`: a pin plus GitHub reads, so agents may call it.
   app.post("/api/add", async (c) => {
@@ -322,28 +367,27 @@ export function createApp(desk: Desk, port: number): Hono {
     return c.json({ ok: true, ...(await desk.githubAct(b.id, b.action as GitHubAction, { head: b.head_oid, body: b.body })) });
   });
   // Merging: your own PRs you handed off (Hand off for merge and Back to desk, through /api/act), which the coordinator gets merged.
-  app.get("/api/inflight", (c) => {
-    ready();
-    return c.json(desk.inflight());
-  });
-  const str = (b: Record<string, unknown>, k: string) => {
-    const v = b[k] ?? undefined;
-    if (v === undefined || typeof v === "string") return v;
-    throw new DeskError(400, `${k} must be a string`);
-  };
-  const line = async (c: { req: { json<T>(): Promise<T> } }, key: string) => {
-    const v = (await input(c))[key];
-    if (typeof v !== "string") throw new DeskError(400, `need { ${key} }`);
-    return v;
-  };
+  app.get("/api/inflight", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.inflight()),
+      { log, read: true },
+    ),
+  );
   // desk_note and desk_hand_back: local only, so agents may call them.
-  app.post("/api/inflight/:id{.+}/note", async (c) => {
-    ready();
-    return c.json({ ok: true, ...desk.note(c.req.param("id"), await line(c, "text")) });
+  app.post("/api/inflight/:id{.+}/note", (c) => {
+    const note = Effect.gen(function* () {
+      yield* up;
+      return { ok: true, ...(yield* desk.note(c.req.param("id"), yield* field(c, "text"))) };
+    });
+    return respond(c, note, { log });
   });
-  app.post("/api/inflight/:id{.+}/handback", async (c) => {
-    ready();
-    return c.json({ ok: true, ...desk.handBack(c.req.param("id"), await line(c, "why")) });
+  app.post("/api/inflight/:id{.+}/handback", (c) => {
+    const back = Effect.gen(function* () {
+      yield* up;
+      return { ok: true, ...(yield* desk.handBack(c.req.param("id"), yield* field(c, "why"))) };
+    });
+    return respond(c, back, { log });
   });
   app.post("/api/coordinator/wake", async (c) => {
     ready();
@@ -367,70 +411,80 @@ export function createApp(desk: Desk, port: number): Hono {
     }
     const ask = await desk.ask({
       text: b.text,
-      item_id: str(b, "item_id"),
-      thread_id: str(b, "thread_id"),
-      thread_url: str(b, "thread_url"),
+      // effect-bridge(C5c): the ask's route yields them
+      item_id: Effect.runSync(str(b, "item_id")),
+      thread_id: Effect.runSync(str(b, "thread_id")),
+      thread_url: Effect.runSync(str(b, "thread_url")),
       lines,
     });
     return c.json({ ok: true, ask });
   });
   app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
   // desk_ask: local only, so agents may read where an ask is.
-  app.get("/api/asks/:id", (c) => {
-    ready();
-    return c.json(desk.askPlace(c.req.param("id")));
-  });
+  app.get("/api/asks/:id", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.askPlace(c.req.param("id"))),
+      { log, read: true },
+    ),
+  );
   // desk_answer: local only, so agents may call it.
-  app.post("/api/asks/:id/answer", async (c) => c.json({ ok: true, ask: desk.answer(c.req.param("id"), await line(c, "text")) }));
+  app.post("/api/asks/:id/answer", (c) => {
+    const answer = Effect.gen(function* () {
+      return { ok: true, ask: yield* desk.answer(c.req.param("id"), yield* field(c, "text")) };
+    });
+    return respond(c, answer, { log });
+  });
   // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.
-  app.post("/api/inquiries", async (c) => {
-    ready();
-    const b = await input(c);
-    const pairs = (k: string, a: string, z: string): Record<string, string>[] => {
-      const v = b[k] ?? [];
-      if (
-        Array.isArray(v) &&
-        v.every(
-          (o: unknown) =>
-            !!o &&
-            typeof o === "object" &&
-            typeof (o as Record<string, unknown>)[a] === "string" &&
-            typeof (o as Record<string, unknown>)[z] === "string",
+  app.post("/api/inquiries", (c) => {
+    const inquire = Effect.gen(function* () {
+      yield* up;
+      const b = yield* bodyOf(c);
+      const pairs = (k: string, a: string, z: string): Effect.Effect<Record<string, string>[], BadRequest> => {
+        const v = b[k] ?? [];
+        if (
+          Array.isArray(v) &&
+          v.every(
+            (o: unknown) =>
+              !!o &&
+              typeof o === "object" &&
+              typeof (o as Record<string, unknown>)[a] === "string" &&
+              typeof (o as Record<string, unknown>)[z] === "string",
+          )
         )
-      )
-        return v as Record<string, string>[];
-      throw new DeskError(400, `${k} must be a list of { ${a}, ${z} }`);
-    };
-    const question = str(b, "question");
-    const from = str(b, "from");
-    const context = str(b, "context");
-    if (!question || !from || context === undefined) throw new DeskError(400, "need { question, from, context }");
-    return c.json({
-      ok: true,
-      inquiry: desk.inquire({
+          return Effect.succeed(v as Record<string, string>[]);
+        return Effect.fail(new BadRequest({ message: `${k} must be a list of { ${a}, ${z} }` }));
+      };
+      const question = yield* str(b, "question");
+      const from = yield* str(b, "from");
+      const context = yield* str(b, "context");
+      if (!question || !from || context === undefined) return yield* new BadRequest({ message: "need { question, from, context }" });
+      const inquiry = yield* desk.inquire({
         question,
         from,
         context,
-        options: pairs("options", "answer", "next").map((o) => ({ answer: o.answer!, next: o.next! })),
-        links: pairs("links", "label", "url").map((l) => ({ label: l.label!, url: l.url! })),
-        item: str(b, "item"),
-      }),
+        options: (yield* pairs("options", "answer", "next")).map((o) => ({ answer: o.answer!, next: o.next! })),
+        links: (yield* pairs("links", "label", "url")).map((l) => ({ label: l.label!, url: l.url! })),
+        item: yield* str(b, "item"),
+      });
+      return { ok: true, inquiry };
     });
+    return respond(c, inquire, { log });
   });
-  app.get("/api/inquiries/:id", (c) => c.json(desk.inquiryView(c.req.param("id"))));
+  app.get("/api/inquiries/:id", (c) => respond(c, desk.inquiryView(c.req.param("id")), { log, read: true }));
   // Your answer, from the desk's own window only: an agent can't answer its own question.
-  app.post("/api/inquiries/:id/answer", async (c) => {
-    if (!fromDesk(c)) throw new DeskError(403, "answer it in the desk's window");
-    const b = await input(c);
-    if (b.dismiss === true) return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), "", true) });
-    if (typeof b.text !== "string") throw new DeskError(400, "need { text } or { dismiss: true }");
-    return c.json({ ok: true, inquiry: desk.answerInquiry(c.req.param("id"), b.text) });
+  app.post("/api/inquiries/:id/answer", (c) => {
+    const answer = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "answer it in the desk's window" });
+      const b = yield* bodyOf(c);
+      if (b.dismiss === true) return { ok: true, inquiry: yield* desk.answerInquiry(c.req.param("id"), "", true) };
+      if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text } or { dismiss: true }" });
+      return { ok: true, inquiry: yield* desk.answerInquiry(c.req.param("id"), b.text) };
+    });
+    return respond(c, answer, { log });
   });
   // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
   // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one.
-  const log = (m: string) => {
-    desk.log(m);
-  };
   app.get("/api/automations", (c) =>
     respond(
       c,
@@ -473,50 +527,72 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, run, { log });
   });
-  app.post("/api/undo", async (c) => {
-    ready();
-    const body = await c.req.json<{ seq?: number }>().catch((): { seq?: number } => ({}));
-    const { id, action } = desk.undo(body.seq, fromDesk(c) ? undefined : "agent");
-    return c.json({ ok: true, id, action });
+  app.post("/api/undo", (c) => {
+    const undo = Effect.gen(function* () {
+      yield* up;
+      const { seq } = (yield* bodyOf(c)) as { seq?: number };
+      const { id, action } = yield* desk.undo(seq, fromDesk(c) ? undefined : "agent");
+      return { ok: true, id, action };
+    });
+    return respond(c, undo, { log });
   });
   app.post("/api/sync", (c) => {
     void desk.sync();
     return c.json({ ok: true });
   });
-  app.get("/api/config", (c) => {
-    ready();
-    return c.json(desk.getConfig());
+  app.get("/api/config", (c) =>
+    respond(
+      c,
+      Effect.map(up, () => desk.getConfig()),
+      { log, read: true },
+    ),
+  );
+  app.post("/api/config/preview", (c) => {
+    const preview = Effect.gen(function* () {
+      yield* up;
+      const { text } = (yield* json(c)) as { text?: string };
+      return desk.preview(text ?? "");
+    });
+    return respond(c, preview, { log });
   });
-  app.post("/api/config/preview", async (c) => {
-    ready();
-    const { text } = await c.req.json<{ text: string }>();
-    return c.json(desk.preview(text ?? ""));
-  });
-  app.put("/api/config", async (c) => {
-    ready();
-    const { text, base } = await c.req.json<{ text: string; base?: string }>();
-    return c.json(desk.putConfig(text ?? "", base));
+  app.put("/api/config", (c) => {
+    const put = Effect.gen(function* () {
+      yield* up;
+      const { text, base } = (yield* json(c)) as { text?: string; base?: string };
+      return yield* desk.putConfig(text ?? "", base);
+    });
+    return respond(c, put, { log });
   });
   app.get("/api/policy", (c) => c.json(desk.getPolicy()));
-  app.put("/api/policy", async (c) => {
-    const { text, base } = await c.req.json<{ text?: unknown; base?: unknown }>();
-    if (typeof text !== "string") throw new DeskError(400, "need { text }");
-    if (base !== undefined && typeof base !== "string") throw new DeskError(400, "base must be the hash from GET /api/policy");
-    return c.json(desk.putPolicy(text, base));
+  app.put("/api/policy", (c) => {
+    const put = Effect.gen(function* () {
+      const { text, base } = yield* json(c);
+      if (typeof text !== "string") return yield* new BadRequest({ message: "need { text }" });
+      if (base !== undefined && typeof base !== "string")
+        return yield* new BadRequest({ message: "base must be the hash from GET /api/policy" });
+      return yield* desk.putPolicy(text, base);
+    });
+    return respond(c, put, { log });
   });
   app.get("/api/fields", (c) => c.json(FIELDS));
   app.get("/api/settings", (c) => c.json(desk.getSettings()));
-  app.put("/api/settings", async (c) => {
-    const body = await c.req.json<{ set?: Record<string, unknown>; reset?: string[] }>();
-    return c.json(desk.putSettings({ set: body.set, reset: body.reset }));
+  app.put("/api/settings", (c) => {
+    const put = Effect.gen(function* () {
+      const b = (yield* json(c)) as { set?: Record<string, unknown>; reset?: string[] };
+      return yield* desk.putSettings({ set: b.set, reset: b.reset });
+    });
+    return respond(c, put, { log });
   });
   const mcpUrl = `http://localhost:${port}/mcp`;
   app.get("/api/agents", (c) => c.json(desk.agentStatus(mcpUrl)));
   app.post("/api/agents/connect", async (c) => c.json(await desk.connectAgent(mcpUrl)));
-  app.get("/api/status", (c) => {
-    ready();
-    return c.json(desk.status());
-  });
+  app.get("/api/status", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.status()),
+      { log, read: true },
+    ),
+  );
   // The event log. A long-poll: with ?wait= it answers as soon as there's an event after ?after=.
   app.get("/api/activity", async (c) => {
     const int = (key: string) => {

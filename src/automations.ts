@@ -194,12 +194,11 @@ export class Automations {
     id: string,
     b: { name: string; schedule: string; prompt: string; on?: boolean },
     byYou: boolean,
-  ): Effect.Effect<Automation, BadRequest | DeskError> {
+  ): Effect.Effect<Automation, BadRequest> {
     return Effect.gen({ self: this }, function* () {
       if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id))
         return yield* new BadRequest({ message: "an automation's id is lowercase letters, digits and -, up to 40" });
-      // effect-bridge(C5a): line becomes an Effect; what it throws is the 400 it was
-      const name = yield* Effect.try({ try: () => this.desk.line(b.name, "name", 80), catch: (e) => e as DeskError });
+      const name = yield* this.desk.line(b.name, "name", 80);
       const s = parseSchedule(b.schedule);
       if (typeof s === "string") return yield* new BadRequest({ message: `schedule: ${s}` });
       const said = b.prompt.trim();
