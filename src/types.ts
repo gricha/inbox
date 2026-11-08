@@ -17,7 +17,7 @@ export interface Head {
   id: string;
   url: string; // where it lives, "" for none
   created_at: string;
-  updated_at: string; // an older snapshot never replaces a newer one
+  updated_at: string; // ingest never lets an older snapshot replace a newer one (putItems doesn't check)
 }
 
 // GitHub item, normalized from GraphQL. Times are ISO strings.

@@ -13,7 +13,7 @@ export const KEEP_RESOLVED = 3 * 24 * 3_600_000;
 // What one of a source's boards lists.
 export interface Members {
   ids: ReadonlySet<string>;
-  kept: ReadonlySet<string>; // listed only to show as resolved
+  kept: ReadonlySet<string>; // listed only to show as resolved (GitHub's: every search's, so an unresolved one is on no board)
   queries: string[]; // what it reads (GitHub's searches), shown with the board
   unfetched: string[]; // of those, the ones not read yet
   error?: string; // what the last read of one failed with
@@ -34,5 +34,6 @@ export interface Connector {
   // The held ids `text` names, and `id` when it names one exactly (what fetchOne reads; a short ref doesn't); null: not its ref.
   refOf(text: string, held: readonly string[]): { held: string[]; id?: string } | null;
   fetchOne(id: string): Effect.Effect<string, Upstream | NotFound>; // reads the item `id` names and stores it; answers the id it's stored under
-  boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members; // scope: its space's; loaded: its config, which a preview's isn't the desk's
+  // scope: its space's; loaded: the config being computed (a preview's, or the desk's), whose signals GitHub's {close_authors} reads.
+  boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members;
 }
