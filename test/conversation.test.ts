@@ -16,7 +16,7 @@ import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { run, runSync } from "./helpers/run.ts";
-import { Effect } from "effect";
+import { Cache, Effect } from "effect";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -350,6 +350,8 @@ test("Claude reads what waits on you once per latest comment, in the background,
   t.gh.items.set("acme/web#3", { ...t.gh.items.get("acme/web#3")!, updated_at: hoursAgo(0.5) });
   await run(t.desk.sync());
   await run(t.desk.reviewView("web#3"));
+  const kept = [...runSync(Cache.keys(t.desk.convos.contexts))].filter((k) => k.startsWith("acme/web#3 "));
+  assert.equal(kept.length, 1, "one version of a PR's conversation is kept: the older one is never asked for again");
   await until(() => fake.calls() === 2 && !t.desk.convos.reading);
   assert.deepEqual(
     [...fake.stdin(2).matchAll(/^- id: (.+)$/gm)].map((m) => m[1]),
@@ -389,6 +391,29 @@ test("your PR whose only action is answering someone says Reply on its row, and 
   await run(t.desk.sync());
   await until(() => fake.calls() === 1 && !t.desk.convos.reading);
   assert.ok(fake.stdin(1).includes("acme/web#3"));
+});
+
+test("a bug reading one PR's conversations ahead is logged and reported, and the next one is still read", posix, async (c) => {
+  const fake = fakeClaude(c);
+  const logs: string[] = [];
+  const t = await setup([myPr(3, { thread_last: azulus }), myPr(7, { thread_last: azulus })], {
+    settings: JUDGE_OFF,
+    desk: {
+      log: (m) => {
+        logs.push(m);
+      },
+    },
+  });
+  c.after(t.cleanup);
+  t.gh.contexts.set("PR_acme/web_3", CTX);
+  t.gh.contexts.set("PR_acme/web_7", CTX);
+  await run(t.desk.sync());
+  const list = t.desk.convos.list.bind(t.desk.convos);
+  t.desk.convos.list = (id) => (id === "acme/web#3" ? Effect.die(new Error("bug")) : list(id));
+  await run(t.desk.convos.warm(["acme/web#3", "acme/web#7"]));
+  await until(() => fake.calls() === 1 && !t.desk.convos.reading);
+  assert.ok(fake.stdin(1).includes("acme/web#7"));
+  assert.ok(logs.includes("reading ahead the conversations on acme/web#3 failed: bug"), logs.join("\n"));
 });
 
 test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude read nothing; opening it does", posix, async (c) => {

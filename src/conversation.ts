@@ -180,9 +180,11 @@ export class Conversations {
   }
 
   context(id: string): Effect.Effect<PrContext, GitHubReadError> {
-    return Effect.suspend(() => {
+    return Effect.gen({ self: this }, function* () {
       const it = this.desk.snapshot().entries.get(id)!.item;
-      return Cache.get(this.contexts, `${id} ${it.node_id} ${it.updated_at}`);
+      const key = `${id} ${it.node_id} ${it.updated_at}`;
+      if (!(yield* Cache.has(this.contexts, key))) yield* this.drop(id); // one version per PR: an older one is never asked for again
+      return yield* Cache.get(this.contexts, key);
     });
   }
 
@@ -233,7 +235,14 @@ export class Conversations {
               }),
             ),
           );
-        }),
+        }).pipe(
+          Effect.catchDefect((bug) =>
+            Effect.sync(() => {
+              report(bug, "conversations", id);
+              this.desk.log(`reading ahead the conversations on ${id} failed: ${messageOf(bug)}`);
+            }),
+          ),
+        ),
       { discard: true },
     );
   }
@@ -307,13 +316,15 @@ export class Conversations {
 
   // After your reply: fetched again, so it's no longer waiting on you.
   forget(id: string): void {
+    Effect.runSync(this.drop(id));
+  }
+
+  drop(id: string): Effect.Effect<void> {
     const cache = this.contexts;
-    Effect.runSync(
-      Effect.gen(function* () {
-        const keys = Array.from(yield* Cache.keys(cache)).filter((k) => k.startsWith(`${id} `)); // before any goes
-        for (const key of keys) yield* Cache.invalidate(cache, key);
-      }),
-    );
+    return Effect.gen(function* () {
+      const keys = Array.from(yield* Cache.keys(cache)).filter((k) => k.startsWith(`${id} `)); // before any goes
+      for (const key of keys) yield* Cache.invalidate(cache, key);
+    });
   }
 
   stop(): void {
