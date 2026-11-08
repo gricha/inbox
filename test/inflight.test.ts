@@ -206,7 +206,7 @@ async function conflicts(c: TestContext, settings: Record<string, unknown> = {})
   t.desk.coordinator.wake = (id, what) => {
     woke.push([id, what]);
   };
-  t.desk.coordinator.stop = async () => {};
+  t.desk.coordinator.stop = () => {};
   await run(t.desk.sync());
   let step = 0;
   const update = async (n: number, o: Partial<Item>) => {

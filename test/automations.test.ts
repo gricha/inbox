@@ -158,7 +158,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   ]);
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   assert.equal(a.on, true, "yours is on");
-  const run = await t.desk.automations.run(a, "now");
+  const run = await t.desk.automations.run(a, "now").p;
 
   assert.equal(run.error, null);
   assert.equal(run.summary, "Read 12 new issues; a few need you.");
@@ -222,7 +222,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   assert.match(fake.stdin(1), /This is its first run/);
 
   // The next run hears what the desk took from the last one, never a ref it couldn't.
-  await t.desk.automations.run(a, "now");
+  await t.desk.automations.run(a, "now").p;
   assert.match(fake.stdin(2), /it listed acme\/other#9, acme\/api#4, acme\/api#1, acme\/api#2, acme\/api#3, acme\/api#5\./);
   assert.doesNotMatch(fake.stdin(2), /nope/);
 });
@@ -234,13 +234,13 @@ test("a run with no answer, or one deleted while it runs, adds nothing; a run it
   await runFx(t.desk.sync());
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   fake.raw('{"type":"result","is_error":false,"result":"I looked around."}');
-  const empty = await t.desk.automations.run(a, "now");
+  const empty = await t.desk.automations.run(a, "now").p;
   assert.equal(empty.error, "the run gave no answer: no summary and no list");
 
   t.gh.items.set("acme/other#9", makeItem({ repo: "acme/other", number: 9, kind: "issue", author: "dave" }));
   fake.answer("One.", [{ ref: "acme/other#9", why: "a crash" }]);
   fake.hold(true);
-  const going = t.desk.automations.run(a, "now");
+  const going = t.desk.automations.run(a, "now").p;
   await until(() => fake.calls() === 2);
   runSync(t.desk.automations.remove("warden"));
   fake.hold(false);
@@ -280,7 +280,7 @@ test("a run that fails says so, under the automation and in a notification", asy
   await runFx(t.desk.sync());
   fake.fail();
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
-  const run = await t.desk.automations.run(a, "now");
+  const run = await t.desk.automations.run(a, "now").p;
   assert.match(run.error ?? "", /claude auth login|authenticate/i);
   assert.equal(t.desk.automations.view()[0]!.runs[0]!.error, run.error);
   assert.equal(t.notes.length, 1);
@@ -296,7 +296,7 @@ test("what fails an item is its error and the run goes on; a bug putting one on 
     { ref: "acme/api#1", why: "asks you" },
   ]);
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
-  const ok = await t.desk.automations.run(a, "now");
+  const ok = await t.desk.automations.run(a, "now").p;
   assert.deepEqual(
     ok.items.map((x) => [x.item_id, x.outcome, x.error ?? null]),
     [
@@ -306,7 +306,7 @@ test("what fails an item is its error and the run goes on; a bug putting one on 
   );
   // Deliberate change: a bug in push was that item's error, never reported; it fails the run, reported and notified once.
   t.desk.push = () => Effect.die(new TypeError("entries.get(...) is undefined"));
-  const bug = await t.desk.automations.run(a, "now");
+  const bug = await t.desk.automations.run(a, "now").p;
   assert.equal(bug.error, "entries.get(...) is undefined");
   assert.deepEqual(bug.items, []);
   assert.equal(t.notes.at(-1), "entries.get(...) is undefined");
@@ -421,7 +421,7 @@ test("the desk stopping during a run stops it: it records, notifies and reports 
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   fake.answer("Nothing needs you.", []);
   fake.hold(true);
-  const going = t.desk.automations.run(a, "now");
+  const going = t.desk.automations.run(a, "now").p;
   await until(() => fake.calls() === 1);
   t.desk.stop();
   const run = await going;

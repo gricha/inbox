@@ -431,11 +431,13 @@ test("when claude can't start or resume it, Merging says why and the owner is no
   t.fake.fail(true);
   runSync(t.desk.act("web#3", "inflight"));
   await until(() => runSync(t.desk.inflight()).coordinator.error === "Not logged in");
-  await t.desk.coordinator.flush();
+  t.desk.coordinator.flush();
+  await t.desk.coordinator.flushing;
   assert.equal(starts(t.fake.calls()).length, 2, "it tried again");
   assert.deepEqual(t.notes, ["Not logged in"], "notified once");
   t.fake.fail(false);
-  await t.desk.coordinator.flush();
+  t.desk.coordinator.flush();
+  await t.desk.coordinator.flushing;
   assert.equal(t.fake.sessions().length, 1);
   assert.equal(runSync(t.desk.inflight()).coordinator.error, null);
 });
@@ -634,7 +636,8 @@ test("bypass turned on: a busy coordinator is left to work; one waiting on a per
   await t.desk.coordinator.flushing;
   assert.deepEqual([...stops(t.fake.calls()), ...resumes(t.fake.calls())], []);
   t.fake.busy("waiting");
-  await t.desk.coordinator.flush(); // the 5-minute check
+  t.desk.coordinator.flush(); // the 5-minute check
+  await t.desk.coordinator.flushing;
   const nudge = "I'd like you to look at Merging now.";
   assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions", nudge]]);
   assert.equal(t.desk.coordinator.saved()?.id, "c0ffee02");
@@ -687,7 +690,8 @@ test("a refused bypass shows in Merging and notifies once; turning it off resume
   t.fake.nobypass(true);
   runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
   await until(() => runSync(t.desk.inflight()).coordinator.error === "Bypass permissions mode is disabled");
-  await t.desk.coordinator.flush();
+  t.desk.coordinator.flush();
+  await t.desk.coordinator.flushing;
   assert.equal(resumes(t.fake.calls()).length, 2, "it tried again");
   assert.deepEqual(t.notes, ["Bypass permissions mode is disabled"], "notified once");
   runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": false } }));

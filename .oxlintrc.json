@@ -51,6 +51,18 @@
         "typescript/no-unsafe-argument": "off",
         "typescript/no-explicit-any": "off"
       }
+    },
+    {
+      "files": ["src/**", "electron/**", "scripts/**"],
+      "excludeFiles": ["scripts/shots.ts", "scripts/icons.ts"],
+      "rules": {
+        "typescript/no-floating-promises": [
+          "error",
+          {
+            "ignoreVoid": false
+          }
+        ]
+      }
     }
   ]
 }

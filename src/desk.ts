@@ -582,9 +582,13 @@ export class Desk {
       const coordinator = this.settings["agent.coordinator"];
       const bypass = this.settings["agent.coordinator_bypass"];
       this.settings = this.readSettings(file);
-      if (coordinator && !this.settings["agent.coordinator"]) void this.coordinator.stop();
-      if (!coordinator && this.settings["agent.coordinator"]) void this.coordinator.flush();
-      else if (bypass !== this.settings["agent.coordinator_bypass"] && this.settings["agent.coordinator"]) void this.coordinator.again();
+      if (coordinator && !this.settings["agent.coordinator"]) this.coordinator.stop();
+      if (!coordinator && this.settings["agent.coordinator"]) this.coordinator.flush();
+      else if (bypass !== this.settings["agent.coordinator_bypass"] && this.settings["agent.coordinator"])
+        this.runner.fork(
+          "coordinator",
+          Effect.promise(() => this.coordinator.again()),
+        );
       // Sync now only when the searches change; other settings apply to what the desk already has.
       if (this.configText) yield* this.reloadConfig(searchKey(this.settings) !== searches);
       else this.changed();

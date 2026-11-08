@@ -210,7 +210,7 @@ export class Coordinator {
 
   view(): CoordinatorView {
     const s = this.saved();
-    if (s && !s.url && this.on && Date.now() - this.checked > FRESH) void this.flush();
+    if (s && !s.url && this.on && Date.now() - this.checked > FRESH) this.flush();
     return {
       on: this.on,
       id: s?.id ?? null,
@@ -225,10 +225,10 @@ export class Coordinator {
   start(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
-      void this.flush();
+      this.flush();
     }, this.every);
     this.ticker.unref();
-    void this.flush();
+    this.flush();
     this.watch(); // an ask from before a restart still waits
   }
 
@@ -276,16 +276,19 @@ export class Coordinator {
 
   // Wake it or Start it now in Merging: start it, or have it look now.
   now(): Promise<void> {
-    if (this.flushing) return this.flushing; // a second w while one runs would wake it twice
-    this.asked = true;
-    return this.flush();
+    // a second w while one runs would wake it twice
+    if (!this.flushing) {
+      this.asked = true;
+      this.flush();
+    }
+    return this.flushing ?? Promise.resolve();
   }
 
   schedule(): void {
     if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asks().length || this.asked)) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.flush();
+      this.flush();
     }, this.batch);
     this.timer.unref();
   }
@@ -300,7 +303,7 @@ export class Coordinator {
   }
 
   // Turned off in Settings: stopped, its history kept for when it's turned on again.
-  stop(): Promise<void> {
+  stop(): void {
     this.desk.store.set(NEWS, null);
     this.desk.store.set(ASKS, null);
     this.asked = false;
@@ -320,20 +323,18 @@ export class Coordinator {
         ),
       ),
     );
-    return this.stopping;
   }
 
   // Picks it up, resumes it if it stopped, and hands it what's waiting once it's idle; looks again a batch later while it works.
   // One run at a time, forked through the desk's runner: the desk stopping interrupts it, and what was waiting stays.
-  flush(): Promise<void> {
-    if (this.flushing) return this.flushing;
+  flush(): void {
+    if (this.flushing) return;
     let ended = false; // a run that ends before its first wait (it's off) has ended already
     const p = this.fork(this.run(), () => {
       ended = true;
       this.flushing = null;
     });
     if (!ended) this.flushing = p;
-    return p;
   }
 
   // Forked through the desk's runner; what it gives settles, never rejecting, once the fiber ends, however it ends.
@@ -353,7 +354,8 @@ export class Coordinator {
   // The run in progress may have read the asks or settings before they changed.
   async again(): Promise<void> {
     await this.flushing;
-    await this.flush();
+    this.flush();
+    await this.flushing;
   }
 
   // A failure keeps what's waiting for the next wake or check, and says why in Merging; a bug in it does the same. It

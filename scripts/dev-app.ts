@@ -24,7 +24,7 @@ function launch(): void {
   child = c;
   // Quitting the app (Cmd+Q, tray) ends the dev session too.
   c.on("exit", () => {
-    if (child === c && !stopping) void shutdown();
+    if (child === c && !stopping) shutdown();
   });
 }
 
@@ -54,13 +54,13 @@ fs.watch(path.join(root, "electron"), { recursive: true }, (_e, file) => {
   }, 300);
 });
 
-async function shutdown(): Promise<void> {
+// After a restart in flight, so the Electron it launches is stopped too.
+function shutdown(): void {
   if (stopping) return;
   stopping = true;
-  await stop();
-  process.exit(0);
+  restarting = restarting.then(stop).then(() => process.exit(0));
 }
-process.on("SIGINT", () => void shutdown());
-process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 launch();

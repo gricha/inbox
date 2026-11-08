@@ -1194,7 +1194,7 @@ test("the nobody's-asked hoist, handBackUnasked and rebaseConflicts skip a block
   c.after(t.cleanup);
   t.desk.store.set("coordinator_bg", { id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" });
   t.desk.coordinator.wake = () => {};
-  t.desk.coordinator.stop = async () => {};
+  t.desk.coordinator.stop = () => {};
   await run(t.desk.sync());
   runSync(t.desk.act("web#2", "inflight"));
   runSync(t.desk.act("web#3", "pin"));

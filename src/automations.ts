@@ -150,12 +150,13 @@ export function nextAt(s: Schedule, now: Date): Date {
 }
 
 type Item = AutomationRun["items"][number];
+// A run in progress: p settles with it however it ends, and interrupting its fiber stops it.
+type Running = { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null };
 
 export class Automations {
   desk: Desk;
   timer: NodeJS.Timeout | null = null;
-  // Each run in progress: p settles with it however it ends, and interrupting its fiber stops it.
-  running = new Map<string, { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null }>();
+  running = new Map<string, Running>();
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -276,16 +277,16 @@ export class Automations {
       if (!a.on || typeof s === "string" || this.running.has(a.id)) continue;
       const due = dueAt(s, now)?.toISOString();
       const last = runs.findLast((r) => r.automation === a.id && r.error !== CUT)?.at ?? "";
-      if (due && due > a.updated_at && due > last) void this.run(a, "schedule");
+      if (due && due > a.updated_at && due > last) this.run(a, "schedule");
     }
   }
 
   // Run now: yours from the desk's window, even before you turn it on; an agent's only once it's on. Forked through the
-  // desk's runner, one at a time per automation: what it gives settles with the run however it ends, interrupted (deleted
-  // while it runs, or the desk stopping) as far as it got.
-  run(a: Automation, trigger: AutomationRun["trigger"]): Promise<AutomationRun> {
+  // desk's runner, one at a time per automation: it gives the run in progress, whose p settles with it however it ends,
+  // interrupted (deleted while it runs, or the desk stopping) as far as it got.
+  run(a: Automation, trigger: AutomationRun["trigger"]): Running {
     const going = this.running.get(a.id);
-    if (going) return going.p;
+    if (going) return going;
     const last = this.runs().findLast((r) => r.automation === a.id && !r.error) ?? null;
     const run: AutomationRun = {
       id: randomBytes(4).toString("hex"),
@@ -303,7 +304,7 @@ export class Automations {
     const p = new Promise<AutomationRun>((r) => {
       resolve = r;
     });
-    const entry: { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null } = { p, fiber: null };
+    const entry: Running = { p, fiber: null };
     this.running.set(a.id, entry);
     const end = () => {
       if (this.running.get(a.id) === entry) this.running.delete(a.id);
@@ -313,7 +314,7 @@ export class Automations {
     entry.fiber = this.desk.runner.fork("automation", Effect.ensuring(this.go(a, run, last), Effect.sync(end)), a.id);
     if (!entry.fiber) end();
     this.desk.changed();
-    return p;
+    return entry;
   }
 
   // One run: what fails it, or a bug in it, is its error, reported and notified once. Interrupted, it records and

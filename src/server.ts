@@ -571,7 +571,7 @@ export function createApp(desk: Desk, port: number): Hono {
       const a = yield* desk.automations.get(c.req.param("id"));
       if (!a.on && !fromDesk(c))
         return yield* new Conflict({ message: `"${a.name}" is off: the owner turns it on in Settings → Automations` });
-      void desk.automations.run(a, "now");
+      desk.automations.run(a, "now");
       return { ok: true, running: a.id };
     });
     return respond(c, run, { log });
