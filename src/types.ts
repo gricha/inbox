@@ -247,6 +247,7 @@ export interface SettingDef {
   min?: number;
   max?: number;
   unit?: string; // a number's, shown after its field ("days")
+  more?: boolean; // behind its part's More (the part named by section), folded until opened
   pattern?: string; // strings and list items must match (an empty "string" is always allowed unless required)
   pattern_hint?: string;
   required?: boolean;
@@ -256,7 +257,6 @@ export interface SettingDef {
 export interface SettingsSection {
   id: string;
   title: string;
-  help?: string;
 }
 
 export interface GitHubStatus {
@@ -321,7 +321,7 @@ export interface DesktopBridge {
   status(): Promise<{ hotkey: { accelerator: string; ok: boolean; error?: string }; open_at_login: boolean; source?: SourceStatus | null }>;
 }
 
-// The desktop app running the desk and its UI from a checkout (Settings → Desktop app → Run from a checkout).
+// The desktop app running the desk and its UI from a checkout (Settings → This device → Run from a checkout).
 export interface SourceStatus {
   dir: string;
   // running: the desk process is up or restarting; attached: a desk already ran on the port, so the app uses that one

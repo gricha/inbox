@@ -9,7 +9,7 @@ import { getStored, setStored } from "./storage.ts";
 export type ThemeId = "system" | Named;
 const KEY = "desk.theme"; // index.html reads it too
 
-// Settings → Appearance's choices after System: the light themes, then the dark, each in the list's order (Light and Dark first).
+// Settings → This device's themes after System: the light themes, then the dark, each in the list's order (Light and Dark first).
 export const THEME_GROUPS: { label: string; themes: Theme[] }[] = [
   { label: "Light", themes: THEMES.filter((t) => t.scheme === "light") },
   { label: "Dark", themes: THEMES.filter((t) => t.scheme === "dark") },

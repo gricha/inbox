@@ -80,7 +80,7 @@ const api = `http://127.0.0.1:${port}`; // the main process's own calls; no IPv6
 const deskUrl = `http://localhost:${port}`;
 let uiUrl = deskUrl;
 const origins = [deskUrl, api];
-// Settings → Desktop app → Run from a checkout as it was at launch; DESK_SOURCE (npm run app:dev) wins over it.
+// Settings → This device → Run from a checkout as it was at launch; DESK_SOURCE (npm run app:dev) wins over it.
 const envSource = envVar("DESK_SOURCE");
 const launchSource = desktopSettings(readSettings(settingsPath(home)).overrides).source;
 const sourceWanted = sourceDir(envSource ?? launchSource, os.homedir());
@@ -104,7 +104,7 @@ let hotkey: { accelerator: string; ok: boolean; error?: string } = { accelerator
 let status: Status | null = null;
 let queueCards: Card[] = []; // the queue's top: now, then today
 let loginApplied: boolean | null = null; // last applied, so a refused registration isn't retried on every update
-let theme: string | null = null; // this device's, as Settings → Appearance picked it; kept here, since the UI's origin can change
+let theme: string | null = null; // this device's, as Settings → This device picked it; kept here, since the UI's origin can change
 
 // A separate DESK_HOME (tests, a second desk) gets its own window state, logs and single-instance lock.
 if (process.env.DESK_HOME) {

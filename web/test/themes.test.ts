@@ -1,4 +1,4 @@
-// Settings → Appearance's themes: src/themes.ts lists them, web/src/styles.css holds their tokens, and the copies that can't
+// Settings → This device's themes: src/themes.ts lists them, web/src/styles.css holds their tokens, and the copies that can't
 // import the list (index.html's pre-paint script, the window's colours) agree with both.
 import assert from "node:assert/strict";
 import fs from "node:fs";

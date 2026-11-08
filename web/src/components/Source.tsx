@@ -1,4 +1,4 @@
-// The desktop app running the desk from a checkout (Settings → Desktop app → Run from a checkout).
+// The desktop app running the desk from a checkout (Settings → This device → Run from a checkout).
 import { Effect } from "effect";
 import { useEffect, useState } from "react";
 import type { SourceStatus } from "../../../src/types.ts";

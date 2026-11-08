@@ -2729,7 +2729,7 @@ const tomlArr = (xs: string[]) => `[${xs.map(tomlStr).join(", ")}]`;
 function toToml(c: Config): string {
   const out = [
     "# Review Desk config. ⌘/Ctrl+Enter previews, ⌘/Ctrl+S saves.",
-    "# Sync interval, bots, notifications and hand-off prompts are on the Settings page (settings.json).",
+    "# Sync interval, bots, notifications and agents' prompts are in Settings (settings.json).",
   ];
   for (const s of c.spaces) out.push("", "[[spaces]]", `id = ${tomlStr(s.id)}`, `name = ${tomlStr(s.name)}`, `scope = ${tomlStr(s.scope)}`);
   for (const b of c.boards) {
@@ -3069,7 +3069,7 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 }
 
 // ---------------------------------------------------------------------------
-// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agents shows Connect.
+// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Claude shows Connect.
 
 const linked = new Set(["claude-code mcp"]);
 function agentStatus(): AgentStatus {

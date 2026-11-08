@@ -269,9 +269,9 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.`,
     `# Each [[boards]] table feeds your desk: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.`,
-    `# Claude then sorts every item by your policy (Settings → Policy), with the rule's bucket as its hint. A rule with`,
-    `# \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever Claude, quiet`,
-    `# days or caps say.`,
+    `# Claude then sorts every item by your policy (Settings → Claude → Your policy), with the rule's bucket as its hint.`,
+    `# A rule with \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever`,
+    `# Claude, quiet days or caps say.`,
     `# A rule with \`final = true\` isn't re-sorted by Claude: what it matches stays in its bucket (your pin still lifts it).`,
     `# \`blocked\`: it can't move until something else happens: a PR it needs merging first (pr.blocked: its description says`,
     `# "Requires \u2026", or it's stacked on it), or reviewers you asked. Only rules fill it: Claude never answers blocked. The`,
@@ -282,7 +282,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Fields (me.requested_direct, author.close, pr.ci, ...) are listed on the Rules page and by \`desk fields\`.`,
     `# Within a bucket, cards sort by rule order (earlier rules first), then \`priority\`, then \`sort\`.`,
     `# \`why\` texts can include fields: "{author.login} asked you".`,
-    `# Sync interval, bots, notifications and hand-off prompts are on the Settings page (settings.json).`,
+    `# Sync interval, bots, notifications and agents' prompts are in Settings (settings.json).`,
   ];
   const spaces: { id: string; name: string; scope: string }[] = orgs.map((o) => ({ id: o, name: o, scope: `org:${o}` }));
   spaces.push({ id: "personal", name: "Personal", scope: personalScope });

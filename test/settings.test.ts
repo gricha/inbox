@@ -4,7 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
-import { checkSetting, DEFAULTS, effective, loadSettings, migrateLegacy, readSettings, SETTINGS, writeSettings } from "../src/settings.ts";
+import {
+  checkSetting,
+  DEFAULTS,
+  effective,
+  loadSettings,
+  migrateLegacy,
+  readSettings,
+  SECTIONS,
+  SETTINGS,
+  writeSettings,
+} from "../src/settings.ts";
 import { defaultConfigText, parseConfig } from "../src/config.ts";
 import type { SettingDef } from "../src/types.ts";
 import { failureSync, runSync } from "./helpers/run.ts";
@@ -19,6 +29,29 @@ test("a number names its unit after its field, never in its label", () => {
     if (d.type === "number") assert.ok(d.unit, `${d.key} has a unit`);
     else assert.equal(d.unit, undefined, `${d.key}: only a number has a unit`);
   }
+});
+
+test("every setting is in one of the page's parts, and no part folds all of its own behind More", () => {
+  const defs = SETTINGS as readonly SettingDef[];
+  for (const d of defs)
+    assert.ok(
+      SECTIONS.some((s) => s.id === d.section),
+      `${d.key} is in ${d.section}`,
+    );
+  for (const s of SECTIONS) {
+    const own = defs.filter((d) => d.section === s.id);
+    if (own.length)
+      assert.ok(
+        own.some((d) => !d.more),
+        `${s.id} shows something before its More`,
+      );
+  }
+  // The array reads in the page's order, part by part.
+  const order = defs.map((d) => d.section).filter((s, i, all) => s !== all[i - 1]);
+  assert.deepEqual(
+    order,
+    SECTIONS.map((s) => s.id).filter((id) => defs.some((d) => d.section === id)),
+  );
 });
 
 test("checkSetting", () => {

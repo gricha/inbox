@@ -85,7 +85,7 @@ function Coordinator({ c, act }: { c: CoordinatorView; act: (k: "copy" | "wake")
   const wake = () => {
     act("wake");
   };
-  if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings \u2192 Agents."}</p>;
+  if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings \u2192 Claude."}</p>;
   if (c.error)
     return (
       <p className="lane-coord lane-coord-error">

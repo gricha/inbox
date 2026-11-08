@@ -270,7 +270,7 @@ const linesInChat = async (page: Page) => {
   await page.locator(".chat-input").waitFor();
 };
 const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
-// A theme picked in Settings → Appearance, as its select sets it; `after` puts System back.
+// A theme picked in Settings → This device, as its select sets it; `after` puts System back.
 const pickTheme = (id: string) => async (page: Page) => {
   await page.evaluate(`localStorage.setItem("desk.theme", ${JSON.stringify(id)}); location.hash = "#/"`);
   await page.reload();
@@ -1740,7 +1740,34 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
     },
   },
-  { name: "settings-github", go: at("#/settings/github"), sizes: ["wide", "mid", "min", "mac", "xl"] },
+  {
+    // GitHub's part at the top, its tuning and prompts folded behind More.
+    name: "settings-github",
+    go: async (page) => {
+      await at("#/settings/github")(page);
+      if (await page.evaluate<boolean>(`!!document.getElementById("setting-github.poll_seconds")?.getClientRects().length`))
+        failures.push("settings-github: More GitHub settings is open on arrival");
+    },
+    sizes: ["wide", "mid", "min", "mac", "xl"],
+  },
+  {
+    // More GitHub settings opened with a click: its rows in the same sheet, under it.
+    name: "settings-github-more",
+    go: async (page) => {
+      await at("#/settings/github")(page);
+      await page.getByRole("button", { name: "More GitHub settings" }).click();
+      const hidden = await page.evaluate<
+        string[]
+      >(`["github.my_repos", "github.bots", "github.close_collaborator_min", "github.poll_seconds",
+        "handoff.prompt", "handoff.mine", "handoff.issue"].filter((k) => !document.getElementById("setting-" + k)?.getClientRects().length)`);
+      if (hidden.length) failures.push(`settings-github-more: ${hidden.join(", ")} still folded`);
+      await page.evaluate(`scrollBy(0, document.querySelector(".s-more").getBoundingClientRect().top - 160)`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.getByRole("button", { name: "More GitHub settings" }).click();
+    },
+  },
   { name: "settings-queue", go: at("#/settings/queue") },
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
@@ -1789,36 +1816,45 @@ const SHOTS: Shot[] = [
       if (head !== "Settings") failures.push(`settings-app: the page head reads ${JSON.stringify(head)}`);
     },
   },
-  { name: "settings-appearance", go: at("#/settings/appearance") },
-  { name: "settings-review", go: at("#/settings/review") },
   {
-    // Settings is one page: its end, Rules and Policy above it.
+    // The old sections' links land on the part their settings live in now; the last, GitHub's, is what's shot.
+    name: "settings-aliases",
+    go: async (page) => {
+      for (const [old, part] of [
+        ["notify", "queue"],
+        ["appearance", "app"],
+        ["review", "github"],
+        ["handoff", "github"],
+      ]) {
+        await at(`#/settings/${old}`)(page);
+        const seen = await page.evaluate<boolean>(`(() => {
+          const h = document.querySelector("#s-${part} > .group-head")?.getBoundingClientRect();
+          return !!h && h.top >= 52 && h.bottom <= innerHeight && (${JSON.stringify(part)} !== "github" || scrollY === 0);
+        })()`);
+        if (!seen) failures.push(`settings-aliases: #/settings/${old} doesn't land on ${part}`);
+      }
+    },
+  },
+  {
+    // Settings is one page: its end, with More closed.
     name: "settings-bottom",
     go: async (page) => {
-      await at("#/settings/review")(page);
+      await at("#/settings/app")(page);
       await toBottom("settings-bottom")(page);
     },
   },
   {
-    // Paused after failures in a row: one line, its label in ink, said once.
-    name: "settings-review-paused",
+    // Paused after failures in a row: one line in Claude's part, its label in ink, said once on the page.
+    name: "settings-agent-paused",
     writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
-      await at("#/settings/review")(page);
-      await page.evaluate(`document.querySelector("#s-review").scrollIntoView()`);
-      await page.waitForTimeout(200);
-    },
-    after: pauseAi(false),
-  },
-  {
-    name: "settings-policy-paused",
-    writes: true,
-    go: async (page) => {
-      await at("#/")(page);
-      await pauseAi(true)(page);
-      await at("#/settings/policy")(page);
+      await at("#/settings/agent")(page);
+      const said = await page.evaluate<number>(
+        `[...document.querySelectorAll(".settings *")].filter((el) => !el.children.length && el.textContent.includes("AI reviews are paused")).length`,
+      );
+      if (said !== 1) failures.push(`settings-agent-paused: Settings says AI reviews are paused ${said} times`);
     },
     after: pauseAi(false),
   },
@@ -1929,7 +1965,7 @@ const SHOTS: Shot[] = [
       name: `theme-${id}-settings`,
       go: async (page) => {
         await pickTheme(id)(page);
-        await at("#/settings/policy")(page);
+        await at("#/settings/agent")(page);
       },
       after: systemTheme,
       sizes: ["wide"],

@@ -1,4 +1,4 @@
-// Every theme Settings → Appearance offers, in one plain list the window, the desktop app, the shots and the tests read.
+// Every theme Settings → This device offers, in one plain list the window, the desktop app, the shots and the tests read.
 // Each one's tokens are in web/src/styles.css: Light's in :root, the others' in :root[data-theme="<id>"]. A new theme is a
 // row here, its block there and its id in web/index.html's pre-paint list (web/test/themes.test.ts holds them together).
 export interface Theme {

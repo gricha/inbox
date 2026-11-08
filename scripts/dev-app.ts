@@ -1,4 +1,4 @@
-// npm run app:dev: the desktop app running from this checkout (DESK_SOURCE, as Settings → Desktop app → Run from a checkout):
+// npm run app:dev: the desktop app running from this checkout (DESK_SOURCE, as Settings → This device → Run from a checkout):
 // src/ restarts the desk, web/ hot-reloads, and a change under electron/ restarts the app.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";

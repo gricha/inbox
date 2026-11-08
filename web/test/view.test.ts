@@ -99,7 +99,6 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute(""), { name: "queue" });
   assert.deepEqual(parseRoute("#/focus"), { name: "queue" });
   assert.deepEqual(parseRoute("#/settings"), { name: "settings", section: "github" });
-  assert.deepEqual(parseRoute("#/settings/handoff"), { name: "settings", section: "handoff" });
   assert.deepEqual(parseRoute("#/rules"), { name: "settings", section: "rules" });
   assert.equal(routeHash({ name: "settings", section: "rules" }), "#/settings/rules");
   assert.deepEqual(parseRoute(routeHash({ name: "settings", section: "app" })), { name: "settings", section: "app" });
@@ -114,6 +113,20 @@ test("the old links still open their pages under the new names: #/later is FYI, 
   assert.deepEqual(parseRoute("#/later"), { name: "later" });
   assert.deepEqual(parseRoute("#/archive"), { name: "archive" });
   assert.deepEqual(parseRoute("#/waiting"), { name: "blocked" });
+});
+
+test("Settings' old section ids land on the part their settings live in now", () => {
+  const part = (id: string) => parseRoute(`#/settings/${id}`);
+  assert.deepEqual(part("notify"), { name: "settings", section: "queue" });
+  assert.deepEqual(part("review"), { name: "settings", section: "github" });
+  assert.deepEqual(part("appearance"), { name: "settings", section: "app" });
+  assert.deepEqual(part("handoff"), { name: "settings", section: "github" });
+  // Rules and the policy are still places of their own, and every part's id goes round the hash unchanged.
+  assert.deepEqual(part("rules"), { name: "settings", section: "rules" });
+  assert.deepEqual(part("policy"), { name: "settings", section: "policy" });
+  for (const section of ["github", "agent", "queue", "automations", "app"])
+    assert.deepEqual(parseRoute(routeHash({ name: "settings", section })), { name: "settings", section });
+  assert.equal(pageOf(part("notify"), "queue"), null);
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {

@@ -2220,7 +2220,7 @@ export class Desk {
   // there) as the cause.
   wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream | Unavailable> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Claude" });
       const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
       if (a) {
         if (a.item_id) yield* this.requireConfig(); // askAbout reads the snapshot
@@ -2473,7 +2473,7 @@ export class Desk {
     lines?: AskLines;
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Claude" });
       const ref = b.item_id ? yield* this.resolve(b.item_id) : null; // before the snapshot, which needs the config
       const item = ref ? this.snapshot().entries.get(ref)!.item : null;
       const bad = (message: string) => new BadRequest({ message });

@@ -128,7 +128,7 @@ middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound`
   `kill` and waits for `close` (bounded by SIGKILL after the grace period), so an interrupted run has exited before its
   fiber ends. A child's own timeout stays an unref'd `setTimeout` inside the callback. `children.ts` tracks every child,
   so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings →
-  Agents) runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile`
+  Claude) runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile`
   can't start one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an
   `Effect.callback` too, and interrupted it stops a `gh` that started and signals nothing for one that didn't
   (`execFile`'s `signal` option sent SIGTERM to the desk's own process group, the desktop app's included, when `gh`

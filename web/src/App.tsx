@@ -290,7 +290,7 @@ export function App() {
       setSection(settingsSection);
       setSettingsSeen(true);
       window.scrollTo(0, 0);
-    } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → Rules.");
+    } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → GitHub → Searches and rules.");
     const stop = new AbortController();
     void runUi(load(), { signal: stop.signal });
     return () => {

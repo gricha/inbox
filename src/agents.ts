@@ -1,4 +1,4 @@
-// The agent you work in (Settings → Agents): whether it has the desk's MCP tools and the Review Desk skill, and connecting it.
+// The agent you work in (Settings → Claude): whether it has the desk's MCP tools and the Review Desk skill, and connecting it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

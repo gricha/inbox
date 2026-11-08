@@ -1,4 +1,4 @@
-// Run from a checkout (Settings → Desktop app → Run from a checkout): the desk under node --watch and the UI on a Vite dev
+// Run from a checkout (Settings → This device → Run from a checkout): the desk under node --watch and the UI on a Vite dev
 // server, both from a Review Desk clone, as children of the app. No electron import.
 import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";

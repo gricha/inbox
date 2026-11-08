@@ -67,9 +67,12 @@ export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "blocked", Grou
   blocked: ["blocked"],
 };
 
+// Settings' old section ids, still in links and habits, and the part each one's settings live in now.
+const SETTINGS_ALIAS: Record<string, string> = { notify: "queue", review: "github", appearance: "app", handoff: "github" };
+
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
-  if (m) return { name: "settings", section: m[1] === undefined || m[1] === "" ? "github" : m[1] };
+  if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };

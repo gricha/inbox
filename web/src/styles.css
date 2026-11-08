@@ -1,7 +1,7 @@
 /* Review Desk: an informational app. Ink and pencil grey on calm paper; colour only where it carries information (CI failing,
    a merge conflict, changes requested, an AI review's risk), and the accent on calls to action: filled on the one to press,
    tinted on a row's. Themes are token sets: the system's light or dark by default, or one picked per device in Settings →
-   Appearance (data-theme on <html>, set before the first paint). */
+   This device (data-theme on <html>, set before the first paint). */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -712,8 +712,8 @@ p {
   padding: 28px 24px 84px;
 }
 
-/* Settings is wider, so the rules editor fits; the page head's name follows it. */
-.col:has(.rules-wrap:not([hidden])) {
+/* Settings is wider, so the rules editor on it fits; the page head's name follows it. */
+.col:has(.settings:not([hidden])) {
   --col-w: 1180px;
 }
 
@@ -3106,44 +3106,30 @@ p {
 
 /* Settings ----------------------------------------------------------------- */
 
-/* Same columns as the queue: the section list sits where refs sit, the pane where titles sit. */
-.settings {
+/* A part: the Inbox's part heading over one sheet of rows; a jump to it stops just under the page head. */
+.s-part,
+.s-rules,
+.s-block {
+  scroll-margin-top: 64px;
+}
+
+.s-part + .s-part {
+  margin-top: 28px;
+}
+
+/* Text a part shows outside its sheet starts where its heading's words do. */
+.s-part > .s-live {
+  max-width: none;
+  margin: 0 0 16px;
   padding: 0 12px;
 }
 
-.s-page-head {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 8px;
+.s-skel .group-head .sk {
+  width: 6em;
 }
 
-.s-page-head .quiet {
-  font-size: 12.5px;
-}
-
-/* Under the page head's rule, so a jump to a section shows one hairline, not two. */
-.s-section {
-  padding: 36px 0 24px;
-  scroll-margin-top: 51px;
-}
-
-.s-section + .s-section {
-  border-top: 1px solid var(--rule);
-}
-
-.s-section h2 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.s-intro {
-  max-width: 64ch;
-  margin-top: 8px;
-  color: var(--pencil);
-  font-size: 14px;
-  line-height: 1.5;
+.s-skel .sk-lines {
+  width: min(360px, 70%);
 }
 
 .s-sub {
@@ -3164,15 +3150,6 @@ p {
 .s-file-err {
   display: block;
   margin-top: 3px;
-}
-
-/* Each section's settings on one sheet, as the Inbox's table: a hairline between rows. */
-.s-sheet {
-  margin-top: 24px;
-}
-
-.s-section > h2 + .s-sheet {
-  margin-top: 14px;
 }
 
 /* The label and its help, then the control on the sheet's right edge, so controls line up row to row. */
@@ -3198,6 +3175,7 @@ p {
 }
 
 .s-label {
+  margin: 0;
   color: var(--ink);
   font-size: 14px;
   font-weight: 550;
@@ -3298,6 +3276,55 @@ p {
   font-size: 13px;
 }
 
+/* More GitHub settings: a quiet row of its own, its rows under it in the same sheet. */
+.s-more {
+  padding: 10px 16px;
+}
+
+.s-more .link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.s-more .i {
+  transition: transform 0.15s;
+}
+
+.s-more [aria-expanded="true"] .i {
+  transform: rotate(180deg);
+}
+
+/* Searches and rules, after GitHub's sheet: its name and one line where the part's heading starts, then the editor. */
+.s-rules {
+  margin-top: 28px;
+}
+
+.s-block-head {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.s-rules > .s-help {
+  max-width: none;
+  margin-top: 2px;
+  padding: 0 12px;
+}
+
+.s-block .policy {
+  margin-top: 4px;
+}
+
+.agent {
+  margin-bottom: 16px;
+  padding: 0 12px;
+}
+
 .agent .btn {
   margin-top: 12px;
 }
@@ -3321,7 +3348,8 @@ p {
 .gh {
   display: grid;
   gap: 28px;
-  margin-top: 26px;
+  margin: 4px 0 24px;
+  padding: 0 12px;
 }
 
 .gh .notice {
@@ -3377,7 +3405,7 @@ p {
 /* Rules editor ------------------------------------------------------------- */
 
 .rules-wrap {
-  margin-top: 24px;
+  margin-top: 14px;
 }
 
 .rules {
@@ -3463,7 +3491,6 @@ p {
 .au {
   display: grid;
   gap: 14px;
-  margin-top: 16px;
 }
 
 .au-list {
@@ -4949,10 +4976,6 @@ p {
 .sk-code .sk {
   margin: 5px 0;
   background: var(--rule);
-}
-
-.s-section h2 .sk {
-  width: 6em;
 }
 
 .sk-files {

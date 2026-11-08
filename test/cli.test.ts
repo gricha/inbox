@@ -419,9 +419,21 @@ test("settings lists effective values by section and stars overrides", async () 
   fake.settings = { "github.poll_seconds": 120 };
   const r = await run(["settings"]);
   assert.equal(r.code, 0);
-  assert.match(r.out, /^GitHub\n\* github\.poll_seconds +120\n {2}github\.close_collaborator_min +5\n {2}github\.bots +\(none\)\n/);
-  assert.match(r.out, /\n\nNotifications\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/);
-  assert.match(r.out, /\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
+  assert.match(
+    r.out,
+    /^GitHub\n {2}github\.resolve_on_others_approval +always\n {2}review\.auto_ai +true\n {2}github\.my_repos +\(none\)\n/,
+  );
+  assert.match(r.out, /\n\* github\.poll_seconds +120\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
+  assert.match(r.out, /\n\nClaude\n {2}policy\.judge +true\n/);
+  assert.match(
+    r.out,
+    /\n\nInbox and notifications\n {2}queue\.quiet_days +14\n {2}queue\.cards +10\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/,
+  );
+  assert.match(r.out, /\n\nThis device\n {2}app\.hotkey +/);
+  assert.deepEqual(
+    r.out.split("\n").filter((l) => /^\S/.test(l) && !l.startsWith("*")),
+    ["GitHub", "Claude", "Inbox and notifications", "This device"],
+  );
   assert.match(r.out, /\n\n\* set in \/home\/you\/\.review-desk\/settings\.json\n$/);
   assert.equal(lastCall().path, "/api/settings");
   assert.equal(JSON.parse((await run(["settings", "--json"])).out).values["github.poll_seconds"], 120);
@@ -540,7 +552,7 @@ test("install and uninstall are macOS-only", async () => {
         assert.equal(r.code, 1);
         assert.equal(
           r.err,
-          `desk: ${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app\n`,
+          `desk: ${cmd} is macOS-only. On Linux and Windows, use Settings → This device → Open at login in the desktop app\n`,
         );
       }
     } finally {

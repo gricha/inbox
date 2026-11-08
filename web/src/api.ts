@@ -46,7 +46,7 @@ export class DeskUnreachable extends Data.TaggedError("DeskUnreachable")<{ reado
 // The desk is up but has nothing to show yet: its first sync (a 503 "starting"). A banner, and polling.
 export class DeskStarting extends Data.TaggedError("DeskStarting")<{ readonly message: string }> {}
 
-// The desk's rules have errors, so it never loaded (a 503 "config"): the notice that links to Settings → Rules.
+// The desk's rules have errors, so it never loaded (a 503 "config"): the notice that links to Settings → GitHub → Searches and rules.
 export class DeskConfigBroken extends Data.TaggedError("DeskConfigBroken")<{ readonly message: string }> {}
 
 // A 409: the state refuses it. kind is the desk's tag; Stale (what you edited changed meanwhile) is what Rules and Policy

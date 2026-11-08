@@ -116,7 +116,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ### "Hand off a review"
 
-1. `desk_item` with the ref. Its hand-off prompt (set in Settings → Prompts for a Claude session) has the URL, the `gh` commands to read the PR, and a line saying not to post. It differs for someone else's PR, the user's own PR, and an issue.
+1. `desk_item` with the ref. Its hand-off prompt (set in Settings → GitHub → More GitHub settings) has the URL, the `gh` commands to read the PR, and a line saying not to post. It differs for someone else's PR, the user's own PR, and an issue.
 2. Use that prompt as the task: start a new session or subagent with it, or work through it here if the user wants. Keep PR titles and bodies out of any prompt you write yourself.
 3. Report findings and drafted comments in chat. The user posts them. A comment may put a change in context, but only what this PR changes and why it matters to the reviewer: never a description of what the code does in general, never a restatement of the diff.
 

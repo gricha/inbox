@@ -202,7 +202,7 @@ source = "github"            # optional; the core's keys: filter, priority, rule
 queries = ["is:open is:pr review-requested:{me}"]
 ```
 
-**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) live in GitHub's own file and are spread into it. Its section shows `status()` beside its entries, rendered from the schema as today. Where sections sit is the Settings redesign's call.
+**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) live in GitHub's own file and are spread into it. Its section shows `status()` beside its entries, rendered from the schema as today. GitHub's part comes first on the page, where sources go, before the core's (Claude, Inbox and notifications, Automations, This device), and holds all of GitHub's entries; `more` folds its tuning (the repos that count as yours, bots, close collaborators, the sync interval and the `handoff.*` prompts) behind More GitHub settings.
 
 ## 4. The plugins we have, against today's files
 
