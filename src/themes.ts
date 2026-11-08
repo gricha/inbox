@@ -11,14 +11,14 @@ export interface Theme {
 }
 
 export const THEMES = [
-  { id: "light", label: "Light", scheme: "light", paper: "#f5f6f8", pencil: "#5c6573", diff: "pierre-light" },
-  { id: "dark", label: "Dark", scheme: "dark", paper: "#14171c", pencil: "#a7b0be", diff: "pierre-dark" },
-  { id: "sand", label: "Sand", scheme: "light", paper: "#f3eee5", pencil: "#73685a", diff: "pierre-light" },
-  { id: "slate", label: "Slate", scheme: "dark", paper: "#1b2028", pencil: "#8e98a5", diff: "pierre-dark" },
+  { id: "light", label: "Light", scheme: "light", paper: "#f5f6f8", pencil: "#5c6573", diff: "pierre-light-desk" },
+  { id: "dark", label: "Dark", scheme: "dark", paper: "#14171c", pencil: "#a7b0be", diff: "pierre-dark-desk" },
+  { id: "sand", label: "Sand", scheme: "light", paper: "#f3eee5", pencil: "#73685a", diff: "pierre-light-desk" },
+  { id: "slate", label: "Slate", scheme: "dark", paper: "#1b2028", pencil: "#8e98a5", diff: "pierre-dark-desk" },
   { id: "solarized", label: "Solarized", scheme: "light", paper: "#f6efdc", pencil: "#4f646b", diff: "solarized-light-desk" },
   { id: "catppuccin", label: "Catppuccin Latte", scheme: "light", paper: "#e6e9ef", pencil: "#5c5f77", diff: "catppuccin-latte-desk" },
   { id: "sentry", label: "Sentry", scheme: "dark", paper: "#181225", pencil: "#9d95b0", diff: "pierre-dark-soft-desk" },
-  { id: "gruvbox", label: "Gruvbox", scheme: "dark", paper: "#1f1d1c", pencil: "#a89984", diff: "gruvbox-dark-medium" },
+  { id: "gruvbox", label: "Gruvbox", scheme: "dark", paper: "#1f1d1c", pencil: "#a89984", diff: "gruvbox-dark-medium-desk" },
   { id: "tokyo-night", label: "Tokyo Night", scheme: "dark", paper: "#15161f", pencil: "#838cb4", diff: "tokyo-night-desk" },
 ] as const satisfies readonly Theme[];
 

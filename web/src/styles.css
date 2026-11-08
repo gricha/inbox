@@ -173,7 +173,7 @@
   --amber: #dfb468;
   --amber-wash: #352c1c;
   --green: #86c99c;
-  --go: #2f8a50;
+  --go: #2a7f49;
   --on-go: #fff;
   --accent: #4d63d9;
   --accent-ink: #9db4ff;
@@ -4917,6 +4917,24 @@ button.s-edit:hover:not(:disabled) {
    mixes into the sheet, in lab: 20% of it on a dark theme's line and 15% on its numbers, 12% and 9% on a light one's. So
    each target is solved for the band wanted (lab()'s a and b are unbounded, so the band comes out exact); an -emphasis-
    override, the changed words' box on top, is the colour itself. */
+
+/* Dark and Slate: the changed words' boxes a step over their line's band, not Pierre's louder ones, so the code on them reads. */
+:root[data-theme="dark"] .rv-diff {
+  --diffs-bg-addition-emphasis-override: #3a4a49;
+  --diffs-bg-deletion-emphasis-override: #4f4146;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .rv-diff {
+    --diffs-bg-addition-emphasis-override: #3a4a49;
+    --diffs-bg-deletion-emphasis-override: #4f4146;
+  }
+}
+
+:root[data-theme="slate"] .rv-diff {
+  --diffs-bg-addition-emphasis-override: #3e5051;
+  --diffs-bg-deletion-emphasis-override: #57454a;
+}
 
 /* Sentry: a deep teal (#1b302c, its numbers #1c2c29) beside a calm plum (#41283b), not a grey on the aubergine. */
 :root[data-theme="sentry"] .rv-diff {

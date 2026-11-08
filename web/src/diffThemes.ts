@@ -5,11 +5,45 @@ import { registerCustomTheme, resolveTheme, type DiffsTheme } from "@pierre/diff
 // - Shiki's Solarized Light and Catppuccin Latte draw much of the code at 2:1 to 3:1 on the sheet, less on a changed line's
 //   tint: darkened (4.4:1 and up on the sheet, comments a step under). Latte's maroon parameters take its text colour: a red
 //   name on an added line reads as a removal.
+// - Pierre's light, Light's and Sand's, draws constants, variables, numbers, operators and strings in oranges, yellows, cyans
+//   and greens at 2:1 to 3.5:1 on the sheet, less inside a changed word's box: darkened (4.5:1 and up on the sheet, 3.5:1 in a
+//   box), comments a step under.
+// - Pierre's dark, Dark's and Slate's, draws punctuation and operators in a grey at 2.4:1 to 2.8:1 on the sheet and 1.2:1 in a
+//   changed word's box, and comments, functions and types not far above: lighter, punctuation in Dark's pencil and comments
+//   in Slate's.
 // - Pierre's soft dark, Sentry's, draws punctuation, parameters and comments in neutral greys that vanish on its changed lines
 //   and the changed words' boxes: lighter, in Sentry's lavender.
+// - Shiki's Gruvbox draws broken code in its dark red at 2.9:1: its bright red.
 // - Shiki's Tokyo Night draws comments, doc comments and markdown punctuation at 2.4:1 to 3.5:1: lighter, comments in folke's
 //   dark5 (4.1:1 on the sheet, about 3:1 on a changed line).
 const COPIES: Record<string, { of: string; colours: Record<string, string> }> = {
+  "pierre-light-desk": {
+    of: "pierre-light",
+    colours: {
+      "#d5901c": "#8f5c00", // constants
+      "#d47628": "#9c4c15", // variables
+      "#d5a910": "#7d6300", // constants' yellow
+      "#1ca1c7": "#0d6d89", // numbers, booleans
+      "#08c0ef": "#0a7187", // operators
+      "#199f43": "#11702f", // strings
+      "#18a46c": "#0f7062", // attributes
+      "#16a994": "#0f7062", // escapes
+      "#17a5af": "#0f7480", // regular expressions
+      "#d5512f": "#a83a1c",
+      "#1a85d4": "#1864a6", // decorators
+      "#d32a61": "#c02556", // keywords
+      "#737373": "#6b6b6b", // comments
+    },
+  },
+  "pierre-dark-desk": {
+    of: "pierre-dark",
+    colours: {
+      "#636363": "#a7b0be", // punctuation and operators
+      "#737373": "#8e98a5", // comments
+      "#9d6afb": "#b391fc", // functions
+      "#d568ea": "#de88ef", // types
+    },
+  },
   "solarized-light-desk": {
     of: "solarized-light",
     colours: {
@@ -49,6 +83,10 @@ const COPIES: Record<string, { of: string; colours: Record<string, string> }> = 
       "#8a8a8a": "#a8a1bb", // parameters
       "#636363": "#857d99", // comments
     },
+  },
+  "gruvbox-dark-medium-desk": {
+    of: "gruvbox-dark-medium",
+    colours: { "#cc241d": "#fb4934" }, // invalid code
   },
   "tokyo-night-desk": {
     of: "tokyo-night",

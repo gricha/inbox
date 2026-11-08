@@ -56,7 +56,7 @@ const TARGETS: [string, string, number, number?][] = [
   ["--accent-ink", "--sheet", 4.5],
   ["--accent-ink", "--accent-wash", 4.5],
   ["--on-accent", "--accent", 4.5], // the filled call to action
-  ["--on-go", "--go", 4.3], // Approve, Hand off for merge
+  ["--on-go", "--go", 4.5], // Approve, Hand off for merge
   ["--red", "--sheet", 4.5],
   ["--red", "--red-wash", 4.5],
   ["--amber", "--sheet", 4.5],
@@ -136,9 +136,9 @@ test("every theme's diff colours are a theme Pierre has, in the same light or da
   for (const t of THEMES) assert.equal((await resolveTheme(t.diff)).type, t.scheme, t.id);
 });
 
-test("the desk's copy of a diff theme draws its code at 4.5:1 on the sheet and every colour at 3:1", async () => {
+test("every theme's diff draws its code at 4.5:1 on the sheet and every colour at 3:1", async () => {
   const misses: string[] = [];
-  for (const t of THEMES.filter((x) => x.diff.endsWith("-desk"))) {
+  for (const t of THEMES) {
     const sheet = tokensOf(t.id)!.get("--sheet")!;
     const theme = await resolveTheme(t.diff);
     if (contrast(theme.fg, sheet) < 4.5) misses.push(`${t.id}: its text ${theme.fg}`);
