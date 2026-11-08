@@ -307,6 +307,7 @@ export class Desk {
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   wrote = new Map<string, string>(); // a More menu write's item → its updated_at then: nothing more till a read shows the change
   sending = new Set<string>(); // conversations a reply is on its way to
+  private readonly storeClosed = Deferred.makeUnsafe<void>(); // by stop(), or the last write in flight then (closeIfIdle)
   readonly runner: Runner; // the work nobody waits on: see runner.ts
 
   constructor(opts: DeskOptions) {
@@ -447,14 +448,23 @@ export class Desk {
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
     fs.unwatchFile(this.policyPath);
-    this.store.close();
+    this.closeIfIdle();
   }
 
-  // stop() at once, and back once every agent process is gone: an AI review's too, and a SIGKILL for what ignores SIGTERM.
+  // A GitHub write in flight keeps the store open, so what landed is still logged and recorded: the last one closes it.
+  private closeIfIdle(): void {
+    if (this.approving.size || this.sending.size || Deferred.isDoneUnsafe(this.storeClosed)) return;
+    this.store.close();
+    Deferred.doneUnsafe(this.storeClosed, Exit.void);
+  }
+
+  // stop() at once, and back once every agent process is gone (an AI review's too, and a SIGKILL for what ignores SIGTERM)
+  // and every GitHub write in flight has recorded what it did, each bounded by its own timeout.
   close(): Effect.Effect<void> {
     return Effect.suspend(() => {
       this.stop();
-      return Effect.promise(() => stopAll()); // it never rejects
+      const gone = Effect.promise(() => stopAll()); // it never rejects
+      return Effect.all([gone, Deferred.await(this.storeClosed)], { concurrency: 2, discard: true });
     });
   }
 
@@ -1852,15 +1862,18 @@ export class Desk {
   }
 
   // Busy at once on a held lock; the write and its bookkeeping run uninterruptibly, and the lock goes whatever GitHub said.
+  // A stopped desk sends none (its store may be closed): the request ends as interrupted.
   private locked<A, E>(locks: Set<string>, key: string, busy: string, write: Effect.Effect<A, E>): Effect.Effect<A, E | Busy> {
     return Effect.uninterruptible(
       Effect.suspend((): Effect.Effect<A, E | Busy> => {
+        if (this.stopped) return Effect.interrupt;
         if (locks.has(key)) return Effect.fail(new Busy({ message: busy }));
         locks.add(key);
         return Effect.ensuring(
           write,
           Effect.sync(() => {
             locks.delete(key);
+            if (this.stopped) this.closeIfIdle();
           }),
         );
       }),

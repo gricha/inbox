@@ -2,13 +2,15 @@
 // issue. The desk decides which an item allows, refuses the rest, and takes them only from its own window.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { createApp } from "../src/server.ts";
+import { Store } from "../src/store.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
-import { Effect, Fiber } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 import { failure, run, runSync } from "./helpers/run.ts";
 
@@ -251,6 +253,52 @@ test("a write its caller stops waiting for still lands, is logged and refreshed,
   assert.deepEqual([d.card.resolved, d.card.actions], ["closed", ["reopen"]], "refreshed as if it had waited");
   await run(t.desk.githubAct("web#3", "reopen"));
   assert.deepEqual(w.calls.at(-1), ["reopen", "PR_acme/web_3"], "not Busy: the lock went with the write");
+});
+
+test("a write in flight when the desk stops still lands, is logged and done, and answers; the store closes after it", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "green" }), myPr(5, { ci: "green" })]);
+  const close = w.writer.close.bind(w.writer);
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  w.writer.close = (pr) => Effect.promise(() => held).pipe(Effect.andThen(close(pr)));
+  const answer = run(t.desk.githubAct("web#3", "close"));
+  await new Promise((r) => {
+    setImmediate(r);
+  });
+  let closed = false;
+  const closing = Effect.runPromise(
+    t.desk.close().pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          closed = true;
+        }),
+      ),
+    ),
+  );
+  assert.equal(t.desk.stopped, true, "stopping is at once");
+  await new Promise((r) => {
+    setImmediate(r);
+  });
+  assert.equal(closed, false, "close() waits for the write");
+  const late = Effect.runPromiseExit(t.desk.githubAct("web#5", "close"));
+  release();
+  assert.deepEqual(await answer, { url: "" }, "its own result, not a 500 from a closed store");
+  await closing;
+  const exit = await late;
+  assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), "a stopped desk sends no new write: interrupted");
+  assert.deepEqual(w.calls, [["close", "PR_acme/web_3"]]);
+  assert.throws(() => t.desk.store.db.prepare("SELECT 1"), /not open/, "the last write closed it");
+  const store = new Store(path.join(t.home, "desk.db"));
+  const logged = store.db
+    .prepare("SELECT action FROM events WHERE item_id = ? AND undone = 1")
+    .all("acme/web#3")
+    .map((r) => r.action);
+  const done = store.state("acme/web#3").done_at;
+  store.close();
+  assert.deepEqual(logged, ["close"], "in the action log");
+  assert.ok(done, "done after it, as if the desk were still up");
 });
 
 test("an issue you opened closes with closeIssue", async (c) => {
