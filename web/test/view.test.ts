@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULTS, settingDef } from "../../src/settings.ts";
+import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
 import type {
   ActivityEvent,
   AgentStatus,
@@ -42,6 +42,7 @@ import {
   draftOf,
   foldOf,
   groupsOf,
+  hotkeyHelp,
   inboxCount,
   inlineAt,
   judgeStatusText,
@@ -55,6 +56,7 @@ import {
   parseList,
   PAGE_GROUPS,
   parseRoute,
+  quietTimes,
   removeCard,
   resolvedHead,
   routeHash,
@@ -282,6 +284,32 @@ test("settings fields: text to value and back", () => {
   assert.equal(valueOf(def("notify.quiet"), " 19:00-09:00 "), "19:00-09:00");
   assert.equal(valueOf(def("handoff.prompt"), "line one\n  indented\n"), "line one\n  indented\n");
   assert.equal(draftOf(90), "90");
+});
+
+test("quiet hours read as two times, off as none, and the times saved back are the string checkSetting takes", () => {
+  assert.deepEqual(quietTimes("19:00-09:00"), ["19:00", "09:00"]);
+  assert.deepEqual(quietTimes(" 9:30-17:05 "), ["09:30", "17:05"]); // a field takes "09:30", not the "9:30" the pattern allows
+  assert.equal(quietTimes(""), null);
+  assert.equal(quietTimes("evenings"), null);
+  assert.equal(checkSetting("notify.quiet", quietTimes("9:30-17:05")!.join("-")), null);
+  assert.equal(checkSetting("notify.quiet", ""), null); // off
+});
+
+test("the shortcut's line: off, working from any app, or why the app couldn't take it", () => {
+  const ok = { accelerator: "Control+Alt+D", ok: true };
+  assert.deepEqual(hotkeyHelp("", null), { text: "Off.", bad: false });
+  assert.deepEqual(hotkeyHelp("", ok), { text: "Off.", bad: false }, "what's saved, before the app lets go of the old one");
+  assert.equal(hotkeyHelp("Control+Alt+D", null), null, "the app hasn't answered: the setting's own help");
+  assert.equal(hotkeyHelp("Alt+K", ok), null, "the app hasn't taken the new one yet");
+  assert.deepEqual(hotkeyHelp("Control+Alt+D", ok), { text: "Works from any app.", bad: false });
+  assert.deepEqual(hotkeyHelp("Control+Alt+D", { ...ok, ok: false, error: "another app has this shortcut" }), {
+    text: "Couldn't use Control+Alt+D: another app has this shortcut.",
+    bad: true,
+  });
+  assert.deepEqual(hotkeyHelp("Control+Alt+D", { ...ok, ok: false }), {
+    text: "Couldn't use Control+Alt+D: another app has it.",
+    bad: true,
+  });
 });
 
 test("a key combo becomes an Electron accelerator", () => {

@@ -26,7 +26,9 @@ import {
   connectCommands,
   DISABLED,
   draftOf,
+  hotkeyHelp,
   judgeStatusText,
+  quietTimes,
   routeHash,
   SETTINGS_VIEWS,
   settingsBack,
@@ -277,6 +279,10 @@ function HotkeyField(p: FieldProps) {
     d.submit(acc);
   }
 
+  // mousedown would blur the input and end the recording before the click lands
+  const keep = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+  };
   return (
     <div className="hotkey">
       <input
@@ -293,16 +299,14 @@ function HotkeyField(p: FieldProps) {
           d.bind.onBlur();
         }}
       />
-      {/* mousedown would blur the input and end the recording before the click lands */}
       <button
         type="button"
         className="btn"
         disabled={p.disabled}
+        title={MAC ? "Press ⌃, ⌥ or ⌘ with a key; Esc cancels" : "Press Ctrl or Alt with a key; Esc cancels"}
         aria-pressed={recording}
         aria-label={recording ? "Cancel recording" : "Record a shortcut"}
-        onMouseDown={(e) => {
-          e.preventDefault();
-        }}
+        onMouseDown={keep}
         onClick={() => {
           setRecording(!recording);
           input.current?.focus();
@@ -310,11 +314,109 @@ function HotkeyField(p: FieldProps) {
       >
         {recording ? "Cancel" : "Record"}
       </button>
-      {recording && (
-        <span className="quiet small" aria-live="polite">
-          Press {MAC ? "⌃, ⌥ or ⌘" : "Ctrl or Alt"} with a key. Esc cancels, Backspace clears.
-        </span>
+      {p.value !== "" && (
+        <button
+          type="button"
+          className="btn"
+          disabled={p.disabled}
+          onMouseDown={keep}
+          onClick={() => {
+            setRecording(false);
+            d.submit("");
+          }}
+        >
+          Turn off
+        </button>
       )}
+    </div>
+  );
+}
+
+// Quiet hours: two times, then a switch on the row's right edge like every other; off saves "", on the times as the
+// "19:00-09:00" checkSetting has always taken.
+function QuietHours({ value, commit, clear, id, invalid, disabled }: FieldProps) {
+  const saved = String(value);
+  const [on, setOn] = useState(saved !== "");
+  const [times, setTimes] = useState<[string, string]>(quietTimes(saved) ?? ["19:00", "09:00"]); // off: the last times you had
+  const editing = useRef(false);
+  const escaped = useRef(false); // Esc blurs the field with the times it just put back not drawn yet
+  useEffect(() => {
+    setOn(saved !== "");
+    const t = quietTimes(saved);
+    if (t && !editing.current) setTimes(t);
+  }, [saved]);
+
+  function put(v: string, refused: () => void) {
+    void runUi(
+      commit(v).pipe(
+        Effect.tap((s) =>
+          Effect.sync(() => {
+            if (s === null) refused();
+          }),
+        ),
+      ),
+    );
+  }
+  function flip(v: boolean) {
+    setOn(v);
+    put(v ? times.join("-") : "", () => {
+      setOn(!v);
+    });
+  }
+  // On leaving a field, as every other field here saves: a time typed digit by digit isn't saved halfway.
+  function leave() {
+    editing.current = false;
+    if (escaped.current) escaped.current = false;
+    else if (on && times[0] && times[1] && times.join("-") !== saved) put(times.join("-"), () => {}); // refused: kept as typed, the row says why
+  }
+
+  const time = (i: 0 | 1) => (
+    <input
+      id={`${id}-${i ? "to" : "from"}`}
+      className="input time"
+      type="time"
+      value={times[i]}
+      disabled={disabled || !on}
+      aria-label={i ? "Quiet hours end" : "Quiet hours start"}
+      aria-invalid={invalid}
+      aria-describedby={`${id}-msg`}
+      onFocus={() => {
+        editing.current = true;
+      }}
+      onChange={(e) => {
+        const next: [string, string] = [...times];
+        next[i] = e.target.value;
+        setTimes(next);
+      }}
+      onBlur={leave}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          escaped.current = true;
+          clear();
+          setTimes(quietTimes(saved) ?? times);
+        }
+        if (e.key === "Escape" || e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
+  );
+  return (
+    <div className="quiet-hours">
+      {time(0)}
+      <span className="s-unit">to</span>
+      {time(1)}
+      <input
+        id={id}
+        className="switch"
+        type="checkbox"
+        // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked; ARIA in HTML forbids aria-checked here
+        role="switch"
+        checked={on}
+        disabled={disabled}
+        aria-describedby={`${id}-msg`}
+        onChange={(e) => {
+          flip(e.target.checked);
+        }}
+      />
     </div>
   );
 }
@@ -328,12 +430,15 @@ const CONTROLS: Record<SettingType, ComponentType<FieldProps>> = {
   hotkey: HotkeyField,
   select: SelectField,
 };
+// A setting whose control isn't its type's, by key, looked up first.
+const BY_KEY: Record<string, ComponentType<FieldProps> | undefined> = { "notify.quiet": QuietHours };
 
 function Row({
   def,
   view,
   onView,
   extra,
+  help,
   hidden,
   disabled = false,
 }: {
@@ -341,6 +446,7 @@ function Row({
   view: SettingsView;
   onView: (v: SettingsView) => void;
   extra?: ReactNode;
+  help?: { text: string; bad: boolean } | null; // a live line in place of the def's help: null keeps the def's
   hidden?: boolean;
   disabled?: boolean;
 }) {
@@ -394,7 +500,7 @@ function Row({
   }
 
   const id = `setting-${def.key}`;
-  const Control = CONTROLS[def.type] ?? StringField;
+  const Control = BY_KEY[def.key] ?? CONTROLS[def.type] ?? StringField;
   const control = (
     <Control
       key={epoch}
@@ -423,6 +529,7 @@ function Row({
   );
   // Free text (a prompt, a path) takes the row's width under its label; a value with a set shape stays beside it.
   const wide = def.type === "text" || (def.type === "string" && !def.pattern);
+  const said = help ?? (def.help ? { text: def.help, bad: false } : null);
 
   return (
     <div id={`row-${def.key}`} className={cls("setting", `st-${def.type}`, wide && "wide", disabled && "s-off")} hidden={hidden}>
@@ -430,7 +537,11 @@ function Row({
         <label className="s-label" htmlFor={id}>
           {def.label}
         </label>
-        {def.help && <p className="s-help">{def.help}</p>}
+        {said && (
+          <p className={cls("s-help", said.bad && "t-bad")} aria-live={help === undefined ? undefined : "polite"}>
+            {said.text}
+          </p>
+        )}
         {!wide && extra}
       </div>
       <div className="s-control">
@@ -445,21 +556,6 @@ function Row({
         </div>
       </div>
     </div>
-  );
-}
-
-function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
-  if (!s.accelerator) return <p className="s-live quiet">Off</p>;
-  if (s.ok)
-    return (
-      <p className="s-live">
-        <span className="t-good">Active:</span> {s.accelerator} shows or hides the window from any app.
-      </p>
-    );
-  return (
-    <p className="s-live t-bad">
-      Couldn't use {s.accelerator}: {s.error ?? "another app may have it"}
-    </p>
   );
 }
 
@@ -770,26 +866,33 @@ export function Settings({
   const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const inView = settingsBack(section) !== null;
 
-  // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
+  // The desktop app re-registers the hotkey once it reads the new settings: ask after a moment, and again until it has.
+  const hotkey = view?.values["app.hotkey"];
   useEffect(() => {
     const stop = new AbortController();
-    const t =
-      desktop && view
-        ? setTimeout(() => {
-            void runUi(
-              Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
-                Effect.map(setLive),
-                Effect.ignore, // the app not answering: the hotkey's line stays as it was
-              ),
-              { signal: stop.signal },
-            );
-          }, 300)
-        : undefined;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const ask = (tries: number) => {
+      t = setTimeout(() => {
+        void runUi(
+          Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
+            Effect.tap((s) =>
+              Effect.sync(() => {
+                setLive(s);
+                if (s && s.hotkey.accelerator !== hotkey && tries > 1) ask(tries - 1);
+              }),
+            ),
+            Effect.ignore, // the app not answering: the shortcut's and the checkout's lines stay as they were
+          ),
+          { signal: stop.signal },
+        );
+      }, 300);
+    };
+    if (desktop && view) ask(10);
     return () => {
       clearTimeout(t);
       stop.abort();
     };
-  }, [view]);
+  }, [view, hotkey]);
 
   // One page of parts; a link to a part scrolls to it, and a view opens at its top.
   const ready = view !== null;
@@ -809,11 +912,8 @@ export function Settings({
         onView={onView}
         hidden={folded}
         disabled={DISABLED[d.key]?.(view.values) ?? false}
-        extra={
-          d.key === "app.source"
-            ? live && <SourceLine s={live.source ?? null} />
-            : d.type === "hotkey" && live && <HotkeyStatus s={live.hotkey} />
-        }
+        help={d.type === "hotkey" ? hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null) : undefined}
+        extra={d.key === "app.source" && live && <SourceLine s={live.source ?? null} />}
       />
     );
 

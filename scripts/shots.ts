@@ -333,6 +333,66 @@ const unsettle = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+let reposWere: unknown = null; // the mock's own github.my_repos, which settings-saves resets and puts back
+// A setting as the desk has it now, read past the window.
+const deskHas = (page: Page, key: string) =>
+  page.evaluate<unknown>(`fetch("/api/settings").then((r) => r.json()).then((v) => v.values[${JSON.stringify(key)}])`);
+// One step of settings-saves: `commit` on a setting's row (after `edit`, which may grow it), then the desk has `want`, "Saved"
+// showed in that row, the row kept its height (`still`: a reset can shrink a list back), and the line clears the hairline.
+const saveStep = async (
+  page: Page,
+  step: string,
+  key: string,
+  o: { edit?: () => Promise<void>; commit: () => Promise<void>; want: unknown; still?: false },
+) => {
+  const row = page.locator(`[id="row-${key}"]`);
+  await row.scrollIntoViewIfNeeded();
+  // The row's height, and how far its message line runs past the row's bottom edge, its hairline.
+  const measure = () =>
+    page.evaluate<[number, number]>(`(() => {
+      const r = document.getElementById(${JSON.stringify(`row-${key}`)}).getBoundingClientRect();
+      return [r.height, document.querySelector(${JSON.stringify(`[id="row-${key}"] .s-msg`)}).getBoundingClientRect().bottom - r.bottom];
+    })()`);
+  await o.edit?.();
+  const [before] = await measure();
+  // The save this step sends: a "Saved" still showing from the row's last step isn't this one's.
+  const put = page
+    .waitForResponse((r) => r.url().endsWith("/api/settings") && r.request().method() === "PUT", { timeout: 5000 })
+    .catch(() => null);
+  await o.commit();
+  if (!(await put)) failures.push(`settings-saves: ${step}: nothing was sent for ${key}`);
+  if (
+    !(await row
+      .locator(".s-msg .t-good", { hasText: "Saved" })
+      .waitFor({ timeout: 3000 })
+      .then(
+        () => true,
+        () => false,
+      ))
+  )
+    failures.push(`settings-saves: ${step}: no "Saved" on ${key}`);
+  const [after, over] = await measure();
+  if (o.still !== false && before !== after) failures.push(`settings-saves: ${step}: ${key}'s row went from ${before}px to ${after}px`);
+  if (over > 0) failures.push(`settings-saves: ${step}: ${key}'s "Saved" runs ${over}px over the hairline`);
+  const has = await deskHas(page, key);
+  if (JSON.stringify(has) !== JSON.stringify(o.want))
+    failures.push(`settings-saves: ${step}: the desk has ${key} = ${JSON.stringify(has)}, not ${JSON.stringify(o.want)}`);
+};
+// The shortcut row's line once it reads `want`, or what it reads after 3 s: the app is asked a moment after the settings load.
+const hotkeySays = async (page: Page, want: string) => {
+  const sel = JSON.stringify('[id="row-app.hotkey"] .s-help');
+  await page
+    .waitForFunction(`document.querySelector(${sel})?.textContent === ${JSON.stringify(want)}`, null, { timeout: 3000 })
+    .catch(() => {});
+  return page.evaluate<string | null>(`document.querySelector(${sel})?.textContent ?? null`);
+};
+// Reset to default on a row you changed: it shows once "Saved" has gone.
+const resetStep = (page: Page, key: string, want: unknown, still?: false) =>
+  saveStep(page, `reset ${key}`, key, {
+    commit: () => page.locator(`[id="row-${key}"]`).getByRole("button", { name: "Reset to default" }).click({ timeout: 4000 }),
+    want,
+    still,
+  });
 // The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
 const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
@@ -1862,6 +1922,111 @@ const SHOTS: Shot[] = [
     after: unsettle,
   },
   {
+    // Quiet hours off: its switch off, and its times greyed but kept, 19:00 and 09:00 until you've had others.
+    name: "settings-queue-quiet-off",
+    go: async (page) => {
+      await settingsAs((v) => {
+        v.values["notify.quiet"] = "";
+      })(page);
+      await at("#/settings/queue")(page);
+      const seen = await page.evaluate<string>(`["from", "to", ""].map((s) => {
+        const f = document.getElementById("setting-notify.quiet" + (s && "-" + s));
+        return (s ? f.value : f.checked ? "on" : "off") + (f.disabled ? " greyed" : "");
+      }).join()`);
+      if (seen !== "19:00 greyed,09:00 greyed,off") failures.push(`settings-queue-quiet-off: quiet hours reads ${seen}`);
+    },
+    after: unsettle,
+  },
+  {
+    // Each kind of control saves as you go: a number, quiet hours off, on and a new start, a switch by its label, a select,
+    // a repo under More and, in the app, the shortcut's Turn off; then Reset to default puts each back. Shot on the last.
+    name: "settings-saves",
+    writes: true,
+    go: async (page) => {
+      reposWere ??= await deskHas(page, "github.my_repos");
+      await at("#/settings/queue")(page);
+      const days = page.locator('[id="setting-queue.quiet_days"]');
+      await saveStep(page, "quiet days", "queue.quiet_days", {
+        edit: () => days.fill("7"),
+        commit: () => days.press("Enter"),
+        want: 7,
+      });
+      const quiet = page.locator('[id="setting-notify.quiet"]');
+      const from = page.locator('[id="setting-notify.quiet-from"]');
+      await saveStep(page, "quiet hours off", "notify.quiet", { commit: () => quiet.click(), want: "" });
+      const off = await page.evaluate<string[]>(
+        `["from", "to"].map((s) => { const f = document.getElementById("setting-notify.quiet-" + s); return f.value + (f.disabled ? " greyed" : ""); })`,
+      );
+      if (off.join() !== "19:00 greyed,09:00 greyed") failures.push(`settings-saves: quiet hours off shows ${JSON.stringify(off)}`);
+      await saveStep(page, "quiet hours on", "notify.quiet", { commit: () => quiet.click(), want: "19:00-09:00" });
+      await saveStep(page, "quiet hours from 20:00", "notify.quiet", {
+        edit: () => from.fill("20:00"),
+        commit: () => from.press("Enter"),
+        want: "20:00-09:00",
+      });
+      await saveStep(page, "Notify me off", "notify.enabled", {
+        commit: () => page.locator('label[for="setting-notify.enabled"]').click(),
+        want: false,
+      });
+      if (!(await quiet.isDisabled())) failures.push("settings-saves: quiet hours isn't greyed with notifications off");
+      await at("#/settings/github")(page);
+      const pick = page.locator('[id="setting-github.resolve_on_others_approval"]');
+      await saveStep(page, "a select", "github.resolve_on_others_approval", {
+        commit: async () => {
+          await pick.selectOption("never");
+        },
+        want: "never",
+      });
+      await page.getByRole("button", { name: "More GitHub settings" }).click();
+      const repos = page.locator('[id="setting-github.my_repos"]');
+      await saveStep(page, "a repo", "github.my_repos", {
+        edit: async () => {
+          await repos.evaluate((el: { focus: () => void; setSelectionRange: (a: number, b: number) => void; value: string }) => {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          });
+          await page.keyboard.type("\nacme/new-repo");
+        },
+        commit: () => repos.blur(),
+        want: [...(reposWere as string[]), "acme/new-repo"],
+      });
+      if (await page.evaluate<boolean>("!!window.desktop")) {
+        await at("#/settings/app")(page);
+        const row = page.locator('[id="row-app.hotkey"]');
+        await saveStep(page, "the shortcut off", "app.hotkey", {
+          commit: () => row.getByRole("button", { name: "Turn off" }).click(),
+          want: "",
+        });
+        const says = await hotkeySays(page, "Off.");
+        if (says !== "Off." || (await row.getByRole("button", { name: "Turn off" }).count()))
+          failures.push(`settings-saves: the shortcut off reads ${JSON.stringify(says)}, with Turn off still there`);
+        await resetStep(page, "app.hotkey", "Control+Alt+D");
+        const back = await hotkeySays(page, "Works from any app.");
+        if (back !== "Works from any app.") failures.push(`settings-saves: the shortcut back reads ${JSON.stringify(back)}`);
+        await at("#/settings/github")(page);
+      }
+      await resetStep(page, "github.my_repos", [], false);
+      await resetStep(page, "github.resolve_on_others_approval", "always");
+      await page.getByRole("button", { name: "More GitHub settings" }).click();
+      await at("#/settings/queue")(page);
+      await resetStep(page, "notify.enabled", true);
+      await resetStep(page, "notify.quiet", "19:00-09:00");
+      await resetStep(page, "queue.quiet_days", 14);
+    },
+    // What a step that failed left: each back to the default, and the mock's own repos back.
+    after: async (page) => {
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(${JSON.stringify({
+          set: { "github.my_repos": reposWere },
+          reset: ["queue.quiet_days", "notify.quiet", "notify.enabled", "github.resolve_on_others_approval", "app.hotkey"],
+        })}) })`,
+      );
+      const open = page.locator('.s-more [aria-expanded="true"]');
+      if (await open.count()) await open.click();
+      await at("#/")(page);
+    },
+  },
+  {
     // Searches and rules, a view of its own: the head's way back to Settings, its name, the column at 1180px, and Save on screen.
     name: "settings-rules",
     go: async (page) => {
@@ -2036,10 +2201,43 @@ const SHOTS: Shot[] = [
         `["app.hotkey", "app.open_at_login", "app.menu_bar_count", "app.source"].filter((k) => !document.getElementById("row-" + k)?.getClientRects().length)`,
       );
       if (missing.length) failures.push(`settings-app-desktop: no ${missing.join(", ")} row`);
-      const live = page.locator('[id="row-app.hotkey"] .s-live');
-      await live.waitFor({ timeout: 3000 }).catch(() => {});
-      const says = (await live.count()) ? await live.textContent() : null;
-      if (!says?.includes("Control+Alt+D")) failures.push(`settings-app-desktop: the shortcut's line reads ${JSON.stringify(says)}`);
+      const says = await hotkeySays(page, "Works from any app.");
+      if (says !== "Works from any app.") failures.push(`settings-app-desktop: the shortcut's line reads ${JSON.stringify(says)}`);
+      const row = page.locator('[id="row-app.hotkey"]');
+      const tip = await row.getByRole("button", { name: "Record a shortcut" }).getAttribute("title");
+      if (tip !== "Press ⌃, ⌥ or ⌘ with a key; Esc cancels")
+        failures.push(`settings-app-desktop: Record's tooltip reads ${JSON.stringify(tip)}`);
+      if (!(await row.getByRole("button", { name: "Turn off" }).isVisible())) failures.push("settings-app-desktop: no Turn off");
+      // Recording names no key on the page (Record's tooltip does), and Esc in the field cancels it without saving.
+      await row.getByRole("button", { name: "Record a shortcut" }).click();
+      const text = await row.textContent();
+      if (!(await row.locator('[aria-pressed="true"]').count()) || /Esc|Backspace|⌃/.test(text ?? ""))
+        failures.push(`settings-app-desktop: recording reads ${JSON.stringify(text)}`);
+      await page.keyboard.press("Escape");
+      if (await row.locator('[aria-pressed="true"]').count()) failures.push("settings-app-desktop: Esc doesn't cancel the recording");
+      if ((await deskHas(page, "app.hotkey")) !== "Control+Alt+D") failures.push("settings-app-desktop: recording changed the shortcut");
+      await page.locator('[id="setting-app.hotkey"]').blur();
+    },
+  },
+  {
+    // Another app has the shortcut: the app's status() says so, and the line under the label is that, in red.
+    name: "settings-app-desktop-taken",
+    sizes: ["mac"],
+    go: async (page) => {
+      await page.evaluate(
+        `window.__deskStatus = { hotkey: { accelerator: "Control+Alt+D", ok: false, error: "another app has this shortcut" }, open_at_login: false, source: null }`,
+      );
+      await at("#/settings/queue")(page); // the app is asked again when Settings reads the desk's settings again
+      await at("#/settings/app")(page);
+      await page.evaluate(`document.getElementById("s-app").scrollIntoView({ block: "start" })`);
+      const says = await hotkeySays(page, "Couldn't use Control+Alt+D: another app has this shortcut.");
+      const red = await page.evaluate<boolean>(`!!document.querySelector('[id="row-app.hotkey"] .s-help.t-bad')`);
+      if (says !== "Couldn't use Control+Alt+D: another app has this shortcut." || !red)
+        failures.push(`settings-app-desktop-taken: the shortcut's line reads ${JSON.stringify(says)}${red ? "" : ", not in red"}`);
+    },
+    after: async (page) => {
+      await page.evaluate("delete window.__deskStatus");
+      await at("#/")(page);
     },
   },
   {

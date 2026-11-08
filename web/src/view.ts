@@ -99,6 +99,23 @@ export const DISABLED: Record<string, ((values: Values) => boolean) | undefined>
   "notify.quiet": (v) => v["notify.enabled"] === false,
 };
 
+// Quiet hours' "19:00-09:00" as its two time fields' "HH:MM"; null while it's off ("") or not that shape.
+export function quietTimes(v: string): [string, string] | null {
+  const m = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(v.trim());
+  return m ? [`${m[1]!.padStart(2, "0")}:${m[2]!}`, `${m[3]!.padStart(2, "0")}:${m[4]!}`] : null;
+}
+
+// The shortcut row's help from the desktop app's status(); null until the app answers for the shortcut that's saved.
+export function hotkeyHelp(
+  saved: string,
+  s: { accelerator: string; ok: boolean; error?: string } | null,
+): { text: string; bad: boolean } | null {
+  if (!saved) return { text: "Off.", bad: false };
+  if (!s || s.accelerator !== saved) return null;
+  if (s.ok) return { text: "Works from any app.", bad: false };
+  return { text: `Couldn't use ${saved}: ${(s.error ?? "another app has it").replace(/\.?$/, ".")}`, bad: true };
+}
+
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };

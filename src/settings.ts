@@ -205,7 +205,7 @@ export const SETTINGS = [
     placeholder: "19:00-09:00",
     pattern: "^\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}$",
     pattern_hint: "like 19:00-09:00",
-    help: "No notifications between these times, every day, in this computer's time; empty for none.",
+    help: "No notifications between these times, every day, in this computer's time.",
   },
   {
     key: "app.hotkey",
@@ -216,7 +216,7 @@ export const SETTINGS = [
     placeholder: "Control+Alt+D",
     pattern: ACCELERATOR,
     pattern_hint: "modifiers and a key, like Control+Alt+D",
-    help: "Works from any app. Empty turns it off.",
+    help: "Works from any app.",
   },
   { key: "app.open_at_login", section: "app", label: "Open at login", type: "boolean", default: false },
   { key: "app.menu_bar_count", section: "app", label: "Show the Inbox count in the menu bar", type: "boolean", default: true },
