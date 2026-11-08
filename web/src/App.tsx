@@ -45,9 +45,9 @@ import { RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
+import { PageHead } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { SourceNotice, useSourceDown } from "./components/Source.tsx";
-import { TopBar } from "./components/TopBar.tsx";
 
 interface Toast {
   id: number;
@@ -1023,25 +1023,29 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} from={reviewFrom} view={view} overview={overview} />
+      <Sidebar
+        route={route}
+        from={reviewFrom}
+        view={view}
+        overview={overview}
+        offline={offline}
+        now={now}
+        onSync={() => {
+          void runUi(sync());
+        }}
+        ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
+        waiting={route.name === "review" && askWaiting}
+        onAsk={() => {
+          openAsk();
+        }}
+      />
       <div className="col">
-        <TopBar
-          overview={overview}
-          offline={offline}
-          now={now}
+        <PageHead
           route={route}
           from={reviewFrom}
           question={route.name === "review" ? reviewQuestion : null}
           filter={filter}
           setFilter={setFilter}
-          onSync={() => {
-            void runUi(sync());
-          }}
-          ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
-          waiting={route.name === "review" && askWaiting}
-          onAsk={() => {
-            openAsk();
-          }}
         />
         <main className="main">
           {sourceDown && <SourceNotice s={sourceDown} />}

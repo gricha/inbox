@@ -185,7 +185,7 @@ export function Review({
   onCloseChat: () => void; // Files closes it for the sidebar
   onAsk: (s: Spot) => void; // a box's Ask your agent: the chat, about that spot
   onSpot: (s: Spot | null) => void; // the spot you're on, for what Ask your agent asks about; null: the PR as a whole
-  onAskWaiting: (waiting: boolean) => void; // your latest ask about it is unanswered: the top bar says so
+  onAskWaiting: (waiting: boolean) => void; // your latest ask about it is unanswered: the sidebar's Ask says so
 }) {
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
@@ -216,7 +216,7 @@ export function Review({
   const jumped = useRef(0); // when a click last scrolled the page to a file
   const v = typeof view === "object" ? view : null;
   const latest = v?.asks.at(-1);
-  const waiting = !!latest && !latest.answer; // your latest ask about it: the top bar says it's waiting
+  const waiting = !!latest && !latest.answer; // your latest ask about it: the sidebar's Ask says it's waiting
   useEffect(() => {
     onAskWaiting(waiting);
     return () => {

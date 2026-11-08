@@ -277,15 +277,14 @@ const systemTheme = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// The narrow top bar's page links as shown, "|" for the rule among them; null where the sidebar shows instead.
-const barPages = (page: Page) =>
-  page.evaluate<string | null>(`(() => {
-    if (document.querySelector(".side")?.getClientRects().length) return null;
-    return [...document.querySelectorAll(".topbar .tb-flight, .topbar .tb-sep")]
-      .filter((el) => el.getClientRects().length)
-      .map((el) => (el.classList.contains("tb-sep") ? "|" : el.textContent.trim()))
-      .join(" ");
-  })()`);
+// The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
+const sideOn = (page: Page) =>
+  page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
+// The page head's words: a list's filter, a review's way back, or the page's name.
+const headSays = (page: Page) =>
+  page.evaluate<string | null>(
+    `(() => { const h = document.querySelector(".page-head"); return h && (h.querySelector("input")?.placeholder ?? h.textContent.trim()); })()`,
+  );
 // The sidebar's pages in order, "|" for its hairline; null where it's hidden.
 const sidePages = (page: Page) =>
   page.evaluate<string | null>(`(() => {
@@ -306,8 +305,10 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
       if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
-      const bar = await barPages(page);
-      if (bar !== null && bar !== "Blocked FYI | Merging Archive") failures.push(`queue: the top bar's pages read ${bar}`);
+      const on = await sideOn(page);
+      if (on !== "Inbox") failures.push(`queue: the sidebar marks ${JSON.stringify(on)}`);
+      const head = await headSays(page);
+      if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
     },
   },
   {
@@ -322,7 +323,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The macOS app between 820 and 880px: the traffic lights' padding, the page links and Ask share the bar.
+    // The macOS app at 840px: the compact sidebar, its brand row under the traffic lights.
     name: "queue-840",
     sizes: ["mac"],
     go: async (page) => {
@@ -334,6 +335,30 @@ const SHOTS: Shot[] = [
       await page.setViewportSize({ width: mac.width, height: mac.height });
     },
   },
+  // A browser at 200 % zoom (1280×820 at 640×410): the sidebar is one row across the top, scrolling inside itself; the page
+  // under it never scrolls sideways.
+  ...(
+    [
+      ["zoom-queue", at("#/")],
+      ["zoom-review", review("acme/api#4127")],
+      ["zoom-settings", at("#/settings/github")],
+    ] as const
+  ).map(([name, go]): Shot => ({
+    name,
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.setViewportSize({ width: 640, height: 410 });
+      await go(page);
+      const side = await page.evaluate<{ row: boolean; h: number }>(
+        `(() => { const s = document.querySelector(".side"); return { row: getComputedStyle(s).flexDirection === "row", h: s.getBoundingClientRect().height }; })()`,
+      );
+      if (!side.row || side.h > 60) failures.push(`${name}: the sidebar isn't one row across the top: ${JSON.stringify(side)}`);
+    },
+    after: async (page) => {
+      const wide = SIZES.find((s) => s.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+    },
+  })),
   // What can't move yet: a chain's rows together, the first saying what its blocker waits on, then a review wait.
   { name: "blocked", go: at("#/blocked") },
   // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
@@ -529,15 +554,15 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Opened from the Inbox: the back link names it, and the narrow top bar leaves it out, as the sidebar marks it.
+    // Opened from the Inbox: the back link in the review's head names it, and the sidebar marks it.
     name: "review",
     go: async (page) => {
       await at("#/")(page);
       await review("acme/api#4127")(page);
-      const back = (await page.locator(".topbar .back").textContent())?.trim();
+      const back = (await page.locator(".page-head .back").textContent())?.trim();
       if (back !== "Inbox") failures.push(`review: the back link reads ${JSON.stringify(back)}`);
-      const bar = await barPages(page);
-      if (bar !== null && bar !== "Blocked FYI | Merging Archive") failures.push(`review: the top bar's pages read ${bar}`);
+      const on = await sideOn(page);
+      if (on !== "Inbox") failures.push(`review: the sidebar marks ${JSON.stringify(on)}`);
       if (await page.locator(".rv-ai .prose").count()) failures.push("review: the AI review doesn't open folded");
       if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
         failures.push("review: the AI review isn't above the conversation and your comment");
@@ -897,11 +922,10 @@ const SHOTS: Shot[] = [
     name: "later",
     go: async (page) => {
       await at("#/later")(page);
-      const on = await page.locator(".side-item.on").textContent();
-      if ((await page.locator(".side").isVisible()) && on?.trim() !== "FYI")
-        failures.push(`later: the sidebar marks ${JSON.stringify(on)}`);
-      const bar = await barPages(page);
-      if (bar !== null && bar !== "Inbox Blocked | Merging Archive") failures.push(`later: the top bar's pages read ${bar}`);
+      const on = await sideOn(page);
+      if (on !== "FYI") failures.push(`later: the sidebar marks ${JSON.stringify(on)}`);
+      const head = await headSays(page);
+      if (head !== "Filter") failures.push(`later: the page head reads ${JSON.stringify(head)}, not the filter`);
     },
   },
   {
@@ -927,6 +951,8 @@ const SHOTS: Shot[] = [
     name: "inflight",
     go: async (page) => {
       await at("#/inflight")(page);
+      const head = await headSays(page);
+      if (head !== "Merging") failures.push(`inflight: the page head reads ${JSON.stringify(head)}`);
       for (const b of ["Copy attach command", "Wake it"])
         if (!(await page.locator(".lane-coord button", { hasText: b }).count())) failures.push(`inflight: your agent's line has no ${b}`);
       // Each row's whole phrase, with the note's age, is its tooltip.
@@ -1030,7 +1056,9 @@ const SHOTS: Shot[] = [
       await page.locator(".inquiry .inq-options").waitFor();
       await page.waitForTimeout(200);
       // Your agent's own question: its answer box is how you talk to it here.
-      if (await page.locator(".tb-ask").count()) failures.push("inquiry: the top bar offers Ask your agent on its own question");
+      if (await page.locator(".side-ask").count()) failures.push("inquiry: the sidebar offers Ask your agent on its own question");
+      const back = (await page.locator(".page-head .back").textContent())?.trim();
+      if (back !== "Inbox") failures.push(`inquiry: the back link reads ${JSON.stringify(back)}`);
     },
     after: at("#/"),
   },
@@ -1064,10 +1092,10 @@ const SHOTS: Shot[] = [
       });
       await page.reload();
       await page.locator(".inquiry .inq-options").waitFor();
-      await page.locator(".sync span", { hasText: "Synced" }).waitFor({ state: "attached" });
+      await page.locator(".side-sync span", { hasText: "Synced" }).waitFor({ state: "attached" });
       await page.waitForTimeout(300);
-      if (await page.locator(".tb-ask").count())
-        failures.push("inquiry-answered: the top bar offers Ask your agent once the queue drops the answered question");
+      if (await page.locator(".side-ask").count())
+        failures.push("inquiry-answered: the sidebar offers Ask your agent once the queue drops the answered question");
       await unroute(page);
       await fresh(page);
     },
@@ -1108,7 +1136,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
       await page.waitForTimeout(300);
       if (await page.locator(".line-ask").count()) failures.push("ask-row: a row still has its own Ask");
-      if (await page.locator(".tb-ask").isVisible()) failures.push("ask-row: the top bar offers Ask your agent with the chat open");
+      if (await page.locator(".side-ask").isVisible()) failures.push("ask-row: the sidebar offers Ask your agent with the chat open");
     },
     after: closeChat,
   },
@@ -1118,7 +1146,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/blocked")(page);
       await page.locator(".queue [data-id]").first().locator(".row-main").focus();
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await page.locator(".chat-input").waitFor();
       await page.waitForTimeout(300);
       const cut = await page.evaluate<number[]>(
@@ -1170,7 +1198,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("Escape");
       // The cached asks draw at once: the fetch must land before the send, or it would replace the ask sent.
       const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await loaded;
       await page.locator(".chat-turn", { hasText: "412 passed" }).waitFor();
       for (const el of [".chat .prose pre", ".chat .prose ol", ".chat .prose ul"]) await page.locator(el).waitFor();
@@ -1204,7 +1232,7 @@ const SHOTS: Shot[] = [
       await review("me/notes-app#12")(page);
       // The fetch lands before the scroll: a turn it adds or drops sends the log back to the newest.
       const loaded = page.waitForResponse((r) => r.url().endsWith("/api/asks"));
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await loaded;
       await page.locator(".chat .prose ol").waitFor();
       await page.waitForTimeout(100);
@@ -1214,21 +1242,21 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
-    // A PR whose latest ask is unanswered, the chat closed: the top bar says so, in what fits the width; its action line doesn't.
-    name: "ask-top-bar",
+    // A PR whose latest ask is unanswered, the chat closed: the sidebar's Ask says so, in what fits it; its action line doesn't.
+    name: "ask-waiting",
     go: async (page) => {
       await review("me/notes-app#12")(page);
       const width = page.viewportSize()?.width ?? 0;
-      const bar = await page.evaluate<{ words: string; icon: boolean; waiting: boolean } | null>(`(() => {
-        const b = document.querySelector(".tb-ask");
+      const ask = await page.evaluate<{ words: string; icon: boolean; waiting: boolean } | null>(`(() => {
+        const b = document.querySelector(".side-ask");
         const shown = (el) => !!el && getComputedStyle(el).display !== "none";
         return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".i")), waiting: b.classList.contains("waiting") };
       })()`);
-      const want = width > 1000 ? "Your agent \u00b7 waiting" : width > 820 ? "Asked" : "";
-      if (!bar || bar.words !== want || !bar.waiting || (width <= 820 && !bar.icon))
-        failures.push(`ask-top-bar: at ${width}px the top bar's ask is ${JSON.stringify(bar)}, not ${want || "its icon alone"}`);
+      const want = width > 1000 ? "Your agent \u00b7 waiting" : "Asked";
+      if (!ask || ask.words !== want || !ask.waiting || !ask.icon)
+        failures.push(`ask-waiting: at ${width}px the sidebar's ask is ${JSON.stringify(ask)}, not ${want} by its icon`);
       const actions = (await page.locator(".rv-actions").textContent()) ?? "";
-      if (/Coordinator|agent/.test(actions)) failures.push(`ask-top-bar: the review's actions say ${actions}`);
+      if (/Coordinator|agent/.test(actions)) failures.push(`ask-waiting: the review's actions say ${actions}`);
     },
   },
   {
@@ -1304,13 +1332,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The top bar's Ask your agent on the queue: the chat about the selected row; the head's x makes it about nothing.
+    // The sidebar's Ask your agent on the queue: the chat about the selected row; the head's x makes it about nothing.
     name: "ask-general",
     go: async (page) => {
       const posted = await echoAsks(page, "shot0004");
       await at("#/")(page);
       await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await page.locator(".chat-input").waitFor();
       const before = await chatState(page);
       if (before.about !== "tinyhttp#205") failures.push(`ask-general: the chat is about ${JSON.stringify(before.about)}`);
@@ -1333,7 +1361,7 @@ const SHOTS: Shot[] = [
     name: "ask-settings",
     go: async (page) => {
       await at("#/settings/github")(page);
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await page.locator(".chat-input").waitFor();
       await page.waitForTimeout(200);
     },
@@ -1345,7 +1373,7 @@ const SHOTS: Shot[] = [
     name: "ask-f",
     go: async (page) => {
       await review("acme/api#4154")(page);
-      await page.locator(".tb-ask").click();
+      await page.locator(".side-ask").click();
       await page.locator(".chat-empty").waitFor(); // no asks about it yet: no log to focus
       if ((page.viewportSize()?.width ?? 0) <= 1100) await page.locator(".chat-head button", { hasText: "Close" }).click();
       await page.locator(".rv-side-show").click();
@@ -1369,9 +1397,9 @@ const SHOTS: Shot[] = [
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       await review("me/notes-app#12")(page);
       const asks = await page.evaluate<string[]>(
-        `[...document.querySelectorAll("button, a, .tb-ask")].filter((el) => !el.closest(".chat") && el.textContent.includes("Ask your agent")).map((el) => el.className)`,
+        `[...document.querySelectorAll("button, a")].filter((el) => !el.closest(".chat") && el.textContent.includes("Ask your agent")).map((el) => el.className)`,
       );
-      if (asks.length || (await page.locator(".tb-ask").count()))
+      if (asks.length || (await page.locator(".side-ask").count()))
         failures.push(`ask-off: the review offers Ask your agent: ${asks.join(", ")}`);
       await at("#/")(page);
       await page.locator(".line", { hasText: "Drop the legacy v1 auth" }).locator(".row-main").click({ button: "right" });
@@ -1463,12 +1491,14 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // No page is current on Settings: the narrow top bar has all five beside its crumb.
+    // On Settings the sidebar marks Settings, none of the pages, and the page head names it.
     name: "settings-app",
     go: async (page) => {
       await at("#/settings/app")(page);
-      const bar = await barPages(page);
-      if (bar !== null && bar !== "Inbox Blocked FYI | Merging Archive") failures.push(`settings-app: the top bar's pages read ${bar}`);
+      const on = await sideOn(page);
+      if (on !== "Settings") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
+      const head = await headSays(page);
+      if (head !== "Settings") failures.push(`settings-app: the page head reads ${JSON.stringify(head)}`);
     },
   },
   { name: "settings-appearance", go: at("#/settings/appearance") },
@@ -1562,9 +1592,8 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       const side = await sidePages(page);
-      if (side !== null && side !== "Inbox Blocked FYI | Merging Archive") failures.push(`sidebar-used: the sidebar reads ${side}`);
-      const fyi = page.locator(".side-item", { hasText: "FYI" });
-      if (await fyi.isVisible()) await fyi.click();
+      if (side !== "Inbox Blocked FYI | Merging Archive") failures.push(`sidebar-used: the sidebar reads ${side}`);
+      await page.locator(".side-item", { hasText: "FYI" }).click();
       await at("#/settings/notify")(page);
     },
   },
@@ -1592,7 +1621,7 @@ const SHOTS: Shot[] = [
       go: async (page) => {
         await pickTheme(id)(page);
         await review("me/notes-app#12")(page);
-        await page.locator(".tb-ask").click();
+        await page.locator(".side-ask").click();
         await page.locator(".chat .prose").first().waitFor();
         await page.waitForTimeout(200);
       },
@@ -1809,14 +1838,29 @@ try {
         // The window names no key: a button's tooltip names its own.
         const chips = await page.evaluate<number>(`[...document.querySelectorAll("kbd")].filter((k) => k.getClientRects().length).length`);
         if (chips) failures.push(`${file}: ${chips} key chip(s) on screen`);
+        // The sidebar's words fit it (in a row, at 640px and below, it scrolls sideways inside itself instead), and so does the head.
         const spill = await page.evaluate<number>(`(() => {
-          const bar = document.querySelector(".topbar");
-          const last = bar && [...bar.querySelectorAll(".tb-right > *")].filter((el) => el.getBoundingClientRect().width).at(-1);
-          if (!last) return 0;
-          const edge = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
-          return Math.max(bar.scrollWidth - bar.clientWidth, last.getBoundingClientRect().right - edge);
+          const side = document.querySelector(".side"), head = document.querySelector(".page-head");
+          const over = (el) => (el ? el.scrollWidth - el.clientWidth : 0);
+          const row = !side || getComputedStyle(side).flexDirection === "row";
+          const items = row ? [] : [side, ...side.querySelectorAll(".side-item, .side-name")];
+          return Math.max(over(head), ...items.map(over));
         })()`);
-        if (spill > 0.5) failures.push(`${file}: the top bar's right side runs ${spill.toFixed(1)}px past its padding`);
+        if (spill > 0) failures.push(`${file}: the sidebar or the page head runs ${spill}px past its edge`);
+        const wraps = await page.evaluate<boolean>(`(() => {
+          const words = document.querySelector(".side-brand span"), r = document.createRange();
+          if (!words?.getClientRects().length) return false;
+          r.selectNodeContents(words);
+          return r.getClientRects().length > 1;
+        })()`);
+        if (wraps) failures.push(`${file}: the sidebar's "Review Desk" wraps`);
+        // The macOS app's traffic lights (electron/main.ts: at 18,19) sit over no control.
+        if (size.mac) {
+          const under = await page.evaluate<string[]>(`[...document.querySelectorAll("a, button, input, select, textarea")]
+            .filter((el) => { const r = el.getBoundingClientRect(); return r.width && r.left < 80 && r.right > 12 && r.top < 38 && r.bottom > 12; })
+            .map((el) => el.textContent.trim() || el.className)`);
+          if (under.length) failures.push(`${file}: the traffic lights sit over ${under.join(", ")}`);
+        }
         await shot.after?.(page);
       }
       await page.close();

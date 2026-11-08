@@ -654,7 +654,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      {/* The sidebar names the page; the head is only where it's saved. */}
+      {/* The page head names the page; this is only where it's saved. */}
       <header className="s-page-head">
         {view && (
           <p className="quiet" title={view.path}>

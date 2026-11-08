@@ -256,7 +256,7 @@ export function resolvedHead(events: ActivityEvent[], resolved: string, me: stri
   return { line: `Resolved: ${resolved}${who}`, events: events.filter((e) => e !== cause && e.kind !== "resolved") };
 }
 
-// Which section the reader is in: the last one whose top has scrolled past the line under the top bar. At the page's end
+// Which section the reader is in: the last one whose top has scrolled past the line under the page head. At the page's end
 // the last ones can't reach that line, so it's the last one.
 export function currentFile(tops: number[], line: number, atEnd = false): number {
   if (atEnd) return Math.max(0, tops.length - 1);

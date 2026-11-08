@@ -436,13 +436,15 @@ p {
   color: var(--green);
 }
 
-/* Title bar ---------------------------------------------------------------- */
+/* Shell -------------------------------------------------------------------- */
 
+/* The sidebar is the only global chrome; each page has its own head. */
 .app {
   --chat-w: clamp(320px, 25vw, 420px);
+  --side-w: 200px;
 
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: var(--side-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -474,9 +476,13 @@ p {
   -webkit-app-region: drag;
 }
 
-/* The desktop app on macOS draws its traffic lights here. */
+/* The desktop app on macOS draws its traffic lights here: they leave the mark room, not its words (the menu bar names the app). */
 :root[data-shell="desktop"][data-platform="darwin"] .side-brand {
   padding-left: 86px;
+}
+
+:root[data-shell="desktop"][data-platform="darwin"] .side-brand span {
+  display: none;
 }
 
 .side-nav {
@@ -492,22 +498,6 @@ p {
   height: 1px;
   margin: 8px 10px;
   background: var(--rule);
-}
-
-/* Settings lives in the footer: always there, never in the way. */
-.side-foot {
-  justify-content: flex-start;
-  margin: 0 10px 12px;
-  color: var(--pencil);
-}
-
-.side-foot .i {
-  flex: none;
-}
-
-/* The word fills the row, so it sits by its icon: .side-item spreads its parts apart. */
-.side-foot .side-name {
-  flex: 1;
 }
 
 .side-item {
@@ -537,6 +527,19 @@ p {
   color: var(--pencil);
 }
 
+/* The footer, bottom up: Settings, the sync line, Ask your agent, quieter than the pages. Always there, never in the way. */
+.side-foot {
+  display: grid;
+  gap: 1px;
+  padding: 0 10px 12px;
+}
+
+.side-foot .side-item {
+  justify-content: flex-start;
+  color: var(--pencil);
+  white-space: nowrap;
+}
+
 /* The pill means one thing: where you are. */
 .side-item.on {
   background: var(--side-on);
@@ -551,7 +554,36 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
-.topbar {
+.side-foot .i {
+  flex: none;
+}
+
+/* The word fills the row, so it sits by its icon: .side-item spreads its parts apart. */
+.side-foot .side-name {
+  flex: 1;
+}
+
+/* The sync line is a status, a step quieter than the pages; red when it failed or the desk is offline. */
+.side-sync {
+  font-size: 12.5px;
+}
+
+.side-foot .side-sync.err {
+  color: var(--red);
+}
+
+.side-ask-short {
+  display: none;
+}
+
+/* Filled while your latest ask waits for its answer. */
+.side-ask.waiting .i path {
+  fill: currentcolor;
+}
+
+/* A page's own head: sticky, as tall as the sidebar's brand row, the window's drag handle in the desktop app. Its control
+   starts on the page column's edge. */
+.page-head {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -559,7 +591,7 @@ p {
   align-items: center;
   gap: 16px;
   height: 52px;
-  padding: 0 16px 0 20px;
+  padding: 0 16px 0 max(24px, calc((100% - var(--col-w)) / 2 + 24px));
   border-bottom: 1px solid var(--rule);
 
   /* Opaque, so rows scrolling under it don't show through. */
@@ -568,31 +600,20 @@ p {
   user-select: none;
 }
 
-.topbar a,
-.topbar button,
-.topbar label,
-.topbar input {
+.page-head a,
+.page-head button,
+.page-head label,
+.page-head input {
   -webkit-app-region: no-drag;
 }
 
-/* With the sidebar showing, the filter starts on the queue column's edge. */
-@media (width > 1000px) {
-  .topbar {
-    padding-left: max(20px, calc((100% - var(--col-w)) / 2 + 24px));
-  }
-
-  /* .topbar for weight: the base .search below centres it, which put it wherever the sync label left room. */
-  .topbar .search {
-    margin: 0;
-  }
-
-  .topbar .wordmark,
-  .topbar .crumb,
-  .topbar .icon.to-settings,
-  .topbar .tb-flight,
-  .topbar .tb-sep {
-    display: none;
-  }
+/* On the page's text, as its group heads are, not on its table's edge as the filter is. */
+.head-name {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .wordmark {
@@ -606,10 +627,6 @@ p {
   letter-spacing: -0.01em;
 }
 
-.wordmark:hover {
-  text-decoration: none;
-}
-
 .mark {
   width: 20px;
   height: 20px;
@@ -617,29 +634,13 @@ p {
   fill: currentcolor;
 }
 
-.crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  color: var(--pencil);
-  font-size: 14.5px;
-}
-
-.crumb::before {
-  content: "";
-  width: 1px;
-  height: 16px;
-  background: var(--rule-strong);
-}
-
 .search {
   display: flex;
   flex: 0 1 380px;
   align-items: center;
-  min-width: 120px; /* gives way to the right side's links at narrow widths */
+  min-width: 120px;
   gap: 8px;
   height: 32px;
-  margin: 0 auto;
   padding: 0 8px 0 10px;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -681,56 +682,6 @@ p {
   display: none;
 }
 
-.tb-right {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-}
-
-.sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--pencil);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.sync:hover {
-  background: var(--wash);
-  color: var(--ink);
-}
-
-.sync.err {
-  color: var(--red);
-}
-
-.icon {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 30px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--pencil);
-  cursor: pointer;
-}
-
-.icon:hover,
-.icon.on {
-  background: var(--wash);
-  color: var(--ink);
-  text-decoration: none;
-}
-
 .i {
   width: 16px;
   height: 16px;
@@ -760,8 +711,9 @@ p {
   padding: 28px 24px 84px;
 }
 
-.main:has(.rules-wrap:not([hidden])) {
-  max-width: 1180px;
+/* Settings is wider, so the rules editor fits; the page head's name follows it. */
+.col:has(.rules-wrap:not([hidden])) {
+  --col-w: 1180px;
 }
 
 .notice {
@@ -2497,9 +2449,15 @@ p {
   background: var(--paper);
 }
 
+/* The toast centres on the page between the sidebar and the chat, clear of its box. */
+.app:has(> .chat) .toast {
+  left: calc((100vw + var(--side-w) - var(--chat-w)) / 2);
+  max-width: min(640px, calc(100vw - var(--side-w) - var(--chat-w) - 32px));
+}
+
 @media (width > 1100px) {
   .app:has(> .chat) {
-    grid-template-columns: 232px minmax(0, 1fr) var(--chat-w);
+    grid-template-columns: var(--side-w) minmax(0, 1fr) var(--chat-w);
   }
 
   .chat {
@@ -2515,14 +2473,9 @@ p {
   .chat-head button {
     -webkit-app-region: no-drag;
   }
-
-  /* The toast centres on the page beside the chat, clear of its box. */
-  .app:has(> .chat) .toast {
-    left: calc(116px + (100vw - var(--chat-w)) / 2);
-    max-width: min(640px, calc(100vw - 264px - var(--chat-w)));
-  }
 }
 
+/* Narrower, it lies over the page's right edge, under the page's head. */
 @media (width <= 1100px) {
   .app {
     --chat-w: min(360px, calc(100vw - 24px));
@@ -2537,14 +2490,9 @@ p {
     width: var(--chat-w);
     box-shadow: var(--shadow);
   }
-
-  .app:has(> .chat) .toast {
-    left: calc((100vw - var(--chat-w)) / 2);
-    max-width: calc(100vw - 32px - var(--chat-w));
-  }
 }
 
-/* As tall as the top bar, its words on one baseline; Close's text ends on the gutter, its fill reaching into it. */
+/* As tall as the page's head, its words on one baseline; Close's text ends on the gutter, its fill reaching into it. */
 .chat-head {
   display: flex;
   align-items: baseline;
@@ -2811,7 +2759,7 @@ p {
   font-size: 12.5px;
 }
 
-/* Under the top bar's rule, so a jump to a section shows one hairline, not two. */
+/* Under the page head's rule, so a jump to a section shows one hairline, not two. */
 .s-section {
   padding: 36px 0 12px;
   scroll-margin-top: 51px;
@@ -3261,58 +3209,6 @@ p {
 
 .au-delete {
   margin-left: auto;
-}
-
-/* Ask your agent, quiet like the sync line: the words at full width, Ask below 1000px, a speech bubble below 820px. */
-.tb-ask {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--pencil);
-  font-size: 12.5px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.tb-ask:hover {
-  background: var(--wash);
-  color: var(--ink);
-}
-
-.tb-ask-short,
-.tb-ask .i {
-  display: none;
-}
-
-/* Below 1000px, where the sidebar is hidden: its pages, in pencil. */
-.tb-flight {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
-  color: var(--pencil);
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
-.tb-flight:hover {
-  background: var(--wash);
-  color: var(--ink);
-}
-
-/* The same split among the narrow top bar's page links. */
-.tb-sep {
-  flex: none;
-  width: 1px;
-  height: 16px;
-  margin: 0 6px;
-  background: var(--rule-strong);
 }
 
 .side-col {
@@ -4314,6 +4210,7 @@ p {
   scroll-margin-top: 52px;
 }
 
+/* Under the review's head while you read the file. */
 .rv-fhead {
   position: sticky;
   top: 52px;
@@ -4681,68 +4578,87 @@ p {
     height: 60vh;
   }
 
+  /* The sidebar compacts: its words kept, the wordmark's words hidden, Ask's label shortened. */
   .app {
+    --side-w: 148px;
+  }
+
+  .side-brand span,
+  .side-ask-long {
+    display: none;
+  }
+
+  .side-ask-short {
+    display: inline;
+  }
+
+  .side-nav,
+  .side-foot {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .side-item {
+    padding: 0 8px;
+  }
+}
+
+/* A browser at 200 % zoom or a phone: the sidebar is one row across the top, scrolling sideways inside itself if it must. */
+@media (width <= 640px) {
+  .app {
+    --side-w: 0px;
+
     grid-template-columns: minmax(0, 1fr);
   }
 
   .side {
-    display: none;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    height: auto;
+    padding: 0 6px;
+    overflow: auto hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    scrollbar-width: none;
   }
 
-  .settings {
+  .side-brand {
+    flex: none;
+    height: 44px;
+    padding: 0 8px 0 6px;
+  }
+
+  .side-nav,
+  .side-foot {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
     padding: 0;
   }
 
-  /* Without the sidebar, the desktop app on macOS draws its traffic lights over the top bar. */
-  :root[data-shell="desktop"][data-platform="darwin"] .topbar {
-    padding-left: 86px;
+  .side-foot {
+    margin-left: auto;
   }
 
-  .tb-ask-long {
-    display: none;
+  .side-item {
+    flex: none;
+    gap: 6px;
+    padding: 0 6px;
+    white-space: nowrap;
   }
 
-  .tb-ask-short {
-    display: inline;
-  }
-}
-
-/* The macOS app pads the bar for the traffic lights: there the sync label gives way to the page links and Ask sooner. */
-@media (width <= 880px) {
-  :root[data-shell="desktop"][data-platform="darwin"] .sync span {
-    display: none;
-  }
-}
-
-@media (width <= 820px) {
-  .sync span {
-    display: none;
+  .side-sep {
+    flex: none;
+    width: 1px;
+    height: 16px;
+    margin: 0 6px;
   }
 
-  .tb-ask {
-    justify-content: center;
-    width: 32px;
-    padding: 0;
-  }
-
-  .tb-ask span {
-    display: none;
-  }
-
-  .tb-ask .i {
-    display: block;
-  }
-
-  /* Filled while your latest ask waits for its answer. */
-  .tb-ask.waiting .i path {
-    fill: currentcolor;
-  }
-}
-
-@media (width <= 640px) {
-  .topbar {
-    gap: 8px;
-    padding: 0 8px 0 14px;
+  .page-head {
+    padding: 0 12px;
   }
 
   .main {
