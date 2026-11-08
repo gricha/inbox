@@ -14,12 +14,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createServer as createViteServer } from "vite";
 import { Desk } from "../src/desk.ts";
-import { DeskError, GitHubGraphQLError, GitHubHttpError, NotFound, Upstream } from "../src/errors.ts";
+import { GitHubGraphQLError, GitHubHttpError, NotFound, Upstream } from "../src/errors.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
-import { createApp, proxyUpgrades, respond } from "../src/server.ts";
+import { createApp, proxyUpgrades, respond, startServer } from "../src/server.ts";
 import { idle, myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
+import { unusedPort } from "./helpers/fake-api.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
@@ -87,7 +88,60 @@ test("rejects foreign Host and Origin", async () => {
   assert.equal((await t.req("/api/review/api%237", { headers: { "sec-fetch-site": "same-origin" } })).status, 200, "the desk's own page");
   assert.equal((await t.req("/api/queue", { headers: { "sec-fetch-site": "none" } })).status, 200, "typed into the address bar");
   assert.notEqual((await t.req("/", { headers: img })).status, 403, "the page itself isn't the API");
+  const refused = async (res: Response) => [res.status, await res.json()];
+  assert.deepEqual(await refused(await t.app.request("http://evil.example/api/overview")), [
+    403,
+    { error: "forbidden host", tag: "Forbidden" },
+  ]);
+  assert.deepEqual(await refused(await t.req("/api/queue", { headers: { origin: "https://evil.example" } })), [
+    403,
+    { error: "forbidden origin", tag: "Forbidden" },
+  ]);
+  assert.deepEqual(await refused(await t.req("/api/queue", { headers: img })), [
+    403,
+    { error: "forbidden cross-site request", tag: "Forbidden" },
+  ]);
   t.cleanup();
+});
+
+test("an /api path the desk doesn't route is a NotFound, and a window-only delete a Forbidden, both through respond", async () => {
+  const t = await setup();
+  const res = await t.req("/api/nope", { method: "POST" });
+  assert.deepEqual([res.status, await res.json()], [404, { error: "not found", tag: "NotFound" }]);
+  const del = await t.req("/api/automations/warden", { method: "DELETE" });
+  assert.deepEqual(
+    [del.status, await del.json()],
+    [403, { error: "delete it in the desk's window: Settings → Automations", tag: "Forbidden" }],
+  );
+  t.cleanup();
+});
+
+test("startServer rejects with what stopped the desk, in its words: its port in use, or GitHub's viewer when gh isn't there", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-start-"));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false }));
+  const saved = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  c.after(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const taken = net.createServer();
+  await new Promise<void>((r) => {
+    taken.listen(0, "127.0.0.1", r);
+  });
+  const port = (taken.address() as AddressInfo).port;
+  await assert.rejects(startServer({ port, home, log: () => {} }), {
+    message: `port ${port} is in use; is desk already running? (http://localhost:${port})`,
+  });
+  taken.close();
+  // No gh and no token: GitHub's viewer fails init, and the desk and its port are let go for a retry.
+  process.env.PATH = home;
+  delete process.env.GITHUB_TOKEN;
+  const free = await unusedPort();
+  for (const _ of [1, 2])
+    await assert.rejects(startServer({ port: free, home, log: () => {} }), { message: /GitHub CLI \(gh\) not found/ });
 });
 
 test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", async () => {
@@ -330,7 +384,12 @@ test("from a checkout the desk's own address serves the app's Vite UI, the API s
   const site = (s: string, mode: string) => get("/src/App.tsx", { "sec-fetch-site": s, "sec-fetch-mode": mode });
   assert.equal((await site("cross-site", "navigate")).status, 200, "a link from another site opens the desk");
   assert.equal((await site("cross-site", "no-cors")).status, 403, "another site can't load the checkout's files");
-  assert.equal((await site("same-site", "cors")).status, 403, "nor another localhost port");
+  const foreign = await site("same-site", "cors");
+  assert.deepEqual(
+    [foreign.status, await foreign.json()],
+    [403, { error: "forbidden cross-site request", tag: "Forbidden" }],
+    "nor another localhost port",
+  );
   vite.up.closeAllConnections();
   vite.up.close();
   await once(vite.up, "close");
@@ -361,7 +420,10 @@ test("from a checkout a path under /api or /health that the desk doesn't route i
   await once(srv, "listening");
   c.after(() => srv.close());
   desk = `http://localhost:${(srv.address() as AddressInfo).port}`;
-  for (const p of ["/apix", "/api-docs", "/health/", "/healthz"]) assert.equal((await fetch(`${desk}${p}`)).status, 404, p);
+  for (const p of ["/apix", "/api-docs", "/health/", "/healthz"]) {
+    const res = await fetch(`${desk}${p}`);
+    assert.deepEqual([res.status, await res.json()], [404, { error: "not found", tag: "NotFound" }], p);
+  }
   assert.equal(asked, 0, "none went to Vite");
 });
 
@@ -589,7 +651,6 @@ test("a route's Effect answers a refusal with its status and tag, a client that 
   const upstream = new Upstream({ message: "GitHub HTTP 500: oops" });
   app.get("/value", (c) => respond(c, Effect.succeed({ ok: true }), { log }));
   app.get("/refused", (c) => respond(c, Effect.fail(new NotFound({ message: 'no automation "nope"' })), { log }));
-  app.get("/legacy", (c) => respond(c, Effect.fail(new DeskError(409, "already answered")), { log }));
   app.get("/upstream", (c) => respond(c, Effect.fail(upstream), { log }));
   app.get("/bug", (c) => respond(c, Effect.die(new TypeError("x is undefined")), { log }));
   app.get("/wait", (c) => respond(c, Effect.never, { log, read: true }));
@@ -599,14 +660,9 @@ test("a route's Effect answers a refusal with its status and tag, a client that 
   };
   assert.deepEqual(await get("/value"), [200, { ok: true }]);
   assert.deepEqual(await get("/refused"), [404, { error: 'no automation "nope"', tag: "NotFound" }]);
-  assert.deepEqual(await get("/legacy"), [409, { error: "already answered", tag: "Conflict" }]);
   assert.deepEqual(await get("/upstream"), [502, { error: "GitHub HTTP 500: oops", tag: "Upstream" }]);
   assert.deepEqual(await get("/bug"), [500, { error: "x is undefined", tag: "Internal" }]);
-  assert.deepEqual(
-    [seen.get("/refused"), seen.get("/legacy"), seen.get("/upstream")],
-    [undefined, undefined, upstream],
-    "the failure itself, for Sentry",
-  );
+  assert.deepEqual([seen.get("/refused"), seen.get("/upstream")], [undefined, upstream], "the failure itself, for Sentry");
   assert.ok(seen.get("/bug") instanceof TypeError);
   assert.equal(logs.length, 1);
   assert.match(logs[0]!, /^error: .*x is undefined/s);
@@ -838,6 +894,13 @@ test("a desk whose config never loaded answers 503: starting until the config's 
   const starting = { error: "desk is starting; the first sync can take a minute", tag: "Unavailable", reason: "starting" };
   assert.deepEqual(await get("/api/queue"), [503, starting]);
   assert.deepEqual(await get("/api/status"), [503, starting]);
+  for (const [method, p] of [
+    ["PUT", "/api/automations/warden"],
+    ["POST", "/api/automations/warden/run"],
+  ]) {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, { method, body: "{}" });
+    assert.deepEqual([res.status, await res.json()], [503, starting], `${method} ${p}`);
+  }
   fs.writeFileSync(path.join(home, "config.toml"), "[[boards]]\nid = 7\n");
   runSync(cold.reloadConfig());
   const broken = {

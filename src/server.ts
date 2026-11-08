@@ -7,15 +7,29 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { Cause, Effect, Exit, Option } from "effect";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { streamSSE } from "hono/streaming";
-import { serve } from "@hono/node-server";
+import { serve, type ServerType } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
-import { Desk, DeskError } from "./desk.ts";
-import { BadRequest, Conflict, errorBody, Forbidden, isDeskHttpError, legacyBody, Unavailable, type ErrorBody } from "./errors.ts";
+import { Desk } from "./desk.ts";
+import {
+  BadRequest,
+  Conflict,
+  errorBody,
+  Forbidden,
+  fsError,
+  isDeskHttpError,
+  ListenFailed,
+  NotFound,
+  Unavailable,
+  type ErrorBody,
+  type FsError,
+  type GitHubReadError,
+  type Upstream,
+} from "./errors.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
@@ -60,25 +74,32 @@ const UI_STARTING =
   '<!doctype html><meta http-equiv="refresh" content="2"><title>Review Desk</title><p>The UI from your checkout is starting; this page tries again every 2 seconds.</p>';
 
 // The app's Vite UI, passed through so this address always shows the checkout's current UI.
-async function fromUi(req: Request, ui: string): Promise<Response> {
-  const site = req.headers.get("sec-fetch-site");
-  // Another site may link to the desk, but not load the checkout's files into its own page.
-  if ((site === "cross-site" || site === "same-site") && req.headers.get("sec-fetch-mode") !== "navigate")
-    throw new DeskError(403, "forbidden cross-site request");
-  const { pathname, search } = new URL(req.url);
-  // Vite's proxy sends these prefixes back to the desk, so one the desk doesn't route would go round forever.
-  if (pathname.startsWith("/api") || pathname.startsWith("/health")) throw new DeskError(404, "not found");
-  const headers = new Headers(req.headers);
-  for (const h of HOP) headers.delete(h);
-  let res: Response;
-  try {
-    res = await fetch(`${ui}${pathname}${search}`, { headers, redirect: "manual", signal: req.signal });
-  } catch {
-    return new Response(UI_STARTING, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
-  }
-  const out = new Headers(res.headers);
-  for (const h of HOP) out.delete(h);
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+function fromUi(req: Request, ui: string): Effect.Effect<Response, Forbidden | NotFound> {
+  return Effect.gen(function* () {
+    const site = req.headers.get("sec-fetch-site");
+    // Another site may link to the desk, but not load the checkout's files into its own page.
+    if ((site === "cross-site" || site === "same-site") && req.headers.get("sec-fetch-mode") !== "navigate")
+      return yield* new Forbidden({ message: "forbidden cross-site request" });
+    const { pathname, search } = new URL(req.url);
+    // Vite's proxy sends these prefixes back to the desk, so one the desk doesn't route would go round forever.
+    if (pathname.startsWith("/api") || pathname.startsWith("/health")) return yield* new NotFound({ message: "not found" });
+    const headers = new Headers(req.headers);
+    for (const h of HOP) headers.delete(h);
+    // The request's own signal, not the Effect's: the body streams on after the route has answered.
+    const passed = Effect.tryPromise({
+      try: () => fetch(`${ui}${pathname}${search}`, { headers, redirect: "manual", signal: req.signal }),
+      catch: (cause) => cause,
+    });
+    return yield* Effect.match(passed, {
+      onFailure: () =>
+        new Response(UI_STARTING, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }),
+      onSuccess: (res) => {
+        const out = new Headers(res.headers);
+        for (const h of HOP) out.delete(h);
+        return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+      },
+    });
+  });
 }
 
 // The Vite page's hot-reload socket, through the desk like the page. Returns what drops the open ones: a server holding one
@@ -124,31 +145,30 @@ export function proxyUpgrades(server: Server, port: number, ui: string): () => v
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
 
-// A route's Effect, answered (docs/effect.md, Boundaries → HTTP). A refusal answers with its status and words; the client
-// going away (only a read passes its signal) with nothing; anything else is a logged 500. At 500 or more c.error is what
-// failed, so the Sentry middleware decides on it as on a throw.
-export async function respond<A, E>(
-  c: Context,
-  effect: Effect.Effect<A, E>,
-  opts: { log: (m: string) => void; read?: boolean },
-): Promise<Response> {
-  const exit = await Effect.runPromiseExit(effect, opts.read ? { signal: c.req.raw.signal } : undefined);
-  if (Exit.isSuccess(exit)) return c.json(exit.value as object);
+// What a route's Effect ended with, answered (docs/effect.md, Boundaries → HTTP): its value as JSON, or the Response it
+// built; a refusal with its status and words; the client going away (only a read passes its signal) with nothing;
+// anything else is a logged 500. At 500 or more c.error is what failed, so the Sentry middleware decides on it as on a throw.
+function reply<A, E>(c: Context, exit: Exit.Exit<A, E>, log: (m: string) => void): Response {
+  if (Exit.isSuccess(exit)) return exit.value instanceof Response ? exit.value : c.json(exit.value as object);
   if (Cause.hasInterruptsOnly(exit.cause)) return new Response(null, { status: 499 });
   const failed = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
   if (isDeskHttpError(failed)) {
     if (failed.status >= 500) c.error = failed;
     return c.json(errorBody(failed), failed.status);
   }
-  if (failed instanceof DeskError) {
-    // effect-bridge(C6): DeskError goes
-    if (failed.status >= 500) c.error = failed;
-    return c.json(legacyBody(failed), failed.status as 400);
-  }
-  opts.log(`error: ${Cause.pretty(exit.cause)}`);
+  log(`error: ${Cause.pretty(exit.cause)}`);
   const e = Cause.squash(exit.cause);
   c.error = e instanceof Error ? e : new Error(String(e));
   return c.json({ error: c.error.message, tag: "Internal" } satisfies ErrorBody, 500);
+}
+
+// A route's Effect, run and answered.
+export async function respond<A, E>(
+  c: Context,
+  effect: Effect.Effect<A, E>,
+  opts: { log: (m: string) => void; read?: boolean },
+): Promise<Response> {
+  return reply(c, await Effect.runPromiseExit(effect, opts.read ? { signal: c.req.raw.signal } : undefined), opts.log);
 }
 
 // A line of a PR's diff, or a range from `start` to it, rebuilt from its parts; null when any of them is bad.
@@ -168,40 +188,43 @@ export function createApp(desk: Desk, port: number): Hono {
   instrument(app);
   const origins = originsOf(port);
   const ui = process.env.DESK_UI_ORIGIN;
+  const log = (m: string) => {
+    desk.log(m);
+  };
 
   // Only this machine's browser and tools: blocks DNS rebinding (Host) and cross-site requests (Origin).
-  app.use("*", async (c, next) => {
-    const host = new URL(c.req.url).hostname;
-    if (!LOCAL.has(host)) throw new DeskError(403, "forbidden host");
-    const origin = c.req.header("origin");
-    if (origin && !origins.has(origin)) throw new DeskError(403, "forbidden origin");
-    // A no-cors GET (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
-    const site = c.req.header("sec-fetch-site");
-    if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
-      throw new DeskError(403, "forbidden cross-site request");
-    await next();
-    c.header("X-Frame-Options", "DENY");
-    c.header("Content-Security-Policy", "frame-ancestors 'none'");
+  const local = (c: Context) =>
+    Effect.suspend((): Effect.Effect<void, Forbidden> => {
+      const refused = (message: string) => Effect.fail(new Forbidden({ message }));
+      if (!LOCAL.has(new URL(c.req.url).hostname)) return refused("forbidden host");
+      const origin = c.req.header("origin");
+      if (origin && !origins.has(origin)) return refused("forbidden origin");
+      // A no-cors GET (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
+      const site = c.req.header("sec-fetch-site");
+      if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
+        return refused("forbidden cross-site request");
+      return Effect.void;
+    });
+  app.use("*", async (c: Context, next: Next) => {
+    const checked = Effect.runSyncExit(local(c));
+    if (Exit.isFailure(checked)) c.res = reply(c, checked, log);
+    else {
+      await next();
+      c.header("X-Frame-Options", "DENY");
+      c.header("Content-Security-Policy", "frame-ancestors 'none'");
+    }
   });
 
+  // Only a bug gets here: every route answers its own failures through respond.
   app.onError((e, c) => {
-    if (isDeskHttpError(e)) return c.json(errorBody(e), e.status);
-    if (e instanceof DeskError) return c.json(legacyBody(e), e.status as 400); // effect-bridge(C6): DeskError goes
     desk.log(`error: ${e.stack ?? e.message}`);
     return c.json({ error: e.message, tag: "Internal" } satisfies ErrorBody, 500);
   });
 
-  const log = (m: string) => {
-    desk.log(m);
-  };
   const STARTING = "desk is starting; the first sync can take a minute";
   // Before the first sync there's nothing to show, unless it's the config's errors.
-  const starting = () => !desk.loaded && !desk.configErrors.length;
-  const ready = () => {
-    if (starting()) throw new DeskError(503, STARTING);
-  };
   const up = Effect.suspend((): Effect.Effect<void, Unavailable> =>
-    starting() ? Effect.fail(new Unavailable({ message: STARTING, reason: "starting" })) : Effect.void,
+    !desk.loaded && !desk.configErrors.length ? Effect.fail(new Unavailable({ message: STARTING, reason: "starting" })) : Effect.void,
   );
   type Req = { req: { json<T>(): Promise<T> } };
   const notJson = () => new BadRequest({ message: "the body must be a JSON object" });
@@ -211,7 +234,6 @@ export function createApp(desk: Desk, port: number): Hono {
     );
   // A body that isn't a JSON object reads as {}: each route says what it needs.
   const bodyOf = (c: Req) => Effect.orElseSucceed(json(c), (): Record<string, unknown> => ({}));
-  const input = (c: Req) => Effect.runPromise(bodyOf(c)); // effect-bridge(C6): the routes yield bodyOf
   // A string the body may leave out.
   const str = (b: Record<string, unknown>, k: string): Effect.Effect<string | undefined, BadRequest> => {
     const v = b[k] ?? undefined;
@@ -223,7 +245,9 @@ export function createApp(desk: Desk, port: number): Hono {
       typeof b[key] === "string" ? Effect.succeed(b[key]) : Effect.fail(new BadRequest({ message: `need { ${key} }` })),
     );
 
-  app.get("/health", (c) => c.json({ ok: true, version: VERSION }));
+  // What can't fail answers through respond too: a bug in it is a logged 500 like any other.
+  const total = (c: Context, f: () => unknown) => respond(c, Effect.sync(f), { log });
+  app.get("/health", (c) => total(c, () => ({ ok: true, version: VERSION })));
   app.get("/api/overview", (c) =>
     respond(
       c,
@@ -444,7 +468,9 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, ask, { log });
   });
-  app.get("/api/asks", (c) => c.json({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() }));
+  app.get("/api/asks", (c) =>
+    total(c, () => ({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() })),
+  );
   // desk_ask: local only, so agents may read where an ask is.
   app.get("/api/asks/:id", (c) =>
     respond(
@@ -510,17 +536,11 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
   // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one.
-  app.get("/api/automations", (c) =>
-    respond(
-      c,
-      Effect.sync(() => desk.automations.view()),
-      { log, read: true },
-    ),
-  );
-  app.put("/api/automations/:id", async (c) => {
-    ready();
-    const b = await input(c);
+  app.get("/api/automations", (c) => total(c, () => desk.automations.view()));
+  app.put("/api/automations/:id", (c) => {
     const set = Effect.gen(function* () {
+      yield* up;
+      const b = yield* bodyOf(c);
       if (
         typeof b.name !== "string" ||
         typeof b.schedule !== "string" ||
@@ -538,12 +558,16 @@ export function createApp(desk: Desk, port: number): Hono {
     return respond(c, set, { log });
   });
   app.delete("/api/automations/:id", (c) => {
-    if (!fromDesk(c)) throw new DeskError(403, "delete it in the desk's window: Settings → Automations");
-    return respond(c, Effect.as(desk.automations.remove(c.req.param("id")), { ok: true }), { log });
+    const remove = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automations" });
+      yield* desk.automations.remove(c.req.param("id"));
+      return { ok: true };
+    });
+    return respond(c, remove, { log });
   });
   app.post("/api/automations/:id/run", (c) => {
-    ready();
     const run = Effect.gen(function* () {
+      yield* up;
       const a = yield* desk.automations.get(c.req.param("id"));
       if (!a.on && !fromDesk(c))
         return yield* new Conflict({ message: `"${a.name}" is off: the owner turns it on in Settings → Automations` });
@@ -561,10 +585,13 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, undo, { log });
   });
-  app.post("/api/sync", (c) => {
-    desk.runner.fork("sync", desk.sync());
-    return c.json({ ok: true });
-  });
+  // The pass runs on through the runner, which logs and reports what fails it; the answer doesn't wait for it.
+  app.post("/api/sync", (c) =>
+    total(c, () => {
+      desk.runner.fork("sync", desk.sync());
+      return { ok: true };
+    }),
+  );
   app.get("/api/config", (c) =>
     respond(
       c,
@@ -588,7 +615,7 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, put, { log });
   });
-  app.get("/api/policy", (c) => c.json(desk.getPolicy()));
+  app.get("/api/policy", (c) => total(c, () => desk.getPolicy()));
   app.put("/api/policy", (c) => {
     const put = Effect.gen(function* () {
       const { text, base } = yield* json(c);
@@ -599,8 +626,8 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, put, { log });
   });
-  app.get("/api/fields", (c) => c.json(FIELDS));
-  app.get("/api/settings", (c) => c.json(desk.getSettings()));
+  app.get("/api/fields", (c) => total(c, () => FIELDS));
+  app.get("/api/settings", (c) => total(c, () => desk.getSettings()));
   app.put("/api/settings", (c) => {
     const put = Effect.gen(function* () {
       const b = (yield* json(c)) as { set?: Record<string, unknown>; reset?: string[] };
@@ -634,62 +661,89 @@ export function createApp(desk: Desk, port: number): Hono {
   });
 
   app.get("/api/events", (c) =>
-    streamSSE(c, async (stream) => {
-      const off = desk.onChange((rev) => void stream.writeSSE({ event: "update", data: JSON.stringify({ rev }) }));
-      const offNotify =
-        c.req.query("notify") === "1"
-          ? desk.onNotify((title, body) => void stream.writeSSE({ event: "notify", data: JSON.stringify({ title, body }) }))
-          : () => {};
-      stream.onAbort(() => {
-        off();
-        offNotify();
-      });
-      await stream.writeSSE({ event: "update", data: JSON.stringify({ rev: desk.rev }) });
-      while (!stream.aborted) {
-        await stream.sleep(25_000);
-        if (!stream.aborted) await stream.write(": ping\n\n");
-      }
-    }),
+    total(c, () =>
+      streamSSE(c, async (stream) => {
+        const off = desk.onChange((rev) => void stream.writeSSE({ event: "update", data: JSON.stringify({ rev }) }));
+        const offNotify =
+          c.req.query("notify") === "1"
+            ? desk.onNotify((title, body) => void stream.writeSSE({ event: "notify", data: JSON.stringify({ title, body }) }))
+            : () => {};
+        stream.onAbort(() => {
+          off();
+          offNotify();
+        });
+        await stream.writeSSE({ event: "update", data: JSON.stringify({ rev: desk.rev }) });
+        while (!stream.aborted) {
+          await stream.sleep(25_000);
+          if (!stream.aborted) await stream.write(": ping\n\n");
+        }
+      }),
+    ),
   );
 
   // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
-  app.post("/mcp", async (c) => {
+  // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process. Each
+  // tool answers for its own failures; connecting the transport has none to expect.
+  app.post("/mcp", (c) => {
     const api = createClient((p, init) => app.request(p, init));
     const transport = new WebStandardStreamableHTTPServerTransport();
-    await createMcpServer(api).connect(transport);
-    return transport.handleRequest(c.req.raw);
+    const handled = Effect.promise(async () => {
+      await createMcpServer(api).connect(transport);
+      return transport.handleRequest(c.req.raw);
+    });
+    return respond(c, handled, { log });
   });
   // Stateless: no server-initiated stream and no session to end, which the spec answers with 405.
   app.on(["GET", "DELETE"], "/mcp", (c) =>
-    c.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }, 405, { allow: "POST" }),
+    total(c, () => c.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }, 405, { allow: "POST" })),
   );
 
-  app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+  app.all("/api/*", (c) => respond(c, Effect.fail(new NotFound({ message: "not found" })), { log }));
 
-  if (ui) app.get("*", (c) => fromUi(c.req.raw, ui));
+  if (ui) app.get("*", (c) => respond(c, fromUi(c.req.raw, ui), { log, read: true }));
   app.get("*", (c) => {
-    const rel = decodeURIComponent(c.req.path).replace(/^\/+/, "") || "index.html";
-    let file = path.resolve(DIST, rel);
-    if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, "index.html");
-    if (!fs.existsSync(file)) return c.text("UI not built. Run: npm run build", 503);
-    const type = TYPES[path.extname(file)] ?? "application/octet-stream";
-    const cache = file.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache";
-    return c.body(fs.readFileSync(file), 200, { "content-type": type, "cache-control": cache });
+    const page = Effect.gen(function* () {
+      const rel = decodeURIComponent(c.req.path).replace(/^\/+/, "") || "index.html";
+      let file = path.resolve(DIST, rel);
+      if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, "index.html");
+      if (!fs.existsSync(file)) return c.text("UI not built. Run: npm run build", 503);
+      const type = TYPES[path.extname(file)] ?? "application/octet-stream";
+      const cache = file.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache";
+      const body = yield* Effect.try({ try: () => fs.readFileSync(file), catch: fsError("read", file) });
+      return c.body(body, 200, { "content-type": type, "cache-control": cache });
+    });
+    return respond(c, page, { log, read: true });
   });
 
   return app;
 }
 
-export async function startServer(
-  opts: {
-    port?: number;
-    open?: boolean;
-    home?: string;
-    notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
-    log?: (msg: string) => void;
-    writer?: GitHubWriter; // a stand-in for live checks that must not write to GitHub
-  } = {},
-): Promise<{ url: string; desk: Desk; close(): Promise<void> }> {
+type ServeOptions = {
+  port?: number;
+  open?: boolean;
+  home?: string;
+  notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
+  log?: (msg: string) => void;
+  writer?: GitHubWriter; // a stand-in for live checks that must not write to GitHub
+};
+type Served = { url: string; desk: Desk; close(): Promise<void> };
+
+// Listening on 127.0.0.1, or why it can't: the port in use, or Node's error.
+const listen = (app: Hono, port: number, url: string) =>
+  Effect.callback<ServerType, ListenFailed>((resume) => {
+    const s = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
+      resume(Effect.succeed(s));
+    });
+    s.once("error", (cause: Error) => {
+      resume(Effect.fail(new ListenFailed({ port, url, cause })));
+    });
+  });
+
+// The desk on its port, its first config read and its loops started. Its port, GitHub's viewer or a file it can't read
+// or write fails it, and then it leaves nothing open: the desktop app retries.
+const startDesk = Effect.fnUntraced(function* (
+  opts: ServeOptions = {},
+): Effect.fn.Return<Served, ListenFailed | GitHubReadError | Upstream | FsError> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);
   const home = opts.home ?? ((process.env.DESK_HOME ?? "") || path.join(os.homedir(), ".review-desk")); // empty means unset, as in the CLI
   const log =
@@ -709,41 +763,42 @@ export async function startServer(
   const app = createApp(desk, port);
   const url = `http://localhost:${port}`;
 
-  const server = await new Promise<ReturnType<typeof serve>>((resolve, reject) => {
-    const s = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-      resolve(s);
-    });
-    s.once("error", (e: NodeJS.ErrnoException) => {
-      reject(e.code === "EADDRINUSE" ? new Error(`port ${port} is in use; is desk already running? (${url})`) : e);
-    });
-  });
+  // The desktop app retries: don't leak the SQLite handle each time.
+  const server = yield* listen(app, port, url).pipe(
+    Effect.onError(() =>
+      Effect.sync(() => {
+        desk.stop();
+      }),
+    ),
+  );
   const ui = process.env.DESK_UI_ORIGIN;
   const dropUpgrades = ui ? proxyUpgrades(server as Server, port, ui) : () => {};
   log(`Review Desk on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
 
-  try {
-    await Effect.runPromise(desk.init()); // effect-bridge(C6): startServer runs it as its own Effect
-  } catch (e) {
-    desk.stop(); // the desktop app retries; don't leak the SQLite handle each time
-    server.close();
-    throw e;
-  }
+  yield* desk.init().pipe(
+    Effect.onError(() =>
+      Effect.sync(() => {
+        desk.stop();
+        server.close();
+      }),
+    ),
+  );
   desk.start();
   if (opts.open) openUrl(url);
 
-  return {
-    url,
-    desk,
-    close: async () => {
-      const agentsGone = Effect.runPromise(desk.close()); // effect-bridge(C6): it stops the desk at once; its agents may take a moment
-      await new Promise<void>((r) => {
-        server.close(() => {
-          r();
-        });
-        (server as { closeAllConnections?: () => void }).closeAllConnections?.();
-        dropUpgrades();
-      });
-      await agentsGone;
-    },
-  };
+  // The desk stops at once; its agents may take a moment.
+  const stopListening = Effect.callback<void>((resume) => {
+    server.close(() => {
+      resume(Effect.void);
+    });
+    (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    dropUpgrades();
+  });
+  const closing = Effect.all([desk.close(), stopListening], { concurrency: 2, discard: true });
+  return { url, desk, close: () => Effect.runPromise(closing) };
+});
+
+// startDesk for a caller that awaits it (the desktop app): it rejects with what stopped the desk, whose words it shows.
+export function startServer(opts: ServeOptions = {}): Promise<Served> {
+  return Effect.runPromise(startDesk(opts));
 }

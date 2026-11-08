@@ -118,6 +118,22 @@ export function errorBody(e: DeskHttpError): ErrorBody {
   return { error: e.message, tag: e._tag };
 }
 
+// ---------------------------------------------------------------- the desk's own server
+
+// Its port couldn't be listened on: in use (another desk, most likely), or Node's error (cause) says why.
+export class ListenFailed extends Data.TaggedError("ListenFailed")<{
+  readonly port: number;
+  readonly url: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const c = this.cause as { code?: unknown } | null;
+    if (typeof c === "object" && c !== null && c.code === "EADDRINUSE")
+      return `port ${this.port} is in use; is desk already running? (${this.url})`;
+    return this.cause instanceof Error ? this.cause.message : `couldn't listen on port ${this.port}: ${String(this.cause)}`;
+  }
+}
+
 // ---------------------------------------------------------------- the rules' expressions (config.toml)
 
 // A board's filter or priority, or a rule's when, doesn't parse, or names a field or function there isn't: the words the
@@ -307,38 +323,4 @@ export class PrChangedDuringFetch extends Data.TaggedError("PrChangedDuringFetch
   override get message(): string {
     return "the PR changed while its diff was fetched: open it again";
   }
-}
-
-// ---------------------------------------------------------------- legacy (removed in C6, with DeskError)
-
-// An error the HTTP API answers with its status: 400 for what you sent, 404, 409 for a state that refuses it, 502 for GitHub.
-export class DeskError extends Error {
-  status: number;
-  candidates?: string[];
-  constructor(status: number, message: string, candidates?: string[]) {
-    super(message);
-    this.status = status;
-    this.candidates = candidates;
-  }
-}
-
-const LEGACY_TAGS: Record<number, ErrorBody["tag"]> = {
-  400: "BadRequest",
-  403: "Forbidden",
-  404: "NotFound",
-  409: "Conflict",
-  502: "Upstream",
-  503: "Unavailable",
-};
-
-// A DeskError's answer, with the tag its status and words say. effect-bridge(C6): goes with DeskError.
-export function legacyBody(e: DeskError): ErrorBody {
-  const candidates = e.candidates?.length ? [...e.candidates] : undefined;
-  const tag: ErrorBody["tag"] = candidates
-    ? "AmbiguousRef"
-    : e.status === 502 && e.message.startsWith("Marked it ready")
-      ? "ReviewersNotAsked"
-      : (LEGACY_TAGS[e.status] ?? "Internal");
-  const reason = e.status === 503 ? (e.message.startsWith("config has errors") ? "config" : "starting") : undefined;
-  return { error: e.message, tag, ...(candidates && { candidates }), ...(reason && { reason }) };
 }

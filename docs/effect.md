@@ -31,9 +31,10 @@ services, `Data.TaggedError`, the desk's own `log`.
 
 ## Defining errors
 
-- Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the rules' expressions, files,
-  child processes, Claude Code, GitHub. The UI's own (the desk unreachable, an API refusal) live in `web/src/api.ts`. Tags are unique across
-  families: GitHub's 403 is `GitHubForbidden`, never `Forbidden`.
+- Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the desk's own server
+  (`ListenFailed`), the rules' expressions, files, child processes, Claude Code, GitHub. The UI's own (the desk
+  unreachable, an API refusal) live in `web/src/api.ts`. Tags are unique across families: GitHub's 403 is
+  `GitHubForbidden`, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
 - Every error has a message the owner can read, the same words as before the migration (tests, toasts, the CLI and the
@@ -56,7 +57,7 @@ services, `Data.TaggedError`, the desk's own `log`.
 | ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `BadRequest`        | 400    | what you sent: the routes' `need { … }`, `line`/`paragraphs`/`parseUntil`, hold's unreadable ref, automations' `set` |
 | `Forbidden`         | 403    | the host/origin/cross-site middleware, `fromUi`, the desk-window-only routes, an agent's hand-off                    |
-| `NotFound`          | 404    | resolve's unknown or unreadable ref, a board, an ask, an inquiry, an automation, an `/api/*` route                   |
+| `NotFound`          | 404    | resolve's unknown or unreadable ref, a board, an ask, an inquiry, an automation, an `/api/*` route, `fromUi`'s loop  |
 | `AmbiguousRef`      | 409    | resolve's ref matching several items, with `candidates`                                                              |
 | `Stale`             | 409    | `putPolicy`'s and `putConfig`'s stale base, approve's and `githubAct`'s stale head                                   |
 | `Busy`              | 409    | a held `approving`/`sending` lock                                                                                    |
@@ -79,7 +80,9 @@ Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with Gi
 answer `Unavailable` "config" (was a TypeError 500); a body that isn't JSON at the routes that parse one is a
 `BadRequest` "the body must be a JSON object" (was a 500), and `input()` also treats JSON `null` or an array as `{}`.
 The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the first sync can take a minute" and
-"Marked it ready, but GitHub didn't ask for the reviews: …".
+"Marked it ready, but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path the desk doesn't
+route, and one under `/api` or `/health` that `fromUi` won't pass to Vite, answer `{ error: "not found", tag:
+"NotFound" }` (there was no tag), and the host/origin/cross-site middleware's 403s carry `Forbidden`.
 
 ## Writing Effect code
 
@@ -196,7 +199,10 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
 
 Each runs an Effect whose failures it answers for, and nothing gets past it unhandled.
 
-- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through `respond(c, effect, { log, read? })`. Only reads and waits (GET views,
+- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through `respond(c, effect, { log, read? })`,
+  every route (one that can't fail through `Effect.sync`, the static files, `fromUi` and the SSE stream as the
+  `Response` they build, which `respond` passes on); the host/origin/cross-site middleware runs its check with
+  `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only a bug. Only reads and waits (GET views,
   `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a client going away interrupts them; a write
   and any work shared with other callers never take the request's signal: nor does opening a PR (`GET /api/review/:id`),
   which starts its AI review and Claude's read once its diff and conversation are in; its `?ahead=1` prefetch does. A
@@ -237,6 +243,10 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
   threw from the constructor, and from the watcher. `init()` returns an Effect: GitHub's viewer failing, a first config
   it can't write for want of your GitHub context (`Upstream`, "couldn't read your GitHub context to write a first
   config: …") or a file it can't read or write (`FsError`) fails it, and `startServer`'s caller shows the words.
+  `startDesk` is the Effect (failing with `ListenFailed`, "port N is in use; is desk already running? (url)", too);
+  `startServer` runs it for a caller that awaits it (the desktop app) and rejects with the failure itself, and its
+  `close()` stays a Promise. A port it can't listen on stops the desk it made, as init failing does, so a
+  retry leaves no store open.
   `stop()` stays synchronous: it interrupts the runner's fibers, unwatches the files and closes the store. `close()` is
   an Effect that stops the desk at once and also waits for `stopAll()`.
 - Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
@@ -279,8 +289,6 @@ _This section goes when the migration is done._ A bridge lets a caller another s
   `callback` throws `AsyncFiberError` when it runs); an Effect a sync caller still runs stays on the fs sync APIs.
 - Fire-and-forget: `desk.runner.fork(what, eff)`, or `desk.runner.fork(what, Effect.promise(() => legacy()))` for a
   legacy promise. Never `void Effect.runPromise`, never a bare `Effect.runFork`.
-- Effect code calling a legacy throwing function: `Effect.try({ try: () => legacy(), catch: (e) => e as DeskError })`;
-  a legacy promise: `Effect.tryPromise({ try: () => legacy(), catch: (e) => e as DeskError })`.
-- Legacy code that catches by `instanceof DeskError` or `.status` and now sees a tagged error: update that catch in the
-  same step (both classes have `status`), or map the error to `DeskError` at the bridge.
-- Until C6, the server's `onError` also answers a legacy `DeskError`, with a tag from its status (`legacyBody`).
+- Effect code calling a legacy throwing function: `Effect.try({ try: () => legacy(), catch })`; a legacy promise:
+  `Effect.tryPromise({ try: () => legacy(), catch })`, with a `catch` that gives the tagged error it fails with.
+- Legacy code that catches by `instanceof` or `.status` and now sees a tagged error: update that catch in the same step.

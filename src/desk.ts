@@ -10,7 +10,6 @@ import {
   Busy,
   ClaudeNotLoggedIn,
   Conflict,
-  DeskError,
   Forbidden,
   fsError,
   NotFound,
@@ -151,8 +150,6 @@ const MAX_LINKS = 12;
 const INVISIBLE =
   // oxlint-disable-next-line no-control-regex -- paragraphs stay; anything else invisible goes, bidi marks too
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
-
-export { DeskError };
 
 interface Entry {
   item: Item;
