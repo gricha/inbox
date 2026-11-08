@@ -103,7 +103,7 @@ test("closing the desk stops the judge and an AI review, what they started, and 
   const t0 = Date.now();
   await run(desk.close());
   const took = Date.now() - t0;
-  await until(() => !pids.some(running), "nothing left running");
+  assert.deepEqual(pids.filter(running), [], "nothing left running once close() is back");
   assert.ok(took < 4000, `took ${took} ms`);
 });
 
