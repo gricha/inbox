@@ -318,7 +318,9 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
   under a GitHub write in flight, leaves that to the last one's lock (`closeIfIdle`). `close()` is an Effect that stops
   the desk at once and also waits for `stopAll()` and for the store to close. Deliberate change, with a test: a write in
   flight when the desk stops still logs, records and answers what it did (it hit the closed store, a logged and reported
-  500 with nothing recorded), and a stopped desk sends no new one (`locked` ends it as interrupted).
+  500 with nothing recorded), and a stopped desk sends no new one: a write's first step (`notStopped`, and `locked` for a
+  desk that stopped on the way) ends it as interrupted, a 499 nobody logs, before it reads the store (it read the closed
+  one: a logged and reported 500).
 - Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
   config (`this.loaded!`, a defect); only an entry point checks it as a failure (`requireConfig`, or `resolve`, which
   checks it first). The hooks the connectors call (`synced`, `rebaseConflicts`, `handBackUnasked`, `trackBlocked`,

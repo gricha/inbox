@@ -1842,6 +1842,7 @@ export class Desk {
   // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your click; `head` is the commit the view showed, so a newer push isn't approved unread.
   approve(ref: string, head: string, body?: string): Effect.Effect<{ url: string }, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const e = yield* this.pr(ref);
       const id = e.item.id;
       const can = this.canApprove(e);
@@ -1861,8 +1862,12 @@ export class Desk {
     });
   }
 
-  // Busy at once on a held lock; the write and its bookkeeping run uninterruptibly, and the lock goes whatever GitHub said.
-  // A stopped desk sends none (its store may be closed): the request ends as interrupted.
+  // A write's first step: a stopped desk reads nothing for one (its store may be closed), and the request ends as interrupted.
+  private notStopped(): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => (this.stopped ? Effect.interrupt : Effect.void));
+  }
+
+  // Busy at once on a held lock, interrupted on a stopped desk; the write and its bookkeeping are uninterruptible, the lock goes whatever GitHub said.
   private locked<A, E>(locks: Set<string>, key: string, busy: string, write: Effect.Effect<A, E>): Effect.Effect<A, E | Busy> {
     return Effect.uninterruptible(
       Effect.suspend((): Effect.Effect<A, E | Busy> => {
@@ -1909,6 +1914,7 @@ export class Desk {
   // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
   githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Effect.Effect<{ url: string }, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const found = yield* this.resolve(ref);
       const e = this.snapshot().entries.get(found)!;
       const it = e.item;
@@ -2415,6 +2421,7 @@ export class Desk {
   // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
   askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const e = yield* this.pr(ref);
       const id = e.item.id;
       if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });
@@ -2696,6 +2703,7 @@ export class Desk {
   // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your click. One of the desk's GitHub writes.
   reply(ref: string, convoId: string, body: string): Effect.Effect<{ url: string }, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const e = yield* this.pr(ref);
       const id = e.item.id;
       const text = body.trim();
@@ -2730,6 +2738,7 @@ export class Desk {
   // in place), on your click. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
   comment(ref: string, body: string): Effect.Effect<{ url: string }, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const found = yield* this.resolve(ref);
       const e = this.snapshot().entries.get(found)!;
       const id = e.item.id;
@@ -2756,6 +2765,7 @@ export class Desk {
   // commit the review showed so its line numbers are the ones you read. Part of reviewing, not its end: the PR stays put.
   inlineComment(ref: string, at: InlineAt, body: string, head: string): Effect.Effect<{ url: string }, WriteError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const e = yield* this.pr(ref);
       const id = e.item.id;
       const text = body.trim();
@@ -2792,6 +2802,7 @@ export class Desk {
   // then a review request to whoever you picked with it (node ids from reviewers()). Asking them failing leaves it ready.
   markReady(ref: string, ask?: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError | ReviewersNotAsked> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.notStopped();
       const e = yield* this.pr(ref);
       const id = e.item.id;
       if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });

@@ -301,6 +301,28 @@ test("a write in flight when the desk stops still lands, is logged and done, and
   assert.ok(done, "done after it, as if the desk were still up");
 });
 
+test("a write sent once the desk has stopped and closed its store ends as interrupted before it reads anything", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "green" }), myPr(5, { ci: "green", draft: true })]);
+  const post = client(t);
+  t.desk.changed(); // the next read computes from the store
+  await run(t.desk.close());
+  const late = [
+    t.desk.githubAct("web#5", "close"),
+    t.desk.approve("web#5", "h"),
+    t.desk.comment("web#5", "hi"),
+    t.desk.reply("web#5", "c1", "hi"),
+    t.desk.inlineComment("web#5", { path: "a.ts", line: 1, side: "new" }, "hi", "h"),
+    t.desk.markReady("web#5"),
+    t.desk.askReviewers("web#5", { users: ["U_1"], teams: [] }),
+  ];
+  for (const write of late) {
+    const exit = await Effect.runPromiseExit<unknown, unknown>(write);
+    assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "it ran");
+  }
+  assert.equal((await post({ id: "acme/web#5", action: "close" }, DESK)).status, 499, "a quiet 499, not a 500 from the closed store");
+  assert.deepEqual(w.calls, []);
+});
+
 test("an issue you opened closes with closeIssue", async (c) => {
   const { t, w } = await withWriter(c, [makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" })]);
   await run(t.desk.githubAct("api#7", "close"));
