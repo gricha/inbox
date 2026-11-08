@@ -204,9 +204,7 @@ export class CommandOutputTooLarge extends Data.TaggedError("CommandOutputTooLar
   }
 }
 
-// It exited non-zero or couldn't start: the last lines it wrote to stderr, else Node's error (cause), else its exit, which
-// is also what a stderr of blank lines says. summary: the words of a caller that has its own (your agent's CLI says what to
-// run yourself, launchctl its step).
+// Exited non-zero or couldn't start: stderr's last lines, else Node's error, else its exit; summary is a caller's own words.
 export class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly command: string;
   readonly code: number | null;
@@ -247,8 +245,7 @@ export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ r
   }
 }
 
-// claude answered with an error (is_error): the API's message ("Overloaded"), and its status when it gave one. With no
-// words, its status says it: the coordinator keeps the message, and an empty one would erase the error it keeps.
+// claude's is_error answer: the API's words, else its status, so the coordinator never keeps an empty error.
 export class ClaudeApiError extends Data.TaggedError("ClaudeApiError")<{ readonly message: string; readonly status?: number }> {
   constructor(args: { readonly message: string; readonly status?: number }) {
     const said = args.message.trim()

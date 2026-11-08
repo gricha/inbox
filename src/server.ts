@@ -145,9 +145,7 @@ export function proxyUpgrades(server: Server, port: number, ui: string): () => v
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
 
-// What a route's Effect ended with, answered (docs/effect.md, Boundaries → HTTP): its value as JSON, or the Response it
-// built; a refusal with its status and words; the client going away (only a read passes its signal) with nothing;
-// anything else is a logged 500. At 500 or more c.error is what failed, so the Sentry middleware decides on it as on a throw.
+// docs/effect.md Boundaries → HTTP: the value or its Response, a refusal's status, 499 for a client gone, else a logged 500 Sentry sees.
 function reply<A, E>(c: Context, exit: Exit.Exit<A, E>, log: (m: string) => void): Response {
   if (Exit.isSuccess(exit)) return exit.value instanceof Response ? exit.value : c.json(exit.value as object);
   if (Cause.hasInterruptsOnly(exit.cause)) return new Response(null, { status: 499 });
@@ -681,9 +679,7 @@ export function createApp(desk: Desk, port: number): Hono {
     ),
   );
 
-  // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process.
-  // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes above in-process. Each
-  // tool answers for its own failures; connecting the transport has none to expect.
+  // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes in-process and answer for their failures.
   app.post("/mcp", (c) => {
     const api = createClient((p, init) => app.request(p, init));
     const transport = new WebStandardStreamableHTTPServerTransport();

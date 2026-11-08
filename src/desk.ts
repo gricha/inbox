@@ -1846,9 +1846,7 @@ export class Desk {
     });
   }
 
-  // A GitHub write under its lock (`approving` or `sending`): a second press while one is on its way is Busy at once, never
-  // queued. The write and what the desk records after it run uninterruptibly together, so a client that leaves mid-write
-  // never leaves it half recorded; the lock goes once it's done, whatever GitHub said.
+  // Busy at once on a held lock; the write and its bookkeeping run uninterruptibly, and the lock goes whatever GitHub said.
   private locked<A, E>(locks: Set<string>, key: string, busy: string, write: Effect.Effect<A, E>): Effect.Effect<A, E | Busy> {
     return Effect.uninterruptible(
       Effect.suspend((): Effect.Effect<A, E | Busy> => {
@@ -1864,8 +1862,7 @@ export class Desk {
     );
   }
 
-  // After a write: the PR itself first, so it resolves (as "you approved") within seconds, as a full pass alone wouldn't
-  // while the search index lags; then the full pass. One fiber the runner holds, so the desk stopping interrupts both.
+  // The PR first (the search index lags), then the full pass, in one runner fiber so the desk stopping interrupts both.
   private refreshAfter(id: string): void {
     this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(this.sync())), id);
   }
@@ -2142,8 +2139,7 @@ export class Desk {
     this.judge.pump();
   }
 
-  // The item's id, fetched read only if the desk doesn't hold it: an ambiguous ref goes back, and what GitHub fails with is
-  // passed on.
+  // The item's id, fetched read only if the desk doesn't hold it; an ambiguous ref and what GitHub fails with are passed on.
   hold(ref: string): Effect.Effect<string, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       yield* this.requireConfig();
@@ -2808,8 +2804,7 @@ export class Desk {
     });
   }
 
-  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first. Read only: what GitHub fails
-  // with is passed on in its words.
+  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first; what GitHub fails with is passed on.
   reviewers(ref: string, q: string): Effect.Effect<Reviewer[], RefError | BadRequest | Conflict | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const e = yield* this.pr(ref);

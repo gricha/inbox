@@ -281,9 +281,7 @@ export class Automations {
     }
   }
 
-  // Run now: yours from the desk's window, even before you turn it on; an agent's only once it's on. Forked through the
-  // desk's runner, one at a time per automation: it gives the run in progress, whose p settles with it however it ends,
-  // interrupted (deleted while it runs, or the desk stopping) as far as it got.
+  // Run now (yours even while it's off, an agent's once it's on), one at a time per automation; its p settles with the run.
   run(a: Automation, trigger: AutomationRun["trigger"]): Running {
     const going = this.running.get(a.id);
     if (going) return going;
@@ -317,8 +315,7 @@ export class Automations {
     return entry;
   }
 
-  // One run: what fails it, or a bug in it, is its error, reported and notified once. Interrupted, it records and
-  // notifies nothing, and its done_at stays null.
+  // One run: what fails it, a bug too, is its error, reported and notified once; interrupted, it records nothing, done_at null.
   go(a: Automation, run: AutomationRun, last: AutomationRun | null): Effect.Effect<void> {
     const body = Effect.gen({ self: this }, function* () {
       const spawnAs = yield* claudeSpawn(claudeCommand(), [

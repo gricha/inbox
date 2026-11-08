@@ -49,8 +49,7 @@ type Mode = keyof typeof PERMISSION;
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
 
-// <home>/<name>, whose project settings keep every rule of deny beside the owner's own. Settings that don't parse fail as
-// their read, in the parser's words.
+// <home>/<name>, whose project settings keep every deny rule beside the owner's own; ones that don't parse fail in the parser's words.
 export const denyDir = Effect.fnUntraced(function* (home: string, name: string, deny: string[]): Effect.fn.Return<string, FsError> {
   const dir = path.join(home, name);
   const file = path.join(dir, ".claude", "settings.json");
@@ -240,8 +239,7 @@ export class Coordinator {
     this.schedule();
   }
 
-  // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle. What cmd.exe
-  // can't pass fails before it's kept; what it gives waits for the run that hands it over, which never fails.
+  // Your ask goes now, not with the next batch: what cmd.exe can't pass fails before it's kept; what it gives waits for the run.
   tell(line: string): Effect.Effect<Effect.Effect<void>, UnsafeArgument> {
     return Effect.map(claudeSpawn(claudeCommand(), [line]), () => {
       this.desk.store.set(ASKS, [...this.asks(), line]);
@@ -358,8 +356,7 @@ export class Coordinator {
     await this.flushing;
   }
 
-  // A failure keeps what's waiting for the next wake or check, and says why in Merging; a bug in it does the same. It
-  // never fails: failure keeps what failed it for the routes' "didn't start".
+  // Never fails: what fails it, a bug too, keeps what's waiting, says why in Merging, and is kept for the routes' "didn't start".
   run(): Effect.Effect<void> {
     const body: Effect.Effect<void, RunError> = Effect.gen({ self: this }, function* () {
       // On again right after off: its process must be gone first, or the resume starts a copy.
