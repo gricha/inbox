@@ -321,6 +321,9 @@ test("a command that fails says why in its last lines, its exit, or the hint for
   assert.equal(out.trim(), '{"is_error":true,"result":"Overloaded"}');
   const gone = await failure(runCommand({ file: "/nonexistent/tool", args: [], shell: false }, { timeout: 5000, missing: "install tool" }));
   assert.deepEqual([gone._tag, gone.message], ["CommandNotFound", "install tool"]);
+  // What spawn refuses before starting anything (a NUL byte) is a CommandFailed in Node's words, not a bug.
+  const refused = await failure(runCommand({ file: "to\0ol", args: [], shell: false }, { timeout: 5000, missing: "install tool" }));
+  assert.ok(refused._tag === "CommandFailed" && refused.cause instanceof Error && refused.message === refused.cause.message);
   const big = new CommandOutputTooLarge({ command: "gh", limitBytes: 64 * 1024 * 1024 });
   assert.deepEqual([big._tag, big.message], ["CommandOutputTooLarge", "gh printed more than 64 MB, so it was stopped"]);
   for (const x of [f, quiet, env]) fs.rmSync(x.dir, { recursive: true });
@@ -445,10 +448,12 @@ test("a PR's diff comes from read-only gh calls; one fetched across a push, or t
   assert.ok(bad.cause instanceof SyntaxError);
   assert.equal(bad.message, bad.cause.message);
 
-  onPath(fs.mkdtempSync(path.join(os.tmpdir(), "desk-no-gh-")));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "desk-no-gh-"));
+  onPath(empty);
   const none = await failure(fetchPr(item));
   assert.deepEqual([none._tag, none.message], ["CommandNotFound", GH_MISSING]);
   for (const x of [ok, forced, pushed, garbled]) fs.rmSync(x.dir, { recursive: true });
+  fs.rmSync(empty, { recursive: true });
 });
 
 test("the prompt fences PR text as untrusted, numbers the diff, and leaves lockfiles out", () => {

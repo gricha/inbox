@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
@@ -136,72 +136,74 @@ function stderrTail(stderr: string): string {
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
 // Not execFile: it can't start the process in a group of its own, and its timeout kills only the process itself.
 export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunError> {
-  return Effect.try({
-    try: () => spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true }),
-    catch: (cause) => new CommandFailed({ command: s.file, code: null, signal: null, stderr: "", cause }),
-  }).pipe(
-    Effect.flatMap((child) =>
-      Effect.callback<string, RunError>((resume) => {
-        track(child);
-        let stdout = "";
-        let stderr = "";
-        let failed: NodeJS.ErrnoException | null = null;
-        let why: "timeout" | "too much" | null = null;
-        let closed = false;
-        const stop = (w: NonNullable<typeof why>) => {
-          if (why) return;
-          why = w;
-          kill(child);
-        };
-        const timer = setTimeout(() => {
-          stop("timeout");
-        }, opts.timeout);
-        timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
-        const outcome = (code: number | null, sig: NodeJS.Signals | null): Effect.Effect<string, RunError> => {
-          if (!failed && code === 0) return Effect.succeed(stdout);
-          if (why === "timeout") return Effect.fail(new CommandTimeout({ command: s.file, timeoutMs: opts.timeout }));
-          if (why === "too much") return Effect.fail(new CommandOutputTooLarge({ command: s.file, limitBytes: MAX_OUTPUT }));
-          if (!failed && opts.stdoutOnError && stdout) return Effect.succeed(stdout);
-          // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
-          const missing =
-            failed?.code === "ENOENT" ||
-            (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
-          if (missing) return Effect.fail(new CommandNotFound({ command: s.file, hint: opts.missing }));
-          const fail = { command: s.file, code, signal: sig, stderr: stderrTail(stderr), ...(failed && { cause: failed }) };
-          return Effect.fail(new CommandFailed(fail));
-        };
-        child.stdout.setEncoding("utf8").on("data", (d: string) => {
-          stdout += d;
-          if (stdout.length > MAX_OUTPUT) stop("too much");
-        });
-        child.stderr.setEncoding("utf8").on("data", (d: string) => {
-          stderr = (stderr + d).slice(-MAX_OUTPUT);
-        });
-        child.on("error", (e) => {
-          failed = e;
-        });
-        child.once("close", (code, sig) => {
-          closed = true;
-          clearTimeout(timer);
-          resume(outcome(code, sig));
-        });
-        child.stdin.on("error", () => {}); // it exited before reading its input; close says why
-        child.stdin.end(opts.input);
-        // Interrupted (the desk stopping): the whole group goes, and the run ends once it has exited, SIGKILL bounding the wait.
-        return Effect.callback<void>((done) => {
-          clearTimeout(timer);
-          if (closed) {
-            done(Effect.void);
-            return;
-          }
-          child.once("close", () => {
-            done(Effect.void);
-          });
-          kill(child);
-        });
-      }),
-    ),
-  );
+  return Effect.callback<string, RunError>((resume) => {
+    // Spawned in the register: no yield between starting the child and tracking it.
+    const started = Result.try({
+      try: () => spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true }),
+      catch: (cause) => cause,
+    });
+    if (Result.isFailure(started)) {
+      resume(Effect.fail(new CommandFailed({ command: s.file, code: null, signal: null, stderr: "", cause: started.failure })));
+      return Effect.void; // nothing started, nothing to stop
+    }
+    const child = started.success;
+    track(child);
+    let stdout = "";
+    let stderr = "";
+    let failed: NodeJS.ErrnoException | null = null;
+    let why: "timeout" | "too much" | null = null;
+    let closed = false;
+    const stop = (w: NonNullable<typeof why>) => {
+      if (why) return;
+      why = w;
+      kill(child);
+    };
+    const timer = setTimeout(() => {
+      stop("timeout");
+    }, opts.timeout);
+    timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
+    const outcome = (code: number | null, sig: NodeJS.Signals | null): Effect.Effect<string, RunError> => {
+      if (!failed && code === 0) return Effect.succeed(stdout);
+      if (why === "timeout") return Effect.fail(new CommandTimeout({ command: s.file, timeoutMs: opts.timeout }));
+      if (why === "too much") return Effect.fail(new CommandOutputTooLarge({ command: s.file, limitBytes: MAX_OUTPUT }));
+      if (!failed && opts.stdoutOnError && stdout) return Effect.succeed(stdout);
+      // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
+      const missing =
+        failed?.code === "ENOENT" || (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
+      if (missing) return Effect.fail(new CommandNotFound({ command: s.file, hint: opts.missing }));
+      const fail = { command: s.file, code, signal: sig, stderr: stderrTail(stderr), ...(failed && { cause: failed }) };
+      return Effect.fail(new CommandFailed(fail));
+    };
+    child.stdout.setEncoding("utf8").on("data", (d: string) => {
+      stdout += d;
+      if (stdout.length > MAX_OUTPUT) stop("too much");
+    });
+    child.stderr.setEncoding("utf8").on("data", (d: string) => {
+      stderr = (stderr + d).slice(-MAX_OUTPUT);
+    });
+    child.on("error", (e) => {
+      failed = e;
+    });
+    child.once("close", (code, sig) => {
+      closed = true;
+      clearTimeout(timer);
+      resume(outcome(code, sig));
+    });
+    child.stdin.on("error", () => {}); // it exited before reading its input; close says why
+    child.stdin.end(opts.input);
+    // Interrupted (the desk stopping): the whole group goes, and the run ends once it has exited, SIGKILL bounding the wait.
+    return Effect.callback<void>((done) => {
+      clearTimeout(timer);
+      if (closed) {
+        done(Effect.void);
+        return;
+      }
+      child.once("close", () => {
+        done(Effect.void);
+      });
+      kill(child);
+    });
+  });
 }
 
 // ---------------------------------------------------------------- the diff
