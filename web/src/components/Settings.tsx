@@ -13,7 +13,7 @@ import type {
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls, githubTip, MAC, orgsLine } from "../format.ts";
-import { Automations } from "./Automations.tsx";
+import { AutomationRows, AutomationView, useAutomations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -23,6 +23,7 @@ import {
   acceleratorOf,
   agentNeeds,
   authProblem,
+  automationOf,
   connectCommands,
   DISABLED,
   draftOf,
@@ -851,7 +852,7 @@ export function Settings({
   onRulesDirty,
 }: {
   active: boolean;
-  section: string; // a part's id, or a view's (rules, policy)
+  section: string; // a part's id, or a view's (rules, policy, automations/<id>)
   view: SettingsView | null;
   now: number;
   loads: number;
@@ -865,6 +866,11 @@ export function Settings({
   const [more, setMore] = useState<Record<string, boolean>>({});
   const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const inView = settingsBack(section) !== null;
+  const au = useAutomations(active, loads, flash);
+  // The automation last opened stays mounted, so an edit in its view survives a trip to its part and back.
+  const automation = automationOf(section);
+  const [lastAutomation, setLastAutomation] = useState(automation);
+  if (automation !== null && automation !== lastAutomation) setLastAutomation(automation);
 
   // The desktop app re-registers the hotkey once it reads the new settings: ask after a moment, and again until it has.
   const hotkey = view?.values["app.hotkey"];
@@ -899,7 +905,7 @@ export function Settings({
   useEffect(() => {
     if (!active || !ready) return;
     if (section === "github" || inView) window.scrollTo({ top: 0 });
-    else document.querySelector(`#s-${section}`)?.scrollIntoView({ block: "start" });
+    else document.querySelector(`#${CSS.escape(`s-${section}`)}`)?.scrollIntoView({ block: "start" }); // escaped: a mistyped #/settings/github/x mustn't throw
   }, [active, section, ready, inView]);
 
   const row = (d: SettingDef | undefined, folded = false) =>
@@ -974,7 +980,7 @@ export function Settings({
               <h2 id={`s-${x.id}-title`} className="group-head">
                 {x.title}
               </h2>
-              {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
+              {x.id === "automations" && <AutomationRows au={au} now={now} />}
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">
                   {lead?.(p)}
@@ -1020,6 +1026,11 @@ export function Settings({
         <Policy active={active} shown={active && section === "policy"} refresh={loads} now={now} flash={flash} onDoc={setPolicy}>
           {view && <div className="lines s-sheet">{row(view.defs.find((d) => d.key === "policy.max_per_hour"))}</div>}
         </Policy>
+      </section>
+      <section className="s-view" hidden={automation === null} aria-labelledby="s-view-automation">
+        {lastAutomation !== null && (
+          <AutomationView key={lastAutomation} au={au} id={lastAutomation} settingsPath={view?.path ?? null} flash={flash} />
+        )}
       </section>
     </div>
   );

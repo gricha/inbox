@@ -31,6 +31,7 @@ import {
   acceleratorOf,
   agentNeeds,
   authProblem,
+  automationOf,
   beside,
   cardFacts,
   connectCommands,
@@ -59,6 +60,7 @@ import {
   quietTimes,
   removeCard,
   resolvedHead,
+  resumeCommand,
   routeHash,
   says,
   sections,
@@ -171,6 +173,40 @@ test("Searches and rules and your policy are views inside Settings: each goes ba
   }
   assert.equal(SETTINGS_VIEWS.rules?.name, "Searches and rules");
   assert.equal(SETTINGS_VIEWS.policy?.name, "Your policy");
+});
+
+test("an automation opens as a view inside Settings, from its own link, and goes back to Automations", () => {
+  const route = parseRoute("#/settings/automations/warden-issues");
+  assert.deepEqual(route, { name: "settings", section: "automations/warden-issues" });
+  assert.equal(routeHash(route), "#/settings/automations/warden-issues");
+  assert.deepEqual(parseRoute("#/settings/automations/warden-issues/"), route);
+  assert.equal(automationOf("automations/warden-issues"), "warden-issues");
+  assert.equal(settingsBack("automations/warden-issues"), "automations");
+  assert.equal(pageOf(route, "queue"), null);
+  // The part itself, and a second step anywhere else, aren't an automation's view.
+  for (const section of ["automations", "github", "rules", "github/warden-issues"]) assert.equal(automationOf(section), null);
+  assert.equal(settingsBack("github/warden-issues"), null);
+  assert.deepEqual(parseRoute("#/settings/automations/a/b"), { name: "queue" });
+});
+
+test("Copy resume command resumes a run's session in the automations folder beside settings.json", () => {
+  const id = "8a2d0c4b-77e1-4f2a-b0c3-5d9e1f6a2b44";
+  assert.equal(resumeCommand("/Users/me/.review-desk/settings.json", id), `cd /Users/me/.review-desk/automations && claude --resume ${id}`);
+  // The mock says it isn't a file; DESK_HOME can be anywhere, spaces and all.
+  assert.equal(
+    resumeCommand("/Users/me/.review-desk/settings.json (mock, in memory)", id),
+    `cd /Users/me/.review-desk/automations && claude --resume ${id}`,
+  );
+  assert.equal(resumeCommand("/tmp/my desk/settings.json", id), `cd '/tmp/my desk/automations' && claude --resume ${id}`);
+  assert.equal(resumeCommand("/tmp/it's/settings.json", id), String.raw`cd '/tmp/it'\''s/automations' && claude --resume ${id}`);
+  assert.equal(
+    resumeCommand(String.raw`C:\Users\me\.review-desk\settings.json`, id),
+    String.raw`cd C:\Users\me\.review-desk\automations && claude --resume ${id}`,
+  );
+  assert.equal(
+    resumeCommand(String.raw`C:\Users\Jo Smith\.review-desk\settings.json`, id),
+    String.raw`cd "C:\Users\Jo Smith\.review-desk\automations" && claude --resume ${id}`,
+  );
 });
 
 test("Searches and rules' row says where each org's items start, an org no space names under Personal", () => {

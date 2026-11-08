@@ -77,8 +77,20 @@ export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | und
   policy: { name: "Your policy", part: "agent" },
 };
 
+// An automation's own view in Settings ("automations/warden-issues"): its id, or null.
+export const automationOf = (section: string): string | null => /^automations\/([\w-]+)$/.exec(section)?.[1] ?? null;
+
 // Where a Settings view's back link and Esc go: the part it opened from; null on the page itself.
-export const settingsBack = (section: string): string | null => SETTINGS_VIEWS[section]?.part ?? null;
+export const settingsBack = (section: string): string | null =>
+  SETTINGS_VIEWS[section]?.part ?? (automationOf(section) === null ? null : "automations");
+
+// What shows an automation run's Claude Code session: resumed in the automations folder, beside settings.json in the desk's home.
+export function resumeCommand(settingsPath: string, session: string): string {
+  const win = /^[A-Za-z]:\\/.test(settingsPath);
+  const dir = `${settingsPath.replace(/[\\/]settings\.json\b.*$/, "")}${win ? "\\" : "/"}automations`;
+  const quoted = /^[\w./\\:~+-]+$/.test(dir) ? dir : win ? `"${dir}"` : `'${dir.replaceAll("'", String.raw`'\''`)}'`;
+  return `cd ${quoted} && claude --resume ${session}`;
+}
 
 // The desktop app's bridge as far as Settings' rows care (window.desktop): absent in a browser.
 type Shell = { platform: string } | undefined;
@@ -117,7 +129,7 @@ export function hotkeyHelp(
 }
 
 export function parseRoute(hash: string): Route {
-  const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
+  const m = hash.match(/^#\/settings(?:\/([\w-]*(?:\/[\w-]+)?))?\/?$/);
   if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };

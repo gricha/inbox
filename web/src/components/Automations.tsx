@@ -1,10 +1,12 @@
-// Settings → Automations: your instructions on a schedule, each with its last runs. Turn one on, run it now, write or change
-// one, delete it. A run's summary and whys are an agent's words: shown as text, never markup.
+// Settings → Automations: your instructions on a schedule. The part lists them (turn one on, run it now, write or change
+// one); each opens a view of its own with its instruction and its runs. A run's summary and whys are an agent's words: shown
+// as text, never markup.
 import { Effect } from "effect";
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import type { AutomationRun, AutomationView } from "../../../src/types.ts";
+import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { AutomationRun, AutomationView as Auto } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, issueUrl, MOD, when } from "../format.ts";
+import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
+import { resumeCommand, routeHash } from "../view.ts";
 
 const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
   added: "Added",
@@ -29,6 +31,9 @@ const slug = (s: string) =>
     .replaceAll(/^-+|-+$/g, "")
     .slice(0, 40);
 
+const viewOf = (id: string) => routeHash({ name: "settings", section: `automations/${id}` });
+const drafted = (a: Auto) => !a.on && a.by === "an agent"; // what an agent wrote is on screen before you turn it on
+
 // The last run in a line: what it put on your desk, or why it failed.
 function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: boolean } {
   if (!r) return { text: "Hasn't run yet", bad: false };
@@ -40,21 +45,12 @@ function lastLine(r: AutomationRun | undefined, now: number): { text: string; ba
   return { text: `Ran ${ago(r.at, now)}: ${said || "nothing new needed you"}`, bad: failed > 0 };
 }
 
-export function Automations({
-  active,
-  refresh,
-  now,
-  flash,
-}: {
-  active: boolean;
-  refresh: number; // bumps on every app refresh
-  now: number;
-  flash: (text: string, error?: boolean) => void;
-}) {
-  const [list, setList] = useState<AutomationView[] | null>(null);
+type Automations = ReturnType<typeof useAutomations>;
+
+// The list and its writes, once for Settings: the part's rows and an automation's view read the same list.
+export function useAutomations(active: boolean, refresh: number, flash: (text: string, error?: boolean) => void) {
+  const [list, setList] = useState<Auto[] | null>(null);
   const [error, setError] = useState("");
-  const [open, setOpen] = useState<string | null>(null); // whose runs show
-  const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(
@@ -106,7 +102,10 @@ export function Automations({
     });
   }
 
-  function runNow(a: AutomationView): Effect.Effect<void> {
+  const turn = (a: Auto, on: boolean) =>
+    put(a.id, { name: a.name, schedule: a.schedule, prompt: a.prompt, on }, `${a.name} is ${on ? "on" : "off"}`);
+
+  function runNow(a: Auto): Effect.Effect<void> {
     return api.runAutomation(a.id).pipe(
       Effect.andThen(() => {
         flash(`Running ${a.name}: what it finds lands on your desk`);
@@ -116,51 +115,52 @@ export function Automations({
     );
   }
 
-  function remove(id: string): Effect.Effect<void> {
+  // True once it's gone.
+  function remove(id: string): Effect.Effect<boolean> {
     return Effect.suspend(() => {
       setBusy(true);
       return api.deleteAutomation(id).pipe(
-        Effect.andThen(() => {
-          setDraft(null);
-          return load();
-        }),
-        Effect.catch(failed),
+        Effect.andThen(load),
+        Effect.as(true),
+        Effect.catch((e) => failed(e).pipe(Effect.as(false))),
         Effect.ensuring(idle),
       );
     });
   }
 
-  // A new one's id is its name's, made free with -2, -3… so it never lands on one you have.
-  function save(d: Draft) {
+  // A new one's id is its name's, made free with -2, -3… so it never lands on one you have. True once it's saved.
+  function save(d: Draft): Effect.Effect<boolean> {
     const base = d.id ?? slug(d.name);
     if (!base) {
       flash("Give it a name", true);
-      return;
+      return Effect.succeed(false);
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    void runUi(
-      put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`).pipe(
-        Effect.tap((saved) =>
-          Effect.sync(() => {
-            if (saved) setDraft(null);
-          }),
-        ),
-      ),
-    );
+    return put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
   }
 
-  if (error && !list) return <p className="t-bad">Couldn't load automations: {error}</p>;
-  if (!list) return null;
+  return { list, error, busy, turn, runNow, remove, save };
+}
+
+const editing = (a: Auto): Draft => ({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
+
+// The Automations part: one table of them, each its switch, its name (its view), Run now and Edit, and its last run.
+export function AutomationRows({ au, now }: { au: Automations; now: number }) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const done = (ok: boolean) =>
+    Effect.sync(() => {
+      if (ok) setDraft(null);
+    });
+
+  if (au.error && !au.list) return <p className="t-bad">Couldn't load automations: {au.error}</p>;
+  if (!au.list) return null;
   return (
     <div className="au">
-      {list.length > 0 && (
+      {au.list.length > 0 && (
         <ul className="au-list">
-          {list.map((a) => {
+          {au.list.map((a) => {
             const last = lastLine(a.runs[0], now);
-            const shown = open === a.id;
-            // What an agent wrote is on screen before you turn it on or run it.
-            const drafted = !a.on && a.by === "an agent";
             return (
               <li key={a.id} className={cls("au-item", !a.on && "off")}>
                 <div className="au-row">
@@ -172,36 +172,23 @@ export function Automations({
                     checked={a.on}
                     aria-label={`Run ${a.name} on its schedule`}
                     onChange={() => {
-                      void runUi(
-                        put(
-                          a.id,
-                          { name: a.name, schedule: a.schedule, prompt: a.prompt, on: !a.on },
-                          `${a.name} is ${a.on ? "off" : "on"}`,
-                        ),
-                      );
+                      void runUi(au.turn(a, !a.on));
                     }}
                   />
-                  <button
-                    type="button"
-                    className="au-main"
-                    aria-expanded={shown}
-                    onClick={() => {
-                      setOpen(shown ? null : a.id);
-                    }}
-                  >
+                  <a className="au-main" href={viewOf(a.id)}>
                     <span className="au-name">{a.name}</span>
                     <span className="au-when">
                       {a.schedule}
                       {a.on && a.next_at ? ` · next ${when(a.next_at)}` : ""}
-                      {drafted ? " · an agent wrote or changed it: read it, then turn it on to run it" : ""}
+                      {drafted(a) ? " · an agent wrote or changed it: read it, then turn it on to run it" : ""}
                     </span>
-                  </button>
+                  </a>
                   <button
                     type="button"
                     className="act"
                     disabled={a.running}
                     onClick={() => {
-                      void runUi(runNow(a));
+                      void runUi(au.runNow(a));
                     }}
                   >
                     {a.running ? "Running…" : "Run now"}
@@ -210,20 +197,20 @@ export function Automations({
                     type="button"
                     className="act"
                     onClick={() => {
-                      setDraft({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
+                      setDraft(editing(a));
                     }}
                   >
                     Edit
                   </button>
                 </div>
                 <p className={cls("au-last", last.bad && "t-bad")}>{last.text}</p>
-                {shown ? <Runs a={a} /> : drafted && <p className="au-prompt au-draft">{a.prompt}</p>}
+                {drafted(a) && <p className="au-prompt au-draft">{a.prompt}</p>}
               </li>
             );
           })}
         </ul>
       )}
-      {list.length === 0 && !draft && (
+      {au.list.length === 0 && !draft && (
         <p className="quiet au-none">
           None yet. Ask an agent with the desk's tools (&ldquo;every Monday, look at the new issues in … and put what needs me on my
           desk&rdquo;), or write one.
@@ -233,15 +220,17 @@ export function Automations({
         <Editor
           key={draft.id ?? "new"}
           draft={draft}
-          busy={busy}
-          onSave={save}
+          busy={au.busy}
+          onSave={(d) => {
+            void runUi(au.save(d).pipe(Effect.tap(done)));
+          }}
           onCancel={() => {
             setDraft(null);
           }}
           onDelete={
             draft.id
               ? () => {
-                  void runUi(remove(draft.id!));
+                  void runUi(au.remove(draft.id!).pipe(Effect.tap(done)));
                 }
               : null
           }
@@ -261,17 +250,161 @@ export function Automations({
   );
 }
 
-// Its instruction, then each run: when, what it found, and what came of each item.
-function Runs({ a }: { a: AutomationView }) {
+// An automation's view (#/settings/automations/<id>): its name and when it runs, its instruction and what you can do with
+// it, then its runs.
+export function AutomationView({
+  au,
+  id,
+  settingsPath,
+  flash,
+}: {
+  au: Automations;
+  id: string;
+  settingsPath: string | null; // settings.json's: the runs' folder is beside it, in the desk's home
+  flash: (text: string, error?: boolean) => void;
+}) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+
+  if (au.error && !au.list) return <p className="s-view-line t-bad">Couldn't load automations: {au.error}</p>;
+  if (!au.list) return null;
+  const a = au.list.find((x) => x.id === id);
+  if (!a)
+    return (
+      <p id="s-view-automation" className="s-view-line">
+        There&rsquo;s no automation called &ldquo;{id}&rdquo;.
+      </p>
+    );
+
+  const agents = drafted(a);
+  const line = `${a.schedule} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
+  const turn = (on: boolean) => () => {
+    void runUi(au.turn(a, on));
+  };
+  const resume = (session: string) => {
+    if (!settingsPath) return null;
+    const cmd = resumeCommand(settingsPath, session);
+    return (
+      <button
+        type="button"
+        className="link-btn au-resume"
+        title={cmd}
+        onClick={() => {
+          void runUi(
+            copyText(cmd).pipe(
+              Effect.match({
+                onSuccess: () => {
+                  flash("Copied");
+                },
+                onFailure: () => {
+                  flash(`Couldn't copy it. Run ${cmd}`, true);
+                },
+              }),
+            ),
+          );
+        }}
+      >
+        Copy resume command
+      </button>
+    );
+  };
+
   return (
-    <div className="au-runs">
-      <p className="au-prompt">{a.prompt}</p>
+    <>
+      <h2 id="s-view-automation" className="s-view-name">
+        {a.name}
+      </h2>
+      <p className="s-view-line">{line}</p>
+      <div className="au-view">
+        {draft ? (
+          <Editor
+            draft={draft}
+            busy={au.busy}
+            onSave={(d) => {
+              void runUi(
+                au.save(d).pipe(
+                  Effect.tap((ok) =>
+                    Effect.sync(() => {
+                      if (ok) setDraft(null);
+                    }),
+                  ),
+                ),
+              );
+            }}
+            onCancel={() => {
+              setDraft(null);
+            }}
+            onDelete={() => {
+              void runUi(
+                au.remove(a.id).pipe(
+                  Effect.tap((ok) =>
+                    Effect.sync(() => {
+                      if (!ok) return;
+                      flash(`Deleted ${a.name}`);
+                      location.replace(routeHash({ name: "settings", section: "automations" })); // its view is gone with it
+                    }),
+                  ),
+                ),
+              );
+            }}
+          />
+        ) : (
+          <>
+            <p className="au-prompt">{a.prompt}</p>
+            <p className="au-note">Runs with your Claude Code and only reads; what needs you lands in your Inbox.</p>
+            <div className="actions">
+              {agents ? (
+                <button type="button" className="act primary" disabled={au.busy} onClick={turn(true)}>
+                  Turn on
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="act"
+                  disabled={a.running}
+                  onClick={() => {
+                    void runUi(au.runNow(a));
+                  }}
+                >
+                  {a.running ? "Running…" : "Run now"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="act"
+                onClick={() => {
+                  setDraft(editing(a));
+                }}
+              >
+                Edit
+              </button>
+              {!agents && (
+                <button type="button" className="act" disabled={au.busy} onClick={turn(!a.on)}>
+                  {a.on ? "Turn off" : "Turn on"}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <h3 className="group-head au-runs-head">Runs</h3>
+      {a.runs.length ? <Runs a={a} resume={resume} /> : <p className="s-view-line">It hasn&rsquo;t run yet.</p>}
+    </>
+  );
+}
+
+// Each run: when, what it found, and what came of each item; its session one click from your clipboard.
+function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }) {
+  return (
+    <div className="lines au-runs">
       {a.runs.map((r) => (
         <section key={r.id} className="au-run" aria-label={`Run ${when(r.at)}`}>
-          <h4 className="au-run-head">
-            {when(r.at)} · {r.trigger === "now" ? "run now" : "on schedule"}
-            {!r.done_at && <span className="busy" aria-label="running" />}
-          </h4>
+          <div className="au-run-top">
+            <h4 className="au-run-head">
+              {when(r.at)} · {r.trigger === "now" ? "run now" : "on schedule"}
+              {!r.done_at && <span className="busy" aria-label="running" />}
+            </h4>
+            {r.session && resume(r.session)}
+          </div>
           {r.error && <p className="t-bad au-run-error">{r.error}</p>}
           {r.summary && <p className="au-summary">{r.summary}</p>}
           {r.items.length > 0 && (
@@ -290,11 +423,6 @@ function Runs({ a }: { a: AutomationView }) {
                 </li>
               ))}
             </ul>
-          )}
-          {r.session && (
-            <p className="quiet au-session">
-              To see what it did: <code>claude --resume {r.session}</code> in the desk's <code>automations</code> folder
-            </p>
           )}
         </section>
       ))}

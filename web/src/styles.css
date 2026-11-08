@@ -3457,7 +3457,8 @@ p {
   color: var(--pencil);
 }
 
-/* Automations: one table of them, each its switch, name and schedule, its buttons, and its last run under it. */
+/* Automations: one table of them, each its switch, its name (a link to its view) and schedule, its buttons, and its last run
+   under it. */
 .au {
   display: grid;
   gap: 14px;
@@ -3505,6 +3506,15 @@ p {
   cursor: pointer;
 }
 
+.au-main:hover {
+  text-decoration: none;
+}
+
+.au-main:hover .au-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .au-name {
   font-size: 15px;
   font-weight: 550;
@@ -3525,10 +3535,35 @@ p {
   font-size: 13px;
 }
 
-.au-runs {
+/* An automation's view: its instruction, how it runs and its buttons under the view's name, lined up with it; then its runs,
+   each a row on one sheet. */
+.au-view {
   display: grid;
-  gap: 14px;
-  margin: 10px 0 4px calc(36px + 12px);
+  gap: 12px;
+  margin-top: 18px;
+  padding: 0 12px;
+}
+
+.au-note {
+  margin: 0;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.au-runs-head {
+  margin-top: 28px;
+}
+
+.au-run-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.au-resume {
+  font-size: 12.5px;
 }
 
 .au-prompt,
@@ -3553,6 +3588,7 @@ p {
 .au-run {
   display: grid;
   gap: 6px;
+  padding: 12px 16px;
 }
 
 .au-run-head {
@@ -3595,11 +3631,6 @@ p {
   min-width: 0;
   color: var(--ink-2);
   overflow-wrap: anywhere;
-}
-
-.au-session {
-  margin: 0;
-  font-size: 12.5px;
 }
 
 .au-none {

@@ -2132,14 +2132,55 @@ const SHOTS: Shot[] = [
   },
   { name: "settings-automations", go: at("#/settings/automations") },
   {
-    // An automation's runs: its instruction, what each run found, and what came of each item.
+    // An automation's view, from its name: its instruction, what each run found and what came of each item, each run's
+    // session a Copy resume command away (the command in its tooltip, not on the page); Esc goes back to Automations, and
+    // an id that isn't one says so.
     name: "settings-automations-runs",
     go: async (page) => {
-      await at("#/settings/automations")(page);
-      await page.locator(".au-main").first().click();
-      await page.locator(".au-runs").waitFor();
-      await page.locator(".au-runs").scrollIntoViewIfNeeded();
-      await page.waitForTimeout(200);
+      const name = "Warden and dotagents issues";
+      const open = async () => {
+        await at("#/settings/automations")(page);
+        await page.locator(".au-main", { hasText: name }).click();
+        await page.locator(".s-view .au-run").first().waitFor();
+      };
+      await open();
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/settings/automations/warden-issues") failures.push(`settings-automations-runs: its name opens ${hash}`);
+      await settingsView(page, "settings-automations-runs", name, "automations", "760px");
+      const seen = await page.evaluate<{ runs: number; tips: string[]; said: boolean }>(`(() => {
+        const v = [...document.querySelectorAll(".s-view")].find((s) => !s.hidden);
+        return {
+          runs: v.querySelectorAll(".au-run").length,
+          tips: [...v.querySelectorAll(".au-resume")].map((b) => b.title),
+          said: document.querySelector(".main").innerText.includes("claude --resume"),
+        };
+      })()`);
+      if (seen.runs !== 2) failures.push(`settings-automations-runs: ${seen.runs} runs in the view`);
+      const tip = /^cd \S+\/\.review-desk\/automations && claude --resume [\da-f-]{36}$/;
+      if (seen.tips.length !== 2 || !seen.tips.every((t) => tip.test(t)))
+        failures.push(`settings-automations-runs: Copy resume command's tooltips read ${JSON.stringify(seen.tips)}`);
+      if (seen.said) failures.push("settings-automations-runs: claude --resume is on the page, not only in a tooltip");
+      // The clipboard stubbed, so a shot never touches yours.
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      await page.locator(".s-view .au-resume").first().click();
+      const copied = await page.evaluate<unknown>("window.__copied");
+      const toast = await page.locator(".toast").textContent();
+      if (copied !== seen.tips[0] || toast !== "Copied")
+        failures.push(`settings-automations-runs: Copy resume command copied ${JSON.stringify(copied)}, saying ${JSON.stringify(toast)}`);
+      await page.reload(); // the toast's gone with it, and Settings opens on the view
+      await page.locator(".s-view .au-run").first().waitFor();
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+      const back = await page.evaluate<string>("location.hash");
+      if (back !== "#/settings/automations") failures.push(`settings-automations-runs: Esc goes to ${back}, not Automations`);
+      await at("#/settings/automations/nope")(page);
+      const none = await page.evaluate<{ line: string | null; href: string | null }>(`({
+        line: [...document.querySelectorAll(".s-view")].find((s) => !s.hidden)?.textContent.trim() ?? null,
+        href: document.querySelector(".page-head a.back")?.getAttribute("href") ?? null,
+      })`);
+      if (none.line !== "There’s no automation called “nope”." || none.href !== "#/settings/automations")
+        failures.push(`settings-automations-runs: an unknown id shows ${JSON.stringify(none)}`);
+      await open();
     },
     after: at("#/"),
   },
