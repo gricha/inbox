@@ -269,7 +269,7 @@ export class GitHubConnector implements Connector {
   boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members {
     const queries = this.queriesFor(loaded, board, scope);
     const hits = this.desk.store.hits(queries);
-    const fetched = this.desk.store.queries();
+    const fetched = this.desk.store.queries(queries);
     return {
       ids: new Set(queries.flatMap((q) => [...(hits.get(q) ?? [])])),
       kept: this.desk.store.kept(),

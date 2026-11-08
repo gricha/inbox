@@ -71,6 +71,8 @@ export class Store {
     if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
     if (!cols.has("snooze_when")) this.db.exec("ALTER TABLE state ADD COLUMN snooze_when TEXT");
     if (!columns("hits").includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
+    // kept() runs once per board a recompute places: this reads only the few kept rows.
+    this.db.exec("CREATE INDEX IF NOT EXISTS hits_kept ON hits (item_id) WHERE kept = 1");
     // The snapshot an item's events were last logged against, while it's stored quietly since ('null': never); else NULL.
     if (!columns("items").includes("said")) this.db.exec("ALTER TABLE items ADD COLUMN said TEXT");
     if (!columns("events").includes("agent")) {
@@ -230,8 +232,12 @@ export class Store {
     );
   }
 
-  queries(): Map<string, { fetched_at: string; total: number; error: string | null }> {
-    const rows = this.db.prepare("SELECT query, fetched_at, total, error FROM queries").all();
+  queries(queries?: readonly string[]): Map<string, { fetched_at: string; total: number; error: string | null }> {
+    const rows = queries
+      ? this.db
+          .prepare("SELECT query, fetched_at, total, error FROM queries WHERE query IN (SELECT value FROM json_each(?))")
+          .all(JSON.stringify(queries))
+      : this.db.prepare("SELECT query, fetched_at, total, error FROM queries").all();
     return new Map(
       rows.map((r) => [
         r.query as string,

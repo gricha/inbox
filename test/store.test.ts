@@ -28,3 +28,16 @@ test("pruning one source's rows leaves the others'", () => {
   assert.deepEqual([...store.itemMeta().keys()], ["notesy:1"]);
   store.close();
 });
+
+test("a board's reads take only its searches: their hits and fetches, and the kept rows any search holds", () => {
+  const store = new Store(":memory:");
+  const at = NOW.toISOString();
+  store.setHits("a", ["acme/api#1"], 1, at, ["acme/api#2"]);
+  store.setHits("b", ["acme/api#3"], 1, at);
+  store.setQueryError("c", "GitHub said no", at);
+  assert.deepEqual([...store.hits(["a", "c"]).keys()], ["a"]);
+  assert.deepEqual([...store.queries(["a", "c", "d"]).keys()].sort(), ["a", "c"]);
+  assert.deepEqual([...store.queries().keys()].sort(), ["a", "b", "c"]);
+  assert.deepEqual([...store.kept()], ["acme/api#2"]);
+  store.close();
+});
