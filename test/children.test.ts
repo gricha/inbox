@@ -1,5 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -30,9 +31,17 @@ while :; do sleep 1; done
   c.after(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
+  // Whole lines only: the fake may be writing its last.
   const pids = () => {
     const f = path.join(dir, "pids");
-    return fs.existsSync(f) ? fs.readFileSync(f, "utf8").split(/\s+/).filter(Boolean).map(Number) : [];
+    return fs.existsSync(f)
+      ? fs
+          .readFileSync(f, "utf8")
+          .split("\n")
+          .slice(0, -1)
+          .flatMap((l) => l.split(" "))
+          .map(Number)
+      : [];
   };
   return { bin, pids };
 }
@@ -46,12 +55,19 @@ const alive = (pid: number) => {
   }
 };
 
-async function until(cond: () => boolean): Promise<void> {
+// A killed grandchild is a zombie until the parent it was left to reaps it: it answers kill(pid, 0) but runs nothing.
+const running = (pid: number) => {
+  if (!alive(pid)) return false;
+  const stat = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+  return stat !== "" && !stat.startsWith("Z");
+};
+
+async function until(cond: () => boolean, what = "timed out waiting"): Promise<void> {
   for (let i = 0; i < 500 && !cond(); i++)
     await new Promise((r) => {
       setTimeout(r, 10);
     });
-  assert.ok(cond(), "timed out waiting");
+  assert.ok(cond(), what);
 }
 
 test("closing the desk stops the judge and an AI review, what they started, and what ignores SIGTERM", posix, async (c) => {
@@ -82,12 +98,13 @@ test("closing the desk stops the judge and an AI review, what they started, and 
   // The judge and the AI review: a claude and its child each.
   await until(() => fake.pids().length === 4);
   const pids = fake.pids();
-  assert.ok(pids.every(alive));
+  assert.ok(pids.every(running));
 
   const t0 = Date.now();
   await run(desk.close());
-  assert.deepEqual(pids.filter(alive), [], "nothing left running");
-  assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
+  const took = Date.now() - t0;
+  await until(() => !pids.some(running), "nothing left running");
+  assert.ok(took < 4000, `took ${took} ms`);
 });
 
 test("a call that times out takes what it started with it", posix, async (c) => {
@@ -96,7 +113,7 @@ test("a call that times out takes what it started with it", posix, async (c) => 
   assert.deepEqual([err._tag, err.message], ["CommandTimeout", "no answer in 0 minutes, so it was stopped"]);
   const pids = fake.pids();
   assert.equal(pids.length, 2);
-  await until(() => !pids.some(alive));
+  await until(() => !pids.some(running));
 });
 
 test("an interrupted call takes what it started with it, and ends only once it has exited", posix, async (c) => {
@@ -110,5 +127,5 @@ test("an interrupted call takes what it started with it, and ends only once it h
   const e = await exit;
   assert.ok(Exit.isFailure(e) && Cause.hasInterruptsOnly(e.cause), "interrupted: nothing to store or report");
   assert.ok(!alive(pids[0]!), "the claude itself has exited when the call ends");
-  await until(() => !pids.some(alive));
+  await until(() => !pids.some(running));
 });

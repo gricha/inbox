@@ -495,17 +495,28 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
   return api;
 }
 
-// A port with nothing listening on it.
+// A port with nothing listening on it, below every ephemeral range (Linux's starts at 32768, macOS's and Windows' at 49152), so
+// no listen(0) or outgoing connection elsewhere takes it before a desk does, or between one desk letting it go and the next.
 export async function unusedPort(): Promise<number> {
-  const s = createServer();
-  await new Promise<void>((r) => {
-    s.listen(0, "127.0.0.1", r);
-  });
-  const { port } = s.address() as AddressInfo;
-  await new Promise<void>((r) => {
-    s.close(() => {
-      r();
+  const first = 20_000 + (process.pid % 10_000); // parallel test files start apart
+  for (let i = 0; i < 12_000; i++) {
+    const port = 20_000 + ((first - 20_000 + i) % 12_000);
+    const s = createServer();
+    const free = await new Promise<boolean>((r) => {
+      s.once("error", () => {
+        r(false);
+      });
+      s.listen(port, "127.0.0.1", () => {
+        r(true);
+      });
     });
-  });
-  return port;
+    if (!free) continue;
+    await new Promise<void>((r) => {
+      s.close(() => {
+        r();
+      });
+    });
+    return port;
+  }
+  throw new Error("no free port from 20000 to 31999");
 }

@@ -140,12 +140,13 @@ if (args[0] !== "agents" && args[0] !== "logs") {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
     },
     sessions: () => read().sessions,
+    // Whole lines only: a claude may have opened the file and not yet written its line.
     calls: () =>
       fs.existsSync(path.join(dir, "calls"))
         ? fs
             .readFileSync(path.join(dir, "calls"), "utf8")
-            .trim()
             .split("\n")
+            .slice(0, -1)
             .map((l) => JSON.parse(l) as string[])
         : [],
     busy: (on: boolean | "waiting") => {
