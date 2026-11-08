@@ -2340,14 +2340,16 @@ p {
 }
 
 /* Tinted, so each row's action shows without shouting; filled under the pointer, the one you're about to press. */
-.line .line-cta:not(.primary) {
+.line .line-cta:not(.primary),
+.s-cta {
   border-color: transparent;
   background: var(--accent-wash);
   color: var(--accent-ink);
   font-weight: 600;
 }
 
-.line .line-cta:not(.primary):hover:not(:disabled) {
+.line .line-cta:not(.primary):hover:not(:disabled),
+.s-cta:hover:not(:disabled) {
   border-color: transparent;
   background: var(--accent);
   color: var(--on-accent);
@@ -3210,8 +3212,9 @@ p {
   margin-block: 5px;
 }
 
-/* A status row's button is as tall as its row allows: no message line goes under it. */
-.setting.s-status .s-control {
+/* A status row's button, or an automation's, is as tall as its row allows: no message line goes under it. */
+.setting.s-status .s-control,
+.setting.au-row .s-control {
   margin-block: 0;
 }
 
@@ -3263,13 +3266,13 @@ p {
 
 /* A sheet too narrow for two columns puts each control under its words, but a switch stays beside them. */
 @container (width < 560px) {
-  .setting:not(.st-boolean) {
+  .setting:not(.st-boolean, .au-row) {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 8px;
   }
 
   /* Across the row, its controls from the start, so a select or a list can take up to 320px of it. */
-  .setting:not(.st-boolean, .wide) .s-control {
+  .setting:not(.st-boolean, .au-row, .wide) .s-control {
     justify-self: stretch;
     margin-top: 0;
   }
@@ -3313,15 +3316,30 @@ p {
   transform: rotate(180deg);
 }
 
-/* A row that opens a view: its name in ink like a label, only its words a link, and Edit in the accent's ink. */
+/* A row that opens a view: its name in ink like a label, only its words a link; its Edit, an automation's Run now and New
+   automation in the accent's ink. */
 .s-name {
   justify-self: start;
 }
 
 .s-edit {
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--accent-ink);
   font-size: 13.5px;
   font-weight: 600;
+  cursor: pointer;
+}
+
+button.s-edit:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.s-edit:disabled {
+  color: var(--pencil);
+  cursor: default;
 }
 
 /* A view inside Settings: its name and one line where a part's heading starts, then its editor. */
@@ -3457,82 +3475,11 @@ p {
   color: var(--pencil);
 }
 
-/* Automations: one table of them, each its switch, its name (a link to its view) and schedule, its buttons, and its last run
-   under it. */
-.au {
-  display: grid;
-  gap: 14px;
-}
-
-.au-list {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  background: var(--sheet);
-  list-style: none;
-}
-
-.au-item {
-  display: grid;
-  gap: 2px;
-  padding: 10px 14px;
-}
-
-.au-item + .au-item {
-  border-top: 1px solid var(--rule);
-}
-
-.au-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.au-main {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 12px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.au-main:hover {
-  text-decoration: none;
-}
-
-.au-main:hover .au-name {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.au-name {
-  font-size: 15px;
-  font-weight: 550;
-}
-
-.au-when {
-  color: var(--pencil);
-  font-size: 13px;
-}
-
-.au-item.off .au-name {
-  color: var(--ink-2);
-}
-
-.au-last {
-  margin: 0 0 0 calc(36px + 12px);
-  color: var(--ink-2);
-  font-size: 13px;
+/* Automations: a row each on the part's sheet, its switch on the sheet's right edge like a setting's; it stays beside the
+   words on a narrow sheet. A new one's editor goes under the sheet, lined up with the part's heading as in a view. */
+.au-new {
+  margin-top: 14px;
+  padding: 0 12px;
 }
 
 /* An automation's view: its instruction, how it runs and its buttons under the view's name, lined up with it; then its runs,
@@ -3581,10 +3528,6 @@ p {
   border-left: 2px solid var(--rule-strong);
 }
 
-.au-prompt.au-draft {
-  margin: 6px 0 2px calc(36px + 12px);
-}
-
 .au-run {
   display: grid;
   gap: 6px;
@@ -3631,14 +3574,6 @@ p {
   min-width: 0;
   color: var(--ink-2);
   overflow-wrap: anywhere;
-}
-
-.au-none {
-  margin: 0;
-}
-
-.au-new {
-  justify-self: start;
 }
 
 .au-editor {

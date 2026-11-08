@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { parseSchedule } from "../../src/automations.ts";
 import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
 import type {
   ActivityEvent,
@@ -21,6 +22,7 @@ import {
   githubTip,
   modelName,
   orgsLine,
+  scheduleWords,
   shortId,
   shortRef,
   snoozeOptions,
@@ -219,6 +221,34 @@ test("Searches and rules' row says where each org's items start, an org no space
   );
   assert.equal(orgsLine([o("a", "Work"), o("b", "Work"), o("c", "Work")]), "a, b and c go to Work.");
   assert.equal(orgsLine([o("me", null), o("friend", "Personal")]), "Everything goes to Personal.");
+});
+
+test("an automation's schedule reads in words, and the window reads exactly the schedules the desk does", () => {
+  assert.equal(scheduleWords("daily 09:00"), "Every day at 09:00");
+  assert.equal(scheduleWords("weekdays 09:00,13:00"), "Weekdays at 09:00 and 13:00");
+  assert.equal(scheduleWords("mon,thu 17:30"), "Mon and Thu at 17:30");
+  assert.equal(scheduleWords("mon,tue,wed 08:00"), "Mon, Tue and Wed at 08:00");
+  assert.equal(scheduleWords("weekdays hourly"), "Weekdays, every hour");
+  assert.equal(scheduleWords("mon,thu hourly"), "Mon and Thu, every hour");
+  assert.equal(scheduleWords("daily hourly"), "Every hour");
+  assert.equal(scheduleWords("sun,mon,tue,wed,thu,fri,sat 7:05"), "Every day at 07:05");
+  assert.equal(scheduleWords("friday,monday,wed,thurs,tue 09:00"), "Weekdays at 09:00");
+  assert.equal(scheduleWords("sun,sat 10:00"), "Sat and Sun at 10:00");
+  assert.equal(scheduleWords("Mon,mon 13:00,9:30,13:00"), "Mon at 09:30 and 13:00");
+  assert.equal(scheduleWords("whenever"), "whenever");
+  const read = ["daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly", " TUE 23:59 ", "sunday 0:00"];
+  const unread = [
+    "mo 09:00",
+    "mon 24:00",
+    "mon 09:60",
+    "mon 9",
+    "mon,,thu 09:00",
+    "daily,mon 09:00",
+    "weekends 09:00",
+    "mon 09:00 10:00",
+    "",
+  ];
+  for (const s of [...read, ...unread]) assert.equal(scheduleWords(s) !== s, typeof parseSchedule(s) === "object", s);
 });
 
 test("GitHub's status row's tooltip has your teams and the rate limit, only what's known", () => {

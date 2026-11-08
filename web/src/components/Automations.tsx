@@ -1,12 +1,13 @@
-// Settings → Automations: your instructions on a schedule. The part lists them (turn one on, run it now, write or change
-// one); each opens a view of its own with its instruction and its runs. A run's summary and whys are an agent's words: shown
-// as text, never markup.
+// Settings → Automations: your instructions on a schedule. The part lists them (turn one on, run it now, write a new one);
+// each opens a view of its own with its instruction, its editor and its runs. A run's summary and whys are an agent's words:
+// shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { AutomationRun, AutomationView as Auto } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
+import { ago, cls, copyText, issueUrl, MOD, scheduleWords, when } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
+import { SkLines } from "./Skeleton.tsx";
 
 const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
   added: "Added",
@@ -34,24 +35,26 @@ const slug = (s: string) =>
 const viewOf = (id: string) => routeHash({ name: "settings", section: `automations/${id}` });
 const drafted = (a: Auto) => !a.on && a.by === "an agent"; // what an agent wrote is on screen before you turn it on
 
-// The last run in a line: what it put on your desk, or why it failed.
+// The last run, the end of its row's help: what it put on your desk, or why it failed.
 function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: boolean } {
-  if (!r) return { text: "Hasn't run yet", bad: false };
-  if (!r.done_at) return { text: `Running since ${ago(r.at, now)}`, bad: false };
-  if (r.error) return { text: `Failed ${ago(r.at, now)}: ${r.error.split("\n")[0] ?? ""}`, bad: true };
+  if (!r) return { text: "hasn't run yet", bad: false };
+  if (!r.done_at) return { text: `running since ${ago(r.at, now)}`, bad: false };
+  if (r.error) return { text: `failed ${ago(r.at, now)}: ${r.error.split("\n")[0] ?? ""}`, bad: true };
   const added = r.items.filter((x) => x.outcome === "added").length;
   const failed = r.items.filter((x) => x.outcome === "failed").length;
   const said = [added && `put ${added} on your desk`, failed && `couldn't add ${failed}`].filter(Boolean).join(", ");
-  return { text: `Ran ${ago(r.at, now)}: ${said || "nothing new needed you"}`, bad: failed > 0 };
+  return { text: `ran ${ago(r.at, now)}, ${said || "nothing new needed you"}`, bad: failed > 0 };
 }
 
-type Automations = ReturnType<typeof useAutomations>;
+export type Automations = ReturnType<typeof useAutomations>;
 
 // The list and its writes, once for Settings: the part's rows and an automation's view read the same list.
 export function useAutomations(active: boolean, refresh: number, flash: (text: string, error?: boolean) => void) {
   const [list, setList] = useState<Auto[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // A new one being written: the part's last row opens it, and its editor sits under the part's sheet.
+  const [writing, setWriting] = useState<Draft | null>(null);
 
   const load = useCallback(
     (): Effect.Effect<void> =>
@@ -140,112 +143,144 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     return put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
   }
 
-  return { list, error, busy, turn, runNow, remove, save };
+  return { list, error, busy, writing, setWriting, turn, runNow, remove, save };
 }
 
 const editing = (a: Auto): Draft => ({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
 
-// The Automations part: one table of them, each its switch, its name (its view), Run now and Edit, and its last run.
+// The Automations part's rows on its sheet: each its name (its view), when it runs and its last run, Run now while it's on
+// and its switch; an agent's draft has Review instead, so it can't run before its instruction has been on screen.
 export function AutomationRows({ au, now }: { au: Automations; now: number }) {
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const done = (ok: boolean) =>
-    Effect.sync(() => {
-      if (ok) setDraft(null);
-    });
-
-  if (au.error && !au.list) return <p className="t-bad">Couldn't load automations: {au.error}</p>;
-  if (!au.list) return null;
+  if (au.error && !au.list)
+    return (
+      <div className="setting s-status">
+        <div className="s-label-col">
+          <p className="s-label">Couldn't load your automations</p>
+          <p className="s-help t-bad">{au.error}</p>
+        </div>
+      </div>
+    );
+  if (!au.list)
+    return (
+      <div className="setting" aria-hidden="true">
+        <SkLines count={2} />
+      </div>
+    );
+  const write = au.writing ? null : (
+    <button
+      type="button"
+      className="s-edit"
+      onClick={() => {
+        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", on: true });
+      }}
+    >
+      New automation
+    </button>
+  );
+  if (!au.list.length)
+    return (
+      <div className="setting">
+        <div className="s-label-col">
+          <p className="s-label">None yet</p>
+          <p className="s-help">Ask an agent to write one, or write one yourself.</p>
+        </div>
+        <div className="s-control">{write}</div>
+      </div>
+    );
   return (
-    <div className="au">
-      {au.list.length > 0 && (
-        <ul className="au-list">
-          {au.list.map((a) => {
-            const last = lastLine(a.runs[0], now);
-            return (
-              <li key={a.id} className={cls("au-item", !a.on && "off")}>
-                <div className="au-row">
-                  <input
-                    className="switch"
-                    type="checkbox"
-                    // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
-                    role="switch"
-                    checked={a.on}
-                    aria-label={`Run ${a.name} on its schedule`}
-                    onChange={() => {
-                      void runUi(au.turn(a, !a.on));
-                    }}
-                  />
-                  <a className="au-main" href={viewOf(a.id)}>
-                    <span className="au-name">{a.name}</span>
-                    <span className="au-when">
-                      {a.schedule}
-                      {a.on && a.next_at ? ` · next ${when(a.next_at)}` : ""}
-                      {drafted(a) ? " · an agent wrote or changed it: read it, then turn it on to run it" : ""}
-                    </span>
-                  </a>
-                  <button
-                    type="button"
-                    className="act"
-                    disabled={a.running}
-                    onClick={() => {
-                      void runUi(au.runNow(a));
-                    }}
-                  >
-                    {a.running ? "Running…" : "Run now"}
-                  </button>
-                  <button
-                    type="button"
-                    className="act"
-                    onClick={() => {
-                      setDraft(editing(a));
-                    }}
-                  >
-                    Edit
-                  </button>
-                </div>
-                <p className={cls("au-last", last.bad && "t-bad")}>{last.text}</p>
-                {drafted(a) && <p className="au-prompt au-draft">{a.prompt}</p>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {au.list.length === 0 && !draft && (
-        <p className="quiet au-none">
-          None yet. Ask an agent with the desk's tools (&ldquo;every Monday, look at the new issues in … and put what needs me on my
-          desk&rdquo;), or write one.
+    <>
+      {au.list.map((a) => (
+        <AutomationRow key={a.id} a={a} au={au} now={now} />
+      ))}
+      {write && <div className="s-more">{write}</div>}
+    </>
+  );
+}
+
+function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }) {
+  const href = viewOf(a.id);
+  const draft = drafted(a);
+  const last = lastLine(a.runs[0], now);
+  const timing = [scheduleWords(a.schedule), a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
+  return (
+    <div className="setting au-row">
+      <div className="s-label-col">
+        {/* A draft's Review is its one stop for Tab; the name is there for the mouse. */}
+        <a className="s-label s-name" href={href} tabIndex={draft ? -1 : undefined}>
+          {a.name}
+        </a>
+        <p className="s-help">
+          {draft ? (
+            `An agent wrote it; read it before it runs · ${scheduleWords(a.schedule)}`
+          ) : (
+            <>
+              {timing} · <span className={cls(last.bad && "t-bad")}>{last.text}</span>
+            </>
+          )}
         </p>
-      )}
-      {draft ? (
-        <Editor
-          key={draft.id ?? "new"}
-          draft={draft}
-          busy={au.busy}
-          onSave={(d) => {
-            void runUi(au.save(d).pipe(Effect.tap(done)));
-          }}
-          onCancel={() => {
-            setDraft(null);
-          }}
-          onDelete={
-            draft.id
-              ? () => {
-                  void runUi(au.remove(draft.id!).pipe(Effect.tap(done)));
-                }
-              : null
-          }
-        />
-      ) : (
-        <button
-          type="button"
-          className="act au-new"
-          onClick={() => {
-            setDraft({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", on: true });
-          }}
-        >
-          New automation
-        </button>
-      )}
+      </div>
+      <div className="s-control">
+        {draft ? (
+          <a className="act s-cta" href={href} aria-label={`Review ${a.name}`}>
+            Review
+          </a>
+        ) : (
+          <>
+            {a.on && (
+              <button
+                type="button"
+                className="s-edit"
+                disabled={a.running}
+                aria-label={`Run ${a.name} now`}
+                onClick={() => {
+                  void runUi(au.runNow(a));
+                }}
+              >
+                {a.running ? "Running…" : "Run now"}
+              </button>
+            )}
+            <input
+              className="switch"
+              type="checkbox"
+              // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
+              role="switch"
+              checked={a.on}
+              aria-label={`Run ${a.name} on its schedule`}
+              onChange={() => {
+                void runUi(au.turn(a, !a.on));
+              }}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A new automation's editor, under the part's sheet once its last row's New automation opens it.
+export function NewAutomation({ au }: { au: Automations }) {
+  if (!au.writing) return null;
+  return (
+    <div className="au-new">
+      <Editor
+        draft={au.writing}
+        busy={au.busy}
+        onSave={(d) => {
+          void runUi(
+            au.save(d).pipe(
+              Effect.tap((ok) =>
+                Effect.sync(() => {
+                  if (ok) au.setWriting(null);
+                }),
+              ),
+            ),
+          );
+        }}
+        onCancel={() => {
+          au.setWriting(null);
+        }}
+        onDelete={null}
+      />
     </div>
   );
 }
@@ -276,7 +311,7 @@ export function AutomationView({
     );
 
   const agents = drafted(a);
-  const line = `${a.schedule} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
+  const line = `${scheduleWords(a.schedule)} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
   const turn = (on: boolean) => () => {
     void runUi(au.turn(a, on));
   };

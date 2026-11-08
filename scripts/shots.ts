@@ -7,7 +7,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type Route } from "playwright-core";
 import { THEMES } from "../src/themes.ts";
-import type { AgentStatus, Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView, SettingsView } from "../src/types.ts";
+import type {
+  AgentStatus,
+  Ask,
+  AskLines,
+  AsksView,
+  AutomationView,
+  InflightView,
+  Overview,
+  QueueView,
+  ReviewView,
+  SettingsView,
+} from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -327,6 +338,30 @@ const settingsAs = (change: (v: SettingsView) => void) => async (page: Page) => 
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+// The automations as the mock serves them, changed in the browser; unsettle undoes it.
+const automationsAs = (change: (v: AutomationView[]) => void) => async (page: Page) => {
+  await page.route("**/api/automations", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const res = await route.fetch();
+    const v = (await res.json()) as AutomationView[];
+    change(v);
+    await route.fulfill({ response: res, json: v });
+  });
+  await at("#/")(page);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+// Each automation's row in Automations: its name, its help (and the part of it in red), and its controls.
+const automationRows = (page: Page) =>
+  page.evaluate<{ name: string; help: string; red: string[]; run: boolean; on: boolean | null; review: string | null }[]>(`
+    [...document.querySelectorAll("#s-automations .au-row")].map((r) => ({
+      name: r.querySelector(".s-name").textContent,
+      help: r.querySelector(".s-help").textContent,
+      red: [...r.querySelectorAll(".s-help .t-bad, .s-help.t-bad")].map((x) => x.textContent),
+      run: [...r.querySelectorAll("button")].some((b) => b.textContent === "Run now"),
+      on: r.querySelector(".switch")?.checked ?? null,
+      review: r.querySelector(".s-cta")?.getAttribute("href") ?? null,
+    }))`);
 const unsettle = async (page: Page) => {
   await unroute(page);
   await at("#/")(page);
@@ -2130,7 +2165,135 @@ const SHOTS: Shot[] = [
       await capUnderStatus(page, "settings-policy");
     },
   },
-  { name: "settings-automations", go: at("#/settings/automations") },
+  {
+    // A row each: its name, when it runs and its last run, Run now and its switch on the sheet's right edge in line with the
+    // other parts'; the agent's draft has a tinted Review instead and no switch; New automation last.
+    name: "settings-automations",
+    go: async (page) => {
+      await at("#/settings/automations")(page);
+      const [mine, draft, ...more] = await automationRows(page);
+      if (
+        !mine ||
+        mine.name !== "Warden and dotagents issues" ||
+        !/^Weekdays at 09:00 · next \S+( \S+)? · ran \d+h ago, put 2 on your desk$/.test(mine.help) ||
+        mine.red.length ||
+        !mine.run ||
+        mine.on !== true ||
+        mine.review
+      )
+        failures.push(`settings-automations: the first row reads ${JSON.stringify(mine)}`);
+      if (
+        !draft ||
+        draft.help !== "An agent wrote it; read it before it runs · Mon and Thu at 17:30" ||
+        draft.run ||
+        draft.on !== null ||
+        draft.review !== "#/settings/automations/sdk-releases"
+      )
+        failures.push(`settings-automations: the agent's draft reads ${JSON.stringify(draft)}`);
+      if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's two`);
+      const [tinted, wash] = await page.evaluate<string[]>(`(() => {
+        const d = document.createElement("div");
+        d.style.background = "var(--accent-wash)";
+        document.body.append(d);
+        const fills = [document.querySelector("#s-automations .s-cta"), d].map((e) => getComputedStyle(e).backgroundColor);
+        d.remove();
+        return fills;
+      })()`);
+      if (tinted !== wash) failures.push(`settings-automations: Review's fill is ${tinted}, not the accent's wash ${wash}`);
+      const edges = await page.evaluate<number[]>(
+        `["#s-automations .switch", '[id="setting-notify.enabled"]'].map((s) => document.querySelector(s).getBoundingClientRect().right)`,
+      );
+      if (Math.abs(edges[0]! - edges[1]!) > 0.5)
+        failures.push(`settings-automations: an automation's switch ends at ${edges[0]}px, a setting's at ${edges[1]}px`);
+      const last = await page.evaluate<string | null>(
+        `document.querySelector("#s-automations .s-sheet > :last-child")?.textContent ?? null`,
+      );
+      if (last !== "New automation") failures.push(`settings-automations: the sheet's last row reads ${JSON.stringify(last)}`);
+    },
+  },
+  {
+    // The last run failed: only those words are red; one of yours that's off says so, with its switch and no Run now.
+    name: "settings-automations-failed",
+    go: async (page) => {
+      await automationsAs((v) => {
+        const run = v[0]!.runs[0]!;
+        run.error = "claude exited with 1: your login has expired\nRun claude and log in again.";
+        run.items = [];
+        Object.assign(v[1]!, { by: "you", on: false, next_at: null });
+      })(page);
+      await at("#/settings/automations")(page);
+      const [failed, off] = await automationRows(page);
+      if (
+        !failed ||
+        !/^failed \d+h ago: claude exited with 1: your login has expired$/.test(failed.red.join("|")) ||
+        !failed.help.startsWith("Weekdays at 09:00 · next ")
+      )
+        failures.push(`settings-automations-failed: the failed run's row reads ${JSON.stringify(failed)}`);
+      if (!off || off.help !== "Mon and Thu at 17:30 · off · hasn't run yet" || off.run || off.on !== false || off.review)
+        failures.push(`settings-automations-failed: the one that's off reads ${JSON.stringify(off)}`);
+    },
+    after: unsettle,
+  },
+  {
+    // None yet: one row says how to get one, and its New automation opens the editor under the sheet, the link gone while it's
+    // open. Nothing's saved: Cancel closes it.
+    name: "settings-automations-new",
+    go: async (page) => {
+      await automationsAs((v) => {
+        v.length = 0;
+      })(page);
+      await at("#/settings/automations")(page);
+      const none = await page.evaluate<string>(`document.querySelector("#s-automations .s-sheet").innerText.replaceAll(/\\n+/g, "\\n")`);
+      if (none !== "None yet\nAsk an agent to write one, or write one yourself.\nNew automation")
+        failures.push(`settings-automations-new: with none the part reads ${JSON.stringify(none)}`);
+      await page.locator("#s-automations").getByRole("button", { name: "New automation" }).click();
+      const seen = await page.evaluate<{ below: boolean; link: boolean; focus: string | null }>(`(() => {
+        const sheet = document.querySelector("#s-automations .s-sheet"), form = document.querySelector("#s-automations .au-editor");
+        return {
+          below: !!form && form.getBoundingClientRect().top >= sheet.getBoundingClientRect().bottom,
+          link: sheet.textContent.includes("New automation"),
+          focus: document.activeElement?.placeholder ?? null,
+        };
+      })()`);
+      if (!seen.below || seen.link || seen.focus !== "Warden and dotagents issues")
+        failures.push(`settings-automations-new: the editor ${JSON.stringify(seen)}`);
+      await page.evaluate(`document.querySelector("#s-automations .au-editor").scrollIntoView({ block: "end" })`);
+    },
+    after: async (page) => {
+      const cancel = page.locator("#s-automations .au-editor").getByRole("button", { name: "Cancel" });
+      if (await cancel.count()) await cancel.click();
+      await unsettle(page);
+    },
+  },
+  {
+    // The agent's draft, opened by its Review: its instruction quoted, then a filled Turn on and Edit, with no Run now.
+    name: "settings-automations-draft",
+    go: async (page) => {
+      const name = "SDK release blockers";
+      await at("#/settings/automations")(page);
+      await page.locator("#s-automations .s-cta").click();
+      await page.waitForTimeout(300);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/settings/automations/sdk-releases") failures.push(`settings-automations-draft: Review opens ${hash}`);
+      await settingsView(page, "settings-automations-draft", name, "automations", "760px");
+      const seen = await page.evaluate<{ line: string; prompt: string; filled: string[]; buttons: string[] }>(`(() => {
+        const v = [...document.querySelectorAll(".s-view")].find((s) => !s.hidden);
+        return {
+          line: v.querySelector(".s-view-line").textContent,
+          prompt: v.querySelector(".au-prompt")?.textContent ?? "",
+          filled: [...v.querySelectorAll(".act.primary")].map((b) => b.textContent),
+          buttons: [...v.querySelectorAll(".au-view .actions button")].map((b) => b.textContent),
+        };
+      })()`);
+      if (seen.line !== "Mon and Thu at 17:30 · an agent wrote it: read it before you turn it on.")
+        failures.push(`settings-automations-draft: the view's line reads ${JSON.stringify(seen.line)}`);
+      if (!seen.prompt.startsWith("Check the open release-blocker issues"))
+        failures.push(`settings-automations-draft: the instruction reads ${JSON.stringify(seen.prompt)}`);
+      if (seen.filled.join() !== "Turn on" || seen.buttons.join() !== "Turn on,Edit")
+        failures.push(`settings-automations-draft: its buttons are ${JSON.stringify(seen)}`);
+    },
+    after: at("#/"),
+  },
   {
     // An automation's view, from its name: its instruction, what each run found and what came of each item, each run's
     // session a Copy resume command away (the command in its tooltip, not on the page); Esc goes back to Automations, and
@@ -2140,7 +2303,7 @@ const SHOTS: Shot[] = [
       const name = "Warden and dotagents issues";
       const open = async () => {
         await at("#/settings/automations")(page);
-        await page.locator(".au-main", { hasText: name }).click();
+        await page.locator("#s-automations .s-name", { hasText: name }).click();
         await page.locator(".s-view .au-run").first().waitFor();
       };
       await open();

@@ -13,7 +13,7 @@ import type {
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls, githubTip, MAC, orgsLine } from "../format.ts";
-import { AutomationRows, AutomationView, useAutomations } from "./Automations.tsx";
+import { AutomationRows, AutomationView, NewAutomation, useAutomations, type Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -770,6 +770,7 @@ interface PartProps {
   loads: number;
   configErrors: number;
   policy: PolicyDoc | null;
+  au: Automations;
   flash: (text: string) => void;
 }
 
@@ -790,6 +791,7 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
     </>
   ),
   agent: (p) => <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} now={p.now} flash={p.flash} />,
+  automations: (p) => <AutomationRows au={p.au} now={p.now} />,
   app: () => <ThemeRow />,
 };
 
@@ -967,7 +969,7 @@ export function Settings({
           </div>
         )}
         {view?.sections.map((x) => {
-          const p: PartProps = { view, active, now, loads, configErrors, policy, flash };
+          const p: PartProps = { view, active, now, loads, configErrors, policy, au, flash };
           const defs = view.defs.filter(
             (d) => d.section === x.id && !ELSEWHERE.has(d.key) && (SHOWN[d.key]?.(view.values, desktop) ?? true),
           );
@@ -980,7 +982,6 @@ export function Settings({
               <h2 id={`s-${x.id}-title`} className="group-head">
                 {x.title}
               </h2>
-              {x.id === "automations" && <AutomationRows au={au} now={now} />}
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">
                   {lead?.(p)}
@@ -1005,6 +1006,7 @@ export function Settings({
                   {folded.map((d) => row(d, !open))}
                 </div>
               )}
+              {x.id === "automations" && <NewAutomation au={au} />}
             </section>
           );
         })}

@@ -185,6 +185,39 @@ export function orgsLine(orgs: readonly { org: string; space: string | null }[])
   return `${said.join(", ")}.`;
 }
 
+const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+// An automation's schedule in words, read as the desk reads it (parseSchedule in src/automations.ts, which the window can't
+// import): "mon,thu 17:30" → "Mon and Thu at 17:30"; one it can't read, as written.
+export function scheduleWords(schedule: string): string {
+  const m = /^\s*([a-z,]+)\s+(\S+)\s*$/i.exec(schedule);
+  if (!m) return schedule;
+  const word = m[1]!.toLowerCase();
+  const at = m[2]!.toLowerCase();
+  const days = new Set(
+    word === "daily"
+      ? [0, 1, 2, 3, 4, 5, 6]
+      : word === "weekdays"
+        ? [1, 2, 3, 4, 5]
+        : word.split(",").map((d) => (d.length >= 3 ? DAYS.findIndex((full) => full.startsWith(d)) : -1)),
+  );
+  if (days.has(-1)) return schedule;
+  const times: number[] = [];
+  if (at !== "hourly")
+    for (const t of at.split(",")) {
+      const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+      if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return schedule;
+      times.push(Number(hm[1]) * 60 + Number(hm[2]));
+    }
+  const weekdays = days.size === 5 && !days.has(0) && !days.has(6);
+  // The week from Monday, so a weekend reads "Sat and Sun".
+  const named = [1, 2, 3, 4, 5, 6, 0].filter((d) => days.has(d)).map((d) => `${DAYS[d]![0]!.toUpperCase()}${DAYS[d]!.slice(1, 3)}`);
+  const which = days.size === 7 ? "Every day" : weekdays ? "Weekdays" : andList(named);
+  if (at === "hourly") return days.size === 7 ? "Every hour" : `${which}, every hour`;
+  const clock = (t: number) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+  return `${which} at ${andList([...new Set(times)].toSorted((x, y) => x - y).map(clock))}`;
+}
+
 // GitHub's status row's tooltip, what's known of "Your teams: @a, @b. 4,870 GitHub requests left until Sun 0:23."
 export function githubTip(gh: { teams: readonly string[]; rate_limit: { remaining: number; reset_at: string } | null }): string {
   const said: string[] = [];
