@@ -64,6 +64,38 @@ test("StrictMode interrupting the first open leaves the shared GET running for t
   assert.deepEqual(gets, ["s"]);
 });
 
+test("a bug in an open everyone left before it answered is still logged; one an open waits on is that open's", async (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  const bug = new TypeError("Cannot read properties of undefined (reading 'includes')");
+  let answer = () => {};
+  const get = () =>
+    Effect.promise(
+      () =>
+        new Promise<void>((ok) => {
+          answer = ok;
+        }),
+    ).pipe(Effect.andThen(Effect.die(bug)));
+  const settle = () =>
+    new Promise((r) => {
+      setTimeout(r, 10);
+    });
+
+  const stop = new AbortController();
+  const left = Effect.runPromiseExit(reviewOf("d", get, 0), { signal: stop.signal });
+  stop.abort(); // the review closed while it loaded
+  assert.ok(Exit.hasInterrupts(await left));
+  answer();
+  await settle();
+  assert.equal(logged.mock.callCount(), 1);
+  assert.match(String(logged.mock.calls[0]?.arguments[0]), /reading 'includes'/);
+
+  const waited = Effect.runPromiseExit(reviewOf("e", get, 0));
+  answer();
+  assert.ok(Exit.hasDies(await waited));
+  await settle();
+  assert.equal(logged.mock.callCount(), 1, "the open that waited answers for it, through its own runUi");
+});
+
 test("resting on a row fetches its review ahead after a short pause; passing over one doesn't", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const f = fakeGet();

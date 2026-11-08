@@ -295,7 +295,10 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   one helper, `runUi(effect, { signal? })`: `Effect.runCallback`, whose `onExit` ignores an interrupt-only exit and logs
   and reports to Sentry any other uncaught cause. Nothing in the window waits on it, so it returns nothing: there's no
   promise to drop or to reject, and `web/src` keeps the same lint as `src/` (a promise nobody waits on, `void` included).
-  Reads pass their effect's signal; writes pass none, so an unmount never interrupts a write.
+  Reads pass their effect's signal; writes pass none, so an unmount never interrupts a write. `reviewOf`'s shared GET
+  runs on its own (`Effect.runPromiseExit`) so StrictMode's second open can join it; one that every open left before it
+  answered hands its exit to `runUi` (`Effect.ignore`: a refusal has nobody to tell), so a bug in it is still logged and
+  reported.
 
 ### The wire
 

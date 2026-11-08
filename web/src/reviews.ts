@@ -11,12 +11,23 @@ let last: { id: string; at: number; review: Effect.Effect<ReviewView, ApiError> 
 // own, outside the opener's fiber: StrictMode interrupting its first effect leaves it running for the second.
 export function reviewOf(id: string, get = api.review, now = Date.now()): Effect.Effect<ReviewView, ApiError> {
   if (last?.id === id && now - last.at < JOIN_MS) return last.review;
-  // Once it answers, a refresh asks again.
+  let waiting = 0;
   const p = Effect.runPromiseExit(get(id)).then((exit) => {
-    if (last?.review === review) last = null;
+    if (last?.review === review) last = null; // once it answers, a refresh asks again
+    // Every open left before it answered: a bug in it is still runUi's to log and report, and a refusal has nobody to tell.
+    if (!waiting) runUi(Effect.ignore(exit));
     return exit;
   });
-  const review = Effect.flatten(Effect.promise(() => p));
+  const review = Effect.suspend(() => {
+    waiting++;
+    return Effect.flatten(Effect.promise(() => p));
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        waiting--;
+      }),
+    ),
+  );
   last = { id, at: now, review };
   return review;
 }
