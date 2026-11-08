@@ -301,6 +301,22 @@ test("a write in flight when the desk stops still lands, is logged and done, and
   assert.ok(done, "done after it, as if the desk were still up");
 });
 
+test("the desk stopping cuts a More menu write's refresh, so closing it doesn't wait for GitHub's read", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "green" })]);
+  let reading = () => {};
+  const read = new Promise<void>((r) => {
+    reading = r;
+  });
+  t.gh.details = () => Effect.sync(reading).pipe(Effect.andThen(Effect.sleep(5000)), Effect.as([]));
+  const answer = run(t.desk.githubAct("web#3", "close"));
+  await read;
+  const t0 = Date.now();
+  await run(t.desk.close());
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+  assert.deepEqual(await answer, { url: "" }, "it still answers what it did");
+  assert.deepEqual(w.calls, [["close", "PR_acme/web_3"]]);
+});
+
 test("a write sent once the desk has stopped and closed its store ends as interrupted before it reads anything", async (c) => {
   const { t, w } = await withWriter(c, [myPr(3, { ci: "green" }), myPr(5, { ci: "green", draft: true })]);
   const post = client(t);

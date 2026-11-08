@@ -316,11 +316,15 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
   `close()` is a Promise. A port it can't listen on stops the desk it made, as init failing does, so a retry leaves no
   store open. `stop()` is synchronous: it interrupts the runner's fibers, unwatches the files and closes the store, or,
   under a GitHub write in flight, leaves that to the last one's lock (`closeIfIdle`). `close()` is an Effect that stops
-  the desk at once and also waits for `stopAll()` and for the store to close. Deliberate change, with a test: a write in
-  flight when the desk stops still logs, records and answers what it did (it hit the closed store, a logged and reported
-  500 with nothing recorded), and a stopped desk sends no new one: a write's first step (`notStopped`, and `locked` for a
-  desk that stopped on the way) ends it as interrupted, a 499 nobody logs, before it reads the store (it read the closed
-  one: a logged and reported 500).
+  the desk at once and also waits for `stopAll()` and for the store to close, so at most for a write's own timeouts.
+  Deliberate change, with a test: a write in flight when the desk stops still logs and records what it did, and its
+  method returns that (it hit the closed store, a logged and reported 500 with nothing recorded); the window doesn't get
+  that answer, since `startServer`'s `close()` drops the open connections at once, and the desktop app SIGKILLs a desk
+  run from a checkout that hasn't quit in 5 s, a write in flight or not. A stopped desk sends no new one: a write's first
+  step (`notStopped`, and `locked` for a desk that stopped on the way) ends it as interrupted, a 499 nobody logs, before
+  it reads the store (it read the closed one: a logged and reported 500). Deliberate change, with a test: the More
+  menu's refresh after its write, which the write awaits before answering, is the runner's, so the desk stopping cuts it
+  (it read GitHub to the end, up to three 30 s attempts and the retries' waits, and `close()` waited for it).
 - Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
   config (`this.loaded!`, a defect); only an entry point checks it as a failure (`requireConfig`, or `resolve`, which
   checks it first). The hooks the connectors call (`synced`, `rebaseConflicts`, `handBackUnasked`, `trackBlocked`,

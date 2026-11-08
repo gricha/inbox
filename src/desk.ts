@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Cause, Deferred, Effect, Exit } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
@@ -458,8 +458,7 @@ export class Desk {
     Deferred.doneUnsafe(this.storeClosed, Exit.void);
   }
 
-  // stop() at once, and back once every agent process is gone (an AI review's too, and a SIGKILL for what ignores SIGTERM)
-  // and every GitHub write in flight has recorded what it did, each bounded by its own timeout.
+  // stop() at once; back once every agent process is gone (SIGKILL for what ignores SIGTERM) and every write in flight is recorded.
   close(): Effect.Effect<void> {
     return Effect.suspend(() => {
       this.stop();
@@ -1950,9 +1949,9 @@ export class Desk {
           else if (this.store.state(id).done_at) yield* this.act(id, "restore");
         } else if (action !== "draft") yield* this.doneAfterWrite(id);
         this.changed();
-        // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
-        // since actions() reads the snapshot this refresh replaces.
-        yield* this.gh.refresh(id);
+        // Awaited, so the window and its u see it closed (actions() reads the snapshot this replaces); the runner's, so a stop cuts it.
+        const refresh = this.runner.fork("refresh", this.gh.refresh(id), id);
+        if (refresh) yield* Fiber.await(refresh);
         // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
         if (action !== "request_changes") this.wrote.set(id, it.updated_at);
         return { url };
