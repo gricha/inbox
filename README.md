@@ -159,6 +159,7 @@ When one is due (the last matching time passed since its last run, and since you
 | [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app                                            |
 | [docs/ui.md](docs/ui.md)                     | the UI                                                                         |
 | [docs/visual.md](docs/visual.md)             | the mark, the colours, the layout, and how a design change is made and checked |
+| [docs/plugins.md](docs/plugins.md)           | the design for a small core with every source a plugin (not built yet)         |
 
 ## Develop
 
