@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, fromName, issueUrl, MOD } from "../format.ts";
+import { parseUrl } from "../prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
@@ -102,11 +103,11 @@ function rich(text: string): ReactNode[] {
   return out;
 }
 
-const shown = (url: string) => URL.parse(url)?.href ?? url; // percent-encodes what could make it read as another host
+const shown = (url: string) => parseUrl(url)?.href ?? url; // percent-encodes what could make it read as another host
 
 // A link's place, short: the host's path without the noise, so the label leads.
 function where(url: string): string {
-  const u = URL.parse(url);
+  const u = parseUrl(url);
   return u ? `${u.host.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}${u.hash}` : url;
 }
 

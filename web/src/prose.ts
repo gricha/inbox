@@ -1,6 +1,8 @@
 // An agent's text as blocks and spans to draw as React elements, never as HTML: paragraphs, lists, `code`, ``` blocks and
 // **bold** read as meant, and a link only ever shows the https URL it opens.
 // A link's url is new URL(raw).href, both its href and what's shown.
+import { Result } from "effect";
+
 export type Span =
   { t: "text"; text: string; bold: boolean } | { t: "code"; text: string; bold: boolean } | { t: "link"; url: string; bold: boolean };
 export type Block =
@@ -158,9 +160,12 @@ function urls(out: Span[], text: string, bold: boolean): void {
   }
 }
 
+// new URL, not URL.parse: the desk serves the window to any browser at localhost, and Safari 17 has no URL.parse.
+export const parseUrl = (raw: string): URL | null => Result.getOrNull(Result.try({ try: () => new URL(raw), catch: () => null }));
+
 // .href puts a lookalike host in punycode and resolves `..` and %2E; userinfo could make another host read as GitHub.
 function link(raw: string): string | null {
-  const u = URL.parse(raw);
+  const u = parseUrl(raw);
   return u?.protocol === "https:" && !u.username && !u.password ? u.href : null;
 }
 

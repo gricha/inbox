@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blocks, fencedCopy, inline, lead, textLines, unlinked, type Block, type Span } from "../src/prose.ts";
+import { blocks, fencedCopy, inline, lead, parseUrl, textLines, unlinked, type Block, type Span } from "../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });
@@ -84,6 +84,20 @@ test("a bare https URL is a link shown as its normalised href; anything else, or
   is("https://github.com/a/../../evil/x", [p(a("https://github.com/evil/x"))]);
   is("https://github%2Ecom/", [p(a("https://github.com/"))]);
   is("**see https://e.test/a**", [p(t("see ", true), a("https://e.test/a", true))]);
+});
+
+test("links read the same in a browser without URL.parse (Safari 17), an agent's question's links too", (ctx) => {
+  const parse = Object.getOwnPropertyDescriptor(URL, "parse");
+  ctx.after(() => {
+    if (parse) Object.defineProperty(URL, "parse", parse);
+  });
+  Reflect.deleteProperty(URL, "parse");
+  assert.equal("parse" in URL, false);
+  is("see https://g\u0456thub.com/a/../x.", [p(t("see "), a("https://xn--gthub-n2e.com/x"), t("."))]);
+  is("[pr](https://github.com@evil.test/x) and https://", [p(t("[pr](https://github.com@evil.test/x) and https://"))]);
+  is("[the run](https://e.test/r)", [p(t("the run ("), a("https://e.test/r"), t(")"))]);
+  assert.equal(parseUrl("https://www.e.test/a b#c")?.href, "https://www.e.test/a%20b#c");
+  assert.equal(parseUrl("not a url"), null);
 });
 
 test("a markdown link reads label, then the URL it opens; an image is never one", () => {
