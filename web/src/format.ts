@@ -167,3 +167,20 @@ export const copyText = (text: string): Effect.Effect<void, ClipboardUnavailable
   );
 
 export const cls = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");
+
+const andList = (xs: readonly string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : (xs[0] ?? ""));
+
+// Searches and rules' row: "acme goes to Work, everything else to Personal."; an org no space names is the catch-all's.
+export function orgsLine(orgs: readonly { org: string; space: string | null }[]): string | null {
+  if (!orgs.length) return null;
+  const spaces = new Map<string, string[]>();
+  for (const o of orgs) {
+    const space = o.space ?? "Personal";
+    spaces.set(space, [...(spaces.get(space) ?? []), o.org]);
+  }
+  const named = [...spaces].filter(([space]) => space !== "Personal");
+  if (!named.length) return "Everything goes to Personal.";
+  const said = named.map(([space, these], i) => `${andList(these)}${i ? "" : these.length > 1 ? " go" : " goes"} to ${space}`);
+  if (spaces.has("Personal")) said.push("everything else to Personal");
+  return `${said.join(", ")}.`;
+}

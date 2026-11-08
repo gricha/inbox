@@ -3182,6 +3182,7 @@ p {
   color: var(--pencil);
   font-size: 13px;
   line-height: 1.4;
+  text-wrap: pretty;
 }
 
 /* Room above and below a control as tall as its row, so the message line under it clears the hairline. */

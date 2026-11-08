@@ -31,6 +31,11 @@ test("a number names its unit after its field, never in its label", () => {
   }
 });
 
+test("a setting's help is one short line", () => {
+  for (const d of SETTINGS as readonly SettingDef[])
+    if (d.help) assert.ok(d.help.length <= 120, `${d.key}'s help is ${d.help.length} characters`);
+});
+
 test("every setting is in one of the page's parts, and no part folds all of its own behind More", () => {
   const defs = SETTINGS as readonly SettingDef[];
   for (const d of defs)

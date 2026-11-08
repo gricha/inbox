@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
 import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, fromName, modelName, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
+import { age, ago, clearedText, eventText, fromName, modelName, orgsLine, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
 import {
   acceleratorOf,
   authProblem,
@@ -141,6 +141,18 @@ test("Searches and rules and your policy are views inside Settings: each goes ba
   }
   assert.equal(SETTINGS_VIEWS.rules?.name, "Searches and rules");
   assert.equal(SETTINGS_VIEWS.policy?.name, "Your policy");
+});
+
+test("Searches and rules' row says where each org's items start, an org no space names under Personal", () => {
+  const o = (org: string, space: string | null) => ({ org, space });
+  assert.equal(orgsLine([]), null);
+  assert.equal(orgsLine([o("acme", "Work"), o("me", null)]), "acme goes to Work, everything else to Personal.");
+  assert.equal(
+    orgsLine([o("acme", "Work"), o("getsentry", "Work"), o("me", null), o("sentry-ops", "Ops")]),
+    "acme and getsentry go to Work, sentry-ops to Ops, everything else to Personal.",
+  );
+  assert.equal(orgsLine([o("a", "Work"), o("b", "Work"), o("c", "Work")]), "a, b and c go to Work.");
+  assert.equal(orgsLine([o("me", null), o("friend", "Personal")]), "Everything goes to Personal.");
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {

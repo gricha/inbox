@@ -12,7 +12,7 @@ import type {
   SettingValue,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, MAC, when } from "../format.ts";
+import { ago, cls, MAC, orgsLine, when } from "../format.ts";
 import { Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
@@ -589,7 +589,7 @@ function ThemeRow() {
         <label className="s-label" htmlFor="s-theme">
           Theme
         </label>
-        <p className="s-help">System follows your computer's light or dark.</p>
+        <p className="s-help">Only this device. System follows your computer's light or dark.</p>
       </div>
       <div className="s-control">
         <select
@@ -645,6 +645,7 @@ interface PartProps {
   now: number;
   configErrors: number;
   policy: PolicyDoc | null;
+  orgs: GitHubStatus["orgs"];
 }
 
 // Rows a part's sheet starts with, before its settings', by the part's id: a plugin's part adds one entry.
@@ -656,7 +657,7 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
       help={
         p.configErrors > 0
           ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
-          : "Which GitHub searches feed your desk, and where each item starts."
+          : (orgsLine(p.orgs) ?? "Which GitHub searches feed your desk, and where each item starts.")
       }
     />
   ),
@@ -781,7 +782,7 @@ export function Settings({
         }
       />
     );
-  const p: PartProps = { now, configErrors, policy };
+  const p: PartProps = { now, configErrors, policy, orgs: view?.github.orgs ?? [] };
 
   return (
     <div className="settings" hidden={!active}>
