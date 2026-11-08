@@ -43,9 +43,11 @@ services, `Data.TaggedError`, the desk's own `log`.
   show them verbatim): pass `message`, or give the class `override get message()`. An empty message erases a stored
   error (the coordinator's `coordinator_error`), so never leave one empty. A command whose caller has words of its own
   keeps them: `CommandNotFound`'s `hint` is its whole message, and `CommandFailed` and `CommandTimeout` take a `summary`
-  ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …"). Deliberate change, with a test: a
+  ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …"). Deliberate changes, each with a test: a
   `CommandFailed` whose stderr is blank says "<command> exited with <code or signal>", and a `ClaudeApiError` with no
-  words "claude failed: API error <status>" (both were empty).
+  words "claude failed: API error <status>" (both were empty); a stderr's tail keeps at most its last 8 KB (one long line
+  was kept whole, up to 64 MB); and a command started through cmd.exe (a Windows `claude.cmd`) is named alone in what
+  fails it (it was cmd.exe's whole line, an ask's text and a `--json-schema` included).
 - `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
   that aren't an error go in a field of their own (Claude's login `detail`).
 - The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix

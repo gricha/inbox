@@ -233,6 +233,7 @@ test("claude runs directly, except a Windows shim, which goes through cmd.exe fu
     file: String.raw`"C:\Program Files\nodejs\claude.cmd" "-p" "--name" "desk: a" "--tools" "" "--json-schema" "{\"a\":[\"b\"]}"`,
     args: [],
     shell: true,
+    name: "C:\\Program Files\\nodejs\\claude.cmd",
   });
   assert.equal(runSync(claudeSpawn("claude", ["C:\\dir\\"], "win32")).file, '"claude" "C:\\dir\\\\"');
   for (const bad of ["C:\\a&b\\claude.cmd", "%EVIL%", "claude|calc", "c^laude"]) {
@@ -315,6 +316,11 @@ test("a command that fails says why in its last lines, its exit, or the hint for
   const quiet = fakeAgent("quiet", "exit 4");
   const e = await failure(runCommand({ file: quiet.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
   assert.deepEqual([e._tag, e.message], ["CommandFailed", `${quiet.bin} exited with 4`]);
+  // A Windows shim's file is cmd.exe's whole line (an ask's text, a schema): its failure names the command alone.
+  const named = await failure(
+    runCommand({ file: quiet.bin, args: [], shell: false, name: "claude" }, { timeout: 5000, missing: "missing" }),
+  );
+  assert.deepEqual([named._tag, named.message], ["CommandFailed", "claude exited with 4"]);
   // claude prints its error envelope and exits 1: kept, so the envelope says what went wrong.
   const env = fakeAgent("claude", `echo '{"is_error":true,"result":"Overloaded"}'; exit 1`);
   const out = await run(runCommand({ file: env.bin, args: [], shell: false }, { timeout: 5000, missing: "missing", stdoutOnError: true }));
@@ -365,7 +371,11 @@ test("a command that fails keeps only the last lines its message reads of all it
   const few = fakeAgent("few", `printf "\\n  one\\ntwo\\n" >&2; exit 2`);
   const g = await failure(runCommand({ file: few.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
   assert.deepEqual(g._tag === "CommandFailed" && [g.stderr, g.message], ["\n  one\ntwo\n", "one two"], "three lines or fewer: all of it");
-  for (const x of [f, few]) fs.rmSync(x.dir, { recursive: true });
+  // One long line is kept to its last 8 KB: it's what the stored errors and the window show.
+  const long = fakeAgent("long", "head -c 100000 /dev/zero | tr '\\0' x >&2; exit 2");
+  const l = await failure(runCommand({ file: long.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
+  assert.ok(l._tag === "CommandFailed" && l.stderr.length === 8193 && l.stderr.startsWith("…") && /^…x+$/.test(l.message));
+  for (const x of [f, few, long]) fs.rmSync(x.dir, { recursive: true });
 });
 
 test("an answer with no summary fails the review as bad output, and asks no second claude", posix, async () => {

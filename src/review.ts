@@ -99,6 +99,7 @@ interface Spawn {
   file: string;
   args: string[];
   shell: boolean;
+  name?: string; // the command itself, when file is cmd.exe's whole line
 }
 
 // npm installs claude on Windows as claude.cmd, which only cmd.exe can start. Every argument is ours and the prompt goes
@@ -112,7 +113,7 @@ export function claudeSpawn(
   const line = [command, ...args].map((a) => `"${a.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/\\+$/, "$&$&")}"`).join(" ");
   if (/[%!^&|<>\r\n]/.test(line))
     return Effect.fail(new UnsafeArgument({ message: `can't start ${command} through cmd.exe: % ! ^ & | < > aren't allowed` }));
-  return Effect.succeed({ file: line, args: [], shell: true });
+  return Effect.succeed({ file: line, args: [], shell: true, name: command });
 }
 
 export interface RunOpts {
@@ -125,17 +126,21 @@ export interface RunOpts {
 
 type RunError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed;
 
-// All CommandFailed's message reads of up to 64 MB of stderr: its last three lines, after a "…" line when there were more.
+const TAIL = 8192; // characters of stderr a failure keeps, for one long line
+
+// All CommandFailed's message reads of up to 64 MB of stderr: its last three lines, after a "…" line when there were more, at most 8 KB.
 function stderrTail(stderr: string): string {
   const t = stderr.trim();
   let at = t.length;
   for (let n = 0; n < 3 && at >= 0; n++) at = t.lastIndexOf("\n", at - 1);
-  return at < 0 ? stderr : `…${t.slice(at)}`;
+  const tail = at < 0 ? stderr : `…${t.slice(at)}`;
+  return tail.length > TAIL ? `…${tail.slice(-TAIL)}` : tail;
 }
 
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
 // Not execFile: it can't start the process in a group of its own, and its timeout kills only the process itself.
 export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunError> {
+  const command = s.name ?? s.file;
   return Effect.callback<string, RunError>((resume) => {
     // Spawned in the register: no yield between starting the child and tracking it.
     const started = Result.try({
@@ -143,7 +148,7 @@ export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunEr
       catch: (cause) => cause,
     });
     if (Result.isFailure(started)) {
-      resume(Effect.fail(new CommandFailed({ command: s.file, code: null, signal: null, stderr: "", cause: started.failure })));
+      resume(Effect.fail(new CommandFailed({ command, code: null, signal: null, stderr: "", cause: started.failure })));
       return Effect.void; // nothing started, nothing to stop
     }
     const child = started.success;
@@ -164,14 +169,14 @@ export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunEr
     timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
     const outcome = (code: number | null, sig: NodeJS.Signals | null): Effect.Effect<string, RunError> => {
       if (!failed && code === 0) return Effect.succeed(stdout);
-      if (why === "timeout") return Effect.fail(new CommandTimeout({ command: s.file, timeoutMs: opts.timeout }));
-      if (why === "too much") return Effect.fail(new CommandOutputTooLarge({ command: s.file, limitBytes: MAX_OUTPUT }));
+      if (why === "timeout") return Effect.fail(new CommandTimeout({ command, timeoutMs: opts.timeout }));
+      if (why === "too much") return Effect.fail(new CommandOutputTooLarge({ command, limitBytes: MAX_OUTPUT }));
       if (!failed && opts.stdoutOnError && stdout) return Effect.succeed(stdout);
       // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
       const missing =
         failed?.code === "ENOENT" || (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
-      if (missing) return Effect.fail(new CommandNotFound({ command: s.file, hint: opts.missing }));
-      const fail = { command: s.file, code, signal: sig, stderr: stderrTail(stderr), ...(failed && { cause: failed }) };
+      if (missing) return Effect.fail(new CommandNotFound({ command, hint: opts.missing }));
+      const fail = { command, code, signal: sig, stderr: stderrTail(stderr), ...(failed && { cause: failed }) };
       return Effect.fail(new CommandFailed(fail));
     };
     child.stdout.setEncoding("utf8").on("data", (d: string) => {
