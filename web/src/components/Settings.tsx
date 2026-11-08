@@ -1,7 +1,8 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
+import { Effect } from "effect";
 import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import type { AgentStatus, DesktopBridge, GitHubStatus, SettingDef, SettingsView, SettingType, SettingValue } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { ago, cls, MAC, tilde, when } from "../format.ts";
 import { Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
@@ -13,8 +14,8 @@ import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
 import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
-// Resolves to the value the server saved, or null when it was rejected (the row shows why).
-type Commit = (v: SettingValue) => Promise<SettingValue | null>;
+// The value the server saved, or null when it was rejected (the row shows why): it never fails.
+type Commit = (v: SettingValue) => Effect.Effect<SettingValue | null>;
 interface FieldProps {
   def: SettingDef;
   value: SettingValue;
@@ -34,7 +35,7 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
     if (!focused.current && !typed.current) setDraft(shown);
   }, [shown]);
 
-  async function save(text: string) {
+  function save(text: string) {
     if (!typed.current) {
       setDraft(shown);
       return;
@@ -46,10 +47,17 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
       setDraft(shown);
       return;
     }
-    const saved = await commit(v);
-    if (saved === null || focused.current) return;
-    typed.current = false;
-    setDraft(draftOf(saved));
+    void runUi(
+      commit(v).pipe(
+        Effect.tap((saved) =>
+          Effect.sync(() => {
+            if (saved === null || focused.current) return;
+            typed.current = false;
+            setDraft(draftOf(saved));
+          }),
+        ),
+      ),
+    );
   }
 
   return {
@@ -57,7 +65,7 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
     submit: (text: string) => {
       typed.current = true;
       setDraft(text);
-      void save(text);
+      save(text);
     },
     bind: {
       id,
@@ -74,7 +82,7 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
       },
       onBlur: () => {
         focused.current = false;
-        void save(draft);
+        save(draft);
       },
       onKeyDown: (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         if (e.key === "Escape") {
@@ -130,9 +138,17 @@ function BooleanField({ value, commit, id }: FieldProps) {
     setOn(value === true);
   }
 
-  async function flip(v: boolean) {
+  function flip(v: boolean) {
     setOn(v);
-    if ((await commit(v)) === null) setOn(!v);
+    void runUi(
+      commit(v).pipe(
+        Effect.tap((saved) =>
+          Effect.sync(() => {
+            if (saved === null) setOn(!v);
+          }),
+        ),
+      ),
+    );
   }
 
   return (
@@ -146,7 +162,7 @@ function BooleanField({ value, commit, id }: FieldProps) {
       aria-labelledby={`${id}-label`}
       aria-describedby={`${id}-msg`}
       onChange={(e) => {
-        void flip(e.target.checked);
+        flip(e.target.checked);
       }}
     />
   );
@@ -160,10 +176,18 @@ function SelectField({ def, value, commit, id, invalid }: FieldProps) {
     setPicked(String(value));
   }
 
-  async function pick(v: string) {
+  function pick(v: string) {
     const was = picked;
     setPicked(v);
-    if ((await commit(v)) === null) setPicked(was);
+    void runUi(
+      commit(v).pipe(
+        Effect.tap((saved) =>
+          Effect.sync(() => {
+            if (saved === null) setPicked(was);
+          }),
+        ),
+      ),
+    );
   }
 
   return (
@@ -174,7 +198,7 @@ function SelectField({ def, value, commit, id, invalid }: FieldProps) {
       aria-invalid={invalid}
       aria-describedby={`${id}-msg`}
       onChange={(e) => {
-        void pick(e.target.value);
+        pick(e.target.value);
       }}
     >
       {def.options?.map((o) => (
@@ -272,28 +296,43 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
     [],
   );
 
-  async function put(patch: { set?: Record<string, SettingValue>; reset?: string[] }): Promise<SettingsView | null> {
-    clearTimeout(timer.current);
-    try {
-      const r = await api.saveSettings(patch);
-      onView(r.settings);
-      if (!r.ok) {
-        setStatus({ error: r.errors.map((e) => e.message).join("; ") || "not saved" });
-        return null;
-      }
-      setStatus("saved");
-      timer.current = window.setTimeout(() => {
-        setStatus(null);
-      }, 1600);
-      return r.settings;
-    } catch (e) {
-      setStatus({ error: message(e) });
-      return null;
-    }
+  // The settings as saved, or null when it wasn't (the row says why): it never fails.
+  function put(patch: { set?: Record<string, SettingValue>; reset?: string[] }): Effect.Effect<SettingsView | null> {
+    return Effect.suspend(() => {
+      clearTimeout(timer.current);
+      return api.saveSettings(patch).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            onView(r.settings);
+            if (!r.ok) {
+              setStatus({ error: r.errors.map((e) => e.message).join("; ") || "not saved" });
+              return null;
+            }
+            setStatus("saved");
+            timer.current = window.setTimeout(() => {
+              setStatus(null);
+            }, 1600);
+            return r.settings;
+          },
+          onFailure: (e) => {
+            setStatus({ error: e.message });
+            return null;
+          },
+        }),
+      );
+    });
   }
 
-  async function resetToDefault() {
-    if (await put({ reset: [def.key] })) setEpoch((n) => n + 1);
+  function resetToDefault() {
+    void runUi(
+      put({ reset: [def.key] }).pipe(
+        Effect.tap((saved) =>
+          Effect.sync(() => {
+            if (saved) setEpoch((n) => n + 1);
+          }),
+        ),
+      ),
+    );
   }
 
   const id = `setting-${def.key}`;
@@ -308,7 +347,7 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
       clear={() => {
         setStatus(null);
       }}
-      commit={async (v) => (await put({ set: { [def.key]: v } }))?.values[def.key] ?? null}
+      commit={(v) => put({ set: { [def.key]: v } }).pipe(Effect.map((saved) => saved?.values[def.key] ?? null))}
     />
   );
   const reset = view.overridden.includes(def.key) && (
@@ -317,7 +356,7 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
       className="link-btn"
       title={`Default: ${draftOf(def.default) || "(empty)"}`}
       onClick={() => {
-        void resetToDefault();
+        resetToDefault();
       }}
     >
       Reset to default
@@ -388,21 +427,33 @@ function AgentLink({ active, loads }: { active: boolean; loads: number }) {
   const [error, setError] = useState<string | null>(null);
   // Re-read on every app refresh: the agent's own config can change outside the desk.
   useEffect(() => {
-    if (active) api.agents().then(setStatus, () => {});
+    const stop = new AbortController();
+    // Not answering: what's shown stays, and the next refresh asks again.
+    if (active) void runUi(api.agents().pipe(Effect.map(setStatus), Effect.ignore), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
   }, [active, loads]);
 
-  async function connect() {
+  function connect() {
     setBusy(true);
     setError(null);
-    try {
-      setStatus(await api.connectAgent());
-    } catch (e) {
-      setError(message(e));
-      setStatus(await api.agents().catch(() => status));
-    } finally {
-      setBusy(false);
-    }
+    void runUi(
+      api.connectAgent().pipe(
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            setError(e.message);
+          }).pipe(Effect.andThen(api.agents().pipe(Effect.orElseSucceed(() => status)))),
+        ),
+        Effect.map(setStatus),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(false);
+          }),
+        ),
+      ),
+    );
   }
 
   if (!status) return null;
@@ -421,7 +472,7 @@ function AgentLink({ active, loads }: { active: boolean; loads: number }) {
           className="btn"
           disabled={busy}
           onClick={() => {
-            void connect();
+            connect();
           }}
         >
           {busy ? "Connecting…" : "Connect"}
@@ -574,14 +625,22 @@ export function Settings({
 
   // The desktop app re-registers the hotkey when settings.json changes; give it a moment before asking.
   useEffect(() => {
+    const stop = new AbortController();
     const t =
       desktop && view
         ? setTimeout(() => {
-            desktop?.status().then(setLive, () => {});
+            void runUi(
+              Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
+                Effect.map(setLive),
+                Effect.ignore, // the app not answering: the hotkey's line stays as it was
+              ),
+              { signal: stop.signal },
+            );
           }, 300)
         : undefined;
     return () => {
       clearTimeout(t);
+      stop.abort();
     };
   }, [view]);
 

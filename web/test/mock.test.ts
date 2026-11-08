@@ -80,7 +80,7 @@ test("overview, focus and every board", async () => {
   // Filtered items aren't on the board (src/rules.ts), not under "hidden".
   const { data: wr } = await call<BoardView>("GET", "/api/boards/work-review");
   assert.ok(![...Object.values(wr.sections).flat(), ...wr.hidden].some((c) => c.id === "acme/web#2279"));
-  assert.equal((await call("GET", "/api/boards/nope")).status, 404);
+  assert.deepEqual(await call("GET", "/api/boards/nope"), { status: 404, data: { error: "unknown board", tag: "NotFound" } });
 });
 
 // Before the tests below act on cards, while the queue is as the mock starts.
@@ -332,15 +332,18 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   }
   assert.deepEqual(v.approve, { ok: true, reason: null });
   const url = `/api/review/${encodeURIComponent("acme/api#4127")}/approve`;
-  assert.equal((await call("POST", url, { head_oid: "an-older-commit" })).status, 409, "only the commit you read");
+  const older = await call<{ tag: string }>("POST", url, { head_oid: "an-older-commit" });
+  assert.deepEqual([older.status, older.data.tag], [409, "Stale"], "only the commit you read");
   const { data: ok } = await call<{ ok: boolean; url: string }>("POST", url, { head_oid: v.item.head_oid });
   assert.equal(ok.ok, true);
   const { data: again } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("api#4127")}`);
   assert.equal(again.approve.reason, "you approved this commit");
   assert.equal(again.card.resolved, "you approved", "like the desk, your approval resolves it");
   assert.deepEqual([again.activity[0]?.kind, again.activity[0]?.actor], ["resolved", "me"]);
-  const mine = await call<{ error: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, { head_oid: "x" });
-  assert.equal(mine.status, 409);
+  const mine = await call<{ error: string; tag: string }>("POST", `/api/review/${encodeURIComponent("me/dotfiles#41")}/approve`, {
+    head_oid: "x",
+  });
+  assert.deepEqual([mine.status, mine.data.tag], [409, "Conflict"]);
 });
 
 test("review view: the desk's reading order for a ranked review, a capped one, nothing worth a look, and an old one", async () => {
@@ -389,7 +392,8 @@ test("policy: a policy with its judge, saved against its hash", async () => {
   const { data: p } = await call<PolicyDoc>("GET", "/api/policy");
   assert.ok(p.text.trim());
   assert.equal(p.judge.state, "idle");
-  assert.equal((await call("PUT", "/api/policy", { text: "x", base: "stale" })).status, 409);
+  const stale = await call<{ tag: string }>("PUT", "/api/policy", { text: "x", base: "stale" });
+  assert.deepEqual([stale.status, stale.data.tag], [409, "Stale"]);
   const { data: saved } = await call<{ ok: boolean; hash: string }>("PUT", "/api/policy", { text: p.text, base: p.hash });
   assert.notEqual(saved.hash, p.hash);
 });

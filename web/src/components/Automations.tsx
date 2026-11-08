@@ -1,8 +1,9 @@
 // Settings → Automations: your instructions on a schedule, each with its last runs. Turn one on, run it now, write or change
 // one, delete it. A run's summary and whys are an agent's words: shown as text, never markup.
+import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import type { AutomationRun, AutomationView } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { ago, cls, issueUrl, MOD, when } from "../format.ts";
 
 const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
@@ -56,57 +57,77 @@ export function Automations({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      setList(await api.automations());
-      setError("");
-    } catch (e) {
-      setError(message(e));
-    }
-  }, []);
+  const load = useCallback(
+    (): Effect.Effect<void> =>
+      api.automations().pipe(
+        Effect.match({
+          onSuccess: (l) => {
+            setList(l);
+            setError("");
+          },
+          onFailure: (e) => {
+            setError(e.message);
+          },
+        }),
+      ),
+    [],
+  );
 
   useEffect(() => {
-    if (active) void load();
+    const stop = new AbortController();
+    if (active) void runUi(load(), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
   }, [active, load, refresh]);
 
+  const failed = (e: { message: string }) =>
+    Effect.sync(() => {
+      flash(e.message, true);
+    });
+  const idle = Effect.sync(() => {
+    setBusy(false);
+  });
+
   // True once it's saved; a switch's put leaves an open editor as it is.
-  async function put(id: string, b: Omit<Draft, "id">, done: string): Promise<boolean> {
-    setBusy(true);
-    try {
-      await api.setAutomation(id, b);
-      flash(done);
-      await load();
-      return true;
-    } catch (e) {
-      flash(message(e), true);
-      return false;
-    } finally {
-      setBusy(false);
-    }
+  function put(id: string, b: Omit<Draft, "id">, done: string): Effect.Effect<boolean> {
+    return Effect.suspend(() => {
+      setBusy(true);
+      return api.setAutomation(id, b).pipe(
+        Effect.andThen(() => {
+          flash(done);
+          return load();
+        }),
+        Effect.as(true),
+        Effect.catch((e) => failed(e).pipe(Effect.as(false))),
+        Effect.ensuring(idle),
+      );
+    });
   }
 
-  async function runNow(a: AutomationView) {
-    try {
-      await api.runAutomation(a.id);
-      flash(`Running ${a.name}: what it finds lands on your desk`);
-      await load();
-    } catch (e) {
-      flash(message(e), true);
-    }
+  function runNow(a: AutomationView): Effect.Effect<void> {
+    return api.runAutomation(a.id).pipe(
+      Effect.andThen(() => {
+        flash(`Running ${a.name}: what it finds lands on your desk`);
+        return load();
+      }),
+      Effect.catch(failed),
+    );
   }
 
-  async function remove(id: string) {
-    setBusy(true);
-    try {
-      await api.deleteAutomation(id);
-      setDraft(null);
-      await load();
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy(false);
-    }
+  function remove(id: string): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      setBusy(true);
+      return api.deleteAutomation(id).pipe(
+        Effect.andThen(() => {
+          setDraft(null);
+          return load();
+        }),
+        Effect.catch(failed),
+        Effect.ensuring(idle),
+      );
+    });
   }
 
   // A new one's id is its name's, made free with -2, -3… so it never lands on one you have.
@@ -118,10 +139,15 @@ export function Automations({
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    void (async () => {
-      if (await put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`))
-        setDraft(null);
-    })();
+    void runUi(
+      put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`).pipe(
+        Effect.tap((saved) =>
+          Effect.sync(() => {
+            if (saved) setDraft(null);
+          }),
+        ),
+      ),
+    );
   }
 
   if (error && !list) return <p className="t-bad">Couldn't load automations: {error}</p>;
@@ -146,10 +172,12 @@ export function Automations({
                     checked={a.on}
                     aria-label={`Run ${a.name} on its schedule`}
                     onChange={() => {
-                      void put(
-                        a.id,
-                        { name: a.name, schedule: a.schedule, prompt: a.prompt, on: !a.on },
-                        `${a.name} is ${a.on ? "off" : "on"}`,
+                      void runUi(
+                        put(
+                          a.id,
+                          { name: a.name, schedule: a.schedule, prompt: a.prompt, on: !a.on },
+                          `${a.name} is ${a.on ? "off" : "on"}`,
+                        ),
                       );
                     }}
                   />
@@ -173,7 +201,7 @@ export function Automations({
                     className="act"
                     disabled={a.running}
                     onClick={() => {
-                      void runNow(a);
+                      void runUi(runNow(a));
                     }}
                   >
                     {a.running ? "Running…" : "Run now"}
@@ -213,7 +241,7 @@ export function Automations({
           onDelete={
             draft.id
               ? () => {
-                  void remove(draft.id!);
+                  void runUi(remove(draft.id!));
                 }
               : null
           }

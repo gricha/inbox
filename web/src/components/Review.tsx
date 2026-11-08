@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
@@ -17,7 +18,7 @@ import type {
   StackMember,
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
 import { blocks, inline, lead, unlinked } from "../prose.ts";
 import { reviewOf } from "../reviews.ts";
@@ -54,6 +55,7 @@ import {
   type Section,
 } from "../view.ts";
 import "../diffThemes.ts";
+import { getStored, setStored } from "../storage.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
@@ -105,13 +107,8 @@ const ROW = 19; // px: .rv-diff's --diffs-line-height
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded
 
 function sideSaved(): boolean {
-  try {
-    const v = localStorage.getItem(SIDE);
-    if (v) return v === "open";
-  } catch {
-    // storage off: the window's width decides
-  }
-  return innerWidth > NARROW;
+  const v = getStored(SIDE); // none, or storage off: the window's width decides
+  return v ? v === "open" : innerWidth > NARROW;
 }
 
 // Pierre draws the diff in a shadow root; its syntax colours and light or dark follow the app's theme (diffOptions).
@@ -174,14 +171,14 @@ export function Review({
   now: number;
   flash: (text: string, error?: boolean) => void;
   onCard: (c: Card, key: string) => void; // d Done, m Hand off for merge, b Back to desk: as in its row's menu
-  onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Promise<boolean>; // the More menu's writes, and Request changes
+  onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Effect.Effect<boolean>; // the More menu's writes, and Request changes
   acted: Acted | undefined; // what you did on it from here: shown in place of the button you pressed
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   // Approve, Ready for review, Ask reviewers: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
   onApprove: (c: Card, head: string) => void;
   onReady: (c: Card, picked: Reviewer[]) => void;
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
-  onComment: (c: Card, body: string) => Promise<boolean>; // your comment on the PR; true once GitHub has it
+  onComment: (c: Card, body: string) => Effect.Effect<boolean>; // your comment on the PR; true once GitHub has it
   onBack: () => void;
   chat: boolean; // your chat with your agent is open: it takes the sidebar's place
   agent: boolean; // your agent is on: its boxes offer Ask your agent
@@ -241,18 +238,26 @@ export function Review({
 
   useEffect(() => {
     const n = ++seq.current;
-    void (async () => {
-      try {
-        const r = await reviewOf(id);
-        if (n === seq.current) {
-          setView(r);
-          setRead((h) => h || r.item.head_oid);
-        }
-      } catch (e) {
-        // Keep what's on screen if a refresh fails.
-        if (n === seq.current) setView((cur) => (cur && typeof cur === "object" ? cur : message(e)));
-      }
-    })();
+    const stop = new AbortController();
+    void runUi(
+      reviewOf(id).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            if (n !== seq.current) return;
+            setView(r);
+            setRead((h) => h || r.item.head_oid);
+          },
+          // Keep what's on screen if a refresh fails.
+          onFailure: (e) => {
+            if (n === seq.current) setView((cur) => (cur && typeof cur === "object" ? cur : e.message));
+          },
+        }),
+      ),
+      { signal: stop.signal },
+    );
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [id, loads]);
 
@@ -422,7 +427,8 @@ export function Review({
     onAsk(s);
   }
 
-  async function sendDraft(text: string) {
+  // It runs to the end after you leave the review: words GitHub refused go back to the PR.
+  function sendDraft(text: string) {
     if (!v || !draft || draft.busy || !text.trim()) return;
     const d = { ...draft, busy: true };
     const pr = id;
@@ -431,29 +437,33 @@ export function Review({
     // Out of what's kept while it's on its way: leave and come back meanwhile, and it isn't there to send twice.
     keepDraft(pr, null);
     sendingOn(pr, true);
-    let url: string;
-    try {
-      ({ url } = d.thread ? await api.reply(v.card.id, d.thread, text) : await api.inline(v.card.id, d.at, text, d.head));
-    } catch (e) {
-      sendingOn(pr, false);
-      returnDraft(pr, { at: d.at, thread: d.thread, head: d.head, text });
-      if (!alive.current) {
-        flash(`Your comment on ${ref} didn't post: ${message(e)}. Your words are back on it.`, true);
-        return;
-      }
-      setDraft((cur) => (cur?.n === d.n ? { ...cur, busy: false } : cur));
-      flash(message(e), true);
-      return;
-    }
-    sendingOn(pr, false);
-    flash(d.thread ? `Sent your reply on ${ref} on GitHub` : `Commented on ${lineName(d.at)} on GitHub`);
-    if (!alive.current) return; // a review you've left doesn't touch the one you're on
-    setSent((s) => [...s, { at: d.at, thread: d.thread, body: text.trim(), url }]);
-    setDraft((cur) => (cur?.n === d.n ? null : cur));
-    if (drafts.current === d.n) {
-      draftText.current = "";
-      holdKeys(false);
-    }
+    void runUi(
+      (d.thread ? api.reply(v.card.id, d.thread, text) : api.inline(v.card.id, d.at, text, d.head)).pipe(
+        Effect.match({
+          onFailure: (e) => {
+            sendingOn(pr, false);
+            returnDraft(pr, { at: d.at, thread: d.thread, head: d.head, text });
+            if (!alive.current) {
+              flash(`Your comment on ${ref} didn't post: ${e.message}. Your words are back on it.`, true);
+              return;
+            }
+            setDraft((cur) => (cur?.n === d.n ? { ...cur, busy: false } : cur));
+            flash(e.message, true);
+          },
+          onSuccess: ({ url }) => {
+            sendingOn(pr, false);
+            flash(d.thread ? `Sent your reply on ${ref} on GitHub` : `Commented on ${lineName(d.at)} on GitHub`);
+            if (!alive.current) return; // a review you've left doesn't touch the one you're on
+            setSent((s) => [...s, { at: d.at, thread: d.thread, body: text.trim(), url }]);
+            setDraft((cur) => (cur?.n === d.n ? null : cur));
+            if (drafts.current === d.n) {
+              draftText.current = "";
+              holdKeys(false);
+            }
+          },
+        }),
+      ),
+    );
   }
 
   function toggleSide() {
@@ -461,28 +471,34 @@ export function Review({
     const show = chat || !side;
     if (chat) onCloseChat();
     setSide(show);
-    try {
-      localStorage.setItem(SIDE, show ? "open" : "folded");
-    } catch {
-      // storage off: it holds until the window closes
-    }
+    setStored(SIDE, show ? "open" : "folded");
   }
 
-  async function askAi() {
+  function askAi() {
     if (!v || busy === "ai") return;
     if (v.generating) {
       flash("The AI review is already being written");
       return;
     }
     setBusy("ai");
-    try {
-      const r = await api.aiReview(v.card.id, !!v.ai && !v.ai_stale);
-      flash(`AI review of ${shortRef(v.card)}: ${r.ai.verdict}`);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy(null);
-    }
+    const ref = shortRef(v.card);
+    void runUi(
+      api.aiReview(v.card.id, !!v.ai && !v.ai_stale).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            flash(`AI review of ${ref}: ${r.ai.verdict}`);
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(null);
+          }),
+        ),
+      ),
+    );
   }
 
   function approve() {
@@ -586,7 +602,7 @@ export function Review({
           keepDraft(id, { at: draft.at, thread: draft.thread, head: draft.head, text: t });
         }}
         onSend={(t) => {
-          void sendDraft(t);
+          sendDraft(t);
         }}
         onCancel={() => {
           setDraft(null);
@@ -670,7 +686,7 @@ export function Review({
                 flying
                   ? undefined
                   : () => {
-                      void askAi();
+                      askAi();
                     }
               }
             />
@@ -763,7 +779,7 @@ export function Review({
                         {
                           label: view.ai ? "Ask Claude to review it again" : "Ask Claude to review it",
                           run: () => {
-                            void askAi();
+                            askAi();
                           },
                         },
                       ]
@@ -777,7 +793,7 @@ export function Review({
                 ]}
                 pick={(a) => {
                   if (a === "request_changes") setWriting(true);
-                  else void onGithub(card, a, read);
+                  else void runUi(onGithub(card, a, read));
                 }}
                 onClose={() => {
                   setMore(false);
@@ -791,9 +807,15 @@ export function Review({
             label="Request changes"
             placeholder="What needs to change"
             onSend={(body) => {
-              void (async () => {
-                if (await onGithub(card, "request_changes", read, body)) setWriting(false);
-              })();
+              void runUi(
+                onGithub(card, "request_changes", read, body).pipe(
+                  Effect.tap((done) =>
+                    Effect.sync(() => {
+                      if (done) setWriting(false);
+                    }),
+                  ),
+                ),
+              );
             }}
             onClose={() => {
               setWriting(false);
@@ -1320,11 +1342,19 @@ function CommentBox({
   body: string;
   setBody: (t: string) => void;
   sending: boolean;
-  onComment: (c: Card, body: string) => Promise<boolean>;
+  onComment: (c: Card, body: string) => Effect.Effect<boolean>;
 }) {
-  async function send() {
+  function send() {
     if (!body.trim() || sending) return;
-    if (await onComment(card, body)) setBody("");
+    void runUi(
+      onComment(card, body).pipe(
+        Effect.tap((done) =>
+          Effect.sync(() => {
+            if (done) setBody("");
+          }),
+        ),
+      ),
+    );
   }
   return (
     <div className="rv-comment">
@@ -1341,7 +1371,7 @@ function CommentBox({
           if (e.key === "Escape") e.currentTarget.blur();
           else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            void send();
+            send();
           }
         }}
       />
@@ -1353,7 +1383,7 @@ function CommentBox({
             title={`Comment on GitHub, as you (${MOD}\u21b5)`}
             disabled={sending}
             onClick={() => {
-              void send();
+              send();
             }}
           >
             {sending ? "Commenting\u2026" : "Comment"}

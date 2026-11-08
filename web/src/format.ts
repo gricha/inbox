@@ -1,4 +1,6 @@
+import { Effect } from "effect";
 import { COORDINATOR_NAME, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff } from "../../src/types.ts";
+import { ClipboardUnavailable } from "./api.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 export const MOD = MAC ? "⌘" : "Ctrl+";
@@ -145,22 +147,23 @@ export const snoozeOptions = (c: Card): typeof SNOOZE => [
   ...(c.wake_on ?? []).map((u, i) => ({ key: String(6 + i), until: u, label: `Until ${UNTIL[u]}`, toast: `until ${UNTIL[u]}` })),
 ];
 
-export async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Clipboard API needs a secure, focused context; the textarea path works in more places.
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    // oxlint-disable-next-line typescript/no-deprecated -- the fallback for when the Clipboard API is refused; nothing replaces it
-    const ok = document.execCommand("copy");
-    ta.remove();
-    if (!ok) throw new Error("clipboard unavailable");
-  }
-}
+// The Clipboard API needs a secure, focused context; the textarea path works in more places.
+export const copyText = (text: string): Effect.Effect<void, ClipboardUnavailable> =>
+  Effect.tryPromise({ try: () => navigator.clipboard.writeText(text), catch: (cause) => cause }).pipe(
+    Effect.catch((cause) =>
+      Effect.suspend((): Effect.Effect<void, ClipboardUnavailable> => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.append(ta);
+        ta.select();
+        // oxlint-disable-next-line typescript/no-deprecated -- the fallback for when the Clipboard API is refused; nothing replaces it
+        const ok = document.execCommand("copy");
+        ta.remove();
+        return ok ? Effect.void : Effect.fail(new ClipboardUnavailable({ cause }));
+      }),
+    ),
+  );
 
 export const cls = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");

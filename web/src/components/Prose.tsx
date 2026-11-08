@@ -1,4 +1,6 @@
+import { Effect } from "effect";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { runUi } from "../api.ts";
 import { copyText } from "../format.ts";
 import { blocks, fencedCopy, textLines, unlinked, type Block, type Span } from "../prose.ts";
 
@@ -55,14 +57,18 @@ function Pre({ text, info }: { text: string; info: string }) {
         className="act prose-copy"
         title="Copy it with its ``` fence, to paste on GitHub"
         onClick={() => {
-          void (async () => {
-            try {
-              await copyText(fencedCopy(text, info));
-              setSaid("Copied");
-            } catch {
-              setSaid("Couldn't copy: select it instead");
-            }
-          })();
+          void runUi(
+            copyText(fencedCopy(text, info)).pipe(
+              Effect.match({
+                onSuccess: () => {
+                  setSaid("Copied");
+                },
+                onFailure: () => {
+                  setSaid("Couldn't copy: select it instead");
+                },
+              }),
+            ),
+          );
         }}
       >
         {said}

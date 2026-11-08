@@ -19,6 +19,11 @@ export function startSentry(s: Overview["sentry"]): void {
   });
 }
 
+// A bug runUi caught: nothing handled it. Dropped until startSentry has run.
+export function report(error: unknown): void {
+  Sentry.captureException(error);
+}
+
 // React's own error hooks: a render error the Reload boundary catches is reported too. Setting them replaces React's
 // console logging, so they log as well.
 const log = Sentry.reactErrorHandler((error: unknown, info) => {

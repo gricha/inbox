@@ -1,10 +1,20 @@
+import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 import type { Card } from "../../../src/types.ts";
+import { runUi } from "../api.ts";
 import { MOD, shortRef } from "../format.ts";
 
 // Comment on an issue opened in place: your comment, at the window's bottom, so a refresh that
 // moves the issue's row never takes what you're writing. ⌘↵ sends, Esc closes; GitHub refusing it keeps your words here.
-export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (body: string) => Promise<boolean>; onClose: () => void }) {
+export function CommentBar({
+  card,
+  onSend,
+  onClose,
+}: {
+  card: Card;
+  onSend: (body: string) => Effect.Effect<boolean>;
+  onClose: () => void;
+}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -19,12 +29,23 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
     };
   }, [card.id]);
 
-  async function send() {
+  function send() {
     if (!text.trim() || busy) return;
     setBusy(true);
-    const ok = await onSend(text);
-    setBusy(false);
-    if (ok) onClose();
+    void runUi(
+      onSend(text).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(false);
+          }),
+        ),
+        Effect.tap((ok) =>
+          Effect.sync(() => {
+            if (ok) onClose();
+          }),
+        ),
+      ),
+    );
   }
 
   return (
@@ -46,7 +67,7 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.repeat) {
               e.preventDefault();
-              void send();
+              send();
             }
           }}
         />
@@ -56,7 +77,7 @@ export function CommentBar({ card, onSend, onClose }: { card: Card; onSend: (bod
           title={`Comment on GitHub, as you (${MOD}\u21b5)`}
           disabled={!text.trim() || busy}
           onClick={() => {
-            void send();
+            send();
           }}
         >
           {busy ? "Commenting\u2026" : "Comment"}

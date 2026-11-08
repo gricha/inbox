@@ -1,6 +1,8 @@
 // The desktop app running the desk from a checkout (Settings → Desktop app → Run from a checkout).
+import { Effect } from "effect";
 import { useEffect, useState } from "react";
 import type { SourceStatus } from "../../../src/types.ts";
+import { runUi } from "../api.ts";
 import { tilde } from "../format.ts";
 import { desktop } from "../theme.ts";
 
@@ -8,15 +10,21 @@ import { desktop } from "../theme.ts";
 export function useSourceDown(down: boolean): SourceStatus | null {
   const [s, setS] = useState<SourceStatus | null>(null);
   useEffect(() => {
-    let live = true;
-    const ask = async () => {
-      const st = await desktop?.status().catch(() => null);
-      if (live) setS(st?.source ?? null);
+    const stop = new AbortController();
+    const ask = () => {
+      void runUi(
+        Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
+          Effect.map((st) => st?.source ?? null),
+          Effect.orElseSucceed(() => null), // the app not answering: nothing to say beyond the desk being down
+          Effect.map(setS),
+        ),
+        { signal: stop.signal },
+      );
     };
-    const t = down && desktop ? setInterval(() => void ask(), 1000) : undefined;
-    if (t) void ask();
+    const t = down && desktop ? setInterval(ask, 1000) : undefined;
+    if (t) ask();
     return () => {
-      live = false;
+      stop.abort();
       clearInterval(t);
       setS(null);
     };

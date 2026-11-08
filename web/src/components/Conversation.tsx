@@ -1,6 +1,7 @@
+import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { age, MOD } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
 import { Words } from "./Prose.tsx";
@@ -61,19 +62,28 @@ export function Conversation({
   if (!view.conversation.length) return null;
 
   // Posting is yours: Reply (or Cmd+Enter).
-  async function send(c: Convo, text: string) {
+  function send(c: Convo, text: string) {
     const to = c.comments.at(-1)?.author ?? "them";
     if (!text.trim() || busy) return;
     setBusy(c.id);
-    try {
-      const { url } = await api.reply(view.card.id, c.id, text);
-      setSent((s) => ({ ...s, [c.id]: url }));
-      flash(`Sent your reply to ${to}`);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy(null);
-    }
+    void runUi(
+      api.reply(view.card.id, c.id, text).pipe(
+        Effect.match({
+          onSuccess: ({ url }) => {
+            setSent((s) => ({ ...s, [c.id]: url }));
+            flash(`Sent your reply to ${to}`);
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(null);
+          }),
+        ),
+      ),
+    );
   }
 
   return (
@@ -127,7 +137,7 @@ export function Conversation({
                 if (e.key === "Escape") e.currentTarget.blur();
                 else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  void send(c, text);
+                  send(c, text);
                 }
               }}
             />
@@ -138,7 +148,7 @@ export function Conversation({
                 title={`Post this reply on GitHub, as you (${MOD}\u21b5)`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {
-                  void send(c, text);
+                  send(c, text);
                 }}
               >
                 {busy === c.id ? "Replying\u2026" : "Reply"}

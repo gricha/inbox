@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
@@ -13,7 +14,7 @@ import type {
   SettingsView,
 } from "../../src/types.ts";
 import { COORDINATOR_NAME } from "../../src/types.ts";
-import { api, message, starting, unreachable } from "./api.ts";
+import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
@@ -74,15 +75,11 @@ const DID: Record<GitHubAction, string> = {
   reopen: "Reopened on GitHub",
   request_changes: "Requested changes on GitHub",
 };
-const sleep = (ms: number) =>
-  new Promise((r) => {
-    setTimeout(r, ms);
-  });
 const go = (r: Route) => {
   location.hash = routeHash(r);
 };
-const UNREACHABLE = "unreachable";
-const configBroken = (msg: string | null) => !!msg && msg.startsWith("config has errors");
+type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
+const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 
 // The desktop app's window needs room for the macOS traffic lights and a draggable title bar.
 if (desktop) {
@@ -95,7 +92,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [overview, setOverview] = useState<Overview | null>(null);
   const [view, setView] = useState<QueueView | null>(null);
-  const [down, setDown] = useState<string | null>(null); // why the API isn't usable right now
+  const [down, setDown] = useState<Down | null>(null);
   const [epoch, setEpoch] = useState(0); // bumped to reopen the event stream
   const [now, setNow] = useState(() => Date.now());
   const [selected, setSelected] = useState<string | null>(null);
@@ -137,7 +134,7 @@ export function App() {
   expandedRef.current = expanded;
   const downRef = useRef(down);
   downRef.current = down;
-  const sourceDown = useSourceDown(down === UNREACHABLE);
+  const sourceDown = useSourceDown(down?._tag === "DeskUnreachable");
   const loadSeq = useRef(0);
   const refreshTimer = useRef(0);
   const toastTimer = useRef(0);
@@ -163,52 +160,70 @@ export function App() {
     setSettings(s);
   }, []);
 
-  const loadSettings = useCallback(async () => {
-    const sn = ++settingsSeq.current;
-    try {
-      const s = await api.settings();
-      if (sn === settingsSeq.current) setSettings(s);
-    } catch {}
-  }, []);
+  const loadSettings = useCallback(
+    (): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const sn = ++settingsSeq.current;
+        return api.settings().pipe(
+          Effect.tap((s) =>
+            Effect.sync(() => {
+              if (sn === settingsSeq.current) setSettings(s);
+            }),
+          ),
+          Effect.ignore, // the next refresh asks again
+        );
+      }),
+    [],
+  );
 
-  const load = useCallback(async () => {
-    const r = routeRef.current;
-    const exp = expandedRef.current;
-    const n = ++loadSeq.current;
-    if (r.name === "settings") void loadSettings();
-    try {
-      const [ov, v, d, l] = await Promise.all([
-        api.overview(),
-        // Always: the sidebar shows the queue's counts on every page.
-        api.queue(),
-        exp ? api.item(exp).catch((e: unknown) => message(e)) : null,
-        // A review of your PR in Merging shows its Merging line too.
-        r.name === "inflight" || r.name === "review" ? api.inflight() : null,
-      ]);
-      if (n !== loadSeq.current) return;
-      setOverview(ov);
-      startSentry(ov.sentry);
-      if (l) setLane(l);
-      setNow(Date.now());
-      setLoads((x) => x + 1);
-      // The dev proxy keeps a dead upstream's event stream open, so reopen it once the API answers again.
-      if (downRef.current) setEpoch((x) => x + 1);
-      setDown(null);
-      setView(v);
-      if (exp && d) setDetails((m) => ({ ...m, [exp]: d }));
-    } catch (e) {
-      if (n !== loadSeq.current) return;
-      if (unreachable(e)) setDown(UNREACHABLE);
-      else if (starting(e)) setDown(message(e));
-      else flash(message(e), true);
-    }
-  }, [flash, loadSettings]);
+  const load = useCallback(
+    (): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const r = routeRef.current;
+        const exp = expandedRef.current;
+        const n = ++loadSeq.current;
+        const views = Effect.all(
+          [
+            api.overview(),
+            // Always: the sidebar shows the queue's counts on every page.
+            api.queue(),
+            exp ? api.item(exp).pipe(Effect.catch((e) => Effect.succeed(e.message))) : Effect.succeed(null),
+            // A review of your PR in Merging shows its Merging line too.
+            r.name === "inflight" || r.name === "review" ? api.inflight() : Effect.succeed(null),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(
+          Effect.match({
+            onSuccess: ([ov, v, d, l]) => {
+              if (n !== loadSeq.current) return;
+              setOverview(ov);
+              startSentry(ov.sentry);
+              if (l) setLane(l);
+              setNow(Date.now());
+              setLoads((x) => x + 1);
+              // The dev proxy keeps a dead upstream's event stream open, so reopen it once the API answers again.
+              if (downRef.current) setEpoch((x) => x + 1);
+              setDown(null);
+              setView(v);
+              if (exp && d) setDetails((m) => ({ ...m, [exp]: d }));
+            },
+            onFailure: (e) => {
+              if (n !== loadSeq.current) return;
+              if (isDown(e)) setDown((cur) => (cur?._tag === e._tag && cur.message === e.message ? cur : e));
+              else flash(e.message, true);
+            },
+          }),
+        );
+        return r.name === "settings" ? Effect.all([loadSettings(), views], { concurrency: "unbounded", discard: true }) : views;
+      }),
+    [flash, loadSettings],
+  );
 
   const refresh = useCallback(
     (ms = 300) => {
       clearTimeout(refreshTimer.current);
       refreshTimer.current = window.setTimeout(() => {
-        void load();
+        void runUi(load());
       }, ms);
     },
     [load],
@@ -237,7 +252,11 @@ export function App() {
       setSettingsSeen(true);
       window.scrollTo(0, 0);
     } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → Rules.");
-    void load();
+    const stop = new AbortController();
+    void runUi(load(), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
   }, [settingsSection, flash, load]);
 
   const onLane = route.name === "inflight";
@@ -258,9 +277,14 @@ export function App() {
     setReviewQuestion(route.name === "inquiry" ? route.id : null);
   }, [route]);
   useEffect(() => {
-    if (!onLane) return;
-    window.scrollTo(0, 0);
-    void load();
+    const stop = new AbortController();
+    if (onLane) {
+      window.scrollTo(0, 0);
+      void runUi(load(), { signal: stop.signal });
+    }
+    return () => {
+      stop.abort();
+    };
   }, [onLane, load]);
 
   // Live updates; EventSource gives up after a non-200 (e.g. the dev proxy while the server is down), so reconnect by hand.
@@ -279,7 +303,7 @@ export function App() {
         // While the browser retries, the stream sits in CONNECTING; a fetch tells us whether the server is gone.
         refresh(0);
         if (es?.readyState !== EventSource.CLOSED) return;
-        setDown((d) => d ?? UNREACHABLE);
+        setDown((d) => d ?? new DeskUnreachable({}));
         retry = window.setTimeout(connect, 5000);
       });
     };
@@ -302,7 +326,7 @@ export function App() {
     const t = down
       ? setInterval(
           () => {
-            void load();
+            void runUi(load());
           },
           quick ? 1000 : 5000,
         )
@@ -462,23 +486,29 @@ export function App() {
     [boards],
   );
 
-  async function fetchDetail(id: string): Promise<ItemDetail | null> {
-    try {
-      const d = await api.item(id);
-      setDetails((m) => ({ ...m, [id]: d }));
-      return d;
-    } catch (e) {
-      setDetails((m) => ({ ...m, [id]: message(e) }));
-      return null;
-    }
+  function fetchDetail(id: string): Effect.Effect<void> {
+    return api.item(id).pipe(
+      Effect.match({
+        onSuccess: (d) => {
+          setDetails((m) => ({ ...m, [id]: d }));
+        },
+        onFailure: (e) => {
+          setDetails((m) => ({ ...m, [id]: e.message }));
+        },
+      }),
+    );
   }
 
-  async function seen(c: Card) {
-    if (!c.new) return;
-    try {
-      await api.act(c.id, "seen");
-      refresh();
-    } catch {}
+  function seen(c: Card): Effect.Effect<void> {
+    if (!c.new) return Effect.void;
+    return api.act(c.id, "seen").pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          refresh();
+        }),
+      ),
+      Effect.ignore, // it stays marked new until it's opened again
+    );
   }
 
   function toggle(c: Card) {
@@ -489,31 +519,42 @@ export function App() {
     }
     setExpanded(c.id);
     setShowSignals(false);
-    void fetchDetail(c.id);
-    void seen(c);
+    void runUi(fetchDetail(c.id));
+    void runUi(seen(c));
   }
 
-  async function act(c: Card, action: Action, until?: string) {
+  const failed = (e: { message: string }) =>
+    Effect.sync(() => {
+      flash(e.message, true);
+    });
+  const refreshNow = Effect.sync(() => {
+    refresh(0);
+  });
+
+  function act(c: Card, action: Action, until?: string): Effect.Effect<void> {
     // A resolved item stays under Resolved whatever you do to it.
     const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
-    if (leaves) hide(c);
-    try {
+    return Effect.gen(function* () {
+      if (leaves) hide(c);
       const started = Date.now();
-      const res = await api.act(c.id, action, until);
+      const res = yield* api.act(c.id, action, until);
       undoSeq.current = res.undo_seq || null; // before the animation, so a quick Undo undoes this action
       undoWrite.current = null;
       if (leaves) {
-        await sleep(Math.max(0, 200 - (Date.now() - started)));
+        yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
         setView((v) => v && removeCard(v, c.id));
       }
       const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
       flash(`${verb}: ${shortRef(c)}`, false, true);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      if (leaves) unhide(c.id);
-      refresh(0);
-    }
+    }).pipe(
+      Effect.catch(failed),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (leaves) unhide(c.id);
+          refresh(0);
+        }),
+      ),
+    );
   }
 
   // A click on an agent's question: its own page, with all it said.
@@ -539,107 +580,131 @@ export function App() {
 
   // Your answer to an agent's question (or leaving it unanswered): it leaves the main page at once while its page stays,
   // saying so; a refusal brings it back. True once the desk has it.
-  async function answerInquiry(q: Inquiry, text: string, dismiss = false): Promise<boolean> {
-    const id = inquiryOf(q.id);
-    if (selected === id) setSelected(null);
-    setAnswered((s) => new Set(s).add(q.id));
-    let ok = true;
-    try {
-      await api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text });
-      flash(dismiss ? `Dismissed ${fromName(q.from, false)}'s question` : `Answered ${fromName(q.from, false)}`);
-    } catch (e) {
-      ok = false;
-      setAnswered((s) => {
-        const next = new Set(s);
-        next.delete(q.id);
-        return next;
-      });
-      setSelected(id);
-      flash(message(e), true);
-    }
-    refresh(0);
-    return ok;
+  function answerInquiry(q: Inquiry, text: string, dismiss = false): Effect.Effect<boolean> {
+    return Effect.suspend(() => {
+      const id = inquiryOf(q.id);
+      if (selected === id) setSelected(null);
+      setAnswered((s) => new Set(s).add(q.id));
+      return api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text }).pipe(
+        Effect.match({
+          onSuccess: () => {
+            flash(dismiss ? `Dismissed ${fromName(q.from, false)}'s question` : `Answered ${fromName(q.from, false)}`);
+            return true;
+          },
+          onFailure: (e) => {
+            setAnswered((s) => {
+              const next = new Set(s);
+              next.delete(q.id);
+              return next;
+            });
+            setSelected(id);
+            flash(e.message, true);
+            return false;
+          },
+        }),
+        Effect.tap(refreshNow),
+      );
+    });
   }
 
   // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
   // refusal brings it back. A review stays open, saying what you did and where it went (`did`). `error` on what the write
   // returns: done, but with something to say. True once GitHub has it.
-  async function finish(
+  function finish(
     c: Card,
     sending: string,
     did: Acted,
-    write: () => Promise<{ text: string; error?: boolean; undo?: boolean }>,
-  ): Promise<boolean> {
-    // Sent already from this review.
-    if (actedRef.current[c.id] && routeRef.current.name === "review") return false;
-    const mark = (to: Acted | null) => {
-      actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
-      setActed(actedRef.current);
-    };
-    mark({ ...did, sending: true });
-    hide(c);
-    flash(sending, false, false, 60_000, true);
-    try {
-      const r = await write();
-      mark({ ...did, sending: false });
-      setView((v) => v && removeCard(v, c.id));
-      flash(r.text, r.error, r.undo);
-      return true;
-    } catch (e) {
-      mark(null);
-      flash(message(e), true);
-      return false;
-    } finally {
-      unhide(c.id);
-      refresh(0);
-    }
+    write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean }, ApiError>,
+  ): Effect.Effect<boolean> {
+    return Effect.suspend((): Effect.Effect<boolean> => {
+      // Sent already from this review.
+      if (actedRef.current[c.id] && routeRef.current.name === "review") return Effect.succeed(false);
+      const mark = (to: Acted | null) => {
+        actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
+        setActed(actedRef.current);
+      };
+      mark({ ...did, sending: true });
+      hide(c);
+      flash(sending, false, false, 60_000, true);
+      return write.pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            mark({ ...did, sending: false });
+            setView((v) => v && removeCard(v, c.id));
+            flash(r.text, r.error, r.undo);
+            return true;
+          },
+          onFailure: (e) => {
+            mark(null);
+            flash(e.message, true);
+            return false;
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            unhide(c.id);
+            refresh(0);
+          }),
+        ),
+      );
+    });
   }
 
-  async function undo() {
-    const w = undoWrite.current;
-    if (w) {
-      undoWrite.current = null;
-      try {
-        if (w.to === "ready") {
-          await api.ready(w.id);
-          await api.act(w.id, "undo"); // marking it ready took it off your desk; undoing the draft keeps it where it was
-        } else await api.github(w.id, "reopen");
-        flash(`Undid it on GitHub: ${shortId(w.id)} is ${w.to === "ready" ? "ready for review" : "open"} again`);
-      } catch (e) {
-        flash(message(e), true);
+  function undo(): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => {
+      const w = undoWrite.current;
+      if (w) {
+        undoWrite.current = null;
+        // Marking it ready took it off your desk; undoing the draft keeps it where it was.
+        const revert: Effect.Effect<unknown, ApiError> =
+          w.to === "ready" ? api.ready(w.id).pipe(Effect.andThen(api.act(w.id, "undo"))) : api.github(w.id, "reopen");
+        return revert.pipe(
+          Effect.match({
+            onSuccess: () => {
+              flash(`Undid it on GitHub: ${shortId(w.id)} is ${w.to === "ready" ? "ready for review" : "open"} again`);
+            },
+            onFailure: (e) => {
+              flash(e.message, true);
+            },
+          }),
+          Effect.andThen(refreshNow),
+        );
       }
-      refresh(0);
-      return;
-    }
-    // Only what this window did: it must not walk back yesterday's history.
-    if (undoSeq.current === null) {
-      flash("Nothing to undo in this window");
-      return;
-    }
-    try {
-      const r = await api.undo(undoSeq.current);
-      undoSeq.current = null;
-      pending.current = { id: r.id, until: Date.now() + 2000 };
-      setSelected(r.id);
-      // If the item comes back into a closed group, let the selection move on once the wait is over.
-      setTimeout(() => {
-        setTick((t) => t + 1);
-      }, 2100);
-      flash(`Undid ${r.action ?? "that"} on ${shortId(r.id)}`);
-      refresh(0);
-    } catch (e) {
-      flash(message(e), true);
-    }
+      // Only what this window did: it must not walk back yesterday's history.
+      if (undoSeq.current === null) {
+        flash("Nothing to undo in this window");
+        return Effect.void;
+      }
+      return api.undo(undoSeq.current).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            undoSeq.current = null;
+            pending.current = { id: r.id, until: Date.now() + 2000 };
+            setSelected(r.id);
+            // If the item comes back into a closed group, let the selection move on once the wait is over.
+            setTimeout(() => {
+              setTick((t) => t + 1);
+            }, 2100);
+            flash(`Undid ${r.action ?? "that"} on ${shortId(r.id)}`);
+            refresh(0);
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+      );
+    });
   }
 
-  async function sync() {
-    setOverview((o) => o && { ...o, syncing: true });
-    try {
-      await api.sync();
-    } catch (e) {
-      if (!unreachable(e)) flash(message(e), true);
-    }
-    refresh(0);
+  function sync(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      setOverview((o) => o && { ...o, syncing: true });
+      return api.sync().pipe(
+        Effect.catchTag("DeskUnreachable", () => Effect.void), // the banner says so
+        Effect.catch(failed),
+        Effect.andThen(refreshNow),
+      );
+    });
   }
 
   // A PR opens its review in place of the queue; an issue opens in place.
@@ -650,76 +715,78 @@ export function App() {
     }
     setSelected(c.id);
     go({ name: "review", id: c.id });
-    void seen(c);
+    void runUi(seen(c));
   }
 
   // Hand off for merge: your own open PR goes to Merging (you're done; your agent gets it merged). Back to desk undoes it.
   function handOff(c: Card) {
-    void finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, async () => {
-      await api.act(c.id, "inflight");
-      undoSeq.current = null;
-      return { text: `Handed off for merge: ${shortRef(c)}. Your agent gets it merged.` };
-    });
+    const write = api.act(c.id, "inflight").pipe(
+      Effect.map(() => {
+        undoSeq.current = null;
+        return { text: `Handed off for merge: ${shortRef(c)}. Your agent gets it merged.` };
+      }),
+    );
+    void runUi(finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, write));
   }
 
   // Back to desk: your PR leaves Merging for your desk.
-  async function back(c: Card) {
-    if (!c.inflight) {
-      flash(`${shortRef(c)} isn't in Merging`);
-      return;
-    }
-    try {
-      await api.act(c.id, "takeback");
-      undoSeq.current = null;
-      undoWrite.current = null;
-      flash(`Back on your desk: ${shortRef(c)}`);
-    } catch (e) {
-      flash(message(e), true);
-    }
-    refresh(0);
+  function back(c: Card): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      if (!c.inflight) {
+        flash(`${shortRef(c)} isn't in Merging`);
+        return Effect.void;
+      }
+      return api.act(c.id, "takeback").pipe(
+        Effect.match({
+          onSuccess: () => {
+            undoSeq.current = null;
+            undoWrite.current = null;
+            flash(`Back on your desk: ${shortRef(c)}`);
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.andThen(refreshNow),
+      );
+    });
   }
 
   // Ready for review on GitHub, from its row or its review (asking whoever was picked there). Only the review request
   // failing leaves it ready, so it stays gone and the toast says who to ask.
-  function markReady(c: Card, picked: Reviewer[] = []) {
+  function ready(c: Card, picked: Reviewer[] = []): Effect.Effect<boolean> {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
-    void finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, async () => {
-      try {
-        await api.ready(c.id, ask);
-      } catch (e) {
-        if (!message(e).startsWith("Marked it ready")) throw e;
-        return { text: `${message(e)}. Ask ${names} on GitHub.`, error: true };
-      }
-      return { text: `Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub` };
-    });
+    const write = api.ready(c.id, ask).pipe(
+      Effect.as({ text: `Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub` }),
+      Effect.catchTag("ReviewersNotAsked", (e) => Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true })),
+    );
+    return finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, write);
+  }
+
+  function markReady(c: Card, picked: Reviewer[] = []) {
+    void runUi(ready(c, picked));
   }
 
   // Ask reviewers in the review of your ready PR nobody's asked to review: it leaves your desk until someone reviews.
   function askReviewers(c: Card, picked: Reviewer[]) {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
-    void finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, async () => {
-      await api.askReviewers(c.id, ask);
-      return { text: `Asked ${names} to review ${shortRef(c)} on GitHub` };
-    });
+    const write = api.askReviewers(c.id, ask).pipe(Effect.as({ text: `Asked ${names} to review ${shortRef(c)} on GitHub` }));
+    void runUi(finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, write));
   }
 
   // Your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
   // refusal keeps your words in it.
-  function comment(c: Card, body: string): Promise<boolean> {
-    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, async () => {
-      await api.comment(c.id, body);
-      return { text: `Commented on ${shortRef(c)} on GitHub` };
-    });
+  function comment(c: Card, body: string): Effect.Effect<boolean> {
+    const write = api.comment(c.id, body).pipe(Effect.as({ text: `Commented on ${shortRef(c)} on GitHub` }));
+    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write);
   }
 
   // Approve in a review: approved on GitHub, pinned to the commit the review showed.
   function approve(c: Card, head: string) {
-    void finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, async () => {
-      await api.approve(c.id, head);
-      return { text: `Approved ${shortRef(c)} on GitHub` };
-    });
+    const write = api.approve(c.id, head).pipe(Effect.as({ text: `Approved ${shortRef(c)} on GitHub` }));
+    void runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write));
   }
 
   // A button that opens its row's menu, at the button: an opened issue's Snooze, with Snooze open.
@@ -732,34 +799,35 @@ export function App() {
 
   // A More menu write, from a row's menu or a review (head: the commit the review showed; body: Request changes' words). Close,
   // merge and Request changes finish your part, so it leaves your desk at once; draft and reopen keep it where it is.
-  async function github(c: Card, action: GitHubAction, head?: string, body?: string): Promise<boolean> {
+  function github(c: Card, action: GitHubAction, head?: string, body?: string): Effect.Effect<boolean> {
     // The same as Ready for review: off your desk at once, into the Archive.
-    if (action === "ready") {
-      markReady(c);
-      return true;
-    }
-    const write = async () => {
-      await api.github(c.id, action, { ...(head ? { head_oid: head } : {}), ...(body ? { body } : {}) });
-      undoSeq.current = null;
-      const to = action === "close" && c.kind === "pr" ? "reopen" : action === "draft" ? "ready" : null;
-      undoWrite.current = to && { id: c.id, to };
-      return { text: `${DID[action]}: ${shortRef(c)}`, undo: !!to };
-    };
+    if (action === "ready") return ready(c);
+    const write = api.github(c.id, action, { ...(head ? { head_oid: head } : {}), ...(body ? { body } : {}) }).pipe(
+      Effect.map(() => {
+        undoSeq.current = null;
+        const to = action === "close" && c.kind === "pr" ? "reopen" : action === "draft" ? "ready" : null;
+        undoWrite.current = to && { id: c.id, to };
+        return { text: `${DID[action]}: ${shortRef(c)}`, undo: !!to };
+      }),
+    );
     if (action === "close" || action === "merge" || action === "request_changes") {
       const verb = action === "close" ? "Closing" : action === "merge" ? "Merging" : "Requesting changes on";
       const what = action === "close" ? "Closed" : action === "merge" ? "Merged" : "Requested changes";
       return finish(c, `${verb} ${shortRef(c)} on GitHub\u2026`, { what, where: "archive" }, write);
     }
-    try {
-      const r = await write();
-      flash(r.text, false, r.undo);
-      return true;
-    } catch (e) {
-      flash(message(e), true);
-      return false;
-    } finally {
-      refresh(0);
-    }
+    return write.pipe(
+      Effect.match({
+        onSuccess: (r) => {
+          flash(r.text, false, r.undo);
+          return true;
+        },
+        onFailure: (e) => {
+          flash(e.message, true);
+          return false;
+        },
+      }),
+      Effect.ensuring(refreshNow),
+    );
   }
 
   // Ask your agent: your chat with your agent, about what you're on: the review's PR and the spot you were last on, a row, or nothing.
@@ -799,20 +867,28 @@ export function App() {
   }
 
   // Copy attach command copies `claude attach <id>`; Wake it starts your agent, or has it look at Merging now.
-  async function coordinatorAct(k: "copy" | "wake") {
+  function coordinatorAct(k: "copy" | "wake"): Effect.Effect<void> {
     const id = lane?.coordinator.id;
-    try {
-      if (k === "wake") {
-        await api.wakeCoordinator();
-        flash(id ? "Asked your agent to look at Merging." : "Started your agent.");
-        refresh(0);
-      } else if (id) {
-        await copyText(`claude attach ${id}`);
-        flash("Copied. Run it in a terminal to open your agent.");
-      }
-    } catch (e) {
-      flash(message(e), true);
-    }
+    const step: Effect.Effect<void, ApiError | ClipboardUnavailable> =
+      k === "wake"
+        ? api.wakeCoordinator().pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                flash(id ? "Asked your agent to look at Merging." : "Started your agent.");
+                refresh(0);
+              }),
+            ),
+          )
+        : id
+          ? copyText(`claude attach ${id}`).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  flash("Copied. Run it in a terminal to open your agent.");
+                }),
+              ),
+            )
+          : Effect.void;
+    return step.pipe(Effect.catch(failed));
   }
 
   function run(c: Card, k: string) {
@@ -827,17 +903,17 @@ export function App() {
         if (expanded !== c.id) toggle(c);
         setShowSignals(true);
       }
-    } else if (k === "b") void back(c);
+    } else if (k === "b") void runUi(back(c));
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOff(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
-      void seen(c);
-    } else if (k === "e" || k === "d") void act(c, c.status === "active" ? "done" : "restore");
-    else if (k === "m") void act(c, c.status === "muted" ? "unmute" : "mute");
-    else if (k === "p") void act(c, c.pinned ? "unpin" : "pin");
+      void runUi(seen(c));
+    } else if (k === "e" || k === "d") void runUi(act(c, c.status === "active" ? "done" : "restore"));
+    else if (k === "m") void runUi(act(c, c.status === "muted" ? "unmute" : "mute"));
+    else if (k === "p") void runUi(act(c, c.pinned ? "unpin" : "pin"));
     else if (k === "comment") {
       // An issue opened in place: Comment opens the comment bar.
       setAsking(null);
@@ -942,7 +1018,8 @@ export function App() {
     menu: openRowMenu,
   };
   const configErrors = overview?.config_errors.length ?? 0;
-  const broken = configBroken(down);
+  const offline = down?._tag === "DeskUnreachable";
+  const broken = down?._tag === "DeskConfigBroken" ? down : null;
 
   return (
     <div className="app">
@@ -950,7 +1027,7 @@ export function App() {
       <div className="col">
         <TopBar
           overview={overview}
-          offline={down === UNREACHABLE}
+          offline={offline}
           now={now}
           route={route}
           from={reviewFrom}
@@ -958,7 +1035,7 @@ export function App() {
           filter={filter}
           setFilter={setFilter}
           onSync={() => {
-            void sync();
+            void runUi(sync());
           }}
           ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
           waiting={route.name === "review" && askWaiting}
@@ -969,19 +1046,19 @@ export function App() {
         <main className="main">
           {sourceDown && <SourceNotice s={sourceDown} />}
           {down && !broken && !sourceDown && (
-            <div className={cls("notice", down === UNREACHABLE ? "err" : "warn")} role="alert">
-              {down === UNREACHABLE ? (
+            <div className={cls("notice", offline ? "err" : "warn")} role="alert">
+              {offline ? (
                 <span>
                   The desk server isn't running. Start it with <code>desk serve</code> or open the desktop app.
                 </span>
               ) : (
-                <span>{down}</span>
+                <span>{down.message}</span>
               )}
               <button
                 type="button"
                 className="btn"
                 onClick={() => {
-                  void load();
+                  void runUi(load());
                 }}
               >
                 Retry
@@ -990,7 +1067,9 @@ export function App() {
           )}
           {broken && !(route.name === "settings" && route.section === "rules") && (
             <div className="notice err" role="alert">
-              <span>Your rules don't load, so there's nothing on your desk yet. {down!.replace(/^config has errors:\s*/, "")}</span>
+              <span>
+                Your rules don't load, so there's nothing on your desk yet. {broken.message.replace(/^config has errors:\s*/, "")}
+              </span>
               <a className="btn" href="#/settings/rules">
                 Fix rules
               </a>
@@ -1117,7 +1196,7 @@ export function App() {
               selected={laneCur?.card.id ?? null}
               select={setLaneSel}
               act={(k) => {
-                void coordinatorAct(k);
+                void runUi(coordinatorAct(k));
               }}
               open={(r) => {
                 setLaneSel(r.card.id);
@@ -1184,7 +1263,7 @@ export function App() {
               type="button"
               className="toast-btn"
               onClick={() => {
-                void undo();
+                void runUi(undo());
               }}
             >
               Undo
@@ -1203,10 +1282,10 @@ export function App() {
           agent={!!overview?.agent}
           run={run}
           act={(c, a, until) => {
-            void act(c, a, until);
+            void runUi(act(c, a, until));
           }}
           github={(c, a) => {
-            void github(c, a);
+            void runUi(github(c, a));
           }}
           reopen={(x, y) => {
             const under = document.elementsFromPoint(x, y).find((n) => !n.closest(".ctx, .scrim-clear"));

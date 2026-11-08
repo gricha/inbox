@@ -1,21 +1,24 @@
+import { Effect } from "effect";
 import type { ReviewView } from "../../src/types.ts";
-import { api } from "./api.ts";
+import { api, runUi, type ApiError } from "./api.ts";
 
 const JOIN_MS = 2_000; // an open while the last one's GET is still out (StrictMode's second effect) shares it
 const DWELL_MS = 150; // the cursor or the pointer rests this long on a row before its review is fetched ahead
 
-let last: { id: string; at: number; p: Promise<ReviewView> } | null = null;
+let last: { id: string; at: number; review: Effect.Effect<ReviewView, ApiError> } | null = null;
 
-// An open asks the desk, which starts its AI review; only once for the same PR opened twice in a row.
-export function reviewOf(id: string, get = api.review, now = Date.now()): Promise<ReviewView> {
-  if (last?.id === id && now - last.at < JOIN_MS) return last.p;
-  const p = get(id);
-  last = { id, at: now, p };
+// An open asks the desk, which starts its AI review; only once for the same PR opened twice in a row. The GET runs on its
+// own, outside the opener's fiber: StrictMode interrupting its first effect leaves it running for the second.
+export function reviewOf(id: string, get = api.review, now = Date.now()): Effect.Effect<ReviewView, ApiError> {
+  if (last?.id === id && now - last.at < JOIN_MS) return last.review;
+  const p = Effect.runPromiseExit(get(id));
+  const review = Effect.flatten(Effect.promise(() => p));
+  last = { id, at: now, review };
   const settled = () => {
-    if (last?.p === p) last = null;
+    if (last?.review === review) last = null;
   };
-  p.then(settled, settled); // once it answers, a refresh asks again
-  return p;
+  void p.then(settled); // once it answers, a refresh asks again
+  return review;
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -29,6 +32,6 @@ export function restOn(id: string | null, get = api.review): void {
   clearTimeout(timer);
   if (id)
     timer = setTimeout(() => {
-      get(id, true).catch(() => {}); // opening it says what went wrong
+      void runUi(get(id, true).pipe(Effect.ignore)); // opening it says what went wrong
     }, DWELL_MS);
 }

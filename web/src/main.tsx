@@ -2,6 +2,7 @@ import { Component, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { reactErrors } from "./sentry.ts";
+import { getStored, setStored } from "./storage.ts";
 import "./styles.css";
 
 const KEY = "desk.crash_reload_at";
@@ -17,11 +18,8 @@ class Reload extends Component<{ children: ReactNode }, { error: Error | null }>
 
   override componentDidCatch(error: Error) {
     console.error(error);
-    let last = 0;
-    try {
-      last = Number(sessionStorage.getItem(KEY)) || 0;
-      sessionStorage.setItem(KEY, String(Date.now()));
-    } catch {}
+    const last = Number(getStored(KEY, true)) || 0; // storage off: it can't tell a second crash, so it reloads
+    setStored(KEY, String(Date.now()), true);
     if (Date.now() - last > 10_000) location.reload();
   }
 

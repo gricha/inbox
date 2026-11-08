@@ -1,6 +1,7 @@
+import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewResult } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde } from "../format.ts";
 import { lineOf } from "../view.ts";
 import { ActButton } from "./Detail.tsx";
@@ -34,74 +35,118 @@ export function Rules({
   const latest = useRef({ doc, text });
   latest.current = { doc, text };
 
-  const load = useCallback(async () => {
-    try {
-      const c = await api.config();
-      const { doc: d, text: t } = latest.current;
-      if (d !== null && t !== d.text) return; // you started editing while this was in flight
-      if (!d || d.text !== c.text || d.path !== c.path) {
-        setDoc({ path: c.path, text: c.text });
-        setText(c.text);
-        setPreview(null);
-      }
-      setErrors(c.errors);
-      setWarnings(c.warnings ?? []);
-      setHard(c.hard);
-      setLoadError("");
-    } catch (e) {
-      setLoadError(message(e));
-    }
-  }, []);
+  const load = useCallback(
+    (): Effect.Effect<void> =>
+      api.config().pipe(
+        Effect.match({
+          onSuccess: (c) => {
+            const { doc: d, text: t } = latest.current;
+            if (d !== null && t !== d.text) return; // you started editing while this was in flight
+            if (!d || d.text !== c.text || d.path !== c.path) {
+              setDoc({ path: c.path, text: c.text });
+              setText(c.text);
+              setPreview(null);
+            }
+            setErrors(c.errors);
+            setWarnings(c.warnings ?? []);
+            setHard(c.hard);
+            setLoadError("");
+          },
+          onFailure: (e) => {
+            setLoadError(e.message);
+          },
+        }),
+      ),
+    [],
+  );
 
   useEffect(() => {
-    api.fields().then(setFields, () => {});
+    const stop = new AbortController();
+    // The fields' help is a side list: the editor works without it.
+    void runUi(api.fields().pipe(Effect.map(setFields), Effect.ignore), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
   }, []);
 
   // Re-read the file each time the page opens: it may have been edited outside (desk config edit, an editor).
   useEffect(() => {
     // Read through the ref: finishing an edit (dirty to clean) must not trigger a re-read.
     const { doc: d, text: t } = latest.current;
-    if (active && (d === null || t === d.text)) void load();
+    const stop = new AbortController();
+    if (active && (d === null || t === d.text)) void runUi(load(), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
   }, [active, load, refresh]);
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
 
-  async function runPreview() {
+  const idle = Effect.sync(() => {
+    setBusy("");
+  });
+
+  function runPreview() {
     setBusy("preview");
-    try {
-      const result = await api.preview(text);
-      setPreview({ text, result });
-      setErrors(result.errors);
-    } catch (e) {
-      flash(message(e), true);
-    } finally {
-      setBusy("");
-    }
+    void runUi(
+      api.preview(text).pipe(
+        Effect.match({
+          onSuccess: (result) => {
+            setPreview({ text, result });
+            setErrors(result.errors);
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.ensuring(idle),
+      ),
+    );
   }
 
-  async function save() {
+  function save() {
     setBusy("save");
-    try {
-      const r = await api.saveConfig(text, doc?.text);
-      setErrors(r.errors);
-      if (r.ok) {
-        setDoc((d) => d && { ...d, text });
-        setPreview(null);
-        flash("Saved. Syncing with the new rules.");
-        onSaved();
-      } else flash(`Not saved: ${r.errors.length} ${r.errors.length === 1 ? "error" : "errors"}`, true);
-    } catch (e) {
-      if ((e as { status?: number }).status === 409) {
-        // The file changed under us: keep your edit, take the new file as the base, and say so.
-        const c = await api.config().catch(() => null);
-        if (c) setDoc({ path: c.path, text: c.text });
-        flash("config.toml changed on disk. Your edit is still here: Revert loads the new file, Save again overwrites it.", true);
-      } else flash(message(e), true);
-    } finally {
-      setBusy("");
-    }
+    void runUi(
+      api.saveConfig(text, doc?.text).pipe(
+        Effect.tap((r) =>
+          Effect.sync(() => {
+            setErrors(r.errors);
+            if (r.ok) {
+              setDoc((d) => d && { ...d, text });
+              setPreview(null);
+              flash("Saved. Syncing with the new rules.");
+              onSaved();
+            } else flash(`Not saved: ${r.errors.length} ${r.errors.length === 1 ? "error" : "errors"}`, true);
+          }),
+        ),
+        Effect.catch((e) =>
+          e._tag === "DeskConflict" && e.kind === "Stale"
+            ? // The file changed under us: keep your edit, take the new file as the base, and say so.
+              api.config().pipe(
+                Effect.tap((c) =>
+                  Effect.sync(() => {
+                    setDoc({ path: c.path, text: c.text });
+                  }),
+                ),
+                Effect.ignore, // no new base: the toast still says why it wasn't saved
+                Effect.andThen(
+                  Effect.sync(() => {
+                    flash(
+                      "config.toml changed on disk. Your edit is still here: Revert loads the new file, Save again overwrites it.",
+                      true,
+                    );
+                  }),
+                ),
+              )
+            : Effect.sync(() => {
+                flash(e.message, true);
+              }),
+        ),
+        Effect.ensuring(idle),
+      ),
+    );
   }
 
   // Window-level so ⌘S / ⌘↵ work wherever focus is on this page; a ref keeps the latest text.
@@ -111,10 +156,10 @@ export function Rules({
     if (!(e.metaKey || e.ctrlKey) || document.activeElement?.closest("[data-own-save]")) return;
     if (e.key.toLowerCase() === "s") {
       e.preventDefault();
-      if (!busy && dirty) void save();
+      if (!busy && dirty) save();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (!busy) void runPreview();
+      if (!busy) runPreview();
     }
   };
   useEffect(() => {
@@ -188,7 +233,7 @@ export function Rules({
             type="button"
             className="btn"
             onClick={() => {
-              void load();
+              void runUi(load());
             }}
           >
             Retry
@@ -223,7 +268,7 @@ export function Rules({
               title={`Save (${MOD}S)`}
               disabled={!!busy || !dirty}
               run={() => {
-                void save();
+                save();
               }}
             />
             <ActButton
@@ -231,7 +276,7 @@ export function Rules({
               title={`Preview changes (${MOD}\u21b5)`}
               disabled={!!busy}
               run={() => {
-                void runPreview();
+                runPreview();
               }}
             />
             <ActButton
