@@ -1341,6 +1341,24 @@ test("turning auto reviews off and on lifts the pause and tries the failed PRs a
   t.cleanup();
 });
 
+test("reviews that fail at once still start two at a time and pause the rest", async (c) => {
+  const t = await setup([ask(1), ask(2), ask(3), ask(4)]);
+  c.after(t.cleanup);
+  const started: string[] = [];
+  t.desk.review = {
+    fetchPr: () => Effect.succeed({ body: "why", files: [FILE] } satisfies PrText),
+    generate: (item) =>
+      Effect.suspend(() => {
+        started.push(item.id);
+        return Effect.fail(new ClaudeApiError({ message: "boom" }));
+      }),
+  };
+  await t.sync();
+  assert.equal(started.length, 2, "it started all four: a run that ended before the pump looked again freed its slot");
+  assert.ok(t.desk.aiPausedNow());
+  assert.equal(t.logs.filter((l) => l.endsWith("failed: boom")).length, 2);
+});
+
 // ---------------------------------------------------------------- pre-flight on the queue's cards
 
 test("someone else's PR reaches the queue once Claude has reviewed it; then its card carries the pre-flight, stale after a push", async () => {

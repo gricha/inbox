@@ -1802,13 +1802,18 @@ export class Desk {
   // Background AI reviews, a couple at a time, in the queue's order: Now, then Today from the top, so the cards on screen
   // are ready first. After a failure it waits for the next sync.
   pumpAi(): void {
-    if (this.stopped || !this.loaded || !this.autoAi() || this.generating.size >= AI_AT_ONCE) return;
+    if (this.stopped || !this.loaded || !this.autoAi()) return;
+    let room = AI_AT_ONCE - this.generating.size; // counted here: a run that fails at once frees its slot before startAi returns
+    if (room <= 0) return;
     const snap = this.snapshot();
     const top = this.top(snap, new Set(), true);
     for (const c of [...top.now, ...top.today]) {
-      if (this.generating.size >= AI_AT_ONCE) return;
+      if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
       const e = snap.entries.get(c.id);
-      if (e && this.wantsAi(e, snap)) this.startAi(c.id);
+      if (e && this.wantsAi(e, snap)) {
+        this.startAi(c.id);
+        room--;
+      }
     }
   }
 
