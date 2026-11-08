@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createClient as createDeskClient } from "../src/client.ts";
 import { createClient } from "../src/github/client.ts";
 import { ALLOWED, createWriter } from "../src/github/write.ts";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { failure, run } from "./helpers/run.ts";
 
 function fakeFetch(reply: { status?: number; body: unknown }) {
@@ -216,6 +219,54 @@ test("a write with no answer (a timeout, the network) may have landed: it's unce
     assert.equal(calls, 1);
   }
 });
+
+test(
+  "a gh auth token that never answers fails the write in 30 s, uninterruptible or not: nothing is sent and that gh is stopped",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "desk-gh-"));
+    const pidFile = path.join(bin, "pid");
+    // A keychain prompt nobody answers; it gives up after 5 s with no token, so a write with no timeout of its own is sent.
+    fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 5\n`, { mode: 0o755 });
+    const env = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+    t.after(() => {
+      process.env.PATH = env.PATH;
+      if (env.GITHUB_TOKEN !== undefined) process.env.GITHUB_TOKEN = env.GITHUB_TOKEN;
+      fs.rmSync(bin, { recursive: true, force: true });
+    });
+    process.env.PATH = `${bin}${path.delimiter}${env.PATH ?? ""}`;
+    delete process.env.GITHUB_TOKEN;
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const f = fakeFetch({ body: { data: {} } });
+    const write = failure(Effect.uninterruptible(createWriter({ fetch: f.fetch }).close("PR_1")));
+    const started = async () => {
+      for (const until = Date.now() + 4000; Date.now() < until;) {
+        const text = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8").trim() : "";
+        if (text) return Number(text);
+        await new Promise((r) => {
+          setImmediate(r);
+        });
+      }
+      return 0;
+    };
+    const gh = await started();
+    assert.ok(gh > 0, "the fake gh started");
+    t.mock.timers.tick(30_000);
+    const e = await write;
+    assert.deepEqual(
+      [e._tag, e._tag === "GitHubAuthError" && e.reason, e.message],
+      ["GitHubAuthError", "no_token", "gh auth token didn't answer in 30 s: run it in a terminal"],
+    );
+    assert.equal(f.calls.length, 0, "nothing sent");
+    const alive = () => !Result.isFailure(Result.try(() => process.kill(gh, 0)));
+    const until = Date.now() + 2000;
+    while (alive() && Date.now() < until)
+      await new Promise((r) => {
+        setImmediate(r);
+      });
+    assert.equal(alive(), false, "the gh that didn't answer is stopped");
+  },
+);
 
 test("a write GitHub answered 2xx with something unreadable may have landed: it's uncertain, in the parser's words", async () => {
   const fetch: typeof globalThis.fetch = () => Promise.resolve(new Response("<html>oops</html>", { status: 200 }));

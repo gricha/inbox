@@ -129,7 +129,10 @@ but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` 
   can't start one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an
   `Effect.callback` too, and interrupted it stops a `gh` that started and signals nothing for one that didn't
   (`execFile`'s `signal` option sent SIGTERM to the desk's own process group, the desktop app's included, when `gh`
-  wasn't there).
+  wasn't there). Deliberate change, with a test: a `gh auth token` that doesn't answer in 30 s is stopped and fails
+  with `GitHubAuthError` "gh auth token didn't answer in 30 s: run it in a terminal" (a write reads it inside its
+  uninterruptible region, so a keychain prompt nobody answered hung the write, and held its lock, until the desk
+  restarted).
 - Retries: GitHub reads retry with
   `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
   3 attempts, the delay then 3× it, no jitter, a log line for each retry. Not the `{ times, while }` options together
@@ -144,7 +147,7 @@ but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` 
 - **A write and what the desk records after it are one `Effect.uninterruptible` region**: the GitHub write (approve,
   reply, comment, inline, ready and asking reviewers, the More menu's), then `logWrite`, `doneAfterWrite`/`act`/`undo`,
   `wrote`, and `ask`'s rollback. A request going away never cancels a write the desk started or skips its bookkeeping;
-  the write's own timeout still applies inside it. Never `restore` around the write.
+  the write's own timeouts (its token read's and its fetch's) still apply inside it. Never `restore` around the write.
 - Locks (`approving`, `sending`): checked and taken at the start of the write's uninterruptible region (`Desk.locked`)
   and released by its `Effect.ensuring` at the end, so nothing can interrupt between taking the lock and the write; a
   held lock fails at once with `Busy`, never queues.

@@ -20,13 +20,18 @@ const MIN_REMAINING = 200;
 // Per-node errors that leave the rest of the response usable: a deleted node, or one the token can't see (e.g. SAML).
 const PARTIAL = new Set(["NOT_FOUND", "FORBIDDEN"]);
 export const GH_MISSING = "GitHub CLI (gh) not found: install it from https://cli.github.com and run gh auth login, or set GITHUB_TOKEN";
+const TOKEN_TIMEOUT_MS = 30_000;
+const GH_SLOW = "gh auth token didn't answer in 30 s: run it in a terminal";
 
 export function readToken(token?: string): Effect.Effect<string, GitHubAuthError> {
   return Effect.suspend((): Effect.Effect<string, GitHubAuthError> => {
     if (token) return Effect.succeed(token);
     if (process.env.GITHUB_TOKEN) return Effect.succeed(process.env.GITHUB_TOKEN);
     return Effect.callback<string, GitHubAuthError>((resume) => {
+      let late = false;
       const child = execFile("gh", ["auth", "token"], (err, stdout) => {
+        clearTimeout(timer);
+        if (late) return;
         if (!err) {
           resume(Effect.succeed(stdout.trim()));
           return;
@@ -40,8 +45,16 @@ export function readToken(token?: string): Effect.Effect<string, GitHubAuthError
           ),
         );
       });
+      // A write reads it where nothing interrupts it, so a gh that never answers (a keychain prompt) is given up here.
+      const timer = setTimeout(() => {
+        late = true;
+        if (child.pid !== undefined) child.kill();
+        resume(Effect.fail(new GitHubAuthError({ reason: "no_token", message: GH_SLOW })));
+      }, TOKEN_TIMEOUT_MS);
+      timer.unref(); // the running gh keeps the process up; this alone mustn't
       // Interrupted, a gh that started is stopped. Not execFile's signal: for one that didn't start it signals the desk's own group.
       return Effect.sync(() => {
+        clearTimeout(timer);
         if (child.pid !== undefined) child.kill();
       });
     });
