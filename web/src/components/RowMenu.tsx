@@ -244,6 +244,7 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
                   </button>
                   {sub && (
                     <SnoozeSub
+                      top={pos.top}
                       options={snoozes}
                       pick={(until) => {
                         choose({ snooze: until });
@@ -259,14 +260,26 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
   );
 }
 
-function SnoozeSub({ options, pick }: { options: ReturnType<typeof snoozeOptions>; pick: (until: string) => void }) {
+function SnoozeSub({
+  top,
+  options,
+  pick,
+}: {
+  top: number; // its menu's, once placed: it opens with its menu, before the menu moves up to fit the window
+  options: ReturnType<typeof snoozeOptions>;
+  pick: (until: string) => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [shift, setShift] = useState(0);
-  // Up as far as it would run past the window's bottom.
+  const shifted = useRef(0);
+  // Up as far as it would run past the window's bottom, from where its menu is now.
   useLayoutEffect(() => {
     const r = box.current?.getBoundingClientRect();
-    if (r) setShift(Math.min(0, innerHeight - 8 - r.bottom));
-  }, []);
+    if (!r) return;
+    shifted.current = Math.min(0, innerHeight - 8 - (r.bottom - shifted.current));
+    setShift(shifted.current);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- top only says its menu has moved
+  }, [top]);
   return (
     <div ref={box} className="ctx ctx-sub" role="menu" aria-label="Snooze" style={{ transform: `translateY(${shift}px)` }}>
       {options.map((o) => (
