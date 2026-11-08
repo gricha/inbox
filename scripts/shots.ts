@@ -311,10 +311,29 @@ const systemTheme = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
 // A Settings part's status rows, by their labels, top to bottom.
 const statusRows = (page: Page, part: string) =>
   page.evaluate<string[]>(`[...document.querySelectorAll("#s-${part} .s-status .s-label")].map((l) => l.textContent.trim())`);
+// Settings as the mock serves it, changed in the browser, from a fresh load since the window reads it once; unsettle undoes it.
+const settingsAs = (change: (v: SettingsView) => void) => async (page: Page) => {
+  await page.route("**/api/settings", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const res = await route.fetch();
+    const v = (await res.json()) as SettingsView;
+    change(v);
+    await route.fulfill({ response: res, json: v });
+  });
+  await at("#/")(page);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+const unsettle = async (page: Page) => {
+  await unroute(page);
+  await at("#/")(page);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+// The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
 const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
 // The page head's words: a list's filter, a review's way back, or the page's name.
@@ -1810,15 +1829,9 @@ const SHOTS: Shot[] = [
     // GitHub's last sync failed on its login: the status row's help is the error in red, with the fix.
     name: "settings-github-error",
     go: async (page) => {
-      await page.route("**/api/settings", async (route) => {
-        const res = await route.fetch();
-        const v = (await res.json()) as SettingsView;
+      await settingsAs((v) => {
         v.github.error = "GitHub rejected the token (HTTP 401)";
-        await route.fulfill({ response: res, json: v });
-      });
-      await at("#/")(page);
-      await page.reload();
-      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      })(page);
       await at("#/settings/github")(page);
       const help = await page.evaluate<{ text: string; red: boolean } | null>(`(() => {
         const h = document.querySelector("#s-github .s-status .s-help");
@@ -1827,14 +1840,27 @@ const SHOTS: Shot[] = [
       if (!help?.red || !help.text.includes("Run gh auth login in a terminal, then sync."))
         failures.push(`settings-github-error: the status row's help reads ${JSON.stringify(help)}`);
     },
-    after: async (page) => {
-      await unroute(page);
-      await at("#/")(page);
-      await page.reload();
-      await page.locator(READY).first().waitFor({ timeout: 15_000 });
-    },
+    after: unsettle,
   },
   { name: "settings-queue", go: at("#/settings/queue") },
+  {
+    // Notifications off: quiet hours has nothing to do, so its words and its field are greyed and the field takes nothing.
+    name: "settings-queue-off",
+    go: async (page) => {
+      await settingsAs((v) => {
+        v.values["notify.enabled"] = false;
+      })(page);
+      await at("#/settings/queue")(page);
+      const quiet = await page.evaluate<{ off: boolean; disabled: boolean } | null>(`(() => {
+        const row = document.getElementById("row-notify.quiet"), field = document.getElementById("setting-notify.quiet");
+        return row && field && { off: row.classList.contains("s-off"), disabled: field.disabled };
+      })()`);
+      if (!quiet?.off || !quiet.disabled) failures.push(`settings-queue-off: quiet hours isn't greyed: ${JSON.stringify(quiet)}`);
+      if (await page.evaluate<boolean>(`document.getElementById("setting-notify.enabled").disabled`))
+        failures.push("settings-queue-off: Notify me is greyed too");
+    },
+    after: unsettle,
+  },
   {
     // Searches and rules, a view of its own: the head's way back to Settings, its name, the column at 1180px, and Save on screen.
     name: "settings-rules",
@@ -1892,6 +1918,20 @@ const SHOTS: Shot[] = [
       const filled = await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Claude Code" }).isVisible();
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
     },
+  },
+  {
+    // Your agent off: letting it run without asking would do nothing, so that row isn't drawn; Run your agent is.
+    name: "settings-agent-off",
+    go: async (page) => {
+      await settingsAs((v) => {
+        v.values["agent.coordinator"] = false;
+      })(page);
+      await at("#/settings/agent")(page);
+      if (await page.locator('[id="row-agent.coordinator_bypass"]').count())
+        failures.push("settings-agent-off: Let your agent run without asking is drawn while your agent is off");
+      if (!(await page.locator('[id="row-agent.coordinator"]').isVisible())) failures.push("settings-agent-off: no Run your agent row");
+    },
+    after: unsettle,
   },
   {
     // Claude Code has the tools and the skill: nothing to say, so no status row and no Connect anywhere.
@@ -1965,10 +2005,16 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // On Settings the sidebar marks Settings, none of the pages, and the page head names it.
+    // On Settings the sidebar marks Settings, none of the pages, and the page head names it; in a browser This device is the
+    // theme alone (the mac size has the app's bridge: settings-app-desktop).
     name: "settings-app",
     go: async (page) => {
       await at("#/settings/app")(page);
+      const rows = await page.evaluate<string[]>(
+        `[...document.querySelectorAll("#s-app .setting")].map((r) => r.id || r.querySelector(".input")?.id)`,
+      );
+      if (!(await page.evaluate<boolean>("!!window.desktop")) && rows.join() !== "s-theme")
+        failures.push(`settings-app: This device in a browser has ${JSON.stringify(rows)}, not the theme alone`);
       const on = await sideOn(page);
       if (on !== "Settings") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
       const head = await headSays(page);
@@ -1976,6 +2022,24 @@ const SHOTS: Shot[] = [
       if (await page.locator(".page-head a.back").count()) failures.push("settings-app: the page head is a way back");
       const col = await page.evaluate<string>(`getComputedStyle(document.querySelector(".main")).maxWidth`);
       if (col !== "760px") failures.push(`settings-app: the column is ${col}, not 760px`);
+    },
+  },
+  {
+    // The macOS app: This device has its rows after the theme, and the shortcut's line comes from the app's status().
+    name: "settings-app-desktop",
+    sizes: ["mac"],
+    go: async (page) => {
+      await at("#/settings/app")(page);
+      // Back on the part Settings last showed, App's scroll to the top wins over Settings' to the part; settings-aliases checks landing.
+      await page.evaluate(`document.getElementById("s-app").scrollIntoView({ block: "start" })`);
+      const missing = await page.evaluate<string[]>(
+        `["app.hotkey", "app.open_at_login", "app.menu_bar_count", "app.source"].filter((k) => !document.getElementById("row-" + k)?.getClientRects().length)`,
+      );
+      if (missing.length) failures.push(`settings-app-desktop: no ${missing.join(", ")} row`);
+      const live = page.locator('[id="row-app.hotkey"] .s-live');
+      await live.waitFor({ timeout: 3000 }).catch(() => {});
+      const says = (await live.count()) ? await live.textContent() : null;
+      if (!says?.includes("Control+Alt+D")) failures.push(`settings-app-desktop: the shortcut's line reads ${JSON.stringify(says)}`);
     },
   },
   {
@@ -2317,10 +2381,11 @@ try {
         colorScheme: theme,
         deviceScaleFactor: 2,
       });
-      // Init scripts run before <html> exists, so set the desktop markers once it does.
+      // The macOS app's bridge (electron/preload.cjs) with only status() faked: App takes the shell's markers from it, and
+      // Settings → This device draws the app's rows. No theme, so the theme stays in localStorage as in a browser.
       if (size.mac) {
         await page.addInitScript(
-          `document.addEventListener("DOMContentLoaded", () => { document.documentElement.dataset.shell = "desktop"; document.documentElement.dataset.platform = "darwin"; });`,
+          `window.desktop = { platform: "darwin", version: "0.0.0", status: async () => window.__deskStatus ?? { hotkey: { accelerator: "Control+Alt+D", ok: true }, open_at_login: false, source: null } };`,
         );
       }
       page.on("console", (m) => {

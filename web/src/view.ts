@@ -80,6 +80,25 @@ export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | und
 // Where a Settings view's back link and Esc go: the part it opened from; null on the page itself.
 export const settingsBack = (section: string): string | null => SETTINGS_VIEWS[section]?.part ?? null;
 
+// The desktop app's bridge as far as Settings' rows care (window.desktop): absent in a browser.
+type Shell = { platform: string } | undefined;
+type Values = Record<string, SettingValue>;
+const inApp = (_: Values, app: Shell) => app !== undefined;
+
+// Settings' rows that would do nothing here aren't drawn, by key; `desk settings` and settings.json still set them.
+export const SHOWN: Record<string, ((values: Values, app: Shell) => boolean) | undefined> = {
+  "agent.coordinator_bypass": (v) => v["agent.coordinator"] !== false,
+  "app.hotkey": inApp,
+  "app.open_at_login": inApp,
+  "app.menu_bar_count": (_, app) => app?.platform === "darwin", // only macOS's tray draws a title beside the icon
+  "app.source": inApp,
+};
+
+// Rows greyed while another setting leaves them nothing to do, by key.
+export const DISABLED: Record<string, ((values: Values) => boolean) | undefined> = {
+  "notify.quiet": (v) => v["notify.enabled"] === false,
+};
+
 export function parseRoute(hash: string): Route {
   const m = hash.match(/^#\/settings(?:\/([\w-]*))?\/?$/);
   if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };

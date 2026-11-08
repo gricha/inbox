@@ -24,11 +24,13 @@ import {
   agentNeeds,
   authProblem,
   connectCommands,
+  DISABLED,
   draftOf,
   judgeStatusText,
   routeHash,
   SETTINGS_VIEWS,
   settingsBack,
+  SHOWN,
   valueOf,
 } from "../view.ts";
 import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
@@ -43,10 +45,11 @@ interface FieldProps {
   clear: () => void;
   id: string;
   invalid: boolean;
+  disabled: boolean;
 }
 
 // A refetch updates the draft only while you aren't editing it, and a rejected draft stays for you to fix.
-function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
+function useDraft({ def, value, commit, clear, id, invalid, disabled }: FieldProps) {
   const shown = draftOf(value);
   const [draft, setDraft] = useState(shown);
   const typed = useRef(false);
@@ -90,6 +93,7 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
     bind: {
       id,
       value: draft,
+      disabled,
       "aria-invalid": invalid,
       "aria-describedby": `${id}-msg`,
       spellCheck: false,
@@ -168,7 +172,7 @@ function ListField(p: FieldProps) {
   return <textarea className="input area" rows={Math.max(2, d.draft.split("\n").length + 1)} placeholder={hint} {...d.bind} />;
 }
 
-function BooleanField({ value, commit, id }: FieldProps) {
+function BooleanField({ value, commit, id, disabled }: FieldProps) {
   const [on, setOn] = useState(value === true);
   const [synced, setSynced] = useState(value);
   if (value !== synced) {
@@ -197,6 +201,7 @@ function BooleanField({ value, commit, id }: FieldProps) {
       // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked; ARIA in HTML forbids aria-checked here
       role="switch"
       checked={on}
+      disabled={disabled}
       aria-describedby={`${id}-msg`}
       onChange={(e) => {
         flip(e.target.checked);
@@ -205,7 +210,7 @@ function BooleanField({ value, commit, id }: FieldProps) {
   );
 }
 
-function SelectField({ def, value, commit, id, invalid }: FieldProps) {
+function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) {
   const [picked, setPicked] = useState(String(value));
   const [synced, setSynced] = useState(value);
   if (value !== synced) {
@@ -232,6 +237,7 @@ function SelectField({ def, value, commit, id, invalid }: FieldProps) {
       id={id}
       className="input choice"
       value={picked}
+      disabled={disabled}
       aria-invalid={invalid}
       aria-describedby={`${id}-msg`}
       onChange={(e) => {
@@ -291,6 +297,7 @@ function HotkeyField(p: FieldProps) {
       <button
         type="button"
         className="btn"
+        disabled={p.disabled}
         aria-pressed={recording}
         aria-label={recording ? "Cancel recording" : "Record a shortcut"}
         onMouseDown={(e) => {
@@ -328,12 +335,14 @@ function Row({
   onView,
   extra,
   hidden,
+  disabled = false,
 }: {
   def: SettingDef;
   view: SettingsView;
   onView: (v: SettingsView) => void;
   extra?: ReactNode;
   hidden?: boolean;
+  disabled?: boolean;
 }) {
   const [status, setStatus] = useState<"saved" | { error: string } | null>(null);
   const [epoch, setEpoch] = useState(0); // remounts the control after a reset so it drops a rejected draft
@@ -393,6 +402,7 @@ function Row({
       def={def}
       value={view.values[def.key] ?? (def.default as SettingValue)}
       invalid={typeof status === "object" && status !== null}
+      disabled={disabled}
       clear={() => {
         setStatus(null);
       }}
@@ -415,7 +425,7 @@ function Row({
   const wide = def.type === "text" || (def.type === "string" && !def.pattern);
 
   return (
-    <div id={`row-${def.key}`} className={cls("setting", `st-${def.type}`, wide && "wide")} hidden={hidden}>
+    <div id={`row-${def.key}`} className={cls("setting", `st-${def.type}`, wide && "wide", disabled && "s-off")} hidden={hidden}>
       <div className="s-label-col">
         <label className="s-label" htmlFor={id}>
           {def.label}
@@ -798,6 +808,7 @@ export function Settings({
         view={view}
         onView={onView}
         hidden={folded}
+        disabled={DISABLED[d.key]?.(view.values) ?? false}
         extra={
           d.key === "app.source"
             ? live && <SourceLine s={live.source ?? null} />
@@ -851,7 +862,9 @@ export function Settings({
         )}
         {view?.sections.map((x) => {
           const p: PartProps = { view, active, now, loads, configErrors, policy, flash };
-          const defs = view.defs.filter((d) => d.section === x.id && !ELSEWHERE.has(d.key));
+          const defs = view.defs.filter(
+            (d) => d.section === x.id && !ELSEWHERE.has(d.key) && (SHOWN[d.key]?.(view.values, desktop) ?? true),
+          );
           const folded = defs.filter((d) => d.more);
           // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
           const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));

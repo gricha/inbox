@@ -2479,6 +2479,14 @@ p {
   border-color: var(--red);
 }
 
+/* Greyed, as the chat's box is while your agent is off. */
+.input:disabled {
+  border-color: var(--rule);
+  background: var(--wash);
+  color: var(--pencil);
+  cursor: default;
+}
+
 .input.num {
   width: 72px;
   font-variant-numeric: tabular-nums;
@@ -3185,6 +3193,11 @@ p {
 
 .s-help.s-ink {
   color: var(--ink);
+}
+
+/* A setting with nothing to do until another is on (quiet hours, while notifications are off): its words greyed with its control. */
+.setting.s-off .s-label {
+  color: var(--pencil);
 }
 
 /* Room above and below a control as tall as its row, so the message line under it clears the hairline. */

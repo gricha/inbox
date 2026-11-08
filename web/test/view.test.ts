@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, AgentStatus, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
+import { DEFAULTS, settingDef } from "../../src/settings.ts";
+import type {
+  ActivityEvent,
+  AgentStatus,
+  Card,
+  Conversation,
+  JudgeStatus,
+  QueueView,
+  ReviewHunk,
+  ReviewOrder,
+  SettingValue,
+} from "../../src/types.ts";
 import {
   age,
   ago,
@@ -27,6 +37,7 @@ import {
   currentFile,
   DEFAULT_OPEN,
   diffRows,
+  DISABLED,
   drawUpTo,
   draftOf,
   foldOf,
@@ -51,6 +62,7 @@ import {
   sections,
   settingsBack,
   SETTINGS_VIEWS,
+  SHOWN,
   stops,
   threadsOn,
   valueOf,
@@ -197,6 +209,31 @@ test("Claude's part asks you to connect Claude Code or update its skill only whi
   assert.deepEqual(connectCommands(agent(true, "missing")), ["cp -R skills/review-desk ~/.claude/skills/"]);
   assert.deepEqual(connectCommands(agent(false, "installed")), ["claude mcp add review-desk"]);
   assert.deepEqual(connectCommands(agent(false, "outdated")), ["claude mcp add review-desk", "cp -R skills/review-desk ~/.claude/skills/"]);
+});
+
+test("Settings draws a row only where it does something, and greys quiet hours while notifications are off", () => {
+  const values = (set: Record<string, SettingValue> = {}): Record<string, SettingValue> => ({
+    ...(DEFAULTS as unknown as Record<string, SettingValue>),
+    ...set,
+  });
+  const drawn = (key: string, v: Record<string, SettingValue>, app?: { platform: string }) => SHOWN[key]?.(v, app) ?? true;
+  const APP = ["app.hotkey", "app.open_at_login", "app.menu_bar_count", "app.source"];
+  // In a browser This device holds only the theme; in the app all its rows, the menu bar's count only on macOS.
+  for (const k of APP) assert.equal(drawn(k, values()), false, k);
+  for (const k of APP) assert.equal(drawn(k, values(), { platform: "darwin" }), true, k);
+  for (const platform of ["linux", "win32"]) {
+    assert.equal(drawn("app.menu_bar_count", values(), { platform }), false);
+    for (const k of APP.filter((x) => x !== "app.menu_bar_count")) assert.equal(drawn(k, values(), { platform }), true, k);
+  }
+  assert.equal(drawn("agent.coordinator_bypass", values()), true);
+  assert.equal(drawn("agent.coordinator_bypass", values({ "agent.coordinator": false })), false);
+  assert.equal(drawn("queue.cards", values()), true);
+  const greyed = (key: string, v: Record<string, SettingValue>) => DISABLED[key]?.(v) ?? false;
+  assert.equal(greyed("notify.quiet", values()), false);
+  assert.equal(greyed("notify.quiet", values({ "notify.enabled": false })), true);
+  assert.equal(greyed("notify.enabled", values({ "notify.enabled": false })), false);
+  // Every key they name is a setting, so a renamed one can't slip out of them unseen.
+  for (const k of [...Object.keys(SHOWN), ...Object.keys(DISABLED)]) assert.ok(settingDef(k), k);
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {
