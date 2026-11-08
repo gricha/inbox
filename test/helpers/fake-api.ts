@@ -124,6 +124,7 @@ const AUTO: AutomationView = {
   on: true,
   by: "you",
   updated_at: ago(48),
+  when: "Weekdays at 9:00",
   next_at: ago(-20),
   running: false,
   runs: [
@@ -272,7 +273,7 @@ function settingsView(overrides: Record<string, SettingValue>): SettingsView {
     values: { ...DEFAULTS, ...overrides },
     overridden: Object.keys(overrides),
     errors: [],
-    github: { login: "you", auth: "gh CLI", error: null, synced_at: ago(0.05), rate_limit: null, teams: [], orgs: [] },
+    github: { login: "you", auth: "gh CLI", error: null, synced_at: ago(0.05), rate_limit: null, teams: [], orgs: [], catch_all: null },
     paused: { ai: null },
   };
 }

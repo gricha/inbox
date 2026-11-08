@@ -237,7 +237,9 @@ test("settings: schema, save, reject and reset", async () => {
   assert.equal(s.github.login, "me");
   assert.equal(s.github.orgs[0]?.org, "acme");
   assert.equal(s.github.orgs[0]?.space, "Work");
-  assert.ok(s.github.orgs.some((o) => o.space === null));
+  // The rest land in the catch-all, Personal (-org:acme), as the desk works it out.
+  assert.equal(s.github.catch_all, "Personal");
+  assert.ok(s.github.orgs.slice(1).length && s.github.orgs.slice(1).every((o) => o.space === "Personal"));
   assert.ok(s.overridden.includes("github.poll_seconds"));
 
   const { data: bad } = await call<Put>("PUT", "/api/settings", { set: { "github.poll_seconds": 5, "notify.enabled": false } });

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { dueAt, nextAt, parseSchedule, type Schedule } from "../src/automations.ts";
+import { dueAt, nextAt, parseSchedule, scheduleWords, type Schedule } from "../src/automations.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
@@ -52,6 +52,22 @@ test("a schedule is days and local times, or hourly; anything else says how to w
     "daily half-hourly",
   ])
     assert.equal(typeof parseSchedule(bad), "string", bad);
+});
+
+test("a schedule reads in words, its times as the snooze menu writes them; one that can't be read, as written", () => {
+  assert.equal(scheduleWords("daily 09:00"), "Every day at 9:00");
+  assert.equal(scheduleWords("weekdays 09:00,13:00"), "Weekdays at 9:00 and 13:00");
+  assert.equal(scheduleWords("mon,thu 17:30"), "Mon and Thu at 17:30");
+  assert.equal(scheduleWords("mon,tue,wed 08:00"), "Mon, Tue and Wed at 8:00");
+  assert.equal(scheduleWords("weekdays hourly"), "Weekdays, every hour");
+  assert.equal(scheduleWords("mon,thu hourly"), "Mon and Thu, every hour");
+  assert.equal(scheduleWords("daily hourly"), "Every hour");
+  assert.equal(scheduleWords("sun,mon,tue,wed,thu,fri,sat 7:05"), "Every day at 7:05");
+  assert.equal(scheduleWords("friday,monday,wed,thurs,tue 09:00"), "Weekdays at 9:00");
+  assert.equal(scheduleWords("sun,sat 10:00"), "Sat and Sun at 10:00");
+  assert.equal(scheduleWords("Mon,mon 13:00,9:30,13:00"), "Mon at 9:30 and 13:00");
+  assert.equal(scheduleWords("sunday 0:00"), "Sun at 0:00");
+  for (const s of ["whenever", "mo 09:00", "mon 24:00", "mon 9", "daily,mon 09:00", ""]) assert.equal(scheduleWords(s), s);
 });
 
 test("it was last due at the latest matching time at or before now, and next at the first after", () => {

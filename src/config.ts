@@ -261,6 +261,28 @@ export function migrateConflict(text: string): string | null {
   return next === text ? null : next;
 }
 
+const terms = (scope: string) => scope.toLowerCase().split(/\s+/).filter(Boolean);
+const names = (t: string) => /^(org|user|repo):/.test(t);
+
+// The space that takes every org no other names: one that names none itself, only leaving some out (Personal's
+// `-org:acme -org:getsentry`), or an empty scope.
+export function catchAllOf(spaces: readonly { name: string; scope: string }[]): string | null {
+  return spaces.find((s) => !terms(s.scope).some(names))?.name ?? null;
+}
+
+// The space an org's items land in: the first that names it (org:acme), else the catch-all unless it leaves the org out;
+// null when none takes it.
+export function spaceOf(org: string, spaces: readonly { name: string; scope: string }[]): string | null {
+  const o = org.toLowerCase();
+  const named = spaces.find((s) => terms(s.scope).some((t) => t === `org:${o}` || t === `user:${o}` || t.startsWith(`repo:${o}/`)));
+  if (named) return named.name;
+  const rest = spaces.find((s) => {
+    const t = terms(s.scope);
+    return !t.some(names) && !t.includes(`-org:${o}`) && !t.includes(`-user:${o}`);
+  });
+  return rest?.name ?? null;
+}
+
 // First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
 export function defaultConfigText(opts: { workOrgs: string[] }): string {
   const orgs = opts.workOrgs;

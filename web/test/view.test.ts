@@ -1,18 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseSchedule } from "../../src/automations.ts";
 import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
-import type {
-  ActivityEvent,
-  AgentStatus,
-  Card,
-  Conversation,
-  JudgeStatus,
-  QueueView,
-  ReviewHunk,
-  ReviewOrder,
-  SettingValue,
-} from "../../src/types.ts";
+import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder, SettingValue } from "../../src/types.ts";
 import {
   age,
   ago,
@@ -22,7 +11,6 @@ import {
   githubTip,
   modelName,
   orgsLine,
-  scheduleWords,
   shortId,
   shortRef,
   snoozeOptions,
@@ -31,12 +19,10 @@ import {
 } from "../src/format.ts";
 import {
   acceleratorOf,
-  agentNeeds,
   authProblem,
   automationOf,
   beside,
   cardFacts,
-  connectCommands,
   currentFile,
   DEFAULT_OPEN,
   diffRows,
@@ -211,44 +197,18 @@ test("Copy resume command resumes a run's session in the automations folder besi
   );
 });
 
-test("Searches and rules' row says where each org's items start, an org no space names under Personal", () => {
+test("Searches and rules' row says where each org's items start, the catch-all's as everything else, whatever it's called", () => {
   const o = (org: string, space: string | null) => ({ org, space });
-  assert.equal(orgsLine([]), null);
-  assert.equal(orgsLine([o("acme", "Work"), o("me", null)]), "acme goes to Work, everything else to Personal.");
+  assert.equal(orgsLine([], "Personal"), null);
+  assert.equal(orgsLine([o("acme", "Work"), o("me", "Personal")], "Personal"), "acme goes to Work, everything else to Personal.");
   assert.equal(
-    orgsLine([o("acme", "Work"), o("getsentry", "Work"), o("me", null), o("sentry-ops", "Ops")]),
+    orgsLine([o("acme", "Work"), o("getsentry", "Work"), o("me", "Personal"), o("sentry-ops", "Ops")], "Personal"),
     "acme and getsentry go to Work, sentry-ops to Ops, everything else to Personal.",
   );
-  assert.equal(orgsLine([o("a", "Work"), o("b", "Work"), o("c", "Work")]), "a, b and c go to Work.");
-  assert.equal(orgsLine([o("me", null), o("friend", "Personal")]), "Everything goes to Personal.");
-});
-
-test("an automation's schedule reads in words, and the window reads exactly the schedules the desk does", () => {
-  assert.equal(scheduleWords("daily 09:00"), "Every day at 09:00");
-  assert.equal(scheduleWords("weekdays 09:00,13:00"), "Weekdays at 09:00 and 13:00");
-  assert.equal(scheduleWords("mon,thu 17:30"), "Mon and Thu at 17:30");
-  assert.equal(scheduleWords("mon,tue,wed 08:00"), "Mon, Tue and Wed at 08:00");
-  assert.equal(scheduleWords("weekdays hourly"), "Weekdays, every hour");
-  assert.equal(scheduleWords("mon,thu hourly"), "Mon and Thu, every hour");
-  assert.equal(scheduleWords("daily hourly"), "Every hour");
-  assert.equal(scheduleWords("sun,mon,tue,wed,thu,fri,sat 7:05"), "Every day at 07:05");
-  assert.equal(scheduleWords("friday,monday,wed,thurs,tue 09:00"), "Weekdays at 09:00");
-  assert.equal(scheduleWords("sun,sat 10:00"), "Sat and Sun at 10:00");
-  assert.equal(scheduleWords("Mon,mon 13:00,9:30,13:00"), "Mon at 09:30 and 13:00");
-  assert.equal(scheduleWords("whenever"), "whenever");
-  const read = ["daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly", " TUE 23:59 ", "sunday 0:00"];
-  const unread = [
-    "mo 09:00",
-    "mon 24:00",
-    "mon 09:60",
-    "mon 9",
-    "mon,,thu 09:00",
-    "daily,mon 09:00",
-    "weekends 09:00",
-    "mon 09:00 10:00",
-    "",
-  ];
-  for (const s of [...read, ...unread]) assert.equal(scheduleWords(s) !== s, typeof parseSchedule(s) === "object", s);
+  assert.equal(orgsLine([o("acme", "Work"), o("me", "Home")], "Home"), "acme goes to Work, everything else to Home.");
+  assert.equal(orgsLine([o("a", "Work"), o("b", "Work"), o("c", "Work")], null), "a, b and c go to Work.");
+  assert.equal(orgsLine([o("me", "Personal"), o("friend", "Personal")], "Personal"), "Everything goes to Personal.");
+  assert.equal(orgsLine([o("acme", "Work"), o("me", null)], null), "acme goes to Work, me is in no space.");
 });
 
 test("GitHub's status row's tooltip has your teams and the rate limit, only what's known", () => {
@@ -260,23 +220,6 @@ test("GitHub's status row's tooltip has your teams and the rate limit, only what
     githubTip({ teams: ["backend"], rate_limit: { remaining: 12, reset_at } }),
     `Your teams: @backend. 12 GitHub requests left until ${when(reset_at)}.`,
   );
-});
-
-test("Claude's part asks you to connect Claude Code or update its skill only while it needs it, and Connect runs only what's missing", () => {
-  const agent = (connected: boolean, state: AgentStatus["skill"]["state"]): AgentStatus => ({
-    driver: "claude-code",
-    mcp: { connected, command: "claude mcp add review-desk" },
-    skill: { state, path: "~/.claude/skills/review-desk/SKILL.md", command: "cp -R skills/review-desk ~/.claude/skills/" },
-  });
-  assert.equal(agentNeeds(agent(true, "installed")), null);
-  assert.equal(agentNeeds(agent(true, "missing")), "connect");
-  assert.equal(agentNeeds(agent(false, "installed")), "connect");
-  assert.equal(agentNeeds(agent(false, "outdated")), "connect");
-  assert.equal(agentNeeds(agent(true, "outdated")), "update");
-  assert.deepEqual(connectCommands(agent(true, "installed")), []);
-  assert.deepEqual(connectCommands(agent(true, "missing")), ["cp -R skills/review-desk ~/.claude/skills/"]);
-  assert.deepEqual(connectCommands(agent(false, "installed")), ["claude mcp add review-desk"]);
-  assert.deepEqual(connectCommands(agent(false, "outdated")), ["claude mcp add review-desk", "cp -R skills/review-desk ~/.claude/skills/"]);
 });
 
 test("Settings draws a row only where it does something, and greys quiet hours while notifications are off", () => {

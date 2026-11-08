@@ -266,7 +266,8 @@ export interface GitHubStatus {
   synced_at: string | null;
   rate_limit: { remaining: number; reset_at: string } | null;
   teams: string[];
-  orgs: { org: string; items: number; space: string | null }[]; // orgs with your open items, and the space covering each
+  orgs: { org: string; items: number; space: string | null }[]; // orgs with your open items, and the space they land in
+  catch_all: string | null; // the space that takes every org no other names (Personal), if one does
 }
 
 export interface SettingsView {
@@ -286,6 +287,8 @@ export interface AgentStatus {
   driver: string;
   mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
   skill: { state: "installed" | "outdated" | "missing"; path: string; command: string }; // path: the installed SKILL.md
+  needs: "connect" | "update" | null; // what Settings asks of you: connect (tools or skill missing), update the skill, nothing
+  connect: string[]; // what Connect runs: only what's missing, in its order
 }
 
 // GET /api/policy: ~/.review-desk/policy.md, prose the judge follows. While it's empty it follows `starter`.
@@ -924,6 +927,7 @@ export interface AutomationRun {
 
 // GET /api/automations
 export interface AutomationView extends Automation {
+  when: string; // its schedule in words ("Mon and Thu at 17:30"), or as written when it can't be read
   next_at: string | null; // while it's on
   running: boolean;
   runs: AutomationRun[]; // newest first, the last 10

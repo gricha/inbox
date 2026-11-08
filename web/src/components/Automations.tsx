@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { AutomationRun, AutomationView as Auto } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, copyText, issueUrl, MOD, scheduleWords, when } from "../format.ts";
+import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -208,7 +208,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
   const href = viewOf(a.id);
   const draft = drafted(a);
   const last = lastLine(a.runs[0], now);
-  const timing = [scheduleWords(a.schedule), a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
+  const timing = [a.when, a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
   return (
     <div className="setting au-row">
       <div className="s-label-col">
@@ -218,7 +218,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
         </a>
         <p className="s-help">
           {draft ? (
-            `An agent wrote it; read it before it runs · ${scheduleWords(a.schedule)}`
+            `An agent wrote it; read it before it runs · ${a.when}`
           ) : (
             <>
               {timing} · {last.text}
@@ -336,7 +336,7 @@ export function AutomationView({
     );
 
   const agents = drafted(a);
-  const line = `${scheduleWords(a.schedule)} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
+  const line = `${a.when} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
   const turn = (on: boolean) => () => {
     void runUi(au.turn(a, on));
   };

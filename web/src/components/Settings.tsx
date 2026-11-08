@@ -21,10 +21,8 @@ import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
 import {
   acceleratorOf,
-  agentNeeds,
   authProblem,
   automationOf,
-  connectCommands,
   DISABLED,
   draftOf,
   hotkeyHelp,
@@ -565,13 +563,15 @@ function Row({
   );
 }
 
-// Who the desk reads GitHub as, or its last sync's error and the fix; the teams and the rate limit are in the tooltip.
+// Who the desk reads GitHub as, or its last sync's error and the fix; the teams and the rate limit are in the tooltip. A
+// login GitHub just refused isn't a sign-in: the row says so, and who it was is in the tooltip.
 function GitHubStatusRow({ gh }: { gh: GitHubStatus }) {
-  const tip = githubTip(gh);
+  const refused = !!gh.error && authProblem(gh.error);
+  const tip = [refused && gh.login && `Last signed in as @${gh.login}.`, githubTip(gh)].filter(Boolean).join(" ");
   return (
     <div className="setting s-status" title={tip || undefined}>
       <div className="s-label-col">
-        <p className="s-label">{gh.login ? `Signed in as @${gh.login}` : "Not signed in"}</p>
+        <p className="s-label">{refused ? "GitHub doesn't accept your login" : gh.login ? `Signed in as @${gh.login}` : "Not signed in"}</p>
         {gh.error ? (
           <p className="s-help t-bad">
             {withCode(gh.error.replace(/\.?$/, "."))}
@@ -641,7 +641,7 @@ function ClaudeStatus({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
   }, [active, loads]);
 
-  const need = status && agentNeeds(status);
+  const need = status?.needs;
   const say = need && NEED[need];
 
   function connect() {
@@ -651,7 +651,7 @@ function ClaudeStatus({
       api.connectAgent().pipe(
         Effect.tap((s) =>
           Effect.sync(() => {
-            if (say && !agentNeeds(s)) flash(say.done);
+            if (say && !s.needs) flash(say.done);
           }),
         ),
         Effect.catch((e) =>
@@ -682,7 +682,7 @@ function ClaudeStatus({
               type="button"
               className="act primary"
               disabled={busy}
-              title={connectCommands(status).join("\n")}
+              title={status.connect.join("\n")}
               onClick={() => {
                 connect();
               }}
@@ -790,7 +790,7 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
         help={
           p.configErrors > 0
             ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
-            : (orgsLine(p.view.github.orgs) ?? "Which GitHub searches feed your desk, and where each item starts.")
+            : (orgsLine(p.view.github.orgs, p.view.github.catch_all) ?? "Which GitHub searches feed your desk, and where each item starts.")
         }
       />
     </>

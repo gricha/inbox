@@ -170,52 +170,21 @@ export const cls = (...xs: (string | false | null | undefined)[]) => xs.filter(B
 
 const andList = (xs: readonly string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : (xs[0] ?? ""));
 
-// Searches and rules' row: "acme goes to Work, everything else to Personal."; an org no space names is the catch-all's.
-export function orgsLine(orgs: readonly { org: string; space: string | null }[]): string | null {
+// Searches and rules' row: "acme goes to Work, everything else to Personal.", each org in the space the desk says it lands in,
+// the catch-all's said once as "everything else".
+export function orgsLine(orgs: readonly { org: string; space: string | null }[], catchAll: string | null): string | null {
   if (!orgs.length) return null;
   const spaces = new Map<string, string[]>();
-  for (const o of orgs) {
-    const space = o.space ?? "Personal";
-    spaces.set(space, [...(spaces.get(space) ?? []), o.org]);
-  }
-  const named = [...spaces].filter(([space]) => space !== "Personal");
-  if (!named.length) return "Everything goes to Personal.";
-  const said = named.map(([space, these], i) => `${andList(these)}${i ? "" : these.length > 1 ? " go" : " goes"} to ${space}`);
-  if (spaces.has("Personal")) said.push("everything else to Personal");
+  const nowhere: string[] = [];
+  for (const o of orgs)
+    if (o.space === null) nowhere.push(o.org);
+    else if (o.space !== catchAll) spaces.set(o.space, [...(spaces.get(o.space) ?? []), o.org]);
+  const rest = catchAll !== null && orgs.some((o) => o.space === catchAll);
+  if (!spaces.size && !nowhere.length) return `Everything goes to ${catchAll}.`;
+  const said = [...spaces].map(([space, these], i) => `${andList(these)}${i ? "" : these.length > 1 ? " go" : " goes"} to ${space}`);
+  if (nowhere.length) said.push(`${andList(nowhere)} ${nowhere.length > 1 ? "are" : "is"} in no space`);
+  if (rest) said.push(`everything else to ${catchAll}`);
   return `${said.join(", ")}.`;
-}
-
-const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-
-// An automation's schedule in words, read as the desk reads it (parseSchedule in src/automations.ts, which the window can't
-// import): "mon,thu 17:30" → "Mon and Thu at 17:30"; one it can't read, as written.
-export function scheduleWords(schedule: string): string {
-  const m = /^\s*([a-z,]+)\s+(\S+)\s*$/i.exec(schedule);
-  if (!m) return schedule;
-  const word = m[1]!.toLowerCase();
-  const at = m[2]!.toLowerCase();
-  const days = new Set(
-    word === "daily"
-      ? [0, 1, 2, 3, 4, 5, 6]
-      : word === "weekdays"
-        ? [1, 2, 3, 4, 5]
-        : word.split(",").map((d) => (d.length >= 3 ? DAYS.findIndex((full) => full.startsWith(d)) : -1)),
-  );
-  if (days.has(-1)) return schedule;
-  const times: number[] = [];
-  if (at !== "hourly")
-    for (const t of at.split(",")) {
-      const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
-      if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return schedule;
-      times.push(Number(hm[1]) * 60 + Number(hm[2]));
-    }
-  const weekdays = days.size === 5 && !days.has(0) && !days.has(6);
-  // The week from Monday, so a weekend reads "Sat and Sun".
-  const named = [1, 2, 3, 4, 5, 6, 0].filter((d) => days.has(d)).map((d) => `${DAYS[d]![0]!.toUpperCase()}${DAYS[d]!.slice(1, 3)}`);
-  const which = days.size === 7 ? "Every day" : weekdays ? "Weekdays" : andList(named);
-  if (at === "hourly") return days.size === 7 ? "Every hour" : `${which}, every hour`;
-  const clock = (t: number) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
-  return `${which} at ${andList([...new Set(times)].toSorted((x, y) => x - y).map(clock))}`;
 }
 
 // GitHub's status row's tooltip, what's known of "Your teams: @a, @b. 4,870 GitHub requests left until Sun 0:23."

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
-import { connect, refreshSkills, status } from "../src/agents.ts";
+import { connect, plan, refreshSkills, status } from "../src/agents.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "review-desk", "SKILL.md"), "utf8");
@@ -49,6 +49,21 @@ test("Claude Code: nothing connected yet, with the exact commands", () => {
   assert.equal(s.skill.state, "missing");
   assert.equal(s.skill.path, claudeSkill());
   assert.match(s.skill.command, /^mkdir -p \S*\.claude.skills'? && cp -R \S*skills.review-desk'? \S*\.claude.skills'?\/$/);
+  assert.equal(s.needs, "connect");
+  assert.deepEqual(s.connect, [s.mcp.command, s.skill.command]);
+});
+
+test("Settings asks you to connect or update only while it's needed, and Connect runs only what's missing", () => {
+  const mcp = (connected: boolean) => ({ connected, command: "claude mcp add review-desk" });
+  const skill = (state: "installed" | "outdated" | "missing") => ({ state, path: "SKILL.md", command: "cp -R skills/review-desk" });
+  assert.deepEqual(plan(mcp(true), skill("installed")), { needs: null, connect: [] });
+  assert.deepEqual(plan(mcp(true), skill("missing")), { needs: "connect", connect: ["cp -R skills/review-desk"] });
+  assert.deepEqual(plan(mcp(false), skill("installed")), { needs: "connect", connect: ["claude mcp add review-desk"] });
+  assert.deepEqual(plan(mcp(false), skill("outdated")), {
+    needs: "connect",
+    connect: ["claude mcp add review-desk", "cp -R skills/review-desk"],
+  });
+  assert.deepEqual(plan(mcp(true), skill("outdated")), { needs: "update", connect: ["cp -R skills/review-desk"] });
 });
 
 test("Claude Code: registered means user scope in ~/.claude.json", () => {

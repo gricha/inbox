@@ -127,6 +127,23 @@ export function parseSchedule(s: string): Schedule | string {
   return { days: [...new Set(days)].toSorted((x, y) => x - y), times: sorted };
 }
 
+const andList = (xs: readonly string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : (xs[0] ?? ""));
+
+// A schedule in words, as the window shows it: "mon,thu 17:30" → "Mon and Thu at 17:30", "weekdays hourly" → "Weekdays, every
+// hour"; its times as the snooze menu writes them (9:00), and one it can't read as written.
+export function scheduleWords(schedule: string): string {
+  const s = parseSchedule(schedule);
+  if (typeof s === "string") return schedule;
+  const days = new Set(s.days);
+  const weekdays = days.size === 5 && !days.has(0) && !days.has(6);
+  // The week from Monday, so a weekend reads "Sat and Sun".
+  const named = [1, 2, 3, 4, 5, 6, 0].filter((d) => days.has(d)).map((d) => `${DAYS[d]![0]!.toUpperCase()}${DAYS[d]!.slice(1, 3)}`);
+  const which = days.size === 7 ? "Every day" : weekdays ? "Weekdays" : andList(named);
+  if (s.times.length === 24 && s.times.every((t, i) => t === i * 60)) return days.size === 7 ? "Every hour" : `${which}, every hour`;
+  const clock = (t: number) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+  return `${which} at ${andList(s.times.map(clock))}`;
+}
+
 // Its times on the day `offset` days from now's, on its days only.
 const timesOn = (s: Schedule, now: Date, offset: number) =>
   s.times
@@ -183,6 +200,7 @@ export class Automations {
     return this.all().map((a) => {
       const s = parseSchedule(a.schedule);
       return Object.assign(a, {
+        when: scheduleWords(a.schedule),
         next_at: a.on && typeof s === "object" ? nextAt(s, now).toISOString() : null,
         running: this.running.has(a.id),
         runs: runs.filter((r) => r.automation === a.id).toReversed(),

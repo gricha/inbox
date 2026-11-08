@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig } from "../src/config.ts";
+import {
+  catchAllOf,
+  defaultConfigText,
+  migrateBotAsk,
+  migrateConflict,
+  migrateDrafts,
+  migrateHard,
+  parseConfig,
+  spaceOf,
+} from "../src/config.ts";
 import { DEFAULTS } from "../src/settings.ts";
 
 test("default configs parse cleanly", () => {
@@ -15,6 +24,24 @@ test("default configs parse cleanly", () => {
   const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
   assert.equal(cfg.spaces.find((s) => s.id === "personal")!.scope, "-org:acme");
   assert.ok(cfg.handoff.prompt.includes("Do not post"));
+});
+
+test("an org lands in the space that names it, else the catch-all that doesn't leave it out, whatever it's called", () => {
+  const spaces = [
+    { name: "Work", scope: "org:acme org:getsentry" },
+    { name: "Ops", scope: "user:sentry-ops" },
+    { name: "Home", scope: "-org:acme -org:getsentry -org:excluded" },
+  ];
+  assert.equal(spaceOf("acme", spaces), "Work");
+  assert.equal(spaceOf("GetSentry", spaces), "Work");
+  assert.equal(spaceOf("sentry-ops", spaces), "Ops");
+  assert.equal(spaceOf("me", spaces), "Home");
+  assert.equal(spaceOf("excluded", spaces), null);
+  assert.equal(catchAllOf(spaces), "Home");
+  assert.equal(catchAllOf(spaces.slice(0, 2)), null);
+  assert.equal(spaceOf("me", spaces.slice(0, 2)), null);
+  assert.equal(spaceOf("me", [{ name: "All", scope: "" }]), "All");
+  assert.equal(spaceOf("acme", [{ name: "One repo", scope: "repo:acme/api" }]), "One repo");
 });
 
 test("TOML syntax errors report a line", () => {

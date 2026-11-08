@@ -338,6 +338,15 @@ const settingsAs = (change: (v: SettingsView) => void) => async (page: Page) => 
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+// The overview as the mock serves it, changed in the browser, from the next load on; unsettle undoes it.
+const overviewAs = (change: (o: Overview) => void) => async (page: Page) => {
+  await page.route("**/api/overview", async (route) => {
+    const res = await route.fetch();
+    const o = (await res.json()) as Overview;
+    change(o);
+    await route.fulfill({ response: res, json: o });
+  });
+};
 // The automations as the mock serves them, changed in the browser; unsettle undoes it.
 const automationsAs = (change: (v: AutomationView[]) => void) => async (page: Page) => {
   await page.route("**/api/automations", async (route) => {
@@ -1924,10 +1933,17 @@ const SHOTS: Shot[] = [
     // GitHub's last sync failed on its login: the status row's help is the error in red, with the fix.
     name: "settings-github-error",
     go: async (page) => {
+      // As the desk would say it everywhere: the sidebar's sync line failed too.
+      await overviewAs((o) => {
+        o.sync_error = "GitHub rejected the token (HTTP 401)";
+      })(page);
       await settingsAs((v) => {
         v.github.error = "GitHub rejected the token (HTTP 401)";
       })(page);
       await at("#/settings/github")(page);
+      const label = await page.locator("#s-github .s-status .s-label").textContent();
+      if (label !== "GitHub doesn't accept your login")
+        failures.push(`settings-github-error: the status row says ${JSON.stringify(label)}`);
       const help = await page.evaluate<{ text: string; red: boolean } | null>(`(() => {
         const h = document.querySelector("#s-github .s-status .s-help");
         return h && { text: h.textContent, red: h.classList.contains("t-bad") };
@@ -2203,8 +2219,7 @@ const SHOTS: Shot[] = [
       await page.route("**/api/agents", async (route) => {
         const res = await route.fetch();
         const a = (await res.json()) as AgentStatus;
-        a.mcp.connected = true;
-        a.skill.state = "installed";
+        Object.assign(a, { mcp: { ...a.mcp, connected: true }, skill: { ...a.skill, state: "installed" }, needs: null, connect: [] });
         await route.fulfill({ response: res, json: a });
       });
       await at("#/")(page); // Settings reads it again only when it's opened
@@ -2238,7 +2253,7 @@ const SHOTS: Shot[] = [
       if (
         !mine ||
         mine.name !== "Warden and dotagents issues" ||
-        !/^Weekdays at 09:00 · next \S+( \S+)? · ran \d+h ago, put 2 on your desk$/.test(mine.help) ||
+        !/^Weekdays at 9:00 · next (\w{3} )?9:00 · ran \d+h ago, put 2 on your desk$/.test(mine.help) ||
         mine.red.length ||
         !mine.run ||
         mine.on !== true ||
@@ -2289,7 +2304,7 @@ const SHOTS: Shot[] = [
       if (
         !failed ||
         !/^failed \d+h ago: claude exited with 1: your login has expired$/.test(failed.red.join("|")) ||
-        !failed.help.startsWith("Weekdays at 09:00 · next ")
+        !failed.help.startsWith("Weekdays at 9:00 · next ")
       )
         failures.push(`settings-automations-failed: the failed run's row reads ${JSON.stringify(failed)}`);
       if (!off || off.help !== "Mon and Thu at 17:30 · off · hasn't run yet" || off.run || off.on !== false || off.review)

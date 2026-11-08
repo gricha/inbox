@@ -88,7 +88,16 @@ import type {
 import { byPart, RANK, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
-import { migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import {
+  catchAllOf,
+  migrateBotAsk,
+  migrateConflict,
+  migrateDrafts,
+  migrateHard,
+  parseConfig,
+  spaceOf,
+  type LoadedConfig,
+} from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -696,7 +705,8 @@ export class Desk {
         teams: ctx?.teams ?? [],
         orgs: Object.entries(ctx?.orgs ?? {})
           .sort((a, b) => b[1] - a[1])
-          .map(([org, items]) => ({ org, items, space: spaces.find((s) => s.scope.split(/\s+/).includes(`org:${org}`))?.name ?? null })),
+          .map(([org, items]) => ({ org, items, space: spaceOf(org, spaces) })),
+        catch_all: catchAllOf(spaces),
       },
       paused: {
         ai: this.aiPausedNow() ? { why: this.aiPaused!.why, until: new Date(this.aiPaused!.until).toISOString() } : null,

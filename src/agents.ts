@@ -60,21 +60,27 @@ const skillState = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<A
   return "installed";
 });
 
+// What an agent's state asks of you, and what Connect runs for it, as connect below does: only what's missing.
+export function plan(mcp: AgentStatus["mcp"], skill: AgentStatus["skill"]): Pick<AgentStatus, "needs" | "connect"> {
+  return {
+    needs: !mcp.connected || skill.state === "missing" ? "connect" : skill.state === "outdated" ? "update" : null,
+    connect: [...(mcp.connected ? [] : [mcp.command]), ...(skill.state === "installed" ? [] : [skill.command])],
+  };
+}
+
 // HOME is read on every call, so tests can point it at a scratch directory.
 export const status = Effect.fn("agents.status")(function* (driver: DriverId, url: string): Effect.fn.Return<AgentStatus, FsError> {
   const d = DRIVERS[driver];
   const home = os.homedir();
   const parent = d.skills(home);
   const dir = path.join(parent, "review-desk");
-  return {
-    driver,
-    mcp: { connected: registered(d, home), command: [d.bin, ...d.add(url)].map(sh).join(" ") },
-    skill: {
-      state: yield* skillState(dir),
-      path: path.join(dir, "SKILL.md"),
-      command: `mkdir -p ${sh(parent)} && cp -R ${sh(SKILL)} ${sh(parent)}/`,
-    },
+  const mcp = { connected: registered(d, home), command: [d.bin, ...d.add(url)].map(sh).join(" ") };
+  const skill = {
+    state: yield* skillState(dir),
+    path: path.join(dir, "SKILL.md"),
+    command: `mkdir -p ${sh(parent)} && cp -R ${sh(SKILL)} ${sh(parent)}/`,
   };
+  return { driver, mcp, skill, ...plan(mcp, skill) };
 });
 
 type RunError = CommandNotFound | CommandFailed | CommandTimeout | UnsafeArgument;

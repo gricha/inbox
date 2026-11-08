@@ -6,6 +6,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
+import { plan } from "../../src/agents.ts";
+import { nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
@@ -2152,12 +2155,17 @@ const RUNS: AutomationRun[] = [
   },
 ];
 function automationsView(): AutomationView[] {
-  return AUTOMATIONS.map((a) => ({
-    ...a,
-    next_at: a.on ? new Date(Date.now() + 18 * HOUR).toISOString() : null,
-    running: false,
-    runs: RUNS.filter((r) => r.automation === a.id).toReversed(),
-  }));
+  return AUTOMATIONS.map((a) => {
+    const s = parseSchedule(a.schedule);
+    return {
+      ...a,
+      when: scheduleWords(a.schedule),
+      // As the desk works it out: the schedule's next time, so every run of the shots says the same.
+      next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
+      running: false,
+      runs: RUNS.filter((r) => r.automation === a.id).toReversed(),
+    };
+  });
 }
 
 // Your asks to the coordinator: two answered (a list, then paragraphs, a list and a code block) and one it's still on. A new
@@ -3028,9 +3036,8 @@ function github(): GitHubStatus {
     synced_at: syncedAt,
     rate_limit: rateLimit(),
     teams: ["backend", "ml-team", "maintainers"],
-    orgs: [...orgs]
-      .sort((a, b) => b[1] - a[1])
-      .map(([org, items]) => ({ org, items, space: config.spaces.find((s) => s.scope.split(/\s+/).includes(`org:${org}`))?.name ?? null })),
+    orgs: [...orgs].sort((a, b) => b[1] - a[1]).map(([org, items]) => ({ org, items, space: spaceOf(org, config.spaces) })),
+    catch_all: catchAllOf(config.spaces),
   };
 }
 
@@ -3076,15 +3083,13 @@ function agentStatus(): AgentStatus {
   const driver = "claude-code";
   const command = "claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp";
   const skills = `${homedir()}/.claude/skills`;
-  return {
-    driver,
-    mcp: { connected: linked.has(`${driver} mcp`), command },
-    skill: {
-      state: linked.has(`${driver} skill`) ? "installed" : "missing",
-      path: `${skills}/review-desk/SKILL.md`,
-      command: `mkdir -p ${skills} && cp -R skills/review-desk ${skills}/`,
-    },
+  const mcp = { connected: linked.has(`${driver} mcp`), command };
+  const skill: AgentStatus["skill"] = {
+    state: linked.has(`${driver} skill`) ? "installed" : "missing",
+    path: `${skills}/review-desk/SKILL.md`,
+    command: `mkdir -p ${skills} && cp -R skills/review-desk ${skills}/`,
   };
+  return { driver, mcp, skill, ...plan(mcp, skill) };
 }
 
 // ---------------------------------------------------------------------------
