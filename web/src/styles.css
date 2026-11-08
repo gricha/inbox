@@ -19,32 +19,32 @@
 }
 
 :root {
-  --paper: #f7f7f5;
+  --paper: #f5f6f8;
   --sheet: #fff;
-  --wash: #ededea;
-  --ink: #1b1d21;
-  --ink-2: #3c4047;
-  --pencil: #62676f;
-  --faint: #9b9fa6;
-  --rule: #e4e4e0;
-  --rule-strong: #d3d3ce;
-  --control: #929590;
-  --sel: #e8e8e4;
-  --side: #f0f0ed;
-  --side-on: #e3e3de;
-  --side-hover: #e9e9e5;
-  --red: #bf3227;
-  --red-wash: #fbe9e7;
-  --amber: #8d5c00;
-  --amber-wash: #f8eed8;
-  --green: #28703f;
-  --go: #1f7a3c;
+  --wash: #edeff2;
+  --ink: #20242c;
+  --ink-2: #3d4450;
+  --pencil: #5c6573;
+  --faint: #979eaa;
+  --rule: #dde1e7;
+  --rule-strong: #c9ced6;
+  --control: #7c8798;
+  --sel: #eef1f4;
+  --side: #eff1f4;
+  --side-on: #dfe3e8;
+  --side-hover: #e7eaee;
+  --red: #b42318;
+  --red-wash: #fcebe9;
+  --amber: #8a4b08;
+  --amber-wash: #faefdf;
+  --green: #176847;
+  --go: #176847;
   --on-go: #fff;
-  --accent: #2f5fd0;
-  --accent-ink: #2a56c4;
-  --accent-wash: #e8eefb;
+  --accent: #365d60;
+  --accent-ink: #365d60;
+  --accent-wash: #d5e8e7;
   --on-accent: #fff;
-  --shadow: 0 1px 2px rgb(27 29 33 / 6%), 0 10px 30px rgb(27 29 33 / 12%);
+  --shadow: 0 1px 2px rgb(32 36 44 / 6%), 0 10px 30px rgb(32 36 44 / 12%);
   --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
 
@@ -58,31 +58,31 @@
 /* System: dark when the computer is, unless a theme was picked. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --paper: #151618;
-    --sheet: #1e1f22;
-    --wash: #232427;
-    --ink: #eaebed;
-    --ink-2: #c6c9ce;
-    --pencil: #9599a1;
-    --faint: #686c74;
-    --rule: #28292d;
-    --rule-strong: #35373c;
-    --control: #6a6e76;
-    --sel: #26272b;
-    --side: #111214;
-    --side-on: #232427;
-    --side-hover: #1b1c1f;
-    --red: #ff8073;
-    --red-wash: #34201e;
-    --amber: #e3b45e;
-    --amber-wash: #2f2614;
-    --green: #7dcb98;
-    --go: #2a8a48;
-    --on-go: #fff;
-    --accent: #3a6be0;
-    --accent-ink: #8fb0ff;
-    --accent-wash: #1c2438;
-    --on-accent: #fff;
+    --paper: #14171c;
+    --sheet: #1b1f26;
+    --wash: #242a33;
+    --ink: #eceff4;
+    --ink-2: #c9cfd9;
+    --pencil: #a7b0be;
+    --faint: #6b7482;
+    --rule: #343b46;
+    --rule-strong: #424a57;
+    --control: #6b7686;
+    --sel: #222830;
+    --side: #111419;
+    --side-on: #252b34;
+    --side-hover: #1c2027;
+    --red: #ffb4ab;
+    --red-wash: #3b2421;
+    --amber: #ebc076;
+    --amber-wash: #33291b;
+    --green: #8dceaf;
+    --go: #8dceaf;
+    --on-go: #0e2419;
+    --accent: #a8cacb;
+    --accent-ink: #a3c5c7;
+    --accent-wash: #243a3d;
+    --on-accent: #162b2d;
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
     color-scheme: dark;
@@ -90,31 +90,31 @@
 }
 
 :root[data-theme="dark"] {
-  --paper: #151618;
-  --sheet: #1e1f22;
-  --wash: #232427;
-  --ink: #eaebed;
-  --ink-2: #c6c9ce;
-  --pencil: #9599a1;
-  --faint: #686c74;
-  --rule: #28292d;
-  --rule-strong: #35373c;
-  --control: #6a6e76;
-  --sel: #26272b;
-  --side: #111214;
-  --side-on: #232427;
-  --side-hover: #1b1c1f;
-  --red: #ff8073;
-  --red-wash: #34201e;
-  --amber: #e3b45e;
-  --amber-wash: #2f2614;
-  --green: #7dcb98;
-  --go: #2a8a48;
-  --on-go: #fff;
-  --accent: #3a6be0;
-  --accent-ink: #8fb0ff;
-  --accent-wash: #1c2438;
-  --on-accent: #fff;
+  --paper: #14171c;
+  --sheet: #1b1f26;
+  --wash: #242a33;
+  --ink: #eceff4;
+  --ink-2: #c9cfd9;
+  --pencil: #a7b0be;
+  --faint: #6b7482;
+  --rule: #343b46;
+  --rule-strong: #424a57;
+  --control: #6b7686;
+  --sel: #222830;
+  --side: #111419;
+  --side-on: #252b34;
+  --side-hover: #1c2027;
+  --red: #ffb4ab;
+  --red-wash: #3b2421;
+  --amber: #ebc076;
+  --amber-wash: #33291b;
+  --green: #8dceaf;
+  --go: #8dceaf;
+  --on-go: #0e2419;
+  --accent: #a8cacb;
+  --accent-ink: #a3c5c7;
+  --accent-wash: #243a3d;
+  --on-accent: #162b2d;
   --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
   color-scheme: dark;
@@ -1139,7 +1139,8 @@ p {
   inset: 0;
 }
 
-.line .line-btn:focus-visible {
+/* The row's button is only part of it: the ring goes round the whole row (below). */
+.line .row-main:focus-visible {
   outline: none;
 }
 
@@ -1147,9 +1148,15 @@ p {
   background: var(--row-sel);
 }
 
-/* The fill is the cursor; a ring on top of it would be a second one. */
-.line .line-main:focus-visible {
-  outline: none;
+/* The selected row's leading mark, down all it shows (a Merging row's phrase, an issue opened in place). */
+.line.sel > * {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Keyboard focus is its own ring round the row, whether or not it's selected: on what draws the row's fill, or it'd go under. */
+:is(.line-row, .lane-row):has(> .row-main:focus-visible) {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
 }
 
 /* A PR or an issue: a small label in its own column, so the titles start in one. */

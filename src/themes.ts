@@ -11,8 +11,8 @@ export interface Theme {
 }
 
 export const THEMES = [
-  { id: "light", label: "Light", scheme: "light", paper: "#f7f7f5", pencil: "#62676f", diff: "pierre-light" },
-  { id: "dark", label: "Dark", scheme: "dark", paper: "#151618", pencil: "#9599a1", diff: "pierre-dark" },
+  { id: "light", label: "Light", scheme: "light", paper: "#f5f6f8", pencil: "#5c6573", diff: "pierre-light" },
+  { id: "dark", label: "Dark", scheme: "dark", paper: "#14171c", pencil: "#a7b0be", diff: "pierre-dark" },
   { id: "sand", label: "Sand", scheme: "light", paper: "#f3eee5", pencil: "#73685a", diff: "pierre-light" },
   { id: "slate", label: "Slate", scheme: "dark", paper: "#1b2028", pencil: "#8e98a5", diff: "pierre-dark" },
   { id: "solarized", label: "Solarized", scheme: "light", paper: "#f6efdc", pencil: "#4f646b", diff: "solarized-light-desk" },

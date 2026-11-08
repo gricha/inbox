@@ -350,8 +350,8 @@ test("sourceEnv: the desk's port and home, exactly the UI's origin, and no DESK_
 test("the window's colours before the UI paints follow this device's theme, else the OS", () => {
   assert.equal(themeColors("slate", false).paper, "#1b2028");
   assert.equal(themeColors("sand", true).paper, "#f3eee5");
-  assert.equal(themeColors("system", true).paper, "#151618");
-  assert.equal(themeColors(null, false).paper, "#f7f7f5");
+  assert.equal(themeColors("system", true).paper, "#14171c");
+  assert.equal(themeColors(null, false).paper, "#f5f6f8");
   assert.deepEqual(
     ["system", "slate", "toString", "", 3].map((t) => isTheme(t)),
     [true, true, false, false, false],
