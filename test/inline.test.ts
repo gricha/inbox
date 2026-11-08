@@ -10,6 +10,7 @@ import { setup } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { GitHubGraphQLError } from "../src/errors.ts";
+import { run } from "./helpers/run.ts";
 
 const HEAD = "a".repeat(40);
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
@@ -33,7 +34,7 @@ async function inline(c: TestContext, fail?: string) {
     },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
   const post = (body: unknown, headers: Record<string, string> = DESK) =>
     app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/web#4")}/inline`, {
@@ -88,7 +89,7 @@ test("an inline comment is logged and leaves the PR where it is: Approve and Req
   const logged = t.desk.store.db.prepare("SELECT action FROM events WHERE item_id = 'acme/web#4' AND action = 'inline_comment'").all();
   assert.equal(logged.length, 1);
   assert.equal(t.desk.store.state("acme/web#4").done_at, null);
-  assert.equal((await t.desk.reviewView("acme/web#4")).approve.ok, true);
+  assert.equal((await run(t.desk.reviewView("acme/web#4"))).approve.ok, true);
 });
 
 test("GitHub's refusal says so; a merged PR takes none", async (c) => {
@@ -97,7 +98,7 @@ test("GitHub's refusal says so; a merged PR takes none", async (c) => {
   assert.equal(res.status, 502);
   assert.match(((await res.json()) as { error: string }).error, /must be part of the diff/);
   t.gh.items.get("acme/web#4")!.state = "merged";
-  await t.desk.sync();
+  await run(t.desk.sync());
   const merged = await post(ok);
   assert.equal(merged.status, 409);
   assert.match(((await merged.json()) as { error: string }).error, /it's merged/);
@@ -118,11 +119,11 @@ test("the review says which commit its diff is at: GitHub's, ahead of the desk's
     },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
-  const v = await t.desk.reviewView("acme/web#4");
+  await run(t.desk.sync());
+  const v = await run(t.desk.reviewView("acme/web#4"));
   assert.equal(v.diff_head, pushed, "a comment pins to the commit whose lines it shows");
   assert.notEqual(v.item.head_oid, pushed);
   head = undefined;
   t.desk.store.set("pr:acme/web#4", null);
-  assert.equal((await t.desk.reviewView("acme/web#4")).diff_head, v.item.head_oid, "no head from GitHub: the desk's");
+  assert.equal((await run(t.desk.reviewView("acme/web#4"))).diff_head, v.item.head_oid, "no head from GitHub: the desk's");
 });

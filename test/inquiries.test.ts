@@ -36,7 +36,7 @@ function http(t: Awaited<ReturnType<typeof setup>>) {
 test("an agent's question is a row on the main page and a notification until the owner answers it in the desk", async (c) => {
   const t = await setup([reviewAsk(1)], { settings: { "notify.quiet": "" } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const req = http(t);
   const asked = await req("POST", "/api/inquiries", {
     question: "Keep the label as text,\nor icons?",
@@ -87,7 +87,7 @@ test("an agent's question is a row on the main page and a notification until the
 test("a question the owner can't decide from its page alone is refused, and says what it lacks", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const req = http(t);
   const refused = async (body: unknown) => {
     const r = await req("POST", "/api/inquiries", body);
@@ -139,7 +139,7 @@ test("marks that make text read as something else are dropped from what an agent
 test("a question's page gets its item's card wherever the desk shows it, Merging too; one it doesn't hold has none", async (c) => {
   const t = await setup([myPr(3, { ci: "green" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#3", "inflight"));
   const about = runSync(t.desk.inquire(full({ item: "web#3" })));
   assert.equal(runSync(t.desk.inquiryView(about.id)).card?.id, "acme/web#3");
@@ -151,7 +151,7 @@ test("a question's page gets its item's card wherever the desk shows it, Merging
 test("the coordinator ends its turn once it asks: your answer, or that you dismissed it, wakes it; another agent's question doesn't", async (c) => {
   const t = await setup([myPr(3)], { settings: { "agent.coordinator": true } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const told: string[] = [];
   t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   const mine = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3 onto main?" })));
@@ -167,7 +167,7 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
 test("a dismissed question tells the agent so", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const req = http(t);
   const q = runSync(t.desk.inquire(full()));
   assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { dismiss: true }, DESK)).status, 200);
@@ -195,7 +195,7 @@ test("what the owner does in the desk takes it off the desk at once: ready for r
     desk: { writer: w },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const status = (ref: string) => runSync(t.desk.item(ref)).card.status;
   await run(t.desk.markReady("web#3"));
   assert.equal(status("web#3"), "done", "marked ready: it waits on reviewers now");
@@ -205,7 +205,7 @@ test("what the owner does in the desk takes it off the desk at once: ready for r
   assert.equal(status("web#5"), "active", "a draft is still yours to finish");
   const it = t.gh.items.get("acme/web#4")!;
   t.gh.items.set(it.id, { ...it, state: "closed", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.githubAct("web#4", "reopen"));
   assert.equal(status("web#4"), "active", "reopened: back on the desk");
 });
@@ -214,7 +214,7 @@ test("a comment on the PR goes from the desk's window only, and takes it off the
   const { w, calls } = writer();
   const t = await setup([reviewAsk(1)], { desk: { writer: w } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const req = http(t);
   const post = (body: unknown, headers: Record<string, string> = DESK) =>
     req("POST", `/api/review/${encodeURIComponent("acme/api#1")}/comment`, body, headers);
@@ -230,7 +230,7 @@ test("a comment on the PR goes from the desk's window only, and takes it off the
 test("a question about an item the desk doesn't hold still goes; one still waiting is never aged out; the tray counts it", async (c) => {
   const t = await setup([reviewAsk(1)]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.inquire(full({ item: "acme/elsewhere#9" }))).item_id, "acme/elsewhere#9");
   const first = t.desk.inquiries()[0]!;
   for (let i = 0; i < 120; i++) {
@@ -276,13 +276,13 @@ test("reopening what a close took off the desk puts back what it was before: sno
   const { w } = writer();
   const t = await setup([myPr(4, { ci: "green" })], { desk: { writer: w } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#4", "snooze", "2d"));
   await run(t.desk.githubAct("web#4", "close"));
   assert.equal(runSync(t.desk.item("web#4")).card.status, "done");
   const it = t.gh.items.get("acme/web#4")!;
   t.gh.items.set(it.id, { ...it, state: "closed", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.githubAct("web#4", "reopen"));
   assert.equal(runSync(t.desk.item("web#4")).card.status, "snoozed");
 });
@@ -290,7 +290,7 @@ test("reopening what a close took off the desk puts back what it was before: sno
 test("Wake it under an ask it stopped without answering hands that ask over again, in your words", async (c) => {
   const t = await setup([myPr(3)], { settings: { "agent.coordinator": true } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const told: string[] = [];
   t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   t.desk.coordinator.now = () => Promise.reject(new Error("not this one"));
@@ -305,7 +305,7 @@ test("Wake it under an ask it stopped without answering hands that ask over agai
     answer: null,
   };
   t.desk.store.set("asks", [a]);
-  await t.desk.wakeCoordinator("a1");
+  await run(t.desk.wakeCoordinator("a1"));
   assert.equal(told.length, 1);
   assert.match(
     told[0]!,

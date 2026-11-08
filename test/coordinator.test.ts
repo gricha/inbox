@@ -219,7 +219,7 @@ async function coordinated(c: TestContext, settings: Record<string, unknown> = {
     fake.done();
   });
   t.desk.coordinator.batch = 30;
-  await t.desk.sync();
+  await run(t.desk.sync());
   const event = (n: number, kind: "ci" | "commented" | "reviewed" | "pushed", data: Record<string, string> = {}) => {
     t.desk.record("github", [{ at: NOW.toISOString(), item_id: `acme/web#${n}`, kind, actor: "dana", data }]);
   };
@@ -230,7 +230,7 @@ async function coordinated(c: TestContext, settings: Record<string, unknown> = {
     const desk = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
     desks.push(desk);
     desk.coordinator.batch = 30;
-    await desk.init();
+    await run(desk.init());
     desk.start();
     return desk;
   };
@@ -375,7 +375,7 @@ test("a desk restart picks up the running coordinator: it only looks, and the ne
   await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await settle();
   const before = t.fake.calls().length;
-  await t.desk.close(); // stops every agent process the desk runs
+  await run(t.desk.close()); // stops every agent process the desk runs
   assert.ok(alive(t.fake.sessions()[0]!.pid), "the session's process isn't the desk's");
   assert.equal(t.fake.calls().length, before, "no stop, no rm");
   const desk = await t.restart();
@@ -410,7 +410,7 @@ test("news a desk restart or a failed start interrupts isn't lost: it goes with 
   const t = await coordinated(c);
   t.desk.coordinator.batch = 60_000;
   runSync(t.desk.act("web#3", "inflight"));
-  await t.desk.close();
+  await run(t.desk.close());
   assert.deepEqual(t.fake.calls(), [], "the batch hadn't gone out");
   t.fake.fail(true);
   const desk = await t.restart();
@@ -447,15 +447,15 @@ test(
     const t = await coordinated(c);
     const it = t.gh.items.get("acme/web#3")!;
     t.gh.items.set(it.id, { ...it, ci: "green", review_decision: "approved", mergeable: "conflict", updated_at: NOW.toISOString() });
-    await t.desk.sync();
+    await run(t.desk.sync());
     await settle();
     assert.deepEqual([t.said(), t.fake.calls()], [[], []], "a desk with no coordinator starts none for it");
     runSync(t.desk.act("web#4", "inflight"));
     // The desk sends rebases only once it has stored its coordinator, a moment after claude was asked to start it.
     await until(() => t.said().length === 1 && !!t.desk.coordinator.saved());
-    await t.desk.sync();
+    await run(t.desk.sync());
     await until(() => t.said().length === 2);
-    await t.desk.sync();
+    await run(t.desk.sync());
     await settle();
     assert.deepEqual(t.said().slice(1), [
       "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly.",
@@ -468,7 +468,7 @@ test("news on a PR that's merged or closed doesn't wake it", posix, async (c) =>
   runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.said().length === 1);
   t.gh.items.set("acme/web#3", { ...t.gh.items.get("acme/web#3")!, state: "merged", merged_by: "me", closed_at: NOW.toISOString() });
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.event(3, "commented");
   await settle(500);
   assert.deepEqual([...stops(t.fake.calls()), ...resumes(t.fake.calls())], [], "nothing stops or resumes it");
@@ -765,7 +765,7 @@ test(
       },
     });
     c.after(t.cleanup);
-    await t.desk.sync();
+    await run(t.desk.sync());
     const app = createApp(t.desk, 49401);
     const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
       app.request(`http://127.0.0.1:49401${p}`, {
@@ -801,7 +801,7 @@ test(
       const body = (await woke.json()) as { error: string; tag: string };
       assert.deepEqual([woke.status, body.tag, body.error], [400, "BadRequest", told.message], "as an ask is: it was a 500");
       assert.equal(
-        (await failure(Effect.tryPromise({ try: () => t.desk.wakeCoordinator("a1"), catch: (e) => e as Error }))).message,
+        (await failure(Effect.tryPromise({ try: () => run(t.desk.wakeCoordinator("a1")), catch: (e) => e as Error }))).message,
         told.message,
       );
       runSync(t.desk.answerInquiry(question.id, "yes & then merge"));
@@ -906,7 +906,7 @@ test(
     );
     await settle();
     assert.deepEqual(t.desk.coordinator.news(), []);
-    assert.equal((await t.desk.reviewView("web#3")).asks.length, 1, "the PR's review shows its own asks");
+    assert.equal((await run(t.desk.reviewView("web#3"))).asks.length, 1, "the PR's review shows its own asks");
   },
 );
 
@@ -1050,7 +1050,7 @@ test("a line ask keeps its lines and wakes the coordinator with where they are b
 async function telling(c: TestContext, items = [myPr(3), myPr(4), reviewAsk(7, { repo: "acme/web" }), myPr(5)]) {
   const t = await setup(items, { settings: { "policy.judge": false, "review.auto_ai": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const told: string[] = [];
   t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   t.desk.coordinator.saved = () => ({ id: "c0ffee01" });
@@ -1058,7 +1058,7 @@ async function telling(c: TestContext, items = [myPr(3), myPr(4), reviewAsk(7, {
   const merged = async (id: string) => {
     const it = t.gh.items.get(id)!;
     t.gh.items.set(id, { ...it, state: "merged", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
-    await t.desk.sync();
+    await run(t.desk.sync());
   };
   return { ...t, told, merged };
 }
@@ -1074,7 +1074,7 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
   runSync(t.desk.act("web#4", "inflight"));
   await t.merged("acme/web#5");
   const about = async (item_id: string) => {
-    const a = await t.desk.ask({ text: "x", item_id });
+    const a = await run(t.desk.ask({ text: "x", item_id }));
     return new RegExp(`^My ask ${a.id}, (.*): "x" Answer it with desk_answer\\.$`).exec(t.told.at(-1)!)?.[1];
   };
   assert.equal(await about("web#3"), "about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off");
@@ -1171,7 +1171,7 @@ test("Wake it re-sends a line ask with the item's state now", async (c) => {
   };
   t.desk.store.set("asks", [a]);
   runSync(t.desk.act("web#3", "inflight"));
-  await t.desk.wakeCoordinator("a1");
+  await run(t.desk.wakeCoordinator("a1"));
   assert.deepEqual(t.told, [askLine(a, { url: "https://github.com/acme/web/pull/3", whose: "mine", merging: true, state: "open" })]);
   assert.equal(
     t.told[0],
@@ -1189,7 +1189,7 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
     return { status: res.status, body: (await res.json()) as AskPlace & { error?: string } };
   };
   const lines: AskLines = { path: "src/plan.ts", line: 23, side: "new", head: "a".repeat(40) };
-  const asked = async (item_id: string) => (await place((await t.desk.ask({ text: "fix it", item_id, lines })).id)).body;
+  const asked = async (item_id: string) => (await place((await run(t.desk.ask({ text: "fix it", item_id, lines }))).id)).body;
 
   const four = await asked("web#4");
   assert.deepEqual(four.about, { url: "https://github.com/acme/web/pull/4", whose: "mine", merging: true, state: "open" });

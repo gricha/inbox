@@ -5,6 +5,7 @@ import path from "node:path";
 import { Desk, type DeskOptions } from "../../src/desk.ts";
 import type { Item } from "../../src/types.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./items.ts";
+import { run } from "./run.ts";
 
 export const reviewAsk = (n: number, o: Partial<Item> = {}) =>
   makeItem({
@@ -53,7 +54,7 @@ export async function setup(items: Item[], extra: { settings?: Record<string, un
     log: () => {},
     ...extra.desk,
   });
-  await desk.init();
+  await run(desk.init());
   return {
     desk,
     gh,

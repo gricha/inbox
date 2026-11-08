@@ -7,7 +7,7 @@ import { Cause, Effect, Exit } from "effect";
 import { Desk } from "../src/desk.ts";
 import { generateReview, runCommand } from "../src/review.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
-import { failure } from "./helpers/run.ts";
+import { failure, run } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -76,16 +76,16 @@ test("closing the desk stops the judge and an AI review, what they started, and 
     log: () => {},
     review: { fetchPr: () => Effect.succeed({ body: "", files: [] }), generate: generateReview },
   });
-  await desk.init();
-  await desk.sync();
-  void desk.generate(item.id).catch(() => {});
+  await run(desk.init());
+  await run(desk.sync());
+  void run(desk.generate(item.id)).catch(() => {});
   // The judge and the AI review: a claude and its child each.
   await until(() => fake.pids().length === 4);
   const pids = fake.pids();
   assert.ok(pids.every(alive));
 
   const t0 = Date.now();
-  await desk.close();
+  await run(desk.close());
   assert.deepEqual(pids.filter(alive), [], "nothing left running");
   assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
 });

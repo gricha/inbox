@@ -58,11 +58,11 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
   const f = fakeReview();
   const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(ID, unknown());
   const say = { id: "ic1", author: "dave", bot: false, body: "@me can you look?", at: hoursAgo(1), url: "https://github.com/x" };
   t.gh.contexts.set("PR_acme/other_9", { threads: [], reviews: [], comments: [say], commits: [] });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.snapshot().entries.has(ID), false, "no search returns it");
 
   const r = await run(t.desk.add("https://github.com/acme/other/pull/9/files"));
@@ -90,7 +90,7 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
   assert.equal(runSync(t.desk.focus()).reviewing, 0);
   assert.equal(row.why, "you added it");
   assert.equal(runSync(t.desk.item(ID)).placements[0]?.board, "added");
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.notes, [], "you put it there: no notification");
 
   runSync(t.desk.undo(r.undo_seq));
@@ -104,13 +104,13 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
 test("an added PR stays while it's pinned and open: refreshed each sync, never pruned; merged, it resolves and goes", async (c) => {
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(ID, unknown());
   await run(t.desk.add(ID));
 
   t.setNow(new Date(NOW.getTime() + 15 * DAY));
   const before = t.gh.detailCalls.length;
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(
     t.gh.detailCalls.slice(before).some((ids) => ids.includes(ID)),
     "no search says when it changed: refreshed",
@@ -122,7 +122,7 @@ test("an added PR stays while it's pinned and open: refreshed each sync, never p
 
   t.gh.items.set(ID, { ...unknown(), state: "merged", updated_at: new Date(NOW.getTime() + 15 * DAY + 60_000).toISOString() });
   t.setNow(new Date(NOW.getTime() + 15 * DAY + 5 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(
     runSync(t.desk.focus()).sections.today.some((x) => x.id === ID),
     false,
@@ -130,14 +130,14 @@ test("an added PR stays while it's pinned and open: refreshed each sync, never p
   assert.ok(runSync(t.desk.queue()).resolved.some((x) => x.id === ID && x.why === "merged"));
 
   t.setNow(new Date(NOW.getTime() + 30 * DAY));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.store.itemsById([ID]).has(ID), false, "merged, it's pruned like anything no search returns");
 });
 
 test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't have a 404", async (c) => {
   const t = await setup([reviewAsk(1), teamPing(2)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(
     runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/api#2"),
     false,
@@ -169,7 +169,7 @@ test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't
 test("an agent's hand-off says why it's on your desk, beside the rule's why, until you act on it", async (c) => {
   const t = await setup([reviewAsk(1), teamPing(2)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(ID, unknown());
   const card = (id: string) => runSync(t.desk.item(id)).card;
   const asked = card("acme/api#1").why;
@@ -218,7 +218,7 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
 test("adding a done, snoozed or muted item brings it back, and its one undo puts that back too", async (c) => {
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const onDesk = () =>
     [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === "acme/api#1");
   for (const action of ["done", "snooze", "mute"] as const) {
@@ -237,7 +237,7 @@ test("what you pin yourself is on your desk at once, reviewed or not; an agent's
   const f = fakeReview();
   const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const onDesk = (id: string) =>
     [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === id);
   assert.equal(onDesk("acme/api#2"), false, "a team ping is FYI");
@@ -255,7 +255,7 @@ test("adding several PRs at once starts their AI reviews two at a time, as the b
   const f = fakeReview();
   const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   for (const n of [9, 10, 11]) t.gh.items.set(`acme/other#${n}`, makeItem({ repo: "acme/other", number: n, author: "dave" }));
   await Promise.all([9, 10, 11].map((n) => run(t.desk.add(`acme/other#${n}`))));
   assert.equal(t.desk.generating.size, 2);

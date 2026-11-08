@@ -21,7 +21,7 @@ import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond } from "../src/server.ts";
 import { myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
@@ -46,8 +46,8 @@ async function setup(settings?: Record<string, unknown>) {
     notify: () => {},
     log: () => {},
   });
-  await desk.init();
-  await desk.sync();
+  await run(desk.init());
+  await run(desk.sync());
   const app = createApp(desk, 47823);
   const req = (p: string, init: RequestInit = {}) => app.request(`http://127.0.0.1:47823${p}`, init);
   const json = async (p: string, init: RequestInit = {}): Promise<any> => (await req(p, init)).json();
@@ -623,7 +623,7 @@ test("a route's Effect answers a refusal with its status and tag, a client that 
 test("the desk's refusals answer through respond with their tag, words and status, and a body that isn't JSON is a 400", async (c) => {
   const t = await withItems([reviewAsk(1), myPr(1, { ci: "green" }), myPr(3, { ci: "green" })], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
   const DESK = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
   const call = async (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) => {
@@ -725,7 +725,7 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
     desk: { writer },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
   const DESK = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
   const call = async (method: string, p: string, body?: unknown, headers: Record<string, string> = DESK) => {

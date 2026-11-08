@@ -45,7 +45,7 @@ function client(t: Awaited<ReturnType<typeof setup>>) {
 test("a hand-off puts your own open PR in Merging: it leaves the queue, and undo or b brings it back", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3, { ci: "pending" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const all = () => {
     const q = runSync(t.desk.queue());
     return [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id);
@@ -75,7 +75,7 @@ test("a hand-off puts your own open PR in Merging: it leaves the queue, and undo
 test("only the desk's own window hands a PR off or undoes a hand-off or Back to desk: the coordinator merges what's there", async (c) => {
   const t = await setup([myPr(3, { ci: "pending" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const post = client(t);
   const desk = "http://localhost:47823";
   const act = (action: string, origin?: string, site?: string) => post("/api/act", { id: "acme/web#3", action }, origin, site);
@@ -94,7 +94,7 @@ test("only the desk's own window hands a PR off or undoes a hand-off or Back to 
 test("a draft isn't handed off: Ready for review is yours, so it would wait on you in Merging", async (c) => {
   const t = await setup([myPr(3, { ci: "green", draft: true })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.throws(
     () => runSync(t.desk.act("web#3", "inflight")),
     (e: Error & { status: number }) => e.status === 409 && e.message.endsWith("mark it ready for review first"),
@@ -106,7 +106,7 @@ test("a PR in Merging stays there whatever it waits on: never in the queue, focu
   const ready = { ci: "green" as const, review_decision: "approved" as const, mergeable: "clean" as const };
   const t = await setup([reviewAsk(1), myPr(3, { ci: "red" }), myPr(4, ready), myPr(5, { ci: "pending" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   for (const n of [3, 4, 5]) runSync(t.desk.act(`web#${n}`, "inflight"));
   const q = runSync(t.desk.queue());
   const shown = [q.sections, runSync(t.desk.focus()).sections].flatMap((x) => Object.values(x).flat());
@@ -119,7 +119,7 @@ test("a PR in Merging stays there whatever it waits on: never in the queue, focu
 test("only your own open PRs are handed off for merge", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3)]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.throws(
     () => runSync(t.desk.act("api#1", "inflight")),
     (e: Error & { status: number }) => e.status === 409 && e.message.includes("your own open PRs"),
@@ -131,7 +131,7 @@ test("in Merging, the coordinator owns it: done, snooze and mute are refused, an
   process.env.DESK_CLAUDE = "/nonexistent/claude";
   const t = await setup([myPr(3, { ci: "pending" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   // Muted before you handed it off: handing off clears that.
   const muted = runSync(t.desk.act("web#3", "mute"));
   const marked = runSync(t.desk.act("web#3", "inflight"));
@@ -169,7 +169,7 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
     myPr(9, { ...green, review_requests: [], reviews: [outsider] }), // reviewed, if not by a collaborator: not one nobody's asked
   ]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   for (let n = 1; n <= 9; n++) runSync(t.desk.act(`web#${n}`, "inflight"));
   const waits = Object.fromEntries(runSync(t.desk.inflight()).rows.map((r) => [r.card.number, r.waits_on]));
   assert.deepEqual(waits, {
@@ -207,12 +207,12 @@ async function conflicts(c: TestContext, settings: Record<string, unknown> = {})
     woke.push([id, what]);
   };
   t.desk.coordinator.stop = async () => {};
-  await t.desk.sync();
+  await run(t.desk.sync());
   let step = 0;
   const update = async (n: number, o: Partial<Item>) => {
     const it = t.gh.items.get(`acme/web#${n}`)!;
     t.gh.items.set(it.id, { ...it, ...o, updated_at: hoursAgo(1 - ++step / 10) });
-    await t.desk.sync();
+    await run(t.desk.sync());
   };
   const main = () =>
     Object.values(runSync(t.desk.focus()).sections)
@@ -230,7 +230,7 @@ test("your PR that's ready to merge but conflicts goes to the coordinator to reb
   assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
   assert.deepEqual(t.main(), []);
   await t.update(3, { comments_total: 1 });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.woke.length, 1, "once per conflict, not every sync");
   assert.deepEqual(t.notes, []);
   // GitHub sees it mergeable again: it leaves Merging by itself, and is ready to merge on your desk.
@@ -273,10 +273,10 @@ test("with the coordinator off, a ready PR's conflict stays yours: nothing is se
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
   // On, it goes; off again, it comes back to your desk.
   runSync(t.desk.putSettings({ set: { "agent.coordinator": true } }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
   runSync(t.desk.putSettings({ set: { "agent.coordinator": false } }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual([t.merging(), t.main()], [[], [["acme/web#3", "approved and green: ready to merge"]]]);
 });
 
@@ -288,7 +288,7 @@ test("nothing is sent from a desk that never started a coordinator, or for your 
   t.desk.store.set("coordinator_bg", SAVED);
   const quiet = t.gh.items.get("acme/web#5")!;
   t.gh.items.set(quiet.id, { ...quiet, mergeable: "conflict" });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.woke, [["acme/web#3", REBASE]], "not #5, quiet in Later");
 });
 
@@ -318,7 +318,7 @@ test("your handed-off PR's conflict stays the coordinator's to merge; one it han
 test("desk_note: the coordinator's latest line on a PR in Merging shows on its row; m again starts without it", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3, { ci: "pending" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const post = client(t);
   const id = encodeURIComponent("acme/web#3");
   assert.equal((await post(`/api/inflight/${id}/note`, { text: "Fixing lint" })).status, 409, "not in Merging yet");
@@ -345,7 +345,7 @@ test("desk_hand_back: the PR leaves Merging for the top of Now with the why, wri
     desk: { writer: w.writer },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#3", "inflight"));
   runSync(t.desk.act("web#4", "inflight"));
   t.desk.notifyNew();
@@ -383,7 +383,7 @@ test("your own open draft carries one call to action, Ready for review; a a mark
     },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const cta = (ref: string) => runSync(t.desk.item(ref)).card.cta;
   assert.deepEqual(
     [cta("web#3"), cta("web#4"), cta("api#1"), cta("web#5")],
@@ -408,7 +408,7 @@ test("your own open draft carries one call to action, Ready for review; a a mark
   // GitHub says it's ready now: the call to action goes, and the rules place it from here.
   const it = t.gh.items.get("acme/web#3")!;
   t.gh.items.set(it.id, { ...it, draft: false, updated_at: hoursAgo(0) });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(cta("web#3"), undefined);
 });
 
@@ -416,7 +416,7 @@ test("Ready for review asks the reviewers you picked with it, after marking it r
   const w = fakeWriter();
   const t = await setup([myPr(3, { ci: "green", draft: true }), myPr(4, { ci: "green", draft: true })], { desk: { writer: w.writer } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const post = client(t);
   const ready = (ref: string, body: unknown) => post(`/api/review/${encodeURIComponent(ref)}/ready`, body, "http://localhost:47823");
   assert.equal((await ready("acme/web#3", { users: "U_dana" })).status, 400, "a list of node ids, not one");
@@ -440,7 +440,7 @@ test("a review request GitHub refuses after Ready for review says it's ready any
   const w = fakeWriter(false, true);
   const t = await setup([myPr(3, { ci: "green", draft: true })], { desk: { writer: w.writer } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await assert.rejects(
     run(t.desk.markReady("web#3", { users: ["U_x"], teams: [] })),
     (e: Error & { status: number }) =>
@@ -456,7 +456,7 @@ test("a review request GitHub refuses after Ready for review says it's ready any
 test("reviewers to pick from are GitHub's for your own PR, without you; anyone else's PR has none", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3, { draft: true })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.reviewerList = [
     { id: "U_dana", login: "dana", name: "Dana", team: false, suggested: true },
     { id: "U_me", login: "Me", name: "", team: false, suggested: false },
@@ -477,18 +477,18 @@ test("a refused Ready for review says why, and nothing is logged", async (c) => 
   const w = fakeWriter(true);
   const t = await setup([myPr(3, { ci: "green", draft: true })], { desk: { writer: w.writer } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await assert.rejects(run(t.desk.markReady("web#3")), /GitHub didn't mark it ready: Resource not accessible/);
   const t2 = await setup([myPr(3, { ci: "green", draft: true })]);
   c.after(t2.cleanup);
-  await t2.desk.sync();
+  await run(t2.desk.sync());
   assert.equal(runSync(t2.desk.item("web#3")).card.cta, undefined, "no writer, no call to action");
 });
 
 test("d on your own PR is plain done: it leaves the queue and comes back when someone else acts", async (c) => {
   const t = await setup([myPr(3, { ci: "red" })]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const all = () =>
     Object.values(runSync(t.desk.queue()).sections)
       .flat()
@@ -508,7 +508,7 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
     desk: { writer: w.writer },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.deepEqual(
     [card("web#3").cta, card("web#3").why, card("web#3").handed_back, card("web#3").bucket],
@@ -540,7 +540,7 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
 
   // GitHub has the request: nothing to ask any more.
   t.gh.items.set("acme/web#3", { ...myPr(3, { ci: "green" }), updated_at: hoursAgo(0) });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual([card("web#3").cta, card("web#3").handed_back], [undefined, undefined]);
 });
 
@@ -554,7 +554,7 @@ test("a review someone left counts as asked; a bot's or your own doesn't", async
     { settings: { "policy.judge": false } },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.item("web#3")).card.handed_back, undefined);
   assert.equal(runSync(t.desk.item("web#4")).card.why, "nobody's asked to review it: add reviewers");
 });
@@ -565,14 +565,14 @@ test("a PR in Merging nobody's asked to review any more comes back to you on the
     desk: { writer: fakeWriter().writer },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#3", "inflight"));
   assert.equal(runSync(t.desk.item("web#3")).card.inflight, true);
   t.gh.items.set("acme/web#3", { ...myPr(3, { ci: "green", review_requests: [] }), updated_at: hoursAgo(0.05) });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.item("web#3")).card.inflight, true, "a few minutes: a workflow may be asking someone");
   t.setNow(new Date(NOW.getTime() + 30 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   const d = runSync(t.desk.item("web#3"));
   assert.deepEqual(
     [d.card.inflight, d.card.handed_back, d.card.cta, d.card.why],
@@ -602,7 +602,7 @@ test("what counts as asked: a bot's request or review doesn't, one GitHub hides 
     { settings: { "policy.judge": false, "github.bots": ["sentry-review"] } },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const unasked = (ref: string) => runSync(t.desk.item(ref)).signals.pr.unasked;
   assert.deepEqual([unasked("web#3"), unasked("web#4"), unasked("web#5")], [true, false, true]);
 });
@@ -619,7 +619,7 @@ test("nobody's asked: not while a workflow may still ask, not once it's quiet, n
     { settings: { "policy.judge": false, "notify.quiet": "" }, desk: { writer: fakeWriter().writer } },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.equal(card("web#3").handed_back, undefined, "minutes old");
   assert.equal(card("web#4").handed_back, undefined, "quiet for 40 days: Later has it");
@@ -628,7 +628,7 @@ test("nobody's asked: not while a workflow may still ask, not once it's quiet, n
   assert.equal(row?.cta, "reviewers");
 
   t.gh.route = () => []; // it left every search: nothing refreshes it any more
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(card("web#5").handed_back, undefined, "no board lists it");
 });
 
@@ -639,7 +639,7 @@ test("Add reviewers and m's refusal agree, from the first minute; quiet is Later
     { settings: { "policy.judge": false }, desk: { writer: fakeWriter().writer } },
   );
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.deepEqual([card("web#3").cta, card("web#3").handed_back], ["reviewers", undefined], "not on top yet, but it says what m needs");
   assert.throws(() => runSync(t.desk.act("web#3", "inflight")), /add reviewers first/);
@@ -649,7 +649,7 @@ test("Add reviewers and m's refusal agree, from the first minute; quiet is Later
 test("on a bot's PR opened for you, your own review doesn't count as anyone reviewing it", async (c) => {
   const t = await setup([], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const mine = { author: "me", author_bot: false, state: "commented" as const, at: hoursAgo(1), commit: "c1" };
   t.gh.items.set(
     "acme/web#8",
@@ -680,7 +680,7 @@ test("a blocked PR in Merging waits on its blocker, and the coordinator is woken
   t.desk.coordinator.wake = (id, what) => {
     woke.push([id, what]);
   };
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("getsentry#1", "inflight"));
   const row = runSync(t.desk.inflight()).rows[0]!;
   assert.deepEqual(
@@ -691,7 +691,7 @@ test("a blocked PR in Merging waits on its blocker, and the coordinator is woken
   const dep = t.gh.items.get("getsentry/sentry#129460")!;
   t.gh.items.set(dep.id, { ...dep, state: "merged", closed_at: at, updated_at: at });
   t.setNow(new Date(at));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
     woke.filter(([, what]) => what.startsWith("unblocked")),
     [["getsentry/getsentry#1", "unblocked: sentry#129460 merged"]],
@@ -713,13 +713,13 @@ test("a Merging PR whose required PR closed without merging says so, and the coo
   t.desk.coordinator.wake = (id, what) => {
     woke.push([id, what]);
   };
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#9", "inflight"));
   woke.length = 0;
   const at = new Date(NOW.getTime() + 3_600_000).toISOString();
   t.gh.items.set("acme/api#5", { ...t.gh.items.get("acme/api#5")!, state: "closed", closed_at: at, updated_at: at });
   t.setNow(new Date(at));
-  await t.desk.sync();
+  await run(t.desk.sync());
   const row = runSync(t.desk.inflight()).rows.find((r) => r.card.id === "acme/web#9")!;
   assert.deepEqual([row.waits_on, row.requires_closed], ["needs api#5, closed without merging", ["api#5"]]);
   assert.deepEqual(woke, [["acme/web#9", "needs api#5, closed without merging"]]);

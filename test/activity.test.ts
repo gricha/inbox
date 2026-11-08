@@ -16,9 +16,9 @@ const kinds = (desk: { store: { activity(q: { after: number; limit: number }): {
 
 test("the first sync logs each item as new; an unchanged sync logs nothing", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(kinds(t.desk), ["new acme/api#1", "new acme/api#2"]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.store.lastSeq(), 2);
   assert.deepEqual(
     runSync(t.desk.overview()).connectors.map((c) => [c.id, c.name, c.status]),
@@ -29,7 +29,7 @@ test("the first sync logs each item as new; an unchanged sync logs nothing", asy
 
 test("a snapshot older than the stored one (the feed and the full pass raced) is dropped, not diffed backwards", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const old = reviewAsk(1);
   const pushed = reviewAsk(1, { updated_at: iso(0.5), head_oid: "def" });
   t.desk.ingest(t.desk.gh, [pushed]);
@@ -41,11 +41,11 @@ test("a snapshot older than the stored one (the feed and the full pass raced) is
 
 test("someone else approves: reviewed and resolved; it leaves Now for Resolved, keeping your triage state", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("api#1", "pin"));
   t.setNow(later(1));
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", iso(0.5))], review_decision: "approved" }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   const log = t.desk.store.activity({ after: 2, limit: 10 });
   assert.deepEqual(
     log.map((e) => [e.kind, e.actor, e.data]),
@@ -87,7 +87,7 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
 test("asked again after the approval: unresolved, and back in Now", async () => {
   const approved = reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" });
   const t = await setup([approved]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.queue()).resolved.length, 1);
   t.setNow(later(2));
   t.gh.items.set(
@@ -102,7 +102,7 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
       ],
     }),
   );
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(kinds(t.desk).slice(-2), ["review_requested acme/api#1", "unresolved acme/api#1"]);
   assert.deepEqual(t.desk.store.activity({ after: 0, limit: 10 }).at(-1)?.data, { was: "approved by bob" });
   assert.deepEqual(
@@ -114,11 +114,11 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
 
 test("an item that leaves every search gets one refresh: merged, resolved, and shown under Resolved for a while", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(later(0.25));
   t.gh.items.set("acme/api#1", reviewAsk(1, { state: "merged", merged_by: "dana", closed_at: iso(0.1), updated_at: iso(0.1) }));
   t.gh.detailCalls = [];
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.gh.detailCalls, [["acme/api#1"]]);
   assert.deepEqual(kinds(t.desk).slice(2), ["merged acme/api#1", "resolved acme/api#1"]);
   assert.equal(t.desk.store.activity({ after: 2, limit: 1 })[0]?.actor, "dana");
@@ -130,13 +130,13 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   // Still gone an hour later: not refreshed again, still shown.
   t.setNow(later(1.25));
   t.gh.detailCalls = [];
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(!t.gh.detailCalls.flat().includes("acme/api#1"));
   assert.equal(runSync(t.desk.queue()).resolved.length, 1);
 
   // Three days after it left, it's off the desk.
   t.setNow(later(80));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).resolved, []);
   t.cleanup();
 });
@@ -148,10 +148,10 @@ test("you approved: still in the reviewed-by search, it passes the board's filte
     q.includes("reviewed-by:@me")
       ? [...t.gh.items.values()].filter((i) => i.reviews.some((r) => r.author === "me")).map((i) => i.id)
       : route(q);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(later(0.25));
   t.gh.items.set("acme/api#1", reviewAsk(1, { review_requests: [], reviews: [approve("me", iso(0.1))], updated_at: iso(0.1) }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
     t.desk.store.activity({ after: 2, limit: 10 }).map((e) => [e.kind, e.actor, e.data]),
     [["resolved", "me", { reason: "you approved" }]],
@@ -163,7 +163,7 @@ test("you approved: still in the reviewed-by search, it passes the board's filte
   assert.ok(!runSync(t.desk.focus()).sections.now.some((c) => c.id === "acme/api#1"));
 
   t.setNow(later(80));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).resolved, [], "three days on, the filter drops it again");
   t.cleanup();
 });
@@ -179,7 +179,7 @@ test("a resolution with no time (no longer requested) doesn't pass a board's fil
   const t = await setup([quiet]);
   const route = t.gh.route;
   t.gh.route = (q) => (q.includes("mentions:@me") ? ["acme/api#1"] : route(q));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.item("api#1")).card.resolved, "no longer requested");
   assert.deepEqual(runSync(t.desk.queue()).resolved, [], "quiet for 20 days: the Mentions filter drops it, as before it resolved");
   t.cleanup();
@@ -187,10 +187,10 @@ test("a resolution with no time (no longer requested) doesn't pass a board's fil
 
 test("unrequested without a review: request removed, resolved as no longer requested", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(later(1));
   t.gh.items.set("acme/api#1", reviewAsk(1, { review_requests: [], updated_at: iso(0.5) }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(kinds(t.desk).slice(1), ["request_removed acme/api#1", "resolved acme/api#1"]);
   assert.deepEqual(
     runSync(t.desk.queue()).resolved.map((c) => c.why),
@@ -201,7 +201,7 @@ test("unrequested without a review: request removed, resolved as no longer reque
 
 test("settings: never resolving on others' approvals puts it back", async () => {
   const t = await setup([reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" })]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(runSync(t.desk.queue()).resolved.length, 1);
   runSync(t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } }));
   await idle(t.desk);
@@ -212,7 +212,7 @@ test("settings: never resolving on others' approvals puts it back", async () => 
 
 test("notifications: a tracked item is refreshed and diffed right away; the poll honours X-Poll-Interval", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.gh.poll()); // the first poll learns where the feed stands
   assert.equal(t.gh.feedCalls.length, 1);
   assert.equal(t.gh.feedCalls[0]?.since, hoursAgo(1));
@@ -239,7 +239,7 @@ test("notifications: a tracked item is refreshed and diffed right away; the poll
 
 test("notifications: something new asking for you starts an early reconcile; other noise doesn't", async () => {
   const t = await setup([]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.gh.poll());
   t.gh.items.set("acme/api#7", reviewAsk(7));
   t.gh.threads = [
@@ -260,7 +260,7 @@ test("notifications: something new asking for you starts an early reconcile; oth
 
 test("notifications: a mention on a tracked item is logged once; not on the first poll", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.threads = [{ thread: "t1", item: "acme/api#1", reason: "mention", updated_at: hoursAgo(0.5) }];
   await run(t.desk.gh.poll());
   assert.ok(!kinds(t.desk).includes("mentioned acme/api#1"));
@@ -278,7 +278,7 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
 
 test("notifications: a refresh the rate limit stops leaves the cursor, so the poll after the pause handles the same threads", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.gh.poll());
   const since = t.desk.gh.feed.since;
   t.setNow(later(1));
@@ -308,7 +308,7 @@ test("notifications: a refresh the rate limit stops leaves the cursor, so the po
 
 test("notifications: a rate-limit pause skips polls", async () => {
   const t = await setup([reviewAsk(1)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.desk.gh.pausedUntil = Date.now() + 60_000;
   await run(t.desk.gh.poll());
   assert.equal(t.gh.feedCalls.length, 0);
@@ -323,22 +323,22 @@ test("notifications: a rate-limit pause skips polls", async () => {
 
 test("activity: after, item and limit; a long-poll answers when an event lands, or when the wait is up", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
-    (await t.desk.activity({ after: 1 })).events.map((e) => e.seq),
+    (await run(t.desk.activity({ after: 1 }))).events.map((e) => e.seq),
     [2],
   );
-  assert.deepEqual(await t.desk.activity({ after: 0, item: "api#2" }).then((p) => [p.events.map((e) => e.item_id), p.last_seq]), [
+  assert.deepEqual(await run(t.desk.activity({ after: 0, item: "api#2" })).then((p) => [p.events.map((e) => e.item_id), p.last_seq]), [
     ["acme/api#2"],
     2,
   ]);
-  assert.equal((await t.desk.activity({ after: 0, limit: 1 })).last_seq, 1);
+  assert.equal((await run(t.desk.activity({ after: 0, limit: 1 }))).last_seq, 1);
   // Nothing new: the cursor stays at the log's end.
-  const empty = await t.desk.activity({ after: 2 });
+  const empty = await run(t.desk.activity({ after: 2 }));
   assert.deepEqual(empty, { events: [], last_seq: 2 });
 
   const started = Date.now();
-  const waiting = t.desk.activity({ after: 2, wait: 30 });
+  const waiting = run(t.desk.activity({ after: 2, wait: 30 }));
   setTimeout(() => {
     t.desk.record("github", [{ at: NOW.toISOString(), item_id: "acme/api#1", kind: "commented", actor: "dana", data: {} }]);
   }, 20);
@@ -350,19 +350,19 @@ test("activity: after, item and limit; a long-poll answers when an event lands, 
   assert.ok(Date.now() - started < 5000);
 
   const ac = new AbortController();
-  const aborted = t.desk.activity({ after: 3, wait: 30, signal: ac.signal });
+  const aborted = run(t.desk.activity({ after: 3, wait: 30, signal: ac.signal }));
   ac.abort();
   assert.deepEqual(await aborted, { events: [], last_seq: 3 });
 
   // An exact id still works once the item is gone from the desk.
-  assert.deepEqual((await t.desk.activity({ item: "acme/gone#9" })).events, []);
+  assert.deepEqual((await run(t.desk.activity({ item: "acme/gone#9" }))).events, []);
   t.cleanup();
 });
 
 test("done on a resolved item stays done when it comes back", async () => {
   const approved = (o: Partial<Item> = {}) => reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved", ...o });
   const t = await setup([approved()]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("api#1", "done"));
   assert.equal(runSync(t.desk.queue()).resolved[0]?.status, "done");
   runSync(t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } }));

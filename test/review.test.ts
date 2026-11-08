@@ -1096,11 +1096,11 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
     notes.push(body);
   };
   const desk = new Desk({ home, github: gh, now: () => NOW, notify, log: () => {}, review: f.deps, writer: opts.writer });
-  await desk.init();
+  await run(desk.init());
   // Waits out a sync already running (approve starts one), then runs a fresh one.
   const sync = async () => {
     while (desk.syncing) await flush();
-    await desk.sync();
+    await run(desk.sync());
     await flush();
   };
   return {
@@ -1151,22 +1151,22 @@ test("after a sync, other people's PRs in Now and Today get AI reviews two at a 
 test("review.auto_ai off: nothing runs on its own; asking runs once per commit and joins a run in progress", async () => {
   const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
   await t.sync();
-  const view = await t.desk.reviewView("api#1");
+  const view = await run(t.desk.reviewView("api#1"));
   assert.equal(view.generating, false);
   assert.equal(t.f.started.length, 0);
   assert.deepEqual(view.files, [FILE]);
 
-  const first = t.desk.aiReview("api#1");
-  const joined = t.desk.aiReview("api#1", true);
+  const first = run(t.desk.aiReview("api#1"));
+  const joined = run(t.desk.aiReview("api#1", true));
   await flush();
   assert.equal(t.f.started.length, 1, "a second ask joins the run");
-  assert.equal((await t.desk.reviewView("api#1")).generating, true);
+  assert.equal((await run(t.desk.reviewView("api#1"))).generating, true);
   await t.f.release("acme/api#1");
   assert.equal((await first).summary, "Review of acme/api#1");
   assert.equal((await joined).summary, "Review of acme/api#1");
-  await t.desk.aiReview("api#1");
+  await run(t.desk.aiReview("api#1"));
   assert.equal(t.f.started.length, 1, "kept for this commit");
-  const forced = t.desk.aiReview("api#1", true);
+  const forced = run(t.desk.aiReview("api#1", true));
   await flush();
   assert.equal(t.f.started.length, 2, "force runs it again");
   await t.f.release("acme/api#1");
@@ -1210,7 +1210,7 @@ test("after a sync, the main page's PRs' diffs and conversations are fetched ahe
   assert.deepEqual(calls.slice(6), ["acme/api#1@h1b"], "a new commit is fetched again");
 
   const before = calls.length;
-  assert.deepEqual((await t.desk.reviewView("api#1")).files, [FILE]);
+  assert.deepEqual((await run(t.desk.reviewView("api#1"))).files, [FILE]);
   assert.equal(calls.length, before, "opening it doesn't wait on GitHub");
   t.cleanup();
 });
@@ -1220,11 +1220,11 @@ test("a review fetched ahead (the row the cursor rests on) starts no AI review; 
   await t.sync();
   assert.equal(t.f.started.length, 2, "two at a time");
   const waiting = ["acme/api#1", "acme/api#2", "acme/api#3"].find((id) => !t.f.started.includes(id))!;
-  const ahead = await t.desk.reviewView(waiting, true);
+  const ahead = await run(t.desk.reviewView(waiting, true));
   assert.deepEqual(ahead.files, [FILE]);
   assert.equal(ahead.generating, false);
   assert.equal(t.f.started.length, 2, "fetched ahead: nothing starts");
-  assert.equal((await t.desk.reviewView(waiting)).generating, true, "opened: its AI review starts");
+  assert.equal((await run(t.desk.reviewView(waiting))).generating, true, "opened: its AI review starts");
   assert.equal(t.f.started.length, 3);
   for (const id of t.f.started.slice()) await t.f.release(id);
   t.cleanup();
@@ -1239,7 +1239,7 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   t.f.setFail("claude CLI isn't logged in");
   await t.f.release("acme/api#1");
 
-  const v = await t.desk.reviewView("acme/api#1");
+  const v = await run(t.desk.reviewView("acme/api#1"));
   assert.equal(v.ai, null);
   assert.equal(v.ai_error, "claude CLI isn't logged in");
   assert.equal(v.generating, false, "opening it doesn't retry the same commit");
@@ -1247,13 +1247,13 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   assert.equal(t.f.started.length, 1, "nor does a sync");
   assert.equal(t.f.fetched.length, 1, "the diff is kept per commit");
 
-  const again = t.desk.aiReview("api#1");
+  const again = run(t.desk.aiReview("api#1"));
   await flush();
   assert.equal(t.f.started.length, 2, "asking does");
   t.f.setFail(null);
   await t.f.release("acme/api#1");
   assert.equal((await again).verdict, "skim");
-  assert.equal((await t.desk.reviewView("api#1")).ai_error, null);
+  assert.equal((await run(t.desk.reviewView("api#1"))).ai_error, null);
   t.cleanup();
 });
 
@@ -1271,21 +1271,25 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
 
   await t.sync();
   await t.sync();
-  const v = await t.desk.reviewView(untried);
+  const v = await run(t.desk.reviewView(untried));
   assert.equal(t.f.started.length, 2, "no sync and no opened PR starts another run");
   assert.equal(v.generating, false);
   assert.equal(v.ai_error, `AI reviews are paused: ${LOGGED_OUT}`);
-  assert.match((await t.desk.reviewView(first!)).ai_error ?? "", /^Claude Code isn't logged in/, "a PR that was tried shows its own error");
-  assert.equal((await t.desk.reviewView("api#4")).ai_error, null, "not on one it wouldn't review on its own (merged)");
+  assert.match(
+    (await run(t.desk.reviewView(first!))).ai_error ?? "",
+    /^Claude Code isn't logged in/,
+    "a PR that was tried shows its own error",
+  );
+  assert.equal((await run(t.desk.reviewView("api#4"))).ai_error, null, "not on one it wouldn't review on its own (merged)");
 
-  const asked = t.desk.aiReview(untried);
+  const asked = run(t.desk.aiReview(untried));
   await flush();
   assert.equal(t.f.started.length, 3, "asking runs it");
   t.f.setFail(null);
   await t.f.release(untried);
   assert.equal((await asked).verdict, "skim");
   assert.equal(t.desk.aiPaused, null, "a success resumes them");
-  assert.equal((await t.desk.reviewView(untried)).ai_error, null);
+  assert.equal((await run(t.desk.reviewView(untried))).ai_error, null);
   t.cleanup();
 });
 
@@ -1376,14 +1380,14 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
 test("the review view sends the desk's reading order", async () => {
   const t = await setup([ask(1)], { chunks: [{ id: "h2", level: "look", why: "swaps old for fresh" }] });
   await t.sync();
-  let v = await t.desk.reviewView("api#1");
+  let v = await run(t.desk.reviewView("api#1"));
   assert.equal(v.order.ranked, false, "no review yet: today's order");
   assert.deepEqual(
     v.order.chunks.map((h) => h.id),
     ["h1", "h2"],
   );
   await t.f.release("acme/api#1");
-  v = await t.desk.reviewView("api#1");
+  v = await run(t.desk.reviewView("api#1"));
   // The fake review's note sits on h1, which Claude didn't rank: it follows the ranked chunk instead of folding.
   assert.deepEqual(
     [v.order.ranked, v.order.chunks.map((h) => [h.id, h.rank, h.level, h.why, h.notes]), v.order.rest],
@@ -1402,7 +1406,7 @@ test("the review view sends the desk's reading order", async () => {
   const { chunks: _, ...unranked } = runSync(t.desk.item("api#1")).ai!;
   t.desk.store.set("review:acme/api#1", unranked);
   t.desk.changed();
-  v = await t.desk.reviewView("api#1");
+  v = await run(t.desk.reviewView("api#1"));
   assert.deepEqual([v.order.ranked, v.order.chunks.map((h) => h.id), v.order.notes], [false, ["h1", "h2"], [0]]);
   t.cleanup();
 });
@@ -1538,8 +1542,8 @@ test("reviews are for PRs: an issue answers 400", async () => {
   });
   const t = await setup([issue], { settings: { "review.auto_ai": false } });
   await t.sync();
-  await assert.rejects(t.desk.reviewView("api#9"), (e: Error & { status: number }) => e.status === 400);
-  await assert.rejects(t.desk.aiReview("api#9"), (e: Error & { status: number }) => e.status === 400);
+  await assert.rejects(run(t.desk.reviewView("api#9")), (e: Error & { status: number }) => e.status === 400);
+  await assert.rejects(run(t.desk.aiReview("api#9")), (e: Error & { status: number }) => e.status === 400);
   t.cleanup();
 });
 
@@ -1572,7 +1576,7 @@ test("approve goes through the write client, lands in the action log, and undo s
   const w = fakeWriter();
   const t = await setup([ask(1), mine(4)], { writer: w.writer, settings: { "review.auto_ai": false } });
   await t.sync();
-  assert.deepEqual((await t.desk.reviewView("api#1")).approve, { ok: true, reason: null });
+  assert.deepEqual((await run(t.desk.reviewView("api#1"))).approve, { ok: true, reason: null });
   runSync(t.desk.act("api#1", "pin"));
   const r = await run(t.desk.approve("api#1", "h1", "LGTM"));
   assert.equal(r.url, "https://github.com/acme/api/pull/1#pullrequestreview-1");
@@ -1590,7 +1594,7 @@ test("approve goes through the write client, lands in the action log, and undo s
   assert.equal(runSync(t.desk.undo()).action, "done", "u puts it back");
   assert.equal(runSync(t.desk.undo()).action, "pin", "undo walks past the approval");
 
-  assert.deepEqual((await t.desk.reviewView("web#4")).approve, { ok: false, reason: "it's your PR" });
+  assert.deepEqual((await run(t.desk.reviewView("web#4"))).approve, { ok: false, reason: "it's your PR" });
   await assert.rejects(
     run(t.desk.approve("web#4", "h4")),
     (e: Error & { status: number }) => e.status === 409 && e.message.includes("your PR"),
@@ -1601,8 +1605,8 @@ test("approve goes through the write client, lands in the action log, and undo s
     reviews: [{ author: "me", author_bot: false, state: "approved", at: hoursAgo(1), commit: "h3" }],
   });
   await t.sync();
-  assert.equal((await t.desk.reviewView("api#2")).approve.reason, "it's closed");
-  assert.equal((await t.desk.reviewView("api#3")).approve.reason, "you approved this commit");
+  assert.equal((await run(t.desk.reviewView("api#2"))).approve.reason, "it's closed");
+  assert.equal((await run(t.desk.reviewView("api#3"))).approve.reason, "you approved this commit");
   assert.equal(w.calls.length, 1);
 
   t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
@@ -1655,7 +1659,7 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
   await t.sync();
   assert.ok(calls.includes("search"), "the full pass still runs");
 
-  const view = await t.desk.reviewView("api#1");
+  const view = await run(t.desk.reviewView("api#1"));
   assert.deepEqual(view.card.resolved, "you approved");
   assert.deepEqual(
     view.activity.map((e) => [e.kind, e.actor, e.data]),
@@ -1727,7 +1731,7 @@ test("an approval its caller stops waiting for still lands, logged and off your 
 test("without a write client, approving is off", async () => {
   const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
   await t.sync();
-  assert.deepEqual((await t.desk.reviewView("api#1")).approve, { ok: false, reason: "approving isn't available in this desk" });
+  assert.deepEqual((await run(t.desk.reviewView("api#1"))).approve, { ok: false, reason: "approving isn't available in this desk" });
   await assert.rejects(run(t.desk.approve("api#1", "h1")), /isn't available/);
   t.cleanup();
 });

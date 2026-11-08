@@ -69,7 +69,7 @@ async function withWriter(c: TestContext, items: Item[]) {
   const w = fakeWriter(() => t!);
   t = await setup(items, { desk: { writer: w.writer } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   return { t, w };
 }
 
@@ -111,12 +111,12 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   assert.deepEqual(actions("web#8"), undefined, "in Merging the coordinator has it");
   assert.deepEqual(actions("api#7"), ["close"], "your issue");
   assert.deepEqual(actions("web#9"), ["close", "draft"], "stacked: it waits on the PR below");
-  const view = await t.desk.reviewView("web#4");
+  const view = await run(t.desk.reviewView("web#4"));
   assert.deepEqual(view.card.actions, ["close", "draft", "merge"], "the review's card says the same");
 
   const t2 = await setup([myPr(3, { ci: "green" })]);
   c.after(t2.cleanup);
-  await t2.desk.sync();
+  await run(t2.desk.sync());
   assert.equal(runSync(t2.desk.item("web#3")).card.actions, undefined, "no write client, no actions");
 });
 
@@ -263,7 +263,7 @@ test("an issue you opened closes with closeIssue", async (c) => {
 test("a refused write says why, and nothing is logged; an agent's /api/act can't reach any of them", async (c) => {
   const t = await setup([myPr(3, { ci: "green" })], { desk: { writer: refuseWrites("Resource not accessible") } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await assert.rejects(
     run(t.desk.githubAct("web#3", "close")),
     (e: Error & { status: number }) => e.status === 502 && e.message.includes("Resource not accessible"),
@@ -294,7 +294,7 @@ test("a write whose refresh reads nothing isn't offered again until a read shows
   ]);
   t.gh.details = details;
   t.desk.gh.pausedUntil = 0; // the reset came
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.item("web#4")).card.actions, ["reopen"], "a read shows it closed");
   assert.deepEqual(runSync(t.desk.item("web#3")).card.actions, ["reopen"]);
 });

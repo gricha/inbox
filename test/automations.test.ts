@@ -138,13 +138,13 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
     settings: { "policy.judge": false, "notify.quiet": "" },
   });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   t.gh.items.set("acme/other#9", makeItem({ repo: "acme/other", number: 9, kind: "issue", author: "dave", title: "Crash on start" }));
   runSync(t.desk.act("api#2", "done"));
   await runFx(t.desk.add("api#3"));
   const five = t.gh.items.get("acme/api#5")!;
   t.gh.items.set(five.id, { ...five, state: "closed", updated_at: new Date(Date.parse(five.updated_at) + 60_000).toISOString() });
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   const card = (id: string) => runSync(t.desk.item(id)).card;
   assert.ok(!["now", "today"].includes(card("acme/api#4").bucket), "a team ping is sorted away");
   fake.answer("Read 12 new issues; a few need you.", [
@@ -231,7 +231,7 @@ test("a run with no answer, or one deleted while it runs, adds nothing; a run it
   const fake = fakeClaude(c);
   const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   fake.raw('{"type":"result","is_error":false,"result":"I looked around."}');
   const empty = await t.desk.automations.run(a, "now");
@@ -277,7 +277,7 @@ test("a run that fails says so, under the automation and in a notification", asy
   const fake = fakeClaude(c);
   const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   fake.fail();
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   const run = await t.desk.automations.run(a, "now");
@@ -290,7 +290,7 @@ test("what fails an item is its error and the run goes on; a bug putting one on 
   const fake = fakeClaude(c);
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   fake.answer("Two things.", [
     { ref: "what", why: "unreadable" },
     { ref: "acme/api#1", why: "asks you" },
@@ -317,7 +317,7 @@ test("on its schedule it runs once per due time, not for ones before you set it,
   fake.answer("Nothing needs you.", []);
   const t = await setup([], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   const now = new Date(2026, 10, 4, 10, 0); // Wednesday 10:00 local
   t.setNow(now);
   const a = (o: Partial<Automation>): Automation => ({
@@ -359,7 +359,7 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
   fake.answer("Nothing needs you.", []);
   const t = await setup([], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   const req = http(createApp(t.desk, 47823));
   const body = (o: Record<string, unknown> = {}) => ({ ...WARDEN, ...o });
 
@@ -417,7 +417,7 @@ test("the desk stopping during a run stops it: it records, notifies and reports 
   const fake = fakeClaude(c);
   const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await runFx(t.desk.sync());
   const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   fake.answer("Nothing needs you.", []);
   fake.hold(true);

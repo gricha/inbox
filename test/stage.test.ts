@@ -4,7 +4,7 @@ import { andMore, askedAt, stage } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 const review = (author: string, state: Item["reviews"][number]["state"], h: number, o: { trusted?: boolean; bot?: boolean } = {}) => ({
   author,
@@ -54,7 +54,7 @@ test("each card says who it's from, you for yours or a bot's for you, and a PR's
     reviewAsk(5, { kind: "issue" }),
   ]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const card = (id: string) => runSync(t.desk.item(id)).card;
   assert.deepEqual(
     ["acme/api#1", "acme/web#2", "acme/api#3", "acme/api#4", "acme/api#5"].map((id) => [card(id).by, card(id).stage]),

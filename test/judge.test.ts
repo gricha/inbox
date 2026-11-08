@@ -10,7 +10,7 @@ import { classify, compileBoard, type Entry } from "../src/rules.ts";
 import { analyze } from "../src/signals.ts";
 import type { AiReview, BoardConfig, Item, JudgeStep } from "../src/types.ts";
 import { FakeGitHub, hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
 const ctx = makeContext();
@@ -665,7 +665,7 @@ async function setup(
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(fake.dir, { recursive: true, force: true });
   });
-  await desk.init();
+  await run(desk.init());
   // Waits for the judge to go quiet: no call running.
   const settle = async () => {
     for (let i = 0; i < 500 && desk.judge.running; i++)
@@ -674,7 +674,7 @@ async function setup(
       });
   };
   const sync = async () => {
-    await desk.sync();
+    await run(desk.sync());
     await settle();
   };
   const placed = (n: number) => runSync(desk.item(`api#${n}`)).placements[0]!;
@@ -744,7 +744,7 @@ test(
     fs.writeFileSync(path.join(t.fake.dir, "hold"), "");
     fs.writeFileSync(path.join(t.fake.dir, "bucket"), "fyi");
     t.gh.items.set("acme/api#1", { ...gray(1), head_oid: "pushed", updated_at: hoursAgo(0) });
-    await t.desk.sync();
+    await run(t.desk.sync());
     await until(() => t.fake.calls() === 2);
     assert.equal(t.desk.judge.running, true);
     assert.deepEqual([t.placed(1).bucket, t.placed(1).judge?.pending], ["today", true]);
@@ -802,10 +802,10 @@ test(
   async (c) => {
     const t = await setup(c, [gray(1)], { policy: "Team asks are today." });
     fs.writeFileSync(path.join(t.fake.dir, "hold"), "");
-    await t.desk.sync();
+    await run(t.desk.sync());
     await until(() => t.fake.calls() === 1);
     assert.equal(t.desk.getPolicy().judge.state, "running");
-    await t.desk.close();
+    await run(t.desk.close());
     await until(() => !t.desk.judge.running);
     const j = t.desk.judge;
     assert.deepEqual([j.call, j.error, j.failures, j.retryAt, j.lastAt, j.timer], [null, null, 0, 0, null, undefined]);
@@ -820,7 +820,7 @@ test("one call at a time, 20 items per call, and no more than policy.max_per_hou
   const items = Array.from({ length: 30 }, (_, i) => gray(i + 1));
   const t = await setup(c, items, { policy: "Team asks are today.", settings: { "policy.max_per_hour": 25 } });
   fs.writeFileSync(path.join(t.fake.dir, "hold"), "");
-  await t.desk.sync();
+  await run(t.desk.sync());
   await until(() => t.fake.calls() === 1);
   t.desk.judge.pump();
   t.desk.judge.pump();

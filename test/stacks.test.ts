@@ -331,7 +331,7 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
     reviewAsk(9),
   ]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
     t.gh.probeCalls.filter((c) => c.includes(" b1") || c.includes(" b2") || c.includes(" b3")),
     ["acme/api down b1", "acme/api down b2", "acme/api down b3"],
@@ -362,7 +362,7 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
   assert.deepEqual([v.up, v.down], [id(2), null]);
   assert.equal(q.sections.now.find((c) => c.id === id(9))?.stack, undefined);
 
-  const top = await t.desk.reviewView(id(3));
+  const top = await run(t.desk.reviewView(id(3)));
   assert.deepEqual([top.stack?.current, top.stack?.up, top.stack?.down], [id(3), null, id(2)], "a member no board lists opens too");
   assert.deepEqual(top.card.stack, { id: id(1), pos: 3, size: 3 });
   assert.equal(runSync(t.desk.item(id(2))).stack?.current, id(2));
@@ -371,7 +371,7 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
 test("the PR below a stack's bottom is fetched; probes wait half an hour, then stale members are refreshed", async (tc) => {
   const t = await setup([theirs(1, "main"), reviewAsk(2, { head_ref: "b2", base: "b1" })]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(t.gh.probeCalls.includes("acme/api up b1"));
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.state, "open");
   assert.deepEqual(
@@ -381,16 +381,16 @@ test("the PR below a stack's bottom is fetched; probes wait half an hour, then s
   );
 
   const probed = t.gh.probeCalls.length;
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.gh.probeCalls.length, probed, "asked once per half hour");
 
   t.gh.items.set(id(1), { ...t.gh.items.get(id(1))!, state: "merged", closed_at: hoursAgo(0), updated_at: hoursAgo(0) });
   t.setNow(new Date(NOW.getTime() + 31 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.state, "merged");
   assert.equal(runSync(t.desk.queue()).sections.now[0]?.stack, undefined, "one open PR left");
   assert.deepEqual(
-    (await t.desk.reviewView(id(2))).stack?.line.map((m) => [m.number, m.state, m.why]),
+    (await run(t.desk.reviewView(id(2)))).stack?.line.map((m) => [m.number, m.state, m.why]),
     [
       [1, "merged", "merged"],
       [2, "open", "carol asked you directly"],
@@ -405,14 +405,14 @@ test("PRs stored before stacks: the desk refetches a few a pass for their branch
   };
   const t = await setup([bare(1), bare(2)]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const fetched = t.gh.detailCalls.flat().length;
   t.gh.items.set(id(1), reviewAsk(1));
   t.gh.items.set(id(2), reviewAsk(2));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.gh.detailCalls.flat().length, fetched + 2, "unchanged on GitHub, but stored without them");
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.head_ref, "change-1");
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.gh.detailCalls.flat().length, fetched + 2, "once they have them, only changes refetch");
 });
 
@@ -427,7 +427,7 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
     myPr(7, { ci: "green", base: "change-6" }),
   ]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const focus = runSync(t.desk.focus());
   assert.deepEqual(
     focus.sections.now.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
@@ -478,7 +478,7 @@ test("a PR a probe finds that the desk stored before it kept branches is fetched
   tc.after(t.cleanup);
   t.desk.store.putItems([old], hoursAgo(1));
   t.gh.items.set(id(1), parent);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).sections.blocked[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
 });
 
@@ -514,9 +514,9 @@ test("a ref counts the PR's own line: forks over a merged bottom are two PRs, no
 test("desktop notifications go per PR: a member asked while the one below is open waits in Blocked; once that merges it's news, once", async (tc) => {
   const t = await setup([reviewAsk(2, { head_ref: "b2" }), theirs(3, 2)], { settings: { "notify.quiet": "" } });
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(id(3), reviewAsk(3, { head_ref: "b3", base: "b2", updated_at: at(1) }));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.notes, [], "the line in Now stands for it");
   assert.deepEqual(
     runSync(t.desk.queue()).sections.now.map((c) => [c.id, c.stack?.folded]),
@@ -524,10 +524,10 @@ test("desktop notifications go per PR: a member asked while the one below is ope
   );
   t.gh.items.set(id(2), { ...t.gh.items.get(id(2))!, state: "merged", closed_at: at(2), updated_at: at(2) });
   t.setNow(new Date(at(3)));
-  await t.desk.sync();
-  await t.desk.sync();
+  await run(t.desk.sync());
+  await run(t.desk.sync());
   assert.deepEqual(t.notes, ["api#3 \u00b7 carol asked you directly"]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(t.notes, ["api#3 \u00b7 carol asked you directly"], "once");
 });
 
@@ -537,11 +537,11 @@ test("a member stored quietly is news once a board lists it: its events since th
   let lag = false; // the search index hasn't caught up with #2's ask yet
   const route = t.gh.route;
   t.gh.route = (q) => route(q).filter((x) => !(lag && x === id(2)));
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(new Date(NOW.getTime() + 31 * 60_000));
   t.gh.items.set(id(2), reviewAsk(2, { head_ref: "b2", base: "b1", updated_at: at(30) }));
   lag = true;
-  await t.desk.sync();
+  await run(t.desk.sync());
   const of2 = () =>
     t.desk.store
       .activity({ after: 0, limit: 100 })
@@ -550,9 +550,9 @@ test("a member stored quietly is news once a board lists it: its events since th
   assert.deepEqual(of2(), [], "the stale refresh stores the ask quietly");
   lag = false;
   t.setNow(new Date(NOW.getTime() + 33 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(of2(), ["new"]);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(of2(), ["new"], "once");
 
   const [gh] = t.desk.connectors;
@@ -566,7 +566,7 @@ test("a member stored quietly is news once a board lists it: its events since th
 test("the feed takes a member stored quietly for one the desk doesn't hold: an ask on it starts a reconcile", async (tc) => {
   const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1)]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await run(t.desk.gh.poll());
   t.gh.items.set(id(2), reviewAsk(2, { head_ref: "b2", base: "b1", updated_at: at(1) }));
   t.gh.threads = [{ thread: "t1", item: id(2), reason: "review_requested", updated_at: at(1) }];
@@ -586,13 +586,13 @@ test("the feed takes a member stored quietly for one the desk doesn't hold: an a
 test("off-board members of a stack the boards list aren't pruned with the items no search returns", async (tc) => {
   const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1), theirs(3, 2), theirs(9, "main")]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.desk.store.putItems([theirs(9, "main")], NOW.toISOString());
   const day = 24 * 60 * 60_000;
   t.setNow(new Date(NOW.getTime() + 14 * day - 10 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(new Date(NOW.getTime() + 14 * day + 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
     runSync(t.desk.item(id(1))).stack?.line.map((m) => m.number),
     [1, 2, 3],
@@ -606,19 +606,19 @@ test("a stored PR your PR requires is refreshed every 10 minutes while open, qui
   tc.after(t.cleanup);
   t.desk.store.putItems([dep], hoursAgo(15 * 24), true); // no search has returned it for 15 days
   const fetched = () => t.gh.detailCalls.flat().filter((x) => x === dep.id).length;
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.store.itemsById([dep.id]).has(dep.id), true, "not pruned: a listed PR needs it");
   assert.equal(fetched(), 1, "stored an hour ago: refreshed");
   t.setNow(new Date(NOW.getTime() + 5 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(fetched(), 1, "not again within 10 minutes");
   t.gh.items.set(dep.id, { ...dep, state: "merged", closed_at: at(12), updated_at: at(12) });
   t.setNow(new Date(NOW.getTime() + 12 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(fetched(), 2);
   assert.equal(t.desk.store.itemsById([dep.id]).get(dep.id)?.state, "merged");
   t.setNow(new Date(NOW.getTime() + 60 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(fetched(), 2, "merged: not refreshed");
   assert.equal(t.desk.store.itemsById([dep.id]).has(dep.id), true, "still kept: the PR that needs it is open");
   assert.deepEqual(
@@ -633,7 +633,7 @@ test("a dependency in another repo is fetched quietly and blocks the PR that nee
   const dep = makeItem({ repo: "acme/sentry", number: 5, author: "carol", reviews: [kai] }); // on no search
   const t = await setup([myPr(1, { requires: ["Acme/Sentry#5"] }), dep]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(t.gh.probeCalls.includes("Acme/Sentry pr 5"));
   const items = t.desk.store.items();
   assert.equal(items.find((i) => i.id === dep.id)?.state, "open");
@@ -649,7 +649,7 @@ test("a dependency in another repo is fetched quietly and blocks the PR that nee
   );
   const probed = t.gh.probeCalls.length;
   t.setNow(new Date(NOW.getTime() + 40 * 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(!t.gh.probeCalls.slice(probed).some((c) => c.includes(" pr ")), "held now: refreshed, not probed");
 });
 
@@ -668,28 +668,28 @@ test("pr probes: at most 20 a sync, and a miss isn't asked again for a day; a fa
       failed++;
       return Effect.fail(new GitHubHttpError({ status: 500, message: "GitHub HTTP 500" }));
     });
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.branchPrs = real;
   assert.ok(failed > 0);
   assert.equal(Object.keys(t.desk.store.get("dep_misses") ?? {}).length, 0, "a failed call learns nothing");
   later(31);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked(), 20);
   later(32);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked(), 30, "the rest on the next pass");
   later(3 * 60);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked(), 30, "no PR there: not asked again today");
   later(25 * 60 + 31);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked(), 50, "a day on, asked again, 20 a pass");
 });
 
 test("QueueView.stacks has every stack a card in the view carries, cleared ones too", async (tc) => {
   const t = await setup([reviewAsk(1, { head_ref: "b1" }), reviewAsk(2, { head_ref: "b2", base: "b1" })]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act(id(1), "mute"));
   runSync(t.desk.act(id(2), "mute"));
   const q = runSync(t.desk.queue());
@@ -705,16 +705,16 @@ test("probes for stacks go first: a busy board doesn't stop a chain filling in o
   const plain = Array.from({ length: 130 }, (_, i) => reviewAsk(100 + i));
   const t = await setup([...plain, theirs(1, "main"), reviewAsk(2, { head_ref: "b2", base: "b1" }), theirs(3, 2), theirs(4, 3)]);
   tc.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.deepEqual(
     runSync(t.desk.item(id(2))).stack?.line.map((m) => m.number),
     [1, 2, 3, 4],
   );
   assert.ok(t.gh.probeCalls.length <= 120, `${t.gh.probeCalls.length} probes`);
   t.setNow(new Date(NOW.getTime() + 60_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.setNow(new Date(NOW.getTime() + 120_000));
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.ok(
     plain.every((p) => t.gh.probeCalls.includes(`acme/api down ${p.head_ref}`)),
     "the rest of the board's PRs are asked over the next passes",

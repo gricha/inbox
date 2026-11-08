@@ -308,9 +308,9 @@ test("Claude reads what waits on you once per latest comment, in the background,
   const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF });
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_3", CTX);
-  await t.desk.sync();
+  await run(t.desk.sync());
 
-  const first = await t.desk.reviewView("web#3");
+  const first = await run(t.desk.reviewView("web#3"));
   assert.deepEqual(
     first.conversation.filter((x) => x.waiting_on_you).map((x) => [x.id, x.take]),
     [
@@ -325,7 +325,7 @@ test("Claude reads what waits on you once per latest comment, in the background,
   assert.ok(args.includes("--json-schema") && args[args.indexOf("--tools") + 1] === "", "no tools, like the judge");
   assert.ok(!fake.stdin(1).includes("PRRT_resolved") && fake.stdin(1).includes("Do tombstones ever expire?"));
 
-  const v = await t.desk.reviewView("web#3");
+  const v = await run(t.desk.reviewView("web#3"));
   assert.equal(v.reading, false);
   assert.deepEqual(v.conversation[0]!.take, {
     gist: "gist of PRRT_open",
@@ -335,8 +335,8 @@ test("Claude reads what waits on you once per latest comment, in the background,
     at: v.conversation[0]!.take!.at,
   });
   assert.equal(v.conversation.find((x) => x.id === "PRRT_bot")!.take, null, "only those waiting on you are read");
-  await t.desk.reviewView("web#3");
-  await t.desk.sync();
+  await run(t.desk.reviewView("web#3"));
+  await run(t.desk.sync());
   assert.equal(fake.calls(), 1, "kept per latest comment: opening it again or a sync asks nothing");
 
   // azulus answers again: that thread is read again, the others keep their take.
@@ -348,14 +348,14 @@ test("Claude reads what waits on you once per latest comment, in the background,
     ],
   });
   t.gh.items.set("acme/web#3", { ...t.gh.items.get("acme/web#3")!, updated_at: hoursAgo(0.5) });
-  await t.desk.sync();
-  await t.desk.reviewView("web#3");
+  await run(t.desk.sync());
+  await run(t.desk.reviewView("web#3"));
   await until(() => fake.calls() === 2 && !t.desk.convos.reading);
   assert.deepEqual(
     [...fake.stdin(2).matchAll(/^- id: (.+)$/gm)].map((m) => m[1]),
     ["PRRT_open"],
   );
-  assert.equal((await t.desk.reviewView("web#3")).conversation[0]!.take?.comment_id, "c9");
+  assert.equal((await run(t.desk.reviewView("web#3"))).conversation[0]!.take?.comment_id, "c9");
 });
 
 test("your PR whose only action is answering someone says Reply on its row, and is read before you open it", posix, async (c) => {
@@ -371,7 +371,7 @@ test("your PR whose only action is answering someone says Reply on its row, and 
   );
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_3", CTX);
-  await t.desk.sync();
+  await run(t.desk.sync());
   for (const n of [3, 4, 5, 6]) runSync(t.desk.act(`web#${n}`, "pin")); // pinned: on the main page whatever the rules say
   const rows = () => [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today];
   assert.deepEqual(
@@ -386,7 +386,7 @@ test("your PR whose only action is answering someone says Reply on its row, and 
     ],
     "CI failing or changes requested is more than a reply; nothing waiting is nothing to answer",
   );
-  await t.desk.sync();
+  await run(t.desk.sync());
   await until(() => fake.calls() === 1 && !t.desk.convos.reading);
   assert.ok(fake.stdin(1).includes("acme/web#3"));
 });
@@ -396,7 +396,7 @@ test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude 
   const t = await setup([myPr(4, { ci: "red", thread_last: azulus })], { settings: JUDGE_OFF });
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_4", CTX);
-  await t.desk.sync();
+  await run(t.desk.sync());
   runSync(t.desk.act("web#4", "pin"));
   const app = createApp(t.desk, 47823);
   const get = (q = "") => app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/web#4")}${q}`);
@@ -410,7 +410,7 @@ test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude 
 test("what reviewers said: a failed fetch shows in the review and is tried again next time; views at once share one", async (c) => {
   const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await until(() => !t.desk.warming);
   const asked: string[] = [];
   let answer: Effect.Effect<PrContext, GitHubReadError> = Effect.fail(new GitHubHttpError({ status: 502, message: "GitHub HTTP 502" }));
@@ -420,7 +420,7 @@ test("what reviewers said: a failed fetch shows in the review and is tried again
       return answer;
     });
   t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
-  const failed = await t.desk.reviewView("web#3", true);
+  const failed = await run(t.desk.reviewView("web#3", true));
   assert.deepEqual([failed.conversation, failed.conversation_error, failed.reading], [[], "GitHub HTTP 502", false]);
 
   const held: (() => void)[] = [];
@@ -429,12 +429,12 @@ test("what reviewers said: a failed fetch shows in the review and is tried again
       resume(Effect.succeed(CTX));
     });
   });
-  const both = Promise.all([t.desk.reviewView("web#3", true), t.desk.reviewView("web#3", true)]);
+  const both = Promise.all([run(t.desk.reviewView("web#3", true)), run(t.desk.reviewView("web#3", true))]);
   await until(() => held.length > 0);
   assert.deepEqual(asked, ["PR_acme/web_3", "PR_acme/web_3"], "the failure wasn't kept, and the two views wait on one fetch");
   held[0]!();
   for (const v of await both) assert.deepEqual([v.conversation_error, v.conversation.length], [null, 7]);
-  assert.equal((await t.desk.reviewView("web#3", true)).conversation.length, 7);
+  assert.equal((await run(t.desk.reviewView("web#3", true))).conversation.length, 7);
   assert.equal(asked.length, 2, "kept once it came back");
 });
 
@@ -442,7 +442,7 @@ test("closing the desk while a read fetches what reviewers said starts no claude
   const fake = fakeClaude(c);
   const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   await until(() => !t.desk.warming);
   const held: (() => void)[] = [];
   t.gh.prContext = () =>
@@ -454,7 +454,7 @@ test("closing the desk while a read fetches what reviewers said starts no claude
   t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
   t.desk.convos.read("acme/web#3");
   assert.deepEqual([t.desk.convos.reading, held.length], ["acme/web#3", 1], "reading: its conversation is being fetched");
-  await t.desk.close();
+  await run(t.desk.close());
   for (const go of held) go();
   await new Promise((r) => {
     setTimeout(r, 200);
@@ -467,7 +467,7 @@ test("a reply goes only from the desk's window, to one of the PR's own conversat
   const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF, desk: { writer: w.writer } });
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_3", CTX);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
   const id = encodeURIComponent("acme/web#3");
   const post = (body: unknown, headers: Record<string, string> = {}) =>
@@ -510,7 +510,7 @@ test("an issue on your desk takes your comment, from the desk's window only, and
   const issue = makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"], node_id: "I_acme/api_9" });
   const t = await setup([], { settings: JUDGE_OFF, desk: { writer: w.writer } });
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set("acme/api#9", issue);
   await run(t.desk.add("acme/api#9"));
   const app = createApp(t.desk, 47823);
@@ -550,7 +550,7 @@ test("answering a comment on your PR nobody's asked to review leaves Add reviewe
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_3", one(3));
   t.gh.contexts.set("PR_acme/web_4", one(4));
-  await t.desk.sync();
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
   const desk = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
   const reply = (n: number) =>
@@ -559,8 +559,8 @@ test("answering a comment on your PR nobody's asked to review leaves Add reviewe
       headers: { "content-type": "application/json", ...desk },
       body: JSON.stringify({ id: `PRRT_${n}`, body: "After 30 days." }),
     });
-  await t.desk.reviewView("web#3");
-  await t.desk.reviewView("web#4");
+  await run(t.desk.reviewView("web#3"));
+  await run(t.desk.reviewView("web#4"));
   assert.equal((await reply(3)).status, 200);
   assert.equal((await reply(4)).status, 200);
   assert.deepEqual([runSync(t.desk.item("web#3")).card.status, runSync(t.desk.item("web#3")).card.cta], ["active", "reviewers"]);

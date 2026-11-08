@@ -17,7 +17,7 @@ const refused = () => new GitHubAuthError({ reason: "rejected", message: "GitHub
 test("every search failing fails the pass with GitHubSearchesFailed, after it kept what it could; the sync shows its words", async (c) => {
   const t = await setup([reviewAsk(1)]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(ID, makeItem({ repo: "acme/other", number: 9, author: "dave" }));
   await run(t.desk.add(ID)); // pinned: no search returns it, so each pass refreshes it
   const err = refused();
@@ -32,7 +32,7 @@ test("every search failing fails the pass with GitHubSearchesFailed, after it ke
   assert.deepEqual(t.gh.detailCalls, [[ID]], "the pin was still refreshed");
 
   const before = t.desk.syncedAt;
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(t.desk.syncError, err.message);
   assert.equal(t.desk.syncedAt, before);
   assert.equal(runSync(t.desk.overview()).connectors[0]?.status, "error");
@@ -41,7 +41,7 @@ test("every search failing fails the pass with GitHubSearchesFailed, after it ke
 test("a rate limit in a pass pauses the loops until GitHub's reset, and the next sync waits for it", async (c) => {
   const t = await setup([reviewAsk(1)]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   const resetAt = new Date(Date.now() + 3_600_000).toISOString();
   const message = `GitHub rate limited until ${resetAt} (HTTP 403)`;
   let asked = 0;
@@ -50,19 +50,19 @@ test("a rate limit in a pass pauses the loops until GitHub's reset, and the next
       asked++;
       return Effect.fail(new GitHubRateLimited({ resetAt, message }));
     });
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked, 1, "the first search's rate limit stops the pass");
   assert.equal(t.desk.gh.pausedUntil, Date.parse(resetAt));
   assert.equal(t.desk.syncError, message);
   assert.equal(runSync(t.desk.overview()).connectors[0]?.status, "paused");
-  await t.desk.sync();
+  await run(t.desk.sync());
   assert.equal(asked, 1, "paused: no pass");
 });
 
 test("fetchOne fails with GitHubNotFetched when details skips the item; add answers 502 with its words", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
-  await t.desk.sync();
+  await run(t.desk.sync());
   t.gh.items.set(ID, makeItem({ repo: "acme/other", number: 9, author: "dave" }));
   t.gh.details = () => Effect.succeed([]); // GitHub refused the batch it was in, which details skips
 
@@ -134,5 +134,5 @@ test("a desk with no context yet fails init with what GitHub's viewer fails with
     desk.stop();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  await assert.rejects(desk.init(), (e) => e === err);
+  await assert.rejects(run(desk.init()), (e) => e === err);
 });
