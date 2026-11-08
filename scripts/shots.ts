@@ -80,6 +80,8 @@ const at = (hash: string) => async (page: Page) => {
 const review =
   (id: string, clicks: string[] = []) =>
   async (page: Page) => {
+    // The list beside it from its top, whatever the shot before scrolled: it brings the review's row into view itself.
+    await page.evaluate(`document.querySelector(".beside-list")?.scrollTo(0, 0)`);
     await at(`#/review/${encodeURIComponent(id)}`)(page);
     await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
     await page.waitForTimeout(900);

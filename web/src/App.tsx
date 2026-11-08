@@ -1131,12 +1131,19 @@ export function App() {
   // while it is); focusing a row leaves the selection on it.
   const listSel = menuAt?.id ?? openSel;
   const compact: RowCtx = { ...ctx, compact: true, selected: listSel, select: ignore };
+  // The open item's row is always in the list beside, marked: one behind the Inbox's "n more" opens that line there.
+  const besideGroups = useMemo(() => {
+    const q = groups.find((g) => g.key === "queue");
+    if (!openSel || !q?.fold || q.cards.some((c) => c.id === openSel)) return groups;
+    const all = groupsOf(view, open, filter, { ...unfolded, queue: true });
+    return all.find((g) => g.key === "queue")?.cards.some((c) => c.id === openSel) ? all : groups;
+  }, [groups, openSel, view, open, filter, unfolded]);
   const besideRows =
     side !== "open" || !listPage ? null : listPage === "queue" ? (
       <Queue
         view={view}
         overview={overview}
-        groups={groups}
+        groups={besideGroups}
         ctx={compact}
         inquiries={inquiries}
         inq={{ ...inq, compact: true, selected: listSel, select: ignore }}

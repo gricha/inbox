@@ -1452,6 +1452,7 @@ p {
 /* Folded, the rail carries on the line under the page's head. */
 .beside.folded::before {
   content: "";
+  box-sizing: border-box;
   flex: none;
   height: 52px;
   border-bottom: 1px solid var(--rule);
@@ -1474,6 +1475,11 @@ p {
   color: var(--pencil);
   cursor: pointer;
   -webkit-app-region: no-drag;
+}
+
+/* A list that starts with a row, not a heading (Merging's): on the heads' hairline instead, so it never sits on that row. */
+.beside:has(.beside-list > .lane > .lines:first-child) .beside-fold {
+  top: 38px;
 }
 
 .beside-fold::before {
@@ -1611,7 +1617,8 @@ p {
   -webkit-line-clamp: 2;
 }
 
-/* One line of facts with a dot between: a long repo name gives way first, then the last fact is cut at its end. */
+/* One line of facts with a dot between: a long repo name gives way first, then a sorted-away row's why, then the last fact,
+   each down to a few letters, so no fact is cut to a bare "…". */
 .c-row .c-meta {
   display: flex;
   grid-area: 2 / 1;
@@ -1639,6 +1646,15 @@ p {
   text-overflow: ellipsis;
 }
 
+.c-meta > .line-note {
+  flex-shrink: 100;
+  min-width: calc-size(max-content, min(size, 10ch));
+}
+
+.c-meta > .line-note:not(:last-child) ~ :last-child {
+  min-width: calc-size(max-content, min(size, 8ch));
+}
+
 .c-meta > * + *::before {
   margin: 0 6px;
   color: var(--faint);
@@ -1660,7 +1676,7 @@ p {
 
 .c-ref .line-ref {
   flex: 0 1000 auto;
-  min-width: calc-size(max-content, min(size, 4ch));
+  min-width: calc-size(max-content, min(size, 6ch));
 }
 
 .c-ref .line-num {
@@ -2036,14 +2052,20 @@ p {
   min-width: 0;
 }
 
-/* A stack's rows together, bottom first, under one quiet line. */
-.lane-stack {
-  margin: 6px 0;
+/* A stack's rows together, bottom first, under one quiet line: a hairline above it, as above any row, and none between the
+   line and its first row, so the line heads its own rows. */
+.lane .lines > .lane-stack {
+  margin: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.lane-stack-head + * {
+  border-top: 0;
 }
 
 .lane-stack-head {
   margin: 0;
-  padding: 0 12px;
+  padding: 8px 14px 0;
   color: var(--pencil);
   font-size: 13px;
 }
