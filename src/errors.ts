@@ -1,7 +1,7 @@
 // The desk's expected failures, as tagged errors: an Effect's error channel names them, catchTag recovers from one, and
 // each carries the words the owner sees verbatim (its message). A bug or a broken invariant is a defect instead (a throw
 // inside Effect code, or Effect.die) and never gets a class here. docs/effect.md has the rules. Tags are unique across
-// families (GitHub's 403 is GitHubForbidden, never Forbidden).
+// families (GitHub's 403 is GitHubHttpError with its status, or GitHubRateLimited for a rate limit, never Forbidden).
 import { Data } from "effect";
 
 // What was thrown, in its words: an Error's message, else the value as text.

@@ -37,7 +37,8 @@ services, `Data.TaggedError`, the desk's own `log`.
   `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
   `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. The desktop app's own (`DeskCallFailed`, `DeskFailed`,
   `ElectronRefused`, `NoFreePort`) live in `electron/lib.ts`, beside the `FsError` and `CommandFailed` it shares with
-  the desk. Tags are unique across families: GitHub's 403 is `GitHubForbidden`, never `Forbidden`.
+  the desk. Tags are unique across families: GitHub's 403 is `GitHubHttpError` (its `status`), or `GitHubRateLimited`
+  for a rate limit, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
 - Every error has a message the owner can read, in fixed words (tests, toasts, the CLI and the stored `*_error` fields
@@ -81,22 +82,24 @@ answers 409 `Stale`, and a held lock 409 `Busy`; the UI shows any of them by its
 Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
 `wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus`, an ask about an item and a
 wake that sends one again (`askAbout`) with broken rules answer `Unavailable` "config" (was a TypeError 500); a body
-that isn't a JSON object (not JSON, `null` or an array) at a route that needs one (`json()`: `/api/act`,
-`/api/config/preview`, PUT `/api/config`, `/api/policy` and `/api/settings`) is a `BadRequest` "the body must be a JSON
-object" (was a 500, or for an array the route's own `need { … }` or a 200); every other route reads one as `{}`
-(`bodyOf`) and says what it needs; a bug in a GitHub write, in `hold`'s fetch or in reading a PR's conversations before
-a reply is a logged 500 `Internal` in its own words (it was a 502 in the write's). `Unavailable` and `ReviewersNotAsked`
-say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can take a minute" and "Marked it ready,
-but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path the desk doesn't route answers
-`{ error: "not found", tag: "NotFound" }` (it had no tag); the host/origin/cross-site middleware's 403s and `fromUi`'s
-403 and 404 keep the `Forbidden` and `NotFound` tags they already had, now through `respond`.
+that isn't a JSON object (not JSON, or JSON `null`, an array, a string, a number or a boolean) at a route that needs one
+(`json()`: `/api/act`, `/api/config/preview`, PUT `/api/config`, `/api/policy` and `/api/settings`) is a `BadRequest`
+"the body must be a JSON object" (not JSON or `null` was a 500; an array or a scalar was `/api/act`'s and
+`/api/policy`'s own `need { … }`, and a 200 at the other three, PUT `/api/settings` rewriting settings.json); every
+other route reads one as `{}` (`bodyOf`) and says what it needs; a bug in a GitHub write, in `hold`'s fetch or in
+reading a PR's conversations before a reply is a logged 500 `Internal` in its own words (it was a 502 in the write's).
+`Unavailable` and `ReviewersNotAsked` say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can
+take a minute" and "Marked it ready, but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path
+the desk doesn't route answers `{ error: "not found", tag: "NotFound" }` (it had no tag); the host/origin/cross-site
+middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound` tags they already had, now through
+`respond`.
 
 ## Writing Effect code
 
 - A function that can fail returns `Effect.Effect<A, E>`, with no requirements (`R` is `never`). Its body is
-  `Effect.gen`, or `Effect.fn("name")` / `Effect.fnUntraced` for a reusable function. In a class, an entry point that
-  wants a span is a field: `readonly approve = Effect.fn("Desk.approve")({ self: this }, function* (id: string) { … })`;
-  other methods return `Effect.gen({ self: this }, function* () { … })`.
+  `Effect.gen`, or `Effect.fn("name")` / `Effect.fnUntraced` for a reusable function. In a class, a method returns
+  `Effect.gen({ self: this }, function* () { … })`, as `Desk.approve` does; no class has an `Effect.fn` field yet (one
+  that wants a span would be `readonly name = Effect.fn("Class.name")({ self: this }, function* (…) { … })`).
 - Costs: `Effect.fn` about 3.4 µs a call (it captures a stack), `Effect.gen` 0.9 µs, `Effect.fnUntraced` 0.3 µs, a
   failure 8 µs. Fine per request; never on something called per item, per row, per rule or per store read. Pure, total
   code stays plain functions: `compute`, `card`, `analyze`, `normalize`, `snapshot`, the view and format helpers, the
@@ -139,11 +142,18 @@ but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` 
   with a tapping schedule (it logs retries that never happen). Never retry a GitHub write: a timed-out one may have
   landed. Deliberate change, with a test: a rate limit's `Retry-After` sent as a date is read as one, and one that can't
   be read waits a minute (it was a `RangeError`).
-- Timeouts: `Effect.timeout(d)` fails with `TimeoutError`; map it to the domain error and its words.
+- Timeouts are the request's own: `AbortSignal.timeout` in a fetch (GitHub's reads and writes, 30 s; the CLI's and
+  MCP's client; the desktop app's `request`), an unref'd timer in a child's `Effect.callback` (`runCommand`'s,
+  `gh auth token`'s 30 s); map what it fails with to the domain error and its words. Nothing uses `Effect.timeout`;
+  `Effect.timeoutOption` only bounds how long the desktop app waits for a checkout's desk and Vite to exit before it
+  SIGKILLs what's left (`electron/source.ts`).
 - **Effect's timers keep the process up**: a fiber left in `Effect.sleep` or a `Schedule` keeps `node --test` from
   exiting, silently. Periodic loops (the connector's poll and feed, the judge's backoff, the coordinator's ticker,
-  automations' minute) keep their unref'd Node timer and fork one runner Effect per tick. `Effect.sleep`, `Schedule` and
-  `timeout` are for waits inside one run: retries, the activity long-poll.
+  automations' minute) keep their unref'd Node timer and fork one runner Effect per tick. `Effect.sleep` and `Schedule`
+  are for waits inside one run: retries (GitHub's reads, launchd's bootstrap), the coordinator's `halt` waiting for its
+  `claude` to exit, `desk_inquiry`'s minute, the desktop app's (its reconnect backoff, a checkout's 15 s retry). The
+  activity long-poll is a Node `setTimeout` in an `Effect.callback` (`nextEvent`), which `record()` or the timer
+  resumes and whose cleanup clears it.
 - **A write and what the desk records after it are one `Effect.uninterruptible` region**: the GitHub write (approve,
   reply, comment, inline, ready and asking reviewers, the More menu's), then `logWrite`, `doneAfterWrite`/`act`/`undo`,
   `wrote`, and `ask`'s rollback. A request going away never cancels a write the desk started or skips its bookkeeping;
@@ -174,9 +184,12 @@ Outside these exceptions there is no `throw`, `try`/`catch`, `.catch(` or `Promi
 - `throw` for a defect, `!` assertions and `throw new Error("unreachable: …")` stay.
 - A module's private recursive parser or evaluator may throw to unwind and convert once, at its exported edge, to a
   `Result` or an Effect (`expr.ts`'s `compile` and `Compiled.eval`, with `Result.try`).
+- `Store.tx`'s rollback: `catch (e) { ROLLBACK; throw e }` rethrows the defect it caught.
 - `electron/preload.cjs`: sandboxed CommonJS, it can't load `effect`.
-- Tests and the shots' Playwright steps are `node:test` / Playwright code: they run Effects through
-  `test/helpers/run.ts`.
+- Tests are `node:test` code: they run Effects through `test/helpers/run.ts`.
+- `scripts/` (the shots, `dev-app.ts`, `icons.ts`, the smoke checks) are plain Node, Electron and Playwright tools: a
+  `throw` fails the run, and a `try`/`catch`/`finally` or a promise's `.catch` retries a step, cleans up after one,
+  passes over a request a reload dropped, or says what failed.
 
 Recover with `Effect.catchTag`/`catchTags` for a specific failure, `Effect.catch` for every typed one. `Effect.ignore`
 only where the desk deliberately ignores a failure (with a one-line why), and `Effect.catchCause` only at a boundary or
@@ -233,10 +246,12 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   `respond(c, effect, { log, read? })`, every route (one that can't fail through `Effect.sync`, the static files,
   `fromUi` and the SSE stream as the `Response` they build, which `respond` passes on); the host/origin/cross-site
   middleware runs its check with `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only
-  a bug. Only reads and waits (GET views, `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a
-  client going away interrupts them; a write and any work shared with other callers never take the request's signal: nor
-  does opening a PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation
-  are in; its `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only
+  a bug. Only reads and waits pass `{ signal: c.req.raw.signal }` (`read: true`: every GET but `total`'s, which can't
+  fail, and opening a PR, below; `/api/activity`'s wait, the static files and `fromUi` included), so a client going
+  away interrupts them; the SSE stream, one of `total`'s, is the `Response` it builds, and its own `onAbort`
+  unsubscribes it. A write and any work shared with other callers never take the request's signal: nor does opening a
+  PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation are in; its
+  `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only
   exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null, { status: 499 })`, log and report
   nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged with `Cause.pretty`. For an
   answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets `c.error` to

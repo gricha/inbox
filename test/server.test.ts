@@ -817,6 +817,10 @@ test("the desk's refusals answer through respond with their tag, words and statu
   assert.deepEqual(await call("PUT", "/api/policy", "null"), [400, no("BadRequest", "the body must be a JSON object")]);
   assert.deepEqual(await call("PUT", "/api/settings", "[]"), [400, no("BadRequest", "the body must be a JSON object")]);
   assert.deepEqual(await call("POST", "/api/config/preview", "{"), [400, no("BadRequest", "the body must be a JSON object")]);
+  const scalar = [400, no("BadRequest", "the body must be a JSON object")];
+  assert.deepEqual(await call("POST", "/api/act", '"str"'), scalar, "it was need { id, action }");
+  assert.deepEqual(await call("POST", "/api/config/preview", "true"), scalar, "it was a 200");
+  assert.deepEqual(await call("PUT", "/api/settings", "5"), scalar, "it was a 200 that rewrote settings.json");
   assert.deepEqual(await call("POST", "/api/add", "[]"), [400, no("BadRequest", "need { id }: owner/repo#123 or a GitHub URL")]);
   assert.deepEqual(await call("POST", "/api/inquiries/nope/answer", { text: "yes" }), [
     403,
