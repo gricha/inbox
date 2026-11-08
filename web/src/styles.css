@@ -878,8 +878,12 @@ p {
   font-size: 14px;
 }
 
-.inquiry .rv-head {
-  padding: 0;
+/* Its words on the review's left edge, 12px in, so opening its review from here doesn't move the column; its sheets (what
+   it's about, the answers) at the column's edge, as a review's diff. */
+.inquiry > .rv-head,
+.inquiry > .inq-context,
+.inquiry > .inq-links {
+  padding: 0 12px;
 }
 
 .inq-about .ref {
@@ -1028,12 +1032,12 @@ p {
 .inquiry .inq-write {
   max-width: none;
   margin: 0;
-  padding: 0;
+  padding: 0 12px;
 }
 
 .inquiry .inq-answered {
   margin: 0;
-  padding: 0;
+  padding: 0 12px;
 }
 
 .inq-answered .quiet {
@@ -2426,6 +2430,7 @@ p {
 .composer .act:not(.primary),
 .chat .act:not(.primary),
 .rv-inline .act:not(.primary),
+.inq-write .act:not(.primary),
 .cv .actions .act:not(.primary) {
   border-color: transparent;
   background: none;
@@ -2435,6 +2440,7 @@ p {
 .composer .act:not(.primary):hover:not(:disabled),
 .chat .act:not(.primary):hover:not(:disabled),
 .rv-inline .act:not(.primary):hover:not(:disabled),
+.inq-write .act:not(.primary):hover:not(:disabled),
 .cv .actions .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
@@ -2456,7 +2462,8 @@ p {
 
 /* Nothing to send yet: Send is text until there is. */
 .composer .act.primary:disabled,
-.chat .act.primary:disabled {
+.chat .act.primary:disabled,
+.inq-write .act.primary:disabled {
   border-color: transparent;
   background: none;
 }
