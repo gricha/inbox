@@ -2716,7 +2716,7 @@ export class Desk {
         // Answering was all it asked of you, and nobody else waits on you there: it's done.
         const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
         const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
-        this.convos.forget(id);
+        yield* this.convos.drop(id);
         if (only && last) yield* this.doneAfterWrite(id);
         this.changed();
         this.refreshAfter(id);
@@ -2743,7 +2743,7 @@ export class Desk {
         const { url } = yield* writer.comment(e.item.node_id, text).pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
         this.store.logWrite(id, "comment", this.now().toISOString());
         this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
-        this.convos.forget(id);
+        yield* this.convos.drop(id);
         yield* this.doneAfterWrite(id);
         this.refreshAfter(id);
         return { url };
@@ -2779,7 +2779,7 @@ export class Desk {
           .pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
         this.store.logWrite(id, "inline_comment", this.now().toISOString());
         this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
-        this.convos.forget(id);
+        yield* this.convos.drop(id);
         this.changed();
         this.refreshAfter(id);
         return { url };

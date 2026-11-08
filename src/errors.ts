@@ -221,10 +221,15 @@ export class CommandFailed extends Data.TaggedError("CommandFailed")<{
   }
 }
 
-// What a command printed doesn't parse (gh's one JSON object per line): cause is the parser's error, whose words show.
-export class CommandBadOutput extends Data.TaggedError("CommandBadOutput")<{ readonly command: string; readonly cause: unknown }> {
+// What a command printed doesn't parse (gh's one JSON object per line): cause is the parser's error, whose words show,
+// or what it printed, with detail saying what's wrong with it.
+export class CommandBadOutput extends Data.TaggedError("CommandBadOutput")<{
+  readonly command: string;
+  readonly cause: unknown;
+  readonly detail?: string;
+}> {
   override get message(): string {
-    return this.cause instanceof Error ? this.cause.message : `${this.command} printed something unreadable`;
+    return this.detail ?? (this.cause instanceof Error ? this.cause.message : `${this.command} printed something unreadable`);
   }
 }
 

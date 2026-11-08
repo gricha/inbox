@@ -313,11 +313,7 @@ export class Conversations {
     this.desk.log(`reading the conversations on ${id} failed: ${message}`);
   }
 
-  // After your reply: fetched again, so it's no longer waiting on you.
-  forget(id: string): void {
-    Effect.runSync(this.drop(id));
-  }
-
+  // Fetched again next time: after your reply, so it's no longer waiting on you, or for the PR's newer version.
   drop(id: string): Effect.Effect<void> {
     const cache = this.contexts;
     return Effect.gen(function* () {

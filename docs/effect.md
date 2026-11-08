@@ -50,7 +50,7 @@ services, `Data.TaggedError`, the desk's own `log`.
   line was kept whole, up to 64 MB); and a command started through cmd.exe (a Windows `claude.cmd`) is named alone in
   what fails it (it was cmd.exe's whole line, an ask's text and a `--json-schema` included).
 - `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
-  that aren't an error go in a field of their own (Claude's login `detail`).
+  that aren't an error go in a field of their own (Claude's login `detail`, `CommandBadOutput`'s).
 - The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix
   in the stored `aiErrors`, `aiPaused.why` and `judge.error`.
 - The HTTP family carries its status as a getter. `isDeskHttpError` (by class) and `errorBody` turn one into the wire's

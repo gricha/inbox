@@ -444,7 +444,7 @@ test("what reviewers said: a failed fetch shows in the review and is tried again
       asked.push(nodeId);
       return answer;
     });
-  t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
+  await run(t.desk.convos.drop("acme/web#3")); // the sync fetched it ahead
   const failed = await run(t.desk.reviewView("web#3", true));
   assert.deepEqual([failed.conversation, failed.conversation_error, failed.reading], [[], "GitHub HTTP 502", false]);
 
@@ -476,7 +476,7 @@ test("closing the desk while a read fetches what reviewers said starts no claude
         resume(Effect.succeed(CTX));
       });
     });
-  t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
+  await run(t.desk.convos.drop("acme/web#3")); // the sync fetched it ahead
   t.desk.convos.read("acme/web#3");
   assert.deepEqual([t.desk.convos.reading, held.length], ["acme/web#3", 1], "reading: its conversation is being fetched");
   await run(t.desk.close());

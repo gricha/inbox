@@ -661,6 +661,7 @@ export function createApp(desk: Desk, port: number): Hono {
   app.get("/api/events", (c) =>
     total(c, () =>
       streamSSE(c, async (stream) => {
+        // Hono's stream swallows a write to a closed client, so dropping the promise is right.
         const off = desk.onChange((rev) => void stream.writeSSE({ event: "update", data: JSON.stringify({ rev }) }));
         const offNotify =
           c.req.query("notify") === "1"
