@@ -1128,16 +1128,20 @@ test("after a sync, other people's PRs in Now and Today get AI reviews two at a 
   assert.ok(!t.f.started.includes("acme/web#4"), "never your own PR");
   assert.equal(t.f.fetched.length, 4, "one diff fetch per PR on the main page, yours too");
 
-  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")?.verdict, "skim");
-  assert.equal(t.desk.item("api#1").ai?.summary, "Review of acme/api#1");
-  assert.deepEqual(t.desk.item("api#1").ai?.notes, [{ path: FILE.path, side: "new", line: 11, body: "Caps the rows." }]);
+  assert.equal(runSync(t.desk.queue()).sections.now.find((c) => c.id === "acme/api#1")?.verdict, "skim");
+  assert.equal(runSync(t.desk.item("api#1")).ai?.summary, "Review of acme/api#1");
+  assert.deepEqual(runSync(t.desk.item("api#1")).ai?.notes, [{ path: FILE.path, side: "new", line: 11, body: "Caps the rows." }]);
 
   await t.sync();
   assert.equal(t.f.started.length, 3, "kept per commit: another sync asks for nothing");
   t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
   await t.sync();
-  assert.equal(t.desk.item("api#1").ai_stale, true);
-  assert.equal(t.desk.queue().sections.now.find((c) => c.id === "acme/api#1")?.verdict, null, "the verdict was for the old commit");
+  assert.equal(runSync(t.desk.item("api#1")).ai_stale, true);
+  assert.equal(
+    runSync(t.desk.queue()).sections.now.find((c) => c.id === "acme/api#1")?.verdict,
+    null,
+    "the verdict was for the old commit",
+  );
   assert.equal(t.f.started.length, 4, "a new commit gets a new review");
   assert.deepEqual(t.f.fetched.slice(-1), ["acme/api#1@h1b"], "and a fresh diff");
   await t.f.release("acme/api#1");
@@ -1229,7 +1233,7 @@ test("a review fetched ahead (the row the cursor rests on) starts no AI review; 
 test("turning auto_ai on starts the backlog; a failure shows in the view and isn't retried until you ask", async () => {
   const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
   await t.sync();
-  t.desk.putSettings({ set: { "review.auto_ai": true } });
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": true } }));
   await flush();
   assert.deepEqual(t.f.started, ["acme/api#1"]);
   t.f.setFail("claude CLI isn't logged in");
@@ -1292,13 +1296,13 @@ test("turning auto reviews off and on lifts the pause and tries the failed PRs a
   for (const id of t.f.started.slice()) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow());
 
-  t.desk.putSettings({ set: { "github.poll_seconds": 120 } });
+  runSync(t.desk.putSettings({ set: { "github.poll_seconds": 120 } }));
   await flush();
   assert.ok(t.desk.aiPausedNow(), "another setting leaves it paused");
   assert.equal(t.f.started.length, 2);
 
-  t.desk.putSettings({ set: { "review.auto_ai": false } });
-  t.desk.putSettings({ set: { "review.auto_ai": true } });
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": true } }));
   await flush();
   assert.equal(t.desk.aiPausedNow(), false);
   assert.equal(t.f.started.length, 4, "two more start at once");
@@ -1320,20 +1324,20 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
   const t = await setup([ask(1), ask(2), ask(3), mine(4), issue]);
   await t.sync();
   const card = (id: string) => {
-    const q = t.desk.queue();
+    const q = runSync(t.desk.queue());
     return [...q.sections.now, ...q.sections.today].find((x) => x.id === id);
   };
   const pf = (id: string) => card(id)!.preflight!;
   assert.deepEqual(t.f.started, ["acme/api#3", "acme/api#2"]);
   assert.equal(card("acme/api#3"), undefined, "being reviewed");
   assert.equal(card("acme/api#1"), undefined, "waiting its turn");
-  assert.equal(t.desk.queue().reviewing, 3);
-  assert.equal(t.desk.focus().reviewing, 3);
+  assert.equal(runSync(t.desk.queue()).reviewing, 3);
+  assert.equal(runSync(t.desk.focus()).reviewing, 3);
   assert.deepEqual(pf("acme/web#4"), { state: "none" }, "your PR");
   assert.deepEqual(pf("acme/api#9"), { state: "none" }, "an issue");
 
   await t.f.release("acme/api#3");
-  assert.equal(t.desk.queue().reviewing, 2);
+  assert.equal(runSync(t.desk.queue()).reviewing, 2);
   assert.deepEqual(pf("acme/api#3"), {
     state: "ready",
     verdict: "skim",
@@ -1342,7 +1346,7 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
     concerns: [],
     notes: 1,
   });
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.equal(
     [...q.sections.now, ...q.sections.today].find((c) => c.id === "acme/api#3")?.verdict,
     "skim",
@@ -1360,8 +1364,8 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
   assert.equal(pf("acme/api#1").state, "ready");
 
   // Later and FYI cards don't carry one.
-  assert.ok([...t.desk.queue().sections.later, ...t.desk.queue().sections.fyi].every((c) => c.preflight === undefined));
-  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  assert.ok([...runSync(t.desk.queue()).sections.later, ...runSync(t.desk.queue()).sections.fyi].every((c) => c.preflight === undefined));
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
   t.gh.items.set("acme/api#2", { ...ask(2), head_oid: "h2b", updated_at: hoursAgo(0) });
   await t.sync();
   assert.equal(pf("acme/api#2").state, "off");
@@ -1395,7 +1399,7 @@ test("the review view sends the desk's reading order", async () => {
   assert.deepEqual(v.order.notes, [0]);
 
   // An older review written before ranking keeps working: today's order, its notes in place.
-  const { chunks: _, ...unranked } = t.desk.item("api#1").ai!;
+  const { chunks: _, ...unranked } = runSync(t.desk.item("api#1")).ai!;
   t.desk.store.set("review:acme/api#1", unranked);
   t.desk.changed();
   v = await t.desk.reviewView("api#1");
@@ -1409,10 +1413,10 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
   await t.sync();
   for (const id of t.f.started.slice()) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow());
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   const claude = { who: "claude", why: CLAUDE_PAUSED };
   assert.deepEqual(q.paused, claude, "a failed login stops Claude as a whole");
-  assert.deepEqual(t.desk.focus().paused, claude);
+  assert.deepEqual(runSync(t.desk.focus()).paused, claude);
   assert.deepEqual(
     q.sections.now.map((c) => c.preflight?.state),
     ["paused", "paused", "paused"],
@@ -1420,9 +1424,9 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
   assert.equal(t.desk.getSettings().paused.ai?.why, LOGGED_OUT, "Settings says what's paused, once");
 
   // Turning auto_ai off: nothing is paused any more, it's off.
-  t.desk.putSettings({ set: { "review.auto_ai": false } });
-  assert.equal(t.desk.queue().paused, null);
-  assert.equal(t.desk.queue().sections.now[0]?.preflight?.state, "off");
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
+  assert.equal(runSync(t.desk.queue()).paused, null);
+  assert.equal(runSync(t.desk.queue()).sections.now[0]?.preflight?.state, "off");
   t.cleanup();
 });
 
@@ -1431,10 +1435,10 @@ test("any other failure pauses only AI reviews; a judge that can't log in pauses
   t.f.setFail("Claude timed out");
   await t.sync();
   for (const id of t.f.started.slice()) await t.f.release(id);
-  assert.deepEqual(t.desk.queue().paused, { who: "ai", why: "Claude timed out" });
-  t.desk.putSettings({ set: { "review.auto_ai": false, "policy.judge": true } });
+  assert.deepEqual(runSync(t.desk.queue()).paused, { who: "ai", why: "Claude timed out" });
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": false, "policy.judge": true } }));
   t.desk.judge.error = LOGGED_OUT;
-  assert.deepEqual(t.desk.queue().paused, { who: "claude", why: CLAUDE_PAUSED });
+  assert.deepEqual(runSync(t.desk.queue()).paused, { who: "claude", why: CLAUDE_PAUSED });
   t.cleanup();
 });
 
@@ -1444,7 +1448,8 @@ test("a PR that waited for Claude's review notifies once it's on the queue; one 
   await t.sync();
   await t.f.release("acme/api#1");
   t.notes.length = 0;
-  const card = (id: string) => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].find((x) => x.id === id);
+  const card = (id: string) =>
+    [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].find((x) => x.id === id);
 
   t.gh.items.set("acme/api#2", ask(2));
   await t.sync();
@@ -1463,11 +1468,11 @@ test("a PR that waited for Claude's review notifies once it's on the queue; one 
   t.f.setFail(null);
   assert.equal(card("acme/api#3")?.preflight?.state, "queued", "Claude couldn't review this commit: on the queue without one");
 
-  t.desk.putSettings({ set: { "review.auto_ai": false } });
+  runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
   t.gh.items.set("acme/api#5", ask(5));
   await t.sync();
   assert.equal(card("acme/api#5")?.preflight?.state, "off", "AI reviews off: nothing to wait for");
-  assert.equal(t.desk.focus().reviewing, 0);
+  assert.equal(runSync(t.desk.focus()).reviewing, 0);
 });
 
 test("once on the queue, a PR stays: a pause ending, a lost failure or a push doesn't hold it again, nor notify it twice", async (c) => {
@@ -1475,7 +1480,7 @@ test("once on the queue, a PR stays: a pause ending, a lost failure or a push do
   c.after(t.cleanup);
   await t.sync();
   assert.deepEqual(t.notes, [], "the first pass is quiet, held ones too");
-  const ids = () => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].map((x) => x.id).toSorted();
+  const ids = () => [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].map((x) => x.id).toSorted();
   // Two failures in a row pause AI reviews: all three show, without a review.
   t.f.setFail("Not logged in");
   await t.f.release("acme/api#3");
@@ -1490,7 +1495,7 @@ test("once on the queue, a PR stays: a pause ending, a lost failure or a push do
   t.gh.items.set("acme/api#3", { ...ask(3), head_oid: "h3b", updated_at: hoursAgo(0) });
   await t.sync();
   assert.deepEqual(ids(), ["acme/api#1", "acme/api#2", "acme/api#3"], "none held again");
-  assert.equal(t.desk.focus().reviewing, 0);
+  assert.equal(runSync(t.desk.focus()).reviewing, 0);
   for (const id of t.f.started.filter((x) => t.desk.generating.has(x))) await t.f.release(id);
   await t.sync();
   assert.deepEqual(t.notes, [], "nor notified again");
@@ -1510,13 +1515,13 @@ test("AI reviews run in the queue's order: Now, then Today from the top, so the 
   const t = await setup([team(10), team(11), ask(1), team(12), team(13), ask(2), team(14)], { settings: { "queue.cards": 2 } });
   c.after(t.cleanup);
   await t.sync();
-  assert.equal(t.desk.queue().cards, 2);
-  assert.equal(t.desk.focus().cards, 2);
+  assert.equal(runSync(t.desk.queue()).cards, 2);
+  assert.equal(runSync(t.desk.focus()).cards, 2);
   const order = ["acme/api#2", "acme/api#1", "me/api#14", "me/api#13", "me/api#12", "me/api#11", "me/api#10"];
   while (t.f.started.length < order.length || t.desk.generating.size)
     await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
   assert.deepEqual(t.f.started, order);
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     [...q.sections.now, ...q.sections.today].map((x) => x.id),
     order,
@@ -1568,7 +1573,7 @@ test("approve goes through the write client, lands in the action log, and undo s
   const t = await setup([ask(1), mine(4)], { writer: w.writer, settings: { "review.auto_ai": false } });
   await t.sync();
   assert.deepEqual((await t.desk.reviewView("api#1")).approve, { ok: true, reason: null });
-  t.desk.act("api#1", "pin");
+  runSync(t.desk.act("api#1", "pin"));
   const r = await t.desk.approve("api#1", "h1", "LGTM");
   assert.equal(r.url, "https://github.com/acme/api/pull/1#pullrequestreview-1");
   assert.deepEqual(w.calls, [{ pr: "PR_acme/api_1", commit: "h1", body: "LGTM" }], "pinned to the commit you read");
@@ -1581,9 +1586,9 @@ test("approve goes through the write client, lands in the action log, and undo s
       ["done", 0],
     ],
   );
-  assert.equal(t.desk.item("api#1").card.status, "done", "approving it in the desk takes it off your desk at once");
-  assert.equal(t.desk.undo().action, "done", "u puts it back");
-  assert.equal(t.desk.undo().action, "pin", "undo walks past the approval");
+  assert.equal(runSync(t.desk.item("api#1")).card.status, "done", "approving it in the desk takes it off your desk at once");
+  assert.equal(runSync(t.desk.undo()).action, "done", "u puts it back");
+  assert.equal(runSync(t.desk.undo()).action, "pin", "undo walks past the approval");
 
   assert.deepEqual((await t.desk.reviewView("web#4")).approve, { ok: false, reason: "it's your PR" });
   await assert.rejects(t.desk.approve("web#4", "h4"), (e: Error & { status: number }) => e.status === 409 && e.message.includes("your PR"));
@@ -1642,8 +1647,8 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
   await t.desk.approve("api#1", "h1");
   await flush();
   assert.equal(calls[0], "details acme/api#1", "the PR itself, before any search");
-  assert.equal(t.desk.queue().resolved.find((c) => c.id === "acme/api#1")?.why, "you approved");
-  assert.ok(!t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"), "out of Now");
+  assert.equal(runSync(t.desk.queue()).resolved.find((c) => c.id === "acme/api#1")?.why, "you approved");
+  assert.ok(!runSync(t.desk.focus()).sections.now.some((c) => c.id === "acme/api#1"), "out of Now");
   await t.sync();
   assert.ok(calls.includes("search"), "the full pass still runs");
 
@@ -1669,7 +1674,7 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
   });
   await t.sync();
   assert.ok(
-    t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"),
+    runSync(t.desk.focus()).sections.now.some((c) => c.id === "acme/api#1"),
     "re-requested: back in Now",
   );
   assert.deepEqual(t.desk.store.activity({ after: 0, limit: 1, item: "acme/api#1", latest: true })[0]?.data, { was: "you approved" });

@@ -8,6 +8,7 @@ import type { Inquiry } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
+import { runSync } from "./helpers/run.ts";
 
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 const CONTEXT =
@@ -66,7 +67,7 @@ test("an agent's question is a row on the main page and a notification until the
     ],
   );
   assert.deepEqual(
-    t.desk.queue().inquiries.map((q) => q.id),
+    runSync(t.desk.queue()).inquiries.map((q) => q.id),
     [inquiry.id],
   );
   assert.deepEqual(t.notes, ["Keep the label as text, or icons?"]);
@@ -78,7 +79,7 @@ test("an agent's question is a row on the main page and a notification until the
   assert.equal((await answer({ text: "  " })).status, 400);
   assert.equal((await answer({ text: "Text" })).status, 200);
   assert.equal((await answer({ text: "Icons" })).status, 409, "answered once");
-  assert.deepEqual(t.desk.queue().inquiries, [], "answered, it leaves the main page");
+  assert.deepEqual(runSync(t.desk.queue()).inquiries, [], "answered, it leaves the main page");
   const read = (await (await req("GET", `/api/inquiries/${inquiry.id}`)).json()) as Inquiry;
   assert.deepEqual([read.answer?.text, read.answer?.dismissed], ["Text", false]);
 });
@@ -126,8 +127,10 @@ test("a question the owner can't decide from its page alone is refused, and says
 test("marks that make text read as something else are dropped from what an agent wrote", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
-  const q = t.desk.inquire(
-    full({ question: "Open \u202Emoc.buhtig\u202C?", context: `${CONTEXT} See https://evil.example/\u202Emoc.buhtig\u202C.` }),
+  const q = runSync(
+    t.desk.inquire(
+      full({ question: "Open \u202Emoc.buhtig\u202C?", context: `${CONTEXT} See https://evil.example/\u202Emoc.buhtig\u202C.` }),
+    ),
   );
   assert.equal(q.question, "Open moc.buhtig?");
   assert.ok(!/[\u202a-\u202e\u2066-\u2069\u200e\u200f]/.test(q.context));
@@ -137,12 +140,12 @@ test("a question's page gets its item's card wherever the desk shows it, Merging
   const t = await setup([myPr(3, { ci: "green" })]);
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#3", "inflight");
-  const about = t.desk.inquire(full({ item: "web#3" }));
-  assert.equal(t.desk.inquiryView(about.id).card?.id, "acme/web#3");
-  const away = t.desk.inquire(full({ item: "acme/elsewhere#9" }));
-  assert.equal(t.desk.inquiryView(away.id).card, null);
-  assert.equal(t.desk.inquiryView(t.desk.inquire(full()).id).card, null);
+  runSync(t.desk.act("web#3", "inflight"));
+  const about = runSync(t.desk.inquire(full({ item: "web#3" })));
+  assert.equal(runSync(t.desk.inquiryView(about.id)).card?.id, "acme/web#3");
+  const away = runSync(t.desk.inquire(full({ item: "acme/elsewhere#9" })));
+  assert.equal(runSync(t.desk.inquiryView(away.id)).card, null);
+  assert.equal(runSync(t.desk.inquiryView(runSync(t.desk.inquire(full())).id)).card, null);
 });
 
 test("the coordinator ends its turn once it asks: your answer, or that you dismissed it, wakes it; another agent's question doesn't", async (c) => {
@@ -151,13 +154,13 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
   await t.desk.sync();
   const told: string[] = [];
   t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
-  const mine = t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3 onto main?" }));
-  t.desk.answerInquiry(mine.id, "Yes,\nthen merge");
+  const mine = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3 onto main?" })));
+  runSync(t.desk.answerInquiry(mine.id, "Yes,\nthen merge"));
   assert.deepEqual(told, [`My answer to your question ${mine.id} ("Rebase #3 onto main?"): "Yes, then merge"`]);
-  const again = t.desk.inquire(full({ from: "Review Desk coordinator", question: "Close #3?" }));
-  t.desk.answerInquiry(again.id, "", true);
+  const again = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Close #3?" })));
+  runSync(t.desk.answerInquiry(again.id, "", true));
   assert.equal(told[1], `I dismissed your question ${again.id} ("Close #3?"): decide yourself.`);
-  t.desk.answerInquiry(t.desk.inquire(full()).id, "Text");
+  runSync(t.desk.answerInquiry(runSync(t.desk.inquire(full())).id, "Text"));
   assert.equal(told.length, 2, "another session reads its own answer with desk_inquiry");
 });
 
@@ -166,10 +169,10 @@ test("a dismissed question tells the agent so", async (c) => {
   c.after(t.cleanup);
   await t.desk.sync();
   const req = http(t);
-  const q = t.desk.inquire(full());
+  const q = runSync(t.desk.inquire(full()));
   assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { dismiss: true }, DESK)).status, 200);
-  assert.deepEqual(t.desk.inquiry(q.id).answer?.dismissed, true);
-  assert.deepEqual(t.desk.queue().inquiries, []);
+  assert.deepEqual(runSync(t.desk.inquiry(q.id)).answer?.dismissed, true);
+  assert.deepEqual(runSync(t.desk.queue()).inquiries, []);
   assert.equal((await req("GET", "/api/inquiries/nope")).status, 404);
 });
 
@@ -193,7 +196,7 @@ test("what the owner does in the desk takes it off the desk at once: ready for r
   });
   c.after(t.cleanup);
   await t.desk.sync();
-  const status = (ref: string) => t.desk.item(ref).card.status;
+  const status = (ref: string) => runSync(t.desk.item(ref)).card.status;
   await t.desk.markReady("web#3");
   assert.equal(status("web#3"), "done", "marked ready: it waits on reviewers now");
   await t.desk.githubAct("web#4", "close");
@@ -221,18 +224,18 @@ test("a comment on the PR goes from the desk's window only, and takes it off the
   assert.deepEqual(calls, []);
   assert.equal((await post({ body: " Why the retry? " })).status, 200);
   assert.deepEqual(calls, ["comment PR_acme/api_1 Why the retry?"]);
-  assert.equal(t.desk.item("api#1").card.status, "done");
+  assert.equal(runSync(t.desk.item("api#1")).card.status, "done");
 });
 
 test("a question about an item the desk doesn't hold still goes; one still waiting is never aged out; the tray counts it", async (c) => {
   const t = await setup([reviewAsk(1)]);
   c.after(t.cleanup);
   await t.desk.sync();
-  assert.equal(t.desk.inquire(full({ item: "acme/elsewhere#9" })).item_id, "acme/elsewhere#9");
+  assert.equal(runSync(t.desk.inquire(full({ item: "acme/elsewhere#9" }))).item_id, "acme/elsewhere#9");
   const first = t.desk.inquiries()[0]!;
   for (let i = 0; i < 120; i++) {
-    const q = t.desk.inquire(full({ question: `Q${i}?` }));
-    if (i < 110) t.desk.answerInquiry(q.id, "yes");
+    const q = runSync(t.desk.inquire(full({ question: `Q${i}?` })));
+    if (i < 110) runSync(t.desk.answerInquiry(q.id, "yes"));
   }
   const kept = t.desk.inquiries();
   assert.ok(kept.length <= 101, `${kept.length} kept`);
@@ -240,9 +243,9 @@ test("a question about an item the desk doesn't hold still goes; one still waiti
     kept.some((q) => q.id === first.id),
     "the first, still unanswered, is kept",
   );
-  assert.equal(t.desk.queue().inquiries.length, 11);
-  assert.equal(t.desk.overview().focus.asks, 11);
-  assert.equal(t.desk.status().now, t.desk.overview().focus.now + 11, "the tray and dock count them as now");
+  assert.equal(runSync(t.desk.queue()).inquiries.length, 11);
+  assert.equal(runSync(t.desk.overview()).focus.asks, 11);
+  assert.equal(runSync(t.desk.status()).now, runSync(t.desk.overview()).focus.now + 11, "the tray and dock count them as now");
 });
 
 test("a question asked before options said what follows still reads, its options with no next and no links", async (c) => {
@@ -259,7 +262,7 @@ test("a question asked before options said what follows still reads, its options
     answer: null,
   };
   t.desk.store.set("inquiries", [old]);
-  assert.deepEqual(t.desk.inquiry("q1"), {
+  assert.deepEqual(runSync(t.desk.inquiry("q1")), {
     ...old,
     options: [
       { answer: "A", next: "" },
@@ -274,14 +277,14 @@ test("reopening what a close took off the desk puts back what it was before: sno
   const t = await setup([myPr(4, { ci: "green" })], { desk: { writer: w } });
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#4", "snooze", "2d");
+  runSync(t.desk.act("web#4", "snooze", "2d"));
   await t.desk.githubAct("web#4", "close");
-  assert.equal(t.desk.item("web#4").card.status, "done");
+  assert.equal(runSync(t.desk.item("web#4")).card.status, "done");
   const it = t.gh.items.get("acme/web#4")!;
   t.gh.items.set(it.id, { ...it, state: "closed", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
   await t.desk.sync();
   await t.desk.githubAct("web#4", "reopen");
-  assert.equal(t.desk.item("web#4").card.status, "snoozed");
+  assert.equal(runSync(t.desk.item("web#4")).card.status, "snoozed");
 });
 
 test("Wake it under an ask it stopped without answering hands that ask over again, in your words", async (c) => {

@@ -9,6 +9,7 @@ import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
+import { runSync } from "./helpers/run.ts";
 
 const READY = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
 const DESK = "http://localhost:47823";
@@ -99,8 +100,8 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
     myPr(9, { ...READY, base: "feature-x", default_branch: "main" }),
     makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" }),
   ]);
-  t.desk.act("web#8", "inflight");
-  const actions = (ref: string) => t.desk.item(ref).card.actions;
+  runSync(t.desk.act("web#8", "inflight"));
+  const actions = (ref: string) => runSync(t.desk.item(ref)).card.actions;
   assert.deepEqual(actions("api#1"), ["request_changes"], "someone else's open PR");
   assert.deepEqual(actions("web#3"), ["close", "draft"], "not approved: no merge");
   assert.deepEqual(actions("web#4"), ["close", "draft", "merge"], "approved, green and mergeable");
@@ -115,7 +116,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   const t2 = await setup([myPr(3, { ci: "green" })]);
   c.after(t2.cleanup);
   await t2.desk.sync();
-  assert.equal(t2.desk.item("web#3").card.actions, undefined, "no write client, no actions");
+  assert.equal(runSync(t2.desk.item("web#3")).card.actions, undefined, "no write client, no actions");
 });
 
 test("close goes through the write client once, from the desk's window only; the item refreshes and u's reopen is allowed", async (c) => {
@@ -131,7 +132,7 @@ test("close goes through the write client once, from the desk's window only; the
   assert.deepEqual(w.calls, []);
 
   const ids = () =>
-    Object.values(t.desk.queue().sections)
+    Object.values(runSync(t.desk.queue()).sections)
       .flat()
       .map((x) => x.id);
   assert.ok(ids().includes("acme/web#3"));
@@ -140,8 +141,8 @@ test("close goes through the write client once, from the desk's window only; the
   assert.deepEqual(writes(t, "acme/web#3"), ["close"], "in the action log, not undone by the desk's undo");
   // Refreshed before the answer, without a full sync: it's closed, off the queue, and reopening is what's left.
   assert.ok(!ids().includes("acme/web#3"));
-  assert.equal(t.desk.item("web#3").card.resolved, "closed");
-  assert.deepEqual(t.desk.item("web#3").card.actions, ["reopen"]);
+  assert.equal(runSync(t.desk.item("web#3")).card.resolved, "closed");
+  assert.deepEqual(runSync(t.desk.item("web#3")).card.actions, ["reopen"]);
   assert.equal((await post(close, DESK)).status, 409, "closed already");
 
   assert.equal((await post({ id: "acme/web#3", action: "reopen" }, DESK)).status, 200);
@@ -149,7 +150,7 @@ test("close goes through the write client once, from the desk's window only; the
     ["close", "PR_acme/web_3"],
     ["reopen", "PR_acme/web_3"],
   ]);
-  assert.equal(t.desk.item("web#3").card.resolved, null);
+  assert.equal(runSync(t.desk.item("web#3")).card.resolved, null);
   assert.ok(ids().includes("acme/web#3"));
 });
 
@@ -163,7 +164,7 @@ test("merge is pinned to the head the desk judged ready, with the repo's merge m
   assert.deepEqual(w.calls, [], "a push since the review showed it merges nothing");
   await t.desk.githubAct("web#4", "merge", { head: "h4" });
   assert.deepEqual(w.calls, [["merge", "PR_acme/web_4", "h4", "SQUASH"]]);
-  assert.equal(t.desk.item("web#4").card.resolved, "merged");
+  assert.equal(runSync(t.desk.item("web#4")).card.resolved, "merged");
   assert.deepEqual(writes(t, "acme/web#4"), ["merge"]);
 });
 
@@ -171,16 +172,16 @@ test("draft sends your open PR back to draft, and its card shows it as one; only
   const { t, w } = await withWriter(c, [myPr(3, { ci: "green" })]);
   await t.desk.githubAct("web#3", "draft", { head: "a push ago" });
   assert.deepEqual(w.calls, [["draft", "PR_acme/web_3"]]);
-  const card = t.desk.item("web#3").card;
+  const card = runSync(t.desk.item("web#3")).card;
   assert.deepEqual([card.draft, card.cta, card.actions], [true, "ready", ["close", "ready"]]);
 });
 
 test("ready in the More menu marks your draft ready, red CI or not, and it leaves your desk as a does", async (c) => {
   const { t, w } = await withWriter(c, [myPr(3, { ci: "red", draft: true })]);
-  assert.equal(t.desk.item("web#3").card.cta, "ready", "the row offers it too");
+  assert.equal(runSync(t.desk.item("web#3")).card.cta, "ready", "the row offers it too");
   await t.desk.githubAct("web#3", "ready");
   assert.deepEqual(w.calls, [["ready", "PR_acme/web_3"]]);
-  const d = t.desk.item("web#3");
+  const d = runSync(t.desk.item("web#3"));
   assert.deepEqual([d.item.draft, d.card.status, d.card.actions], [false, "done", ["close", "draft"]]);
 });
 
@@ -201,8 +202,8 @@ test("request changes needs what you wrote, is pinned to the commit you read, an
 
 test("a bot's PR whose untrusted via line names you gets no close, draft or merge", async (c) => {
   const { t, w } = await withWriter(c, [reviewAsk(9, { author: "junior[bot]", author_bot: true, via: "@me", ...READY })]);
-  assert.equal(t.desk.item("api#9").signals.me.author, true, "the rules still call it yours");
-  assert.equal(t.desk.item("api#9").card.actions, undefined);
+  assert.equal(runSync(t.desk.item("api#9")).signals.me.author, true, "the rules still call it yours");
+  assert.equal(runSync(t.desk.item("api#9")).card.actions, undefined);
   await assert.rejects(t.desk.githubAct("api#9", "merge"), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(w.calls, []);
 });
@@ -233,7 +234,7 @@ test("an issue you opened closes with closeIssue", async (c) => {
   const { t, w } = await withWriter(c, [makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" })]);
   await t.desk.githubAct("api#7", "close");
   assert.deepEqual(w.calls, [["closeIssue", "I_7"]]);
-  assert.equal(t.desk.item("api#7").card.resolved, "closed");
+  assert.equal(runSync(t.desk.item("api#7")).card.resolved, "closed");
 });
 
 test("a refused write says why, and nothing is logged; an agent's /api/act can't reach any of them", async (c) => {
@@ -245,7 +246,7 @@ test("a refused write says why, and nothing is logged; an agent's /api/act can't
     (e: Error & { status: number }) => e.status === 502 && e.message.includes("Resource not accessible"),
   );
   assert.deepEqual(writes(t, "acme/web#3"), []);
-  assert.throws(() => t.desk.act("web#3", "close" as never, undefined, "agent"), /unknown action/);
+  assert.throws(() => runSync(t.desk.act("web#3", "close" as never, undefined, "agent")), /unknown action/);
 });
 
 test("a write whose refresh fails isn't offered again until a read shows the change", async (c) => {
@@ -253,10 +254,10 @@ test("a write whose refresh fails isn't offered again until a read shows the cha
   const details = t.gh.details.bind(t.gh);
   t.gh.details = () => Effect.die(new Error("GitHub is down")); // details fails only with a rate limit, which pauses instead
   await t.desk.githubAct("web#4", "close");
-  assert.equal(t.desk.item("web#4").card.actions, undefined, "the snapshot still says open, but nothing is offered");
+  assert.equal(runSync(t.desk.item("web#4")).card.actions, undefined, "the snapshot still says open, but nothing is offered");
   await assert.rejects(t.desk.githubAct("web#4", "merge"), /409|can't/);
   assert.deepEqual(w.calls, [["close", "PR_acme/web_4"]]);
   t.gh.details = details;
   await t.desk.sync();
-  assert.deepEqual(t.desk.item("web#4").card.actions, ["reopen"], "a read shows it closed");
+  assert.deepEqual(runSync(t.desk.item("web#4")).card.actions, ["reopen"], "a read shows it closed");
 });

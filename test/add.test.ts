@@ -7,6 +7,7 @@ import type { AiReview } from "../src/types.ts";
 import { createApp } from "../src/server.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { runSync } from "./helpers/run.ts";
 
 // Adding starts Claude's read: never the real claude, even when run without the no-agent preload.
 process.env.DESK_CLAUDE = "/nonexistent/claude";
@@ -80,21 +81,21 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
     "held with its events from here",
   );
 
-  const onPage = () => t.desk.focus().sections.today.find((x) => x.id === ID);
+  const onPage = () => runSync(t.desk.focus()).sections.today.find((x) => x.id === ID);
   assert.equal(onPage(), undefined, "not until Claude has reviewed it");
-  assert.equal(t.desk.focus().reviewing, 1);
+  assert.equal(runSync(t.desk.focus()).reviewing, 1);
   await f.finish(ID);
   const row = onPage();
   assert.ok(row, "on the main page");
-  assert.equal(t.desk.focus().reviewing, 0);
+  assert.equal(runSync(t.desk.focus()).reviewing, 0);
   assert.equal(row.why, "you added it");
-  assert.equal(t.desk.item(ID).placements[0]?.board, "added");
+  assert.equal(runSync(t.desk.item(ID)).placements[0]?.board, "added");
   await t.desk.sync();
   assert.deepEqual(t.notes, [], "you put it there: no notification");
 
-  t.desk.undo(r.undo_seq);
+  runSync(t.desk.undo(r.undo_seq));
   assert.equal(
-    t.desk.focus().sections.today.some((x) => x.id === ID),
+    runSync(t.desk.focus()).sections.today.some((x) => x.id === ID),
     false,
     "undo unpins it, and nothing else puts it there",
   );
@@ -115,7 +116,7 @@ test("an added PR stays while it's pinned and open: refreshed each sync, never p
     "no search says when it changed: refreshed",
   );
   assert.ok(
-    t.desk.focus().sections.today.some((x) => x.id === ID),
+    runSync(t.desk.focus()).sections.today.some((x) => x.id === ID),
     "past the 14 days an item no search returns is kept",
   );
 
@@ -123,10 +124,10 @@ test("an added PR stays while it's pinned and open: refreshed each sync, never p
   t.setNow(new Date(NOW.getTime() + 15 * DAY + 5 * 60_000));
   await t.desk.sync();
   assert.equal(
-    t.desk.focus().sections.today.some((x) => x.id === ID),
+    runSync(t.desk.focus()).sections.today.some((x) => x.id === ID),
     false,
   );
-  assert.ok(t.desk.queue().resolved.some((x) => x.id === ID && x.why === "merged"));
+  assert.ok(runSync(t.desk.queue()).resolved.some((x) => x.id === ID && x.why === "merged"));
 
   t.setNow(new Date(NOW.getTime() + 30 * DAY));
   await t.desk.sync();
@@ -138,7 +139,7 @@ test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't
   c.after(t.cleanup);
   await t.desk.sync();
   assert.equal(
-    t.desk.focus().sections.today.some((x) => x.id === "acme/api#2"),
+    runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/api#2"),
     false,
     "a team ping is FYI",
   );
@@ -155,7 +156,7 @@ test("adding what the desk holds pins it; a bad ref is a 400, one GitHub doesn't
   const body = (await res.json()) as { item: { card: { board: string } }; undo_seq: number };
   assert.ok(body.undo_seq > 0);
   assert.equal(body.item.card.board, "acme-review", "held: pinned where its board has it");
-  assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/api#2"));
+  assert.ok(runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/api#2"));
   assert.deepEqual(t.gh.lookupCalls, [], "nothing fetched");
 
   assert.equal((await add({})).status, 400);
@@ -170,7 +171,7 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   c.after(t.cleanup);
   await t.desk.sync();
   t.gh.items.set(ID, unknown());
-  const card = (id: string) => t.desk.item(id).card;
+  const card = (id: string) => runSync(t.desk.item(id)).card;
   const asked = card("acme/api#1").why;
 
   const first = await t.desk.add("api#1", "  the retry budget\nchanged\u202e  ", "seer retry fix");
@@ -180,12 +181,12 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   assert.equal(card("acme/api#1").why, asked, "the rule's why stays its own");
   assert.deepEqual(card(ID).handoff, { why: "needs your call on the token transport", from: "seer write gate" });
   assert.deepEqual(card("acme/api#2").handoff, { why: "your sign-off on the schema", from: "" });
-  assert.deepEqual(t.desk.focus().sections.now.find((x) => x.id === "acme/api#1")?.handoff?.from, "seer retry fix");
+  assert.deepEqual(runSync(t.desk.focus()).sections.now.find((x) => x.id === "acme/api#1")?.handoff?.from, "seer retry fix");
 
   // Dealt with, it's yours: the ask doesn't come back with the item; undo brings it back.
-  const done = t.desk.act("api#1", "done");
+  const done = runSync(t.desk.act("api#1", "done"));
   assert.equal(card("acme/api#1").handoff, undefined);
-  t.desk.undo(done.undo_seq);
+  runSync(t.desk.undo(done.undo_seq));
   assert.equal(card("acme/api#1").handoff?.why, "the retry budget changed");
 
   // Each add's why goes with its own pin: a later one, or yours without a why, stands until it's undone.
@@ -193,15 +194,15 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   assert.equal(card("acme/api#1").handoff?.why, "now it's a schema change too");
   const bare = await t.desk.add("api#1");
   assert.equal(card("acme/api#1").handoff, undefined);
-  t.desk.undo(bare.undo_seq);
-  t.desk.undo(second.undo_seq);
+  runSync(t.desk.undo(bare.undo_seq));
+  runSync(t.desk.undo(second.undo_seq));
   assert.equal(card("acme/api#1").handoff?.why, "the retry budget changed");
-  t.desk.undo(first.undo_seq);
+  runSync(t.desk.undo(first.undo_seq));
   assert.equal(card("acme/api#1").handoff, undefined, "unpinned: no hand-off");
 
   // Your own pin is yours.
-  t.desk.act(ID, "unpin");
-  t.desk.act(ID, "pin");
+  runSync(t.desk.act(ID, "unpin"));
+  runSync(t.desk.act(ID, "pin"));
   assert.equal(card(ID).handoff, undefined);
 
   await assert.rejects(t.desk.add("api#2", " \n "), /the why is empty/);
@@ -218,16 +219,17 @@ test("adding a done, snoozed or muted item brings it back, and its one undo puts
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
   await t.desk.sync();
-  const onDesk = () => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === "acme/api#1");
+  const onDesk = () =>
+    [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === "acme/api#1");
   for (const action of ["done", "snooze", "mute"] as const) {
-    t.desk.act("api#1", action);
+    runSync(t.desk.act("api#1", action));
     assert.equal(onDesk(), false, action);
-    const before = t.desk.item("api#1").state;
+    const before = runSync(t.desk.item("api#1")).state;
     const r = await t.desk.add("acme/api#1");
     assert.equal(r.item.card.status, "active", action);
     assert.ok(onDesk(), `${action}: on the main page`);
-    t.desk.undo(r.undo_seq);
-    assert.deepEqual(t.desk.item("api#1").state, before, `${action}: one undo`);
+    runSync(t.desk.undo(r.undo_seq));
+    assert.deepEqual(runSync(t.desk.item("api#1")).state, before, `${action}: one undo`);
   }
 });
 
@@ -236,16 +238,17 @@ test("what you pin yourself is on your desk at once, reviewed or not; an agent's
   const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
   c.after(t.cleanup);
   await t.desk.sync();
-  const onDesk = (id: string) => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === id);
+  const onDesk = (id: string) =>
+    [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === id);
   assert.equal(onDesk("acme/api#2"), false, "a team ping is FYI");
-  t.desk.act("api#2", "pin");
+  runSync(t.desk.act("api#2", "pin"));
   assert.equal(onDesk("acme/api#2"), true);
-  assert.equal(t.desk.item("api#2").held, false);
+  assert.equal(runSync(t.desk.item("api#2")).held, false);
 
   t.gh.items.set(ID, unknown());
   await t.desk.add(ID, "your call on the token transport", "seer write gate");
   assert.equal(onDesk(ID), false);
-  assert.equal(t.desk.item(ID).held, true);
+  assert.equal(runSync(t.desk.item(ID)).held, true);
 });
 
 test("adding several PRs at once starts their AI reviews two at a time, as the background ones run", async (c) => {

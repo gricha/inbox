@@ -15,7 +15,7 @@ import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
-import { run } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 
 const posix = { skip: process.platform === "win32" };
@@ -372,8 +372,8 @@ test("your PR whose only action is answering someone says Reply on its row, and 
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_3", CTX);
   await t.desk.sync();
-  for (const n of [3, 4, 5, 6]) t.desk.act(`web#${n}`, "pin"); // pinned: on the main page whatever the rules say
-  const rows = () => [...t.desk.focus().sections.now, ...t.desk.focus().sections.today];
+  for (const n of [3, 4, 5, 6]) runSync(t.desk.act(`web#${n}`, "pin")); // pinned: on the main page whatever the rules say
+  const rows = () => [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today];
   assert.deepEqual(
     rows()
       .map((r) => [r.id, r.cta ?? null])
@@ -397,7 +397,7 @@ test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude 
   c.after(t.cleanup);
   t.gh.contexts.set("PR_acme/web_4", CTX);
   await t.desk.sync();
-  t.desk.act("web#4", "pin");
+  runSync(t.desk.act("web#4", "pin"));
   const app = createApp(t.desk, 47823);
   const get = (q = "") => app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/web#4")}${q}`);
   const ahead = (await (await get("?ahead=1")).json()) as ReviewView;
@@ -527,7 +527,7 @@ test("an issue on your desk takes your comment, from the desk's window only, and
 
   assert.equal((await post({ body: "On it this week." }, desk)).status, 200);
   assert.deepEqual(w.calls, [["comment", "I_acme/api_9", "On it this week."]]);
-  assert.equal(t.desk.item("api#9").card.status, "done", "your part is done until someone else acts");
+  assert.equal(runSync(t.desk.item("api#9")).card.status, "done", "your part is done until someone else acts");
 
   t.gh.items.set("acme/api#9", { ...issue, state: "closed", closed_at: hoursAgo(0), updated_at: hoursAgo(0) });
   await run(t.desk.gh.refresh("acme/api#9"));
@@ -563,6 +563,6 @@ test("answering a comment on your PR nobody's asked to review leaves Add reviewe
   await t.desk.reviewView("web#4");
   assert.equal((await reply(3)).status, 200);
   assert.equal((await reply(4)).status, 200);
-  assert.deepEqual([t.desk.item("web#3").card.status, t.desk.item("web#3").card.cta], ["active", "reviewers"]);
-  assert.equal(t.desk.item("web#4").card.status, "done", "dana's asked: answering was all it wanted");
+  assert.deepEqual([runSync(t.desk.item("web#3")).card.status, runSync(t.desk.item("web#3")).card.cta], ["active", "reviewers"]);
+  assert.equal(runSync(t.desk.item("web#4")).card.status, "done", "dana's asked: answering was all it wanted");
 });

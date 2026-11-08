@@ -10,6 +10,7 @@ import { classify, compileBoard, type Entry } from "../src/rules.ts";
 import { analyze } from "../src/signals.ts";
 import type { AiReview, BoardConfig, Item, JudgeStep } from "../src/types.ts";
 import { FakeGitHub, hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
+import { runSync } from "./helpers/run.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
 const ctx = makeContext();
@@ -676,7 +677,7 @@ async function setup(
     await desk.sync();
     await settle();
   };
-  const placed = (n: number) => desk.item(`api#${n}`).placements[0]!;
+  const placed = (n: number) => runSync(desk.item(`api#${n}`)).placements[0]!;
   return { desk, gh, fake, home, logs, sync, settle, placed };
 }
 
@@ -690,10 +691,10 @@ test("with policy.md empty, the starter policy is in effect: Claude sorts by it 
   assert.deepEqual([doc.text, doc.starter, doc.hash, doc.judge.state], ["", DEFAULT_POLICY, textHash(DEFAULT_POLICY), "idle"]);
 
   // Writing the starter out as your own changes nothing; anything else asks again.
-  t.desk.putPolicy(DEFAULT_POLICY, doc.hash);
+  runSync(t.desk.putPolicy(DEFAULT_POLICY, doc.hash));
   await t.settle();
   assert.equal(t.fake.calls(), 1);
-  t.desk.putPolicy("", t.desk.policy.hash);
+  runSync(t.desk.putPolicy("", t.desk.policy.hash));
   await t.settle();
   assert.equal(t.fake.calls(), 1, "cleared: the starter again, the same answers");
 });
@@ -726,7 +727,7 @@ test(
 
     const p = t.placed(1);
     assert.deepEqual([p.bucket, p.why, p.judge], ["today", "fake says today", { bucket: "today", why: "fake says today", pending: false }]);
-    assert.equal(t.desk.queue().sections.today.length, 3);
+    assert.equal(runSync(t.desk.queue()).sections.today.length, 3);
     assert.deepEqual(t.desk.getPolicy().judge, {
       ...t.desk.getPolicy().judge,
       state: "idle",
@@ -752,12 +753,12 @@ test(
     fs.rmSync(path.join(t.fake.dir, "hold"));
     await t.settle();
     assert.deepEqual([t.placed(1).bucket, t.placed(1).why], ["fyi", "fake says fyi"]);
-    assert.equal(t.desk.queue().sections.fyi.length, 1);
-    assert.equal(t.desk.item("api#3").card.placed_by, "claude", "Claude chose Today within the floor");
+    assert.equal(runSync(t.desk.queue()).sections.fyi.length, 1);
+    assert.equal(runSync(t.desk.item("api#3")).card.placed_by, "claude", "Claude chose Today within the floor");
 
     // A new policy asks again for everything, and the earlier answers hold meanwhile: the queue doesn't fall back to the rules.
     fs.writeFileSync(path.join(t.fake.dir, "hold"), "");
-    t.desk.putPolicy("Everything from carol is FYI.", t.desk.policy.hash);
+    runSync(t.desk.putPolicy("Everything from carol is FYI.", t.desk.policy.hash));
     await until(() => t.fake.calls() === 3);
     assert.match(t.fake.stdin(3), /Everything from carol is FYI\./);
     assert.deepEqual([t.placed(1).bucket, t.placed(2).bucket, t.placed(2).judge?.pending], ["fyi", "today", true]);
@@ -787,9 +788,9 @@ test("a failure leaves the board default, says why, and waits before trying agai
 
   // Logged in again: turning it off and on tries now instead of waiting out the pause, and forgets the old error.
   fs.rmSync(path.join(t.fake.dir, "fail"));
-  t.desk.putSettings({ set: { "policy.judge": false } });
+  runSync(t.desk.putSettings({ set: { "policy.judge": false } }));
   assert.equal(t.desk.judge.error, null);
-  t.desk.putSettings({ set: { "policy.judge": true } });
+  runSync(t.desk.putSettings({ set: { "policy.judge": true } }));
   await until(() => t.fake.calls() === 2);
   await t.settle();
   assert.deepEqual([t.desk.getPolicy().judge.state, t.placed(1).bucket], ["idle", "today"]);
@@ -915,7 +916,7 @@ test("sorting answered items again (a policy edit) uses half the hour, so a new 
   await t.sync();
   assert.equal(t.fake.calls(), 1);
   t.desk.store.set("judge_spent", []); // an hour later
-  t.desk.putPolicy("Team asks are fyi.", t.desk.policy.hash);
+  runSync(t.desk.putPolicy("Team asks are fyi.", t.desk.policy.hash));
   await t.settle();
   assert.equal(t.fake.calls(), 2);
   assert.equal(t.fake.stdin(2).match(/^- id: /gm)?.length, 5, "half the hour");
@@ -939,7 +940,7 @@ test("sorting again goes by where Claude has each item now: what it put in Today
     ["today", "later", "fyi", "today"],
   );
   t.desk.store.set("judge_spent", []);
-  t.desk.putPolicy("Team asks are later.", t.desk.policy.hash);
+  runSync(t.desk.putPolicy("Team asks are later.", t.desk.policy.hash));
   await t.settle();
   assert.equal(t.fake.calls(), 3);
   assert.deepEqual(t.fake.stdin(3).match(/^- id: .*$/gm), ["- id: acme/api#1"], "Claude's Today, not the rules' Today hint");
@@ -960,16 +961,16 @@ test(
     await t.sync();
     assert.match(t.fake.stdin(1), /- id: acme\/api#1\n(?: {2}.*\n)* {2}a hard rule keeps it in today or above, so answer within that\n/);
     assert.deepEqual(
-      [t.placed(1).bucket, t.placed(1).why, t.placed(1).judge?.bucket, t.desk.item("api#1").card.placed_by],
+      [t.placed(1).bucket, t.placed(1).why, t.placed(1).judge?.bucket, runSync(t.desk.item("api#1")).card.placed_by],
       ["today", "asked you by name (added by sentry-junior)", "fyi", "hard"],
     );
     assert.equal(t.placed(2).bucket, "fyi");
 
-    t.desk.act("api#2", "pin");
-    t.desk.act("api#3", "pin");
+    runSync(t.desk.act("api#2", "pin"));
+    runSync(t.desk.act("api#3", "pin"));
     // A pin the old desk-run coordinator made: an opinion Claude weighs, not a floor.
     t.desk.store.db.prepare("UPDATE events SET agent = 'coordinator' WHERE item_id = 'acme/api#3'").run();
-    assert.deepEqual([t.placed(2).bucket, t.desk.item("api#2").card.placed_by], ["today", "pin"]);
+    assert.deepEqual([t.placed(2).bucket, runSync(t.desk.item("api#2")).card.placed_by], ["today", "pin"]);
     assert.deepEqual([t.placed(3).bucket, t.placed(3).judge?.pending], ["fyi", true], "Claude sorts it again, pinned");
     await t.sync();
     assert.equal(t.fake.calls(), 2, "a pin sorts the item again on the next sync");
@@ -981,7 +982,7 @@ test(
     );
     assert.doesNotMatch(asked, /a hard rule keeps/);
     assert.deepEqual([t.placed(2).bucket, t.placed(2).judge?.bucket, t.placed(2).judge?.pending], ["today", "fyi", false]);
-    assert.deepEqual([t.placed(3).bucket, t.desk.item("api#3").card.placed_by], ["fyi", "claude"]);
+    assert.deepEqual([t.placed(3).bucket, runSync(t.desk.item("api#3")).card.placed_by], ["fyi", "claude"]);
   },
 );
 
@@ -989,8 +990,8 @@ test("an item Claude's reply leaves out says so on its card", posix, async (c) =
   const t = await setup(c, [gray(1), gray(2)], { policy: "Team asks are today." });
   fs.writeFileSync(path.join(t.fake.dir, "skip"), "acme/api#2");
   await t.sync();
-  assert.deepEqual([t.placed(2).bucket, t.desk.item("api#2").card.placed_by], ["later", "unanswered"]);
-  assert.equal(t.desk.item("api#1").card.placed_by, "claude");
+  assert.deepEqual([t.placed(2).bucket, runSync(t.desk.item("api#2")).card.placed_by], ["later", "unanswered"]);
+  assert.equal(runSync(t.desk.item("api#1")).card.placed_by, "claude");
 });
 
 const twoBoards = `[[spaces]]

@@ -9,7 +9,7 @@ import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { run } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubAuthError, GitHubHttpError } from "../src/errors.ts";
 
@@ -25,7 +25,7 @@ test("first run writes a config with a space for the busiest org", async () => {
 test("sync fills boards, focus and status", async () => {
   const t = await setup([reviewAsk(1), teamPing(2), myPr(3)]);
   await t.desk.sync();
-  const review = t.desk.board("acme-review");
+  const review = runSync(t.desk.board("acme-review"));
   assert.deepEqual(
     review.sections.now.map((c) => c.id),
     ["acme/api#1"],
@@ -36,18 +36,18 @@ test("sync fills boards, focus and status", async () => {
   );
   assert.equal(review.sections.now[0]?.why, "carol asked you directly");
   assert.ok(review.board.queries.every((q) => q.endsWith("org:acme")));
-  const mine = t.desk.board("acme-mine");
+  const mine = runSync(t.desk.board("acme-mine"));
   assert.deepEqual(
     mine.sections.today.map((c) => c.id),
     ["acme/web#3"],
   );
   assert.ok(mine.sections.today[0]?.chips.includes("CI red"));
 
-  const focus = t.desk.focus();
+  const focus = runSync(t.desk.focus());
   assert.deepEqual(focus.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
   assert.deepEqual(focus.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
-  assert.equal(t.desk.status().text, "desk 2");
-  const ov = t.desk.overview();
+  assert.equal(runSync(t.desk.status()).text, "desk 2");
+  const ov = runSync(t.desk.overview());
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 1);
   assert.equal(ov.spaces[0]?.boards[0]?.counts.now, 1);
@@ -69,19 +69,19 @@ test("details are only refetched when an item changed or went stale", async () =
 test("done hides until someone else acts; undo restores", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
-  const r = t.desk.act("api#1", "done");
+  const r = runSync(t.desk.act("api#1", "done"));
   assert.ok(r.undo_seq > 0);
-  let board = t.desk.board("acme-review");
+  let board = runSync(t.desk.board("acme-review"));
   assert.equal(board.sections.now.length, 0);
   assert.deepEqual(
     board.cleared.map((c) => [c.id, c.status]),
     [["acme/api#1", "done"]],
   );
 
-  assert.deepEqual(t.desk.undo().action, "done");
-  assert.equal(t.desk.board("acme-review").sections.now.length, 1);
+  assert.deepEqual(runSync(t.desk.undo()).action, "done");
+  assert.equal(runSync(t.desk.board("acme-review")).sections.now.length, 1);
 
-  t.desk.act("acme/api#1", "done");
+  runSync(t.desk.act("acme/api#1", "done"));
   t.setNow(new Date(NOW.getTime() + 3_600_000));
   t.gh.items.set(
     "acme/api#1",
@@ -91,7 +91,7 @@ test("done hides until someone else acts; undo restores", async () => {
     }),
   );
   await t.desk.sync();
-  board = t.desk.board("acme-review");
+  board = runSync(t.desk.board("acme-review"));
   assert.equal(board.sections.now[0]?.id, "acme/api#1");
   assert.equal(board.sections.now[0].new, true);
   t.cleanup();
@@ -100,34 +100,34 @@ test("done hides until someone else acts; undo restores", async () => {
 test("snooze until a time, wakes on time or on activity; mute and pin", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
   await t.desk.sync();
-  t.desk.act("api#1", "snooze", "3h");
-  assert.equal(t.desk.board("acme-review").cleared[0]?.status, "snoozed");
+  runSync(t.desk.act("api#1", "snooze", "3h"));
+  assert.equal(runSync(t.desk.board("acme-review")).cleared[0]?.status, "snoozed");
   t.setNow(new Date(NOW.getTime() + 4 * 3_600_000));
   t.desk.changed();
-  assert.equal(t.desk.board("acme-review").cleared.length, 0);
+  assert.equal(runSync(t.desk.board("acme-review")).cleared.length, 0);
 
-  t.desk.act("api#2", "mute");
-  assert.equal(t.desk.board("acme-review").cleared[0]?.status, "muted");
-  t.desk.act("api#2", "unmute");
-  t.desk.act("api#2", "pin");
-  assert.equal(t.desk.board("acme-review").sections.now[0]?.id, "acme/api#2");
+  runSync(t.desk.act("api#2", "mute"));
+  assert.equal(runSync(t.desk.board("acme-review")).cleared[0]?.status, "muted");
+  runSync(t.desk.act("api#2", "unmute"));
+  runSync(t.desk.act("api#2", "pin"));
+  assert.equal(runSync(t.desk.board("acme-review")).sections.now[0]?.id, "acme/api#2");
   t.cleanup();
 });
 
 test("refs resolve by full id, short id, number or URL; ambiguity is a 409", async () => {
   const t = await setup([reviewAsk(1), myPr(1)]);
   await t.desk.sync();
-  assert.equal(t.desk.resolve("api#1"), "acme/api#1");
-  assert.equal(t.desk.resolve("https://github.com/acme/web/pull/1/files"), "acme/web#1");
+  assert.equal(runSync(t.desk.resolve("api#1")), "acme/api#1");
+  assert.equal(runSync(t.desk.resolve("https://github.com/acme/web/pull/1/files")), "acme/web#1");
   assert.throws(
-    () => t.desk.resolve("#1"),
+    () => runSync(t.desk.resolve("#1")),
     (e: { status: number }) => e.status === 409,
   );
   assert.throws(
-    () => t.desk.resolve("api#99"),
+    () => runSync(t.desk.resolve("api#99")),
     (e: { status: number }) => e.status === 404,
   );
-  const detail = t.desk.item("acme/api#1");
+  const detail = runSync(t.desk.item("acme/api#1"));
   assert.equal(detail.signals.me.requested_direct, true);
   assert.ok(detail.handoff_prompt.includes("gh pr diff 1 --repo acme/api"));
   assert.ok(!detail.handoff_prompt.includes(detail.item.title));
@@ -161,11 +161,11 @@ test("preview shows moves without saving; putConfig saves valid text only", asyn
   assert.deepEqual(p.errors, []);
   const review = p.boards.find((b) => b.id === "acme-review")!;
   assert.deepEqual(review.moved, [{ id: "acme/api#2", title: "Change 2", from: "fyi", to: "today" }]);
-  assert.equal(t.desk.board("acme-review").sections.fyi.length, 1);
+  assert.equal(runSync(t.desk.board("acme-review")).sections.fyi.length, 1);
 
-  assert.equal(t.desk.putConfig("[[boards]]\nid = 1").ok, false);
-  assert.equal(t.desk.putConfig(text).ok, true);
-  assert.equal(t.desk.board("acme-review").sections.today[0]?.id, "acme/api#2");
+  assert.equal(runSync(t.desk.putConfig("[[boards]]\nid = 1")).ok, false);
+  assert.equal(runSync(t.desk.putConfig(text)).ok, true);
+  assert.equal(runSync(t.desk.board("acme-review")).sections.today[0]?.id, "acme/api#2");
   t.cleanup();
 });
 
@@ -189,7 +189,7 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   await t.desk.sync();
   t.gh.items.set("acme/web#3", myPr(3, { ci: "red" }));
   await t.desk.sync();
-  assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/web#3" && x.placed_by === "pending"));
+  assert.ok(runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/web#3" && x.placed_by === "pending"));
   assert.deepEqual(t.notes, [], "the rules put it there, and Claude may still sort it away");
   const e = t.desk.snapshot().entries.get("acme/web#3")!;
   const key = judgeKey(e.item, e.analysis.activity_at, null);
@@ -199,8 +199,8 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   assert.deepEqual(t.notes, ["web#3 · your PR is red"]);
   t.desk.notifyNew();
   assert.equal(t.notes.length, 1, "once");
-  t.desk.act("api#2", "pin");
-  assert.ok(t.desk.focus().sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
+  runSync(t.desk.act("api#2", "pin"));
+  assert.ok(runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
   t.desk.notifyNew();
   assert.equal(t.notes.length, 1, "your pin put it there");
   t.cleanup();
@@ -214,7 +214,7 @@ test("your own new drafts never notify, and the queue lists a stack of them once
   const pair = [20, 21].map((n) => myPr(n, { draft: true, ci: "none", head_ref: `p${n}`, base: n === 20 ? "main" : "p20" }));
   for (const p of [...stack, ...pair]) t.gh.items.set(p.id, p);
   await t.desk.sync();
-  const cards = [...t.desk.focus().sections.now, ...t.desk.focus().sections.today];
+  const cards = [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today];
   assert.deepEqual(t.notes, [], "you just opened them");
   assert.deepEqual(
     cards
@@ -290,20 +290,20 @@ test("your areas: fetched on the first sync, then daily; a failure keeps them an
 
 test("parseUntil", () => {
   const now = new Date("2026-10-28T15:30:00"); // a Wednesday, local
-  assert.equal(parseUntil("3h", now).getTime(), now.getTime() + 3 * 3_600_000);
-  const tomorrow = parseUntil("tomorrow", now);
+  assert.equal(runSync(parseUntil("3h", now)).getTime(), now.getTime() + 3 * 3_600_000);
+  const tomorrow = runSync(parseUntil("tomorrow", now));
   assert.deepEqual([tomorrow.getDate(), tomorrow.getHours()], [29, 9]);
-  const monday = parseUntil("monday", now);
+  const monday = runSync(parseUntil("monday", now));
   assert.deepEqual([monday.getDay(), monday.getDate(), monday.getHours()], [1, 2, 9]);
-  assert.throws(() => parseUntil("someday", now));
+  assert.throws(() => runSync(parseUntil("someday", now)));
 });
 
 test("parseUntil rejects bare numbers and past times; accepts Nd", () => {
   const now = new Date("2026-10-28T15:30:00Z");
-  assert.throws(() => parseUntil("3", now), /can't read/);
-  assert.throws(() => parseUntil("2026-10-01", now), /can't read/);
-  assert.equal(parseUntil("2d", now).getTime(), now.getTime() + 48 * 3_600_000);
-  assert.equal(parseUntil("2026-11-02T09:00:00Z", now).toISOString(), "2026-11-02T09:00:00.000Z");
+  assert.throws(() => runSync(parseUntil("3", now)), /can't read/);
+  assert.throws(() => runSync(parseUntil("2026-10-01", now)), /can't read/);
+  assert.equal(runSync(parseUntil("2d", now)).getTime(), now.getTime() + 48 * 3_600_000);
+  assert.equal(runSync(parseUntil("2026-11-02T09:00:00Z", now)).toISOString(), "2026-11-02T09:00:00.000Z");
 });
 
 test("done remembers the activity you saw: activity synced after the click still resurfaces", async () => {
@@ -311,56 +311,56 @@ test("done remembers the activity you saw: activity synced after the click still
   await t.desk.sync();
   // A comment made just before the click, but synced after it.
   const commentAt = new Date(NOW.getTime() - 60_000).toISOString();
-  t.desk.act("api#1", "done");
+  runSync(t.desk.act("api#1", "done"));
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: commentAt, comments: [{ author: "carol", author_bot: false, at: commentAt }] }));
   await t.desk.sync();
-  assert.equal(t.desk.board("acme-review").sections.now[0]?.id, "acme/api#1");
+  assert.equal(runSync(t.desk.board("acme-review")).sections.now[0]?.id, "acme/api#1");
   t.cleanup();
 });
 
 test("undo by seq refuses to overwrite a later action on the same item", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
-  const first = t.desk.act("api#1", "pin").undo_seq;
-  t.desk.act("api#1", "done");
+  const first = runSync(t.desk.act("api#1", "pin")).undo_seq;
+  runSync(t.desk.act("api#1", "done"));
   assert.throws(
-    () => t.desk.undo(first),
+    () => runSync(t.desk.undo(first)),
     (e: { status: number }) => e.status === 409,
   );
-  t.desk.undo();
-  t.desk.undo(first);
-  assert.equal(t.desk.item("api#1").state.pinned, false);
+  runSync(t.desk.undo());
+  runSync(t.desk.undo(first));
+  assert.equal(runSync(t.desk.item("api#1")).state.pinned, false);
   t.cleanup();
 });
 
 test("bare numbers resolve as numbers, not repo + digit", async () => {
   const t = await setup([reviewAsk(123)]);
   await t.desk.sync();
-  assert.equal(t.desk.resolve("123"), "acme/api#123");
-  assert.equal(t.desk.resolve("#123"), "acme/api#123");
+  assert.equal(runSync(t.desk.resolve("123")), "acme/api#123");
+  assert.equal(runSync(t.desk.resolve("#123")), "acme/api#123");
   t.cleanup();
 });
 
 test("a date-only snooze means 09:00 local that day", () => {
-  const d = parseUntil("2026-11-02", new Date("2026-10-28T15:30:00"));
+  const d = runSync(parseUntil("2026-11-02", new Date("2026-10-28T15:30:00")));
   assert.deepEqual([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()], [2026, 10, 2, 9]);
 });
 
 test("tomorrow after midnight means this morning; monday before 9 on a Monday means today; 0h is refused", () => {
   const lateNight = new Date("2026-10-27T01:30:00"); // Tuesday, local
-  const t = parseUntil("tomorrow", lateNight);
+  const t = runSync(parseUntil("tomorrow", lateNight));
   assert.deepEqual([t.getDate(), t.getHours()], [27, 9]);
   const mondayEarly = new Date("2026-11-02T07:00:00"); // Monday, local
-  assert.deepEqual([parseUntil("monday", mondayEarly).getDate()], [2]);
-  assert.throws(() => parseUntil("0h", lateNight), /can't read/);
+  assert.deepEqual([runSync(parseUntil("monday", mondayEarly)).getDate()], [2]);
+  assert.throws(() => runSync(parseUntil("0h", lateNight)), /can't read/);
 });
 
 test("hand-off prompt depends on kind: review, your PR, issue", async () => {
   const issue = makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"] });
   const t = await setup([reviewAsk(1), myPr(2), issue]);
   await t.desk.sync();
-  assert.match(t.desk.item("api#1").handoff_prompt, /gh pr diff 1 --repo acme\/api/);
-  assert.match(t.desk.item("web#2").handoff_prompt, /gh pr checks 2 --repo acme\/web/);
+  assert.match(runSync(t.desk.item("api#1")).handoff_prompt, /gh pr diff 1 --repo acme\/api/);
+  assert.match(runSync(t.desk.item("web#2")).handoff_prompt, /gh pr checks 2 --repo acme\/web/);
   t.cleanup();
 });
 
@@ -374,9 +374,9 @@ test("the main page's parts: a hand-back, what waits on your review, the rest th
   t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
   await t.desk.add("acme/api#9");
   await t.desk.add("acme/api#6"); // someone else's PR nobody asked you to review
-  t.desk.act("web#5", "inflight");
-  t.desk.handBack("web#5", "needs a product call on the retry budget");
-  const f = t.desk.focus();
+  runSync(t.desk.act("web#5", "inflight"));
+  runSync(t.desk.handBack("web#5", "needs a product call on the retry budget"));
+  const f = runSync(t.desk.focus());
   const part = Object.fromEntries([...f.sections.now, ...f.sections.today].map((x) => [x.id, x.group]));
   assert.deepEqual(part, {
     "acme/web#5": "back",
@@ -399,9 +399,9 @@ test("the main page's parts: a hand-back, what waits on your review, the rest th
 test("saving config refuses when the file changed since it was loaded", async () => {
   const t = await setup([]);
   const base = t.desk.getConfig().text;
-  assert.equal(t.desk.putConfig(base, base).ok, true);
+  assert.equal(runSync(t.desk.putConfig(base, base)).ok, true);
   assert.throws(
-    () => t.desk.putConfig(base, base + "\n# stale"),
+    () => runSync(t.desk.putConfig(base, base + "\n# stale")),
     (e: { status: number }) => e.status === 409,
   );
   t.cleanup();
@@ -423,17 +423,17 @@ test("when every search fails, the last sync time stays and the error is shown",
 test("settings: saving changes the live config; bad values write nothing", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
-  const r = t.desk.putSettings({ set: { "handoff.prompt": "Look at {item.url} please", "github.poll_seconds": 120 } });
+  const r = runSync(t.desk.putSettings({ set: { "handoff.prompt": "Look at {item.url} please", "github.poll_seconds": 120 } }));
   assert.equal(r.ok, true);
   assert.deepEqual(r.settings.overridden.sort(), ["github.poll_seconds", "handoff.prompt"]);
   assert.equal(t.desk.loaded!.config.poll_seconds, 120);
-  assert.equal(t.desk.item("api#1").handoff_prompt, "Look at https://github.com/acme/api/pull/1 please");
-  const bad = t.desk.putSettings({ set: { "github.poll_seconds": 5, "notify.enabled": false } });
+  assert.equal(runSync(t.desk.item("api#1")).handoff_prompt, "Look at https://github.com/acme/api/pull/1 please");
+  const bad = runSync(t.desk.putSettings({ set: { "github.poll_seconds": 5, "notify.enabled": false } }));
   assert.equal(bad.ok, false);
   assert.equal(bad.errors[0]?.path, "github.poll_seconds");
   assert.equal(t.desk.settings["notify.enabled"], true);
   // Setting a default value or resetting drops the key from settings.json.
-  t.desk.putSettings({ set: { "github.poll_seconds": 90 }, reset: ["handoff.prompt"] });
+  runSync(t.desk.putSettings({ set: { "github.poll_seconds": 90 }, reset: ["handoff.prompt"] }));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), {});
   assert.equal(t.desk.getSettings().github.login, "me");
   t.cleanup();
@@ -444,7 +444,7 @@ test("a removed setting is ignored: no settings problem, and a save keeps it for
   const t = await setup([reviewAsk(1)], { settings: old });
   assert.deepEqual(t.desk.getSettings().errors, []);
   assert.equal(t.desk.settings["notify.enabled"], false);
-  assert.equal(t.desk.putSettings({ set: { "github.poll_seconds": 120 } }).ok, true);
+  assert.equal(runSync(t.desk.putSettings({ set: { "github.poll_seconds": 120 } })).ok, true);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), { ...old, "github.poll_seconds": 120 });
   t.cleanup();
 });
@@ -468,8 +468,8 @@ test("settings move out of an old config.toml on start", async () => {
 test("queue: every item once at its best placement, plus hidden and cleared", async () => {
   const t = await setup([reviewAsk(1), teamPing(2), myPr(3), myPr(4, { ci: "green" })]);
   await t.desk.sync();
-  t.desk.act("web#4", "done");
-  const q = t.desk.queue();
+  runSync(t.desk.act("web#4", "done"));
+  const q = runSync(t.desk.queue());
   assert.deepEqual(q.sections.now.map((c) => c.id).sort(), ["acme/api#1"]);
   assert.deepEqual(q.sections.today.map((c) => c.id).sort(), ["acme/web#3"]);
   assert.deepEqual(
@@ -493,19 +493,19 @@ test("Resolved lists the last day's items that were in Now or Today or asked of 
   t.gh.items.set("acme/api#2", merged(2));
   await t.desk.sync();
   assert.deepEqual(
-    t.desk.queue().resolved.map((c) => c.id),
+    runSync(t.desk.queue()).resolved.map((c) => c.id),
     ["acme/api#1"],
   );
   t.setNow(new Date(NOW.getTime() + 30 * 3_600_000));
   await t.desk.sync();
-  assert.deepEqual(t.desk.queue().resolved, [], "a day on, it's gone");
+  assert.deepEqual(runSync(t.desk.queue()).resolved, [], "a day on, it's gone");
   t.cleanup();
 });
 
 test("a review asked only of your team says so", async () => {
   const t = await setup([reviewAsk(4, { review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] })]);
   await t.desk.sync();
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   const all = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi];
   assert.equal(all.find((c) => c.id === "acme/api#4")?.team_ask, "CODEOWNERS ping to @ml-team");
   t.cleanup();
@@ -521,8 +521,8 @@ test("quiet items drop out of Now and Today: your old failing PRs go to Later; a
     reviewAsk(1, { updated_at: days(30) }),
   ]);
   await t.desk.sync();
-  t.desk.act("web#8", "inflight");
-  const q = t.desk.queue();
+  runSync(t.desk.act("web#8", "inflight"));
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.later.filter((c) => c.demoted?.startsWith("quiet")).map((c) => [c.id, c.demoted]),
     [
@@ -539,12 +539,11 @@ test("quiet items drop out of Now and Today: your old failing PRs go to Later; a
     q.sections.today.map((c) => c.id),
     ["acme/web#7"],
   );
-  assert.deepEqual([t.desk.inflight().rows[0]?.waits_on, t.desk.overview().inflight.total], ["waits on a CI fix", 1]);
+  assert.deepEqual([runSync(t.desk.inflight()).rows[0]?.waits_on, runSync(t.desk.overview()).inflight.total], ["waits on a CI fix", 1]);
 
-  t.desk.putSettings({ set: { "queue.quiet_days": 0 } });
+  runSync(t.desk.putSettings({ set: { "queue.quiet_days": 0 } }));
   assert.deepEqual(
-    t.desk
-      .queue()
+    runSync(t.desk.queue())
       .sections.today.map((c) => c.id)
       .sort(),
     ["acme/web#20631", "acme/web#548", "acme/web#7"],
@@ -572,8 +571,8 @@ test("saving settings keeps entries in settings.json it can't use", async () => 
   const t = await setup([]);
   const file = path.join(t.home, "settings.json");
   fs.writeFileSync(file, JSON.stringify({ "github.poll_seconds": 5, "x.typo": true }));
-  t.desk.reloadSettings();
-  const r = t.desk.putSettings({ set: { "notify.enabled": false } });
+  runSync(t.desk.reloadSettings());
+  const r = runSync(t.desk.putSettings({ set: { "notify.enabled": false } }));
   assert.equal(r.ok, true);
   assert.deepEqual(
     r.settings.errors.map((e) => e.path),
@@ -641,7 +640,7 @@ test("an unreadable settings.json is never overwritten: saving and moving settin
     desk.configWarnings.map((w) => w.path),
     ["poll_seconds"],
   );
-  const r = desk.putSettings({ set: { "notify.enabled": false } });
+  const r = runSync(desk.putSettings({ set: { "notify.enabled": false } }));
   assert.equal(r.ok, false);
   assert.deepEqual(r.errors, [
     { path: "settings.json", message: "settings.json can't be read, so saving now would overwrite it. Fix or delete the file first." },
@@ -663,7 +662,7 @@ test("settings move once: leftovers in config.toml only warn, and a later reset 
   };
   let desk = await open();
   assert.equal(desk.settings["github.poll_seconds"], 300);
-  desk.putSettings({ reset: ["github.poll_seconds"] });
+  runSync(desk.putSettings({ reset: ["github.poll_seconds"] }));
   await idle(desk);
   desk.stop();
   fs.writeFileSync(config, legacy); // e.g. restored from a backup
@@ -692,7 +691,7 @@ test("a config saved after the first start can't set settings: the agent-reachab
     return d;
   };
   const first = await open();
-  const r = first.putConfig(`${first.getConfig().text}\n[analyze]\ncommand = "/tmp/not-claude"\n`, first.getConfig().hash);
+  const r = runSync(first.putConfig(`${first.getConfig().text}\n[analyze]\ncommand = "/tmp/not-claude"\n`, first.getConfig().hash));
   assert.deepEqual(
     [r.ok, r.errors.map((e) => e.path)],
     [false, ["analyze"]],
@@ -708,12 +707,12 @@ test("settings that change the searches sync right away", async () => {
   const t = await setup([]);
   await t.desk.sync();
   assert.ok(!t.gh.searches.some((q) => q.includes("author:bob")));
-  t.desk.putSettings({ set: { "github.close_collaborator_min": 1 } });
+  runSync(t.desk.putSettings({ set: { "github.close_collaborator_min": 1 } }));
   await idle(t.desk);
   assert.ok(t.gh.searches.some((q) => q.endsWith("author:alice author:bob")));
   // Anything else applies to what the desk has: no new pass over GitHub.
   const before = t.gh.searches.length;
-  t.desk.putSettings({ set: { "policy.judge": false, "notify.quiet": "", "github.my_repos": ["acme/web"] } });
+  runSync(t.desk.putSettings({ set: { "policy.judge": false, "notify.quiet": "", "github.my_repos": ["acme/web"] } }));
   await idle(t.desk);
   assert.equal(t.gh.searches.length, before);
   t.cleanup();
@@ -724,7 +723,7 @@ test("a new sync interval re-arms the pending poll", async (ctx) => {
   const t = await setup([]);
   t.desk.start();
   await idle(t.desk);
-  t.desk.putSettings({ set: { "github.poll_seconds": 30 } });
+  runSync(t.desk.putSettings({ set: { "github.poll_seconds": 30 } }));
   await idle(t.desk);
   const before = t.gh.searches.length;
   ctx.mock.timers.tick(30_000);
@@ -798,10 +797,10 @@ test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits
   await t.desk.sync();
   const why = "CI can't pass until getsentry/sentry#129460 merges";
   for (const id of ["getsentry#22982", "getsentry#22983"]) {
-    t.desk.act(id, "inflight");
-    t.desk.handBack(id, why);
+    runSync(t.desk.act(id, "inflight"));
+    runSync(t.desk.handBack(id, why));
   }
-  let q = t.desk.queue();
+  let q = runSync(t.desk.queue());
   assert.deepEqual(back(q.sections.now), [], "not back to you while #129460 blocks them");
   assert.deepEqual(
     q.sections.blocked.map((x) => [x.id, x.why, x.stage]),
@@ -819,7 +818,7 @@ test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits
   merge(t, LIVE, 1);
   await t.desk.sync();
   await t.desk.sync();
-  q = t.desk.queue();
+  q = runSync(t.desk.queue());
   const unblocked = `unblocked: sentry#129460 merged \u00b7 handed back: ${why}`;
   assert.deepEqual(back(q.sections.now), [
     ["getsentry/getsentry#22982", unblocked],
@@ -876,7 +875,7 @@ test("Blocked: sentry#129460 once your push changed the code under markstory's l
     commits,
   });
   await t.desk.sync();
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.blocked.map((x) => [x.id, x.why, x.cta ?? null]),
     [[LIVE, "waits on a review from cvxluo, skaasten and 6 more", null]],
@@ -899,7 +898,7 @@ test("A review asked of you by name that requires an open PR waits in Blocked; o
   const five = makeItem({ number: 5, author: "carol", reviews: [{ ...review("kai", "commented"), commit: "x" }] });
   t.desk.store.putItems([five], NOW.toISOString(), true);
   await t.desk.sync();
-  let q = t.desk.queue();
+  let q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.now.map((x) => x.id),
     [],
@@ -912,7 +911,7 @@ test("A review asked of you by name that requires an open PR waits in Blocked; o
   t.desk.store.putItems([{ ...five, state: "merged", closed_at: at, updated_at: at }], at, true);
   t.setNow(new Date(at));
   await t.desk.sync();
-  q = t.desk.queue();
+  q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.now.map((x) => [x.id, x.why]),
     [["acme/api#9", "carol asked you directly"]],
@@ -925,7 +924,7 @@ test("A review asked of you by name whose description names an open PR in anothe
   c.after(t.cleanup);
   t.desk.store.putItems([makeItem({ repo: "evilcorp/api", number: 5, author: "carol" })], NOW.toISOString(), true);
   await t.desk.sync();
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.deepEqual([q.sections.now.map((x) => [x.id, x.why]), q.sections.blocked], [[["acme/api#9", "carol asked you directly"]], []]);
 });
 
@@ -942,9 +941,9 @@ test("A change request or a reply you owe on a blocked PR is yours: not in Block
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#1", "inflight");
-  t.desk.handBack("web#1", "kofi wants a different retry budget");
-  const q = t.desk.queue();
+  runSync(t.desk.act("web#1", "inflight"));
+  runSync(t.desk.handBack("web#1", "kofi wants a different retry budget"));
+  const q = runSync(t.desk.queue());
   assert.equal(
     q.sections.today.some((x) => x.id === "acme/web#3"),
     false,
@@ -965,8 +964,8 @@ test("Done on a Blocked row: it comes back when the PR it waits on merges", asyn
   const t = await setup([dependent(22982), root()], { settings: QUIET });
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("getsentry#22982", "done");
-  const all = () => Object.values(t.desk.queue().sections).flat();
+  runSync(t.desk.act("getsentry#22982", "done"));
+  const all = () => Object.values(runSync(t.desk.queue()).sections).flat();
   assert.equal(
     all().some((x) => x.id === "getsentry/getsentry#22982"),
     false,
@@ -974,7 +973,7 @@ test("Done on a Blocked row: it comes back when the PR it waits on merges", asyn
   merge(t, LIVE, 1);
   await t.desk.sync();
   assert.deepEqual(
-    t.desk.queue().sections.today.map((x) => [x.id, x.why]),
+    runSync(t.desk.queue()).sections.today.map((x) => [x.id, x.why]),
     [["getsentry/getsentry#22982", "approved and green: ready to merge"]],
   );
   assert.equal(t.notes.at(-1), "getsentry#22982 \u00b7 approved and green: ready to merge");
@@ -1004,13 +1003,13 @@ test("Done or a snooze after the PR it needs merged sticks, from a description o
   await t.desk.sync();
   t.setNow(new Date(NOW.getTime() + 2 * 3_600_000));
   const where = (id: string) =>
-    Object.entries(t.desk.queue().sections)
+    Object.entries(runSync(t.desk.queue()).sections)
       .filter(([, cs]) => cs.some((x) => x.id === id))
       .map(([s]) => s);
-  t.desk.act("getsentry#22982", "done");
-  t.desk.act("web#2", "done");
+  runSync(t.desk.act("getsentry#22982", "done"));
+  runSync(t.desk.act("web#2", "done"));
   assert.deepEqual([where("getsentry/getsentry#22982"), where("acme/web#2")], [[], []]);
-  t.desk.act("getsentry#22982", "snooze", "3h");
+  runSync(t.desk.act("getsentry#22982", "snooze", "3h"));
   assert.deepEqual(where("getsentry/getsentry#22982"), []);
 });
 
@@ -1041,8 +1040,8 @@ test("Blocked by the template: your PRs waiting on reviews, the latest ask as th
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#7", "inflight");
-  const q = t.desk.queue();
+  runSync(t.desk.act("web#7", "inflight"));
+  const q = runSync(t.desk.queue());
   assert.equal(
     q.sections.later.some((x) => x.id === "acme/web#1"),
     false,
@@ -1066,8 +1065,8 @@ test("Merging's PRs another PR blocks are on Blocked, in their chain, marked in 
   c.after(t.cleanup);
   t.desk.coordinator.wake = () => {};
   await t.desk.sync();
-  t.desk.act("getsentry#22983", "inflight");
-  const q = t.desk.queue();
+  runSync(t.desk.act("getsentry#22983", "inflight"));
+  const q = runSync(t.desk.queue());
   assert.equal(
     q.sections.today.some((x) => x.id === "getsentry/getsentry#22982"),
     false,
@@ -1086,7 +1085,7 @@ test("Merging's PRs another PR blocks are on Blocked, in their chain, marked in 
     false,
   );
   assert.deepEqual(
-    t.desk.inflight().rows.map((r) => [r.card.id, r.waits_on]),
+    runSync(t.desk.inflight()).rows.map((r) => [r.card.id, r.waits_on]),
     [["getsentry/getsentry#22983", "waits on sentry#129460 to merge first"]],
   );
 });
@@ -1102,20 +1101,20 @@ test("a hand-back of a PR only waiting on reviewers isn't held, and a hand-back 
   t.desk.coordinator.wake = () => {};
   await t.desk.sync();
   assert.equal(
-    t.desk.queue().sections.later.some((x) => x.id === "acme/web#1"),
+    runSync(t.desk.queue()).sections.later.some((x) => x.id === "acme/web#1"),
     false,
     "it waits on reviews: Blocked, not Later",
   );
   for (const n of [1, 2]) {
-    t.desk.act(`web#${n}`, "inflight");
-    t.desk.handBack(`web#${n}`, "needs your call");
+    runSync(t.desk.act(`web#${n}`, "inflight"));
+    runSync(t.desk.handBack(`web#${n}`, "needs your call"));
   }
   // web#2's dependency merged after the hand-back, while the desk never saw it open.
   const at = new Date(NOW.getTime() + 3_600_000).toISOString();
   t.desk.store.putItems([makeItem({ number: 77, state: "merged", closed_at: at, updated_at: at })], at, true);
   t.setNow(new Date(at));
   await t.desk.sync();
-  assert.deepEqual(back(t.desk.queue().sections.now), [
+  assert.deepEqual(back(runSync(t.desk.queue()).sections.now), [
     ["acme/web#1", "handed back: needs your call"],
     ["acme/web#2", "handed back: needs your call"],
   ]);
@@ -1138,11 +1137,11 @@ test("the nobody's-asked hoist, handBackUnasked and rebaseConflicts skip a block
   t.desk.coordinator.wake = () => {};
   t.desk.coordinator.stop = async () => {};
   await t.desk.sync();
-  t.desk.act("web#2", "inflight");
-  t.desk.act("web#3", "pin");
+  runSync(t.desk.act("web#2", "inflight"));
+  runSync(t.desk.act("web#3", "pin"));
   t.gh.items.set("acme/web#2", { ...t.gh.items.get("acme/web#2")!, review_requests: [], updated_at: hoursAgo(1) });
   await t.desk.sync();
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.equal(
     q.sections.now.some((x) => x.id === "acme/web#1"),
     false,
@@ -1177,7 +1176,7 @@ test("trackBlocked: the first run logs nothing; becoming blocked logs 'blocked b
     "acme/web#1": { since: hoursAgo(48), by: "web#101" },
     "acme/web#2": { since: later, by: "web#100" },
   });
-  const rows = Object.fromEntries(t.desk.queue().sections.blocked.map((x) => [x.id, x.waiting_since]));
+  const rows = Object.fromEntries(runSync(t.desk.queue()).sections.blocked.map((x) => [x.id, x.waiting_since]));
   assert.deepEqual([rows["acme/web#1"], rows["acme/web#2"]], [hoursAgo(48), later]);
 });
 
@@ -1187,7 +1186,7 @@ test("a dependency closed without merging puts your PR in Today: needs X, closed
   t.desk.store.putItems([makeItem({ number: 66, state: "closed", closed_at: hoursAgo(3) })], NOW.toISOString(), true);
   await t.desk.sync();
   assert.deepEqual(
-    t.desk.queue().sections.today.map((x) => [x.id, x.why]),
+    runSync(t.desk.queue()).sections.today.map((x) => [x.id, x.why]),
     [["acme/web#1", "needs api#66, closed without merging"]],
   );
 });
@@ -1199,7 +1198,7 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
   await t.desk.sync();
   const coordinator = "Review Desk coordinator";
   await t.desk.add("acme/web#1", "waits on web#100: no review in 3 days", coordinator);
-  let q = t.desk.queue();
+  let q = runSync(t.desk.queue());
   assert.equal(
     q.sections.today.some((x) => x.id === "acme/web#1"),
     false,
@@ -1212,7 +1211,7 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
   t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
   await t.desk.add("acme/api#6", "carol's fix for the flaky retry", coordinator);
   await t.desk.add("acme/web#2", "needs your call on the retry budget", "seer fix");
-  q = t.desk.queue();
+  q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.today.map((x) => [x.id, x.board, x.why]),
     [
@@ -1229,8 +1228,8 @@ test("a coordinator's desk_add on no other board stays on Added after you act on
   t.gh.items.set("acme/api#77", makeItem({ number: 77, author: "carol" }));
   await t.desk.sync();
   await t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Review Desk coordinator");
-  t.desk.act("api#77", "done");
-  let q = t.desk.queue();
+  runSync(t.desk.act("api#77", "done"));
+  let q = runSync(t.desk.queue());
   assert.deepEqual(
     q.cleared.map((x) => [x.id, x.status]),
     [["acme/api#77", "done"]],
@@ -1243,7 +1242,7 @@ test("a coordinator's desk_add on no other board stays on Added after you act on
     comments: [{ author: "carol", author_bot: false, at }],
   });
   await t.desk.sync();
-  q = t.desk.queue();
+  q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.today.map((x) => [x.id, x.board]),
     [["acme/api#77", "added"]],

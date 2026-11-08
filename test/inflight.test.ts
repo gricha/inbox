@@ -11,6 +11,7 @@ import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
 import { GitHubGraphQLError } from "../src/errors.ts";
+import { runSync } from "./helpers/run.ts";
 
 function fakeWriter(refuse = false, refuseReviews = false) {
   const calls: (string | string[])[][] = [];
@@ -46,29 +47,29 @@ test("a hand-off puts your own open PR in Merging: it leaves the queue, and undo
   c.after(t.cleanup);
   await t.desk.sync();
   const all = () => {
-    const q = t.desk.queue();
+    const q = runSync(t.desk.queue());
     return [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id);
   };
   assert.ok(all().includes("acme/web#3"));
-  const r = t.desk.act("web#3", "inflight");
+  const r = runSync(t.desk.act("web#3", "inflight"));
   assert.ok(r.state.inflight_at);
   assert.ok(!all().includes("acme/web#3"));
   assert.deepEqual(
-    t.desk.inflight().rows.map((x) => [x.card.id, x.card.inflight, x.waits_on, x.note]),
+    runSync(t.desk.inflight()).rows.map((x) => [x.card.id, x.card.inflight, x.waits_on, x.note]),
     [["acme/web#3", true, "waits on CI", null]],
   );
-  assert.deepEqual(t.desk.overview().inflight, { total: 1 });
-  assert.throws(() => t.desk.act("web#3", "inflight"), /in Merging already/);
-  t.desk.undo(r.undo_seq);
+  assert.deepEqual(runSync(t.desk.overview()).inflight, { total: 1 });
+  assert.throws(() => runSync(t.desk.act("web#3", "inflight")), /in Merging already/);
+  runSync(t.desk.undo(r.undo_seq));
   assert.ok(all().includes("acme/web#3"));
-  assert.equal(t.desk.inflight().rows.length, 0);
-  t.desk.act("web#3", "inflight");
-  const back = t.desk.act("web#3", "takeback");
+  assert.equal(runSync(t.desk.inflight()).rows.length, 0);
+  runSync(t.desk.act("web#3", "inflight"));
+  const back = runSync(t.desk.act("web#3", "takeback"));
   assert.equal(back.state.inflight_at, null);
   assert.ok(all().includes("acme/web#3"));
-  t.desk.undo(back.undo_seq);
-  assert.equal(t.desk.inflight().rows.length, 1);
-  assert.throws(() => t.desk.undo(undefined, "agent"), /in the desk's window/);
+  runSync(t.desk.undo(back.undo_seq));
+  assert.equal(runSync(t.desk.inflight()).rows.length, 1);
+  assert.throws(() => runSync(t.desk.undo(undefined, "agent")), /in the desk's window/);
 });
 
 test("only the desk's own window hands a PR off or undoes a hand-off or Back to desk: the coordinator merges what's there", async (c) => {
@@ -80,14 +81,14 @@ test("only the desk's own window hands a PR off or undoes a hand-off or Back to 
   const act = (action: string, origin?: string, site?: string) => post("/api/act", { id: "acme/web#3", action }, origin, site);
   assert.equal((await act("inflight")).status, 403, "curl, the CLI or an agent");
   assert.equal((await act("inflight", desk, "none")).status, 403, "an Origin alone isn't the desk's page");
-  assert.equal(t.desk.inflight().rows.length, 0);
+  assert.equal(runSync(t.desk.inflight()).rows.length, 0);
   assert.equal((await act("inflight", desk)).status, 200);
   const back = (await (await act("takeback", desk)).json()) as { undo_seq: number };
   assert.equal((await post("/api/undo", { seq: back.undo_seq })).status, 409, "an agent can't put it back in Merging");
   assert.equal((await act("undo")).status, 409, "nor through /api/act");
-  assert.equal(t.desk.inflight().rows.length, 0);
+  assert.equal(runSync(t.desk.inflight()).rows.length, 0);
   assert.equal((await post("/api/undo", { seq: back.undo_seq }, desk)).status, 200);
-  assert.equal(t.desk.inflight().rows.length, 1);
+  assert.equal(runSync(t.desk.inflight()).rows.length, 1);
 });
 
 test("a draft isn't handed off: Ready for review is yours, so it would wait on you in Merging", async (c) => {
@@ -95,10 +96,10 @@ test("a draft isn't handed off: Ready for review is yours, so it would wait on y
   c.after(t.cleanup);
   await t.desk.sync();
   assert.throws(
-    () => t.desk.act("web#3", "inflight"),
+    () => runSync(t.desk.act("web#3", "inflight")),
     (e: Error & { status: number }) => e.status === 409 && e.message.endsWith("mark it ready for review first"),
   );
-  assert.equal(t.desk.inflight().rows.length, 0);
+  assert.equal(runSync(t.desk.inflight()).rows.length, 0);
 });
 
 test("a PR in Merging stays there whatever it waits on: never in the queue, focus or the status line", async (c) => {
@@ -106,13 +107,13 @@ test("a PR in Merging stays there whatever it waits on: never in the queue, focu
   const t = await setup([reviewAsk(1), myPr(3, { ci: "red" }), myPr(4, ready), myPr(5, { ci: "pending" })]);
   c.after(t.cleanup);
   await t.desk.sync();
-  for (const n of [3, 4, 5]) t.desk.act(`web#${n}`, "inflight");
-  const q = t.desk.queue();
-  const shown = [q.sections, t.desk.focus().sections].flatMap((x) => Object.values(x).flat());
+  for (const n of [3, 4, 5]) runSync(t.desk.act(`web#${n}`, "inflight"));
+  const q = runSync(t.desk.queue());
+  const shown = [q.sections, runSync(t.desk.focus()).sections].flatMap((x) => Object.values(x).flat());
   assert.deepEqual([...new Set([...shown, ...q.hidden, ...q.cleared, ...q.resolved].map((x) => x.id))], ["acme/api#1"]);
-  assert.equal(t.desk.status().text, "desk 1");
-  assert.deepEqual([t.desk.item("web#3").card.bucket, t.desk.item("web#3").card.why], ["fyi", "merging"]);
-  assert.deepEqual(t.desk.overview().inflight, { total: 3 });
+  assert.equal(runSync(t.desk.status()).text, "desk 1");
+  assert.deepEqual([runSync(t.desk.item("web#3")).card.bucket, runSync(t.desk.item("web#3")).card.why], ["fyi", "merging"]);
+  assert.deepEqual(runSync(t.desk.overview()).inflight, { total: 3 });
 });
 
 test("only your own open PRs are handed off for merge", async (c) => {
@@ -120,10 +121,10 @@ test("only your own open PRs are handed off for merge", async (c) => {
   c.after(t.cleanup);
   await t.desk.sync();
   assert.throws(
-    () => t.desk.act("api#1", "inflight"),
+    () => runSync(t.desk.act("api#1", "inflight")),
     (e: Error & { status: number }) => e.status === 409 && e.message.includes("your own open PRs"),
   );
-  assert.throws(() => t.desk.act("web#3", "takeback"), /isn't in Merging/);
+  assert.throws(() => runSync(t.desk.act("web#3", "takeback")), /isn't in Merging/);
 });
 
 test("in Merging, the coordinator owns it: done, snooze and mute are refused, and the judge leaves it alone", async (c) => {
@@ -132,20 +133,20 @@ test("in Merging, the coordinator owns it: done, snooze and mute are refused, an
   c.after(t.cleanup);
   await t.desk.sync();
   // Muted before you handed it off: handing off clears that.
-  const muted = t.desk.act("web#3", "mute");
-  const marked = t.desk.act("web#3", "inflight");
+  const muted = runSync(t.desk.act("web#3", "mute"));
+  const marked = runSync(t.desk.act("web#3", "inflight"));
   assert.equal(marked.state.muted, false);
   for (const action of ["done", "snooze", "mute"] as const)
     assert.throws(
-      () => t.desk.act("web#3", action),
+      () => runSync(t.desk.act("web#3", action)),
       (e: Error & { status: number }) => e.status === 409 && e.message.endsWith("bring it back to the desk first"),
     );
   // Undoing the hand-off brings back the mute.
-  t.desk.undo(marked.undo_seq);
+  runSync(t.desk.undo(marked.undo_seq));
   assert.equal(t.desk.store.state("acme/web#3").muted, true);
-  t.desk.undo(muted.undo_seq);
-  t.desk.act("web#3", "inflight");
-  t.desk.putPolicy("Waiting PRs are fyi.");
+  runSync(t.desk.undo(muted.undo_seq));
+  runSync(t.desk.act("web#3", "inflight"));
+  runSync(t.desk.putPolicy("Waiting PRs are fyi."));
   assert.ok(!t.desk.judge.queue().some((g) => g.item.id === "acme/web#3"));
 });
 
@@ -169,8 +170,8 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
   ]);
   c.after(t.cleanup);
   await t.desk.sync();
-  for (let n = 1; n <= 9; n++) t.desk.act(`web#${n}`, "inflight");
-  const waits = Object.fromEntries(t.desk.inflight().rows.map((r) => [r.card.number, r.waits_on]));
+  for (let n = 1; n <= 9; n++) runSync(t.desk.act(`web#${n}`, "inflight"));
+  const waits = Object.fromEntries(runSync(t.desk.inflight()).rows.map((r) => [r.card.number, r.waits_on]));
   assert.deepEqual(waits, {
     1: "waits on a CI fix",
     2: "waits on a merge conflict fix",
@@ -182,8 +183,12 @@ test("what a PR in Merging waits on: the first thing between it and a merge", as
     8: "ready to merge",
     9: "waits on a review",
   });
-  assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 9)!.approved_by, [], "the coordinator merges on it");
-  assert.deepEqual(t.desk.inflight().rows.find((r) => r.card.number === 7)!.stacked, true, "the coordinator sees it sits on another PR");
+  assert.deepEqual(runSync(t.desk.inflight()).rows.find((r) => r.card.number === 9)!.approved_by, [], "the coordinator merges on it");
+  assert.deepEqual(
+    runSync(t.desk.inflight()).rows.find((r) => r.card.number === 7)!.stacked,
+    true,
+    "the coordinator sees it sits on another PR",
+  );
 });
 
 const SAVED = { id: "c0ffee01", url: "https://claude.ai/code/session_01Fakec0ffee01" };
@@ -210,10 +215,10 @@ async function conflicts(c: TestContext, settings: Record<string, unknown> = {})
     await t.desk.sync();
   };
   const main = () =>
-    Object.values(t.desk.focus().sections)
+    Object.values(runSync(t.desk.focus()).sections)
       .flat()
       .map((x) => [x.id, x.why]);
-  const merging = () => t.desk.inflight().rows.map((r) => [r.card.id, r.waits_on, r.rebase]);
+  const merging = () => runSync(t.desk.inflight()).rows.map((r) => [r.card.id, r.waits_on, r.rebase]);
   return { ...t, woke, update, main, merging };
 }
 
@@ -252,7 +257,7 @@ test("a conflict on your PR that isn't ready to merge yet is nobody's: nothing g
 test("a rebase the coordinator hands back tops your desk with its reason, and isn't sent again for that conflict", async (c) => {
   const t = await conflicts(c);
   await t.update(3, { mergeable: "conflict" });
-  t.desk.handBack("web#3", "can't rebase cleanly: both change the retry schedule");
+  runSync(t.desk.handBack("web#3", "can't rebase cleanly: both change the retry schedule"));
   await t.update(3, { comments_total: 1 });
   assert.deepEqual(t.main(), [["acme/web#3", "handed back: can't rebase cleanly: both change the retry schedule"]]);
   assert.deepEqual([t.woke.length, t.merging()], [1, []]);
@@ -267,10 +272,10 @@ test("with the coordinator off, a ready PR's conflict stays yours: nothing is se
   assert.deepEqual([t.woke, t.merging()], [[], []]);
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
   // On, it goes; off again, it comes back to your desk.
-  t.desk.putSettings({ set: { "agent.coordinator": true } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": true } }));
   await t.desk.sync();
   assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
-  t.desk.putSettings({ set: { "agent.coordinator": false } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": false } }));
   await t.desk.sync();
   assert.deepEqual([t.merging(), t.main()], [[], [["acme/web#3", "approved and green: ready to merge"]]]);
 });
@@ -289,21 +294,21 @@ test("nothing is sent from a desk that never started a coordinator, or for your 
 
 test("CI that never ran doesn't hold a conflicting PR back: GitHub runs none on one", async (c) => {
   const t = await conflicts(c);
-  t.desk.act("web#4", "pin");
+  runSync(t.desk.act("web#4", "pin"));
   await t.update(4, { review_decision: "approved", ci: "pending", mergeable: "conflict" });
   assert.deepEqual(t.woke, [["acme/web#4", REBASE]]);
 });
 
 test("your handed-off PR's conflict stays the coordinator's to merge; one it hands back or you bring back stays yours", async (c) => {
   const t = await conflicts(c);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await t.update(3, { mergeable: "conflict" });
   assert.deepEqual(t.merging(), [["acme/web#3", "waits on a merge conflict fix", false]]);
-  t.desk.handBack("web#3", "can't rebase cleanly");
+  runSync(t.desk.handBack("web#3", "can't rebase cleanly"));
   await t.update(3, { comments_total: 1 });
   assert.deepEqual(t.main(), [["acme/web#3", "handed back: can't rebase cleanly"]]);
-  t.desk.act("web#3", "inflight");
-  t.desk.act("web#3", "takeback");
+  runSync(t.desk.act("web#3", "inflight"));
+  runSync(t.desk.act("web#3", "takeback"));
   await t.update(3, { comments_total: 2 });
   assert.deepEqual(t.merging(), []);
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
@@ -317,20 +322,20 @@ test("desk_note: the coordinator's latest line on a PR in Merging shows on its r
   const post = client(t);
   const id = encodeURIComponent("acme/web#3");
   assert.equal((await post(`/api/inflight/${id}/note`, { text: "Fixing lint" })).status, 409, "not in Merging yet");
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   assert.equal((await post(`/api/inflight/${id}/note`, { text: "Fixing lint" })).status, 200, "local only, so agents may");
   t.setNow(new Date(Date.parse(hoursAgo(0)) + 60_000));
   assert.equal((await post(`/api/inflight/${id}/note`, { text: "Pushed\nabc1234,\tCI running" })).status, 200);
-  assert.deepEqual(t.desk.inflight().rows[0]!.note, {
+  assert.deepEqual(runSync(t.desk.inflight()).rows[0]!.note, {
     text: "Pushed abc1234, CI running",
     at: new Date(Date.parse(hoursAgo(0)) + 60_000).toISOString(),
   });
   assert.equal((await post(`/api/inflight/${id}/note`, { text: "  " })).status, 400);
   assert.equal((await post(`/api/inflight/${id}/note`, {})).status, 400);
   assert.equal((await post(`/api/inflight/${encodeURIComponent("acme/api#1")}/note`, { text: "x" })).status, 409, "not yours");
-  t.desk.act("web#3", "takeback");
-  t.desk.act("web#3", "inflight");
-  assert.equal(t.desk.inflight().rows[0]!.note, null);
+  runSync(t.desk.act("web#3", "takeback"));
+  runSync(t.desk.act("web#3", "inflight"));
+  assert.equal(runSync(t.desk.inflight()).rows[0]!.note, null);
 });
 
 test("desk_hand_back: the PR leaves Merging for the top of Now with the why, writes nothing, and notifies", async (c) => {
@@ -341,8 +346,8 @@ test("desk_hand_back: the PR leaves Merging for the top of Now with the why, wri
   });
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#3", "inflight");
-  t.desk.act("web#4", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
+  runSync(t.desk.act("web#4", "inflight"));
   t.desk.notifyNew();
   const post = client(t);
   const res = await post(`/api/inflight/${encodeURIComponent("acme/web#3")}/handback`, { why: "Dana wants the cache\nredesigned first" });
@@ -350,10 +355,10 @@ test("desk_hand_back: the PR leaves Merging for the top of Now with the why, wri
   assert.deepEqual(w.calls, [], "a hand-back writes nothing to GitHub");
   assert.equal(t.desk.store.state("acme/web#3").inflight_at, null);
   assert.deepEqual(
-    t.desk.inflight().rows.map((r) => r.card.id),
+    runSync(t.desk.inflight()).rows.map((r) => r.card.id),
     ["acme/web#4"],
   );
-  const [top] = t.desk.queue().sections.now;
+  const [top] = runSync(t.desk.queue()).sections.now;
   assert.deepEqual(
     [top?.id, top?.why, top?.handed_back, top?.inflight],
     ["acme/web#3", "handed back: Dana wants the cache redesigned first", true, false],
@@ -362,10 +367,10 @@ test("desk_hand_back: the PR leaves Merging for the top of Now with the why, wri
   assert.equal((await post(`/api/inflight/${encodeURIComponent("acme/web#3")}/handback`, { why: "again" })).status, 409);
   // Done puts it away for good; m again starts afresh.
   t.setNow(new Date(Date.parse(hoursAgo(0)) + 60_000));
-  t.desk.act("web#3", "done");
-  assert.ok(!t.desk.queue().sections.now.some((x) => x.id === "acme/web#3"));
-  t.desk.act("web#3", "restore");
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "done"));
+  assert.ok(!runSync(t.desk.queue()).sections.now.some((x) => x.id === "acme/web#3"));
+  runSync(t.desk.act("web#3", "restore"));
+  runSync(t.desk.act("web#3", "inflight"));
   assert.deepEqual(t.desk.merging("acme/web#3"), {});
 });
 
@@ -379,7 +384,7 @@ test("your own open draft carries one call to action, Ready for review; a a mark
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  const cta = (ref: string) => t.desk.item(ref).card.cta;
+  const cta = (ref: string) => runSync(t.desk.item(ref)).card.cta;
   assert.deepEqual(
     [cta("web#3"), cta("web#4"), cta("api#1"), cta("web#5")],
     ["ready", undefined, undefined, "ready"],
@@ -477,7 +482,7 @@ test("a refused Ready for review says why, and nothing is logged", async (c) => 
   const t2 = await setup([myPr(3, { ci: "green", draft: true })]);
   c.after(t2.cleanup);
   await t2.desk.sync();
-  assert.equal(t2.desk.item("web#3").card.cta, undefined, "no writer, no call to action");
+  assert.equal(runSync(t2.desk.item("web#3")).card.cta, undefined, "no writer, no call to action");
 });
 
 test("d on your own PR is plain done: it leaves the queue and comes back when someone else acts", async (c) => {
@@ -485,14 +490,14 @@ test("d on your own PR is plain done: it leaves the queue and comes back when so
   c.after(t.cleanup);
   await t.desk.sync();
   const all = () =>
-    Object.values(t.desk.queue().sections)
+    Object.values(runSync(t.desk.queue()).sections)
       .flat()
       .map((x) => x.id);
   assert.ok(all().includes("acme/web#3"));
-  const r = t.desk.act("web#3", "done");
-  assert.deepEqual([r.state.inflight_at, t.desk.inflight().rows.length], [null, 0]);
+  const r = runSync(t.desk.act("web#3", "done"));
+  assert.deepEqual([r.state.inflight_at, runSync(t.desk.inflight()).rows.length], [null, 0]);
   assert.ok(!all().includes("acme/web#3"));
-  assert.ok(t.desk.queue().cleared.some((x) => x.id === "acme/web#3"));
+  assert.ok(runSync(t.desk.queue()).cleared.some((x) => x.id === "acme/web#3"));
 });
 
 test("your ready PR nobody's asked to review tops your desk with Add reviewers; m refuses it; asking someone clears it", async (c) => {
@@ -504,16 +509,16 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
   });
   c.after(t.cleanup);
   await t.desk.sync();
-  const card = (ref: string) => t.desk.item(ref).card;
+  const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.deepEqual(
     [card("web#3").cta, card("web#3").why, card("web#3").handed_back, card("web#3").bucket],
     ["reviewers", "nobody's asked to review it: add reviewers", true, "now"],
   );
-  const top = t.desk.focus().sections.now[0];
+  const top = runSync(t.desk.focus()).sections.now[0];
   assert.deepEqual([top?.id, top?.group], ["acme/web#3", "back"], "on top, in Back to you");
   assert.equal(card("web#4").cta, "ready", "a draft: Ready for review comes first");
   assert.equal(card("web#5").cta, undefined, "dana's asked");
-  assert.throws(() => t.desk.act("web#3", "inflight"), /nobody's asked to review acme\/web#3: add reviewers first/);
+  assert.throws(() => runSync(t.desk.act("web#3", "inflight")), /nobody's asked to review acme\/web#3: add reviewers first/);
 
   const post = client(t);
   const desk = "http://localhost:47823";
@@ -528,7 +533,7 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
   assert.deepEqual(w.calls, [["request_reviews", "PR_acme/web_3", ["U_dana"], ["T_backend"]]]);
   assert.equal(card("web#3").status, "done", "your part is done until someone reviews");
   assert.equal(
-    [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].some((x) => x.id === "acme/web#3"),
+    [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === "acme/web#3"),
     false,
     "off your desk",
   );
@@ -550,8 +555,8 @@ test("a review someone left counts as asked; a bot's or your own doesn't", async
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  assert.equal(t.desk.item("web#3").card.handed_back, undefined);
-  assert.equal(t.desk.item("web#4").card.why, "nobody's asked to review it: add reviewers");
+  assert.equal(runSync(t.desk.item("web#3")).card.handed_back, undefined);
+  assert.equal(runSync(t.desk.item("web#4")).card.why, "nobody's asked to review it: add reviewers");
 });
 
 test("a PR in Merging nobody's asked to review any more comes back to you on the next sync, with Add reviewers", async (c) => {
@@ -561,14 +566,14 @@ test("a PR in Merging nobody's asked to review any more comes back to you on the
   });
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act("web#3", "inflight");
-  assert.equal(t.desk.item("web#3").card.inflight, true);
+  runSync(t.desk.act("web#3", "inflight"));
+  assert.equal(runSync(t.desk.item("web#3")).card.inflight, true);
   t.gh.items.set("acme/web#3", { ...myPr(3, { ci: "green", review_requests: [] }), updated_at: hoursAgo(0.05) });
   await t.desk.sync();
-  assert.equal(t.desk.item("web#3").card.inflight, true, "a few minutes: a workflow may be asking someone");
+  assert.equal(runSync(t.desk.item("web#3")).card.inflight, true, "a few minutes: a workflow may be asking someone");
   t.setNow(new Date(NOW.getTime() + 30 * 60_000));
   await t.desk.sync();
-  const d = t.desk.item("web#3");
+  const d = runSync(t.desk.item("web#3"));
   assert.deepEqual(
     [d.card.inflight, d.card.handed_back, d.card.cta, d.card.why],
     [false, true, "reviewers", "handed back: nobody's asked to review it: add reviewers"],
@@ -580,7 +585,7 @@ test("a PR in Merging nobody's asked to review any more comes back to you on the
     "the desk's, not an agent's",
   );
   assert.equal(
-    t.desk.inflight().rows.some((r) => r.card.id === "acme/web#3" && r.state === "open"),
+    runSync(t.desk.inflight()).rows.some((r) => r.card.id === "acme/web#3" && r.state === "open"),
     false,
     "out of Merging",
   );
@@ -598,7 +603,7 @@ test("what counts as asked: a bot's request or review doesn't, one GitHub hides 
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  const unasked = (ref: string) => t.desk.item(ref).signals.pr.unasked;
+  const unasked = (ref: string) => runSync(t.desk.item(ref)).signals.pr.unasked;
   assert.deepEqual([unasked("web#3"), unasked("web#4"), unasked("web#5")], [true, false, true]);
 });
 
@@ -615,11 +620,11 @@ test("nobody's asked: not while a workflow may still ask, not once it's quiet, n
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  const card = (ref: string) => t.desk.item(ref).card;
+  const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.equal(card("web#3").handed_back, undefined, "minutes old");
   assert.equal(card("web#4").handed_back, undefined, "quiet for 40 days: Later has it");
   assert.equal(card("web#5").cta, "reviewers", "a comment waits on you, but nobody would review your answer");
-  const row = [...t.desk.focus().sections.now, ...t.desk.focus().sections.today].find((x) => x.id === "acme/web#5");
+  const row = [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].find((x) => x.id === "acme/web#5");
   assert.equal(row?.cta, "reviewers");
 
   t.gh.route = () => []; // it left every search: nothing refreshes it any more
@@ -635,9 +640,9 @@ test("Add reviewers and m's refusal agree, from the first minute; quiet is Later
   );
   c.after(t.cleanup);
   await t.desk.sync();
-  const card = (ref: string) => t.desk.item(ref).card;
+  const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.deepEqual([card("web#3").cta, card("web#3").handed_back], ["reviewers", undefined], "not on top yet, but it says what m needs");
-  assert.throws(() => t.desk.act("web#3", "inflight"), /add reviewers first/);
+  assert.throws(() => runSync(t.desk.act("web#3", "inflight")), /add reviewers first/);
   assert.deepEqual([card("web#4").cta, card("web#4").handed_back], ["reviewers", true], "20 days old, pushed to an hour ago");
 });
 
@@ -651,7 +656,7 @@ test("on a bot's PR opened for you, your own review doesn't count as anyone revi
     makeItem({ number: 8, repo: "acme/web", author: "junior[bot]", author_bot: true, via: "@me", ci: "green", reviews: [mine] }),
   );
   await t.desk.add("acme/web#8");
-  const s = t.desk.item("web#8").signals;
+  const s = runSync(t.desk.item("web#8")).signals;
   assert.deepEqual([s.me.author, s.pr.unasked], [true, true]);
 });
 
@@ -676,8 +681,8 @@ test("a blocked PR in Merging waits on its blocker, and the coordinator is woken
     woke.push([id, what]);
   };
   await t.desk.sync();
-  t.desk.act("getsentry#1", "inflight");
-  const row = t.desk.inflight().rows[0]!;
+  runSync(t.desk.act("getsentry#1", "inflight"));
+  const row = runSync(t.desk.inflight()).rows[0]!;
   assert.deepEqual(
     [row.waits_on, row.blocked_by],
     ["waits on sentry#129460 to merge first", { ref: "sentry#129460", waits: "waits on a review from dana" }],
@@ -691,7 +696,7 @@ test("a blocked PR in Merging waits on its blocker, and the coordinator is woken
     woke.filter(([, what]) => what.startsWith("unblocked")),
     [["getsentry/getsentry#1", "unblocked: sentry#129460 merged"]],
   );
-  assert.equal(t.desk.inflight().rows[0]!.waits_on, "ready to merge");
+  assert.equal(runSync(t.desk.inflight()).rows[0]!.waits_on, "ready to merge");
 });
 
 test("a Merging PR whose required PR closed without merging says so, and the coordinator is woken with it, not 'unblocked'", async (c) => {
@@ -709,13 +714,13 @@ test("a Merging PR whose required PR closed without merging says so, and the coo
     woke.push([id, what]);
   };
   await t.desk.sync();
-  t.desk.act("web#9", "inflight");
+  runSync(t.desk.act("web#9", "inflight"));
   woke.length = 0;
   const at = new Date(NOW.getTime() + 3_600_000).toISOString();
   t.gh.items.set("acme/api#5", { ...t.gh.items.get("acme/api#5")!, state: "closed", closed_at: at, updated_at: at });
   t.setNow(new Date(at));
   await t.desk.sync();
-  const row = t.desk.inflight().rows.find((r) => r.card.id === "acme/web#9")!;
+  const row = runSync(t.desk.inflight()).rows.find((r) => r.card.id === "acme/web#9")!;
   assert.deepEqual([row.waits_on, row.requires_closed], ["needs api#5, closed without merging", ["api#5"]]);
   assert.deepEqual(woke, [["acme/web#9", "needs api#5, closed without merging"]]);
 });

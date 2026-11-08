@@ -139,12 +139,12 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   c.after(t.cleanup);
   await t.desk.sync();
   t.gh.items.set("acme/other#9", makeItem({ repo: "acme/other", number: 9, kind: "issue", author: "dave", title: "Crash on start" }));
-  t.desk.act("api#2", "done");
+  runSync(t.desk.act("api#2", "done"));
   await t.desk.add("api#3");
   const five = t.gh.items.get("acme/api#5")!;
   t.gh.items.set(five.id, { ...five, state: "closed", updated_at: new Date(Date.parse(five.updated_at) + 60_000).toISOString() });
   await t.desk.sync();
-  const card = (id: string) => t.desk.item(id).card;
+  const card = (id: string) => runSync(t.desk.item(id)).card;
   assert.ok(!["now", "today"].includes(card("acme/api#4").bucket), "a team ping is sorted away");
   fake.answer("Read 12 new issues; a few need you.", [
     { ref: "https://github.com/acme/other/issues/9", why: "a crash on start since 0.9, three reports" },
@@ -178,10 +178,10 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   assert.equal(card("acme/api#4").bucket, "today", "its pin lifts it, as yours would");
   assert.equal(card("acme/api#4").why, "Warden issues: the team ping is about the loader you own");
   assert.notEqual(card("acme/api#1").why, "Warden issues: asks you about the retry budget", "on your queue by its own rule");
-  assert.equal(t.desk.item("acme/api#1").state.pinned, false);
+  assert.equal(runSync(t.desk.item("acme/api#1")).state.pinned, false);
   assert.equal(card("acme/api#2").status, "done", "done stays done");
   assert.notEqual(card("acme/api#3").why, "Warden issues: you pinned it", "your own pin keeps its why");
-  assert.equal(t.desk.item("acme/api#5").state.pinned, false, "nobody needs a closed one");
+  assert.equal(runSync(t.desk.item("acme/api#5")).state.pinned, false, "nobody needs a closed one");
   assert.deepEqual(t.notes, ["2 on your desk, couldn't add 1"]);
   assert.deepEqual(
     t.desk.automations.view()[0]!.runs.map((r) => r.id),
@@ -189,10 +189,10 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   );
 
   // Dealing with what it added ends its pin; undo brings it back.
-  const { undo_seq } = t.desk.act("other#9", "done");
-  assert.equal(t.desk.item("acme/other#9").state.pinned, false);
-  t.desk.undo(undo_seq);
-  assert.equal(t.desk.item("acme/other#9").state.pinned, true);
+  const { undo_seq } = runSync(t.desk.act("other#9", "done"));
+  assert.equal(runSync(t.desk.item("acme/other#9")).state.pinned, false);
+  runSync(t.desk.undo(undo_seq));
+  assert.equal(runSync(t.desk.item("acme/other#9")).state.pinned, true);
 
   // Your own Claude Code with what your settings allow and read-only tools; nothing else, never asking.
   const args = fake.args(1);

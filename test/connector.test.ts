@@ -9,7 +9,7 @@ import { Desk } from "../src/desk.ts";
 import { GitHubAuthError, GitHubRateLimited } from "../src/errors.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
-import { failure } from "./helpers/run.ts";
+import { failure, runSync } from "./helpers/run.ts";
 
 const ID = "acme/other#9";
 const refused = () => new GitHubAuthError({ reason: "rejected", message: "GitHub rejected the token (HTTP 401): run `gh auth login`" });
@@ -35,7 +35,7 @@ test("every search failing fails the pass with GitHubSearchesFailed, after it ke
   await t.desk.sync();
   assert.equal(t.desk.syncError, err.message);
   assert.equal(t.desk.syncedAt, before);
-  assert.equal(t.desk.overview().connectors[0]?.status, "error");
+  assert.equal(runSync(t.desk.overview()).connectors[0]?.status, "error");
 });
 
 test("a rate limit in a pass pauses the loops until GitHub's reset, and the next sync waits for it", async (c) => {
@@ -54,7 +54,7 @@ test("a rate limit in a pass pauses the loops until GitHub's reset, and the next
   assert.equal(asked, 1, "the first search's rate limit stops the pass");
   assert.equal(t.desk.gh.pausedUntil, Date.parse(resetAt));
   assert.equal(t.desk.syncError, message);
-  assert.equal(t.desk.overview().connectors[0]?.status, "paused");
+  assert.equal(runSync(t.desk.overview()).connectors[0]?.status, "paused");
   await t.desk.sync();
   assert.equal(asked, 1, "paused: no pass");
 });

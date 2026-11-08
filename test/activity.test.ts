@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { Item } from "../src/types.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
-import { run } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 
@@ -21,7 +21,7 @@ test("the first sync logs each item as new; an unchanged sync logs nothing", asy
   await t.desk.sync();
   assert.equal(t.desk.store.lastSeq(), 2);
   assert.deepEqual(
-    t.desk.overview().connectors.map((c) => [c.id, c.name, c.status]),
+    runSync(t.desk.overview()).connectors.map((c) => [c.id, c.name, c.status]),
     [["github", "GitHub", "ok"]],
   );
   t.cleanup();
@@ -42,7 +42,7 @@ test("a snapshot older than the stored one (the feed and the full pass raced) is
 test("someone else approves: reviewed and resolved; it leaves Now for Resolved, keeping your triage state", async () => {
   const t = await setup([reviewAsk(1), reviewAsk(2)]);
   await t.desk.sync();
-  t.desk.act("api#1", "pin");
+  runSync(t.desk.act("api#1", "pin"));
   t.setNow(later(1));
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", iso(0.5))], review_decision: "approved" }));
   await t.desk.sync();
@@ -56,7 +56,7 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
   );
   assert.ok(log.every((e) => e.source === "github" && e.item_id === "acme/api#1"));
 
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.now.map((c) => c.id),
     ["acme/api#2"],
@@ -68,13 +68,13 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
   );
   assert.equal(q.sections.now[0]?.resolved_at, null);
   assert.deepEqual(
-    t.desk.focus().sections.now.map((c) => c.id),
+    runSync(t.desk.focus()).sections.now.map((c) => c.id),
     ["acme/api#2"],
   );
-  const board = t.desk.board("acme-review");
+  const board = runSync(t.desk.board("acme-review"));
   assert.ok(![...Object.values(board.sections).flat(), ...board.hidden, ...board.cleared].some((c) => c.id === "acme/api#1"));
   assert.equal(board.board.counts.cleared, 0);
-  const d = t.desk.item("api#1");
+  const d = runSync(t.desk.item("api#1"));
   assert.equal(d.card.resolved, "approved by bob");
   assert.equal(d.state.pinned, true);
   assert.deepEqual(
@@ -88,7 +88,7 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
   const approved = reviewAsk(1, { updated_at: iso(0.5), reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" });
   const t = await setup([approved]);
   await t.desk.sync();
-  assert.equal(t.desk.queue().resolved.length, 1);
+  assert.equal(runSync(t.desk.queue()).resolved.length, 1);
   t.setNow(later(2));
   t.gh.items.set(
     "acme/api#1",
@@ -106,7 +106,7 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
   assert.deepEqual(kinds(t.desk).slice(-2), ["review_requested acme/api#1", "unresolved acme/api#1"]);
   assert.deepEqual(t.desk.store.activity({ after: 0, limit: 10 }).at(-1)?.data, { was: "approved by bob" });
   assert.deepEqual(
-    t.desk.queue().sections.now.map((c) => c.id),
+    runSync(t.desk.queue()).sections.now.map((c) => c.id),
     ["acme/api#1"],
   );
   t.cleanup();
@@ -123,7 +123,7 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   assert.deepEqual(kinds(t.desk).slice(2), ["merged acme/api#1", "resolved acme/api#1"]);
   assert.equal(t.desk.store.activity({ after: 2, limit: 1 })[0]?.actor, "dana");
   assert.deepEqual(
-    t.desk.queue().resolved.map((c) => [c.id, c.why, c.resolved_at]),
+    runSync(t.desk.queue()).resolved.map((c) => [c.id, c.why, c.resolved_at]),
     [["acme/api#1", "merged", iso(0.1)]],
   );
 
@@ -132,12 +132,12 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   t.gh.detailCalls = [];
   await t.desk.sync();
   assert.ok(!t.gh.detailCalls.flat().includes("acme/api#1"));
-  assert.equal(t.desk.queue().resolved.length, 1);
+  assert.equal(runSync(t.desk.queue()).resolved.length, 1);
 
   // Three days after it left, it's off the desk.
   t.setNow(later(80));
   await t.desk.sync();
-  assert.deepEqual(t.desk.queue().resolved, []);
+  assert.deepEqual(runSync(t.desk.queue()).resolved, []);
   t.cleanup();
 });
 
@@ -157,14 +157,14 @@ test("you approved: still in the reviewed-by search, it passes the board's filte
     [["resolved", "me", { reason: "you approved" }]],
   );
   assert.deepEqual(
-    t.desk.queue().resolved.map((c) => [c.id, c.why, c.resolved_at]),
+    runSync(t.desk.queue()).resolved.map((c) => [c.id, c.why, c.resolved_at]),
     [["acme/api#1", "you approved", iso(0.1)]],
   );
-  assert.ok(!t.desk.focus().sections.now.some((c) => c.id === "acme/api#1"));
+  assert.ok(!runSync(t.desk.focus()).sections.now.some((c) => c.id === "acme/api#1"));
 
   t.setNow(later(80));
   await t.desk.sync();
-  assert.deepEqual(t.desk.queue().resolved, [], "three days on, the filter drops it again");
+  assert.deepEqual(runSync(t.desk.queue()).resolved, [], "three days on, the filter drops it again");
   t.cleanup();
 });
 
@@ -180,8 +180,8 @@ test("a resolution with no time (no longer requested) doesn't pass a board's fil
   const route = t.gh.route;
   t.gh.route = (q) => (q.includes("mentions:@me") ? ["acme/api#1"] : route(q));
   await t.desk.sync();
-  assert.equal(t.desk.item("api#1").card.resolved, "no longer requested");
-  assert.deepEqual(t.desk.queue().resolved, [], "quiet for 20 days: the Mentions filter drops it, as before it resolved");
+  assert.equal(runSync(t.desk.item("api#1")).card.resolved, "no longer requested");
+  assert.deepEqual(runSync(t.desk.queue()).resolved, [], "quiet for 20 days: the Mentions filter drops it, as before it resolved");
   t.cleanup();
 });
 
@@ -193,7 +193,7 @@ test("unrequested without a review: request removed, resolved as no longer reque
   await t.desk.sync();
   assert.deepEqual(kinds(t.desk).slice(1), ["request_removed acme/api#1", "resolved acme/api#1"]);
   assert.deepEqual(
-    t.desk.queue().resolved.map((c) => c.why),
+    runSync(t.desk.queue()).resolved.map((c) => c.why),
     ["no longer requested"],
   );
   t.cleanup();
@@ -202,11 +202,11 @@ test("unrequested without a review: request removed, resolved as no longer reque
 test("settings: never resolving on others' approvals puts it back", async () => {
   const t = await setup([reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved" })]);
   await t.desk.sync();
-  assert.equal(t.desk.queue().resolved.length, 1);
-  t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } });
+  assert.equal(runSync(t.desk.queue()).resolved.length, 1);
+  runSync(t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } }));
   await idle(t.desk);
-  assert.equal(t.desk.queue().resolved.length, 0);
-  assert.equal(t.desk.queue().sections.now[0]?.id, "acme/api#1");
+  assert.equal(runSync(t.desk.queue()).resolved.length, 0);
+  assert.equal(runSync(t.desk.queue()).sections.now[0]?.id, "acme/api#1");
   t.cleanup();
 });
 
@@ -308,7 +308,7 @@ test("notifications: a rate-limit pause skips polls", async () => {
   t.desk.gh.pausedUntil = Date.now() + 60_000;
   await run(t.desk.gh.poll());
   assert.equal(t.gh.feedCalls.length, 0);
-  assert.equal(t.desk.overview().connectors[0]?.status, "paused");
+  assert.equal(runSync(t.desk.overview()).connectors[0]?.status, "paused");
   t.gh.notifications = () =>
     Effect.fail(new GitHubRateLimited({ resetAt: iso(1), message: `GitHub rate limited until ${iso(1)} (HTTP 403)` }));
   t.desk.gh.pausedUntil = 0;
@@ -359,12 +359,12 @@ test("done on a resolved item stays done when it comes back", async () => {
   const approved = (o: Partial<Item> = {}) => reviewAsk(1, { reviews: [approve("bob", hoursAgo(0.5))], review_decision: "approved", ...o });
   const t = await setup([approved()]);
   await t.desk.sync();
-  t.desk.act("api#1", "done");
-  assert.equal(t.desk.queue().resolved[0]?.status, "done");
-  t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } });
+  runSync(t.desk.act("api#1", "done"));
+  assert.equal(runSync(t.desk.queue()).resolved[0]?.status, "done");
+  runSync(t.desk.putSettings({ set: { "github.resolve_on_others_approval": "never" } }));
   await idle(t.desk);
   assert.deepEqual(
-    t.desk.queue().cleared.map((c) => [c.id, c.status]),
+    runSync(t.desk.queue()).cleared.map((c) => [c.id, c.status]),
     [["acme/api#1", "done"]],
   );
   t.cleanup();

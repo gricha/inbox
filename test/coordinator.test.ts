@@ -11,7 +11,7 @@ import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace, AsksView } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { makeItem, NOW } from "./helpers/items.ts";
-import { failure, failureSync, run } from "./helpers/run.ts";
+import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -242,14 +242,14 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    assert.deepEqual(t.desk.inflight().coordinator, { on: true, id: null, url: null, error: null, status: null, queued: [] });
+    assert.deepEqual(runSync(t.desk.inflight()).coordinator, { on: true, id: null, url: null, error: null, status: null, queued: [] });
     t.desk.start();
     await until(() => t.fake.calls().length === 1);
     await settle();
     assert.deepEqual(t.fake.calls(), [["agents", "--json", "--all"]], "a scratch desk never creates one");
-    t.desk.act("web#3", "inflight");
-    t.desk.act("web#4", "inflight");
-    await until(() => t.desk.inflight().coordinator.url !== null);
+    runSync(t.desk.act("web#3", "inflight"));
+    runSync(t.desk.act("web#4", "inflight"));
+    await until(() => runSync(t.desk.inflight()).coordinator.url !== null);
     const [s] = t.fake.sessions();
     const dir = path.join(t.home, "coordinator");
     assert.equal(fs.realpathSync(s!.cwd), fs.realpathSync(dir));
@@ -270,7 +270,7 @@ test(
       "Bash(git push * +*)",
     ])
       assert.ok(deny.includes(r), r);
-    assert.deepEqual(t.desk.inflight().coordinator, {
+    assert.deepEqual(runSync(t.desk.inflight()).coordinator, {
       on: true,
       id: "c0ffee01",
       url: "https://claude.ai/code/session_01Fakec0ffee01",
@@ -287,7 +287,7 @@ test("settings the owner wrote in the coordinator's folder keep their own rules 
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const old = { permissions: { additionalDirectories: ["/src"], deny: ["Bash(gh pr comment:*)", "Bash(rm:*)"] }, model: "x" };
   fs.writeFileSync(file, JSON.stringify(old));
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.fake.sessions().length === 1);
   const s = JSON.parse(fs.readFileSync(file, "utf8")) as {
     permissions: { additionalDirectories: string[]; deny: string[] };
@@ -302,7 +302,7 @@ test("settings the owner wrote in the coordinator's folder keep their own rules 
 
 test("news on a PR in Merging wakes the same session with one line per batch; news elsewhere doesn't", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.said().length === 1);
   t.event(3, "ci", { from: "pending", to: "red" });
   t.event(3, "commented");
@@ -318,7 +318,7 @@ test("news on a PR in Merging wakes the same session with one line per batch; ne
   const i = calls.findIndex((a) => a[0] === "--resume");
   assert.deepEqual(calls[i - 1], ["stop", "c0ffee01"]);
   assert.deepEqual(calls[i], ["--resume", "c0ffee01-1111-2222", "--bg", t.said()[1]]);
-  t.desk.act("web#5", "inflight");
+  runSync(t.desk.act("web#5", "inflight"));
   t.event(3, "reviewed", { state: "changes_requested" });
   await until(() => t.said().length === 3);
   assert.equal(
@@ -330,7 +330,7 @@ test("news on a PR in Merging wakes the same session with one line per batch; ne
 
 test("a busy coordinator isn't stopped: it gets the news once it's idle, all of it in one message", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.fake.sessions().length === 1);
   t.fake.busy(true);
   t.event(3, "ci", { from: "pending", to: "green" });
@@ -346,7 +346,7 @@ test("a busy coordinator isn't stopped: it gets the news once it's idle, all of 
 
 test("a coordinator the owner stopped is resumed; one they removed is started afresh on the next wake", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.fake.sessions().length === 1);
   await settle();
   const pid = t.fake.sessions()[0]!.pid;
@@ -365,14 +365,14 @@ test("a coordinator the owner stopped is resumed; one they removed is started af
   await settle();
   assert.equal(t.fake.sessions().length, 1);
   assert.deepEqual(t.said(), [`${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): CI failed.`]);
-  assert.equal(t.desk.inflight().coordinator.id, "c0ffee02");
+  assert.equal(runSync(t.desk.inflight()).coordinator.id, "c0ffee02");
 });
 
 test("a desk restart picks up the running coordinator: it only looks, and the next desk wakes that one", posix, async (c) => {
   const t = await coordinated(c);
   t.desk.start();
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await settle();
   const before = t.fake.calls().length;
   await t.desk.close(); // stops every agent process the desk runs
@@ -393,7 +393,7 @@ test("a coordinator that crashed or was stopped comes back at the desk's next ch
   const t = await coordinated(c);
   t.desk.coordinator.every = 50;
   t.desk.start();
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.said().length === 1);
   await settle();
   const pid = t.fake.sessions()[0]!.pid;
@@ -409,7 +409,7 @@ test("a coordinator that crashed or was stopped comes back at the desk's next ch
 test("news a desk restart or a failed start interrupts isn't lost: it goes with the next try", posix, async (c) => {
   const t = await coordinated(c);
   t.desk.coordinator.batch = 60_000;
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await t.desk.close();
   assert.deepEqual(t.fake.calls(), [], "the batch hadn't gone out");
   t.fake.fail(true);
@@ -429,15 +429,15 @@ test("news a desk restart or a failed start interrupts isn't lost: it goes with 
 test("when claude can't start or resume it, Merging says why and the owner is notified once, until it runs", posix, async (c) => {
   const t = await coordinated(c, { "notify.quiet": "" });
   t.fake.fail(true);
-  t.desk.act("web#3", "inflight");
-  await until(() => t.desk.inflight().coordinator.error === "Not logged in");
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => runSync(t.desk.inflight()).coordinator.error === "Not logged in");
   await t.desk.coordinator.flush();
   assert.equal(starts(t.fake.calls()).length, 2, "it tried again");
   assert.deepEqual(t.notes, ["Not logged in"], "notified once");
   t.fake.fail(false);
   await t.desk.coordinator.flush();
   assert.equal(t.fake.sessions().length, 1);
-  assert.equal(t.desk.inflight().coordinator.error, null);
+  assert.equal(runSync(t.desk.inflight()).coordinator.error, null);
 });
 
 test(
@@ -450,7 +450,7 @@ test(
     await t.desk.sync();
     await settle();
     assert.deepEqual([t.said(), t.fake.calls()], [[], []], "a desk with no coordinator starts none for it");
-    t.desk.act("web#4", "inflight");
+    runSync(t.desk.act("web#4", "inflight"));
     // The desk sends rebases only once it has stored its coordinator, a moment after claude was asked to start it.
     await until(() => t.said().length === 1 && !!t.desk.coordinator.saved());
     await t.desk.sync();
@@ -465,7 +465,7 @@ test(
 
 test("news on a PR that's merged or closed doesn't wake it", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.said().length === 1);
   t.gh.items.set("acme/web#3", { ...t.gh.items.get("acme/web#3")!, state: "merged", merged_by: "me", closed_at: NOW.toISOString() });
   await t.desk.sync();
@@ -485,20 +485,20 @@ test("w in Merging starts it now; off in Settings stops it and nothing wakes it;
   assert.equal((await again).status, 200);
   await settle(500);
   assert.deepEqual(t.said(), [`${ROLE} I'd like you to look at Merging now.`], "at once, no batch, and one wake, not two");
-  t.desk.putSettings({ set: { "agent.coordinator": false } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": false } }));
   await until(() => !t.fake.sessions()[0]!.running);
-  assert.equal(t.desk.inflight().coordinator.on, false);
+  assert.equal(runSync(t.desk.inflight()).coordinator.on, false);
   assert.equal((await wake()).status, 409);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   t.event(3, "commented");
   await settle();
   assert.equal(t.said().length, 1, "off: nothing wakes it");
-  t.desk.putSettings({ set: { "agent.coordinator": true } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": true } }));
   await until(() => t.fake.sessions()[0]!.running);
   await t.desk.coordinator.flushing;
   // Off and on at once: the resume waits for the stopped process to exit, or claude would start a copy.
-  t.desk.putSettings({ set: { "agent.coordinator": false } });
-  t.desk.putSettings({ set: { "agent.coordinator": true } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": false } }));
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": true } }));
   await until(() => resumes(t.fake.calls()).length === 2);
   await settle();
   assert.equal(t.fake.sessions().length, 1, "the same session, not a copy");
@@ -516,8 +516,8 @@ const copying = (id: string) => ["--resume", `${id}-1111-2222`, "--bg", "--name"
 
 test("bypass on: it starts in bypass mode, and wakes resume it with no flags, so it keeps that mode", posix, async (c) => {
   const t = await coordinated(c, { "agent.coordinator_bypass": true });
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   assert.deepEqual(starts(t.fake.calls()), [
     [
       "--bg",
@@ -544,8 +544,8 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    t.desk.act("web#3", "inflight");
-    await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+    runSync(t.desk.act("web#3", "inflight"));
+    await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
     await t.desk.coordinator.flushing;
     assert.deepEqual(
       starts(t.fake.calls())[0]!.slice(0, 6),
@@ -559,8 +559,8 @@ test(
       ],
       "off: no mode passed",
     );
-    t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
-    await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
+    runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
+    await until(() => runSync(t.desk.inflight()).coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
     assert.deepEqual(stops(t.fake.calls()), [["stop", "c0ffee01"]]);
     assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions"]]);
     assert.deepEqual(ids(t), [
@@ -573,7 +573,7 @@ test(
     await until(() => t.said().length === 2);
     assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee02-1111-2222", "--bg", t.said()[1]]);
 
-    t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+    runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": false } }));
     await until(() => t.desk.coordinator.saved()?.id === "c0ffee03");
     assert.deepEqual(resumes(t.fake.calls()).at(-1), [...copying("c0ffee02"), "default"]);
     t.event(3, "ci", { from: "pending", to: "red" });
@@ -589,8 +589,8 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    t.desk.act("web#3", "inflight");
-    await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+    runSync(t.desk.act("web#3", "inflight"));
+    await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
     await t.desk.coordinator.flushing;
     t.desk.stop();
     const file = path.join(t.home, "settings.json");
@@ -610,8 +610,8 @@ test(
 
 test("a coordinator saved before the bypass setting is default: resumed with no flags", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await t.desk.coordinator.flushing;
   const { mode: _, ...old } = t.desk.coordinator.saved()!;
   t.desk.store.set("coordinator_bg", old);
@@ -625,11 +625,11 @@ test("a coordinator saved before the bypass setting is default: resumed with no 
 
 test("bypass turned on: a busy coordinator is left to work; one waiting on a permission prompt switches", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await t.desk.coordinator.flushing;
   t.fake.busy(true);
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
   await settle();
   await t.desk.coordinator.flushing;
   assert.deepEqual([...stops(t.fake.calls()), ...resumes(t.fake.calls())], []);
@@ -643,14 +643,14 @@ test("bypass turned on: a busy coordinator is left to work; one waiting on a per
 
 test("claude rm of the coordinator after bypass changes starts a fresh one, not a copy a change left stopped", posix, async (c) => {
   const t = await coordinated(c);
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await t.desk.coordinator.flushing;
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
-  await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
+  await until(() => runSync(t.desk.inflight()).coordinator.url === "https://claude.ai/code/session_01Fakec0ffee02");
   await t.desk.coordinator.flushing;
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
-  await until(() => t.desk.inflight().coordinator.url === "https://claude.ai/code/session_01Fakec0ffee03");
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": false } }));
+  await until(() => runSync(t.desk.inflight()).coordinator.url === "https://claude.ai/code/session_01Fakec0ffee03");
   await t.desk.coordinator.flushing;
   t.fake.owner("rm", "c0ffee03");
   t.event(3, "commented");
@@ -666,11 +666,11 @@ test("claude rm of the coordinator after bypass changes starts a fresh one, not 
 
 test("a running coordinator the desk didn't see start gets the setting's mode on its next launch", posix, async (c) => {
   const t = await coordinated(c, { "agent.coordinator_bypass": true });
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await t.desk.coordinator.flushing;
   t.desk.store.set("coordinator_bg", null); // the desk stopped before claude said it backgrounded it
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": false } }));
   await until(() => t.desk.coordinator.saved()?.id === "c0ffee02");
   assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "default"]]);
   assert.deepEqual(ids(t), [
@@ -681,17 +681,17 @@ test("a running coordinator the desk didn't see start gets the setting's mode on
 
 test("a refused bypass shows in Merging and notifies once; turning it off resumes the old one as it was", posix, async (c) => {
   const t = await coordinated(c, { "notify.quiet": "" });
-  t.desk.act("web#3", "inflight");
-  await until(() => t.said().length === 1 && t.desk.inflight().coordinator.url !== null);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
   await t.desk.coordinator.flushing;
   t.fake.nobypass(true);
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": true } });
-  await until(() => t.desk.inflight().coordinator.error === "Bypass permissions mode is disabled");
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
+  await until(() => runSync(t.desk.inflight()).coordinator.error === "Bypass permissions mode is disabled");
   await t.desk.coordinator.flush();
   assert.equal(resumes(t.fake.calls()).length, 2, "it tried again");
   assert.deepEqual(t.notes, ["Bypass permissions mode is disabled"], "notified once");
-  t.desk.putSettings({ set: { "agent.coordinator_bypass": false } });
-  await until(() => t.desk.inflight().coordinator.error === null);
+  runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": false } }));
+  await until(() => runSync(t.desk.inflight()).coordinator.error === null);
   assert.deepEqual(resumes(t.fake.calls()).at(-1), ["--resume", "c0ffee01-1111-2222", "--bg"]);
   assert.deepEqual(ids(t), [["c0ffee01", "default", true]]);
 });
@@ -713,7 +713,7 @@ test("w says so when claude can't start it", async (c) => {
     logs.some((l) => l.startsWith("coordinator: /nonexistent/claude not found")),
     logs.join("\n"),
   );
-  assert.equal(t.desk.inflight().coordinator.id, null);
+  assert.equal(runSync(t.desk.inflight()).coordinator.id, null);
 });
 
 const OWNER = { origin: "http://localhost:49401", "sec-fetch-site": "same-origin" };
@@ -724,7 +724,7 @@ test(
   async (c) => {
     const t = await coordinated(c, { "notify.quiet": "" });
     t.fake.hold(true);
-    t.desk.act("web#3", "inflight");
+    runSync(t.desk.act("web#3", "inflight"));
     await until(() => t.fake.calls().length === 1);
     const flushing = t.desk.coordinator.flushing;
     assert.ok(flushing, "the batch's run is looking");
@@ -784,7 +784,9 @@ test(
       answer: null,
     };
     t.desk.store.set("asks", [ask]);
-    const question = t.desk.inquire({ question: "Rebase #3?", from: "Review Desk coordinator", context: "x ".repeat(120), item: "web#3" });
+    const question = runSync(
+      t.desk.inquire({ question: "Rebase #3?", from: "Review Desk coordinator", context: "x ".repeat(120), item: "web#3" }),
+    );
     const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
     Object.defineProperty(process, "platform", { value: "win32" }); // claude.cmd, which only cmd.exe starts
     try {
@@ -802,9 +804,9 @@ test(
         (await failure(Effect.tryPromise({ try: () => t.desk.wakeCoordinator("a1"), catch: (e) => e as Error }))).message,
         told.message,
       );
-      t.desk.answerInquiry(question.id, "yes & then merge");
+      runSync(t.desk.answerInquiry(question.id, "yes & then merge"));
       assert.ok(logs.includes(`coordinator: couldn't pass on your answer to ${question.id}: ${told.message}`), logs.join("\n"));
-      assert.ok(t.desk.inquiry(question.id).answer, "your answer is kept");
+      assert.ok(runSync(t.desk.inquiry(question.id)).answer, "your answer is kept");
     } finally {
       Object.defineProperty(process, "platform", platform);
     }
@@ -893,7 +895,7 @@ test(
     t.desk.coordinator.batch = 30;
     t.fake.busy(true);
     const later = ((await (await api.ask({ text: "snooze web#4 until monday" })).json()) as { ask: Ask }).ask;
-    t.desk.act("web#4", "inflight");
+    runSync(t.desk.act("web#4", "inflight"));
     await settle();
     assert.equal(resumes(t.fake.calls()).length, 1, "nothing reaches it while it works");
     t.fake.busy(false);
@@ -918,7 +920,7 @@ test("an ask comes only from the desk's own window, and only while the coordinat
   assert.equal((await api.ask({ text: "  " }, OWNER)).status, 400);
   assert.equal((await api.ask({ text: "hi", item_id: "web#99" }, OWNER)).status, 404);
   assert.equal((await api.ask({ text: "hi", item_id: "web#3", thread_url: "https://evil.example/x" }, OWNER)).status, 400);
-  t.desk.putSettings({ set: { "agent.coordinator": false } });
+  runSync(t.desk.putSettings({ set: { "agent.coordinator": false } }));
   assert.equal((await api.ask(body)).status, 409);
   const listed = await api.list();
   assert.deepEqual([listed.on, listed.asks], [false, []]);
@@ -949,7 +951,7 @@ test(
     assert.equal((await api.answer(ask.id, "Also rebased it.")).status, 200);
     assert.equal(t.notes.length, 1, "only its first answer notifies");
     const h = NOW.getHours();
-    t.desk.putSettings({ set: { "notify.quiet": `${h}:00-${h + 1}:00` } });
+    runSync(t.desk.putSettings({ set: { "notify.quiet": `${h}:00-${h + 1}:00` } }));
     const quiet = ((await (await api.ask({ text: "anything left for me today?" })).json()) as { ask: Ask }).ask;
     assert.equal((await api.answer(quiet.id, "No.")).status, 200);
     assert.equal(t.notes.length, 1, "quiet hours");
@@ -1069,7 +1071,7 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
     makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"], url: "https://github.com/acme/api/issues/9" }),
   );
   await t.desk.add("acme/api#9");
-  t.desk.act("web#4", "inflight");
+  runSync(t.desk.act("web#4", "inflight"));
   await t.merged("acme/web#5");
   const about = async (item_id: string) => {
     const a = await t.desk.ask({ text: "x", item_id });
@@ -1087,7 +1089,7 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
     "about someone else's PR acme/web#8 (https://github.com/acme/web/pull/8), read only: don't push to it or post on it",
     "a bot's via alone never makes it mine",
   );
-  t.desk.act("web#8", "inflight");
+  runSync(t.desk.act("web#8", "inflight"));
   assert.equal(await about("web#8"), "about my PR acme/web#8 (https://github.com/acme/web/pull/8), in Merging", "only my m put it there");
   assert.equal(await about("web#5"), "about my PR acme/web#5 (https://github.com/acme/web/pull/5), merged");
 });
@@ -1168,7 +1170,7 @@ test("Wake it re-sends a line ask with the item's state now", async (c) => {
     answer: null,
   };
   t.desk.store.set("asks", [a]);
-  t.desk.act("web#3", "inflight");
+  runSync(t.desk.act("web#3", "inflight"));
   await t.desk.wakeCoordinator("a1");
   assert.deepEqual(t.told, [askLine(a, { url: "https://github.com/acme/web/pull/3", whose: "mine", merging: true, state: "open" })]);
   assert.equal(
@@ -1179,7 +1181,7 @@ test("Wake it re-sends a line ask with the item's state now", async (c) => {
 
 test("GET /api/asks/:id says where an ask is and where a change may go: only the branch of my own open PR, in Merging or not", async (c) => {
   const t = await telling(c);
-  t.desk.act("web#4", "inflight");
+  runSync(t.desk.act("web#4", "inflight"));
   await t.merged("acme/web#5");
   const app = createApp(t.desk, 49401);
   const place = async (id: string, desk = app) => {
@@ -1211,7 +1213,7 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
   });
   assert.equal((await place("nope", createApp(cold, 49401))).status, 503, "a desk that's starting");
   fs.writeFileSync(path.join(home, "config.toml"), "[[boards]]\nid = 7\n");
-  cold.reloadConfig();
+  runSync(cold.reloadConfig());
   cold.store.set("asks", [
     { id: "a1", at: NOW.toISOString(), text: "x", item_id: "acme/web#3", thread_id: null, thread_url: null, lines, answer: null },
   ]);

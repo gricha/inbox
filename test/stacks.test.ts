@@ -16,7 +16,7 @@ import {
 import type { Bucket, Card, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { run } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubHttpError } from "../src/errors.ts";
 
@@ -346,7 +346,7 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
     "context for the stack, not news",
   );
 
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   const one = q.sections.now.find((c) => c.id === id(1));
   assert.deepEqual(one?.stack, { id: id(1), pos: 1, size: 3, folded: [] });
   assert.deepEqual(Object.keys(q.stacks), [id(1)]);
@@ -365,7 +365,7 @@ test("a stack asked of you at its bottom: the desk fetches the PRs above it quie
   const top = await t.desk.reviewView(id(3));
   assert.deepEqual([top.stack?.current, top.stack?.up, top.stack?.down], [id(3), null, id(2)], "a member no board lists opens too");
   assert.deepEqual(top.card.stack, { id: id(1), pos: 3, size: 3 });
-  assert.equal(t.desk.item(id(2)).stack?.current, id(2));
+  assert.equal(runSync(t.desk.item(id(2))).stack?.current, id(2));
 });
 
 test("the PR below a stack's bottom is fetched; probes wait half an hour, then stale members are refreshed", async (tc) => {
@@ -374,7 +374,11 @@ test("the PR below a stack's bottom is fetched; probes wait half an hour, then s
   await t.desk.sync();
   assert.ok(t.gh.probeCalls.includes("acme/api up b1"));
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.state, "open");
-  assert.deepEqual(t.desk.queue().sections.blocked[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] }, "it waits on #1 to merge");
+  assert.deepEqual(
+    runSync(t.desk.queue()).sections.blocked[0]?.stack,
+    { id: id(1), pos: 2, size: 2, folded: [] },
+    "it waits on #1 to merge",
+  );
 
   const probed = t.gh.probeCalls.length;
   await t.desk.sync();
@@ -384,7 +388,7 @@ test("the PR below a stack's bottom is fetched; probes wait half an hour, then s
   t.setNow(new Date(NOW.getTime() + 31 * 60_000));
   await t.desk.sync();
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.state, "merged");
-  assert.equal(t.desk.queue().sections.now[0]?.stack, undefined, "one open PR left");
+  assert.equal(runSync(t.desk.queue()).sections.now[0]?.stack, undefined, "one open PR left");
   assert.deepEqual(
     (await t.desk.reviewView(id(2))).stack?.line.map((m) => [m.number, m.state, m.why]),
     [
@@ -424,13 +428,13 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
   ]);
   tc.after(t.cleanup);
   await t.desk.sync();
-  const focus = t.desk.focus();
+  const focus = runSync(t.desk.focus());
   assert.deepEqual(
     focus.sections.now.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
     [],
     "#2 and #3 are both asked of you, and both wait on #1 to merge",
   );
-  const q = t.desk.queue();
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.blocked.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
     [[id(2), [id(1), id(3)]]],
@@ -449,8 +453,8 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
     ],
   );
 
-  for (const n of [7, 8, 5, 6]) t.desk.act(id(n, "acme/web"), "inflight");
-  const lane = t.desk.inflight();
+  for (const n of [7, 8, 5, 6]) runSync(t.desk.act(id(n, "acme/web"), "inflight"));
+  const lane = runSync(t.desk.inflight());
   const web = (n: number) => id(n, "acme/web");
   const order = lane.rows.map((r) => r.card.id);
   const at5 = order.indexOf(web(5));
@@ -475,7 +479,7 @@ test("a PR a probe finds that the desk stored before it kept branches is fetched
   t.desk.store.putItems([old], hoursAgo(1));
   t.gh.items.set(id(1), parent);
   await t.desk.sync();
-  assert.deepEqual(t.desk.queue().sections.blocked[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
+  assert.deepEqual(runSync(t.desk.queue()).sections.blocked[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
 });
 
 test("a ref counts the PR's own line: forks over a merged bottom are two PRs, not one 1/1 stack", () => {
@@ -515,7 +519,7 @@ test("desktop notifications go per PR: a member asked while the one below is ope
   await t.desk.sync();
   assert.deepEqual(t.notes, [], "the line in Now stands for it");
   assert.deepEqual(
-    t.desk.queue().sections.now.map((c) => [c.id, c.stack?.folded]),
+    runSync(t.desk.queue()).sections.now.map((c) => [c.id, c.stack?.folded]),
     [[id(2), [id(3)]]],
   );
   t.gh.items.set(id(2), { ...t.gh.items.get(id(2))!, state: "merged", closed_at: at(2), updated_at: at(2) });
@@ -590,7 +594,7 @@ test("off-board members of a stack the boards list aren't pruned with the items 
   t.setNow(new Date(NOW.getTime() + 14 * day + 60_000));
   await t.desk.sync();
   assert.deepEqual(
-    t.desk.item(id(1)).stack?.line.map((m) => m.number),
+    runSync(t.desk.item(id(1))).stack?.line.map((m) => m.number),
     [1, 2, 3],
   );
   assert.equal(t.desk.store.itemsById([id(9)]).has(id(9)), false, "an item in no stack still goes");
@@ -635,7 +639,7 @@ test("a dependency in another repo is fetched quietly and blocks the PR that nee
   assert.equal(items.find((i) => i.id === dep.id)?.state, "open");
   assert.equal(dependencies(items, buildStacks(items)).get("acme/web#1")?.root, dep.id);
   assert.deepEqual(
-    t.desk.queue().sections.blocked.map((c) => [c.id, c.why]),
+    runSync(t.desk.queue()).sections.blocked.map((c) => [c.id, c.why]),
     [["acme/web#1", "blocked by sentry#5, which waits on a review"]],
   );
   assert.deepEqual(
@@ -686,9 +690,9 @@ test("QueueView.stacks has every stack a card in the view carries, cleared ones 
   const t = await setup([reviewAsk(1, { head_ref: "b1" }), reviewAsk(2, { head_ref: "b2", base: "b1" })]);
   tc.after(t.cleanup);
   await t.desk.sync();
-  t.desk.act(id(1), "mute");
-  t.desk.act(id(2), "mute");
-  const q = t.desk.queue();
+  runSync(t.desk.act(id(1), "mute"));
+  runSync(t.desk.act(id(2), "mute"));
+  const q = runSync(t.desk.queue());
   assert.deepEqual(
     q.cleared.map((c) => c.stack?.id),
     [id(1), id(1)],
@@ -703,7 +707,7 @@ test("probes for stacks go first: a busy board doesn't stop a chain filling in o
   tc.after(t.cleanup);
   await t.desk.sync();
   assert.deepEqual(
-    t.desk.item(id(2)).stack?.line.map((m) => m.number),
+    runSync(t.desk.item(id(2))).stack?.line.map((m) => m.number),
     [1, 2, 3, 4],
   );
   assert.ok(t.gh.probeCalls.length <= 120, `${t.gh.probeCalls.length} probes`);

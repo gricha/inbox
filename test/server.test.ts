@@ -19,6 +19,7 @@ import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { runSync } from "./helpers/run.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
 delete process.env.DESK_UI_ORIGIN;
@@ -130,14 +131,14 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     const act = await call("desk_act", { ref: "api#7", action: "done" });
     const seq = Number(/Undo with desk_undo seq=(\d+)/.exec(act.text)?.[1]);
     assert.ok(seq > 0, act.text);
-    assert.equal(t.desk.status().text, "");
+    assert.equal(runSync(t.desk.status()).text, "");
     assert.deepEqual(await call("desk_undo", { seq }), { text: "undid done on acme/api#7", isError: false });
-    assert.equal(t.desk.status().text, "desk 1");
+    assert.equal(runSync(t.desk.status()).text, "desk 1");
 
     const added = await call("desk_add", { ref: "api#7", why: "needs your call on the retry budget", from: "seer retry fix" });
     assert.match(added.text, /^added acme\/api#7 to the user's desk, pinned\. .*Undo with desk_undo seq=\d+\./);
-    assert.equal(t.desk.item("api#7").state.pinned, true);
-    assert.deepEqual(t.desk.item("api#7").card.handoff, { why: "needs your call on the retry budget", from: "seer retry fix" });
+    assert.equal(runSync(t.desk.item("api#7")).state.pinned, true);
+    assert.deepEqual(runSync(t.desk.item("api#7")).card.handoff, { why: "needs your call on the retry budget", from: "seer retry fix" });
     assert.equal((await call("desk_add", { ref: "api#7" })).isError, true, "a hand-off says why");
 
     const missing = await call("desk_item", { ref: "api#99" });
