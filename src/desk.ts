@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import { stopAll } from "./children.ts";
-import { DeskError } from "./errors.ts";
+import { DeskError, type ClaudeError, type CommandError } from "./errors.ts";
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
@@ -74,7 +74,7 @@ import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } 
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type PrText } from "./review.ts";
+import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations } from "./conversation.ts";
@@ -206,8 +206,8 @@ function replaceFile(file: string, text: string, backup = false): void {
 }
 
 export interface ReviewDeps {
-  fetchPr(item: Item, since?: string): Promise<PrText>;
-  generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Promise<AiReview>;
+  fetchPr(item: Item, since?: string): Effect.Effect<PrText, FetchPrError>;
+  generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Effect.Effect<AiReview, CommandError | ClaudeError>;
 }
 
 export class Desk {
@@ -1481,8 +1481,7 @@ export class Desk {
     if (cached?.head_oid === item.head_oid) return Promise.resolve(cached);
     const running = this.fetching.get(id);
     if (running) return running;
-    const p = review
-      .fetchPr(item, since)
+    const p = Effect.runPromise(review.fetchPr(item, since)) // effect-bridge(C5c): prText becomes an Effect
       .then((t) => {
         if (!this.stopped) this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
         return t;
@@ -1537,7 +1536,10 @@ export class Desk {
       if (!this.review) throw new Error("AI review isn't available in this desk");
       const pr = await this.prText(id);
       if (this.stopped) throw new Error("stopped"); // close() has stopped the agents already: don't start one it misses
-      const ai = await this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
+      // effect-bridge(C5c): runAi becomes an Effect; aiErrors, aiPaused and retryAgents still match NOT_LOGGED_IN by suffix
+      const ai = await Effect.runPromise(
+        this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir()),
+      );
       if (this.stopped) return ai;
       this.store.set(`review:${id}`, ai);
       this.aiErrors.delete(id);
@@ -1554,8 +1556,8 @@ export class Desk {
       const message = (err as Error).message;
       report(err, "ai_review", id);
       this.aiErrors.set(id, { head_oid: e.item.head_oid, message, at: Date.now() });
-      const cause = (err as Error).cause;
-      this.log(`AI review of ${id} failed: ${message}${typeof cause === "string" ? ` (${cause})` : ""}`);
+      const detail = (err as { detail?: unknown }).detail; // effect-bridge(C5c): the login's own words, ClaudeNotLoggedIn's detail
+      this.log(`AI review of ${id} failed: ${message}${typeof detail === "string" ? ` (${detail})` : ""}`);
       if (++this.aiFailures >= AI_PAUSE_AFTER) {
         if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
         this.aiPaused = { why: message, until: Date.now() + AI_RETRY };

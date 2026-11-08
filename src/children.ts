@@ -2,6 +2,7 @@
 // Each gets a process group of its own (spawn's `detached`), so a kill reaches what it started too: hooks, test runners.
 import { execFile, type ChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Effect } from "effect";
 
 const win = process.platform === "win32";
 export const OWN_GROUP = !win; // detached on Windows is a new console window; taskkill /T reaches the tree there
@@ -26,10 +27,14 @@ export function track(child: ChildProcess): void {
 }
 
 function signal(child: ChildProcess, sig: NodeJS.Signals): void {
-  try {
-    if (win) execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
-    else process.kill(-child.pid!, sig);
-  } catch {} // the group is gone
+  const send = Effect.try({
+    try: () => {
+      if (win) execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
+      else process.kill(-child.pid!, sig);
+    },
+    catch: (e) => e,
+  });
+  Effect.runSync(Effect.ignore(send)); // it fails only when the group is gone: nothing left to stop
 }
 
 // SIGTERM to its group, then SIGKILL after `grace` for whatever ignored it.

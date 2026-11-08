@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Cause, Effect, Exit } from "effect";
 import { Desk } from "../src/desk.ts";
 import { generateReview, runCommand } from "../src/review.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { failure } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -72,7 +74,7 @@ test("closing the desk stops the judge and an AI review, what they started, and 
     now: () => NOW,
     notify: () => {},
     log: () => {},
-    review: { fetchPr: () => Promise.resolve({ body: "", files: [] }), generate: generateReview },
+    review: { fetchPr: () => Effect.succeed({ body: "", files: [] }), generate: generateReview },
   });
   await desk.init();
   await desk.sync();
@@ -90,9 +92,23 @@ test("closing the desk stops the judge and an AI review, what they started, and 
 
 test("a call that times out takes what it started with it", posix, async (c) => {
   const fake = stuckClaude(c);
-  const run = runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 1500, missing: "missing" });
-  await assert.rejects(run, /no answer in 0 minutes, so it was stopped/);
+  const err = await failure(runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 1500, missing: "missing" }));
+  assert.deepEqual([err._tag, err.message], ["CommandTimeout", "no answer in 0 minutes, so it was stopped"]);
   const pids = fake.pids();
   assert.equal(pids.length, 2);
+  await until(() => !pids.some(alive));
+});
+
+test("an interrupted call takes what it started with it, and ends only once it has exited", posix, async (c) => {
+  const fake = stuckClaude(c);
+  const ac = new AbortController();
+  const call = runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 60_000, missing: "missing" });
+  const exit = Effect.runPromiseExit(call, { signal: ac.signal });
+  await until(() => fake.pids().length === 2);
+  const pids = fake.pids();
+  ac.abort();
+  const e = await exit;
+  assert.ok(Exit.isFailure(e) && Cause.hasInterruptsOnly(e.cause), "interrupted: nothing to store or report");
+  assert.ok(!alive(pids[0]!), "the claude itself has exited when the call ends");
   await until(() => !pids.some(alive));
 });

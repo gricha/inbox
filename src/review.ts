@@ -4,7 +4,22 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Effect } from "effect";
 import { kill, OWN_GROUP, track } from "./children.ts";
+import {
+  ClaudeApiError,
+  ClaudeBadOutput,
+  ClaudeNotLoggedIn,
+  CommandBadOutput,
+  CommandFailed,
+  CommandNotFound,
+  CommandOutputTooLarge,
+  CommandTimeout,
+  PrChangedDuringFetch,
+  UnsafeArgument,
+  type ClaudeError,
+  type CommandError,
+} from "./errors.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { AiReview, ChunkRanking, Item, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder, ReviewRest, Signals } from "./types.ts";
 
@@ -86,11 +101,16 @@ interface Spawn {
 
 // npm installs claude on Windows as claude.cmd, which only cmd.exe can start. Every argument is ours and the prompt goes
 // through stdin, so refusing cmd.exe's special characters leaves nothing to inject.
-export function claudeSpawn(command: string, args: string[], platform: NodeJS.Platform = process.platform): Spawn {
-  if (platform !== "win32" || /\.(exe|com)$/i.test(command)) return { file: command, args, shell: false };
+export function claudeSpawn(
+  command: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): Effect.Effect<Spawn, UnsafeArgument> {
+  if (platform !== "win32" || /\.(exe|com)$/i.test(command)) return Effect.succeed({ file: command, args, shell: false });
   const line = [command, ...args].map((a) => `"${a.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/\\+$/, "$&$&")}"`).join(" ");
-  if (/[%!^&|<>\r\n]/.test(line)) throw new Error(`can't start ${command} through cmd.exe: % ! ^ & | < > aren't allowed`);
-  return { file: line, args: [], shell: true };
+  if (/[%!^&|<>\r\n]/.test(line))
+    return Effect.fail(new UnsafeArgument({ message: `can't start ${command} through cmd.exe: % ! ^ & | < > aren't allowed` }));
+  return Effect.succeed({ file: line, args: [], shell: true });
 }
 
 export interface RunOpts {
@@ -99,78 +119,78 @@ export interface RunOpts {
   timeout: number;
   stdoutOnError?: boolean;
   missing: string;
-  signal?: AbortSignal; // aborting kills the process
 }
+
+type RunError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed;
 
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
 // Not execFile: it can't start the process in a group of its own, and its timeout kills only the process itself.
-export function runCommand(s: Spawn, opts: RunOpts): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (opts.signal?.aborted) {
-      reject(new Error("stopped"));
-      return;
-    }
-    const child = spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true });
-    track(child);
-    let stdout = "";
-    let stderr = "";
-    let failed: NodeJS.ErrnoException | null = null;
-    let why: "stopped" | "timeout" | "too much" | null = null;
-    const stop = (w: NonNullable<typeof why>) => {
-      if (why) return;
-      why = w;
-      kill(child);
-    };
-    const abort = () => {
-      stop("stopped");
-    };
-    const timer = setTimeout(() => {
-      stop("timeout");
-    }, opts.timeout);
-    timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
-    child.stdout.setEncoding("utf8").on("data", (d: string) => {
-      stdout += d;
-      if (stdout.length > MAX_OUTPUT) stop("too much");
-    });
-    child.stderr.setEncoding("utf8").on("data", (d: string) => {
-      stderr = (stderr + d).slice(-MAX_OUTPUT);
-    });
-    child.on("error", (e) => {
-      failed = e;
-    });
-    child.on("close", (code, sig) => {
-      clearTimeout(timer);
-      opts.signal?.removeEventListener("abort", abort);
-      if (!failed && code === 0) {
-        resolve(stdout);
-        return;
-      }
-      if (opts.signal?.aborted) {
-        reject(new Error("stopped"));
-        return;
-      }
-      if (why === "timeout") {
-        reject(new Error(`no answer in ${Math.round(opts.timeout / 60_000)} minutes, so it was stopped`));
-        return;
-      }
-      if (why === "too much") {
-        reject(new Error(`${s.file} printed more than ${MAX_OUTPUT / 1024 / 1024} MB, so it was stopped`));
-        return;
-      }
-      if (!failed && opts.stdoutOnError && stdout) {
-        resolve(stdout);
-        return;
-      }
-      // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
-      const missing =
-        failed?.code === "ENOENT" || (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
-      const message = stderr || (failed?.message ?? `${s.file} exited with ${code ?? sig}`);
-      reject(new Error(missing ? opts.missing : message.trim().split("\n").slice(-3).join(" ")));
-    });
-    opts.signal?.addEventListener("abort", abort);
-    child.stdin.on("error", () => {}); // it exited before reading its input; close says why
-    child.stdin.end(opts.input);
-  });
+export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunError> {
+  return Effect.try({
+    try: () => spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true }),
+    catch: (cause) => new CommandFailed({ command: s.file, code: null, signal: null, stderr: "", cause }),
+  }).pipe(
+    Effect.flatMap((child) =>
+      Effect.callback<string, RunError>((resume) => {
+        track(child);
+        let stdout = "";
+        let stderr = "";
+        let failed: NodeJS.ErrnoException | null = null;
+        let why: "timeout" | "too much" | null = null;
+        let closed = false;
+        const stop = (w: NonNullable<typeof why>) => {
+          if (why) return;
+          why = w;
+          kill(child);
+        };
+        const timer = setTimeout(() => {
+          stop("timeout");
+        }, opts.timeout);
+        timer.unref(); // the running child keeps the process up; this alone mustn't (a test's mocked timers can't clear it)
+        const outcome = (code: number | null, sig: NodeJS.Signals | null): Effect.Effect<string, RunError> => {
+          if (!failed && code === 0) return Effect.succeed(stdout);
+          if (why === "timeout") return Effect.fail(new CommandTimeout({ command: s.file, timeoutMs: opts.timeout }));
+          if (why === "too much") return Effect.fail(new CommandOutputTooLarge({ command: s.file, limitBytes: MAX_OUTPUT }));
+          if (!failed && opts.stdoutOnError && stdout) return Effect.succeed(stdout);
+          // cmd.exe exits 9009 (or 1 under /c) and says "is not recognized" when it can't find the command.
+          const missing =
+            failed?.code === "ENOENT" ||
+            (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
+          if (missing) return Effect.fail(new CommandNotFound({ command: s.file, hint: opts.missing }));
+          return Effect.fail(new CommandFailed({ command: s.file, code, signal: sig, stderr, ...(failed && { cause: failed }) }));
+        };
+        child.stdout.setEncoding("utf8").on("data", (d: string) => {
+          stdout += d;
+          if (stdout.length > MAX_OUTPUT) stop("too much");
+        });
+        child.stderr.setEncoding("utf8").on("data", (d: string) => {
+          stderr = (stderr + d).slice(-MAX_OUTPUT);
+        });
+        child.on("error", (e) => {
+          failed = e;
+        });
+        child.once("close", (code, sig) => {
+          closed = true;
+          clearTimeout(timer);
+          resume(outcome(code, sig));
+        });
+        child.stdin.on("error", () => {}); // it exited before reading its input; close says why
+        child.stdin.end(opts.input);
+        // Interrupted (the desk stopping): the whole group goes, and the run ends once it has exited, SIGKILL bounding the wait.
+        return Effect.callback<void>((done) => {
+          clearTimeout(timer);
+          if (closed) {
+            done(Effect.void);
+            return;
+          }
+          child.once("close", () => {
+            done(Effect.void);
+          });
+          kill(child);
+        });
+      }),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------- the diff
@@ -182,30 +202,39 @@ export interface PrText {
   since?: { base: string; files: ReviewFile[] }; // what changed since the commit you last reviewed
 }
 
+export type FetchPrError = RunError | CommandBadOutput | PrChangedDuringFetch;
+
 // Read-only GETs: the changed files (every page) and the description; with `since` (the commit you last reviewed), the
-// diff from it to the head too. A base that's gone (a force-push) just leaves that out.
-export async function fetchPr(item: Item, since?: string): Promise<PrText> {
+// diff from it to the head too.
+export const fetchPr = Effect.fn("fetchPr")(function* (item: Item, since?: string): Effect.fn.Return<PrText, FetchPrError> {
   const [owner, name] = item.repo.split("/");
   const repo = `repos/${owner}/${name}`;
   const pr = `${repo}/pulls/${item.number}`;
   const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
   const fields = "{filename, previous_filename, status, additions, deletions, patch, contents_url}";
-  const [files, body, delta] = await Promise.all([
-    gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", `.[] | ${fields}`]),
-    gh(["api", pr, "--jq", '.body // ""']),
-    since && /^[0-9a-f]{7,40}$/i.test(since)
-      ? gh(["api", `${repo}/compare/${since}...${item.head_oid}`, "--jq", `.files[] | ${fields}`]).catch(() => null)
-      : null,
-  ]);
-  const head = filesHead(files);
-  if (head === null) throw new Error("the PR changed while its diff was fetched: open it again");
+  const [files, body, delta] = yield* Effect.all(
+    [
+      gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", `.[] | ${fields}`]),
+      gh(["api", pr, "--jq", '.body // ""']),
+      since && /^[0-9a-f]{7,40}$/i.test(since)
+        ? // A base that's gone (a force-push), or anything else stopping this call, just leaves the since diff out.
+          gh(["api", `${repo}/compare/${since}...${item.head_oid}`, "--jq", `.files[] | ${fields}`]).pipe(Effect.orElseSucceed(() => null))
+        : Effect.succeed(null),
+    ],
+    { concurrency: "unbounded" },
+  );
+  const read = <A>(parse: () => A) => Effect.try({ try: parse, catch: (cause) => new CommandBadOutput({ command: "gh", cause }) });
+  const head = yield* read(() => filesHead(files));
+  if (head === null) return yield* new PrChangedDuringFetch({ id: item.id });
+  const changed = yield* read(() => parseFiles(files));
+  const before = since && delta !== null ? yield* read(() => parseFiles(delta)) : null;
   return {
     body: body.trimEnd(),
-    files: parseFiles(files),
+    files: changed,
     ...(head && { head }),
-    ...(since && delta !== null && { since: { base: since, files: parseFiles(delta) } }),
+    ...(since && before && { since: { base: since, files: before } }),
   };
-}
+});
 
 // The commit the files are at, from each one's contents_url (?ref=<sha>): undefined with no files, null when pages
 // fetched across a push disagree. A removed file's is the base's: the head has no such file.
@@ -406,11 +435,10 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
 // Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
 export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
-// Where it runs, the answer's shape, and a signal that kills the run (the desk stopping).
+// Where it runs and the answer's shape. Interrupting the run kills it (the desk stopping).
 export interface AskOpts {
   dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
-  signal?: AbortSignal;
 }
 
 export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
@@ -423,7 +451,10 @@ export function agentDir(home: string): string {
 }
 
 // No --restricted: with no tools and no MCP servers, your settings only bring your model, effort and plugins.
-export async function askClaude(prompt: string, opts: { command?: string } & AskOpts): Promise<ClaudeAnswer> {
+export const askClaude = Effect.fn("askClaude")(function* (
+  prompt: string,
+  opts: { command?: string } & AskOpts,
+): Effect.fn.Return<ClaudeAnswer, CommandError | ClaudeError> {
   const command = opts.command ?? claudeCommand();
   const args = [
     "-p",
@@ -436,29 +467,29 @@ export async function askClaude(prompt: string, opts: { command?: string } & Ask
     "--json-schema",
     JSON.stringify(opts.schema ?? SCHEMA),
   ];
-  const out = await runCommand(claudeSpawn(command, args), {
+  const spawnAs = yield* claudeSpawn(command, args);
+  const out = yield* runCommand(spawnAs, {
     input: prompt,
     cwd: opts.dir,
     timeout: TIMEOUT,
     stdoutOnError: true,
     missing: claudeMissing(command),
-    signal: opts.signal,
   });
-  return claudeEnvelope(out);
-}
+  return yield* claudeEnvelope(out);
+});
 
-export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+export { NOT_LOGGED_IN } from "./errors.ts";
 // The queue's one line when it is: every agent stops on it, the judge too.
 export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
 
-// claude's error, with the fix for an expired or missing login; the CLI's own words go in `cause`, for the log. An API error's JSON body comes down to its message.
-export function claudeError(raw: string, status?: number): Error {
+// claude's error, with the fix for an expired or missing login; the CLI's own words go in `detail`, for the log. An API error's JSON body comes down to its message.
+export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | ClaudeApiError {
   const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");
   if (status !== 401 && !/\b401\b|failed to authenticate|invalid api key|not logged in|please run \/login/i.test(msg))
-    return new Error(msg);
+    return new ClaudeApiError({ message: msg, ...(status !== undefined && { status }) });
   // "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." → "401 OAuth access token has expired"
   const why = msg.replace(/^Failed to authenticate\.\s*(API Error:\s*)?/i, "").replace(/\.?\s*Re-authenticate to continue\.?$/i, "");
-  return new Error(NOT_LOGGED_IN, { cause: why });
+  return new ClaudeNotLoggedIn({ detail: why });
 }
 
 export interface ClaudeAnswer {
@@ -466,29 +497,47 @@ export interface ClaudeAnswer {
   model: string; // the first model in claude's modelUsage, else "claude-code"
 }
 
-export function claudeEnvelope(out: string): ClaudeAnswer {
-  const env = JSON.parse(out) as {
-    is_error?: boolean;
-    result?: string;
-    api_error_status?: number;
-    structured_output?: unknown;
-    modelUsage?: unknown;
-  };
-  if (env.is_error) throw claudeError(env.result ?? "claude failed", env.api_error_status);
+interface Envelope {
+  is_error?: boolean;
+  result?: string;
+  api_error_status?: number;
+  structured_output?: unknown;
+  modelUsage?: unknown;
+}
+
+// What claude printed, as JSON; what doesn't parse fails with the parser's words.
+const readJson = (json: string, excerpt: string) =>
+  Effect.try({
+    try: (): unknown => JSON.parse(json),
+    catch: (cause) =>
+      new ClaudeBadOutput({ message: cause instanceof Error ? cause.message : String(cause), excerpt: excerpt.slice(0, 500), cause }),
+  });
+
+export const claudeEnvelope = Effect.fnUntraced(function* (out: string): Effect.fn.Return<ClaudeAnswer, ClaudeError> {
+  const env = (yield* readJson(out, out)) as Envelope;
+  if (env.is_error) return yield* claudeError(env.result ?? "claude failed", env.api_error_status);
   const usage = env.modelUsage && typeof env.modelUsage === "object" ? Object.keys(env.modelUsage) : [];
+  const result = env.result ?? "";
   return {
-    answer: env.structured_output ?? JSON.parse(/\{[\s\S]*\}/.exec(env.result ?? "")?.[0] ?? "{}"),
+    answer: env.structured_output ?? (yield* readJson(/\{[\s\S]*\}/.exec(result)?.[0] ?? "{}", result)),
     model: usage[0] ?? "claude-code",
   };
-}
+});
 
 // A second run checks what the first said against the diff, on its own: only what holds is shown. The caps apply after it,
 // so a comment it drops never cost a true one its place.
-export async function generateReview(item: Item, s: Signals, why: string, pr: PrText, dir: string): Promise<AiReview> {
-  const { answer, model } = await askClaude(buildPrompt(item, s, why, pr), { dir });
+export const generateReview = Effect.fn("generateReview")(function* (
+  item: Item,
+  s: Signals,
+  why: string,
+  pr: PrText,
+  dir: string,
+): Effect.fn.Return<AiReview, CommandError | ClaudeError> {
+  const { answer, model } = yield* askClaude(buildPrompt(item, s, why, pr), { dir });
   const r = readReview(answer, pr.files);
+  if (!r.summary) return yield* new ClaudeBadOutput({ message: "the agent returned no summary" });
   const all = [...r.concerns, ...r.notes];
-  const held = all.length ? await checkClaims(item, pr, all, dir) : new Set<number>();
+  const held = all.length ? yield* checkClaims(item, pr, all, dir) : new Set<number>();
   const checked = {
     ...r,
     concerns: r.concerns.filter((_, i) => held.has(i)),
@@ -496,7 +545,7 @@ export async function generateReview(item: Item, s: Signals, why: string, pr: Pr
   };
   const dropped = r.unbacked + all.length - held.size;
   return { ...keep(checked, pr.files), ...(dropped > 0 && { dropped }), head_oid: item.head_oid, model, at: new Date().toISOString() };
-}
+});
 
 const CHECK_SCHEMA = {
   type: "object",
@@ -550,15 +599,15 @@ function buildCheckPrompt(item: Item, pr: PrText, comments: Placed[], tag = rand
 }
 
 // Which comments held up: c1, c2, … by their place in `comments`; one it didn't say holds is out.
-async function checkClaims(item: Item, pr: PrText, comments: Placed[], dir: string): Promise<Set<number>> {
-  const { answer } = await askClaude(buildCheckPrompt(item, pr, comments), { dir, schema: CHECK_SCHEMA });
+const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comments: Placed[], dir: string) {
+  const { answer } = yield* askClaude(buildCheckPrompt(item, pr, comments), { dir, schema: CHECK_SCHEMA });
   const held = new Set<number>();
   for (const c of list(((answer ?? {}) as Record<string, unknown>).comments)) {
     const n = Number(/^c(\d+)$/i.exec(text(c?.id))?.[1]);
     if (c?.holds === true && n >= 1 && n <= comments.length) held.add(n - 1);
   }
   return held;
-}
+});
 
 // ---------------------------------------------------------------- the answer
 
@@ -568,11 +617,10 @@ const list = (v: unknown) => (Array.isArray(v) ? (v as (Record<string, unknown> 
 type Placed = ReviewNote & { quote: string };
 
 // What Claude wrote, its comments placed on the diff and kept only where their quote is code in that file's diff (the
-// evidence they rest on); nothing capped yet. Model output: don't trust its field types.
-function readReview(parsed: unknown, files: ReviewFile[]) {
-  const raw = (parsed ?? {}) as Record<string, unknown>;
+// evidence they rest on); nothing capped yet. Model output: don't trust its field types. An empty summary is the caller's to refuse.
+function readReview(answer: unknown, files: ReviewFile[]) {
+  const raw = (answer ?? {}) as Record<string, unknown>;
   const summary = text(raw.summary);
-  if (!summary) throw new Error("the agent returned no summary");
   // "side:line" as the model may name it → where the note goes. An unchanged line shows once, numbered in the new file.
   const anchors = new Map<string, Map<string, { side: ReviewNote["side"]; line: number }>>();
   for (const f of files) {

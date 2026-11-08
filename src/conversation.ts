@@ -1,6 +1,7 @@
 // What reviewers said on a PR, which of it waits on you, and Claude's read of what does. Read only: replies go through
 // Desk.reply(), on your click. Claude runs like the judge: your own claude, no tools, an empty directory.
 import { randomBytes } from "node:crypto";
+import { Effect } from "effect";
 import type { Desk } from "./desk.ts";
 import type { PrContext } from "./github/index.ts";
 import { askClaude } from "./review.ts";
@@ -243,7 +244,10 @@ export class Conversations {
       const unread = (await this.list(id)).filter((c) => c.waiting_on_you && !c.take).slice(0, BATCH);
       if (!unread.length) return;
       const prompt = buildTakePrompt(e.item, desk.me() || "the owner", unread, ctx);
-      const { answer } = await askClaude(prompt, { schema: TAKE_SCHEMA, signal: this.abort.signal, dir: desk.agentDir() });
+      // effect-bridge(C4a): run is still a promise; its abort interrupts the call, and a stopped desk drops what that rejects with
+      const { answer } = await Effect.runPromise(askClaude(prompt, { schema: TAKE_SCHEMA, dir: desk.agentDir() }), {
+        signal: this.abort.signal,
+      });
       if (desk.stopped) return;
       const got = parseTakes(answer, new Map(unread.map((c) => [c.id, c.comments.at(-1)!.id])), new Date().toISOString());
       desk.store.set(`take:${id}`, { ...(desk.store.get(`take:${id}`) as Takes | null), ...got });

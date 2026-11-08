@@ -1,6 +1,7 @@
 // Automations: your instructions, run on their schedule by your own Claude Code, read only. What a run finds that needs you
 // goes on your desk with its why; nothing else comes of it. Agents may draft one; only you turn it on, in the desk.
 import { randomBytes } from "node:crypto";
+import { Cause, Effect, Exit } from "effect";
 import { DENY as COORDINATOR_DENY, denyDir } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
 import { DeskError } from "./errors.ts";
@@ -295,30 +296,34 @@ export class Automations {
     };
     this.record(run);
     try {
-      const out = await runCommand(
-        claudeSpawn(claudeCommand(), [
-          "-p",
-          "--output-format",
-          "json",
-          "--permission-mode",
-          "dontAsk",
-          "--allowedTools",
-          ALLOW.join(","),
-          "--json-schema",
-          JSON.stringify(SCHEMA),
-        ]),
-        {
+      const spawnAs = claudeSpawn(claudeCommand(), [
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "dontAsk",
+        "--allowedTools",
+        ALLOW.join(","),
+        "--json-schema",
+        JSON.stringify(SCHEMA),
+      ]);
+      const call = Effect.flatMap(spawnAs, (s) =>
+        runCommand(s, {
           input: prompt(a, run.at, last),
           cwd: this.dir(),
           timeout: TIMEOUT,
           stdoutOnError: true,
           missing: claudeMissing(claudeCommand()),
-          signal: AbortSignal.any([this.abort.signal, stop]),
-        },
+        }),
       );
+      // effect-bridge(C4b): go is still a promise; its AbortControllers interrupt the call, which reads "stopped" as before
+      const exit = await Effect.runPromiseExit(call, { signal: AbortSignal.any([this.abort.signal, stop]) });
+      if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) throw new Error("stopped");
+      const out = await Effect.runPromise(exit);
       if (stop.aborted || !this.all().some((x) => x.id === a.id)) return run; // deleted while it ran
       run.session = sessionOf(out);
-      const answer = (claudeEnvelope(out).answer ?? {}) as { summary?: unknown; items?: unknown };
+      const env = await Effect.runPromise(claudeEnvelope(out)); // effect-bridge(C4b): what it fails with rejects, as its throw did
+      const answer = (env.answer ?? {}) as { summary?: unknown; items?: unknown };
       if (typeof answer.summary !== "string") throw new Error("the run gave no answer: no summary and no list");
       run.summary = answer.summary.trim();
       const found = Array.isArray(answer.items) ? answer.items : [];

@@ -2,6 +2,7 @@
 // pinned to the commit the review showed, and not the end of reviewing it.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
 import type { GitHubWriter, InlineThread } from "../src/github/write.ts";
 import { createApp } from "../src/server.ts";
@@ -104,8 +105,8 @@ test("the review says which commit its diff is at: GitHub's, ahead of the desk's
   const pushed = "f".repeat(40);
   let head: string | undefined = pushed;
   const review: ReviewDeps = {
-    fetchPr: () => Promise.resolve({ body: "", files: [], ...(head && { head }) }),
-    generate: () => new Promise(() => {}),
+    fetchPr: () => Effect.succeed({ body: "", files: [], ...(head && { head }) }),
+    generate: () => Effect.never,
   };
   const t = await setup(
     [makeItem({ number: 4, repo: "acme/web", author: "dana", review_requests: [{ reviewer: "me", type: "user", codeowner: false }] })],

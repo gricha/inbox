@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Effect } from "effect";
 import type { Desk } from "./desk.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
@@ -73,8 +74,11 @@ interface Agent {
   startedAt?: number;
 }
 
+// effect-bridge(C4b): the coordinator is still promises; cmd.exe's refusal still throws before anything starts
 const claude = (args: string[], cwd?: string) =>
-  runCommand(claudeSpawn(claudeCommand(), args), { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) });
+  Effect.runPromise(
+    runCommand(Effect.runSync(claudeSpawn(claudeCommand(), args)), { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
+  );
 
 const alive = (pid: number) => {
   try {
@@ -224,7 +228,7 @@ export class Coordinator {
 
   // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle.
   tell(line: string): Promise<void> {
-    claudeSpawn(claudeCommand(), [line]); // throws on what cmd.exe can't pass
+    Effect.runSync(claudeSpawn(claudeCommand(), [line])); // effect-bridge(C4b): throws on what cmd.exe can't pass
     this.desk.store.set(ASKS, [...this.asks(), line]);
     this.watch();
     return this.again();

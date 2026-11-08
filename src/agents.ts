@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Effect } from "effect";
 import { parse } from "smol-toml";
 import { claudeSpawn } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
@@ -72,7 +73,7 @@ export function status(driver: DriverId, url: string): AgentStatus {
 }
 
 function run(bin: string, args: string[], command: string): Promise<void> {
-  const s = claudeSpawn(bin, args);
+  const s = Effect.runSync(claudeSpawn(bin, args)); // effect-bridge(C3): cmd.exe's refusal throws as before
   return new Promise((resolve, reject) => {
     execFile(s.file, s.args, { shell: s.shell, timeout: 60_000 }, (err, _stdout, stderr) => {
       if (!err) {

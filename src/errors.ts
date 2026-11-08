@@ -152,6 +152,92 @@ export const fsError =
   (cause: unknown): FsError =>
     new FsError({ op, path, cause });
 
+// ---------------------------------------------------------------- child processes (claude, gh)
+
+// The command isn't on PATH (or cmd.exe can't find it): the hint, what to install, is the whole message.
+export class CommandNotFound extends Data.TaggedError("CommandNotFound")<{ readonly command: string; readonly hint: string }> {
+  override get message(): string {
+    return this.hint;
+  }
+}
+
+// No answer in time: it was stopped, and what it started with it.
+export class CommandTimeout extends Data.TaggedError("CommandTimeout")<{ readonly command: string; readonly timeoutMs: number }> {
+  override get message(): string {
+    return `no answer in ${Math.round(this.timeoutMs / 60_000)} minutes, so it was stopped`;
+  }
+}
+
+// It printed more than the desk keeps, so it was stopped.
+export class CommandOutputTooLarge extends Data.TaggedError("CommandOutputTooLarge")<{
+  readonly command: string;
+  readonly limitBytes: number;
+}> {
+  override get message(): string {
+    return `${this.command} printed more than ${this.limitBytes / 1024 / 1024} MB, so it was stopped`;
+  }
+}
+
+// It exited non-zero or couldn't start: the last lines it wrote to stderr, else Node's error (cause), else its exit.
+export class CommandFailed extends Data.TaggedError("CommandFailed")<{
+  readonly command: string;
+  readonly code: number | null;
+  readonly signal: string | null;
+  readonly stderr: string;
+  readonly cause?: unknown;
+}> {
+  override get message(): string {
+    const why =
+      this.stderr || (this.cause instanceof Error ? this.cause.message : `${this.command} exited with ${this.code ?? this.signal}`);
+    return why.trim().split("\n").slice(-3).join(" ");
+  }
+}
+
+// What a command printed doesn't parse (gh's one JSON object per line): cause is the parser's error, whose words show.
+export class CommandBadOutput extends Data.TaggedError("CommandBadOutput")<{ readonly command: string; readonly cause: unknown }> {
+  override get message(): string {
+    return this.cause instanceof Error ? this.cause.message : `${this.command} printed something unreadable`;
+  }
+}
+
+// An argument cmd.exe can't be given safely (a Windows claude.cmd shim): nothing was started.
+export class UnsafeArgument extends Data.TaggedError("UnsafeArgument")<{ readonly message: string }> {}
+
+export type CommandError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed | UnsafeArgument;
+
+// ---------------------------------------------------------------- Claude Code
+
+// The whole message: retryAgents, paused() and the judge find it by suffix in the stored error texts.
+export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+
+// An expired or missing login. detail is the CLI's own words ("401 OAuth access token has expired"), for the log.
+export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ readonly detail: string }> {
+  override get message(): string {
+    return NOT_LOGGED_IN;
+  }
+}
+
+// claude answered with an error (is_error): the API's message ("Overloaded"), and its status when it gave one.
+export class ClaudeApiError extends Data.TaggedError("ClaudeApiError")<{ readonly message: string; readonly status?: number }> {}
+
+// What claude answered can't be read, or isn't an answer (no summary): excerpt is what it printed, cause the parser's error.
+export class ClaudeBadOutput extends Data.TaggedError("ClaudeBadOutput")<{
+  readonly message: string;
+  readonly excerpt?: string;
+  readonly cause?: unknown;
+}> {}
+
+export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput;
+
+// ---------------------------------------------------------------- GitHub
+
+// The pages of a PR's files were fetched across a push and disagree on its head commit.
+export class PrChangedDuringFetch extends Data.TaggedError("PrChangedDuringFetch")<{ readonly id: string }> {
+  override get message(): string {
+    return "the PR changed while its diff was fetched: open it again";
+  }
+}
+
 // ---------------------------------------------------------------- legacy (removed in C6, with DeskError)
 
 // An error the HTTP API answers with its status: 400 for what you sent, 404, 409 for a state that refuses it, 502 for GitHub.

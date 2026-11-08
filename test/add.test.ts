@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
 import { parseReview } from "../src/review.ts";
 import type { AiReview } from "../src/types.ts";
@@ -23,14 +24,14 @@ function fakeReview() {
   const review: ReviewDeps = {
     fetchPr: (item) => {
       fetched.push(item.id);
-      return Promise.resolve({ body: "", files: [] });
+      return Effect.succeed({ body: "", files: [] });
     },
     generate: (item) => {
       started.push(item.id);
-      return new Promise<AiReview>((resolve) => {
+      return Effect.callback<AiReview>((resume) => {
         const ai = parseReview({ verdict: "skim", risk: "low", summary: "fine", notes: [] }, []);
         done.set(item.id, () => {
-          resolve({ ...ai, head_oid: item.head_oid, model: "fake", at: NOW.toISOString() });
+          resume(Effect.succeed({ ...ai, head_oid: item.head_oid, model: "fake", at: NOW.toISOString() }));
         });
       });
     },

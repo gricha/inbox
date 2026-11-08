@@ -19,14 +19,10 @@ function failed<A, E>(exit: Exit.Exit<A, E>): E {
   return e.value;
 }
 
-/** @public until C1 */
 export const run = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => settle(await Effect.runPromiseExit(effect));
 
-/** @public until C1 */
 export const runSync = <A, E>(effect: Effect.Effect<A, E>): A => settle(Effect.runSyncExit(effect));
 
-/** @public until C1 */
 export const failure = async <A, E>(effect: Effect.Effect<A, E>): Promise<E> => failed(await Effect.runPromiseExit(effect));
 
-/** @public until C1 */
 export const failureSync = <A, E>(effect: Effect.Effect<A, E>): E => failed(Effect.runSyncExit(effect));

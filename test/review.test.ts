@@ -5,8 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { Effect } from "effect";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
+import { ClaudeApiError, ClaudeNotLoggedIn, CommandOutputTooLarge, NOT_LOGGED_IN } from "../src/errors.ts";
+import { GH_MISSING } from "../src/github/client.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
   agentDir,
@@ -16,18 +19,23 @@ import {
   claudeError,
   claudeSpawn,
   CLAUDE_PAUSED,
+  fetchPr,
   generateReview,
   filesHead,
   numberPatch,
   parseFiles,
   parseReview,
   reviewOrder,
+  runCommand,
   type PrText,
 } from "../src/review.ts";
 import { analyze } from "../src/signals.ts";
 import type { AiReview, Item, ReviewFile } from "../src/types.ts";
 import { FakeGitHub, hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
+import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+
+const posix = { skip: process.platform === "win32" };
 
 const PATCH = [
   "@@ -10,3 +10,4 @@ export function plan(q: Query) {",
@@ -151,23 +159,21 @@ test("parseReview anchors notes to real diff lines, keeps only what quotes the d
     ],
   );
   assert.equal(parseReview({ summary: "x", verdict: "maybe", risk: 7 }, []).verdict, "skim");
-  assert.throws(() => parseReview({ verdict: "look" }, []), /no summary/);
+  assert.equal(parseReview({ verdict: "look" }, []).summary, "", "total: generateReview is what refuses no summary");
 });
 
 test("claude's envelope: structured output, JSON in the result, the model it ran, and login errors", () => {
-  assert.deepEqual(claudeEnvelope(JSON.stringify({ structured_output: { summary: "s" } })), {
+  const envelope = (env: unknown) => runSync(claudeEnvelope(JSON.stringify(env)));
+  assert.deepEqual(envelope({ structured_output: { summary: "s" } }), {
     answer: { summary: "s" },
     model: "claude-code",
   });
-  assert.deepEqual(claudeEnvelope(JSON.stringify({ result: 'Here: {"summary":"t"}' })).answer, { summary: "t" });
+  assert.deepEqual(envelope({ result: 'Here: {"summary":"t"}' }).answer, { summary: "t" });
   // The model is whatever your Claude Code ran, as it reports it.
   const usage = { "claude-opus-5[1m]": { inputTokens: 900, outputTokens: 120 }, "claude-haiku-4-5": { inputTokens: 40 } };
-  assert.equal(claudeEnvelope(JSON.stringify({ structured_output: {}, modelUsage: usage })).model, "claude-opus-5[1m]");
-  assert.equal(claudeEnvelope(JSON.stringify({ structured_output: {}, modelUsage: null })).model, "claude-code");
-  assert.throws(
-    () => claudeEnvelope(JSON.stringify({ is_error: true, result: "API Error: 401 OAuth access token has expired" })),
-    /claude auth login/,
-  );
+  assert.equal(envelope({ structured_output: {}, modelUsage: usage }).model, "claude-opus-5[1m]");
+  assert.equal(envelope({ structured_output: {}, modelUsage: null }).model, "claude-code");
+  assert.throws(() => envelope({ is_error: true, result: "API Error: 401 OAuth access token has expired" }), /claude auth login/);
   // What claude -p 2.1 prints with an expired login (exit 1).
   const expired = {
     type: "result",
@@ -177,52 +183,63 @@ test("claude's envelope: structured output, JSON in the result, the model it ran
     terminal_reason: "api_error",
     result: "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
   };
-  assert.throws(
-    () => claudeEnvelope(JSON.stringify(expired)),
-    (e: Error) =>
-      e.message === "Claude Code isn't logged in. Run `claude auth login` in a terminal." &&
-      e.cause === "401 OAuth access token has expired",
-  );
-  assert.throws(() => claudeEnvelope(JSON.stringify({ is_error: true, result: "Overloaded" })), /^Error: Overloaded$/);
+  const out = failureSync(claudeEnvelope(JSON.stringify(expired)));
+  assert.ok(out._tag === "ClaudeNotLoggedIn");
+  assert.equal(out.message, "Claude Code isn't logged in. Run `claude auth login` in a terminal.");
+  assert.equal(out.detail, "401 OAuth access token has expired", "the CLI's own words, for the log");
+  assert.throws(() => envelope({ is_error: true, result: "Overloaded" }), /^ClaudeApiError: Overloaded$/);
+  const busy = failureSync(claudeEnvelope(JSON.stringify({ is_error: true, result: "Overloaded", api_error_status: 529 })));
+  assert.deepEqual([busy._tag, busy.message, busy instanceof ClaudeApiError && busy.status], ["ClaudeApiError", "Overloaded", 529]);
   // The real 401's JSON body shows as its message, not as JSON on a status line.
   const real =
     'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}';
-  assert.throws(
-    () => claudeEnvelope(JSON.stringify({ is_error: true, result: real })),
-    (e: Error) => e.cause === "401 OAuth token has expired.",
-  );
-  assert.equal(
-    claudeError("Not logged in · Please run /login").message,
-    "Claude Code isn't logged in. Run `claude auth login` in a terminal.",
-  );
-  assert.equal(claudeError("Overloaded").message, "Overloaded");
+  const body = failureSync(claudeEnvelope(JSON.stringify({ is_error: true, result: real })));
+  assert.ok(body instanceof ClaudeNotLoggedIn);
+  assert.equal(body.detail, "401 OAuth token has expired.");
+  assert.equal(claudeError("Not logged in · Please run /login").message, NOT_LOGGED_IN);
+  assert.equal(claudeError("Not logged in · Please run /login")._tag, "ClaudeNotLoggedIn");
+  assert.deepEqual([claudeError("Overloaded")._tag, claudeError("Overloaded").message], ["ClaudeApiError", "Overloaded"]);
   // A run that failed on login code isn't a login failure.
   const work = "Tool use failed while fixing the OAuth callback in src/login.ts";
   assert.equal(claudeError(work).message, work);
 });
 
+test("what claude printed that isn't JSON fails as bad output, in the parser's words, with what it printed", () => {
+  const bad = failureSync(claudeEnvelope("Segmentation fault"));
+  assert.ok(bad._tag === "ClaudeBadOutput");
+  assert.ok(bad.cause instanceof SyntaxError);
+  assert.deepEqual([bad.message, bad.excerpt], [bad.cause.message, "Segmentation fault"]);
+  const inResult = failureSync(claudeEnvelope(JSON.stringify({ result: "Here: {not json}" })));
+  assert.ok(inResult._tag === "ClaudeBadOutput");
+  assert.deepEqual([inResult.excerpt, inResult.cause instanceof SyntaxError], ["Here: {not json}", true]);
+});
+
 test("claude runs directly, except a Windows shim, which goes through cmd.exe fully quoted", () => {
   const args = ["-p", "--name", "desk: a", "--tools", "", "--json-schema", '{"a":["b"]}'];
-  assert.deepEqual(claudeSpawn("claude", args, "darwin"), { file: "claude", args, shell: false });
-  assert.deepEqual(claudeSpawn("claude", args, "linux"), { file: "claude", args, shell: false });
-  assert.deepEqual(claudeSpawn("C:\\tools\\claude.EXE", args, "win32"), { file: "C:\\tools\\claude.EXE", args, shell: false });
-  assert.deepEqual(claudeSpawn("C:\\Program Files\\nodejs\\claude.cmd", args, "win32"), {
+  assert.deepEqual(runSync(claudeSpawn("claude", args, "darwin")), { file: "claude", args, shell: false });
+  assert.deepEqual(runSync(claudeSpawn("claude", args, "linux")), { file: "claude", args, shell: false });
+  assert.deepEqual(runSync(claudeSpawn("C:\\tools\\claude.EXE", args, "win32")), { file: "C:\\tools\\claude.EXE", args, shell: false });
+  assert.deepEqual(runSync(claudeSpawn("C:\\Program Files\\nodejs\\claude.cmd", args, "win32")), {
     file: String.raw`"C:\Program Files\nodejs\claude.cmd" "-p" "--name" "desk: a" "--tools" "" "--json-schema" "{\"a\":[\"b\"]}"`,
     args: [],
     shell: true,
   });
-  assert.equal(claudeSpawn("claude", ["C:\\dir\\"], "win32").file, '"claude" "C:\\dir\\\\"');
-  for (const bad of ["C:\\a&b\\claude.cmd", "%EVIL%", "claude|calc", "c^laude"])
-    assert.throws(() => claudeSpawn(bad, args, "win32"), /cmd\.exe/);
+  assert.equal(runSync(claudeSpawn("claude", ["C:\\dir\\"], "win32")).file, '"claude" "C:\\dir\\\\"');
+  for (const bad of ["C:\\a&b\\claude.cmd", "%EVIL%", "claude|calc", "c^laude"]) {
+    const e = failureSync(claudeSpawn(bad, args, "win32"));
+    assert.deepEqual([e._tag, e.message], ["UnsafeArgument", `can't start ${bad} through cmd.exe: % ! ^ & | < > aren't allowed`]);
+  }
 });
 
 test("stopping a call to a claude that isn't there signals nothing else", { skip: process.platform === "win32" }, async () => {
   // In its own process group: Node's own `signal` option would kill that whole group here (the spawn failed, so pid 0).
-  const code = `import { runCommand } from ${JSON.stringify(pathToFileURL(path.resolve("src/review.ts")).href)};
+  const code = `import { Cause, Effect } from ${JSON.stringify(import.meta.resolve("effect"))};
+import { runCommand } from ${JSON.stringify(pathToFileURL(path.resolve("src/review.ts")).href)};
 const ac = new AbortController();
-const p = runCommand({ file: "/nonexistent/claude", args: [], shell: false }, { timeout: 5000, missing: "missing", signal: ac.signal });
+const p = Effect.runPromiseExit(runCommand({ file: "/nonexistent/claude", args: [], shell: false }, { timeout: 5000, missing: "missing" }), { signal: ac.signal });
 ac.abort();
-console.log(await p.catch((e) => e.message));`;
+const exit = await p;
+console.log(exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : String(exit));`;
   const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--input-type=module", "-e", code], { detached: true });
   let out = "";
   child.stdout.on("data", (d: Buffer) => {
@@ -233,14 +250,13 @@ console.log(await p.catch((e) => e.message));`;
       resolve([c, sig]);
     });
   });
-  assert.deepEqual([exit, signal, out.trim()], [0, null, "stopped"]);
+  assert.deepEqual([exit, signal, out.trim()], [0, null, "interrupted"]);
 });
 
 test("a missing claude command says where to set its path", async () => {
-  await assert.rejects(
-    askClaude("hi", { command: path.join(os.tmpdir(), "no-such-claude"), dir: os.tmpdir() }),
-    /not found: install Claude Code so claude runs from your PATH/,
-  );
+  const command = path.join(os.tmpdir(), "no-such-claude");
+  const e = await failure(askClaude("hi", { command, dir: os.tmpdir() }));
+  assert.deepEqual([e._tag, e.message], ["CommandNotFound", `${command} not found: install Claude Code so claude runs from your PATH`]);
 });
 
 // Fake agents in a scratch dir: they record their arguments and stdin, and answer like the real CLIs.
@@ -262,7 +278,7 @@ test(
     );
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
     const dir = agentDir(home);
-    assert.deepEqual(await askClaude("PROMPT", { command: f.bin, dir }), { answer: { summary: "ok" }, model: "claude-opus-5[1m]" });
+    assert.deepEqual(await run(askClaude("PROMPT", { command: f.bin, dir })), { answer: { summary: "ok" }, model: "claude-opus-5[1m]" });
     const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
     for (const a of ["-p", "--strict-mcp-config", "--no-session-persistence", "--json-schema"]) assert.ok(args.includes(a), a);
     assert.equal(args[args.indexOf("--tools") + 1], "");
@@ -280,6 +296,111 @@ test(
     fs.rmSync(home, { recursive: true });
   },
 );
+
+test("a command that fails says why in its last lines, its exit, or the hint for one that isn't there", posix, async () => {
+  const f = fakeAgent("tool", `echo one >&2; echo two >&2; echo three >&2; echo four >&2; exit 3`);
+  const loud = await failure(runCommand({ file: f.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
+  assert.deepEqual([loud._tag, loud.message], ["CommandFailed", "two three four"]);
+  assert.deepEqual(loud._tag === "CommandFailed" && [loud.code, loud.signal], [3, null]);
+  const quiet = fakeAgent("quiet", "exit 4");
+  const e = await failure(runCommand({ file: quiet.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
+  assert.deepEqual([e._tag, e.message], ["CommandFailed", `${quiet.bin} exited with 4`]);
+  // claude prints its error envelope and exits 1: kept, so the envelope says what went wrong.
+  const env = fakeAgent("claude", `echo '{"is_error":true,"result":"Overloaded"}'; exit 1`);
+  const out = await run(runCommand({ file: env.bin, args: [], shell: false }, { timeout: 5000, missing: "missing", stdoutOnError: true }));
+  assert.equal(out.trim(), '{"is_error":true,"result":"Overloaded"}');
+  const gone = await failure(runCommand({ file: "/nonexistent/tool", args: [], shell: false }, { timeout: 5000, missing: "install tool" }));
+  assert.deepEqual([gone._tag, gone.message], ["CommandNotFound", "install tool"]);
+  const big = new CommandOutputTooLarge({ command: "gh", limitBytes: 64 * 1024 * 1024 });
+  assert.deepEqual([big._tag, big.message], ["CommandOutputTooLarge", "gh printed more than 64 MB, so it was stopped"]);
+  for (const x of [f, quiet, env]) fs.rmSync(x.dir, { recursive: true });
+});
+
+test("an answer with no summary fails the review as bad output, and asks no second claude", posix, async () => {
+  const f = fakeAgent("claude", `echo x >> "$(dirname "$0")/calls"; echo '{"structured_output":{"summary":"  ","notes":[]}}'`);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  const was = process.env.DESK_CLAUDE;
+  process.env.DESK_CLAUDE = f.bin;
+  try {
+    const item = makeItem();
+    const e = await failure(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
+    assert.deepEqual([e._tag, e.message], ["ClaudeBadOutput", "the agent returned no summary"]);
+    assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, 1);
+  } finally {
+    process.env.DESK_CLAUDE = was;
+    fs.rmSync(f.dir, { recursive: true });
+    fs.rmSync(home, { recursive: true });
+  }
+});
+
+// A gh on PATH that answers the PR's files, its description and the compare from files in its own directory.
+function fakeGh(files: string[], compare?: string[]) {
+  const f = fakeAgent(
+    "gh",
+    `d="$(dirname "$0")"
+case "$*" in
+  *--paginate*) cat "$d/files" ;;
+  *compare*) if [ -f "$d/compare" ]; then cat "$d/compare"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;
+  *) printf 'The description.\\n\\n' ;;
+esac`,
+  );
+  fs.writeFileSync(path.join(f.dir, "files"), files.join("\n"));
+  if (compare) fs.writeFileSync(path.join(f.dir, "compare"), compare.join("\n"));
+  return f;
+}
+
+test("a PR's diff comes from read-only gh calls; one fetched across a push, or that gh garbles, says so", posix, async (c) => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const file = (sha: string, name: string) =>
+    JSON.stringify({
+      filename: name,
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      patch: "@@ -1 +1 @@\n+x",
+      contents_url: `https://api.github.com/repos/acme/api/contents/${name}?ref=${sha}`,
+    });
+  const was = process.env.PATH;
+  c.after(() => {
+    process.env.PATH = was;
+  });
+  const onPath = (dir: string) => {
+    process.env.PATH = `${dir}:/usr/bin:/bin`;
+  };
+  const item = makeItem({ head_oid: A });
+
+  const ok = fakeGh([file(A, "x.ts"), file(A, "y.ts")], [file(A, "y.ts")]);
+  onPath(ok.dir);
+  const pr = await run(fetchPr(item, "abc1234"));
+  assert.deepEqual(
+    [pr.body, pr.head, pr.files.map((x) => x.path), pr.since?.base, pr.since?.files.map((x) => x.path)],
+    ["The description.", A, ["x.ts", "y.ts"], "abc1234", ["y.ts"]],
+  );
+  assert.match(fs.readFileSync(path.join(ok.dir, "args"), "utf8"), /^api\n/, "only gh api, never a write");
+
+  // A base that's gone (a force-push): the review goes on without the since-your-review diff.
+  const forced = fakeGh([file(A, "x.ts")]);
+  onPath(forced.dir);
+  assert.ok(!("since" in (await run(fetchPr(item, "abc1234")))));
+
+  const pushed = fakeGh([file(A, "x.ts"), file(B, "y.ts")]);
+  onPath(pushed.dir);
+  const moved = await failure(fetchPr(item));
+  assert.deepEqual([moved._tag, moved.message], ["PrChangedDuringFetch", "the PR changed while its diff was fetched: open it again"]);
+
+  const garbled = fakeGh(["not json"]);
+  onPath(garbled.dir);
+  const bad = await failure(fetchPr(item));
+  assert.ok(bad._tag === "CommandBadOutput");
+  assert.ok(bad.cause instanceof SyntaxError);
+  assert.equal(bad.message, bad.cause.message);
+
+  onPath(fs.mkdtempSync(path.join(os.tmpdir(), "desk-no-gh-")));
+  const none = await failure(fetchPr(item));
+  assert.deepEqual([none._tag, none.message], ["CommandNotFound", GH_MISSING]);
+  for (const x of [ok, forced, pushed, garbled]) fs.rmSync(x.dir, { recursive: true });
+});
 
 test("the prompt fences PR text as untrusted, numbers the diff, and leaves lockfiles out", () => {
   const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
@@ -583,7 +704,9 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem({ head_oid: "c0ffee" });
-      const ai = await generateReview(item, signalsOf(item), "", { body: "Only admins reach the planner.", files: [FILE] }, agentDir(home));
+      const ai = await run(
+        generateReview(item, signalsOf(item), "", { body: "Only admins reach the planner.", files: [FILE] }, agentDir(home)),
+      );
       assert.deepEqual(ai.concerns, ["Drops rows past the limit with no way to page."]);
       assert.deepEqual(
         ai.notes.map((n) => [n.line, n.body]),
@@ -640,7 +763,7 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem();
-      const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home));
+      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
       assert.deepEqual(ai.concerns, ["Concern 3.", "Concern 4.", "Concern 5.", "Concern 6.", "Concern 7.", "Concern 8."]);
       assert.equal(ai.dropped, 2, "the check's two, not the cap");
     } finally {
@@ -673,7 +796,7 @@ test(
       process.env.DESK_CLAUDE = f.bin;
       try {
         const item = makeItem();
-        const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home));
+        const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
         assert.equal(ai.notes.length, kept);
         assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, calls);
       } finally {
@@ -711,7 +834,7 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem({ head_oid: "c0ffee" });
-      const ai = await generateReview(item, signalsOf(item), "", { body: "", files: [FILE, LOCK] }, agentDir(home));
+      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE, LOCK] }, agentDir(home)));
       const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
       const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { required: string[]; properties: Record<string, unknown> };
       assert.ok(schema.required.includes("chunks") && "chunks" in schema.properties);
@@ -870,21 +993,28 @@ function fakeDeps(chunks?: unknown) {
   const deps: ReviewDeps = {
     fetchPr: (item) => {
       fetched.push(`${item.id}@${item.head_oid}`);
-      return Promise.resolve({ body: "why", files: [FILE] } satisfies PrText);
+      return Effect.succeed({ body: "why", files: [FILE] } satisfies PrText);
     },
-    generate: async (item, _s, _why, pr) => {
+    generate: (item, _s, _why, pr) => {
       started.push(item.id);
       const g = deferred();
       gates.set(item.id, g);
-      await g.promise;
-      if (fail) throw new Error(fail);
-      const notes = [{ path: FILE.path, side: "new", line: 11, quote: "rows.slice(0, q.limit)", body: "Caps the rows." }];
-      return {
-        ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes, chunks }, pr.files),
-        head_oid: item.head_oid,
-        model: "claude-opus-5[1m]",
-        at: NOW.toISOString(),
-      } satisfies AiReview;
+      return Effect.gen(function* () {
+        yield* Effect.promise(() => g.promise);
+        if (fail)
+          return yield* Effect.fail(
+            fail === NOT_LOGGED_IN
+              ? new ClaudeNotLoggedIn({ detail: "401 OAuth access token has expired" })
+              : new ClaudeApiError({ message: fail }),
+          );
+        const notes = [{ path: FILE.path, side: "new", line: 11, quote: "rows.slice(0, q.limit)", body: "Caps the rows." }];
+        return {
+          ...parseReview({ verdict: "skim", risk: "low", summary: `Review of ${item.id}`, notes, chunks }, pr.files),
+          head_oid: item.head_oid,
+          model: "claude-opus-5[1m]",
+          at: NOW.toISOString(),
+        } satisfies AiReview;
+      });
     },
   };
   return {
@@ -1001,10 +1131,10 @@ test("after a sync, the main page's PRs' diffs and conversations are fetched ahe
   t.f.deps.fetchPr = (item) => {
     calls.push(`${item.id}@${item.head_oid}`);
     most = Math.max(most, ++open);
-    return new Promise((resolve) => {
+    return Effect.callback<PrText>((resume) => {
       held.push(() => {
         open--;
-        resolve({ body: "", files: [FILE] });
+        resume(Effect.succeed({ body: "", files: [FILE] }));
       });
     });
   };
@@ -1076,7 +1206,7 @@ test("turning auto_ai on starts the backlog; a failure shows in the view and isn
   t.cleanup();
 });
 
-const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+const LOGGED_OUT = NOT_LOGGED_IN;
 
 test("failures in a row (an expired login) pause AI reviews nobody asked for; asking still runs, and a success resumes them", async () => {
   const t = await setup([ask(1), ask(2), ask(3), ask(4, { state: "merged" })]);

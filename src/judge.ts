@@ -1,6 +1,7 @@
 // The judge: Claude sorts everything by the owner's prose policy, with where the rules put each item as its hint (and a
 // hard rule's floor). Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
+import { Effect } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
 import { askClaude, NOT_LOGGED_IN } from "./review.ts";
@@ -447,8 +448,9 @@ export class Judge {
     const ids = batch.map((g) => g.item.id);
     try {
       const prompt = buildJudgePrompt(batch, desk.policyText(), desk.me() || "the owner", desk.ctx);
-      const opts = { schema: JUDGE_SCHEMA, signal: this.abort.signal, dir: desk.agentDir() };
-      const raw = (await askClaude(prompt, opts)).answer;
+      const opts = { schema: JUDGE_SCHEMA, dir: desk.agentDir() };
+      // effect-bridge(C4a): run is still a promise; its abort interrupts the call, and a stopped desk drops what that rejects with
+      const raw = (await Effect.runPromise(askClaude(prompt, opts), { signal: this.abort.signal })).answer;
       const answers = parseVerdicts(raw, ids);
       if (desk.stopped) return;
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.
@@ -479,8 +481,8 @@ export class Judge {
       this.retryAt = Date.now() + BACKOFF[Math.min(this.failures, BACKOFF.length) - 1]!;
       this.error = (err as Error).message;
       report(err, "judge");
-      const cause = (err as Error).cause;
-      desk.log(`judge failed on ${batch.length} items: ${this.error}${typeof cause === "string" ? ` (${cause})` : ""}`);
+      const detail = (err as { detail?: unknown }).detail; // effect-bridge(C4a): the login's own words, ClaudeNotLoggedIn's detail
+      desk.log(`judge failed on ${batch.length} items: ${this.error}${typeof detail === "string" ? ` (${detail})` : ""}`);
     } finally {
       this.running = false;
       if (!desk.stopped) {
