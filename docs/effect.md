@@ -120,7 +120,9 @@ host/origin/cross-site middleware's 403s carry `Forbidden`.
   clears the child's timer and listeners, then calls `resume` once; the cleanup kills the group through `children.ts`'s
   `kill` and waits for `close` (bounded by SIGKILL after the grace period), so an interrupted run has exited before its
   fiber ends. A child's own timeout stays an unref'd `setTimeout` inside the callback. `children.ts` tracks every child,
-  so `desk.close()` reaches whole process groups.
+  so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings → Agents)
+  runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile` can't start
+  one, and reached only the CLI itself).
 - Retries: GitHub reads retry with
   `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
   3 attempts, the delay then 3× it, no jitter, a log line for each retry. Not the `{ times, while }` options together

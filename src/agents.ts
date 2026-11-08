@@ -1,5 +1,4 @@
 // The agent you work in (Settings → Agents): whether it has the desk's MCP tools and the Review Desk skill, and connecting it.
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { CommandFailed, CommandNotFound, CommandTimeout, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
-import { claudeSpawn } from "./review.ts";
+import { claudeSpawn, runCommand } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
 const SKILL = fileURLToPath(new URL("../skills/review-desk", import.meta.url));
@@ -83,49 +82,30 @@ type RunError = CommandNotFound | CommandFailed | CommandTimeout | UnsafeArgumen
 const TIMEOUT = 60_000;
 
 // Every failure ends with what to run yourself instead: `command`, the same registration.
-const run = (bin: string, args: string[], command: string): Effect.Effect<void, RunError> =>
-  Effect.flatMap(claudeSpawn(bin, args), (s) =>
-    Effect.callback<void, RunError>((resume) => {
-      const child = execFile(s.file, s.args, { shell: s.shell, timeout: TIMEOUT }, (err, _stdout, stderr) => {
-        if (!err) {
-          resume(Effect.void);
-          return;
-        }
-        // cmd.exe exits 9009 when it can't find the command.
-        if (err.code === "ENOENT" || (s.shell && err.code === 9009)) {
-          resume(Effect.fail(new CommandNotFound({ command: bin, hint: `${bin} isn't on PATH. Run it yourself: ${command}` })));
-          return;
-        }
-        const summary = `${bin} failed: ${(stderr || err.message).trim().split("\n").slice(-2).join(" ")}. Run it yourself: ${command}`;
-        // execFile kills it for its timeout, or for printing more than it keeps.
-        const timedOut = err.killed === true && err.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-        const code = typeof err.code === "number" ? err.code : null;
-        resume(
+const run = (bin: string, args: string[], command: string, timeout: number): Effect.Effect<void, RunError> =>
+  Effect.flatMap(claudeSpawn(bin, args), (s) => {
+    const summary = (why: string) =>
+      `${bin} failed: ${(why || `Command failed: ${[bin, ...args].join(" ")}`).trim().split("\n").slice(-2).join(" ")}. Run it yourself: ${command}`;
+    return runCommand(s, { timeout, missing: `${bin} isn't on PATH. Run it yourself: ${command}` }).pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        CommandFailed: (e) =>
           Effect.fail(
-            timedOut
-              ? new CommandTimeout({ command: bin, timeoutMs: TIMEOUT, summary })
-              : new CommandFailed({ command: bin, code, signal: err.signal ?? null, stderr, cause: err, summary }),
+            new CommandFailed({
+              command: bin,
+              code: e.code,
+              signal: e.signal,
+              stderr: e.stderr,
+              ...(e.cause !== undefined && { cause: e.cause }),
+              summary: summary(e.stderr || (e.cause instanceof Error ? e.cause.message : "")),
+            }),
           ),
-        );
-      });
-      // Interrupted: it's stopped (SIGKILL if SIGTERM didn't do it in 2 s), and the run ends once it has exited.
-      return Effect.callback<void>((done) => {
-        if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
-          done(Effect.void);
-          return;
-        }
-        const hard = setTimeout(() => {
-          child.kill("SIGKILL");
-        }, 2000);
-        hard.unref();
-        child.once("exit", () => {
-          clearTimeout(hard);
-          done(Effect.void);
-        });
-        child.kill();
-      });
-    }),
-  );
+        CommandTimeout: () => Effect.fail(new CommandTimeout({ command: bin, timeoutMs: timeout, summary: summary("") })),
+        CommandOutputTooLarge: (e) =>
+          Effect.fail(new CommandFailed({ command: bin, code: null, signal: null, stderr: "", cause: e, summary: summary(e.message) })),
+      }),
+    );
+  });
 
 const copySkill = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<void, FsError> {
   yield* Effect.try({
@@ -164,10 +144,11 @@ export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHo
 export const connect = Effect.fn("agents.connect")(function* (
   driver: DriverId,
   url: string,
+  timeout: number = TIMEOUT,
 ): Effect.fn.Return<AgentStatus, FsError | RunError> {
   const d = DRIVERS[driver];
   const s = yield* status(driver, url);
   if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));
-  if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command);
+  if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command, timeout);
   return yield* status(driver, url);
 });

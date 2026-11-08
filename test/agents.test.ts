@@ -6,7 +6,6 @@ import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
 import { connect, refreshSkills, status } from "../src/agents.ts";
-import { CommandTimeout } from "../src/errors.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "review-desk", "SKILL.md"), "utf8");
@@ -109,9 +108,10 @@ test("connect says what to run when the CLI is missing or fails", { skip: proces
   assert.equal(failed._tag, "CommandFailed");
   assert.equal(failed.message, `codex failed: config.toml: bad TOML. Run it yourself: codex mcp add review-desk --url ${MCP}`);
   assert.deepEqual(failed._tag === "CommandFailed" && [failed.code, failed.stderr], [1, "config.toml: bad TOML\n"]);
-  // No answer in a minute is a CommandTimeout in the same words (execFile's 60 s can't be waited out here).
-  const summary = "claude failed: Command failed: claude mcp add. Run it yourself: claude mcp add";
-  assert.equal(new CommandTimeout({ command: "claude", timeoutMs: 60_000, summary }).message, summary);
+  fake("claude", "exec /bin/sleep 30");
+  const slow = await failure(connect("claude-code", MCP, 200));
+  const add = `claude mcp add --transport http --scope user review-desk ${MCP}`;
+  assert.deepEqual([slow._tag, slow.message], ["CommandTimeout", `claude failed: Command failed: ${add}. Run it yourself: ${add}`]);
 });
 
 test("an installed skill that can't be read fails with FsError", () => {
@@ -120,16 +120,31 @@ test("an installed skill that can't be read fails with FsError", () => {
   assert.deepEqual([e._tag, e.op, e.path, e.code], ["FsError", "read", claudeSkill(), "EISDIR"]);
 });
 
-test("interrupting connect stops the agent's CLI and waits for it to exit", { skip: process.platform === "win32" }, async () => {
-  fake("claude", `echo $$ > "$HOME/claude-pid"; exec /bin/sleep 30`);
-  const fiber = Effect.runFork(connect("claude-code", MCP));
-  const pidFile = join(home, "claude-pid");
-  while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim()) await sleep(10);
-  await Effect.runPromise(Fiber.interrupt(fiber));
-  const exit = await Effect.runPromise(Fiber.await(fiber));
-  assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
-  assert.throws(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0), { code: "ESRCH" });
-});
+test(
+  "interrupting connect stops the agent's CLI and what it started, and waits for it to exit",
+  { skip: process.platform === "win32", timeout: 10_000 },
+  async () => {
+    fake("claude", `echo $$ > "$HOME/claude-pid"; /bin/sleep 30 & echo $! > "$HOME/child-pid"; wait`);
+    const fiber = Effect.runFork(connect("claude-code", MCP));
+    const pidOf = (name: string) => (existsSync(join(home, name)) ? Number(readFileSync(join(home, name), "utf8")) : 0);
+    while (!pidOf("claude-pid") || !pidOf("child-pid")) await sleep(10);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
+    assert.throws(() => process.kill(pidOf("claude-pid"), 0), { code: "ESRCH" });
+    // Its whole group goes: the sleep it left behind may be a zombie for a moment, until it's reaped.
+    const gone = () => {
+      try {
+        process.kill(pidOf("child-pid"), 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    for (let i = 0; i < 100 && !gone(); i++) await sleep(20);
+    assert.ok(gone(), "what the CLI started is stopped too");
+  },
+);
 
 test("the owner's desk refreshes an installed skill that's out of date, never installs one, and a scratch desk touches neither", () => {
   const old = SKILL.replace("Review Desk", "Old Desk");
