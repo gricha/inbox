@@ -555,6 +555,12 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
+/* A page's word and its count on one baseline, so they move together whatever the scroll rounds to. */
+.side-nav .side-item {
+  align-items: baseline;
+  line-height: 30px;
+}
+
 .side-foot .i {
   flex: none;
 }
@@ -5180,11 +5186,16 @@ button.s-edit:hover:not(:disabled) {
     align-items: center;
     gap: 2px;
     height: auto;
-    padding: 0 6px;
+    padding: 0 12px 0 6px;
     overflow: auto hidden;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
     scrollbar-width: thin;
+  }
+
+  /* More of the row past the window's edge (Sidebar says so): its end fades out, so the cut word reads as going on. */
+  .side.more {
+    mask-image: linear-gradient(to left, transparent, #000 40px);
   }
 
   .side-brand {

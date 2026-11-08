@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
 import { pageOf, type ListPage, type Route } from "../view.ts";
@@ -44,9 +45,26 @@ export function Sidebar({
   const onArchive = page === "archive";
   const onSettings = route.name === "settings";
   const flight = overview?.inflight;
+  // One row across a narrow window: whether more of it lies past the window's edge, so its end fades.
+  const side = useRef<HTMLElement>(null);
+  const [more, setMore] = useState(false);
+  useEffect(() => {
+    const el = side.current;
+    const check = () => {
+      if (el) setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    if (el) for (const x of [el, ...el.children]) ro.observe(x);
+    el?.addEventListener("scroll", check, { passive: true });
+    return () => {
+      ro.disconnect();
+      el?.removeEventListener("scroll", check);
+    };
+  }, []);
   const rate = overview?.rate_limit ? `GitHub API: ${overview.rate_limit.remaining} requests left` : undefined;
   return (
-    <aside className="side">
+    <aside ref={side} className={cls("side", more && "more")}>
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
       <div className="wordmark side-brand">
         <Mark />
