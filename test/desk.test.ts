@@ -9,7 +9,7 @@ import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { failureSync, run, runSync } from "./helpers/run.ts";
+import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubAuthError, GitHubHttpError } from "../src/errors.ts";
 
@@ -332,6 +332,16 @@ test("refs fail with tagged errors: an ambiguous one has its candidates, one the
     (e: { _tag: string; candidates: string[] }) => e._tag === "AmbiguousRef" && e.candidates.length === 2,
   );
   assert.equal(runSync(t.desk.itemId("acme/gone#5")), "acme/gone#5", "an exact id: its events outlive it");
+  // hold quotes an ambiguous ref trimmed, and refuses a short ref it doesn't hold and one GitHub doesn't have in their own words.
+  const held = async (ref: string) => (await failure(t.desk.hold(ref))).message;
+  assert.deepEqual(
+    [await held(" #1 "), await held("gone#5"), await held(" https://github.com/acme/gone/pull/5/files ")],
+    [
+      '"#1" matches 2 items',
+      `"gone#5" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`,
+      "GitHub has no PR or issue acme/gone#5",
+    ],
+  );
   assert.deepEqual([failureSync(t.desk.itemId("gone#5"))._tag, failureSync(t.desk.item("acme/gone#5"))._tag], ["NotFound", "NotFound"]);
   assert.deepEqual(
     [failureSync(t.desk.act("api#1", "takeback"))._tag, failureSync(t.desk.act("web#1", "inflight", undefined, "agent"))._tag],

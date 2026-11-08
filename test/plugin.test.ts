@@ -215,7 +215,9 @@ test("init asks every source what it needs: a first config.toml is GitHub's then
   assert.deepEqual(first.notes.inits, [true]);
   const board = first.desk.loaded?.boards.find((b) => b.config.id === "notes")?.config;
   assert.deepEqual([board?.source, board?.space], ["notes", "acme"]);
-  assert.equal(first.desk.me(), "me", "who you are is GitHub's");
+  assert.equal(first.desk.me(), "me");
+  first.desk.gh.ctx = { ...first.desk.gh.ctx!, me: "ann" }; // what GitHub's connector knows, not yet in kv
+  assert.deepEqual([first.desk.me(), first.desk.ctx?.me], ["ann", "ann"], "who you are is GitHub's");
   first.desk.stop();
 
   const again = start();
