@@ -1164,6 +1164,10 @@ const SHOTS: Shot[] = [
       if (!(await page.locator(".rv-tc-body code").count())) failures.push("review-inline: a code name in the thread above isn't code");
       if (!(await page.locator(".rv-inline button", { hasText: "Ask your agent" }).count()))
         failures.push("review-inline: the box has no Ask your agent");
+      // Its Comment on screen when it opens, not only the words.
+      const send = await page.locator(".rv-inline .act.primary").boundingBox();
+      if (!send || send.y < 0 || send.y + send.height > page.viewportSize()!.height)
+        failures.push(`review-inline: the box's Comment is off screen: ${JSON.stringify(send)}`);
     },
   },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
@@ -1197,7 +1201,11 @@ const SHOTS: Shot[] = [
         v.item = { ...v.item, review_requests: [] };
       })(page);
       await at(`#/review/${encodeURIComponent("acme/api#3051")}`)(page);
-      await page.locator(".rv-reviewers-pop .pop-item").first().waitFor();
+      // The box has the cursor and its list stays closed, so nothing covers Ask reviewers; GitHub's picks are on the line.
+      await page.waitForFunction(`document.activeElement?.matches(".rv-reviewers-input")`);
+      await page.locator(".rv-suggested .suggest").first().waitFor();
+      await page.waitForTimeout(300);
+      if (await page.locator(".rv-reviewers-pop").count()) failures.push("review-unasked: the reviewers list opens over Ask reviewers");
     },
     after: async (page) => {
       await unroute(page);
@@ -1267,7 +1275,17 @@ const SHOTS: Shot[] = [
     },
   },
   // The sidebar lists a file at the repo's root and a long folder.
-  { name: "review-python", go: review("acme/ml-pipeline#311") },
+  {
+    name: "review-python",
+    go: async (page) => {
+      await review("acme/ml-pipeline#311")(page);
+      // Its files are what it's for: open over the diff where the column folds them.
+      const files = page.locator(".rv-side-show");
+      if (await files.isVisible()) await files.click();
+      await page.waitForTimeout(200);
+    },
+    after: sideDefault,
+  },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
   { name: "review-stack", go: review("acme/api#4154") },
   // Past the last change: the folded rest's line where the review has one (the mock's doesn't), and a click opens it in place.
@@ -1627,16 +1645,22 @@ const SHOTS: Shot[] = [
       });
       await review("me/notes-app#12")(page);
       // A box that posts on GitHub names what it does there: Send is only for your agent.
-      const convos = await page.evaluate<{ buttons: string[]; filled: string }[]>(`[...document.querySelectorAll(".cv")].map((cv) => {
+      const convos = await page.evaluate<
+        { buttons: string[]; filled: string; lead: boolean }[]
+      >(`[...document.querySelectorAll(".cv")].map((cv) => {
         const words = (b) => b.textContent.trim();
         const actions = cv.querySelector(".actions");
-        return { buttons: [...actions.querySelectorAll("button, a")].map(words), filled: words(actions.querySelector(".act.primary")) };
+        const send = actions.querySelector(".act.primary, .act.s-cta");
+        return { buttons: [...actions.querySelectorAll("button, a")].map(words), filled: send ? words(send) : "", lead: !!send?.matches(".primary") };
       })`);
       for (const [i, c] of convos.entries()) {
         if (c.buttons.some((b) => b.includes("Send") || b === "Ask coordinator"))
           failures.push(`ask-review: conversation ${i + 1}'s actions read ${c.buttons.join(", ")}`);
-        if (c.filled !== "Reply") failures.push(`ask-review: conversation ${i + 1}'s filled button reads "${c.filled}", not Reply`);
+        if (c.filled !== "Reply") failures.push(`ask-review: conversation ${i + 1}'s call to action reads "${c.filled}", not Reply`);
       }
+      // One filled Reply on the page, the first's; the rest tinted.
+      if (convos.filter((c) => c.lead).length !== 1 || !convos[0]?.lead)
+        failures.push(`ask-review: filled Replies ${JSON.stringify(convos.map((c) => c.lead))}, not the first alone`);
       if (!convos[1]?.buttons.includes("Ask your agent")) failures.push("ask-review: the second conversation has no Ask your agent");
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");

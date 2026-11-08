@@ -2304,15 +2304,20 @@ p {
   color: var(--on-accent);
 }
 
-/* Done from the review, which stays open: what you did, in green, and where it went, on its own line above its actions. */
+/* Done from the review, which stays open: what you did, in green, and where it went, in the action row where the button you
+   pressed was, as tall as it. */
 .rv-acted {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 18px 0 0;
-  padding: 0 12px;
+  min-height: 34px;
+  margin: 0 8px 0 0;
   color: var(--green);
   font: 600 14px var(--sans);
+}
+
+.rv-acted-dot {
+  color: var(--faint);
 }
 
 .rv-acted a {
@@ -2387,6 +2392,15 @@ p {
 .cv .actions .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+/* A conversation's Reply that isn't the one you're answering: tinted, as a row's call to action. */
+.cv .actions .act.s-cta {
+  background: var(--accent-wash);
+}
+
+.cv .actions .act.s-cta:hover:not(:disabled) {
+  background: var(--accent);
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
@@ -2735,15 +2749,16 @@ p {
   cursor: pointer;
 }
 
-/* Your comment on an issue opened in place, over the page's bottom where the toast shows. */
+/* Your comment on an issue opened in place, over the page's bottom where the toast shows: centred on the page's column as
+   the toast is, clear of the sidebar and the list beside a review. */
 .composer {
   position: fixed;
   bottom: 18px;
-  left: 50%;
+  left: calc(50% + (var(--side-w) + var(--list-w)) / 2);
   z-index: 35;
   display: grid;
   gap: 8px;
-  width: min(720px, calc(100vw - 32px));
+  width: min(720px, calc(100% - var(--side-w) - var(--list-w) - 32px));
   max-height: calc(100vh - 120px);
   padding: 12px;
   overflow: auto;
@@ -3922,6 +3937,13 @@ button.s-edit:hover:not(:disabled) {
   field-sizing: content;
 }
 
+/* The comment box's place while the review loads: a quiet bar as tall as the box. */
+.rv-comment-input.sk-box {
+  border-color: transparent;
+  background: var(--wash);
+  resize: none;
+}
+
 .rv-side {
   position: sticky;
   top: 72px;
@@ -3947,6 +3969,7 @@ button.s-edit:hover:not(:disabled) {
     padding: 20px 14px 20px 16px;
     border-left: 1px solid var(--rule);
     background: var(--paper);
+    box-shadow: var(--shadow);
   }
 }
 
@@ -4085,13 +4108,13 @@ button.s-edit:hover:not(:disabled) {
   font-weight: 500;
 }
 
-/* GitHub's suggestions, a click each: quieter than who's picked until you pick them. */
+/* GitHub's suggestions, a click each: quieter than who's picked until you pick them. Spaced by the line's own gap, so
+   wrapped onto a line of its own it starts where "Reviewers" does. */
 .rv-suggested {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  margin-left: 8px;
 }
 
 .rv-reviewer.suggest {
@@ -4284,6 +4307,11 @@ button.s-edit:hover:not(:disabled) {
 .rv-meta > span {
   position: relative;
   padding-left: 18px;
+}
+
+/* A long why wraps without leaving one word on a line of its own. */
+.rv-meta > .why {
+  text-wrap: pretty;
 }
 
 .rv-meta > span::before,

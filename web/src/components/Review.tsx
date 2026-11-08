@@ -63,7 +63,7 @@ import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { ProseBlocks, spans, Words } from "./Prose.tsx";
-import { Reviewers } from "./Reviewers.tsx";
+import { focusReviewers, Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
 // What sits under a line of the diff: an AI note (index: its place in reading order), a review thread, the comment you're
@@ -283,9 +283,7 @@ export function Review({
   useEffect(() => {
     if (!asking || askedFocus.current === id) return;
     askedFocus.current = id;
-    requestAnimationFrame(() => {
-      document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
-    });
+    requestAnimationFrame(focusReviewers);
   }, [asking, id]);
 
   // The desk's reading order; its notes are only those written for this commit, in reading order.
@@ -597,7 +595,15 @@ export function Review({
     ...(item.state === "open" && item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
     ...(item.draft ? [{ text: "draft", tone: "" }] : []),
     ...depFacts(card),
-    { text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`, tone: "" },
+    // No size to speak of where nothing changed: "No files changed." says so under it.
+    ...(item.changed_files
+      ? [
+          {
+            text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`,
+            tone: "",
+          },
+        ]
+      : []),
   ];
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
   // The one box you write in, wherever it's drawn: under its line, or above the diff once a push took its line off it.
@@ -713,7 +719,9 @@ export function Review({
             />
           )}
           <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
-          {((open && !acted) || !!comment.trim()) && (
+          {/* Still there once you've acted, so you can comment on what you did and nothing under it moves. */}
+          {/* While Request changes is open its box is the one you write in, so an empty comment box steps aside. */}
+          {(open || !!comment.trim()) && !(writing && !comment.trim()) && (
             <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
           )}
         </div>
@@ -721,16 +729,21 @@ export function Review({
         {picking && !acted && (
           <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />
         )}
-        {/* Done from here: what you did and where it went, above what's left to do. */}
-        {acted && (
-          <p className="rv-acted">
-            <span className="rv-acted-what">✓ {acted.what}</span>
-            {acted.sending && <span className="busy" aria-label="sending" />}
-            <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>{acted.where === "inflight" ? "in Merging" : "in Archive"}</a>
-          </p>
-        )}
-        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest. */}
+        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest; done from here,
+            what you did and where it went, in place of the button you pressed. */}
         <div className="actions rv-actions">
+          {acted && (
+            <p className="rv-acted">
+              <span className="rv-acted-what">✓ {acted.what}</span>
+              <span className="rv-acted-dot" aria-hidden="true">
+                ·
+              </span>
+              <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>
+                {acted.where === "inflight" ? "in Merging" : "in Archive"}
+              </a>
+              {acted.sending && <span className="busy" aria-label="sending" />}
+            </p>
+          )}
           {readying && !acted && (
             <ActButton
               k="a"
@@ -1050,6 +1063,11 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
   return (
     <div className={cls("review", side && "side-open")} aria-busy="true">
       <div className="rv-main">
+        {!side && card?.kind === "pr" && (
+          <span className="act rv-side-toggle rv-side-show" aria-hidden="true">
+            {card.stack ? "Stack and files" : "Files"}
+          </span>
+        )}
         <div className="rv-top">
           {card ? (
             <Head
@@ -1087,9 +1105,15 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
           {(card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
             <SkLines count={1} className="rv-convo sk-short" />
           )}
+          {/* An open PR's comment box, empty, at its height. */}
+          {card && !card.resolved && (
+            <div className="rv-comment" aria-hidden="true">
+              <div className="rv-comment-input sk-box" />
+            </div>
+          )}
         </div>
+        {/* Its call to action and More. */}
         <div className="actions rv-actions" aria-hidden="true">
-          <span className="sk sk-key" />
           <span className="sk sk-key" />
           <span className="sk sk-key" />
         </div>
@@ -1145,11 +1169,11 @@ function StackList({ stack }: { stack: Stack }) {
           </span>
           <span className="rv-mnum">#{m.number}</span>
           <span className="rv-mtitle">{m.title}</span>
-          {/* Passing, running and waiting on a review are no news; what's wrong or approved is. */}
+          {/* Passing, running and waiting on a review are no news; what's wrong or approved is, red and amber in words. */}
           {m.state === "open" && (
             <span className="rv-marks" aria-label={words}>
-              {m.ci === "red" && <span className="t-bad">✗</span>}
-              {m.review === "changes_requested" && <span className="t-warn">±</span>}
+              {m.ci === "red" && <span className="t-bad">failing</span>}
+              {m.review === "changes_requested" && <span className="t-warn">changes</span>}
               {m.review === "approved" && <span>✓</span>}
             </span>
           )}
@@ -1689,7 +1713,8 @@ function InlineBox({
       }
       if (keep && at) el.setSelectionRange(at[0], at[1]);
       else el.setSelectionRange(el.value.length, el.value.length);
-      el.scrollIntoView({ block: "nearest" });
+      // The whole box in view, its Comment under the words too, not only where you type.
+      (el.closest(".rv-inline") ?? el).scrollIntoView({ block: "nearest" });
       boxBack();
       focused.current();
     };

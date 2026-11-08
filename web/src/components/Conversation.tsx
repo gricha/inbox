@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { age, MOD } from "../format.ts";
+import { age, cls, MOD } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
 import { Words } from "./Prose.tsx";
 
@@ -40,6 +40,7 @@ export function Conversation({
   const [sent, setSent] = useState<Record<string, string>>({}); // until the sync shows your reply: its url
   const [busy, setBusy] = useState<string | null>(null);
   const [more, setMore] = useState(false);
+  const [at, setAt] = useState<string | null>(null); // the conversation whose reply box you were last in
   const replied = useRef(""); // the PR whose reply box was focused for its Reply row
 
   // Opened from a Reply row: the first reply box is ready to type in (⌘↩ sends it, Esc leaves it).
@@ -55,8 +56,11 @@ export function Conversation({
 
   const waiting = view.conversation.filter((c) => c.waiting_on_you && !(c.id in sent));
   const on = (c: Convo) => {
+    setAt(c.id);
     onSpot(threadOf(view.card.id, c));
   };
+  // One filled Reply on the page: the one you're answering (the first, until you're in another's box); the rest tinted.
+  const lead = waiting.find((c) => c.id === at)?.id ?? waiting[0]?.id;
   const rest = view.conversation.filter((c) => !c.waiting_on_you);
   if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
   if (!view.conversation.length) return null;
@@ -144,7 +148,7 @@ export function Conversation({
             <div className="actions">
               <button
                 type="button"
-                className="act primary"
+                className={cls("act", c.id === lead ? "primary" : "s-cta")}
                 title={`Post this reply on GitHub, as you (${MOD}\u21b5)`}
                 disabled={!text.trim() || busy === c.id}
                 onClick={() => {

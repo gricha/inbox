@@ -4,8 +4,18 @@ import type { Reviewer } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls } from "../format.ts";
 
+// The box with the cursor and its list closed, as a review opened to ask reviewers starts: the Suggested on its line offer
+// GitHub's picks, and the list opens as you type, press ↓ or click the box, never over Ask reviewers unasked.
+export function focusReviewers() {
+  const el = document.querySelector<HTMLInputElement>(".rv-reviewers-input");
+  if (!el) return;
+  el.dataset.quiet = "";
+  el.focus();
+}
+
 // Who Ready for review asks to review your draft: GitHub's suggestions on the line, a click each, and in the list as you
-// focus it, then its people and teams as you type. Those already asked show first and stay; @ in the review focuses it.
+// focus it (while it's open, they're there and not on the line), then its people and teams as you type. Those already asked
+// show first and stay; @ in the review focuses it.
 export function Reviewers({
   id,
   asked,
@@ -86,6 +96,7 @@ export function Reviewers({
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
+      setOpen(true);
       setHi((h) => (list.length ? (h + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length : 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
@@ -134,8 +145,13 @@ export function Reviewers({
           onChange={(e) => {
             setQ(e.target.value);
             setHi(0);
+            setOpen(true);
           }}
-          onFocus={() => {
+          onFocus={(e) => {
+            if ("quiet" in e.currentTarget.dataset) delete e.currentTarget.dataset.quiet;
+            else setOpen(true);
+          }}
+          onClick={() => {
             setOpen(true);
           }}
           onBlur={() => {
@@ -172,7 +188,7 @@ export function Reviewers({
           </div>
         )}
       </span>
-      {offered.length > 0 && (
+      {offered.length > 0 && !open && (
         <span className="rv-suggested">
           <span className="rv-reviewers-label">Suggested</span>
           {offered.map((r) => (
