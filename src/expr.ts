@@ -1,5 +1,7 @@
 // A small, safe expression language for rule `when` / `filter` and `why` templates.
+import { Result } from "effect";
 import type { Signals } from "./types.ts";
+import { ExprEvalError, ExprSyntaxError } from "./errors.ts";
 import { FIELDS } from "./signals.ts";
 import { andMore } from "./stage.ts";
 
@@ -20,6 +22,20 @@ type Token = { k: "num" | "str" | "id" | "op" | "end"; v: string; pos: number };
 const KEYWORD_OPS: Record<string, string> = { and: "&&", or: "||", not: "!", in: "in", matches: "matches" };
 const FUNCS: Record<string, number> = { len: 1, lower: 1, contains: 2, startswith: 2, any: 2 };
 const FIELD_PATHS = new Set(FIELDS.map((f) => f.path));
+
+// What the parser and the evaluator throw to unwind from deep in their recursion. compile and eval each catch it once, at
+// their edge, and answer with a Result: what's wrong with the expression, or with an item's values for it.
+class Bad extends Error {
+  readonly pos: number | undefined;
+  readonly hint: string | undefined;
+  readonly op: string | undefined;
+  constructor(message: string, at: { pos?: number; hint?: string; op?: string } = {}) {
+    super(message);
+    this.pos = at.pos;
+    this.hint = at.hint;
+    this.op = at.op;
+  }
+}
 
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
@@ -47,7 +63,7 @@ function tokenize(src: string): Token[] {
         }
         s += src[j++];
       }
-      if (j >= src.length) throw new SyntaxError(`unterminated string at ${i + 1}`);
+      if (j >= src.length) throw new Bad(`unterminated string at ${i + 1}`, { pos: i + 1 });
       out.push({ k: "str", v: s, pos: i });
       i = j + 1;
       continue;
@@ -70,8 +86,8 @@ function tokenize(src: string): Token[] {
       i++;
       continue;
     }
-    if (c === "=") throw new SyntaxError(`use == to compare (at ${i + 1})`);
-    throw new SyntaxError(`unexpected "${c}" at ${i + 1}`);
+    if (c === "=") throw new Bad(`use == to compare (at ${i + 1})`, { pos: i + 1 });
+    throw new Bad(`unexpected "${c}" at ${i + 1}`, { pos: i + 1 });
   }
   out.push({ k: "end", v: "", pos: src.length });
   return out;
@@ -83,7 +99,7 @@ function parse(src: string): Node {
   const peek = (): Token => toks[p] ?? { k: "end", v: "", pos: src.length };
   const isOp = (v: string) => peek().k === "op" && peek().v === v;
   const expect = (v: string) => {
-    if (!isOp(v)) throw new SyntaxError(`expected "${v}" at ${peek().pos + 1}`);
+    if (!isOp(v)) throw new Bad(`expected "${v}" at ${peek().pos + 1}`, { pos: peek().pos + 1 });
     p++;
   };
 
@@ -191,11 +207,11 @@ function parse(src: string): Node {
       }
       return { t: "name", path: tok.v };
     }
-    throw new SyntaxError(tok.k === "end" ? "unexpected end of expression" : `unexpected "${tok.v}" at ${tok.pos + 1}`);
+    throw new Bad(tok.k === "end" ? "unexpected end of expression" : `unexpected "${tok.v}" at ${tok.pos + 1}`, { pos: tok.pos + 1 });
   };
 
   const node = or();
-  if (peek().k !== "end") throw new SyntaxError(`unexpected "${peek().v}" at ${peek().pos + 1}`);
+  if (peek().k !== "end") throw new Bad(`unexpected "${peek().v}" at ${peek().pos + 1}`, { pos: peek().pos + 1 });
   return node;
 }
 
@@ -205,8 +221,8 @@ function check(node: Node): void {
       return;
     case "name":
       if (!FIELD_PATHS.has(node.path)) {
-        const hint = suggest(node.path);
-        throw new SyntaxError(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`);
+        const hint = suggest(node.path) ?? undefined;
+        throw new Bad(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`, { hint });
       }
       return;
     case "list":
@@ -220,16 +236,14 @@ function check(node: Node): void {
       check(node.a);
       check(node.b);
       if (node.op === "matches" && node.b.t === "lit") {
-        try {
-          node.re = new RegExp(String(node.b.v), "i");
-        } catch (e) {
-          throw new SyntaxError(`bad regex: ${(e as Error).message}`);
-        }
+        const re = regex(String(node.b.v));
+        if (Result.isFailure(re)) throw new Bad(`bad regex: ${re.failure}`);
+        node.re = re.success;
       }
       return;
     case "call":
-      if (!(node.fn in FUNCS)) throw new SyntaxError(`unknown function "${node.fn}"; have ${Object.keys(FUNCS).join(", ")}`);
-      if (node.args.length !== FUNCS[node.fn]) throw new SyntaxError(`${node.fn}() takes ${FUNCS[node.fn]} argument(s)`);
+      if (!(node.fn in FUNCS)) throw new Bad(`unknown function "${node.fn}"; have ${Object.keys(FUNCS).join(", ")}`);
+      if (node.args.length !== FUNCS[node.fn]) throw new Bad(`${node.fn}() takes ${FUNCS[node.fn]} argument(s)`);
       node.args.forEach(check);
   }
 }
@@ -269,9 +283,13 @@ function lookup(s: Signals, path: string): Value {
 }
 
 function num(v: unknown, op: string): number {
-  if (typeof v !== "number") throw new TypeError(`${op} needs numbers, got ${JSON.stringify(v)}`);
+  if (typeof v !== "number") throw new Bad(`${op} needs numbers, got ${JSON.stringify(v)}`, { op });
   return v;
 }
+
+// `matches` against what may not be a pattern: a literal is checked when it compiles, a field's value when it's used.
+const regex = (source: string): Result.Result<RegExp, string> =>
+  Result.try({ try: () => new RegExp(source, "i"), catch: (e) => (e as Error).message });
 
 function glob(pattern: string): RegExp {
   return new RegExp(
@@ -343,9 +361,13 @@ function evaluate(node: Node, s: Signals): Value {
         case "in":
           if (Array.isArray(b)) return b.includes(a);
           if (typeof b === "string") return b.includes(String(a));
-          throw new TypeError(`"in" needs a list or string on the right, got ${JSON.stringify(b)}`);
-        case "matches":
-          return (node.re ?? new RegExp(String(b), "i")).test(String(a ?? ""));
+          throw new Bad(`"in" needs a list or string on the right, got ${JSON.stringify(b)}`, { op: "in" });
+        case "matches": {
+          if (node.re) return node.re.test(String(a ?? ""));
+          const re = regex(String(b));
+          if (Result.isFailure(re)) throw new Bad(re.failure, { op: "matches" });
+          return re.success.test(String(a ?? ""));
+        }
         case "+":
           if (typeof a === "string" || typeof b === "string") return String(a) + String(b);
           return num(a, "+") + num(b, "+");
@@ -362,16 +384,31 @@ function evaluate(node: Node, s: Signals): Value {
   throw new Error("unknown node");
 }
 
-export type Compiled = { ok: true; eval(s: Signals): unknown } | { ok: false; error: string };
+// An expression ready to run on an item's signals: its value, or why the item's values don't work with it. Per item, per
+// rule, per board on every snapshot, so a Result and never an Effect.
+export interface Compiled {
+  eval(s: Signals): Result.Result<unknown, ExprEvalError>;
+}
 
-export function compile(src: string): Compiled {
-  try {
-    const node = parse(src);
-    check(node);
-    return { ok: true, eval: (s) => evaluate(node, s) };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
+export function compile(source: string): Result.Result<Compiled, ExprSyntaxError> {
+  return Result.try({
+    try: (): Compiled => {
+      const node = parse(source);
+      check(node);
+      return { eval: (s) => Result.try({ try: () => evaluate(node, s), catch: evalError }) };
+    },
+    catch: (e) => {
+      if (e instanceof Bad) return new ExprSyntaxError({ source, message: e.message, pos: e.pos, hint: e.hint });
+      if (e instanceof RangeError) return new ExprSyntaxError({ source, message: e.message }); // nested deeper than the stack goes
+      throw e; // a bug in the parser, not the expression's
+    },
+  });
+}
+
+function evalError(e: unknown): ExprEvalError {
+  if (e instanceof Bad) return new ExprEvalError({ message: e.message, op: e.op });
+  if (e instanceof RangeError) return new ExprEvalError({ message: e.message });
+  throw e; // an unknown node, function or operator: a bug, since compile checked them
 }
 
 // A count of 1 takes the singular of the plural that follows it: "{pr.unresolved_threads} unresolved threads" → "1 unresolved thread".

@@ -2,7 +2,9 @@
 // Adding a setting = one entry in SETTINGS; the Settings page, validation and `desk settings` pick it up.
 import fs from "node:fs";
 import path from "node:path";
+import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
+import { fsError, type FsError } from "./errors.ts";
 import type { ConfigError, SettingDef, SettingsSection, SettingValue } from "./types.ts";
 
 const DEFAULT_PROMPT = `Review {item.url} by {item.author}.
@@ -269,21 +271,20 @@ const REMOVED = new Set([
   "inflight.clone_roots",
 ]);
 
-// Reads settings.json. Bad entries fall back to their defaults; `raw` keeps them (null if unreadable) so a save doesn't drop them.
-export function readSettings(file: string): {
+// What settings.json holds. Bad entries fall back to their defaults; `raw` keeps them (null if unusable) so a save doesn't drop them.
+export interface SettingsFile {
   overrides: Record<string, SettingValue>;
   errors: ConfigError[];
   raw: Record<string, unknown> | null;
-} {
-  if (!fs.existsSync(file)) return { overrides: {}, errors: [], raw: {} };
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch (e) {
-    return { overrides: {}, errors: [{ path: "settings.json", message: (e as Error).message }], raw: null };
-  }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
-    return { overrides: {}, errors: [{ path: "settings.json", message: "must be a JSON object" }], raw: null };
+}
+
+const unusable = (message: string): SettingsFile => ({ overrides: {}, errors: [{ path: "settings.json", message }], raw: null });
+
+function settingsFrom(text: string): SettingsFile {
+  const parsed = Result.try({ try: (): unknown => JSON.parse(text), catch: (e) => (e as Error).message });
+  if (Result.isFailure(parsed)) return unusable(parsed.failure);
+  const raw = parsed.success;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return unusable("must be a JSON object");
   const overrides: Record<string, SettingValue> = {};
   const errors: ConfigError[] = [];
   for (const [k, v] of Object.entries(raw)) {
@@ -295,15 +296,40 @@ export function readSettings(file: string): {
   return { overrides, errors, raw: raw as Record<string, unknown> };
 }
 
+// Reads settings.json, none yet being no overrides. Only reading it fails: what's in it is checked entry by entry.
+export const loadSettings = (file: string): Effect.Effect<SettingsFile, FsError> =>
+  Effect.suspend((): Effect.Effect<SettingsFile, FsError> =>
+    fs.existsSync(file)
+      ? Effect.try({ try: () => fs.readFileSync(file, "utf8"), catch: fsError("read", file) }).pipe(Effect.map(settingsFrom))
+      : Effect.succeed({ overrides: {}, errors: [], raw: {} }),
+  );
+
+// For what reads it synchronously and goes on regardless (the desk starting, the desktop app): one it can't read is a
+// problem on settings.json, like one that isn't JSON, and nothing a save may write over.
+export const readSettings = (file: string): SettingsFile =>
+  Effect.runSync(loadSettings(file).pipe(Effect.catch((e) => Effect.succeed(unusable(e.message)))));
+
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });
 
-export function writeSettings(file: string, values: Record<string, unknown>): void {
-  const real = fs.existsSync(file) ? fs.realpathSync(file) : file; // keep a symlinked settings.json a symlink
+// Through a temporary file and a rename, so a reader never sees half of it, and through a symlinked settings.json.
+export const writeSettings = Effect.fn("writeSettings")(function* (file: string, values: Record<string, unknown>) {
+  const real = fs.existsSync(file) ? yield* Effect.try({ try: () => fs.realpathSync(file), catch: fsError("realpath", file) }) : file;
   const sorted = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
   const tmp = `${real}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(sorted, null, 2) + "\n");
-  fs.renameSync(tmp, real);
-}
+  const text = JSON.stringify(sorted, null, 2) + "\n";
+  yield* Effect.try({
+    try: () => {
+      fs.writeFileSync(tmp, text);
+    },
+    catch: fsError("write", tmp),
+  });
+  yield* Effect.try({
+    try: () => {
+      fs.renameSync(tmp, real);
+    },
+    catch: fsError("rename", real),
+  });
+}, Effect.uninterruptible);
 
 // ---------------------------------------------------------------- moving settings out of config.toml
 
@@ -321,14 +347,13 @@ const LEGACY: Record<string, string> = {
 };
 export const LEGACY_TABLES = ["signals", "notify", "handoff", "analyze"];
 
+const toml = (text: string): Result.Result<Record<string, unknown>, unknown> => Result.try({ try: () => parse(text), catch: (e) => e });
+
 // Pulls the old settings out of config.toml text. `text` is null when they couldn't be removed cleanly.
 export function migrateLegacy(configText: string): { moved: Record<string, SettingValue>; text: string | null } | null {
-  let raw: Record<string, unknown>;
-  try {
-    raw = parse(configText);
-  } catch {
-    return null;
-  }
+  const parsed = toml(configText);
+  if (Result.isFailure(parsed)) return null; // parseConfig reports it
+  const raw = parsed.success;
   if (!("poll_seconds" in raw) && !LEGACY_TABLES.some((t) => t in raw)) return null;
   const moved: Record<string, SettingValue> = {};
   for (const [old, key] of Object.entries(LEGACY)) {
@@ -366,14 +391,12 @@ export function migrateLegacy(configText: string): { moved: Record<string, Setti
     .join("\n")
     .replaceAll(/\n{3,}/g, "\n\n")
     .replace(/^\n+/, "");
-  try {
-    const after = parse(text) as Record<string, unknown>;
-    const same = JSON.stringify([raw.spaces, raw.boards]) === JSON.stringify([after.spaces, after.boards]);
-    const clean = !("poll_seconds" in after) && !LEGACY_TABLES.some((t) => t in after);
-    return { moved, text: same && clean ? text : null };
-  } catch {
-    return { moved, text: null };
-  }
+  const reparsed = toml(text);
+  if (Result.isFailure(reparsed)) return { moved, text: null };
+  const after = reparsed.success;
+  const same = JSON.stringify([raw.spaces, raw.boards]) === JSON.stringify([after.spaces, after.boards]);
+  const clean = !("poll_seconds" in after) && !LEGACY_TABLES.some((t) => t in after);
+  return { moved, text: same && clean ? text : null };
 }
 
 export const settingsPath = (home: string) => path.join(home, "settings.json");

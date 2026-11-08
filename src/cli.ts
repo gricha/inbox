@@ -5,6 +5,7 @@ import { readFileSync, realpathSync, watchFile } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
+import { Effect } from "effect";
 import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { DeskApiError, DeskDownError, untilText } from "./client.ts";
@@ -423,7 +424,8 @@ async function connect(x: Ctx): Promise<number> {
   const driver = HARNESSES[x.args[0] ?? "claude"];
   if (!driver) throw new UsageError(`unknown agent: ${x.args[0]} (try: desk connect claude, or codex)`);
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
-  const s = x.opts.apply ? await agents.connect(driver.id, url) : agents.status(driver.id, url);
+  // effect-bridge(C6): connect becomes an Effect; what they fail with throws as before
+  const s = x.opts.apply ? await Effect.runPromise(agents.connect(driver.id, url)) : Effect.runSync(agents.status(driver.id, url));
   if (s.mcp.connected && s.skill.state === "installed") {
     x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
     return 0;
@@ -454,7 +456,8 @@ async function serve(x: Ctx): Promise<number> {
   const srv = await startServer({ port, open: !!x.opts.open });
   const refresh = () => {
     try {
-      for (const f of agents.refreshSkills(srv.desk.home)) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
+      const done = Effect.runSync(agents.refreshSkills(srv.desk.home)); // effect-bridge(C6): serve's refresh catches its FsError
+      for (const f of done) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
     } catch (e) {
       srv.desk.log(`couldn't refresh the Review Desk skill: ${(e as Error).message}`);
     }
@@ -537,13 +540,13 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
   },
   install: async (x) => {
     macOnly("install");
-    const file = await install(cliPath());
+    const file = await Effect.runPromise(install(cliPath())); // effect-bridge(C6): it rejects with what it fails with
     x.out(`${x.c.green("✓")} installed ${file}\n  desk serve now runs at login; log: ~/.review-desk/desk.log`);
     return 0;
   },
   uninstall: (x) => {
     macOnly("uninstall");
-    x.out(`${x.c.green("✓")} removed ${uninstall()}`);
+    x.out(`${x.c.green("✓")} removed ${Effect.runSync(uninstall())}`); // effect-bridge(C6): it throws its FsError
     return Promise.resolve(0);
   },
 };
@@ -569,8 +572,9 @@ export async function main(argv: string[], io: IO = STDIO): Promise<number> {
     if (positionals.length > max) throw new UsageError(`${cmd}: unexpected argument ${positionals[max]}`);
     return await run(ctxFor(io, positionals, values));
   } catch (e) {
-    const err = e as Error & { code?: string };
-    if (e instanceof UsageError || err.code?.startsWith("ERR_PARSE_ARGS")) {
+    const err = e as Error & { code?: unknown };
+    // A CommandFailed's code is its exit status, a number.
+    if (e instanceof UsageError || (typeof err.code === "string" && err.code.startsWith("ERR_PARSE_ARGS"))) {
       io.stderr.write(`desk: ${err.message}\nrun 'desk help' for usage\n`);
       return 2;
     }

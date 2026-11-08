@@ -4,8 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
-import { checkSetting, DEFAULTS, effective, migrateLegacy, readSettings, SETTINGS, writeSettings } from "../src/settings.ts";
+import { checkSetting, DEFAULTS, effective, loadSettings, migrateLegacy, readSettings, SETTINGS, writeSettings } from "../src/settings.ts";
 import { defaultConfigText, parseConfig } from "../src/config.ts";
+import { failureSync, runSync } from "./helpers/run.ts";
 
 test("every setting's default is valid", () => {
   for (const d of SETTINGS) assert.equal(checkSetting(d.key, d.default), null, d.key);
@@ -42,11 +43,33 @@ test("settings.json: bad entries fall back to defaults", () => {
   const s = effective(overrides);
   assert.equal(s["github.poll_seconds"], 90);
   assert.deepEqual(s["github.bots"], ["ci-helper"]);
-  writeSettings(file, { "notify.enabled": false });
+  runSync(writeSettings(file, { "notify.enabled": false }));
   assert.deepEqual(readSettings(file).overrides, { "notify.enabled": false });
   fs.writeFileSync(file, "{ not json");
   assert.equal(readSettings(file).errors[0]?.path, "settings.json");
   assert.equal(readSettings(file).raw, null);
+  assert.equal(runSync(loadSettings(file)).raw, null, "what's in it is collected, never a failure");
+  fs.writeFileSync(file, "[]");
+  assert.deepEqual(readSettings(file).errors, [{ path: "settings.json", message: "must be a JSON object" }]);
+  assert.deepEqual(runSync(loadSettings(path.join(dir, "none.json"))), { overrides: {}, errors: [], raw: {} });
+});
+
+test("a settings.json that can't be read fails with FsError, and the desk starts on defaults with it as a problem", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
+  const file = path.join(dir, "settings.json");
+  fs.mkdirSync(file);
+  const e = failureSync(loadSettings(file));
+  assert.deepEqual([e._tag, e.op, e.path, e.code], ["FsError", "read", file, "EISDIR"]);
+  assert.match(e.message, /^EISDIR: illegal operation on a directory/, "Node's words, which name what it did");
+  assert.deepEqual(readSettings(file), { overrides: {}, errors: [{ path: "settings.json", message: e.message }], raw: null });
+});
+
+test("writeSettings fails with FsError when settings.json can't be written", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
+  const file = path.join(dir, "gone", "settings.json");
+  const e = failureSync(writeSettings(file, { "notify.enabled": false }));
+  assert.deepEqual([e._tag, e.op, e.path, e.code], ["FsError", "write", `${file}.${process.pid}.tmp`, "ENOENT"]);
+  assert.match(e.message, /^ENOENT: no such file or directory, open /);
 });
 
 test("settings that no longer exist (the Claude model and command) load without errors and stay in the file", () => {
@@ -80,7 +103,7 @@ test("writeSettings writes through a symlinked settings.json", () => {
   const link = path.join(dir, "settings.json");
   fs.writeFileSync(real, "{}");
   fs.symlinkSync(real, link);
-  writeSettings(link, { "notify.enabled": false });
+  runSync(writeSettings(link, { "notify.enabled": false }));
   assert.ok(fs.lstatSync(link).isSymbolicLink());
   assert.deepEqual(JSON.parse(fs.readFileSync(real, "utf8")), { "notify.enabled": false });
   assert.deepEqual(fs.readdirSync(dir).sort(), ["dotfiles.json", "settings.json"]);

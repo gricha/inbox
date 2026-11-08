@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Result } from "effect";
 import { compile, renderTemplate } from "../src/expr.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
@@ -8,11 +9,8 @@ import { makeContext, makeItem, NOW } from "./helpers/items.ts";
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
 const sig = analyze(makeItem({ labels: ["bug", "area:ml"], title: "Revert flaky retry" }), makeContext(), cfg, NOW).signals;
 
-const run = (src: string) => {
-  const c = compile(src);
-  if (!c.ok) throw new Error(c.error);
-  return c.eval(sig);
-};
+const run = (src: string) => Result.getOrThrow(Result.getOrThrow(compile(src)).eval(sig));
+const syntaxError = (src: string) => Result.getOrThrow(Result.flip(compile(src)));
 
 test("operators and precedence", () => {
   assert.equal(run("1 + 2 * 3"), 7);
@@ -40,21 +38,32 @@ test("in, matches and functions", () => {
 });
 
 test("compile errors are specific", () => {
-  const unknown = compile("me.requsted_direct");
-  assert.equal(unknown.ok, false);
-  assert.match((unknown as { error: string }).error, /did you mean "me.requested_direct"/);
-  assert.match((compile("pr.ci = 'red'") as { error: string }).error, /use ==/);
-  assert.match((compile("foo(1)") as { error: string }).error, /unknown function/);
-  assert.match((compile("len(1, 2)") as { error: string }).error, /takes 1/);
-  assert.match((compile("(pr.size") as { error: string }).error, /expected "\)"/);
-  assert.match((compile("item.title matches '['") as { error: string }).error, /bad regex/);
-  assert.match((compile("'open") as { error: string }).error, /unterminated/);
+  const unknown = syntaxError("me.requsted_direct");
+  assert.equal(unknown._tag, "ExprSyntaxError");
+  assert.equal(unknown.message, 'unknown field "me.requsted_direct"; did you mean "me.requested_direct"?');
+  assert.deepEqual([unknown.source, unknown.hint], ["me.requsted_direct", "me.requested_direct"]);
+  assert.equal(syntaxError("pr.ci = 'red'").message, "use == to compare (at 7)");
+  assert.equal(syntaxError("pr.ci = 'red'").pos, 7);
+  assert.match(syntaxError("foo(1)").message, /unknown function/);
+  assert.match(syntaxError("len(1, 2)").message, /takes 1/);
+  assert.deepEqual([syntaxError("(pr.size").message, syntaxError("(pr.size").pos], ['expected ")" at 9', 9]);
+  assert.match(syntaxError("item.title matches '['").message, /^bad regex: /);
+  assert.match(syntaxError("'open").message, /unterminated/);
+  assert.match(syntaxError("(".repeat(100_000)).message, /call stack/, "nesting deeper than the stack goes is the expression's");
 });
 
 test("type errors surface at eval time", () => {
-  const c = compile("item.title > 3");
-  assert.ok(c.ok);
-  assert.throws(() => (c as { eval: (s: unknown) => unknown }).eval(sig), /needs numbers/);
+  const c = Result.getOrThrow(compile("item.title > 3"));
+  const e = Result.getOrThrow(Result.flip(c.eval(sig)));
+  assert.equal(e._tag, "ExprEvalError");
+  assert.match(e.message, /^> needs numbers, got "Revert flaky retry"$/);
+  assert.equal(e.op, ">");
+  const pattern = Result.getOrThrow(
+    Result.flip(Result.getOrThrow(compile("'x' matches item.title")).eval({ ...sig, item: { ...sig.item, title: "[" } })),
+  );
+  assert.deepEqual([pattern._tag, pattern.op], ["ExprEvalError", "matches"]);
+  assert.match(pattern.message, /Invalid regular expression/);
+  assert.equal(Result.getOrThrow(Result.flip(Result.getOrThrow(compile("'a' in pr.size")).eval(sig))).op, "in");
 });
 
 test("templates interpolate fields and round numbers", () => {

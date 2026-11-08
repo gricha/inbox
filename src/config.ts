@@ -1,4 +1,5 @@
 // Loads and validates config.toml, and writes the first-run default.
+import { Result } from "effect";
 import { parse, TomlError } from "smol-toml";
 import {
   BUCKETS,
@@ -22,22 +23,20 @@ type Raw = Record<string, unknown>;
 
 const SORTS = ["waiting", "updated", "newest"] as const;
 
+// smol-toml says which line; a document nested deeper than the stack goes (a RangeError) has none.
+function tomlError(e: unknown): ConfigError {
+  const line = e instanceof TomlError ? e.line : undefined;
+  return { path: line ? `line ${line}` : "toml", message: (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "" };
+}
+
 // Settings (sync interval, bots, prompts, ...) come from settings.json; config.toml holds spaces and boards.
 export function parseConfig(
   text: string,
   settings: Settings = DEFAULTS,
 ): { loaded: LoadedConfig | null; errors: ConfigError[]; warnings: ConfigError[] } {
-  let raw: Raw;
-  try {
-    raw = parse(text);
-  } catch (e) {
-    const err = e as TomlError;
-    return {
-      loaded: null,
-      errors: [{ path: err.line ? `line ${err.line}` : "toml", message: err.message.split("\n")[0] ?? "" }],
-      warnings: [],
-    };
-  }
+  const parsed = Result.try({ try: (): Raw => parse(text), catch: tomlError });
+  if (Result.isFailure(parsed)) return { loaded: null, errors: [parsed.failure], warnings: [] };
+  const raw = parsed.success;
   const errors: ConfigError[] = [];
   const err = (path: string, message: string) => errors.push({ path, message });
 

@@ -534,7 +534,7 @@ export class Desk {
       return;
     }
     const merged = { ...m.moved, ...this.settingsRaw };
-    if (Object.keys(merged).length) writeSettings(this.settingsPath, merged);
+    if (Object.keys(merged).length) Effect.runSync(writeSettings(this.settingsPath, merged)); // effect-bridge(C5a): migrateSettings yields it; init fails with its FsError
     this.store.set("settings_migrated", this.now().toISOString());
     this.settings = this.readSettings();
     if (m.text === null) {
@@ -619,7 +619,7 @@ export class Desk {
       else next[k] = v;
     }
     for (const k of patch.reset ?? []) delete next[k];
-    writeSettings(this.settingsPath, next);
+    Effect.runSync(writeSettings(this.settingsPath, next)); // effect-bridge(C5a): putSettings yields it; it throws its FsError, a 500 as before
     this.reloadSettings();
     return { ok: true, errors: [], settings: this.getSettings() };
   }
@@ -627,12 +627,12 @@ export class Desk {
   // ---------------------------------------------------------------- agents
 
   agentStatus(mcpUrl: string): AgentStatus {
-    return agents.status("claude-code", mcpUrl);
+    return Effect.runSync(agents.status("claude-code", mcpUrl)); // effect-bridge(C5c): agentStatus yields it; it throws its FsError, a 500 as before
   }
 
   async connectAgent(mcpUrl: string): Promise<AgentStatus> {
     try {
-      return await agents.connect("claude-code", mcpUrl);
+      return await Effect.runPromise(agents.connect("claude-code", mcpUrl)); // effect-bridge(C5c): connectAgent maps what it fails with to Upstream
     } catch (e) {
       throw new DeskError(502, (e as Error).message);
     }

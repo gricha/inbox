@@ -4,8 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
+import { CommandFailed, CommandNotFound, CommandTimeout, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { claudeSpawn } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
@@ -39,24 +40,29 @@ export type DriverId = keyof typeof DRIVERS;
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 
+// No config yet, or one that doesn't parse: not registered, and registering will say what's wrong.
 function registered(d: Driver, home: string): boolean {
-  try {
-    const servers = d.servers(home);
-    return typeof servers === "object" && servers !== null && "review-desk" in servers;
-  } catch {
-    return false; // no config yet, or one we can't parse: registering will say what's wrong
-  }
+  const servers = Result.getOrNull(Result.try({ try: () => d.servers(home), catch: () => null }));
+  return typeof servers === "object" && servers !== null && "review-desk" in servers;
 }
 
-function skillState(dir: string): "installed" | "outdated" | "missing" {
+// The skill the desk ships: not reading it is a broken install (a defect), never the owner's to fix.
+const bundled = Effect.sync(() => fs.readdirSync(SKILL));
+const bundledFile = (f: string) => Effect.sync(() => fs.readFileSync(path.join(SKILL, f)));
+
+const readFile = (file: string) => Effect.try({ try: () => fs.readFileSync(file), catch: fsError("read", file) });
+
+const skillState = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<AgentStatus["skill"]["state"], FsError> {
   if (!fs.existsSync(path.join(dir, "SKILL.md"))) return "missing";
-  const same = (f: string) =>
-    fs.existsSync(path.join(dir, f)) && fs.readFileSync(path.join(dir, f)).equals(fs.readFileSync(path.join(SKILL, f)));
-  return fs.readdirSync(SKILL).every(same) ? "installed" : "outdated";
-}
+  for (const f of yield* bundled) {
+    const mine = path.join(dir, f);
+    if (!fs.existsSync(mine) || !(yield* readFile(mine)).equals(yield* bundledFile(f))) return "outdated";
+  }
+  return "installed";
+});
 
 // HOME is read on every call, so tests can point it at a scratch directory.
-export function status(driver: DriverId, url: string): AgentStatus {
+export const status = Effect.fn("agents.status")(function* (driver: DriverId, url: string): Effect.fn.Return<AgentStatus, FsError> {
   const d = DRIVERS[driver];
   const home = os.homedir();
   const parent = d.skills(home);
@@ -65,55 +71,103 @@ export function status(driver: DriverId, url: string): AgentStatus {
     driver,
     mcp: { connected: registered(d, home), command: [d.bin, ...d.add(url)].map(sh).join(" ") },
     skill: {
-      state: skillState(dir),
+      state: yield* skillState(dir),
       path: path.join(dir, "SKILL.md"),
       command: `mkdir -p ${sh(parent)} && cp -R ${sh(SKILL)} ${sh(parent)}/`,
     },
   };
-}
+});
 
-function run(bin: string, args: string[], command: string): Promise<void> {
-  const s = Effect.runSync(claudeSpawn(bin, args)); // effect-bridge(C3): cmd.exe's refusal throws as before
-  return new Promise((resolve, reject) => {
-    execFile(s.file, s.args, { shell: s.shell, timeout: 60_000 }, (err, _stdout, stderr) => {
-      if (!err) {
-        resolve();
-        return;
-      }
-      // cmd.exe exits 9009 when it can't find the command.
-      const why =
-        err.code === "ENOENT" || (s.shell && err.code === 9009)
-          ? `${bin} isn't on PATH`
-          : `${bin} failed: ${(stderr || err.message).trim().split("\n").slice(-2).join(" ")}`;
-      reject(new Error(`${why}. Run it yourself: ${command}`));
-    });
+type RunError = CommandNotFound | CommandFailed | CommandTimeout | UnsafeArgument;
+
+const TIMEOUT = 60_000;
+
+// Every failure ends with what to run yourself instead: `command`, the same registration.
+const run = (bin: string, args: string[], command: string): Effect.Effect<void, RunError> =>
+  Effect.flatMap(claudeSpawn(bin, args), (s) =>
+    Effect.callback<void, RunError>((resume) => {
+      const child = execFile(s.file, s.args, { shell: s.shell, timeout: TIMEOUT }, (err, _stdout, stderr) => {
+        if (!err) {
+          resume(Effect.void);
+          return;
+        }
+        // cmd.exe exits 9009 when it can't find the command.
+        if (err.code === "ENOENT" || (s.shell && err.code === 9009)) {
+          resume(Effect.fail(new CommandNotFound({ command: bin, hint: `${bin} isn't on PATH. Run it yourself: ${command}` })));
+          return;
+        }
+        const summary = `${bin} failed: ${(stderr || err.message).trim().split("\n").slice(-2).join(" ")}. Run it yourself: ${command}`;
+        // execFile kills it for its timeout, or for printing more than it keeps.
+        const timedOut = err.killed === true && err.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+        const code = typeof err.code === "number" ? err.code : null;
+        resume(
+          Effect.fail(
+            timedOut
+              ? new CommandTimeout({ command: bin, timeoutMs: TIMEOUT, summary })
+              : new CommandFailed({ command: bin, code, signal: err.signal ?? null, stderr, cause: err, summary }),
+          ),
+        );
+      });
+      // Interrupted: it's stopped (SIGKILL if SIGTERM didn't do it in 2 s), and the run ends once it has exited.
+      return Effect.callback<void>((done) => {
+        if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+          done(Effect.void);
+          return;
+        }
+        const hard = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, 2000);
+        hard.unref();
+        child.once("exit", () => {
+          clearTimeout(hard);
+          done(Effect.void);
+        });
+        child.kill();
+      });
+    }),
+  );
+
+const copySkill = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<void, FsError> {
+  yield* Effect.try({
+    try: () => {
+      fs.mkdirSync(dir, { recursive: true });
+    },
+    catch: fsError("mkdir", dir),
   });
-}
-
-function copySkill(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
-  for (const f of fs.readdirSync(SKILL)) fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(SKILL, f)));
-}
+  for (const f of yield* bundled) {
+    const content = yield* bundledFile(f);
+    const to = path.join(dir, f);
+    yield* Effect.try({
+      try: () => {
+        fs.writeFileSync(to, content);
+      },
+      catch: fsError("write", to),
+    });
+  }
+});
 
 // Connect's copy goes stale whenever the skill changes. Only on ~/.review-desk: a scratch or test desk never writes to ~/.claude.
-export function refreshSkills(deskHome: string): string[] {
+export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string): Effect.fn.Return<string[], FsError> {
   const home = os.homedir();
   if (path.resolve(deskHome) !== path.join(home, ".review-desk")) return [];
   const done: string[] = [];
   for (const d of Object.values(DRIVERS)) {
     const dir = path.join(d.skills(home), "review-desk");
-    if (skillState(dir) !== "outdated") continue; // missing: an agent you didn't connect
-    copySkill(dir);
+    if ((yield* skillState(dir)) !== "outdated") continue; // missing: an agent you didn't connect
+    yield* copySkill(dir);
     done.push(path.join(dir, "SKILL.md"));
   }
   return done;
-}
+});
 
 // Installs or refreshes the skill, then registers the MCP server if it isn't yet.
-export async function connect(driver: DriverId, url: string): Promise<AgentStatus> {
+export const connect = Effect.fn("agents.connect")(function* (
+  driver: DriverId,
+  url: string,
+): Effect.fn.Return<AgentStatus, FsError | RunError> {
   const d = DRIVERS[driver];
-  const s = status(driver, url);
-  if (s.skill.state !== "installed") copySkill(path.dirname(s.skill.path));
-  if (!s.mcp.connected) await run(d.bin, d.add(url), s.mcp.command);
-  return status(driver, url);
-}
+  const s = yield* status(driver, url);
+  if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));
+  if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command);
+  return yield* status(driver, url);
+});

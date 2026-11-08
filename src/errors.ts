@@ -128,13 +128,27 @@ export function errorBody(e: DeskHttpError): ErrorBody {
   return { error: e.message, tag: e._tag };
 }
 
+// ---------------------------------------------------------------- the rules' expressions (config.toml)
+
+// A board's filter or priority, or a rule's when, doesn't parse, or names a field or function there isn't: the words the
+// Rules page shows at its path. pos is where it went wrong (1-based), hint the field it may have meant.
+export class ExprSyntaxError extends Data.TaggedError("ExprSyntaxError")<{
+  readonly source: string;
+  readonly message: string;
+  readonly pos?: number;
+  readonly hint?: string;
+}> {}
+
+// An expression that parsed but can't be worked out for an item: op on what isn't a number, `in` on what isn't a list or
+// text, `matches` on a field's value that isn't a pattern. The rule doesn't match, and its trace keeps the words.
+export class ExprEvalError extends Data.TaggedError("ExprEvalError")<{ readonly message: string; readonly op?: string }> {}
+
 // ---------------------------------------------------------------- files
 
 type FsOp = "read" | "write" | "rename" | "copy" | "mkdir" | "realpath" | "readdir" | "remove" | "stat" | "append" | "watch";
 
 // A file the desk reads or writes failed: cause is Node's own error (its code says which: ENOENT, EACCES…), and its
 // message is Node's, which already names the file.
-/** @public until C3 */
 export class FsError extends Data.TaggedError("FsError")<{ readonly op: FsOp; readonly path: string; readonly cause: unknown }> {
   get code(): string | undefined {
     const c = this.cause as { code?: unknown } | null;
@@ -146,7 +160,6 @@ export class FsError extends Data.TaggedError("FsError")<{ readonly op: FsOp; re
 }
 
 // For Effect.try's and Effect.tryPromise's catch: `catch: fsError("write", file)`.
-/** @public until C3 */
 export const fsError =
   (op: FsOp, path: string) =>
   (cause: unknown): FsError =>
@@ -161,9 +174,14 @@ export class CommandNotFound extends Data.TaggedError("CommandNotFound")<{ reado
   }
 }
 
-// No answer in time: it was stopped, and what it started with it.
-export class CommandTimeout extends Data.TaggedError("CommandTimeout")<{ readonly command: string; readonly timeoutMs: number }> {
+// No answer in time: it was stopped, and what it started with it. summary: the words of a caller that has its own.
+export class CommandTimeout extends Data.TaggedError("CommandTimeout")<{
+  readonly command: string;
+  readonly timeoutMs: number;
+  readonly summary?: string;
+}> {
   override get message(): string {
+    if (this.summary) return this.summary;
     return `no answer in ${Math.round(this.timeoutMs / 60_000)} minutes, so it was stopped`;
   }
 }
@@ -179,14 +197,17 @@ export class CommandOutputTooLarge extends Data.TaggedError("CommandOutputTooLar
 }
 
 // It exited non-zero or couldn't start: the last lines it wrote to stderr, else Node's error (cause), else its exit.
+// summary: the words of a caller that has its own (your agent's CLI says what to run yourself, launchctl its step).
 export class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly command: string;
   readonly code: number | null;
   readonly signal: string | null;
   readonly stderr: string;
   readonly cause?: unknown;
+  readonly summary?: string;
 }> {
   override get message(): string {
+    if (this.summary) return this.summary;
     const why =
       this.stderr || (this.cause instanceof Error ? this.cause.message : `${this.command} exited with ${this.code ?? this.signal}`);
     return why.trim().split("\n").slice(-3).join(" ");

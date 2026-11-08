@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Result } from "effect";
 import { compile } from "../src/expr.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
@@ -170,9 +171,11 @@ test("a CODEOWNERS ping that changes code you work in, one that doesn't, and one
   assert.deepEqual([yours.pr.my_area_files, yours.pr.my_area], [2, true]);
   assert.deepEqual([elsewhere.pr.my_area_files, elsewhere.pr.my_area], [0, false]);
   assert.deepEqual([unknown.pr.my_area_files, unknown.pr.my_area], [-1, false]);
-  const rule = compile("me.requested_codeowner && pr.my_area_files == 0");
-  if (!rule.ok) throw new Error(rule.error);
-  assert.deepEqual([rule.eval(yours), rule.eval(elsewhere), rule.eval(unknown)], [false, true, false]);
+  const rule = Result.getOrThrow(compile("me.requested_codeowner && pr.my_area_files == 0"));
+  assert.deepEqual(
+    [yours, elsewhere, unknown].map((s) => Result.getOrThrow(rule.eval(s))),
+    [false, true, false],
+  );
 });
 
 test("a bot's PR opened for you is yours: by your login or your name, whatever the punctuation", () => {

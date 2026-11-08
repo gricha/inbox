@@ -25,17 +25,22 @@ services, `Data.TaggedError`, the desk's own `log`.
   or `sync_error` text and `{ ok: false, errors }` answers stay data.
 - A timeout is a failure (it's stored and shown: "no answer in 6 minutes, so it was stopped"). Interruption (the desk
   stopping, a client going away) isn't: it's never stored, shown or reported.
+- A notification never fails what sent it: `notify` and `openUrl` ignore what `execFile` refuses as well as what it
+  fails with. Deliberate change, with a test: text `execFile` refuses before starting anything (a NUL byte) now
+  does nothing too, where it threw into the coordinator's or an automation's bookkeeping.
 
 ## Defining errors
 
-- Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, files, child processes, Claude
-  Code, GitHub. The UI's own (the desk unreachable, an API refusal) live in `web/src/api.ts`. Tags are unique across
+- Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the rules' expressions, files,
+  child processes, Claude Code, GitHub. The UI's own (the desk unreachable, an API refusal) live in `web/src/api.ts`. Tags are unique across
   families: GitHub's 403 is `GitHubForbidden`, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
 - Every error has a message the owner can read, the same words as before the migration (tests, toasts, the CLI and the
   stored `*_error` fields show them verbatim): pass `message`, or give the class `override get message()`. An empty
-  message erases a stored error (the coordinator's `coordinator_error`), so never leave one empty.
+  message erases a stored error (the coordinator's `coordinator_error`), so never leave one empty. A command whose
+  caller has words of its own keeps them: `CommandNotFound`'s `hint` is its whole message, and `CommandFailed` and
+  `CommandTimeout` take a `summary` ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …").
 - `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
   that aren't an error go in a field of their own (Claude's login `detail`).
 - The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix
@@ -131,8 +136,8 @@ The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the 
 Outside these exceptions there is no `throw`, `try`/`catch`, `.catch(` or `Promise.reject` for an expected failure:
 
 - `throw` for a defect, `!` assertions and `throw new Error("unreachable: …")` stay.
-- A module's private recursive parser may throw to unwind and convert once, at its exported edge, to a `Result` or an
-  Effect (`expr.ts`'s `compile`).
+- A module's private recursive parser or evaluator may throw to unwind and convert once, at its exported edge, to a
+  `Result` or an Effect (`expr.ts`'s `compile` and `Compiled.eval`, with `Result.try`).
 - `electron/preload.cjs`: sandboxed CommonJS, it can't load `effect`.
 - Tests and the shots' Playwright steps are `node:test` / Playwright code: they run Effects through
   `test/helpers/run.ts` and assert as before.
@@ -197,8 +202,9 @@ with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), an
 
 ## Desk's shape
 
-- `new Desk(opts)` stays a constructor; its I/O failing (the home, `settings.json`, `desk.db`) is a startup defect
-  that `startServer`'s caller shows. `init()` returns an Effect. `stop()` stays synchronous: it interrupts the runner's
+- `new Desk(opts)` stays a constructor; its I/O failing (the home, `desk.db`) is a startup defect that
+  `startServer`'s caller shows. A `settings.json` it can't read is a problem on the Settings page, as before: the
+  constructor and the desktop app read it with `readSettings`, which folds `loadSettings`' `FsError` into the errors. `init()` returns an Effect. `stop()` stays synchronous: it interrupts the runner's
   fibers, unwatches the files and closes the store. `close()` is an Effect that also waits for `stopAll()`.
 - Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `compute`) assert the config
   (`this.loaded!`, a defect); only an entry point checks it as a failure. The hooks the connectors call (`synced`,

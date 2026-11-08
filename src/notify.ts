@@ -1,5 +1,6 @@
 // Desktop notifications and opening URLs. Text goes in as argv: never through a shell, never into AppleScript source.
 import { execFile } from "node:child_process";
+import { Result } from "effect";
 
 type Command = [file: string, args: string[]];
 
@@ -21,8 +22,10 @@ export function openCommand(url: string, platform: NodeJS.Platform = process.pla
   return ["xdg-open", [url]];
 }
 
-// The callback swallows errors, so a missing notify-send or xdg-open does nothing.
-const run = (c: Command | null) => void (c && execFile(c[0], c[1], () => {}));
+// A notification never fails what sent it: a missing notify-send or xdg-open, or text execFile refuses (a NUL byte), does nothing.
+const run = (c: Command | null): void => {
+  if (c) Result.try({ try: () => execFile(c[0], c[1], () => {}), catch: () => null });
+};
 
 export const notify = (title: string, body: string): void => {
   run(notifyCommand(title, body));

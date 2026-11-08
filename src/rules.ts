@@ -1,26 +1,29 @@
 // Places items on a board: filter, first matching rule, caps, sort.
+import { Result } from "effect";
 import type { BoardConfig, Bucket, Card, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
 import { RANK } from "./types.ts";
+import type { ExprSyntaxError } from "./errors.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
+
+type Expr = Result.Result<Compiled, ExprSyntaxError>;
 
 export interface CompiledBoard {
   config: BoardConfig;
-  filter: Compiled | null;
-  priority: Compiled | null;
-  rules: Compiled[];
+  filter: Expr | null;
+  priority: Expr | null;
+  rules: Expr[];
 }
 
 export function compileBoard(board: BoardConfig, path: string): { board: CompiledBoard; errors: ConfigError[] } {
   const errors: ConfigError[] = [];
-  const filter = board.filter ? compile(board.filter) : null;
-  if (filter && !filter.ok) errors.push({ path: `${path}.filter`, message: filter.error });
-  const priority = board.priority ? compile(board.priority) : null;
-  if (priority && !priority.ok) errors.push({ path: `${path}.priority`, message: priority.error });
-  const rules = board.rules.map((r, i) => {
-    const c = compile(r.when);
-    if (!c.ok) errors.push({ path: `${path}.rules[${i}].when`, message: c.error });
+  const at = (where: string, src: string): Expr => {
+    const c = compile(src);
+    if (Result.isFailure(c)) errors.push({ path: `${path}.${where}`, message: c.failure.message });
     return c;
-  });
+  };
+  const filter = board.filter ? at("filter", board.filter) : null;
+  const priority = board.priority ? at("priority", board.priority) : null;
+  const rules = board.rules.map((r, i) => at(`rules[${i}].when`, r.when));
   return { board: { config: board, filter, priority, rules }, errors };
 }
 
@@ -44,13 +47,11 @@ export interface BoardResult {
   inactive: string[]; // on the board but done/snoozed/muted
 }
 
-function truthy(c: Compiled, s: Signals): { matched: boolean; error?: string } {
-  if (!c.ok) return { matched: false, error: c.error };
-  try {
-    return { matched: Boolean(c.eval(s)) };
-  } catch (e) {
-    return { matched: false, error: (e as Error).message };
-  }
+// A rule that doesn't compile, or can't be worked out for this item, doesn't match: its trace says why.
+function truthy(c: Expr, s: Signals): { matched: boolean; error?: string } {
+  if (Result.isFailure(c)) return { matched: false, error: c.failure.message };
+  const v = c.success.eval(s);
+  return Result.isSuccess(v) ? { matched: Boolean(v.success) } : { matched: false, error: v.failure.message };
 }
 
 // The policy judge's answer for an item, while judging is on.
@@ -167,13 +168,11 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   }
   const sort = SORTS[cfg.sort];
   const prio = new Map<string, number>();
-  if (board.priority?.ok) {
+  if (board.priority && Result.isSuccess(board.priority)) {
+    const priority = board.priority.success;
     for (const e of entries) {
-      try {
-        prio.set(e.id, Number(board.priority.eval(e.signals)) || 0);
-      } catch {
-        prio.set(e.id, 0);
-      }
+      const v = priority.eval(e.signals);
+      prio.set(e.id, Result.isSuccess(v) ? Number(v.success) || 0 : 0); // one it can't work out sorts as 0
     }
   }
   const rank = (e: Entry) => prio.get(e.id) ?? 0;

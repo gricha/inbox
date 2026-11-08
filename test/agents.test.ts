@@ -3,7 +3,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { connect, refreshSkills, status } from "../src/agents.ts";
+import { CommandTimeout } from "../src/errors.ts";
+import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "review-desk", "SKILL.md"), "utf8");
 const MCP = "http://localhost:47961/mcp";
@@ -36,7 +40,7 @@ const write = (rel: string, text: string) => {
 const claudeSkill = () => join(home, ".claude", "skills", "review-desk", "SKILL.md");
 
 test("Claude Code: nothing connected yet, with the exact commands", () => {
-  const s = status("claude-code", MCP);
+  const s = runSync(status("claude-code", MCP));
   assert.equal(s.driver, "claude-code");
   assert.deepEqual(s.mcp, {
     connected: false,
@@ -50,60 +54,81 @@ test("Claude Code: nothing connected yet, with the exact commands", () => {
 
 test("Claude Code: registered means user scope in ~/.claude.json", () => {
   write(".claude.json", JSON.stringify({ projects: { "/x": { mcpServers: { "review-desk": { type: "http", url: MCP } } } } }));
-  assert.equal(status("claude-code", MCP).mcp?.connected, false);
+  assert.equal(runSync(status("claude-code", MCP)).mcp?.connected, false);
   write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: MCP } } }));
-  assert.equal(status("claude-code", MCP).mcp?.connected, true);
+  assert.equal(runSync(status("claude-code", MCP)).mcp?.connected, true);
   write(".claude.json", "{ not json");
-  assert.equal(status("claude-code", MCP).mcp?.connected, false);
+  assert.equal(runSync(status("claude-code", MCP)).mcp?.connected, false);
 });
 
 test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
-  const s = status("codex", MCP);
+  const s = runSync(status("codex", MCP));
   assert.deepEqual(s.mcp, { connected: false, command: "codex mcp add review-desk --url http://localhost:47961/mcp" });
   assert.equal(s.skill?.path, join(home, ".agents", "skills", "review-desk", "SKILL.md"));
   write(join(".codex", "config.toml"), `model = "o3"\n\n[mcp_servers.review-desk]\nurl = "${MCP}"\n`);
-  assert.equal(status("codex", MCP).mcp?.connected, true);
+  assert.equal(runSync(status("codex", MCP)).mcp?.connected, true);
 });
 
 // Already registered, so no agent CLI runs: this part works on every OS.
 test("connect copies the skill, and refreshes it when it's out of date", async () => {
   write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: MCP } } }));
-  const s = await connect("claude-code", MCP);
+  const s = await run(connect("claude-code", MCP));
   assert.equal(s.skill?.state, "installed");
   assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
   writeFileSync(claudeSkill(), SKILL.replace("Review Desk", "Old Desk"));
-  assert.equal(status("claude-code", MCP).skill?.state, "outdated");
-  assert.equal((await connect("claude-code", MCP)).skill?.state, "installed");
+  assert.equal(runSync(status("claude-code", MCP)).skill?.state, "outdated");
+  assert.equal((await run(connect("claude-code", MCP))).skill?.state, "installed");
   assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
 });
 
 test("connect registers through the agent's own CLI", { skip: process.platform === "win32" }, async () => {
   fake("claude", `printf '{"mcpServers":{"review-desk":{"type":"http","url":"%s"}}}' "$8" > "$HOME/.claude.json"`);
-  const c = await connect("claude-code", MCP);
+  const c = await run(connect("claude-code", MCP));
   assert.equal(readFileSync(join(home, "claude-args"), "utf8"), `mcp\nadd\n--transport\nhttp\n--scope\nuser\nreview-desk\n${MCP}\n`);
   assert.equal(c.mcp?.connected, true);
   assert.equal(c.skill?.state, "installed");
 
   fake("codex", `/bin/mkdir -p "$HOME/.codex" && printf '[mcp_servers.review-desk]\\nurl = "%s"\\n' "$5" >> "$HOME/.codex/config.toml"`);
-  const x = await connect("codex", MCP);
+  const x = await run(connect("codex", MCP));
   assert.equal(readFileSync(join(home, "codex-args"), "utf8"), `mcp\nadd\nreview-desk\n--url\n${MCP}\n`);
   assert.equal(x.mcp?.connected, true);
   assert.equal(readFileSync(join(home, ".agents", "skills", "review-desk", "SKILL.md"), "utf8"), SKILL);
 
   // Both in place: nothing runs again.
   fake("claude", "exit 1");
-  assert.equal((await connect("claude-code", MCP)).mcp?.connected, true);
+  assert.equal((await run(connect("claude-code", MCP))).mcp?.connected, true);
 });
 
 test("connect says what to run when the CLI is missing or fails", { skip: process.platform === "win32" }, async () => {
-  await assert.rejects(connect("claude-code", MCP), {
-    message: `claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk ${MCP}`,
-  });
+  const missing = await failure(connect("claude-code", MCP));
+  assert.equal(missing._tag, "CommandNotFound");
+  assert.equal(missing.message, `claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk ${MCP}`);
   assert.ok(existsSync(claudeSkill()), "the skill is installed even when registering fails");
   fake("codex", `echo "config.toml: bad TOML" >&2; exit 1`);
-  await assert.rejects(connect("codex", MCP), {
-    message: `codex failed: config.toml: bad TOML. Run it yourself: codex mcp add review-desk --url ${MCP}`,
-  });
+  const failed = await failure(connect("codex", MCP));
+  assert.equal(failed._tag, "CommandFailed");
+  assert.equal(failed.message, `codex failed: config.toml: bad TOML. Run it yourself: codex mcp add review-desk --url ${MCP}`);
+  assert.deepEqual(failed._tag === "CommandFailed" && [failed.code, failed.stderr], [1, "config.toml: bad TOML\n"]);
+  // No answer in a minute is a CommandTimeout in the same words (execFile's 60 s can't be waited out here).
+  const summary = "claude failed: Command failed: claude mcp add. Run it yourself: claude mcp add";
+  assert.equal(new CommandTimeout({ command: "claude", timeoutMs: 60_000, summary }).message, summary);
+});
+
+test("an installed skill that can't be read fails with FsError", () => {
+  mkdirSync(claudeSkill(), { recursive: true });
+  const e = failureSync(status("claude-code", MCP));
+  assert.deepEqual([e._tag, e.op, e.path, e.code], ["FsError", "read", claudeSkill(), "EISDIR"]);
+});
+
+test("interrupting connect stops the agent's CLI and waits for it to exit", { skip: process.platform === "win32" }, async () => {
+  fake("claude", `echo $$ > "$HOME/claude-pid"; exec /bin/sleep 30`);
+  const fiber = Effect.runFork(connect("claude-code", MCP));
+  const pidFile = join(home, "claude-pid");
+  while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim()) await sleep(10);
+  await Effect.runPromise(Fiber.interrupt(fiber));
+  const exit = await Effect.runPromise(Fiber.await(fiber));
+  assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
+  assert.throws(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0), { code: "ESRCH" });
 });
 
 test("the owner's desk refreshes an installed skill that's out of date, never installs one, and a scratch desk touches neither", () => {
@@ -111,12 +136,12 @@ test("the owner's desk refreshes an installed skill that's out of date, never in
   write(join(".claude", "skills", "review-desk", "SKILL.md"), old);
   const codexSkill = join(home, ".agents", "skills", "review-desk", "SKILL.md");
 
-  assert.deepEqual(refreshSkills(join(home, "scratch-desk")), []);
-  assert.deepEqual(refreshSkills(join(tmpdir(), ".review-desk")), [], "a .review-desk outside HOME isn't the owner's");
+  assert.deepEqual(runSync(refreshSkills(join(home, "scratch-desk"))), []);
+  assert.deepEqual(runSync(refreshSkills(join(tmpdir(), ".review-desk"))), [], "a .review-desk outside HOME isn't the owner's");
   assert.equal(readFileSync(claudeSkill(), "utf8"), old, "a scratch or test desk leaves it alone");
 
-  assert.deepEqual(refreshSkills(join(home, ".review-desk")), [claudeSkill()]);
+  assert.deepEqual(runSync(refreshSkills(join(home, ".review-desk"))), [claudeSkill()]);
   assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
   assert.equal(existsSync(codexSkill), false, "a missing one is Connect's to install");
-  assert.deepEqual(refreshSkills(join(home, ".review-desk") + "/"), [], "current: nothing to do");
+  assert.deepEqual(runSync(refreshSkills(join(home, ".review-desk") + "/")), [], "current: nothing to do");
 });

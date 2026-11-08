@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
+import { Effect, Schedule } from "effect";
+import { CommandFailed, fsError, type FsError } from "./errors.ts";
 
 const LABEL = "dev.review-desk.desk";
 
@@ -58,25 +59,52 @@ export function plistFor(o: PlistOptions): string {
 const plistPath = (home = homedir()) => join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
 const domain = () => `gui/${process.getuid!()}`;
 
-export async function install(cliPath: string, port = Number((process.env.DESK_PORT ?? "") || 47823)): Promise<string> {
+const mkdir = (dir: string) =>
+  Effect.try({
+    try: () => {
+      mkdirSync(dir, { recursive: true });
+    },
+    catch: fsError("mkdir", dir),
+  });
+
+const bootstrap = (file: string) =>
+  Effect.suspend((): Effect.Effect<void, CommandFailed> => {
+    const r = spawnSync("launchctl", ["bootstrap", domain(), file], { encoding: "utf8" });
+    if (r.status === 0) return Effect.void;
+    const stderr = r.stderr ?? "";
+    const summary = `launchctl bootstrap failed: ${stderr.trim()}`;
+    return Effect.fail(new CommandFailed({ command: "launchctl", code: r.status, signal: r.signal, stderr, cause: r.error, summary }));
+  });
+
+export const install = Effect.fn("launchd.install")(function* (
+  cliPath: string,
+  port: number = Number((process.env.DESK_PORT ?? "") || 47823),
+): Effect.fn.Return<string, FsError | CommandFailed> {
   const home = homedir();
   const file = plistPath(home);
-  mkdirSync(join(home, ".review-desk"), { recursive: true });
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, plistFor({ nodePath: process.execPath, cliPath, home, port }));
-  spawnSync("launchctl", ["bootout", `${domain()}/${LABEL}`]);
-  // bootout returns before the old job is fully gone, so an immediate bootstrap can fail with EIO.
-  for (let i = 0; ; i++) {
-    const r = spawnSync("launchctl", ["bootstrap", domain(), file], { encoding: "utf8" });
-    if (r.status === 0) return file;
-    if (i === 4) throw new Error(`launchctl bootstrap failed: ${(r.stderr ?? "").trim()}`);
-    await sleep(500);
-  }
-}
-
-export function uninstall(): string {
-  const file = plistPath();
-  spawnSync("launchctl", ["bootout", `${domain()}/${LABEL}`]);
-  rmSync(file, { force: true });
+  yield* mkdir(join(home, ".review-desk"));
+  yield* mkdir(dirname(file));
+  const plist = plistFor({ nodePath: process.execPath, cliPath, home, port });
+  yield* Effect.try({
+    try: () => {
+      writeFileSync(file, plist);
+    },
+    catch: fsError("write", file),
+  });
+  spawnSync("launchctl", ["bootout", `${domain()}/${LABEL}`]); // not loaded is fine
+  // bootout returns before the old job is fully gone, so an immediate bootstrap can fail with EIO: 5 tries, 500 ms apart.
+  yield* bootstrap(file).pipe(Effect.retry({ times: 4, schedule: Schedule.spaced("500 millis") }));
   return file;
-}
+});
+
+export const uninstall = Effect.fn("launchd.uninstall")(function* (): Effect.fn.Return<string, FsError> {
+  const file = plistPath();
+  spawnSync("launchctl", ["bootout", `${domain()}/${LABEL}`]); // not loaded is fine
+  yield* Effect.try({
+    try: () => {
+      rmSync(file, { force: true });
+    },
+    catch: fsError("remove", file),
+  });
+  return file;
+});
