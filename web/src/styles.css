@@ -629,8 +629,8 @@ p {
 }
 
 .mark {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   color: var(--accent-ink);
   fill: currentcolor;
 }
@@ -797,6 +797,11 @@ p {
   background: var(--sheet);
 }
 
+/* Light and Dark: the sidebar's cool grey, as the rest of their palette, so the selection reads as one of theirs. */
+:root:is(:not([data-theme]), [data-theme="light"], [data-theme="dark"]) .lines {
+  --row-sel: color-mix(in oklab, var(--side-on) 70%, var(--sheet));
+}
+
 /* Solarized's teal ink mixed into its cream comes out a cool sage: its base2 instead, as warm as the sidebar's. */
 :root[data-theme="solarized"] .lines {
   --row-hover: #f6efdb;
@@ -813,8 +818,8 @@ p {
   border-top: 1px solid var(--rule);
 }
 
-/* A tight table drops the stage column and a question's sender first, then who it's from; a review still shows both, and
-   so do the two-line rows beside it. */
+/* A tight table drops the stage column and a question's sender first, then who it's from, before a repo or a why is cut
+   to a few letters; a review still shows both, and so do the two-line rows beside it. */
 @container (width < 760px) {
   .line-row:not(.c-row) .line-stage,
   .line:not(.c-line) .inq-from {
@@ -822,7 +827,7 @@ p {
   }
 }
 
-@container (width < 520px) {
+@container (width < 620px) {
   .line-row:not(.c-row) .line-by {
     display: none;
   }
@@ -1152,7 +1157,7 @@ p {
 /* The title is what you read: a long repo name is cut short (its title attribute has it whole), the number never. */
 .line-ref {
   flex: 0 100 auto;
-  min-width: calc-size(max-content, min(size, 4ch));
+  min-width: calc-size(max-content, min(size, 6ch));
   max-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1191,7 +1196,7 @@ p {
 
 .line-note {
   flex: 0 10000 auto;
-  min-width: 0;
+  min-width: calc-size(max-content, min(size, 10ch));
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1372,7 +1377,7 @@ p {
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr) var(--chat-w);
 }
 
-/* Full height beside the page, scrolling on its own; over the page's head, so its fold button can reach across the divider. */
+/* Full height beside the page, scrolling on its own; over the page's column, so its fold button can reach across the divider. */
 .beside {
   position: sticky;
   top: 0;
@@ -1385,15 +1390,14 @@ p {
   background: var(--sheet);
 }
 
-/* As tall as the page's head beside it, the window's drag handle too: the list's name and count, then its filter, clear of
-   the fold button. */
+/* As tall as the page's head beside it, the window's drag handle too: the list's name and count, then its filter. */
 .beside-head {
   display: flex;
   flex: none;
   align-items: center;
   gap: 12px;
   height: 52px;
-  padding: 0 24px 0 16px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--rule);
   -webkit-app-region: drag;
   user-select: none;
@@ -1442,10 +1446,11 @@ p {
   border-bottom: 1px solid var(--rule);
 }
 
-/* On the divider by the head, always there: a small circle in a 28px target that reaches across the divider. */
+/* On the divider just under the heads, always there: a small circle in a 28px target that reaches across the divider, clear
+   of both heads (the window's drag handles) and of Back. */
 .beside-fold {
   position: absolute;
-  top: 12px;
+  top: 60px;
   right: -14px;
   z-index: 1;
   display: grid;
@@ -1555,7 +1560,17 @@ p {
   padding: 4px 16px 16px;
 }
 
-/* Two lines a row: the title, wrapping to two at most, then the rest on one, its age and its call to action at the end. */
+/* An item's actions wrap beside a review: each text action reaches into the gutter, so a second line starts where the first
+   does. */
+.beside .card-keys {
+  column-gap: 15px;
+}
+
+.beside .card-keys > .act:not(.primary) {
+  margin-left: -9px;
+}
+
+/* Two lines a row: the title, wrapping to two at most, then the rest on one, its call to action and its age at the end. */
 .c-line .c-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1585,22 +1600,32 @@ p {
   -webkit-line-clamp: 2;
 }
 
-/* One line of facts with a dot between, cut short at its end only: the stage or the note first, then who it's from. */
+/* One line of facts with a dot between: a long repo name gives way first, then the last fact is cut at its end. */
 .c-row .c-meta {
+  display: flex;
   grid-area: 2 / 1;
+  align-items: baseline;
   min-width: 0;
   padding-right: 10px;
   overflow: hidden;
   color: var(--pencil);
   font-size: var(--meta-size);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .c-meta > *,
 .c-meta > .line-note {
-  display: inline;
+  flex: none;
+  width: auto;
+  min-width: 0;
   white-space: nowrap;
+}
+
+.c-meta > .line-note,
+.c-meta > :last-child {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .c-meta > * + *::before {
@@ -1617,11 +1642,14 @@ p {
   content: none;
 }
 
-/* A long repo name gives way within its own room, the number never. */
+/* A long repo name gives way before the facts after it, down to a few letters; the number never. */
+.c-meta > .c-ref {
+  display: contents;
+}
+
 .c-ref .line-ref {
-  display: inline-block;
-  min-width: 0;
-  vertical-align: top;
+  flex: 0 1000 auto;
+  min-width: calc-size(max-content, min(size, 4ch));
 }
 
 .c-ref .line-num {
@@ -1633,18 +1661,24 @@ p {
 }
 
 .c-row .line-age {
-  grid-area: 2 / 2;
+  grid-area: 2 / 3;
+  justify-self: end;
   min-width: 0;
   margin: 0;
   padding: 0;
 }
 
-/* The row's call to action, as accent text after its age. */
+/* Beside a review the Questions heading says what they are: Agent goes quiet, so Answer is the line's one accent. */
+.c-line.inq .c-meta > .line-kind {
+  color: var(--faint);
+}
+
+/* The row's call to action, as accent text before its age, so the ages end in one column. */
 .c-row > .c-cta {
   position: relative;
   z-index: 1;
-  grid-area: 2 / 3;
-  margin: -5px -2px -5px 8px;
+  grid-area: 2 / 2;
+  margin: -5px 8px -5px 0;
   padding: 5px 2px;
   border: 0;
   background: none;
@@ -1988,6 +2022,7 @@ p {
 
 .lane-row .line-note {
   flex: 1 1 0;
+  min-width: 0;
 }
 
 /* A stack's rows together, bottom first, under one quiet line. */
@@ -2620,15 +2655,16 @@ p {
   margin-top: 9px;
 }
 
+/* Centred on the page's column, clear of the sidebar and the list beside a review (each 0 where it isn't there). */
 .toast {
   position: fixed;
   bottom: 22px;
-  left: 50%;
+  left: calc(50% + (var(--side-w) + var(--list-w)) / 2);
   z-index: 40;
   display: flex;
   align-items: center;
   gap: 14px;
-  max-width: min(640px, calc(100vw - 32px));
+  max-width: min(640px, calc(100% - var(--side-w) - var(--list-w) - 32px));
   padding: 8px 8px 8px 16px;
   border-radius: 12px;
   background: var(--ink);
@@ -4931,7 +4967,7 @@ p {
     overflow: auto hidden;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
-    scrollbar-width: none;
+    scrollbar-width: thin;
   }
 
   .side-brand {

@@ -1,4 +1,4 @@
-// The mark (assets/brand/mark.svg, its paths copied as they are): decorative, always beside the words "Review Desk".
+// The mark (assets/brand/mark.svg, its paths copied as they are): decorative; in the brand row, beside the words where they show.
 export function Mark() {
   return (
     <svg className="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">

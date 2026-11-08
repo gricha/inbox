@@ -37,8 +37,12 @@ async function up(url: string, ms = 30_000): Promise<void> {
 async function start(): Promise<string> {
   const node = (args: string[], env: Record<string, string>) =>
     kids.push(spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: "ignore" }));
-  // An AI review that never finishes during the run, so every theme and size shows it being written.
-  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], { MOCK_PORT: String(MOCK), MOCK_AI_MS: "3600000" });
+  // An AI review that never finishes during the run, so every theme and size shows it being written; no sync on a timer.
+  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], {
+    MOCK_PORT: String(MOCK),
+    MOCK_AI_MS: "3600000",
+    MOCK_NO_POLL: "1",
+  });
   node(["node_modules/vite/bin/vite.js", "--config", "web/vite.config.ts", "--port", String(VITE), "--strictPort"], {
     DESK_API: `http://127.0.0.1:${MOCK}`,
   });
@@ -412,6 +416,28 @@ const SHOTS: Shot[] = [
       await page.setViewportSize({ width: wide.width, height: wide.height });
     },
   })),
+  // At 250 % zoom (512×328) the sidebar's row runs past the window: a thin scrollbar says so, and its end reaches Settings.
+  {
+    name: "zoom-512",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.setViewportSize({ width: 512, height: 328 });
+      await at("#/")(page);
+      const s = await page.evaluate<{ over: boolean; bar: string; reach: boolean }>(`(() => {
+        const side = document.querySelector(".side"), last = [...side.querySelectorAll(".side-item")].at(-1);
+        side.scrollLeft = side.scrollWidth;
+        const r = last.getBoundingClientRect(), b = side.getBoundingClientRect();
+        const out = { over: side.scrollWidth > side.clientWidth, bar: getComputedStyle(side).scrollbarWidth, reach: r.left >= b.left - 1 && r.right <= b.right + 1 };
+        side.scrollLeft = 0;
+        return out;
+      })()`);
+      if (s.over && (s.bar === "none" || !s.reach)) failures.push(`zoom-512: the sidebar's row hides its end: ${JSON.stringify(s)}`);
+    },
+    after: async (page) => {
+      const wide = SIZES.find((s) => s.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+    },
+  },
   // What can't move yet: a chain's rows together, the first saying what its blocker waits on, then a review wait.
   { name: "blocked", go: at("#/blocked") },
   // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
@@ -636,11 +662,20 @@ const SHOTS: Shot[] = [
       }
       await besideOpen(page, "beside-review", "acme/api#4127");
       if (b?.sideInline) failures.push("beside-review: the review's sidebar squeezes in beside the diff next to the list");
-      // A row's right-click menu, as on the table.
+      // The calls to action sit before the ages, so the ages end in one column.
+      const ends = await page.evaluate<number[]>(
+        `[...new Set([...document.querySelectorAll(".beside .c-row .line-age")].map((el) => Math.round(el.getBoundingClientRect().right)))]`,
+      );
+      if (ends.length !== 1) failures.push(`beside-review: the ages end at ${ends.join(", ")}px, not in one column`);
+      // A row's right-click menu, as on the table: its row marked while it's open, then the open review's again.
       await page.locator('.beside .line[data-id="acme/api#4099"] .row-main').click({ button: "right" });
       if (!(await page.locator(".ctx").count())) failures.push("beside-review: a right-click on a row beside the review opens no menu");
+      const marked = (await besideSays(page))?.sel;
+      if (marked !== "acme/api#4099") failures.push(`beside-review: with its menu open, the list marks ${JSON.stringify(marked)}`);
       await page.keyboard.press("Escape");
       await page.waitForTimeout(150);
+      const after = (await besideSays(page))?.sel;
+      if (after !== "acme/api#4127") failures.push(`beside-review: with the menu closed, the list marks ${JSON.stringify(after)}`);
     },
   },
   // An issue in the list beside a review opens in place under its row, as in the table; the review stays.
@@ -658,7 +693,14 @@ const SHOTS: Shot[] = [
         failures.push("beside-issue: opening an issue beside the review left the review");
     },
     after: async (page) => {
-      await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
+      // Esc closes it first, as on the table, and the review stays.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      const left = await page.evaluate<{ open: boolean; review: boolean }>(
+        `({ open: !!document.querySelector(".line.open"), review: location.hash.startsWith("#/review/") })`,
+      );
+      if (left.open || !left.review) failures.push(`beside-issue: after Esc, ${JSON.stringify(left)}`);
+      if (left.open) await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
       await refold(page);
     },
   },
@@ -717,7 +759,17 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(200);
       await besideOpen(page, "beside-inquiry", "ask:q2bead00");
     },
-    after: at("#/"),
+    after: async (page) => {
+      // From the question, a review and then another from the list: the way back is the list's page, the Inbox.
+      for (const id of ["acme/api#4099", "acme/api#4127"]) {
+        await page.locator(`.beside .line[data-id="${id}"] .row-main`).click();
+        await page.waitForFunction(`decodeURIComponent(location.hash) === ${JSON.stringify(`#/review/${id}`)}`);
+        await page.waitForTimeout(200);
+      }
+      const back = (await page.locator(".page-head .back").textContent())?.trim();
+      if (back !== "Inbox") failures.push(`beside-inquiry: two reviews on from the question, the back link reads ${JSON.stringify(back)}`);
+      await at("#/")(page);
+    },
   },
   // A long title: one line in the table, two at most beside a review, cut at the second's end.
   {
@@ -1953,6 +2005,12 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await page.route("**/approve", () => {});
       await review("acme/api#4127", ['.rv-actions button:has-text("Approve")'])(page);
+      // Its toast centres on the page's column, beside the list as without it.
+      const off = await page.evaluate<number | null>(`(() => {
+        const t = document.querySelector(".toast")?.getBoundingClientRect(), c = document.querySelector(".col")?.getBoundingClientRect();
+        return t && c ? Math.round(Math.abs(t.left + t.width / 2 - (c.left + c.width / 2))) : null;
+      })()`);
+      if (off === null || off > 2) failures.push(`review-approve: the toast is ${off}px off the middle of the page's column`);
     },
   },
 ];
@@ -2085,6 +2143,22 @@ try {
           return Math.max(over(head), ...items.map(over));
         })()`);
         if (spill > 0) failures.push(`${file}: the sidebar or the page head runs ${spill}px past its edge`);
+        // A table cuts a repo to 6 letters' room and a why to 10 at most: who it's from goes first (styles.css @container).
+        const squeezed = await page.evaluate<string[]>(`(() => {
+          const out = [];
+          for (const [sel, n] of [[".line-ref", 6], [".line-note", 10]])
+            for (const el of document.querySelectorAll(".lines .line:not(.c-line, .lane-row, .blocked-row) " + sel)) {
+              if (!el.getClientRects().length || el.scrollWidth <= el.clientWidth + 1) continue;
+              const room = document.createElement("span"), cs = getComputedStyle(el);
+              room.style.cssText = "position:absolute;visibility:hidden;width:" + n + "ch";
+              for (const k of ["fontFamily", "fontSize", "fontWeight", "fontVariantNumeric"]) room.style[k] = cs[k];
+              document.body.append(room);
+              if (el.getBoundingClientRect().width < room.getBoundingClientRect().width - 1) out.push(el.textContent);
+              room.remove();
+            }
+          return out;
+        })()`);
+        if (squeezed.length) failures.push(`${file}: a table cuts ${squeezed.map((t) => JSON.stringify(t)).join(", ")} to a few letters`);
         const wraps = await page.evaluate<boolean>(`(() => {
           const words = document.querySelector(".side-brand span"), r = document.createRange();
           if (!words?.getClientRects().length) return false;

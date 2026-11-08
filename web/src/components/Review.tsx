@@ -106,7 +106,8 @@ const ROOM = 1000; // px of the page's column (styles.css's @container pane): na
 const ROW = 19; // px: .rv-diff's --diffs-line-height
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded, where it has room
 const pane = () => document.querySelector(".col");
-const roomy = () => (pane()?.clientWidth ?? innerWidth) >= ROOM;
+// The fractional width, as the container query reads it, so the two agree at the edge.
+const roomy = () => (pane()?.getBoundingClientRect().width ?? innerWidth) >= ROOM;
 
 // Pierre draws the diff in a shadow root; its syntax colours and light or dark follow the app's theme (diffOptions).
 const DIFF: FileDiffOptions<Meta, undefined> = {
@@ -236,13 +237,16 @@ export function Review({
   }, []);
 
   // The page's column narrows with the list beside it, the chat or the window; given room again, the sidebar goes back beside the diff.
-  useEffect(() => {
+  // Measured before the first paint as well: a review drawn with the window would otherwise flash its sidebar over the diff.
+  useLayoutEffect(() => {
     const col = pane();
-    const watch = new ResizeObserver(() => {
+    const fit = () => {
       const r = roomy();
       setRoom(r);
       if (r) setOver(false);
-    });
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
     if (col) watch.observe(col);
     return () => {
       watch.disconnect();

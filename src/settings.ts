@@ -137,7 +137,7 @@ export const SETTINGS = [
     label: "Your agent",
     type: "boolean",
     default: true,
-    help: "A background Claude Code session (\"Review Desk coordinator\" on claude.ai) that answers what you ask it from the desk (Ask your agent, in the top bar or a PR's review) and gets the PRs you hand off merged. The desk starts it on your first hand-off or ask, keeps it running and wakes it with your asks and with news on PRs in Merging. Off: it's stopped, nothing wakes it, and the window shows no Ask your agent.",
+    help: "A background Claude Code session (\"Review Desk coordinator\" on claude.ai) that answers what you ask it from the desk (Ask your agent, in the sidebar or a PR's review) and gets the PRs you hand off merged. The desk starts it on your first hand-off or ask, keeps it running and wakes it with your asks and with news on PRs in Merging. Off: it's stopped, nothing wakes it, and the window shows no Ask your agent.",
   },
   {
     key: "agent.coordinator_bypass",

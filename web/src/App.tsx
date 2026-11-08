@@ -310,8 +310,15 @@ export function App() {
     setLaneSel(null);
   }, [route]);
   // A review belongs to the page it was opened from: Esc, the back link and the sidebar go back there.
+  const lastReview = useRef<string | null>(null);
   useEffect(() => {
-    if (route.name === "review") return;
+    const was = lastReview.current;
+    lastReview.current = route.name === "review" ? route.id : null;
+    if (route.name === "review") {
+      // Another review, from the list beside it or its stack: the way back is the list's page, not the question.
+      if (was !== null && was !== route.id) setReviewQuestion(null);
+      return;
+    }
     setReviewFrom(route.name === "settings" || route.name === "inquiry" ? "queue" : route.name);
     setReviewQuestion(route.name === "inquiry" ? route.id : null);
   }, [route]);
@@ -433,7 +440,8 @@ export function App() {
     () => (laneList ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
     [laneList, laneRows, page],
   );
-  // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu.
+  // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu; beside a
+  // review it only marks the row while its menu is open, so the page's own selection is the one you left it with.
   function rowMenu(x: number, y: number, target: Element | null): boolean {
     const id = target?.closest<HTMLElement>(".line[data-id]")?.dataset.id;
     const c = onScreen.find((card) => card.id === id);
@@ -443,8 +451,10 @@ export function App() {
       return false;
     }
     stay.current = c.id;
-    if (laneList) setLaneSel(c.id);
-    else setSelected(c.id);
+    if (!target?.closest(".beside")) {
+      if (laneList) setLaneSel(c.id);
+      else setSelected(c.id);
+    }
     setMenuAt({ id: c.id, x, y });
     return true;
   }
@@ -506,7 +516,7 @@ export function App() {
     // tick re-checks once the undo hold has run out.
   }, [cursor, selected, tick]);
 
-  // The first row of a group brings its heading along (the page's first, the top of the page), so no heading sits under the bar.
+  // A group's first row brings its heading along (the page's first, the top of the page), so no heading sits under the page head.
   useEffect(() => {
     if (!selected || !["queue", "later", "blocked", "archive"].includes(route.name) || stay.current === selected) return;
     const el = document.querySelector(`[data-id="${CSS.escape(selected)}"]`);
@@ -836,7 +846,7 @@ export function App() {
   function openRowMenu(c: Card, el: HTMLElement, snooze = false) {
     const r = el.getBoundingClientRect();
     stay.current = c.id;
-    setSelected(c.id);
+    if (!el.closest(".beside")) setSelected(c.id);
     setMenuAt({ id: c.id, x: r.left, y: r.bottom + 4, snooze });
   }
 
@@ -1023,6 +1033,14 @@ export function App() {
       setCommenting(null);
       e.preventDefault();
       e.stopImmediatePropagation();
+      return;
+    }
+    // An issue opened in place in the list beside a review closes first, as on its page, before the review reads "go back".
+    const plain = e.key === "Escape" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing;
+    if (plain && expanded && !typing && !menu && document.querySelector(".beside .line.open")) {
+      setExpanded(null);
+      e.preventDefault();
+      e.stopImmediatePropagation();
     }
   };
   const keyRef = useRef(onKey);
@@ -1088,9 +1106,10 @@ export function App() {
     }
   }
 
-  // The rows beside a review or a question: its list page's, two lines a row, the open item marked; focusing a row leaves the
-  // selection on it.
-  const compact: RowCtx = { ...ctx, compact: true, selected: openSel, select: ignore };
+  // The rows beside a review or a question: its list page's, two lines a row, the open item marked (the row whose menu is open,
+  // while it is); focusing a row leaves the selection on it.
+  const listSel = menuAt?.id ?? openSel;
+  const compact: RowCtx = { ...ctx, compact: true, selected: listSel, select: ignore };
   const besideRows =
     side !== "open" || !listPage ? null : listPage === "queue" ? (
       <Queue
@@ -1099,7 +1118,7 @@ export function App() {
         groups={groups}
         ctx={compact}
         inquiries={inquiries}
-        inq={{ ...inq, compact: true, selected: openSel, select: ignore }}
+        inq={{ ...inq, compact: true, selected: listSel, select: ignore }}
         filter={filter}
         unfold={unfold}
         selectFold={ignore}
@@ -1108,7 +1127,7 @@ export function App() {
       <Inflight
         view={lane}
         now={now}
-        selected={openSel}
+        selected={listSel}
         select={ignore}
         act={ignore}
         open={(r) => {

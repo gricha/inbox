@@ -2717,7 +2717,8 @@ function sync() {
     bump();
   }, 1200);
 }
-setInterval(sync, config.poll_seconds * 1000);
+// The shots turn it off: a push it brings would make a review they read stale at a time that depends on how long a run took.
+if (!process.env.MOCK_NO_POLL) setInterval(sync, config.poll_seconds * 1000);
 
 // ---------------------------------------------------------------------------
 // Config text: generated from `config`, parsed back with a small line-based TOML reader.
