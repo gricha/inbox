@@ -45,15 +45,14 @@ const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at:
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-// A pass's boundary: what failed it, a failure or a bug, goes to `handle`. Interruption (the desk stopping) isn't a failure:
-// it passes through, recording nothing.
+// A pass's boundary: a failure or a bug goes to `handle`; the desk stopping never gets here, an inner interrupt records nothing.
 const settle =
   (handle: (e: unknown) => void) =>
   <A, E>(self: Effect.Effect<A, E>): Effect.Effect<A | void> =>
     self.pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
-          ? Effect.interrupt
+          ? Effect.void
           : Effect.sync(() => {
               handle(Cause.squash(cause));
             }),
@@ -136,15 +135,14 @@ export class GitHubConnector implements Connector {
     this.feedTimer.unref();
   }
 
-  // One pass of a loop, in the desk's runner: a bug that gets past the pass's own boundary (the desk's hooks after it) is
-  // logged and reported, and the loop keeps its schedule. Interrupted (the desk stopping), it doesn't re-arm.
+  // A loop's pass in the runner: a bug past its own boundary (the desk's hooks) is logged and reported, and it re-arms, as after an inner interrupt.
   loop(what: string, once: Effect.Effect<void>, again: () => void): void {
     this.desk.runner.fork(
       what,
       once.pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
-            ? Effect.interrupt
+            ? Effect.void
             : Effect.sync(() => {
                 this.desk.log(`${what} failed: ${Cause.pretty(cause)}`);
                 report(Cause.squash(cause), what);

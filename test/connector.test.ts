@@ -105,6 +105,34 @@ test("a bug after a pass is logged and the loop keeps its schedule", async (c) =
   assert.ok(t.gh.searches.length > before, "the next pass ran on time");
 });
 
+test("an interrupt from inside a pass records nothing and the loop keeps its schedule", async (c) => {
+  c.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs: string[] = [];
+  const t = await setup([reviewAsk(1)], {
+    desk: {
+      log: (m) => {
+        logs.push(m);
+      },
+    },
+  });
+  c.after(t.cleanup);
+  const search = t.gh.search.bind(t.gh);
+  let first = true;
+  t.gh.search = (...a: Parameters<typeof search>) => {
+    if (!first) return search(...a);
+    first = false;
+    return Effect.interrupt;
+  };
+  t.desk.start();
+  await idle(t.desk);
+  assert.ok(t.desk.gh.timer !== null, "the next pass is armed");
+  assert.deepEqual([t.desk.gh.error, logs.filter((l) => l.includes("failed"))], [null, []]);
+  const before = t.gh.searches.length;
+  c.mock.timers.tick(t.desk.settings["github.poll_seconds"] * 1000);
+  await idle(t.desk);
+  assert.ok(t.gh.searches.length > before, "the next pass ran on time");
+});
+
 test("the desk stopping mid-pass records nothing: no error, and the pass lets go of syncing", async (c) => {
   const logs: string[] = [];
   const t = await setup([reviewAsk(1)], {
