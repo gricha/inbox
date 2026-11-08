@@ -2062,15 +2062,25 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Searches and rules, a view of its own: the head's way back to Settings, its name, the column at 1180px, and Save on screen.
+    // Searches and rules, a view of its own: the head's way back to Settings, its name, the column at 1180px, Save on screen,
+    // and still on screen with the editor dragged taller than the window; its code wraps, never scrolling sideways.
     name: "settings-rules",
     go: async (page) => {
       await at("#/settings/rules")(page);
       await settingsView(page, "settings-rules", "Searches and rules", "github", "1180px");
-      const foot = await page.evaluate<number>(
-        `document.querySelector(".rules-wrap .editor-foot").getBoundingClientRect().bottom - innerHeight`,
-      );
+      const below = () =>
+        page.evaluate<number>(`document.querySelector(".rules-wrap .editor-foot").getBoundingClientRect().bottom - innerHeight`);
+      const foot = await below();
       if (foot > 0) failures.push(`settings-rules: the editor's foot ends ${Math.round(foot)}px below the window`);
+      const sideways = await page.evaluate<number>(`(() => {
+        const ed = document.querySelector(".rules-wrap .editor");
+        return ed.scrollWidth - ed.clientWidth;
+      })()`);
+      if (sideways > 0) failures.push(`settings-rules: the editor's code scrolls ${sideways}px sideways`);
+      await page.evaluate(`document.querySelector(".rules-wrap .editor").style.height = "calc(100vh + 400px)"`);
+      const tall = await below();
+      if (tall > 0) failures.push(`settings-rules: with the editor dragged taller, its foot ends ${Math.round(tall)}px below the window`);
+      await page.evaluate(`document.querySelector(".rules-wrap .editor").style.height = ""`);
     },
   },
   {
@@ -2101,6 +2111,38 @@ const SHOTS: Shot[] = [
       await at("#/rules")(page);
       await settingsView(page, "settings-rules-keeps", "Searches and rules", "github", "1180px");
       if (!(await kept())) failures.push("settings-rules-keeps: #/rules opens the view without the draft");
+    },
+    after: async (page) => {
+      await page.getByRole("button", { name: "Revert" }).click();
+      await at("#/")(page);
+    },
+  },
+  {
+    // A bucket that isn't one, under a comment long enough to wrap: Preview changes lists the error under a red head, and
+    // clicking it selects its line, which is what's shot (the lines above it in view, however they wrap). Nothing is saved.
+    name: "settings-rules-errors",
+    go: async (page) => {
+      await at("#/settings/rules")(page);
+      const editor = page.locator(".rules-wrap .editor");
+      const lines = (await editor.inputValue()).split("\n");
+      const bad = lines.findIndex((l, i) => i > lines.length / 2 && l.startsWith("bucket = "));
+      lines[bad] = 'bucket = "soon"';
+      lines.splice(1, 0, `# ${"a comment long enough to wrap ".repeat(20)}`);
+      await editor.fill(lines.join("\n"));
+      await page.getByRole("button", { name: "Preview changes" }).click();
+      await page.locator(".err-row").first().click();
+      const seen = await page.evaluate<{ red: boolean; picked: string; hidden: number }>(`(() => {
+        const ed = document.querySelector(".rules-wrap .editor");
+        const head = getComputedStyle(document.querySelector(".errors .s-sub")).color;
+        return {
+          red: head === getComputedStyle(document.querySelector(".err-row code")).color,
+          picked: ed.value.slice(ed.selectionStart, ed.selectionEnd),
+          hidden: document.querySelector(".page-head").getBoundingClientRect().bottom - ed.getBoundingClientRect().top,
+        };
+      })()`);
+      if (!seen.red) failures.push("settings-rules-errors: the errors' head isn't red");
+      if (seen.picked !== 'bucket = "soon"') failures.push(`settings-rules-errors: the error selects ${JSON.stringify(seen.picked)}`);
+      if (seen.hidden > 0) failures.push(`settings-rules-errors: the editor's top is ${Math.round(seen.hidden)}px under the page's head`);
     },
     after: async (page) => {
       await page.getByRole("button", { name: "Revert" }).click();

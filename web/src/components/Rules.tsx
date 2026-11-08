@@ -209,11 +209,13 @@ export function Rules({
     const line = lineOf(text, path);
     if (!el || line === null) return;
     const lines = text.split("\n");
-    const start = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0);
-    el.focus();
+    const startOf = (n: number) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+    const start = startOf(line);
+    el.focus({ preventScroll: true });
     el.setSelectionRange(start, start + (lines[line] ?? "").length);
-    // oxlint-disable-next-line unicorn/prefer-number-coercion -- lineHeight is "19.5px"; Number() would give NaN
-    el.scrollTop = Math.max(0, (line - 4) * (parseFloat(getComputedStyle(el).lineHeight) || 20));
+    el.scrollTop = depthOf(el, text.slice(0, startOf(Math.max(0, line - 4))));
+    // The line sits near the editor's top, which a click on an error under the editor (a narrow window) has scrolled away.
+    el.scrollIntoView({ block: "nearest" });
     track();
   }
 
@@ -251,7 +253,6 @@ export function Rules({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            wrap="off"
             aria-label="Config TOML"
             title="Tab indents, Esc leaves the editor."
             onChange={(e) => {
@@ -337,7 +338,7 @@ export function Rules({
           )}
 
           <section className="side-block">
-            <h3 className="s-sub">Hard and final rules</h3>
+            <h3 className="s-sub">Rules Claude can't sort below</h3>
             {hard.length ? (
               <p className="small">
                 What a hard rule matches stays at least in its bucket (<code>today</code> for a <code>now</code> rule), whatever Claude,
@@ -524,4 +525,25 @@ export function Rules({
       </div>
     </div>
   );
+}
+
+// How far down the editor `before` reaches once wrapped: laid out in a hidden copy of the editor, from one mark to another.
+function depthOf(el: HTMLTextAreaElement, before: string): number {
+  const copy = document.createElement("div");
+  const from = document.createElement("span");
+  const to = document.createElement("span");
+  copy.className = "editor";
+  // Its own scrollbar, as the editor has one, so its lines are as wide as the editor's.
+  Object.assign(copy.style, {
+    position: "absolute",
+    visibility: "hidden",
+    width: `${el.offsetWidth}px`,
+    height: "auto",
+    overflowY: "scroll",
+  });
+  copy.append(from, before, to);
+  document.body.append(copy);
+  const depth = to.getBoundingClientRect().top - from.getBoundingClientRect().top;
+  copy.remove();
+  return depth;
 }

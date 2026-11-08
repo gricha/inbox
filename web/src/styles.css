@@ -3138,10 +3138,10 @@ p {
   width: min(360px, 70%);
 }
 
+/* No colour of its own, so the errors' head is red and Moved to Settings' amber. */
 .s-sub {
   margin: 0 0 10px;
-  color: var(--ink);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -3413,20 +3413,24 @@ button.s-edit:hover:not(:disabled) {
   gap: 28px;
 }
 
+/* The window's height less the view's head, name and line above it and its foot below, so Save shows without scrolling;
+   code wraps, never scrolling sideways; a jump to an error scrolls it clear of the page's head. */
 .editor {
   display: block;
   width: 100%;
-  height: calc(100vh - 300px);
-  min-height: 380px;
+  height: calc(100vh - 210px);
+  min-height: 240px;
   padding: 14px 16px;
   overflow: auto;
+  scroll-margin-top: 64px;
   border: 1px solid var(--rule-strong);
   border-radius: 12px;
   background: var(--sheet);
   color: var(--ink);
   font: 12.5px/1.65 var(--mono);
   tab-size: 2;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   resize: vertical;
 }
 
@@ -3443,6 +3447,16 @@ button.s-edit:hover:not(:disabled) {
   margin-top: 10px;
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+/* The rules editor's foot stays on the window's bottom edge while the editor runs past it (a short window, or dragged
+   taller), on the page's paper so the code goes under it. */
+.editor-col > .editor-foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: 0;
+  padding: 10px 0 12px;
+  background: var(--paper);
 }
 
 .unsaved {
@@ -4951,10 +4965,6 @@ button.s-edit:hover:not(:disabled) {
     position: static;
     max-height: none;
     overflow: visible;
-  }
-
-  .editor {
-    height: 60vh;
   }
 
   /* The sidebar compacts: its words kept, the wordmark's words hidden, Ask's label shortened. */
