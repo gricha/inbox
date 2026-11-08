@@ -123,7 +123,9 @@ the desk doesn't route, and one under `/api` or `/health` that `fromUi` won't pa
   fiber ends. A child's own timeout stays an unref'd `setTimeout` inside the callback. `children.ts` tracks every child,
   so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings → Agents)
   runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile` can't start
-  one, and reached only the CLI itself).
+  one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an `Effect.callback` too, and
+  interrupted it stops a `gh` that started and signals nothing for one that didn't (`execFile`'s `signal` option sent
+  SIGTERM to the desk's own process group, the desktop app's included, when `gh` wasn't there).
 - Retries: GitHub reads retry with
   `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
   3 attempts, the delay then 3× it, no jitter, a log line for each retry. Not the `{ times, while }` options together

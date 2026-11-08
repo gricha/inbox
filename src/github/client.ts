@@ -1,7 +1,6 @@
 // Read-only GitHub transport (GraphQL queries and REST GETs): token, retries, rate-limit tracking.
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { Cache, Duration, Effect, Exit, Schedule } from "effect";
 import {
   GitHubAuthError,
@@ -18,8 +17,6 @@ const REST = "https://api.github.com";
 const RETRYABLE = new Set([502, 503, 504]);
 const RETRIES = 2;
 const MIN_REMAINING = 200;
-// oxlint-disable-next-line typescript/strict-void-return -- promisify picks execFile's util.promisify.custom form, so no return value is discarded
-const execFileAsync = promisify(execFile);
 // Per-node errors that leave the rest of the response usable: a deleted node, or one the token can't see (e.g. SAML).
 const PARTIAL = new Set(["NOT_FOUND", "FORBIDDEN"]);
 export const GH_MISSING = "GitHub CLI (gh) not found: install it from https://cli.github.com and run gh auth login, or set GITHUB_TOKEN";
@@ -28,19 +25,26 @@ export function readToken(token?: string): Effect.Effect<string, GitHubAuthError
   return Effect.suspend((): Effect.Effect<string, GitHubAuthError> => {
     if (token) return Effect.succeed(token);
     if (process.env.GITHUB_TOKEN) return Effect.succeed(process.env.GITHUB_TOKEN);
-    return Effect.tryPromise({
-      try: (signal) => execFileAsync("gh", ["auth", "token"], { signal }),
-      catch: (cause) => {
-        const err = cause as NodeJS.ErrnoException;
-        return err.code === "ENOENT"
-          ? new GitHubAuthError({ reason: "gh_missing", message: GH_MISSING, cause })
-          : new GitHubAuthError({
-              reason: "no_token",
-              message: `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${err.message})`,
-              cause,
-            });
-      },
-    }).pipe(Effect.map((r) => r.stdout.trim()));
+    return Effect.callback<string, GitHubAuthError>((resume) => {
+      const child = execFile("gh", ["auth", "token"], (err, stdout) => {
+        if (!err) {
+          resume(Effect.succeed(stdout.trim()));
+          return;
+        }
+        const message = `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${err.message})`;
+        resume(
+          Effect.fail(
+            err.code === "ENOENT"
+              ? new GitHubAuthError({ reason: "gh_missing", message: GH_MISSING, cause: err })
+              : new GitHubAuthError({ reason: "no_token", message, cause: err }),
+          ),
+        );
+      });
+      // Interrupted, a gh that started is stopped. Not execFile's signal: for one that didn't start it signals the desk's own group.
+      return Effect.sync(() => {
+        if (child.pid !== undefined) child.kill();
+      });
+    });
   });
 }
 

@@ -3,6 +3,8 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { Cause, Effect, Exit, Fiber } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 import { createClient, GH_MISSING } from "../src/github/client.ts";
@@ -253,6 +255,35 @@ test("a missing gh says how to install it", async () => {
     if (env.GITHUB_TOKEN !== undefined) process.env.GITHUB_TOKEN = env.GITHUB_TOKEN;
     else delete process.env.GITHUB_TOKEN;
   }
+});
+
+test("stopping a token read whose gh isn't there signals nothing else", { skip: process.platform === "win32" }, async () => {
+  // In its own process group: execFile's own signal option would SIGTERM that whole group here (the spawn failed, so pid 0).
+  const code = `import { Cause, Effect } from ${JSON.stringify(import.meta.resolve("effect"))};
+import { readToken } from ${JSON.stringify(pathToFileURL(path.resolve("src/github/client.ts")).href)};
+const ac = new AbortController();
+const p = Effect.runPromiseExit(readToken(), { signal: ac.signal });
+ac.abort();
+const exit = await p;
+console.log(exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : String(exit));`;
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "desk-nogh-"));
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: empty };
+  delete env.GITHUB_TOKEN;
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "--input-type=module", "-e", code], {
+    detached: true,
+    env,
+  });
+  let out = "";
+  child.stdout.on("data", (d: Buffer) => {
+    out += d.toString();
+  });
+  const [exit, signal] = await new Promise<[number | null, string | null]>((resolve) => {
+    child.on("close", (c, sig) => {
+      resolve([c, sig]);
+    });
+  });
+  fs.rmSync(empty, { recursive: true });
+  assert.deepEqual([exit, signal, out.trim()], [0, null, "interrupted"]);
 });
 
 test("the token is read once and kept, and read again after GitHub rejects it", async () => {
