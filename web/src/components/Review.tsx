@@ -256,7 +256,7 @@ export function Review({
   useEffect(() => {
     const n = ++seq.current;
     const stop = new AbortController();
-    void runUi(
+    runUi(
       reviewOf(id).pipe(
         Effect.match({
           onSuccess: (r) => {
@@ -452,7 +452,7 @@ export function Review({
     // Out of what's kept while it's on its way: leave and come back meanwhile, and it isn't there to send twice.
     keepDraft(pr, null);
     sendingOn(pr, true);
-    void runUi(
+    runUi(
       (d.thread ? api.reply(v.card.id, d.thread, text) : api.inline(v.card.id, d.at, text, d.head)).pipe(
         Effect.match({
           onFailure: (e) => {
@@ -501,7 +501,7 @@ export function Review({
     }
     setBusy("ai");
     const ref = shortRef(v.card);
-    void runUi(
+    runUi(
       api.aiReview(v.card.id, !!v.ai && !v.ai_stale).pipe(
         Effect.match({
           onSuccess: (r) => {
@@ -827,7 +827,7 @@ export function Review({
                 ]}
                 pick={(a) => {
                   if (a === "request_changes") setWriting(true);
-                  else void runUi(onGithub(card, a, read));
+                  else runUi(onGithub(card, a, read));
                 }}
                 onClose={() => {
                   setMore(false);
@@ -841,7 +841,7 @@ export function Review({
             label="Request changes"
             placeholder="What needs to change"
             onSend={(body) => {
-              void runUi(
+              runUi(
                 onGithub(card, "request_changes", read, body).pipe(
                   Effect.tap((done) =>
                     Effect.sync(() => {
@@ -1391,7 +1391,7 @@ function CommentBox({
 }) {
   function send() {
     if (!body.trim() || sending) return;
-    void runUi(
+    runUi(
       onComment(card, body).pipe(
         Effect.tap((done) =>
           Effect.sync(() => {

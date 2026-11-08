@@ -11,13 +11,13 @@ let last: { id: string; at: number; review: Effect.Effect<ReviewView, ApiError> 
 // own, outside the opener's fiber: StrictMode interrupting its first effect leaves it running for the second.
 export function reviewOf(id: string, get = api.review, now = Date.now()): Effect.Effect<ReviewView, ApiError> {
   if (last?.id === id && now - last.at < JOIN_MS) return last.review;
-  const p = Effect.runPromiseExit(get(id));
+  // Once it answers, a refresh asks again.
+  const p = Effect.runPromiseExit(get(id)).then((exit) => {
+    if (last?.review === review) last = null;
+    return exit;
+  });
   const review = Effect.flatten(Effect.promise(() => p));
   last = { id, at: now, review };
-  const settled = () => {
-    if (last?.review === review) last = null;
-  };
-  void p.then(settled); // once it answers, a refresh asks again
   return review;
 }
 
@@ -32,6 +32,6 @@ export function restOn(id: string | null, get = api.review): void {
   clearTimeout(timer);
   if (id)
     timer = setTimeout(() => {
-      void runUi(get(id, true).pipe(Effect.ignore)); // opening it says what went wrong
+      runUi(get(id, true).pipe(Effect.ignore)); // opening it says what went wrong
     }, DWELL_MS);
 }

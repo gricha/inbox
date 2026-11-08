@@ -32,7 +32,7 @@ export function CommentBar({
   function send() {
     if (!text.trim() || busy) return;
     setBusy(true);
-    void runUi(
+    runUi(
       onSend(text).pipe(
         Effect.ensuring(
           Effect.sync(() => {

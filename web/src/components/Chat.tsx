@@ -58,7 +58,7 @@ export function Chat({
 
   useEffect(() => {
     const stop = new AbortController();
-    void runUi(
+    runUi(
       api.asks().pipe(
         Effect.tap((v) =>
           Effect.sync(() => {
@@ -87,7 +87,7 @@ export function Chat({
     kept.delete(key);
     setText("");
     const s = about.spot;
-    void runUi(
+    runUi(
       api
         .ask({
           text: t,
@@ -313,7 +313,7 @@ function Waiting({ ask, live }: { ask: string; live?: CoordinatorView | undefine
         type="button"
         className="act"
         onClick={() => {
-          void runUi(
+          runUi(
             api.wakeCoordinator(ask).pipe(
               Effect.match({
                 onSuccess: () => {

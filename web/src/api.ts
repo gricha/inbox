@@ -140,13 +140,17 @@ function call<T>(method: string, path: string, body?: unknown): Effect.Effect<T,
 }
 
 // Where the window runs an Effect: each failure it expects is answered inside (a toast, a line on the page), so what gets
-// here is a bug, logged and reported. An interrupt (an effect's cleanup, StrictMode's unmount) is quiet. It never rejects.
-// A read passes its effect's signal; a write passes none, so leaving the page never cuts one short.
-export async function runUi<A>(effect: Effect.Effect<A>, options?: { readonly signal?: AbortSignal }): Promise<void> {
-  const exit = await Effect.runPromiseExit(effect, options);
-  if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return;
-  console.error(Cause.pretty(exit.cause));
-  report(Cause.squash(exit.cause));
+// here is a bug, logged and reported. An interrupt (an effect's cleanup, StrictMode's unmount) is quiet. Nobody waits on
+// it. A read passes its effect's signal; a write passes none, so leaving the page never cuts one short.
+export function runUi<A>(effect: Effect.Effect<A>, options?: { readonly signal?: AbortSignal }): void {
+  Effect.runCallback(effect, {
+    ...options,
+    onExit: (exit) => {
+      if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return;
+      console.error(Cause.pretty(exit.cause));
+      report(Cause.squash(exit.cause));
+    },
+  });
 }
 
 export const api = {

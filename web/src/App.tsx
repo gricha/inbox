@@ -264,7 +264,7 @@ export function App() {
     (ms = 300) => {
       clearTimeout(refreshTimer.current);
       refreshTimer.current = window.setTimeout(() => {
-        void runUi(load());
+        runUi(load());
       }, ms);
     },
     [load],
@@ -308,7 +308,7 @@ export function App() {
       setSettingsSeen(true);
     } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → GitHub → Searches and rules.");
     const stop = new AbortController();
-    void runUi(load(), { signal: stop.signal });
+    runUi(load(), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -342,7 +342,7 @@ export function App() {
     const stop = new AbortController();
     if (onLane) {
       window.scrollTo(0, 0);
-      void runUi(load(), { signal: stop.signal });
+      runUi(load(), { signal: stop.signal });
     }
     return () => {
       stop.abort();
@@ -388,7 +388,7 @@ export function App() {
     const t = down
       ? setInterval(
           () => {
-            void runUi(load());
+            runUi(load());
           },
           quick ? 1000 : 5000,
         )
@@ -588,8 +588,8 @@ export function App() {
     }
     setExpanded(c.id);
     setShowSignals(false);
-    void runUi(fetchDetail(c.id));
-    void runUi(seen(c));
+    runUi(fetchDetail(c.id));
+    runUi(seen(c));
   }
 
   const failed = (e: { message: string }) =>
@@ -784,7 +784,7 @@ export function App() {
     }
     setSelected(c.id);
     go({ name: "review", id: c.id });
-    void runUi(seen(c));
+    runUi(seen(c));
   }
 
   // Hand off for merge: your own open PR goes to Merging (you're done; your agent gets it merged). Back to desk undoes it.
@@ -795,7 +795,7 @@ export function App() {
         return { text: `Handed off for merge: ${shortRef(c)}. Your agent gets it merged.` };
       }),
     );
-    void runUi(finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, write));
+    runUi(finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, write));
   }
 
   // Back to desk: your PR leaves Merging for your desk.
@@ -834,7 +834,7 @@ export function App() {
   }
 
   function markReady(c: Card, picked: Reviewer[] = []) {
-    void runUi(ready(c, picked));
+    runUi(ready(c, picked));
   }
 
   // Ask reviewers in the review of your ready PR nobody's asked to review: it leaves your desk until someone reviews.
@@ -842,7 +842,7 @@ export function App() {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
     const write = api.askReviewers(c.id, ask).pipe(Effect.as({ text: `Asked ${names} to review ${shortRef(c)} on GitHub` }));
-    void runUi(finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, write));
+    runUi(finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, write));
   }
 
   // Your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
@@ -855,7 +855,7 @@ export function App() {
   // Approve in a review: approved on GitHub, pinned to the commit the review showed.
   function approve(c: Card, head: string) {
     const write = api.approve(c.id, head).pipe(Effect.as({ text: `Approved ${shortRef(c)} on GitHub` }));
-    void runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write));
+    runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write));
   }
 
   // A button that opens its row's menu, at the button: an opened issue's Snooze, with Snooze open.
@@ -972,17 +972,17 @@ export function App() {
         if (expanded !== c.id) toggle(c);
         setShowSignals(true);
       }
-    } else if (k === "b") void runUi(back(c));
+    } else if (k === "b") runUi(back(c));
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOff(c);
     else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
-      void runUi(seen(c));
-    } else if (k === "e" || k === "d") void runUi(act(c, c.status === "active" ? "done" : "restore"));
-    else if (k === "m") void runUi(act(c, c.status === "muted" ? "unmute" : "mute"));
-    else if (k === "p") void runUi(act(c, c.pinned ? "unpin" : "pin"));
+      runUi(seen(c));
+    } else if (k === "e" || k === "d") runUi(act(c, c.status === "active" ? "done" : "restore"));
+    else if (k === "m") runUi(act(c, c.status === "muted" ? "unmute" : "mute"));
+    else if (k === "p") runUi(act(c, c.pinned ? "unpin" : "pin"));
     else if (k === "comment") {
       // An issue opened in place: Comment opens the comment bar.
       setAsking(null);
@@ -1186,7 +1186,7 @@ export function App() {
         offline={offline}
         now={now}
         onSync={() => {
-          void runUi(sync());
+          runUi(sync());
         }}
         ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
         waiting={route.name === "review" && askWaiting}
@@ -1231,7 +1231,7 @@ export function App() {
                 type="button"
                 className="btn"
                 onClick={() => {
-                  void runUi(load());
+                  runUi(load());
                 }}
               >
                 Retry
@@ -1354,7 +1354,7 @@ export function App() {
               selected={laneCur?.card.id ?? null}
               select={setLaneSel}
               act={(k) => {
-                void runUi(coordinatorAct(k));
+                runUi(coordinatorAct(k));
               }}
               open={(r) => {
                 setLaneSel(r.card.id);
@@ -1422,7 +1422,7 @@ export function App() {
               type="button"
               className="toast-btn"
               onClick={() => {
-                void runUi(undo());
+                runUi(undo());
               }}
             >
               Undo
@@ -1441,10 +1441,10 @@ export function App() {
           agent={!!overview?.agent}
           run={run}
           act={(c, a, until) => {
-            void runUi(act(c, a, until));
+            runUi(act(c, a, until));
           }}
           github={(c, a) => {
-            void runUi(github(c, a));
+            runUi(github(c, a));
           }}
           reopen={(x, y) => {
             const under = document.elementsFromPoint(x, y).find((n) => !n.closest(".ctx, .scrim-clear"));

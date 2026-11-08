@@ -12,7 +12,7 @@ export function useSourceDown(down: boolean): SourceStatus | null {
   useEffect(() => {
     const stop = new AbortController();
     const ask = () => {
-      void runUi(
+      runUi(
         Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
           Effect.map((st) => st?.source ?? null),
           Effect.orElseSucceed(() => null), // the app not answering: nothing to say beyond the desk being down

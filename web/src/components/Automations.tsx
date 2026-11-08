@@ -81,7 +81,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
 
   useEffect(() => {
     const stop = new AbortController();
-    if (active) void runUi(load(), { signal: stop.signal });
+    if (active) runUi(load(), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -241,7 +241,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
                 disabled={a.running}
                 aria-label={`Run now: ${a.name}`}
                 onClick={() => {
-                  void runUi(au.runNow(a));
+                  runUi(au.runNow(a));
                 }}
               >
                 {a.running ? "Running…" : "Run now"}
@@ -255,7 +255,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
               checked={a.on}
               aria-label={`Run ${a.name} on its schedule`}
               onChange={() => {
-                void runUi(au.turn(a, !a.on));
+                runUi(au.turn(a, !a.on));
               }}
             />
           </>
@@ -274,7 +274,7 @@ export function NewAutomation({ au }: { au: Automations }) {
         draft={au.writing}
         busy={au.busy}
         onSave={(d) => {
-          void runUi(
+          runUi(
             au.save(d).pipe(
               Effect.tap((ok) =>
                 Effect.sync(() => {
@@ -338,7 +338,7 @@ export function AutomationView({
   const agents = drafted(a);
   const line = `${a.when} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
   const turn = (on: boolean) => () => {
-    void runUi(au.turn(a, on));
+    runUi(au.turn(a, on));
   };
   const resume = (session: string) => {
     if (!settingsPath) return null;
@@ -349,7 +349,7 @@ export function AutomationView({
         className="link-btn au-resume"
         title={cmd}
         onClick={() => {
-          void runUi(
+          runUi(
             copyText(cmd).pipe(
               Effect.match({
                 onSuccess: () => {
@@ -381,7 +381,7 @@ export function AutomationView({
             busy={au.busy}
             onChange={setDraft}
             onSave={(d) => {
-              void runUi(
+              runUi(
                 au.save(d).pipe(
                   Effect.tap((ok) =>
                     Effect.sync(() => {
@@ -395,7 +395,7 @@ export function AutomationView({
               setDraft(null);
             }}
             onDelete={() => {
-              void runUi(
+              runUi(
                 au.remove(a.id).pipe(
                   Effect.tap((ok) =>
                     Effect.sync(() => {
@@ -424,7 +424,7 @@ export function AutomationView({
                   className="act"
                   disabled={a.running}
                   onClick={() => {
-                    void runUi(au.runNow(a));
+                    runUi(au.runNow(a));
                   }}
                 >
                   {a.running ? "Running…" : "Run now"}

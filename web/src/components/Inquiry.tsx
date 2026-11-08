@@ -137,7 +137,7 @@ export function InquiryPage({
   useEffect(() => {
     const n = ++seq.current;
     const stop = new AbortController();
-    void runUi(
+    runUi(
       api.inquiry(id).pipe(
         Effect.match({
           onSuccess: (r) => {
@@ -172,7 +172,7 @@ export function InquiryPage({
     if (!dismiss && !t.trim()) return;
     const mine = { text: dismiss ? "" : t.trim(), at: "", dismissed: dismiss }; // the desk stamps it
     setSent(mine);
-    void runUi(
+    runUi(
       onAnswer(v, t, dismiss).pipe(
         Effect.tap((ok) =>
           Effect.sync(() => {

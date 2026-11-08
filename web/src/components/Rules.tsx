@@ -65,7 +65,7 @@ export function Rules({
   useEffect(() => {
     const stop = new AbortController();
     // The fields' help is a side list: the editor works without it.
-    void runUi(api.fields().pipe(Effect.map(setFields), Effect.ignore), { signal: stop.signal });
+    runUi(api.fields().pipe(Effect.map(setFields), Effect.ignore), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -76,7 +76,7 @@ export function Rules({
     // Read through the ref: finishing an edit (dirty to clean) must not trigger a re-read.
     const { doc: d, text: t } = latest.current;
     const stop = new AbortController();
-    if (active && (d === null || t === d.text)) void runUi(load(), { signal: stop.signal });
+    if (active && (d === null || t === d.text)) runUi(load(), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -92,7 +92,7 @@ export function Rules({
 
   function runPreview() {
     setBusy("preview");
-    void runUi(
+    runUi(
       api.preview(text).pipe(
         Effect.match({
           onSuccess: (result) => {
@@ -110,7 +110,7 @@ export function Rules({
 
   function save() {
     setBusy("save");
-    void runUi(
+    runUi(
       api.saveConfig(text, doc?.text).pipe(
         Effect.tap((r) =>
           Effect.sync(() => {
@@ -237,7 +237,7 @@ export function Rules({
             type="button"
             className="btn"
             onClick={() => {
-              void runUi(load());
+              runUi(load());
             }}
           >
             Retry

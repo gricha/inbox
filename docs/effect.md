@@ -292,9 +292,10 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   app can't remove is logged and passed over, and a login item the OS refused is logged as `open at login failed: …` and
   the tray still updates (each failed the app's start, following the desk or the tray's refresh, in desk.log alone).
 - **UI** (`web/src`): `api.ts` answers with Effects failing with the UI's own tagged errors. Components run them through
-  one helper, `runUi(effect, { signal? })`: `Effect.runPromiseExit`, ignoring an interrupt-only exit, reporting any
-  other uncaught cause to Sentry, never rejecting. Reads pass their effect's signal; writes pass none, so an unmount
-  never interrupts a write.
+  one helper, `runUi(effect, { signal? })`: `Effect.runCallback`, whose `onExit` ignores an interrupt-only exit and logs
+  and reports to Sentry any other uncaught cause. Nothing in the window waits on it, so it returns nothing: there's no
+  promise to drop or to reject, and `web/src` keeps the same lint as `src/` (a promise nobody waits on, `void` included).
+  Reads pass their effect's signal; writes pass none, so an unmount never interrupts a write.
 
 ### The wire
 

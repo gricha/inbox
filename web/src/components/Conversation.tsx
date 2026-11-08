@@ -70,7 +70,7 @@ export function Conversation({
     const to = c.comments.at(-1)?.author ?? "them";
     if (!text.trim() || busy) return;
     setBusy(c.id);
-    void runUi(
+    runUi(
       api.reply(view.card.id, c.id, text).pipe(
         Effect.match({
           onSuccess: ({ url }) => {

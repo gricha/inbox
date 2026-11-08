@@ -57,7 +57,7 @@ function Pre({ text, info }: { text: string; info: string }) {
         className="act prose-copy"
         title="Copy it with its ``` fence, to paste on GitHub"
         onClick={() => {
-          void runUi(
+          runUi(
             copyText(fencedCopy(text, info)).pipe(
               Effect.match({
                 onSuccess: () => {

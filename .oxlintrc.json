@@ -53,7 +53,7 @@
       }
     },
     {
-      "files": ["src/**", "electron/**", "scripts/**"],
+      "files": ["src/**", "electron/**", "scripts/**", "web/src/**"],
       "excludeFiles": ["scripts/shots.ts", "scripts/icons.ts"],
       "rules": {
         "typescript/no-floating-promises": [

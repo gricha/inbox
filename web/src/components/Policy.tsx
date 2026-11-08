@@ -63,7 +63,7 @@ export function Policy({
 
   useEffect(() => {
     const stop = new AbortController();
-    if (active) void runUi(load(), { signal: stop.signal });
+    if (active) runUi(load(), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -73,7 +73,7 @@ export function Policy({
   function save() {
     if (!doc) return;
     setBusy(true);
-    void runUi(
+    runUi(
       api.savePolicy(text, doc.hash).pipe(
         Effect.tap((r) =>
           Effect.sync(() => {

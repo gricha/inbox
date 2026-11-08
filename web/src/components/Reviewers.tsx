@@ -38,7 +38,7 @@ export function Reviewers({
   // GitHub's suggestions, on the line before you look for anyone: who you'd likely ask anyway.
   useEffect(() => {
     const stop = new AbortController();
-    void runUi(
+    runUi(
       api.reviewers(id, "").pipe(
         Effect.tap((r) =>
           Effect.sync(() => {
@@ -67,7 +67,10 @@ export function Reviewers({
         },
       }),
     );
-    const t = open ? setTimeout(() => void runUi(search, { signal: stop.signal }), q ? 150 : 0) : undefined;
+    const ask = () => {
+      runUi(search, { signal: stop.signal });
+    };
+    const t = open ? setTimeout(ask, q ? 150 : 0) : undefined;
     return () => {
       clearTimeout(t);
       stop.abort();

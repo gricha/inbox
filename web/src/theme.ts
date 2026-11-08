@@ -32,7 +32,7 @@ export function savedTheme(): ThemeId {
 // showing it anyway, so there's nothing to say.
 function keepInApp(id: ThemeId): void {
   if (desktop?.setTheme)
-    void runUi(Effect.tryPromise({ try: () => desktop?.setTheme?.(id) ?? Promise.resolve(), catch: (e) => e }).pipe(Effect.ignore));
+    runUi(Effect.tryPromise({ try: () => desktop?.setTheme?.(id) ?? Promise.resolve(), catch: (e) => e }).pipe(Effect.ignore));
 }
 
 export function applyTheme(id: ThemeId): void {

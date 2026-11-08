@@ -1,5 +1,5 @@
 // The window's API calls: an error answer decoded into the UI's tagged errors the way docs/effect.md's "The wire" says (a
-// tag when the desk sends one, its status when an older desk doesn't), and runUi, which never rejects and reports only bugs.
+// tag when the desk sends one, its status when an older desk doesn't), and runUi, which throws nothing and reports only bugs.
 import assert from "node:assert/strict";
 import { STATUS_CODES } from "node:http";
 import { afterEach, test } from "node:test";
@@ -165,9 +165,8 @@ test("runUi: an interrupted read aborts its request and says nothing", async (t)
       });
     });
   const stop = new AbortController();
-  const read = runUi(api.queue().pipe(Effect.ignore), { signal: stop.signal });
+  runUi(api.queue().pipe(Effect.ignore), { signal: stop.signal });
   stop.abort(); // the effect's cleanup
-  await assert.doesNotReject(read);
   assert.equal(signal?.aborted, true);
   await Sentry.flush(500);
   assert.equal(logged.mock.callCount(), 0);
@@ -175,25 +174,19 @@ test("runUi: an interrupted read aborts its request and says nothing", async (t)
 });
 
 test("runUi: a write without a signal runs to its end", async () => {
-  let done = false;
   desk(200, JSON.stringify({ ok: true, url: "https://github.com/acme/api/pull/1#c" }));
-  await runUi(
-    api.comment("acme/api#1", "hi").pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          done = true;
-        }),
-      ),
-      Effect.ignore,
-    ),
-  );
-  assert.ok(done);
+  const wrote = await new Promise<boolean>((done) => {
+    runUi(api.comment("acme/api#1", "hi").pipe(Effect.isSuccess, Effect.map(done)));
+  });
+  assert.ok(wrote);
 });
 
-test("runUi: a bug is logged and reported, and it still resolves", async (t) => {
+test("runUi: a bug is logged and reported, and nothing escapes it", async (t) => {
   const logged = t.mock.method(console, "error", () => {});
   const bug = new TypeError("Cannot read properties of undefined (reading 'card')");
-  await assert.doesNotReject(runUi(Effect.die(bug)));
+  assert.doesNotThrow(() => {
+    runUi(Effect.die(bug));
+  });
   await Sentry.flush(500);
   assert.equal(logged.mock.callCount(), 1);
   assert.match(String(logged.mock.calls[0]?.arguments[0]), /Cannot read properties of undefined/);

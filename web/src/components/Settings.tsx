@@ -71,7 +71,7 @@ function useDraft({ def, value, commit, clear, id, invalid, disabled }: FieldPro
       setDraft(shown);
       return;
     }
-    void runUi(
+    runUi(
       commit(v).pipe(
         Effect.tap((saved) =>
           Effect.sync(() => {
@@ -173,7 +173,7 @@ function BooleanField({ value, commit, id, disabled }: FieldProps) {
 
   function flip(v: boolean) {
     setOn(v);
-    void runUi(
+    runUi(
       commit(v).pipe(
         Effect.tap((saved) =>
           Effect.sync(() => {
@@ -212,7 +212,7 @@ function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) 
   function pick(v: string) {
     const was = picked;
     setPicked(v);
-    void runUi(
+    runUi(
       commit(v).pipe(
         Effect.tap((saved) =>
           Effect.sync(() => {
@@ -336,7 +336,7 @@ function QuietHours({ value, commit, clear, id, invalid, disabled }: FieldProps)
   }, [saved]);
 
   function put(v: string, refused: () => void) {
-    void runUi(
+    runUi(
       commit(v).pipe(
         Effect.tap((s) =>
           Effect.sync(() => {
@@ -492,7 +492,7 @@ function Row({
   }
 
   function resetToDefault() {
-    void runUi(
+    runUi(
       put({ reset: [def.key] }).pipe(
         Effect.tap((saved) =>
           Effect.sync(() => {
@@ -634,7 +634,7 @@ function ClaudeStatus({
   useEffect(() => {
     const stop = new AbortController();
     // Not answering: what's shown stays, and the next refresh asks again.
-    if (active) void runUi(api.agents().pipe(Effect.map(setStatus), Effect.ignore), { signal: stop.signal });
+    if (active) runUi(api.agents().pipe(Effect.map(setStatus), Effect.ignore), { signal: stop.signal });
     return () => {
       stop.abort();
     };
@@ -647,7 +647,7 @@ function ClaudeStatus({
   function connect() {
     setBusy(true);
     setError(null);
-    void runUi(
+    runUi(
       api.connectAgent().pipe(
         Effect.tap((s) =>
           Effect.sync(() => {
@@ -886,7 +886,7 @@ export function Settings({
     let t: ReturnType<typeof setTimeout> | undefined;
     const ask = (tries: number) => {
       t = setTimeout(() => {
-        void runUi(
+        runUi(
           Effect.tryPromise({ try: () => desktop?.status() ?? Promise.resolve(null), catch: (e) => e }).pipe(
             Effect.tap((s) =>
               Effect.sync(() => {
