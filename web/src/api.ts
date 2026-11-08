@@ -1,7 +1,7 @@
 // The window's only HTTP layer: each call is an Effect that fails with one of the UI's own tagged errors below, decoded
 // from the desk's error answer ({ error, tag, candidates?, reason? }, docs/effect.md → The wire). Components run them
 // through runUi and answer for each failure themselves: a toast, a line on the page, the down banner.
-import { Cause, Data, Effect, Exit } from "effect";
+import { Cause, Data, Effect, Exit, Result } from "effect";
 import type { ErrorBody } from "../../src/errors.ts";
 import type {
   Action,
@@ -115,27 +115,42 @@ function refusal(status: number, body: Partial<ErrorBody> | null, statusText: st
   return new DeskRequestFailed({ message, status, kind: tag });
 }
 
+// A JSON answer: its body parsed, or why it didn't (cut short, not JSON after all).
+interface Answer {
+  readonly res: Response;
+  readonly json: Result.Result<unknown, unknown>;
+}
+
 function call<T>(method: string, path: string, body?: unknown): Effect.Effect<T, ApiError> {
   return Effect.gen(function* () {
-    const res = yield* Effect.tryPromise({
+    // The body is read under the request's own signal, so an interrupt while it's still arriving stops the download too.
+    const answer = yield* Effect.tryPromise({
       try: (signal) =>
         fetch(path, {
           method,
           headers: body === undefined ? undefined : { "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
           signal,
-        }),
+        }).then((res): Promise<Answer> | null =>
+          (res.headers.get("content-type") ?? "").includes("json")
+            ? res
+                .text()
+                .then((text): unknown => JSON.parse(text))
+                .then(
+                  (json): Answer => ({ res, json: Result.succeed(json) }),
+                  (cause: unknown): Answer => ({ res, json: Result.fail(cause) }),
+                )
+            : null,
+        ),
       catch: (cause) => new DeskUnreachable({ cause }),
     });
-    if (!(res.headers.get("content-type") ?? "").includes("json")) return yield* new DeskUnreachable({});
-    const json = Effect.tryPromise({
-      try: (): Promise<unknown> => res.json(),
-      catch: (cause) => new DeskBadResponse({ status: res.status, cause }),
-    });
-    if (res.ok) return (yield* json) as T;
+    if (!answer) return yield* new DeskUnreachable({});
+    const { res, json } = answer;
+    if (res.ok)
+      return Result.isSuccess(json) ? (json.success as T) : yield* new DeskBadResponse({ status: res.status, cause: json.failure });
     // A refusal whose body doesn't parse still says what it is by its status.
-    const answer = yield* json.pipe(Effect.orElseSucceed(() => null));
-    return yield* Effect.fail(refusal(res.status, answer as Partial<ErrorBody> | null, res.statusText, STALE.has(`${method} ${path}`)));
+    const refused = Result.getOrNull(json) as Partial<ErrorBody> | null;
+    return yield* Effect.fail(refusal(res.status, refused, res.statusText, STALE.has(`${method} ${path}`)));
   });
 }
 

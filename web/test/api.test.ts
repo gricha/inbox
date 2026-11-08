@@ -136,6 +136,22 @@ test("a 2xx body cut short is a bad response in the parser's words; a refusal's 
   assert.equal(cut._tag, "DeskBadResponse");
   assert.ok(cut.message.length > 0 && cut.message !== "desk server not reachable", cut.message);
 
+  // The connection dropping while the body arrives: a bad response in its words, not the desk down.
+  const dropped = new TypeError("terminated");
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(
+        new ReadableStream({
+          pull: (c) => {
+            c.error(dropped);
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+  const gone = await failure(api.queue());
+  assert.deepEqual([gone._tag, gone.message], ["DeskBadResponse", "terminated"]);
+
   desk(409, "{");
   const refusal = await failure(api.act("acme/api#1", "done"));
   assert.equal(refusal._tag, "DeskConflict");
@@ -169,6 +185,55 @@ test("runUi: an interrupted read aborts its request and says nothing", async (t)
   stop.abort(); // the effect's cleanup
   assert.equal(signal?.aborted, true);
   await Sentry.flush(500);
+  assert.equal(logged.mock.callCount(), 0);
+  assert.equal(events.length, 0);
+});
+
+test("runUi: a read interrupted while its body is still arriving aborts the download too, and says nothing", async (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  let signal: AbortSignal | undefined;
+  let reading = () => {};
+  const started = new Promise<void>((done) => {
+    reading = done;
+  });
+  globalThis.fetch = (_input, init) => {
+    const sig = init?.signal ?? undefined;
+    signal = sig;
+    const body = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        c.enqueue(new TextEncoder().encode('{"sections": {'));
+        // A real fetch errors its body when its signal aborts.
+        sig?.addEventListener("abort", () => {
+          c.error(new DOMException("aborted", "AbortError"));
+        });
+      },
+      pull: () => {
+        reading();
+      },
+    });
+    return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+  };
+  let ended = 0;
+  const stop = new AbortController();
+  runUi(
+    api.queue().pipe(
+      Effect.match({
+        onFailure: () => {
+          ended++;
+        },
+        onSuccess: () => {
+          ended++;
+        },
+      }),
+    ),
+    { signal: stop.signal },
+  );
+  await started;
+  assert.equal(signal?.aborted, false);
+  stop.abort(); // the effect's cleanup, while the body is on its way
+  assert.equal(signal?.aborted, true);
+  await Sentry.flush(500);
+  assert.equal(ended, 0);
   assert.equal(logged.mock.callCount(), 0);
   assert.equal(events.length, 0);
 });
