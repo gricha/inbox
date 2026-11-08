@@ -52,7 +52,6 @@ import {
   menuLabel,
   mergePath,
   messageOf,
-  type NoFreePort,
   parseNotice,
   probeHealth,
   quietly,
@@ -93,7 +92,6 @@ const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
 type Status = { now: number; today: number; new: number; text: string };
 type Server = Awaited<ReturnType<typeof startServer>>;
-type SourceError = FsError | NoFreePort; // what stops the desk from a checkout starting at all
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -139,7 +137,7 @@ if (!app.requestSingleInstanceLock()) {
   runner.fork("starting the app", main());
 }
 
-function main(): Effect.Effect<void, SourceError> {
+function main(): Effect.Effect<void> {
   return Effect.gen(function* () {
     app.setAppUserModelId("dev.review-desk.app");
     app.on("before-quit", () => {
@@ -192,7 +190,13 @@ function main(): Effect.Effect<void, SourceError> {
     createWindow();
     yield* Fiber.join(pathReady);
     yield* planDesk();
-    yield* reap(home, log);
+    yield* reap(home, log).pipe(
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          log(`forgetting what an earlier run left going: ${e.message}`);
+        }),
+      ),
+    );
     if (!(yield* connect())) return;
     // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
     runner.fork("following the desk", watch());
@@ -311,7 +315,7 @@ function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
 }
 
 // Attach to the desk on the port, or start one here. False when the user chose Quit.
-function connect(): Effect.Effect<boolean, SourceError> {
+function connect(): Effect.Effect<boolean> {
   return Effect.gen(function* () {
     let waitingOn = "";
     for (;;) {
@@ -343,8 +347,22 @@ function connect(): Effect.Effect<boolean, SourceError> {
         continue;
       }
       if (plan.run === "source") {
+        const started = yield* Effect.result(startSource({ dir: fromSource, node: plan.node, port, home, log }));
+        // Its home or a port for its UI: said in the window, and tried again, as a desk from source that can't start yet.
+        if (Result.isFailure(started)) {
+          const problem = `The desk from ${fromSource} couldn't start: ${started.failure.message}`;
+          if (problem !== waitingOn) {
+            waitingOn = problem;
+            log(problem);
+            showPage(`${problem}. The app tries again every 15 seconds.`);
+          }
+          yield* Effect.sleep(15_000);
+          checkSource();
+          if (quitting || relaunching) return false;
+          continue;
+        }
         if (waitingOn) showPage("Starting Review Desk\u2026");
-        const s = yield* startSource({ dir: fromSource, node: plan.node, port, home, log });
+        const s = started.success;
         source = s;
         uiUrl = s.ui;
         origins.push(s.ui);
@@ -381,7 +399,7 @@ function connect(): Effect.Effect<boolean, SourceError> {
 
 // Follows /api/events: refreshes the tray on each update, shows a desk's notifications when it isn't in this process, and
 // takes over when an attached desk goes away. A desk from source restarting is just a reconnect.
-function watch(): Effect.Effect<void, SourceError> {
+function watch(): Effect.Effect<void> {
   return Effect.gen(function* () {
     let attempt = 0;
     const events = {
@@ -455,7 +473,7 @@ function refreshSoon(): void {
   }, 500);
 }
 
-function refresh(): Effect.Effect<void, FsError | ElectronRefused> {
+function refresh(): Effect.Effect<void> {
   return Effect.gen(function* () {
     const [s, focus, settings] = yield* Effect.all(
       [getJson<Status>(`${api}/api/status`), getJson<FocusView>(`${api}/api/focus`), getJson<SettingsView>(`${api}/api/settings`)],
@@ -486,13 +504,21 @@ const shown = new Set<Notification>(); // a collected Notification loses its cli
 
 // ---------------------------------------------------------------- desktop settings
 
-function applySettings(next: DesktopSettings): Effect.Effect<void, FsError | ElectronRefused> {
+function applySettings(next: DesktopSettings): Effect.Effect<void> {
   return Effect.gen(function* () {
     if (next.hotkey !== hotkey.accelerator) registerHotkey(next.hotkey);
     if (next.source !== prefs.source) checkSource();
     if (next.open_at_login !== loginApplied) {
       loginApplied = next.open_at_login;
-      if (next.open_at_login !== loginItemEnabled()) yield* setLoginItem(next.open_at_login);
+      // One the OS refuses is logged; the tray still updates.
+      if (next.open_at_login !== loginItemEnabled())
+        yield* setLoginItem(next.open_at_login).pipe(
+          Effect.catch((e) =>
+            Effect.sync(() => {
+              log(`open at login failed: ${e.message}`);
+            }),
+          ),
+        );
     }
     prefs = next;
   });

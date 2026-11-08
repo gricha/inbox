@@ -50,7 +50,13 @@ fs.watch(path.join(root, "electron"), { recursive: true }, (_e, file) => {
   clearTimeout(timer);
   timer = setTimeout(() => {
     console.log(`\n${file ? path.join("electron", file) : "electron/"}: restarting Electron`);
-    restarting = restarting.then(stop).then(launch);
+    // A spawn that throws is said, and the chain goes on: a later restart or quitting still runs.
+    restarting = restarting
+      .then(stop)
+      .then(launch)
+      .catch((e: unknown) => {
+        console.error(`restarting Electron: ${e instanceof Error ? e.message : String(e)}`);
+      });
   }, 300);
 });
 

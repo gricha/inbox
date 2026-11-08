@@ -58,7 +58,7 @@ export class NoFreePort extends Data.TaggedError("NoFreePort")<{ readonly cause:
 export const appRunner = (log: (m: string) => void): Runner => new Runner(log, report, detached);
 
 // The IPC boundary (an ipcMain.handle handler): what the Effect gives, or a rejection with a failure's words alone, all the
-// structured clone keeps. A bug rejects with its own words and is logged.
+// structured clone keeps. A bug rejects with its own words and is logged and reported.
 export const ipcAnswer = <A, E extends { readonly message: string }>(
   channel: string,
   effect: Effect.Effect<A, E>,
@@ -68,7 +68,9 @@ export const ipcAnswer = <A, E extends { readonly message: string }>(
     effect.pipe(
       Effect.tapCause((cause) =>
         Effect.sync(() => {
-          if (Cause.hasDies(cause)) log(`${channel} failed: ${Cause.pretty(cause)}`);
+          if (!Cause.hasDies(cause)) return;
+          log(`${channel} failed: ${Cause.pretty(cause)}`);
+          report(Cause.squash(cause), channel);
         }),
       ),
       Effect.mapError((e) => new Error(e.message)),
