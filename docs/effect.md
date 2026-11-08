@@ -228,6 +228,20 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
 - **Electron** (`electron/main.ts`): an IPC handler runs its Effect and rejects with a plain `Error(message)` (only the
   message survives the structured clone). Callbacks that must answer synchronously (`will-quit`, `desktop:theme`'s
   `returnValue`, `will-navigate`, the window-open handler) stay plain code and fork only their async tail.
+  `ipcAnswer` (`electron/lib.ts`) is that boundary: `Forbidden` "not allowed" for a page that isn't the desk's, `BadRequest`
+  "no such theme", and a bug logged too. The app's own failures live in `electron/lib.ts` (`DeskCallFailed`, `DeskFailed`,
+  `ElectronRefused`, `NoFreePort`), beside `FsError` and `CommandFailed`. What it starts and nobody waits on (its start,
+  following the desk, the tray's refresh, a link or Settings it opens, Sync now, a start page, quitting) goes through one
+  runner, `appRunner(log)`: src's `Runner`, logging to desk.log and reporting if the app ever reports. A start page the next
+  load supersedes (`ERR_ABORTED`) is no failure. Following the desk's events is a loop whose pass logs a bug and goes on.
+  Quitting closes the desk or stops the checkout's, each failure logged, then `app.exit(0)` whatever happened. A file the
+  app keeps for itself (window.json, theme.json, live.json) that's missing or isn't JSON reads as `null` (`readJson`); a
+  pid that's gone or a log line it can't write is nothing (`tryOr`, `quietly`). Deliberate changes, each with a test: a
+  node that `spawn` refuses at once (a NUL byte in its path) is a failure the restart loop of the desk from a checkout
+  handles like one that fails to start (it threw: an uncaught exception in the main process, or `startSource` rejecting),
+  and `commandOutput` gives no output for one (it rejected); what fails the app's background work (`startSource`, a login
+  item Linux refused, a link the OS didn't open, Settings or Sync now) is logged as `<what> failed: …`, where it was an
+  unhandled rejection or ignored.
 - **UI** (`web/src`): `api.ts` answers with Effects failing with the UI's own tagged errors. Components run them through
   one helper, `runUi(effect, { signal? })`: `Effect.runPromiseExit`, ignoring an interrupt-only exit, reporting any
   other uncaught cause to Sentry, never rejecting. Reads pass their effect's signal; writes pass none, so an unmount

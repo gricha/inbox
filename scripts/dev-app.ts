@@ -4,13 +4,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { Effect } from "effect";
 import { envVar, probeHealth } from "../electron/lib.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const electron = createRequire(import.meta.url)("electron") as string; // outside Electron the package exports the binary's path
 const port = Number(envVar("DESK_PORT") ?? 47823);
 
-if ((await probeHealth(`http://127.0.0.1:${port}`)).kind === "desk") {
+if ((await Effect.runPromise(probeHealth(`http://127.0.0.1:${port}`))).kind === "desk") {
   console.warn(`A desk is already running on :${port}; the app attaches to it, so src/ and web/ changes won't reach it.`);
   console.warn(`For a separate dev desk: DESK_PORT=47900 DESK_HOME=/tmp/desk-dev npm run app:dev`);
 }

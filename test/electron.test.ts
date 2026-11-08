@@ -1,22 +1,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Effect, Fiber } from "effect";
+import { BadRequest } from "../src/errors.ts";
+import { failure, run } from "./helpers/run.ts";
 import {
+  appRunner,
   backoff,
   cardLabel,
   commandOutput,
   DESK_ARGS,
+  DeskCallFailed,
+  DeskFailed,
   deskPlan,
   desktopEntry,
   desktopSettings,
+  ElectronRefused,
   envVar,
   fallbackDirs,
   findNode,
+  followEvents,
+  getJson,
+  ipcAnswer,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
@@ -26,10 +37,14 @@ import {
   loginShellPath,
   menuLabel,
   mergePath,
+  NoFreePort,
+  parseJson,
   parseNotice,
   parseShellPath,
   parseSSE,
   probeHealth,
+  quietly,
+  readJson,
   restoreBounds,
   SHELL_PATH_COMMAND,
   sourceDir,
@@ -37,10 +52,29 @@ import {
   themeColors,
   trayTitle,
   trayTooltip,
+  tryOr,
   viteArgs,
   watchEvent,
   type DeskPlan,
+  type SSEvent,
 } from "../electron/lib.ts";
+import { freePort, reap, startSource } from "../electron/source.ts";
+
+// A local server for what the app asks its desk; close() also ends any stream it holds open.
+const serve = (handler: http.RequestListener) =>
+  new Promise<{ base: string; close: () => void }>((resolve) => {
+    const s = http.createServer(handler).listen(0, "127.0.0.1", () => {
+      resolve({
+        base: `http://127.0.0.1:${(s.address() as AddressInfo).port}`,
+        close: () => {
+          s.closeAllConnections();
+          s.close();
+        },
+      });
+    });
+  });
+
+const isAlive = (pid: number) => tryOr(() => process.kill(pid, 0), false);
 
 test("parseShellPath ignores rc-file noise around the markers", () => {
   const out = `Welcome!\n__DESK_PATH__/opt/homebrew/bin:/usr/bin:/bin\n__DESK_PATH__\nbye`;
@@ -54,30 +88,22 @@ test(
   "commandOutput stops a shell that ignores SIGTERM, and what it started, at the deadline",
   { skip: process.platform === "win32" },
   async () => {
-    assert.deepEqual(await commandOutput("/bin/sh", ["-c", "printf hi"], 5000), { stdout: "hi", timedOut: false });
+    assert.deepEqual(await run(commandOutput("/bin/sh", ["-c", "printf hi"], 5000)), { stdout: "hi", timedOut: false });
     const t0 = Date.now();
-    const { stdout, timedOut } = await commandOutput("/bin/sh", ["-c", "trap '' TERM; sleep 30 & echo $!; wait"], 300);
+    const { stdout, timedOut } = await run(commandOutput("/bin/sh", ["-c", "trap '' TERM; sleep 30 & echo $!; wait"], 300));
     assert.ok(Date.now() - t0 < 2000, `returned after ${Date.now() - t0}ms`);
     assert.equal(timedOut, true);
     const pid = Number(stdout.trim());
     assert.ok(pid > 0, `the background job's pid: ${JSON.stringify(stdout)}`);
-    const alive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    for (let i = 0; i < 20 && alive(); i++) await sleep(50);
-    assert.equal(alive(), false, "the rc's child is gone too");
+    for (let i = 0; i < 20 && isAlive(pid); i++) await sleep(50);
+    assert.equal(isAlive(pid), false, "the rc's child is gone too");
     if (fs.existsSync("/bin/zsh")) {
       const zdot = fs.mkdtempSync(path.join(os.tmpdir(), "desk-zdot-"));
       try {
         fs.writeFileSync(path.join(zdot, ".zshrc"), "sleep 3\n");
         process.env.ZDOTDIR = zdot;
         const t1 = Date.now();
-        assert.equal((await commandOutput("/bin/zsh", ["-ilc", SHELL_PATH_COMMAND], 300)).timedOut, true);
+        assert.equal((await run(commandOutput("/bin/zsh", ["-ilc", SHELL_PATH_COMMAND], 300))).timedOut, true);
         assert.ok(Date.now() - t1 < 1000, `interactive zsh returned after ${Date.now() - t1}ms`);
       } finally {
         delete process.env.ZDOTDIR;
@@ -89,17 +115,21 @@ test(
 
 test("loginShellPath tries the login shell once more, for longer, before giving up on it", async () => {
   const tries: number[] = [];
-  const shell = (outs: string[]) => (timeoutMs: number) => {
-    tries.push(timeoutMs);
-    return Promise.resolve(outs[tries.length - 1] ?? "");
-  };
-  assert.equal(await loginShellPath(shell(["", "__DESK_PATH__/opt/homebrew/bin:/usr/bin\n__DESK_PATH__"])), "/opt/homebrew/bin:/usr/bin");
+  const shell = (outs: string[]) => (timeoutMs: number) =>
+    Effect.sync(() => {
+      tries.push(timeoutMs);
+      return outs[tries.length - 1] ?? "";
+    });
+  assert.equal(
+    await run(loginShellPath(shell(["", "__DESK_PATH__/opt/homebrew/bin:/usr/bin\n__DESK_PATH__"]))),
+    "/opt/homebrew/bin:/usr/bin",
+  );
   assert.deepEqual(tries, [5000, 20_000], "a slow first shell after a boot gets a second, longer try");
   tries.length = 0;
-  assert.equal(await loginShellPath(shell(["__DESK_PATH__/usr/bin__DESK_PATH__"])), "/usr/bin");
+  assert.equal(await run(loginShellPath(shell(["__DESK_PATH__/usr/bin__DESK_PATH__"]))), "/usr/bin");
   assert.deepEqual(tries, [5000]);
   tries.length = 0;
-  assert.equal(await loginShellPath(shell(["noise", "noise"])), null);
+  assert.equal(await run(loginShellPath(shell(["noise", "noise"]))), null);
   assert.equal(tries.length, 2);
 });
 
@@ -168,37 +198,29 @@ test("envVar treats an empty variable as unset", () => {
 });
 
 test("probeHealth: a desk, nothing, or something else", async () => {
-  const serve = (handler: http.RequestListener) =>
-    new Promise<{ base: string; close: () => void }>((resolve) => {
-      const s = http.createServer(handler).listen(0, "127.0.0.1", () => {
-        resolve({
-          base: `http://127.0.0.1:${(s.address() as AddressInfo).port}`,
-          close: () => {
-            s.close();
-          },
-        });
-      });
-    });
-
   const desk = await serve((_q, r) => {
     r.writeHead(200, { "content-type": "application/json" }).end(`{"ok":true,"version":"0.1.0"}`);
   });
-  assert.deepEqual(await probeHealth(desk.base), { kind: "desk" });
+  assert.deepEqual(await run(probeHealth(desk.base)), { kind: "desk" });
   desk.close();
 
   const other = await serve((_q, r) => {
     r.writeHead(404).end("nope");
   });
-  assert.equal((await probeHealth(other.base)).kind, "other");
+  assert.equal((await run(probeHealth(other.base))).kind, "other");
   other.close();
 
   const hung = await serve(() => {});
-  const p = await probeHealth(hung.base, 200);
-  assert.equal(p.kind, "other");
+  const p = await run(probeHealth(hung.base, 200));
+  assert.deepEqual(
+    p,
+    { kind: "other", detail: "The operation was aborted due to timeout" },
+    "a desk too busy to answer isn't one to replace",
+  );
   hung.close();
 
   // The port the desk just released is now free.
-  assert.deepEqual(await probeHealth(desk.base), { kind: "free" });
+  assert.deepEqual(await run(probeHealth(desk.base)), { kind: "free" });
 });
 
 test("backoff doubles up to 30s", () => {
@@ -390,4 +412,313 @@ test("desktopEntry quotes Exec arguments", () => {
   assert.match(text, /\nExec="\/home\/me\/Apps\/Review Desk.AppImage" --hidden\n/);
   assert.match(desktopEntry("/opt/a$b/100%", []), /\nExec="\/opt\/a\\\\\$b\/100%%"\n/);
   assert.match(desktopEntry("/usr/bin/review-desk", ["--hidden"]), /\nExec=\/usr\/bin\/review-desk --hidden\n/);
+});
+
+test("commandOutput: one spawn refuses before it starts gives no output, like one that fails to start", async () => {
+  assert.deepEqual(await run(commandOutput("bad\0command", [], 5000)), { stdout: "", timedOut: false });
+  assert.deepEqual(await run(commandOutput(path.join(os.tmpdir(), "desk-no-such-command"), [], 5000)), { stdout: "", timedOut: false });
+});
+
+test("commandOutput interrupted stops its whole group before it ends", { skip: process.platform === "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-cmd-"));
+  try {
+    const file = path.join(dir, "pid");
+    const fiber = Effect.runFork(commandOutput("/bin/sh", ["-c", `sleep 30 & echo $! > ${file}; wait`], 60_000));
+    for (let i = 0; i < 100 && !fs.existsSync(file); i++) await sleep(20);
+    const pid = Number(fs.readFileSync(file, "utf8").trim());
+    assert.ok(isAlive(pid));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    for (let i = 0; i < 20 && isAlive(pid); i++) await sleep(50);
+    assert.equal(isAlive(pid), false, "what the shell started went with it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tryOr, quietly, parseJson and readJson: what may not be there is a fallback, never a throw", () => {
+  assert.equal(
+    tryOr(() => {
+      throw new Error("gone");
+    }, "fallback"),
+    "fallback",
+  );
+  assert.equal(
+    tryOr(() => 7, 0),
+    7,
+  );
+  quietly(() => {
+    throw new Error("ignored");
+  });
+  assert.deepEqual(parseJson('{"a":1}'), { a: 1 });
+  for (const bad of ["", "{", "undefined"]) assert.equal(parseJson(bad), null, bad);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-json-"));
+  try {
+    fs.writeFileSync(path.join(dir, "ok.json"), '{"theme":"slate"}');
+    fs.writeFileSync(path.join(dir, "bad.json"), "{theme");
+    assert.deepEqual(readJson(path.join(dir, "ok.json")), { theme: "slate" });
+    assert.equal(readJson(path.join(dir, "bad.json")), null);
+    assert.equal(readJson(path.join(dir, "missing.json")), null);
+    assert.equal(readJson(dir), null, "a directory");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the app's own failures keep the words of what failed", () => {
+  const aborted = Object.assign(new Error("ERR_ABORTED (-3) loading 'data:text/html,…'"), { code: "ERR_ABORTED", errno: -3 });
+  assert.equal(new ElectronRefused({ cause: aborted }).aborted, true, "a load the next one superseded");
+  const refused = new ElectronRefused({
+    cause: Object.assign(new Error("ERR_CONNECTION_REFUSED (-102)"), { code: "ERR_CONNECTION_REFUSED" }),
+  });
+  assert.equal(refused.aborted, false);
+  assert.equal(refused.message, "ERR_CONNECTION_REFUSED (-102)");
+  assert.equal(new ElectronRefused({ cause: "no" }).aborted, false);
+  assert.equal(new DeskCallFailed({ url: "http://127.0.0.1:1/api/events", status: 503 }).message, "HTTP 503");
+  assert.equal(new DeskCallFailed({ url: "http://127.0.0.1:1/api/events", cause: new TypeError("fetch failed") }).message, "fetch failed");
+  assert.equal(new DeskCallFailed({ url: "http://127.0.0.1:1/api/events" }).message, "no answer from http://127.0.0.1:1/api/events");
+  assert.equal(
+    new DeskFailed({ cause: new Error("port 47823 is in use; is desk already running?") }).message,
+    "port 47823 is in use; is desk already running?",
+  );
+  assert.equal(
+    new NoFreePort({ cause: new Error("listen EPERM: operation not permitted 127.0.0.1") }).message,
+    "listen EPERM: operation not permitted 127.0.0.1",
+  );
+});
+
+test("ipcAnswer: the renderer gets the value, or a plain Error with a failure's words; a bug is logged too", async () => {
+  const lines: string[] = [];
+  const log = (m: string) => {
+    lines.push(m);
+  };
+  assert.deepEqual(await ipcAnswer("desktop:status", Effect.succeed({ ok: true }), log), { ok: true });
+  await assert.rejects(ipcAnswer("desktop:set-theme", Effect.fail(new BadRequest({ message: "no such theme" })), log), (e: unknown) => {
+    assert.ok(e instanceof Error);
+    assert.equal(e.constructor, Error, "only the message survives the structured clone, so only a message is sent");
+    assert.equal(e.message, "no such theme");
+    return true;
+  });
+  assert.deepEqual(lines, [], "a refusal is the renderer's to show");
+  await assert.rejects(
+    ipcAnswer(
+      "desktop:status",
+      Effect.sync(() => {
+        throw new TypeError("boom");
+      }),
+      log,
+    ),
+    /boom/,
+  );
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /^desktop:status failed: .*boom/s);
+});
+
+test("appRunner logs what fails in the app's background work, and nothing for an interrupt", async () => {
+  const lines: string[] = [];
+  const runner = appRunner((m) => {
+    lines.push(m);
+  });
+  const failed = runner.fork("opening a link", Effect.fail(new ElectronRefused({ cause: new Error("no handler for this URL") })));
+  await Effect.runPromise(Fiber.await(failed!));
+  const died = runner.fork(
+    "refreshing the tray",
+    Effect.sync(() => {
+      throw new Error("a bug");
+    }),
+  );
+  await Effect.runPromise(Fiber.await(died!));
+  const cut = runner.fork("following the desk", Effect.never);
+  await Effect.runPromise(Fiber.interrupt(cut!));
+  assert.equal(lines.length, 2, lines.join("\n"));
+  assert.match(lines[0]!, /^opening a link failed: .*no handler for this URL/s);
+  assert.match(lines[1]!, /^refreshing the tray failed: .*a bug/s);
+});
+
+test("getJson: the desk's answer, or null while it's starting, unreachable or unreadable", async () => {
+  const desk = await serve((q, r) => {
+    if (q.url === "/api/status") r.writeHead(200, { "content-type": "application/json" }).end(`{"now":2,"today":5}`);
+    else if (q.url === "/api/bad") r.writeHead(200, { "content-type": "application/json" }).end("{");
+    else r.writeHead(503, { "content-type": "application/json" }).end(`{"error":"desk is starting"}`);
+  });
+  try {
+    assert.deepEqual(await run(getJson(`${desk.base}/api/status`)), { now: 2, today: 5 });
+    assert.equal(await run(getJson(`${desk.base}/api/focus`)), null, "starting");
+    assert.equal(await run(getJson(`${desk.base}/api/bad`)), null, "not JSON");
+  } finally {
+    desk.close();
+  }
+  assert.equal(await run(getJson(`${desk.base}/api/status`)), null, "nothing there");
+});
+
+test("followEvents: each event until the stream ends; no answer, an HTTP error or a dropped stream is DeskCallFailed", async () => {
+  let drop = false;
+  const desk = await serve((q, r) => {
+    if (q.url === "/starting") {
+      r.writeHead(503).end();
+      return;
+    }
+    r.writeHead(200, { "content-type": "text/event-stream" });
+    r.write(`event: update\ndata: {"rev":1}\n\nevent: notify\ndata: {"title":"Review Desk","body":"api#7"}\n\n`);
+    r.write("event: upd");
+    setTimeout(() => {
+      if (drop) r.destroy();
+      else r.end("ate\ndata: 2\n\n");
+    }, 20);
+  });
+  try {
+    const seen: SSEvent[] = [];
+    let connected = 0;
+    const on = {
+      connected: () => {
+        connected++;
+      },
+      event: (e: SSEvent) => {
+        seen.push(e);
+      },
+    };
+    await run(followEvents(`${desk.base}/api/events`, on));
+    assert.equal(connected, 1);
+    assert.deepEqual(seen, [
+      { event: "update", data: `{"rev":1}` },
+      { event: "notify", data: `{"title":"Review Desk","body":"api#7"}` },
+      { event: "update", data: "2" },
+    ]);
+
+    drop = true;
+    seen.length = 0;
+    const dropped = await failure(followEvents(`${desk.base}/api/events`, on));
+    assert.equal(dropped._tag, "DeskCallFailed");
+    assert.equal(seen.length, 2, "what came before it dropped");
+
+    const starting = await failure(followEvents(`${desk.base}/starting`, on));
+    assert.equal(starting._tag, "DeskCallFailed");
+    assert.equal(starting.message, "HTTP 503");
+    assert.equal(connected, 2, "a 503 isn't connected");
+  } finally {
+    desk.close();
+  }
+  assert.equal((await failure(followEvents(`${desk.base}/api/events`, { connected() {}, event() {} })))._tag, "DeskCallFailed");
+});
+
+test("followEvents interrupted lets go of the stream", async () => {
+  let closed: () => void = () => {};
+  const gone = new Promise<void>((resolve) => {
+    closed = resolve;
+  });
+  let opened: () => void = () => {};
+  const open = new Promise<void>((resolve) => {
+    opened = resolve;
+  });
+  const desk = await serve((q, r) => {
+    r.writeHead(200, { "content-type": "text/event-stream" });
+    r.write(": ping\n\n");
+    q.on("close", closed);
+  });
+  try {
+    const fiber = Effect.runFork(followEvents(`${desk.base}/api/events`, { connected: opened, event() {} }));
+    await open;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    await gone;
+  } finally {
+    desk.close();
+  }
+});
+
+test("freePort gives a port the UI's dev server can listen on", async () => {
+  const port = await run(freePort());
+  assert.ok(Number.isInteger(port) && port > 0);
+  const s = http.createServer();
+  await new Promise<void>((resolve) => {
+    s.listen(port, "127.0.0.1", resolve);
+  });
+  s.close();
+});
+
+test("reap stops only what an earlier run left going from source, then forgets it", { skip: process.platform === "win32" }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-reap-"));
+  const file = path.join(home, "live.json");
+  const lines: string[] = [];
+  const log = (m: string) => {
+    lines.push(m);
+  };
+  const idle = (...args: string[]) =>
+    spawn(process.execPath, ["-e", "process.stdout.write('up'); setInterval(() => {}, 1000)", ...args], {
+      detached: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  const left = idle("--", "--watch-path=src"); // as a script argument: node runs no --watch with -e
+  const other = idle();
+  // Until it has started, ps shows a child with the command line of what forked it.
+  const up = (c: ReturnType<typeof idle>) =>
+    new Promise((resolve) => {
+      c.stdout.once("data", resolve);
+      c.once("exit", resolve); // one that never ran fails the assertions below instead of hanging here
+    });
+  try {
+    await Promise.all([up(left), up(other)]);
+    await run(reap(home, log));
+    assert.deepEqual(lines, [], "nothing was left");
+
+    fs.writeFileSync(file, "{not json");
+    await run(reap(home, log));
+    assert.ok(fs.existsSync(file), "one it can't read stays as it is");
+
+    fs.writeFileSync(file, JSON.stringify({ pids: [left.pid, other.pid, 999_999_999] }));
+    await run(reap(home, log));
+    for (let i = 0; i < 20 && isAlive(left.pid!); i++) await sleep(50);
+    assert.equal(isAlive(left.pid!), false, "the desk an earlier run left going");
+    assert.equal(isAlive(other.pid!), true, "a pid that went to something else since");
+    assert.deepEqual(lines, [`stopping what an earlier run left going from source (pid ${left.pid})`]);
+    assert.equal(fs.existsSync(file), false);
+
+    if (process.getuid?.() !== 0) {
+      fs.writeFileSync(file, JSON.stringify({ pids: [] }));
+      fs.chmodSync(home, 0o500);
+      try {
+        const e = await failure(reap(home, log));
+        assert.equal(e._tag, "FsError");
+        assert.match(e.message, /EACCES|EPERM/);
+      } finally {
+        fs.chmodSync(home, 0o700);
+      }
+    }
+  } finally {
+    left.kill("SIGKILL");
+    other.kill("SIGKILL");
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("startSource: a node that spawn refuses to start is a failure the restart loop handles, never a throw", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-source-"));
+  const logged: string[] = [];
+  try {
+    const source = await run(
+      startSource({
+        dir: home,
+        node: "bad\0node",
+        port: 1,
+        home,
+        log: (m) => {
+          logged.push(m);
+        },
+      }),
+    );
+    const status = source.status();
+    assert.equal(status.state, "failed");
+    assert.match(status.detail ?? "", /^couldn't run node: .*null bytes/);
+    assert.ok(logged.some((m) => m.startsWith("desk from source: couldn't run node: ")));
+    const liveLog = () => fs.readFileSync(path.join(home, "live.log"), "utf8");
+    assert.match(liveLog(), /desk: couldn't run node: .*; starting it again in 2s/);
+    t.mock.timers.tick(2000);
+    assert.match(liveLog(), /desk: couldn't run node: .*; starting it again in 4s/, "it tries again, backing off");
+    await run(source.stop());
+    await run(source.uiReady()); // stopped: nothing to wait for
+    assert.match(liveLog(), /stopped\n$/);
+    t.mock.timers.tick(4000);
+    assert.doesNotMatch(liveLog().split("stopped\n")[1] ?? "", /starting/, "a stopped source starts nothing");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

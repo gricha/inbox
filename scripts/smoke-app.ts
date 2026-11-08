@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Effect } from "effect";
 import { _electron } from "playwright-core";
 import { envVar, probeHealth } from "../electron/lib.ts";
 import { freePort } from "../electron/source.ts";
@@ -14,7 +15,7 @@ const root = path.join(import.meta.dirname, "..");
 const bin = process.argv[2];
 const ownHome = !process.env.DESK_HOME;
 const home = envVar("DESK_HOME") ?? fs.mkdtempSync(path.join(os.tmpdir(), "desk-smoke-"));
-const port = envVar("DESK_PORT") ?? String(await freePort());
+const port = envVar("DESK_PORT") ?? String(await Effect.runPromise(freePort()));
 if (port === "47823") throw new Error("pick a scratch DESK_PORT, not the real desk's 47823");
 const deskUrl = `http://localhost:${port}`;
 
@@ -98,7 +99,7 @@ try {
   await app.close();
   const code = await exited;
   assert.equal(code, 0, `exit code ${code}`);
-  assert.equal((await probeHealth(`http://127.0.0.1:${port}`)).kind, "free", "the in-process desk is still listening");
+  assert.equal((await Effect.runPromise(probeHealth(`http://127.0.0.1:${port}`))).kind, "free", "the in-process desk is still listening");
   assert.ok(fs.existsSync(path.join(home, "app", "logs", "desk.log")), "no desk.log");
   step("quit cleanly; the port is free");
   console.log("smoke:app passed");

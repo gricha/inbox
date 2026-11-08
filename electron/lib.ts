@@ -2,8 +2,121 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { Cause, Data, Effect, Result } from "effect";
+import { fsError, type FsError } from "../src/errors.ts";
+import { Runner } from "../src/runner.ts";
+import { detached, report } from "../src/sentry.ts";
 import { DEFAULTS } from "../src/settings.ts";
 import { themeOf } from "../src/themes.ts";
+
+// ---------------------------------------------------------------- what the app's own calls fail with (docs/effect.md)
+
+export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+// The desk (or its UI's dev server) didn't answer the app (cause: fetch's error), or answered with an HTTP error. The app
+// tries again, or reads it as nothing there yet.
+export class DeskCallFailed extends Data.TaggedError("DeskCallFailed")<{
+  readonly url: string;
+  readonly status?: number;
+  readonly cause?: unknown;
+}> {
+  override get message(): string {
+    if (this.status !== undefined) return `HTTP ${this.status}`;
+    return this.cause instanceof Error ? this.cause.message : `no answer from ${this.url}`;
+  }
+}
+
+// The desk this process runs didn't start, or didn't close: startServer's or close's error is the cause, and its words
+// are the dialog's or the log's.
+export class DeskFailed extends Data.TaggedError("DeskFailed")<{ readonly cause: unknown }> {
+  override get message(): string {
+    return messageOf(this.cause);
+  }
+}
+
+// Electron (or the OS through it) refused: a page that didn't load, a link it didn't open, a login item it didn't set.
+// cause is its error, whose words show. A load the next one superseded is ERR_ABORTED: nothing went wrong.
+export class ElectronRefused extends Data.TaggedError("ElectronRefused")<{ readonly cause: unknown }> {
+  get aborted(): boolean {
+    const c = this.cause;
+    return typeof c === "object" && c !== null && "code" in c && c.code === "ERR_ABORTED";
+  }
+  override get message(): string {
+    return messageOf(this.cause);
+  }
+}
+
+// No port for the UI's dev server: the OS wouldn't let the app listen on one (a sandbox). cause is its error.
+export class NoFreePort extends Data.TaggedError("NoFreePort")<{ readonly cause: unknown }> {
+  override get message(): string {
+    return messageOf(this.cause);
+  }
+}
+
+// The app's background work (its start, following the desk, the tray's refresh, a link it opens): what fails is logged,
+// and reported if the app reports, never an unhandled rejection; interruption is quiet.
+export const appRunner = (log: (m: string) => void): Runner => new Runner(log, report, detached);
+
+// The IPC boundary (an ipcMain.handle handler): what the Effect gives, or a rejection with a failure's words alone, all the
+// structured clone keeps. A bug rejects with its own words and is logged.
+export const ipcAnswer = <A, E extends { readonly message: string }>(
+  channel: string,
+  effect: Effect.Effect<A, E>,
+  log: (m: string) => void,
+): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.tapCause((cause) =>
+        Effect.sync(() => {
+          if (Cause.hasDies(cause)) log(`${channel} failed: ${Cause.pretty(cause)}`);
+        }),
+      ),
+      Effect.mapError((e) => new Error(e.message)),
+    ),
+  );
+
+// ---------------------------------------------------------------- files and processes that may not be there
+
+// What f gives, or fallback when it throws: a file or a process that may be gone, where that is the answer.
+export const tryOr = <A, B>(f: () => A, fallback: B): A | B => Result.merge(Result.try({ try: f, catch: () => fallback }));
+
+// f run for what it does, or nothing when it throws: a process that's already gone, a file the app does without.
+export const quietly = (f: () => void): void => {
+  Result.try({ try: f, catch: () => null });
+};
+
+// JSON someone else wrote (a desk's notice, the app's own window.json), or null when it isn't JSON.
+export const parseJson = (text: string): unknown => tryOr((): unknown => JSON.parse(text), null);
+
+// A file the app keeps for itself, or null when it's missing or isn't JSON: the app starts without it.
+export const readJson = (file: string): unknown => {
+  const text = disk.read(file);
+  return text === null ? null : parseJson(text);
+};
+
+export const writeFile = (file: string, text: string): Effect.Effect<void, FsError> =>
+  Effect.try({
+    try: () => {
+      fs.writeFileSync(file, text);
+    },
+    catch: fsError("write", file),
+  });
+
+export const removeFile = (file: string): Effect.Effect<void, FsError> =>
+  Effect.try({
+    try: () => {
+      fs.rmSync(file, { force: true });
+    },
+    catch: fsError("remove", file),
+  });
+
+export const makeDir = (dir: string): Effect.Effect<void, FsError> =>
+  Effect.try({
+    try: () => {
+      fs.mkdirSync(dir, { recursive: true });
+    },
+    catch: fsError("mkdir", dir),
+  });
 
 // ---------------------------------------------------------------- PATH
 
@@ -20,39 +133,69 @@ export function parseShellPath(out: string): string | null {
 }
 
 // SIGKILL to its whole group at the deadline: an interactive shell ignores SIGTERM, and what its rc files started would linger.
-export function commandOutput(cmd: string, args: string[], timeoutMs: number): Promise<{ stdout: string; timedOut: boolean }> {
-  return new Promise((resolve) => {
+// One that can't start prints nothing, as one that fails to: its caller reads no output either way.
+export const commandOutput = (cmd: string, args: string[], timeoutMs: number): Effect.Effect<{ stdout: string; timedOut: boolean }> =>
+  Effect.suspend(() => {
     const group = process.platform !== "win32";
-    const child = spawn(cmd, args, { detached: group, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-    let stdout = "";
-    let timedOut = false;
-    child.stdout.setEncoding("utf8").on("data", (s: string) => {
-      stdout += s;
+    const started = Result.try({
+      try: () => spawn(cmd, args, { detached: group, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }),
+      catch: () => null,
     });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        if (child.pid) process.kill(group ? -child.pid : child.pid, "SIGKILL");
-      } catch {} // already gone
-      child.stdout.destroy(); // a background job that kept the pipe can't hold up close
-    }, timeoutMs);
-    const done = () => {
-      clearTimeout(timer);
-      resolve({ stdout, timedOut });
-    };
-    child.on("error", done);
-    child.on("close", done);
+    if (Result.isFailure(started)) return Effect.succeed({ stdout: "", timedOut: false });
+    const child = started.success;
+    return Effect.callback<{ stdout: string; timedOut: boolean }>((resume) => {
+      let stdout = "";
+      let timedOut = false;
+      let closed = false;
+      child.stdout.setEncoding("utf8").on("data", (s: string) => {
+        stdout += s;
+      });
+      const stop = () => {
+        const pid = child.pid;
+        if (pid)
+          quietly(() => {
+            process.kill(group ? -pid : pid, "SIGKILL");
+          }); // already gone
+        child.stdout.destroy(); // a background job that kept the pipe can't hold up close
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        stop();
+      }, timeoutMs);
+      const done = () => {
+        closed = true;
+        clearTimeout(timer);
+        resume(Effect.succeed({ stdout, timedOut }));
+      };
+      child.on("error", done);
+      child.on("close", done);
+      // Interrupted: the group goes, and the run ends once it has.
+      return Effect.callback<void>((gone) => {
+        clearTimeout(timer);
+        if (closed) {
+          gone(Effect.void);
+          return;
+        }
+        child.once("close", () => {
+          gone(Effect.void);
+        });
+        stop();
+      });
+    });
   });
-}
 
 // The first login shell after a boot can be slow (nvm, a cold disk), so it gets a second, longer try.
-export async function loginShellPath(run: (timeoutMs: number) => Promise<string>, timeouts = [5000, 20_000]): Promise<string | null> {
-  for (const timeoutMs of timeouts) {
-    const p = parseShellPath(await run(timeoutMs));
-    if (p) return p;
-  }
-  return null;
-}
+export const loginShellPath = (
+  run: (timeoutMs: number) => Effect.Effect<string>,
+  timeouts = [5000, 20_000],
+): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    for (const timeoutMs of timeouts) {
+      const p = parseShellPath(yield* run(timeoutMs));
+      if (p) return p;
+    }
+    return null;
+  });
 
 export interface Disk {
   isDir(p: string): boolean;
@@ -61,27 +204,9 @@ export interface Disk {
 }
 
 const disk: Disk = {
-  isDir: (p) => {
-    try {
-      return fs.statSync(p).isDirectory();
-    } catch {
-      return false;
-    }
-  },
-  read: (p) => {
-    try {
-      return fs.readFileSync(p, "utf8");
-    } catch {
-      return null;
-    }
-  },
-  list: (p) => {
-    try {
-      return fs.readdirSync(p);
-    } catch {
-      return [];
-    }
-  },
+  isDir: (p) => tryOr(() => fs.statSync(p).isDirectory(), false),
+  read: (p) => tryOr(() => fs.readFileSync(p, "utf8"), null),
+  list: (p) => tryOr(() => fs.readdirSync(p), []),
 };
 
 // Version managers' node dirs go after the usual ones, so gh and claude resolve exactly as before.
@@ -136,18 +261,54 @@ export const envVar = (name: string): string | undefined => (process.env[name] =
 
 export type Probe = { kind: "desk" } | { kind: "free" } | { kind: "other"; detail: string };
 
+// A call to the desk (or its UI's dev server): its answer, whatever its status, or DeskCallFailed when none came in time.
+export const request = (
+  url: string,
+  opts: { method?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+): Effect.Effect<Response, DeskCallFailed> =>
+  Effect.tryPromise({
+    try: (signal) => {
+      const signals = [
+        signal,
+        ...(opts.signal ? [opts.signal] : []),
+        ...(opts.timeoutMs === undefined ? [] : [AbortSignal.timeout(opts.timeoutMs)]),
+      ];
+      return fetch(url, { method: opts.method, signal: AbortSignal.any(signals) });
+    },
+    catch: (cause) => new DeskCallFailed({ url, cause }),
+  });
+
+// An answer's body as JSON; its signal (request's timeout) still bounds the read.
+const json = (res: Response, url: string): Effect.Effect<unknown, DeskCallFailed> =>
+  Effect.tryPromise({ try: (): Promise<unknown> => res.json(), catch: (cause) => new DeskCallFailed({ url, cause }) });
+
+// What the desk answers at url, or null while it's starting (503), unreachable, or answering with what doesn't parse.
+export const getJson = <T>(url: string, timeoutMs = 5000): Effect.Effect<T | null> =>
+  request(url, { timeoutMs }).pipe(
+    Effect.flatMap((res) => (res.ok ? json(res, url).pipe(Effect.map((v) => v as T)) : Effect.succeed(null))),
+    Effect.orElseSucceed(() => null),
+  );
+
 // What answers on the desk's port: a desk (attach), nothing (start one), or something else.
-export async function probeHealth(base: string, timeoutMs = 1000): Promise<Probe> {
-  try {
-    const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(timeoutMs) });
-    const body = (await res.json().catch(() => null)) as { ok?: unknown } | null;
-    return res.ok && body?.ok === true ? { kind: "desk" } : { kind: "other", detail: `HTTP ${res.status} on /health` };
-  } catch (e) {
-    const code = (e as { cause?: { code?: string } }).cause?.code;
-    if (code === "ECONNREFUSED") return { kind: "free" };
-    return { kind: "other", detail: code ?? (e as Error).message };
-  }
-}
+export const probeHealth = (base: string, timeoutMs = 1000): Effect.Effect<Probe> =>
+  request(`${base}/health`, { timeoutMs }).pipe(
+    Effect.flatMap((res) =>
+      json(res, `${base}/health`).pipe(
+        Effect.orElseSucceed(() => null),
+        Effect.map((body): Probe =>
+          res.ok && (body as { ok?: unknown } | null)?.ok === true
+            ? { kind: "desk" }
+            : { kind: "other", detail: `HTTP ${res.status} on /health` },
+        ),
+      ),
+    ),
+    Effect.catch((e) => {
+      const code = (e.cause as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+      return Effect.succeed<Probe>(
+        code === "ECONNREFUSED" ? { kind: "free" } : { kind: "other", detail: typeof code === "string" ? code : e.message },
+      );
+    }),
+  );
 
 export const backoff = (attempt: number): number => Math.min(30_000, 1000 * 2 ** attempt);
 
@@ -182,14 +343,39 @@ export function parseSSE(buf: string): { events: SSEvent[]; rest: string } {
   return { events, rest };
 }
 
+// The desk's events (/api/events) until the stream ends, each one to `event`, and `connected` once it's answered. What
+// ends it early (no answer, an HTTP error, the connection dropping) is DeskCallFailed.
+export const followEvents = (url: string, on: { connected(): void; event(e: SSEvent): void }): Effect.Effect<void, DeskCallFailed> =>
+  Effect.suspend(() => {
+    const cut = new AbortController();
+    return Effect.gen(function* () {
+      const res = yield* request(url, { signal: cut.signal });
+      const body = yield* res.ok && res.body ? Effect.succeed(res.body) : Effect.fail(new DeskCallFailed({ url, status: res.status }));
+      on.connected();
+      const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+      const read = Effect.tryPromise({ try: () => reader.read(), catch: (cause) => new DeskCallFailed({ url, cause }) });
+      let buf = "";
+      for (let chunk = yield* read; !chunk.done; chunk = yield* read) {
+        const { events, rest } = parseSSE(buf + chunk.value);
+        buf = rest;
+        for (const e of events) on.event(e);
+      }
+    }).pipe(
+      // Cut short (interrupted, or a bug in what handles an event): the stream goes too.
+      Effect.ensuring(
+        Effect.sync(() => {
+          cut.abort();
+        }),
+      ),
+    );
+  });
+
 // A desk's `event: notify`, which it sends to the app attached with ?notify=1 instead of notifying itself.
 export function parseNotice(data: string): { title: string; body: string } | null {
-  try {
-    const n = JSON.parse(data) as { title?: unknown; body?: unknown };
-    return typeof n.title === "string" && typeof n.body === "string" ? { title: n.title, body: n.body } : null;
-  } catch {
-    return null;
-  }
+  const n = parseJson(data);
+  if (typeof n !== "object" || n === null) return null;
+  const { title, body } = n as { title?: unknown; body?: unknown };
+  return typeof title === "string" && typeof body === "string" ? { title, body } : null;
 }
 
 // ---------------------------------------------------------------- settings
@@ -228,14 +414,11 @@ export function findNode(PATH: string, sep = path.delimiter, isFile: (p: string)
   return null;
 }
 
-function executable(p: string): boolean {
-  try {
+const executable = (p: string): boolean =>
+  tryOr(() => {
     fs.accessSync(p, fs.constants.X_OK);
     return fs.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
+  }, false);
 
 export type DeskPlan =
   { run: "source"; node: string } | { run: "wait"; need: "checkout" | "modules" | "node"; problem: string } | { run: "in-process" };
@@ -346,21 +529,13 @@ export const cardLabel = (c: { repo: string; number: number; title: string }): s
 
 // ---------------------------------------------------------------- URLs
 
-const parse = (url: string): URL | null => {
-  try {
-    return new URL(url);
-  } catch {
-    return null;
-  }
-};
-
-export const isAppUrl = (url: string, origins: string[]): boolean => origins.includes(parse(url)?.origin ?? "");
+export const isAppUrl = (url: string, origins: string[]): boolean => origins.includes(URL.parse(url)?.origin ?? "");
 // After the desk comes back, a window still on its UI keeps its view; one on the start or wait page has none to keep.
 export const keepsView = (pageUrl: string, origins: string[], fromSource: boolean): boolean => !fromSource && isAppUrl(pageUrl, origins);
-export const isHttpUrl = (url: string): boolean => ["http:", "https:"].includes(parse(url)?.protocol ?? "");
-export const isHttpsUrl = (url: string): boolean => parse(url)?.protocol === "https:";
+export const isHttpUrl = (url: string): boolean => ["http:", "https:"].includes(URL.parse(url)?.protocol ?? "");
+export const isHttpsUrl = (url: string): boolean => URL.parse(url)?.protocol === "https:";
 export const isGitHubUrl = (url: string): boolean => {
-  const u = parse(url);
+  const u = URL.parse(url);
   return u?.protocol === "https:" && u.host === "github.com";
 };
 

@@ -15,24 +15,32 @@ import {
   shell,
   Tray,
 } from "electron";
-import type { MenuItemConstructorOptions, NativeImage } from "electron";
+import type { IpcMainInvokeEvent, MenuItemConstructorOptions, NativeImage } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
+import { Cause, Effect, Exit, Fiber, Result } from "effect";
+import { BadRequest, Forbidden, type FsError } from "../src/errors.ts";
+import { report } from "../src/sentry.ts";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
 import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.ts";
 import {
+  appRunner,
   backoff,
   cardLabel,
   commandOutput,
+  DeskFailed,
   deskPlan,
   desktopEntry,
   desktopSettings,
+  ElectronRefused,
   envVar,
   fallbackDirs,
   findNode,
+  followEvents,
+  getJson,
+  ipcAnswer,
   isAppUrl,
   isGitHubUrl,
   isHttpsUrl,
@@ -40,20 +48,28 @@ import {
   isTheme,
   keepsView,
   loginShellPath,
+  makeDir,
   menuLabel,
   mergePath,
+  messageOf,
+  type NoFreePort,
   parseNotice,
-  parseSSE,
   probeHealth,
+  quietly,
+  readJson,
+  removeFile,
+  request,
   restoreBounds,
   SHELL_PATH_COMMAND,
   sourceDir,
   themeColors,
   trayTitle,
   trayTooltip,
+  writeFile,
   type Bounds,
   type DeskPlan,
   type DesktopSettings,
+  type SSEvent,
 } from "./lib.ts";
 import { reap, startSource, type Source } from "./source.ts";
 
@@ -76,6 +92,7 @@ const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
 type Status = { now: number; today: number; new: number; text: string };
 type Server = Awaited<ReturnType<typeof startServer>>;
+type SourceError = FsError | NoFreePort; // what stops the desk from a checkout starting at all
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -101,121 +118,184 @@ let logFile = "";
 function log(msg: string): void {
   const line = `${new Date().toISOString()} ${msg}\n`;
   if (!app.isPackaged) process.stderr.write(line);
-  try {
+  // Logging never fails what it logs: a line it can't write is left out.
+  quietly(() => {
     if (!logFile) {
       fs.mkdirSync(app.getPath("logs"), { recursive: true });
       logFile = path.join(app.getPath("logs"), "desk.log");
     }
     fs.appendFileSync(logFile, line);
-  } catch {}
+  });
 }
+
+// Everything the app starts and nobody waits on goes through it, so what fails is in desk.log.
+const runner = appRunner(log);
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", showWindow);
-  void main();
+  runner.fork("starting the app", main());
 }
 
-async function main(): Promise<void> {
-  app.setAppUserModelId("dev.review-desk.app");
-  app.on("before-quit", () => {
-    quitting = true;
-  });
-  app.on("will-quit", (e) => {
-    globalShortcut.unregisterAll();
-    if (!server && !source) return;
-    e.preventDefault();
-    if (closing) return;
-    closing = true;
-    // A second app.quit() after preventing will-quit is ignored (Electron 45); the windows are closed by now anyway.
-    void Promise.all([
-      server?.close().catch((err: Error) => {
-        log(`closing the desk: ${err.message}`);
-      }),
-      source?.stop(),
-    ]).finally(() => {
-      app.exit(0);
+function main(): Effect.Effect<void, SourceError> {
+  return Effect.gen(function* () {
+    app.setAppUserModelId("dev.review-desk.app");
+    app.on("before-quit", () => {
+      quitting = true;
     });
-  });
-  process.on("exit", () => {
-    source?.kill();
-  });
-  app.on("activate", showWindow);
+    app.on("will-quit", (e) => {
+      globalShortcut.unregisterAll();
+      if (!server && !source) return;
+      e.preventDefault();
+      if (closing) return;
+      closing = true;
+      // A second app.quit() after preventing will-quit is ignored (Electron 45); the windows are closed by now anyway.
+      runner.fork("quitting", stopDesk(server, source));
+    });
+    process.on("exit", () => {
+      source?.kill();
+    });
+    app.on("activate", showWindow);
 
-  const pathReady = fixPath();
-  await app.whenReady();
-  log(`Review Desk ${app.getVersion()} (Electron ${process.versions.electron}), desk ${deskUrl}, home ${home}`);
-  if (mac && !app.isPackaged) app.dock?.setIcon(asset("icon.png")); // from the repo the Dock would show Electron's icon
-  secureSession();
-  ipcMain.handle("desktop:status", (e) => {
-    if (!isAppUrl(e.senderFrame?.url ?? "", origins)) throw new Error("not allowed");
-    return { hotkey, open_at_login: loginItemEnabled(), source: sourceStatus() };
+    const pathReady = yield* Effect.forkChild(fixPath());
+    yield* Effect.promise(() => app.whenReady());
+    log(`Review Desk ${app.getVersion()} (Electron ${process.versions.electron}), desk ${deskUrl}, home ${home}`);
+    if (mac && !app.isPackaged) app.dock?.setIcon(asset("icon.png")); // from the repo the Dock would show Electron's icon
+    secureSession();
+    handle("desktop:status", (e) =>
+      fromApp(e).pipe(Effect.map(() => ({ hotkey, open_at_login: loginItemEnabled(), source: sourceStatus() }))),
+    );
+    theme = readTheme();
+    // The preload reads it before the page's first paint.
+    ipcMain.on("desktop:theme", (e) => {
+      e.returnValue = theme;
+    });
+    handle("desktop:set-theme", (e, t) =>
+      Effect.gen(function* () {
+        yield* fromApp(e);
+        const picked = yield* isTheme(t) ? Effect.succeed(t) : Effect.fail(new BadRequest({ message: "no such theme" }));
+        theme = picked;
+        yield* writeFile(themeFile(), JSON.stringify({ theme: picked })).pipe(
+          Effect.catch((err) =>
+            Effect.sync(() => {
+              log(`saving the theme: ${err.message}`);
+            }),
+          ),
+        );
+        win?.setBackgroundColor(paper());
+      }),
+    );
+    Menu.setApplicationMenu(appMenu());
+    createTray();
+    createWindow();
+    yield* Fiber.join(pathReady);
+    yield* planDesk();
+    yield* reap(home, log);
+    if (!(yield* connect())) return;
+    // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
+    runner.fork("following the desk", watch());
+    yield* loadUi();
   });
-  theme = readTheme();
-  // The preload reads it before the page's first paint.
-  ipcMain.on("desktop:theme", (e) => {
-    e.returnValue = theme;
-  });
-  ipcMain.handle("desktop:set-theme", (e, t: unknown) => {
-    if (!isAppUrl(e.senderFrame?.url ?? "", origins)) throw new Error("not allowed");
-    if (!isTheme(t)) throw new Error("no such theme");
-    theme = t;
-    try {
-      fs.writeFileSync(themeFile(), JSON.stringify({ theme: t }));
-    } catch (err) {
-      log(`saving the theme: ${(err as Error).message}`);
-    }
-    win?.setBackgroundColor(paper());
-  });
-  Menu.setApplicationMenu(appMenu());
-  createTray();
-  createWindow();
-  await pathReady;
-  await planDesk();
-  await reap(home, log);
-  if (!(await connect())) return;
-  // Before the UI: the tray and notifications work while Vite is still coming up (or broken).
-  void watch();
-  await loadUi();
 }
 
-async function loadUi(): Promise<void> {
-  if (source) {
-    const s = source;
-    const slow = setTimeout(() => {
-      void win?.loadURL(startPage(`Starting the UI from ${fromSource}… its output is in ${s.status().log}`));
-    }, 20_000);
-    await s.uiReady();
-    clearTimeout(slow);
-  }
-  await win?.loadURL(uiUrl).catch((e: Error) => {
-    log(`loading ${uiUrl}: ${e.message}`);
+// The desk this process runs closed and what runs from a checkout stopped, each failure logged; then the app exits.
+function stopDesk(s: Server | null, src: Source | null): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    const closed = s
+      ? Effect.tryPromise({ try: () => s.close(), catch: (cause) => new DeskFailed({ cause }) }).pipe(
+          Effect.catch((err) =>
+            Effect.sync(() => {
+              log(`closing the desk: ${err.message}`);
+            }),
+          ),
+        )
+      : Effect.void;
+    const stopped = src
+      ? src.stop().pipe(
+          Effect.catch((err) =>
+            Effect.sync(() => {
+              log(`stopping the desk from ${fromSource}: ${err.message}`);
+            }),
+          ),
+        )
+      : Effect.void;
+    const done = yield* Effect.exit(Effect.all([closed, stopped], { concurrency: "unbounded", discard: true }));
+    if (Exit.isFailure(done)) {
+      log(`quitting failed: ${Cause.pretty(done.cause)}`);
+      report(Cause.squash(done.cause), "quitting");
+    }
+    app.exit(0);
+  });
+}
+
+// The IPC boundary: a handler's failure rejects the renderer's call with its words (ipcAnswer).
+function handle<A, E extends { readonly message: string }>(
+  channel: string,
+  answer: (e: IpcMainInvokeEvent, arg: unknown) => Effect.Effect<A, E>,
+): void {
+  ipcMain.handle(channel, (e, arg: unknown) => ipcAnswer(channel, answer(e, arg), log));
+}
+
+// Only the desk's own window asks the app for its state or sets its theme.
+const fromApp = (e: IpcMainInvokeEvent): Effect.Effect<void, Forbidden> =>
+  isAppUrl(e.senderFrame?.url ?? "", origins) ? Effect.void : Effect.fail(new Forbidden({ message: "not allowed" }));
+
+function loadUi(): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    if (source) {
+      const s = source;
+      const slow = setTimeout(() => {
+        showPage(`Starting the UI from ${fromSource}… its output is in ${s.status().log}`);
+      }, 20_000);
+      yield* s.uiReady().pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            clearTimeout(slow);
+          }),
+        ),
+      );
+    }
+    if (!win) return;
+    yield* load(win, uiUrl).pipe(
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          log(`loading ${uiUrl}: ${e.message}`);
+        }),
+      ),
+    );
   });
 }
 
 // ---------------------------------------------------------------- PATH
 
 // Finder, the Dock and login items start apps with /usr/bin:/bin; gh and claude live elsewhere.
-async function fixPath(): Promise<void> {
-  if (process.platform === "win32") return;
-  const sh = envVar("SHELL") ?? (mac ? "/bin/zsh" : "/bin/bash");
-  const fromShell = await loginShellPath(async (timeout) => {
-    const { stdout, timedOut } = await commandOutput(sh, ["-ilc", SHELL_PATH_COMMAND], timeout);
-    if (timedOut) log(`${sh} didn't print PATH within ${timeout / 1000}s`);
-    return stdout;
+function fixPath(): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    if (process.platform === "win32") return;
+    const sh = envVar("SHELL") ?? (mac ? "/bin/zsh" : "/bin/bash");
+    const fromShell = yield* loginShellPath((timeout) =>
+      commandOutput(sh, ["-ilc", SHELL_PATH_COMMAND], timeout).pipe(
+        Effect.map(({ stdout, timedOut }) => {
+          if (timedOut) log(`${sh} didn't print PATH within ${timeout / 1000}s`);
+          return stdout;
+        }),
+      ),
+    );
+    process.env.PATH = mergePath(path.delimiter, fromShell ?? "", process.env.PATH ?? "", ...fallbackDirs(os.homedir()));
+    if (!fromShell) log(`couldn't read PATH from ${sh}; added the usual dirs`);
   });
-  process.env.PATH = mergePath(path.delimiter, fromShell ?? "", process.env.PATH ?? "", ...fallbackDirs(os.homedir()));
-  if (!fromShell) log(`couldn't read PATH from ${sh}; added the usual dirs`);
 }
 
 // ---------------------------------------------------------------- the desk
 
-async function planDesk(): Promise<void> {
-  const node = sourceWanted ? findNode(process.env.PATH ?? "") : null;
-  const version = node ? (await commandOutput(node, ["--version"], 5000)).stdout : "";
-  plan = deskPlan(sourceWanted, node ? { path: node, version } : null);
-  fromSource = plan.run === "in-process" ? "" : sourceWanted;
+function planDesk(): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    const node = sourceWanted ? findNode(process.env.PATH ?? "") : null;
+    const version = node ? (yield* commandOutput(node, ["--version"], 5000)).stdout : "";
+    plan = deskPlan(sourceWanted, node ? { path: node, version } : null);
+    fromSource = plan.run === "in-process" ? "" : sourceWanted;
+  });
 }
 
 // What the window says while the chosen folder can't run the desk yet.
@@ -230,97 +310,114 @@ function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
 }
 
 // Attach to the desk on the port, or start one here. False when the user chose Quit.
-async function connect(): Promise<boolean> {
-  let waitingOn = "";
-  for (;;) {
-    const probe = await probeHealth(api);
-    if (probe.kind === "desk") {
-      log(`attached to the desk on ${deskUrl}${fromSource ? `; ${fromSource} runs once that desk stops` : ""}`);
-      return true;
-    }
-    if (probe.kind === "other") {
-      dialog.showErrorBox(
-        "Review Desk",
-        `Something other than Review Desk is using port ${port} (${probe.detail}).\n\nStop it, or set DESK_PORT to another port.`,
-      );
-      app.quit();
-      return false;
-    }
-    // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
-    if (plan.run === "wait") {
-      if (plan.problem !== waitingOn) {
-        waitingOn = plan.problem;
-        log(`waiting to run the desk from ${fromSource}: ${plan.problem}`);
-        void win?.loadURL(startPage(waitText(plan)));
+function connect(): Effect.Effect<boolean, SourceError> {
+  return Effect.gen(function* () {
+    let waitingOn = "";
+    for (;;) {
+      const probe = yield* probeHealth(api);
+      if (probe.kind === "desk") {
+        log(`attached to the desk on ${deskUrl}${fromSource ? `; ${fromSource} runs once that desk stops` : ""}`);
+        return true;
       }
-      await sleep(15_000);
-      checkSource(); // with no desk there's no Settings page: settings.json is where the folder gets fixed
-      if (quitting || relaunching) return false;
-      if (plan.need === "node") await fixPath(); // a login shell (nvm and all) every 15 s only when it can help
-      await planDesk();
-      continue;
-    }
-    if (plan.run === "source") {
-      if (waitingOn) void win?.loadURL(startPage("Starting Review Desk\u2026"));
-      source = await startSource({ dir: fromSource, node: plan.node, port, home, log });
-      uiUrl = source.ui;
-      origins.push(source.ui);
-      log(`running the desk on ${deskUrl} and the UI on ${source.ui} from ${fromSource}`);
-      return true;
-    }
-    try {
+      if (probe.kind === "other") {
+        dialog.showErrorBox(
+          "Review Desk",
+          `Something other than Review Desk is using port ${port} (${probe.detail}).\n\nStop it, or set DESK_PORT to another port.`,
+        );
+        app.quit();
+        return false;
+      }
+      // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
+      if (plan.run === "wait") {
+        if (plan.problem !== waitingOn) {
+          waitingOn = plan.problem;
+          log(`waiting to run the desk from ${fromSource}: ${plan.problem}`);
+          showPage(waitText(plan));
+        }
+        yield* Effect.sleep(15_000);
+        checkSource(); // with no desk there's no Settings page: settings.json is where the folder gets fixed
+        if (quitting || relaunching) return false;
+        if (plan.need === "node") yield* fixPath(); // a login shell (nvm and all) every 15 s only when it can help
+        yield* planDesk();
+        continue;
+      }
+      if (plan.run === "source") {
+        if (waitingOn) showPage("Starting Review Desk\u2026");
+        const s = yield* startSource({ dir: fromSource, node: plan.node, port, home, log });
+        source = s;
+        uiUrl = s.ui;
+        origins.push(s.ui);
+        log(`running the desk on ${deskUrl} and the UI on ${s.ui} from ${fromSource}`);
+        return true;
+      }
       log(`starting a desk on ${deskUrl}`);
-      server = await startServer({ port, home, notify, log });
-      return true;
-    } catch (e) {
-      const message = (e as Error).message;
+      const started = yield* Effect.result(
+        Effect.tryPromise({ try: () => startServer({ port, home, notify, log }), catch: (cause) => new DeskFailed({ cause }) }),
+      );
+      if (Result.isSuccess(started)) {
+        server = started.success;
+        return true;
+      }
+      const { message } = started.failure;
       log(`the desk didn't start: ${message}`);
-      const { response } = await dialog.showMessageBox({
-        type: "error",
-        message: "Review Desk couldn't start",
-        detail: `${message}\n\nIf GitHub isn't logged in, run gh auth login in a terminal, then Retry.`,
-        buttons: ["Retry", "Quit"],
-        defaultId: 0,
-        cancelId: 1,
-      });
+      const { response } = yield* Effect.promise(() =>
+        dialog.showMessageBox({
+          type: "error",
+          message: "Review Desk couldn't start",
+          detail: `${message}\n\nIf GitHub isn't logged in, run gh auth login in a terminal, then Retry.`,
+          buttons: ["Retry", "Quit"],
+          defaultId: 0,
+          cancelId: 1,
+        }),
+      );
       if (response === 1) {
         app.quit();
         return false;
       }
     }
-  }
+  });
 }
 
 // Follows /api/events: refreshes the tray on each update, shows a desk's notifications when it isn't in this process, and
 // takes over when an attached desk goes away. A desk from source restarting is just a reconnect.
-async function watch(): Promise<void> {
-  // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- the before-quit handler sets quitting while this loop awaits
-  for (let attempt = 0; !quitting;) {
-    try {
-      const res = await fetch(`${api}/api/events${server ? "" : "?notify=1"}`);
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-      attempt = 0;
-      let buf = "";
-      for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
-        const { events, rest } = parseSSE(buf + chunk);
-        buf = rest;
-        for (const e of events) {
-          const n = e.event === "notify" ? parseNotice(e.data) : null;
-          if (n) notify(n.title, n.body);
-        }
-        if (events.some((e) => e.event === "update")) refreshSoon();
+function watch(): Effect.Effect<void, SourceError> {
+  return Effect.gen(function* () {
+    let attempt = 0;
+    const events = {
+      connected: () => {
+        attempt = 0;
+      },
+      event: (e: SSEvent) => {
+        const n = e.event === "notify" ? parseNotice(e.data) : null;
+        if (n) notify(n.title, n.body);
+        if (e.event === "update") refreshSoon();
+      },
+    };
+    // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- the before-quit handler sets quitting while this loop waits
+    while (!quitting) {
+      // However the stream ended (the desk restarting, or gone), the checks below tell what's next; a bug is logged too.
+      yield* followEvents(`${api}/api/events${server ? "" : "?notify=1"}`, events).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.sync(() => {
+                if (!Cause.hasDies(cause)) return;
+                log(`following the desk failed: ${Cause.pretty(cause)}`);
+                report(Cause.squash(cause), "following the desk");
+              }),
+        ),
+      );
+      if (quitting) return;
+      if (!server && !source && (yield* deskGone())) {
+        log(fromSource ? "the desk went away; running it from source" : "the desk went away; starting one here");
+        if (!(yield* connect())) return;
+        if (keepsView(win?.webContents.getURL() ?? "", origins, !!source)) win?.webContents.reload();
+        else yield* loadUi();
+        continue;
       }
-    } catch {}
-    if (quitting) return;
-    if (!server && !source && (await deskGone())) {
-      log(fromSource ? "the desk went away; running it from source" : "the desk went away; starting one here");
-      if (!(await connect())) return;
-      if (keepsView(win?.webContents.getURL() ?? "", origins, !!source)) win?.webContents.reload();
-      else await loadUi();
-      continue;
+      yield* Effect.sleep(source ? 1000 : backoff(attempt++));
     }
-    await sleep(source ? 1000 : backoff(attempt++));
-  }
+  });
 }
 
 function sourceStatus(): SourceStatus | null {
@@ -339,43 +436,36 @@ function checkSource(): void {
   app.quit();
 }
 
-async function deskGone(): Promise<boolean> {
-  for (let i = 0; i < 3; i++) {
-    if ((await probeHealth(api)).kind !== "free") return false;
-    await sleep(1000);
-  }
-  return true;
+function deskGone(): Effect.Effect<boolean> {
+  return Effect.gen(function* () {
+    for (let i = 0; i < 3; i++) {
+      if ((yield* probeHealth(api)).kind !== "free") return false;
+      yield* Effect.sleep(1000);
+    }
+    return true;
+  });
 }
 
 let refreshTimer: NodeJS.Timeout | null = null;
 function refreshSoon(): void {
   refreshTimer ??= setTimeout(() => {
     refreshTimer = null;
-    void refresh();
+    runner.fork("refreshing the tray", refresh());
   }, 500);
 }
 
-async function refresh(): Promise<void> {
-  const [s, focus, settings] = await Promise.all([
-    getJson<Status>("/api/status"),
-    getJson<FocusView>("/api/focus"),
-    getJson<SettingsView>("/api/settings"),
-  ]);
-  if (settings) applySettings(desktopSettings(settings.values));
-  status = s;
-  queueCards = focus ? [...focus.sections.now, ...focus.sections.today] : [];
-  updateTray();
-  updateBadge();
-}
-
-// null while the desk is starting (503) or unreachable.
-async function getJson<T>(p: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${api}${p}`, { signal: AbortSignal.timeout(5000) });
-    return res.ok ? ((await res.json()) as T) : null;
-  } catch {
-    return null;
-  }
+function refresh(): Effect.Effect<void, FsError | ElectronRefused> {
+  return Effect.gen(function* () {
+    const [s, focus, settings] = yield* Effect.all(
+      [getJson<Status>(`${api}/api/status`), getJson<FocusView>(`${api}/api/focus`), getJson<SettingsView>(`${api}/api/settings`)],
+      { concurrency: "unbounded" },
+    );
+    if (settings) yield* applySettings(desktopSettings(settings.values));
+    status = s;
+    queueCards = focus ? [...focus.sections.now, ...focus.sections.today] : [];
+    updateTray();
+    updateBadge();
+  });
 }
 
 function notify(title: string, body: string): void {
@@ -395,26 +485,26 @@ const shown = new Set<Notification>(); // a collected Notification loses its cli
 
 // ---------------------------------------------------------------- desktop settings
 
-function applySettings(next: DesktopSettings): void {
-  if (next.hotkey !== hotkey.accelerator) registerHotkey(next.hotkey);
-  if (next.source !== prefs.source) checkSource();
-  if (next.open_at_login !== loginApplied) {
-    loginApplied = next.open_at_login;
-    if (next.open_at_login !== loginItemEnabled()) setLoginItem(next.open_at_login);
-  }
-  prefs = next;
+function applySettings(next: DesktopSettings): Effect.Effect<void, FsError | ElectronRefused> {
+  return Effect.gen(function* () {
+    if (next.hotkey !== hotkey.accelerator) registerHotkey(next.hotkey);
+    if (next.source !== prefs.source) checkSource();
+    if (next.open_at_login !== loginApplied) {
+      loginApplied = next.open_at_login;
+      if (next.open_at_login !== loginItemEnabled()) yield* setLoginItem(next.open_at_login);
+    }
+    prefs = next;
+  });
 }
 
 function registerHotkey(accelerator: string): void {
   if (hotkey.ok && hotkey.accelerator) globalShortcut.unregister(hotkey.accelerator);
   hotkey = { accelerator, ok: true };
   if (!accelerator) return;
-  try {
-    hotkey.ok = globalShortcut.register(accelerator, toggleWindow);
-    if (!hotkey.ok) hotkey.error = "another app has this shortcut";
-  } catch (e) {
-    hotkey = { accelerator, ok: false, error: (e as Error).message };
-  }
+  // One Electron can't read throws; another app's is false. Either way it's what Settings shows.
+  const registered = Result.try({ try: () => globalShortcut.register(accelerator, toggleWindow), catch: messageOf });
+  if (Result.isFailure(registered)) hotkey = { accelerator, ok: false, error: registered.failure };
+  else if (!registered.success) hotkey = { accelerator, ok: false, error: "another app has this shortcut" };
   log(hotkey.ok ? `hotkey ${accelerator}` : `hotkey ${accelerator} failed: ${hotkey.error}`);
 }
 
@@ -427,20 +517,27 @@ function loginItemEnabled(): boolean {
   return app.getLoginItemSettings(mac ? undefined : { args: ["--hidden"] }).openAtLogin;
 }
 
-function setLoginItem(on: boolean): void {
-  if (!app.isPackaged) return;
-  log(`open at login: ${on}`);
-  if (!linux) {
-    app.setLoginItemSettings({ openAtLogin: on, args: ["--hidden"] });
-    return;
-  }
-  const file = autostartFile();
-  if (!on) {
-    fs.rmSync(file, { force: true });
-    return;
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, desktopEntry(envVar("APPIMAGE") ?? process.execPath, ["--hidden"]));
+function setLoginItem(on: boolean): Effect.Effect<void, FsError | ElectronRefused> {
+  return Effect.gen(function* () {
+    if (!app.isPackaged) return;
+    log(`open at login: ${on}`);
+    if (!linux) {
+      yield* Effect.try({
+        try: () => {
+          app.setLoginItemSettings({ openAtLogin: on, args: ["--hidden"] });
+        },
+        catch: (cause) => new ElectronRefused({ cause }),
+      });
+      return;
+    }
+    const file = autostartFile();
+    if (!on) {
+      yield* removeFile(file);
+      return;
+    }
+    yield* makeDir(path.dirname(file));
+    yield* writeFile(file, desktopEntry(envVar("APPIMAGE") ?? process.execPath, ["--hidden"]));
+  });
 }
 
 // ---------------------------------------------------------------- window
@@ -449,12 +546,8 @@ const stateFile = () => path.join(app.getPath("userData"), "window.json");
 const themeFile = () => path.join(app.getPath("userData"), "theme.json");
 
 function readTheme(): string | null {
-  try {
-    const t = (JSON.parse(fs.readFileSync(themeFile(), "utf8")) as { theme?: unknown }).theme;
-    return isTheme(t) ? t : null;
-  } catch {
-    return null;
-  }
+  const t = (readJson(themeFile()) as { theme?: unknown } | null)?.theme;
+  return isTheme(t) ? t : null;
 }
 
 // The UI's --paper, so the window doesn't flash another theme while it loads.
@@ -467,12 +560,33 @@ const startPage = (text: string) => {
   return `data:text/html;charset=utf-8,${encodeURIComponent(page)}`;
 };
 
+const load = (w: BrowserWindow, url: string): Effect.Effect<void, ElectronRefused> =>
+  Effect.tryPromise({ try: () => w.loadURL(url), catch: (cause) => new ElectronRefused({ cause }) });
+
+// The window's start page with text on it. The next load superseding it rejects it with ERR_ABORTED: nothing went wrong.
+function showPage(text: string): void {
+  if (!win) return;
+  runner.fork(
+    "showing the start page",
+    load(win, startPage(text)).pipe(
+      Effect.catchIf(
+        (e) => e.aborted,
+        () => Effect.void,
+      ),
+    ),
+  );
+}
+
+// A link the window was asked to open, in the browser.
+function openLink(url: string): void {
+  runner.fork(
+    "opening a link",
+    Effect.tryPromise({ try: () => shell.openExternal(url), catch: (cause) => new ElectronRefused({ cause }) }),
+  );
+}
+
 function createWindow(): void {
-  let saved: Partial<Bounds> | null = null;
-  try {
-    // restoreBounds type-checks each field.
-    saved = JSON.parse(fs.readFileSync(stateFile(), "utf8")) as Partial<Bounds> | null;
-  } catch {}
+  const saved = readJson(stateFile()) as Partial<Bounds> | null; // restoreBounds type-checks each field
   const bg = paper();
   const w = new BrowserWindow({
     ...restoreBounds(
@@ -511,9 +625,8 @@ function createWindow(): void {
   const save = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try {
-        fs.writeFileSync(stateFile(), JSON.stringify(w.getNormalBounds()));
-      } catch {}
+      // Where it was is a nicety: unsaved, the window opens at its default size.
+      Effect.runSync(Effect.ignore(writeFile(stateFile(), JSON.stringify(w.getNormalBounds()))));
     }, 500);
   };
   nativeTheme.on("updated", () => {
@@ -525,13 +638,13 @@ function createWindow(): void {
   w.webContents.on("will-navigate", (e) => {
     if (isAppUrl(e.url, origins)) return;
     e.preventDefault();
-    if (isHttpUrl(e.url)) void shell.openExternal(e.url);
+    if (isHttpUrl(e.url)) openLink(e.url);
   });
   w.webContents.setWindowOpenHandler(({ url }) => {
-    if (isHttpsUrl(url)) void shell.openExternal(url);
+    if (isHttpsUrl(url)) openLink(url);
     return { action: "deny" };
   });
-  void w.loadURL(startPage("Starting Review Desk…"));
+  showPage("Starting Review Desk…");
 }
 
 function showWindow(): void {
@@ -551,7 +664,15 @@ function toggleWindow(): void {
 
 function openSettings(): void {
   showWindow();
-  void win?.webContents.executeJavaScript(`location.hash = "#/settings"`).catch(() => {});
+  const w = win;
+  if (!w) return;
+  runner.fork(
+    "opening Settings",
+    Effect.tryPromise({
+      try: () => w.webContents.executeJavaScript(`location.hash = "#/settings"`),
+      catch: (cause) => new ElectronRefused({ cause }),
+    }),
+  );
 }
 
 function secureSession(): void {
@@ -621,7 +742,7 @@ function updateTray(): void {
   const cards: MenuItemConstructorOptions[] = queueCards.slice(0, 5).map((c) => ({
     label: cardLabel(c),
     click: () => {
-      if (isGitHubUrl(c.url)) void shell.openExternal(c.url);
+      if (isGitHubUrl(c.url)) openLink(c.url);
     },
   }));
   tray.setContextMenu(
@@ -636,7 +757,12 @@ function updateTray(): void {
         ? [{ type: "separator" as const }, { label: menuLabel(`Inbox (${queueCards.length})`), enabled: false }, ...cards]
         : []),
       { type: "separator" },
-      { label: "Sync now", click: () => void fetch(`${api}/api/sync`, { method: "POST" }).catch(() => {}) },
+      {
+        label: "Sync now",
+        click: () => {
+          runner.fork("Sync now", request(`${api}/api/sync`, { method: "POST" }));
+        },
+      },
       { label: "Settings…", click: openSettings },
       { type: "separator" },
       {
