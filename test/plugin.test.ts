@@ -1,16 +1,18 @@
 // A source that isn't GitHub, held in memory (ids notes:1, notes:2…): the guard that the core stops assuming GitHub.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { Effect } from "effect";
+import { defaultConfigText } from "../src/config.ts";
 import type { Connector, Members } from "../src/connectors/connector.ts";
-import type { Desk } from "../src/desk.ts";
-import { NotFound } from "../src/errors.ts";
+import { Desk } from "../src/desk.ts";
+import { NotFound, Upstream } from "../src/errors.ts";
 import type { ConnectorStatus, Head } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
-import { makeItem, NOW } from "./helpers/items.ts";
-import { failureSync, run, runSync } from "./helpers/run.ts";
+import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const DAY = 24 * 3_600_000;
 
@@ -18,15 +20,32 @@ interface Note extends Head {
   text: string;
 }
 
+// Its part of a first config.toml: a board in the first space.
+const NOTES_BOARD = `[[boards]]
+id = "notes"
+name = "Notes"
+source = "notes"
+default = "today"
+`;
+
 // Its notes go into the desk's store as GitHub's items do, with none of GitHub's fields.
 class Notes implements Connector {
   readonly id = "notes";
   readonly name = "Notes";
   desk: Desk;
   notes: Note[] = [];
+  inits: boolean[] = []; // what each init was asked
 
   constructor(desk: Desk) {
     this.desk = desk;
+  }
+
+  // It needs nothing before the desk starts: its notes are in memory.
+  init(first: boolean): Effect.Effect<string | null, Upstream> {
+    return Effect.sync(() => {
+      this.inits.push(first);
+      return first ? NOTES_BOARD : null;
+    });
   }
 
   // Kept by the source alone, until the desk fetches it.
@@ -152,4 +171,41 @@ test("a board lists only its source's items: a notes board the notes, which GitH
   assert.deepEqual(listed("review"), [reviewAsk(1).id]);
   assert.deepEqual(runSync(t.desk.board("notes")).board.queries, [], "its source's, not GitHub's");
   assert.ok(![...t.desk.store.queries().keys()].some((q) => q.includes("label:notes")), "GitHub searches its own boards only");
+});
+
+test("init asks every source what it needs: a first config.toml is GitHub's then the notes' board, written once all have answered", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
+  const desks: Desk[] = [];
+  c.after(() => {
+    for (const d of desks) d.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  const start = () => {
+    const desk = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+    desks.push(desk);
+    const notes = new Notes(desk);
+    desk.connectors.push(notes);
+    return { desk, notes };
+  };
+  const config = path.join(home, "config.toml");
+
+  const failing = start();
+  failing.notes.init = () => Effect.fail(new Upstream({ message: "notes are offline" }));
+  assert.equal((await failure(failing.desk.init())).message, "notes are offline");
+  assert.equal(fs.existsSync(config), false, "GitHub's part isn't written alone");
+  failing.desk.stop();
+
+  const first = start();
+  await run(first.desk.init());
+  assert.equal(fs.readFileSync(config, "utf8"), `${defaultConfigText({ workOrgs: ["acme"] })}\n${NOTES_BOARD}`);
+  assert.deepEqual(first.notes.inits, [true]);
+  const board = first.desk.loaded?.boards.find((b) => b.config.id === "notes")?.config;
+  assert.deepEqual([board?.source, board?.space], ["notes", "acme"]);
+  assert.equal(first.desk.me(), "me", "who you are is GitHub's");
+  first.desk.stop();
+
+  const again = start();
+  await run(again.desk.init());
+  assert.deepEqual(again.notes.inits, [false], "there's a config.toml: nothing to add to it");
+  assert.equal(fs.readFileSync(config, "utf8"), `${defaultConfigText({ workOrgs: ["acme"] })}\n${NOTES_BOARD}`);
 });

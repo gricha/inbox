@@ -1,7 +1,7 @@
 // A connector turns one source (GitHub today) into item snapshots and events. The desk runs every connector it has.
 import type { Effect } from "effect";
 import type { LoadedConfig } from "../config.ts";
-import type { NotFound, Upstream } from "../errors.ts";
+import type { GitHubReadError, NotFound, Upstream } from "../errors.ts";
 import type { CompiledBoard } from "../rules.ts";
 import type { ActivityEvent, ConnectorStatus, Item } from "../types.ts";
 
@@ -22,6 +22,8 @@ export interface Members {
 export interface Connector {
   readonly id: string; // "github"; the `source` of its events and of its boards
   readonly name: string; // "GitHub"
+  // Before the desk starts: what it must have (GitHub: your context); first: its part of the first config.toml, else null.
+  init(first: boolean): Effect.Effect<string | null, GitHubReadError | Upstream>;
   start(): void; // its loops: the full reconcile and the cheap change feed
   stop(): void;
   reschedule(): void; // settings changed; re-arm the timers

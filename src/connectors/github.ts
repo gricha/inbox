@@ -1,5 +1,5 @@
 // GitHub as a connector: board searches plus details (reconcile), the notifications feed, and the snapshot diff.
-import type { LoadedConfig } from "../config.ts";
+import { defaultConfigText, type LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
 import { Cause, Effect, Result } from "effect";
 import {
@@ -14,7 +14,7 @@ import {
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
-import type { ConnectorStatus, Item } from "../types.ts";
+import type { ConnectorStatus, Context, Item } from "../types.ts";
 import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
 import { botCheck } from "../signals.ts";
@@ -85,10 +85,12 @@ export class GitHubConnector implements Connector {
   timer: NodeJS.Timeout | null = null;
   feedTimer: NodeJS.Timeout | null = null;
   feed: Feed;
+  ctx: Context | null; // who you are, your teams, orgs and areas: kv `context`
 
   constructor(desk: Desk, api: GitHub) {
     this.desk = desk;
     this.api = api;
+    this.ctx = desk.store.get("context") as Context | null;
     this.syncedAt = desk.store.get("synced_at") as string | null;
     this.feed = { since: null, last_modified: null, interval: 60, seen: {}, ...(desk.store.get("github.feed") as Partial<Feed> | null) };
   }
@@ -176,25 +178,48 @@ export class GitHubConnector implements Connector {
 
   // ---------------------------------------------------------------- context and searches
 
+  me(): string {
+    return this.ctx?.me ?? "";
+  }
+
+  // Your context, when the desk has none; first: the first config.toml, its spaces from where your work is.
+  init(first: boolean): Effect.Effect<string | null, GitHubReadError | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      if (!this.ctx) yield* this.refreshContext();
+      if (!first) return null;
+      // Don't guess the spaces from a failed fetch.
+      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.desk.now().getTime() - 24 * HOUR)
+        return yield* new Upstream({
+          message: `couldn't read your GitHub context to write a first config: ${this.contextError ?? "unknown error"}`,
+        });
+      const orgs = Object.entries(this.ctx.orgs)
+        .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 1)
+        .map(([o]) => o);
+      return defaultConfigText({ workOrgs: orgs });
+    });
+  }
+
   // Fails only when there's no context yet and GitHub won't say who you are; the rest falls back to what the desk had.
   refreshContext(): Effect.Effect<void, GitHubReadError> {
     return Effect.gen({ self: this }, function* () {
       const desk = this.desk;
-      const me = desk.ctx?.me ?? (yield* this.api.viewer());
+      const me = this.ctx?.me ?? (yield* this.api.viewer());
       const got = yield* Effect.result(this.api.context(me));
       if (Result.isSuccess(got)) {
-        desk.ctx = { ...desk.ctx, ...got.success, me, refreshed_at: desk.now().toISOString() };
+        this.ctx = { ...this.ctx, ...got.success, me, refreshed_at: desk.now().toISOString() };
         this.contextError = null;
       } else {
         this.contextError = got.failure.message;
         desk.log(`context refresh failed: ${this.contextError}`);
         // Retry in about an hour rather than on every poll.
         const retry = new Date(desk.now().getTime() - 23 * HOUR).toISOString();
-        desk.ctx = desk.ctx
-          ? { ...desk.ctx, refreshed_at: retry }
+        this.ctx = this.ctx
+          ? { ...this.ctx, refreshed_at: retry }
           : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
       }
-      desk.store.set("context", desk.ctx);
+      desk.store.set("context", this.ctx);
     });
   }
 
@@ -204,24 +229,24 @@ export class GitHubConnector implements Connector {
       const desk = this.desk;
       const got = yield* Effect.result(this.api.areas());
       if (Result.isSuccess(got)) {
-        if (desk.ctx) desk.ctx = { ...desk.ctx, areas: got.success, areas_at: desk.now().toISOString() };
+        if (this.ctx) this.ctx = { ...this.ctx, areas: got.success, areas_at: desk.now().toISOString() };
       } else {
         desk.log(`areas refresh failed: ${got.failure.message}`);
-        if (desk.ctx) desk.ctx = { ...desk.ctx, areas_at: new Date(desk.now().getTime() - 23 * HOUR).toISOString() };
+        if (this.ctx) this.ctx = { ...this.ctx, areas_at: new Date(desk.now().getTime() - 23 * HOUR).toISOString() };
       }
-      desk.store.set("context", desk.ctx);
+      desk.store.set("context", this.ctx);
     });
   }
 
   // Board query → expanded GitHub search string (null when it can't run, e.g. no collaborators yet).
   expandQuery(q: string, scope: string, loaded: LoadedConfig): string | null {
-    const me = this.desk.me();
+    const me = this.me();
     let base = `${q} ${scope}`.replaceAll("{me}", me).replaceAll(/\s+/g, " ").trim();
     if (!base.includes("{close_authors}")) return base;
     base = base.replace("{close_authors}", "").replaceAll(/\s+/g, " ").trim();
     const min = loaded.config.signals.close_collaborator_min;
     const isBot = botCheck(loaded.config.signals.bots);
-    const authors = Object.entries(this.desk.ctx?.affinity ?? {})
+    const authors = Object.entries(this.ctx?.affinity ?? {})
       .filter(([a, n]) => n >= min && a.toLowerCase() !== me.toLowerCase() && !isBot(a))
       .sort((a, b) => b[1] - a[1]);
     let out = base;
@@ -301,10 +326,10 @@ export class GitHubConnector implements Connector {
       const desk = this.desk;
       const now = desk.now();
       const iso = now.toISOString();
-      if (!desk.ctx || now.getTime() - Date.parse(desk.ctx.refreshed_at) > 24 * HOUR) yield* this.refreshContext();
-      if (now.getTime() - (Date.parse(desk.ctx?.areas_at ?? "") || 0) > 24 * HOUR) yield* this.refreshAreas();
+      if (!this.ctx || now.getTime() - Date.parse(this.ctx.refreshed_at) > 24 * HOUR) yield* this.refreshContext();
+      if (now.getTime() - (Date.parse(this.ctx?.areas_at ?? "") || 0) > 24 * HOUR) yield* this.refreshAreas();
       const loaded = desk.loaded!; // reconcile checked it, and a reload never unsets it
-      const me = desk.me().toLowerCase();
+      const me = this.me().toLowerCase();
       const own = loaded.boards.filter((b) => (b.config.source ?? this.id) === this.id);
       const queries = [...new Set(own.flatMap((b) => this.queriesFor(loaded, b)))];
       const listed = desk.store.hits(); // what each search returned last time
@@ -350,7 +375,7 @@ export class GitHubConnector implements Connector {
         // Only on the pass it left: an item kept to show as resolved was last listed before that.
         return m && (last === null || m.last_hit_at >= last) ? [hitOf(id, m)] : [];
       });
-      const items = need.length || drops.length ? yield* this.api.details([...need, ...drops], desk.me()) : [];
+      const items = need.length || drops.length ? yield* this.api.details([...need, ...drops], this.me()) : [];
       desk.ingest(this, items);
       const keep = (id: string) => {
         const m = meta.get(id);
@@ -450,7 +475,7 @@ export class GitHubConnector implements Connector {
         }
         for (const it of old) want.set(it.id, hitOf(it.id, it));
         if (!want.size) continue;
-        const items = yield* this.api.details([...want.values()], desk.me());
+        const items = yield* this.api.details([...want.values()], this.me());
         desk.ingest(this, items, true);
         fetched += items.length;
       }
@@ -482,7 +507,7 @@ export class GitHubConnector implements Connector {
       const at = id.lastIndexOf("#");
       const hit = yield* this.api.lookup(id.slice(0, at), Number(id.slice(at + 1))).pipe(Effect.mapError(upstream));
       if (!hit) return yield* new NotFound({ message: `GitHub has no PR or issue ${id}` });
-      const [item] = yield* this.api.details([hit], this.desk.me()).pipe(Effect.mapError(upstream));
+      const [item] = yield* this.api.details([hit], this.me()).pipe(Effect.mapError(upstream));
       if (!item) return yield* upstream(new GitHubNotFetched({ id: hit.id })); // details skips a batch that failed
       this.desk.ingest(this, [item]);
       return item.id;
@@ -497,7 +522,7 @@ export class GitHubConnector implements Connector {
       const m = desk.store.itemMeta().get(id);
       if (!m || this.stopped || Date.now() < this.pausedUntil) return Effect.void;
       return Effect.gen({ self: this }, function* () {
-        const items = yield* this.api.details([hitOf(id, m)], desk.me());
+        const items = yield* this.api.details([hitOf(id, m)], this.me());
         if (this.stopped) return;
         desk.ingest(this, items);
         desk.synced();
@@ -517,7 +542,7 @@ export class GitHubConnector implements Connector {
   poll(): Effect.Effect<void> {
     return Effect.suspend((): Effect.Effect<void> => {
       const desk = this.desk;
-      if (this.stopped || this.polling || !desk.loaded || !desk.ctx || Date.now() < this.pausedUntil) return Effect.void;
+      if (this.stopped || this.polling || !desk.loaded || !this.ctx || Date.now() < this.pausedUntil) return Effect.void;
       this.polling = true;
       const started = desk.now().getTime();
       // The first poll only learns where the feed stands; a thread's old mention isn't news.
@@ -552,7 +577,7 @@ export class GitHubConnector implements Connector {
           }
         }
         // Before the cursor moves: if this fails, the next poll sees these threads again.
-        const items = refresh.size ? yield* this.api.details([...refresh.values()], desk.me()) : [];
+        const items = refresh.size ? yield* this.api.details([...refresh.values()], this.me()) : [];
         // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
         const now = Date.parse(page.date ?? "") || started;
         this.feed.since = new Date(now - 60_000).toISOString();
@@ -592,6 +617,11 @@ export class GitHubConnector implements Connector {
 
   events(prev: Item | null, next: Item): NewEvent[] {
     const d = this.desk;
-    return itemEvents(prev, next, { me: d.me(), teams: d.ctx?.teams ?? [], bots: d.settings["github.bots"], now: d.now().toISOString() });
+    return itemEvents(prev, next, {
+      me: this.me(),
+      teams: this.ctx?.teams ?? [],
+      bots: d.settings["github.bots"],
+      now: d.now().toISOString(),
+    });
   }
 }

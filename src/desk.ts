@@ -88,7 +88,7 @@ import type {
 import { byPart, RANK, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
-import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
+import { migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { renderTemplate } from "./expr.ts";
@@ -287,7 +287,6 @@ export class Desk {
   configText = "";
   configErrors: ConfigError[] = [];
   configWarnings: ConfigError[] = [];
-  ctx: Context | null = null;
   rev = 0;
   listeners = new Set<(rev: number) => void>();
   notifyListeners = new Set<(title: string, body: string) => void>();
@@ -331,7 +330,6 @@ export class Desk {
     this.settingsPath = settingsPath(this.home);
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
-    this.ctx = this.store.get("context") as Context | null;
     this.gh = new GitHubConnector(this, opts.github);
     this.connectors = [this.gh];
     this.judge = new Judge(this);
@@ -361,11 +359,12 @@ export class Desk {
 
   // ---------------------------------------------------------------- lifecycle
 
-  // GitHub's viewer failing (no context yet), or a file it can't read or write, fails it: startServer's caller shows why.
+  // A connector's init failing (GitHub's viewer, no context yet) or a file it can't read or write fails it: startServer's caller shows why.
   init(): Effect.Effect<void, GitHubReadError | Upstream | FsError> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.ctx) yield* this.gh.refreshContext();
-      if (!fs.existsSync(this.configPath)) yield* this.firstConfig();
+      const first = !fs.existsSync(this.configPath);
+      const parts = yield* Effect.forEach(this.connectors, (c) => c.init(first));
+      if (first) yield* this.firstConfig(parts.filter((p) => p !== null).join("\n"));
       yield* this.migrateSettings();
       yield* this.migrateRules();
       yield* this.readPolicy();
@@ -382,30 +381,15 @@ export class Desk {
     });
   }
 
-  // The default spaces come from where your work is; don't guess them from a failed fetch.
-  private firstConfig(): Effect.Effect<void, Upstream | FsError> {
-    return Effect.suspend((): Effect.Effect<void, Upstream | FsError> => {
-      if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.now().getTime() - 24 * HOUR)
-        return Effect.fail(
-          new Upstream({
-            message: `couldn't read your GitHub context to write a first config: ${this.gh.contextError ?? "unknown error"}`,
-          }),
-        );
-      const orgs = Object.entries(this.ctx?.orgs ?? {})
-        .filter(([o, n]) => o.toLowerCase() !== this.me().toLowerCase() && n >= 5)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 1)
-        .map(([o]) => o);
-      const text = defaultConfigText({ workOrgs: orgs });
-      const write = Effect.try({
-        try: () => {
-          fs.writeFileSync(this.configPath, text);
-        },
-        catch: fsError("write", this.configPath),
-      });
-      return Effect.map(write, () => {
-        this.log(`wrote ${this.configPath}`);
-      });
+  private firstConfig(text: string): Effect.Effect<void, FsError> {
+    const write = Effect.try({
+      try: () => {
+        fs.writeFileSync(this.configPath, text);
+      },
+      catch: fsError("write", this.configPath),
+    });
+    return Effect.map(write, () => {
+      this.log(`wrote ${this.configPath}`);
     });
   }
 
@@ -494,8 +478,12 @@ export class Desk {
     for (const fn of this.listeners) fn(this.rev);
   }
 
+  get ctx(): Context | null {
+    return this.gh.ctx;
+  }
+
   me(): string {
-    return this.ctx?.me ?? "";
+    return this.gh.me();
   }
 
   // Where the tool-less agent calls run (the AI review, the judge, the read of conversations).
