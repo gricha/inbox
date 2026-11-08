@@ -6,7 +6,7 @@ import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { Cause, Effect, Exit } from "effect";
-import { GitHubRateLimited } from "../src/errors.ts";
+import { GitHubHttpError, GitHubRateLimited } from "../src/errors.ts";
 
 const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
 const iso = (h: number) => later(h).toISOString();
@@ -304,6 +304,23 @@ test("notifications: a refresh the rate limit stops leaves the cursor, so the po
   assert.deepEqual(kinds(t.desk).slice(1), ["commented acme/api#1", "mentioned acme/api#1"]);
   assert.notEqual(t.desk.gh.feed.since, since);
   t.cleanup();
+});
+
+test("notifications: a poll GitHub fails keeps its words as feedError and leaves the cursor; the next one clears it", async (c) => {
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  await run(t.desk.gh.poll());
+  const since = t.desk.gh.feed.since;
+  const notifications = t.gh.notifications.bind(t.gh);
+  t.gh.notifications = () => Effect.fail(new GitHubHttpError({ status: 500, message: "GitHub HTTP 500: oops" }));
+  await run(t.desk.gh.poll());
+  assert.equal(t.desk.gh.feedError, "GitHub HTTP 500: oops");
+  assert.equal(t.desk.gh.feed.since, since);
+  assert.equal(t.desk.gh.pausedUntil, 0);
+  t.gh.notifications = notifications;
+  await run(t.desk.gh.poll());
+  assert.equal(t.desk.gh.feedError, null);
 });
 
 test("notifications: a rate-limit pause skips polls", async () => {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 import { createClient, GH_MISSING } from "../src/github/client.ts";
 import { failure, run } from "./helpers/run.ts";
@@ -95,6 +95,21 @@ test("no answer after the retries is a network failure, with fetch's error as it
   assert.deepEqual([e._tag, e.message], ["GitHubNetworkError", "GitHub request failed: fetch failed"]);
   assert.equal(e._tag === "GitHubNetworkError" && e.cause, down);
   assert.equal(fake.calls.length, 3);
+});
+
+test("interrupting a read aborts its fetch", async () => {
+  let seen: AbortSignal | undefined;
+  const fetch = ((_url: string, init: RequestInit) => {
+    seen = init.signal ?? undefined;
+    return new Promise<Response>(() => {});
+  }) as unknown as typeof globalThis.fetch;
+  const fiber = Effect.runFork(client(fetch).query("query { x }"));
+  await new Promise((r) => {
+    setTimeout(r, 10);
+  });
+  assert.ok(seen && !seen.aborted, "the request is out");
+  await Effect.runPromise(Fiber.interrupt(fiber));
+  assert.equal(seen.aborted, true);
 });
 
 test("an answer that isn't JSON is a bad response, in the parser's words, and isn't retried", async () => {

@@ -18,7 +18,7 @@ import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
-import { GitHubHttpError } from "../src/errors.ts";
+import { GitHubHttpError, GitHubRateLimited } from "../src/errors.ts";
 
 // A PR on branch b<n> of acme/api, based on `on`: a branch, or the number of the PR below it.
 const pr = (n: number, on: string | number, o: Partial<Item> = {}) =>
@@ -684,6 +684,15 @@ test("pr probes: at most 20 a sync, and a miss isn't asked again for a day; a fa
   later(25 * 60 + 31);
   await run(t.desk.sync());
   assert.equal(asked(), 50, "a day on, asked again, 20 a pass");
+});
+
+test("a rate limit on a stack probe pauses the sync until its reset", async (tc) => {
+  const t = await setup([myPr(1, { requires: ["acme/gone#100"] })]);
+  tc.after(t.cleanup);
+  const resetAt = new Date(Date.now() + 3_600_000).toISOString();
+  t.gh.branchPrs = () => Effect.fail(new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (HTTP 403)` }));
+  await run(t.desk.sync());
+  assert.equal(t.desk.gh.pausedUntil, Date.parse(resetAt));
 });
 
 test("QueueView.stacks has every stack a card in the view carries, cleared ones too", async (tc) => {
