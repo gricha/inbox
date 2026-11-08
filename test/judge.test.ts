@@ -654,7 +654,11 @@ async function setup(
   const gh: FakeGitHub = new FakeGitHub(items, (q) =>
     q.includes("review-requested:@me") && !q.includes("-review-requested") ? [...gh.items.values()].map((i) => i.id) : [],
   );
-  const desk = new Desk({ home, github: gh, now: () => NOW, notify: () => {}, log: () => {} });
+  const logs: string[] = [];
+  const log = (m: string) => {
+    logs.push(m);
+  };
+  const desk = new Desk({ home, github: gh, now: () => NOW, notify: () => {}, log });
   c.after(() => {
     desk.stop();
     fs.rmSync(home, { recursive: true, force: true });
@@ -673,7 +677,7 @@ async function setup(
     await settle();
   };
   const placed = (n: number) => desk.item(`api#${n}`).placements[0]!;
-  return { desk, gh, fake, home, sync, settle, placed };
+  return { desk, gh, fake, home, logs, sync, settle, placed };
 }
 
 test("with policy.md empty, the starter policy is in effect: Claude sorts by it from the first sync", posix, async (c) => {
@@ -775,6 +779,11 @@ test("a failure leaves the board default, says why, and waits before trying agai
   for (let i = 0; i < 3; i++) await t.sync();
   assert.equal(t.fake.calls(), 1, "no retry storm: syncs don't call again while it waits");
   assert.equal(j.spent, 0, "a failed call doesn't use up the hour");
+  assert.deepEqual(
+    t.logs.filter((l) => l.startsWith("judge")),
+    ["judge failed on 1 items: Claude Code isn't logged in. Run `claude auth login` in a terminal. (401 OAuth token has expired)"],
+    "logged once, with the login's own words",
+  );
 
   // Logged in again: turning it off and on tries now instead of waiting out the pause, and forgets the old error.
   fs.rmSync(path.join(t.fake.dir, "fail"));
@@ -785,6 +794,26 @@ test("a failure leaves the board default, says why, and waits before trying agai
   await t.settle();
   assert.deepEqual([t.desk.getPolicy().judge.state, t.placed(1).bucket], ["idle", "today"]);
 });
+
+test(
+  "closing the desk while Claude sorts stops the call, which isn't a failure: nothing is recorded, retried or logged",
+  posix,
+  async (c) => {
+    const t = await setup(c, [gray(1)], { policy: "Team asks are today." });
+    fs.writeFileSync(path.join(t.fake.dir, "hold"), "");
+    await t.desk.sync();
+    await until(() => t.fake.calls() === 1);
+    assert.equal(t.desk.getPolicy().judge.state, "running");
+    await t.desk.close();
+    await until(() => !t.desk.judge.running);
+    const j = t.desk.judge;
+    assert.deepEqual([j.call, j.error, j.failures, j.retryAt, j.lastAt, j.timer], [null, null, 0, 0, null, undefined]);
+    assert.deepEqual(
+      t.logs.filter((l) => l.startsWith("judge")),
+      [],
+    );
+  },
+);
 
 test("one call at a time, 20 items per call, and no more than policy.max_per_hour items an hour", posix, async (c) => {
   const items = Array.from({ length: 30 }, (_, i) => gray(i + 1));

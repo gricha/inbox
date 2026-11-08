@@ -1,10 +1,10 @@
 // The judge: Claude sorts everything by the owner's prose policy, with where the rules put each item as its hint (and a
 // hard rule's floor). Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
-import { Effect } from "effect";
+import { Effect, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
-import { askClaude, NOT_LOGGED_IN } from "./review.ts";
+import { askClaude, makeAgentDir, NOT_LOGGED_IN } from "./review.ts";
 import { andMore, pushAnswered, pushesOf } from "./stage.ts";
 import {
   BUCKETS,
@@ -18,7 +18,7 @@ import {
   type JudgeStep,
   type Signals,
 } from "./types.ts";
-import { detached, report } from "./sentry.ts";
+import { report } from "./sentry.ts";
 
 // The policy while policy.md is empty, so Claude sorts from the first sync.
 export const DEFAULT_POLICY = `Less is more. Show me what a person is waiting on me for; when unsure, sort it away.
@@ -330,7 +330,7 @@ export class Judge {
   failures = 0;
   retryAt = 0;
   lastAt: string | null = null;
-  abort = new AbortController();
+  call: Fiber.Fiber<void> | null = null; // the call in flight, which stop() interrupts
   timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(desk: Desk) {
@@ -418,7 +418,11 @@ export class Judge {
       this.arm(spent[0]! + HOUR - now);
       return;
     }
-    void this.run(batch);
+    this.running = true;
+    desk.changed();
+    const call = desk.runner.fork("judge", this.run(batch));
+    if (!call) this.running = false;
+    else if (!call.pollUnsafe()) this.call = call; // one that failed before its first wait has ended (and maybe pumped) already
   }
 
   // Forgets the last failure and its backoff: the next pump calls now.
@@ -432,27 +436,28 @@ export class Judge {
     clearTimeout(this.timer);
     this.timer = setTimeout(
       () => {
-        detached(() => {
-          this.pump();
-        });
+        this.desk.runner.fork(
+          "judge",
+          Effect.sync(() => {
+            this.pump();
+          }),
+        );
       },
       Math.max(ms, 1000),
     );
+    this.timer.unref();
   }
 
-  async run(batch: JudgeItem[]): Promise<void> {
+  // One call, which pump() forks through the desk's runner. What fails it, or a bug in what it records, is its error and
+  // waits (BACKOFF) as before; the desk stopping interrupts it, which records nothing and pumps no more.
+  run(batch: JudgeItem[]): Effect.Effect<void> {
     const desk = this.desk;
     const policy = desk.policy;
-    this.running = true;
-    desk.changed();
     const ids = batch.map((g) => g.item.id);
-    try {
+    return Effect.gen({ self: this }, function* () {
       const prompt = buildJudgePrompt(batch, desk.policyText(), desk.me() || "the owner", desk.ctx);
-      const opts = { schema: JUDGE_SCHEMA, dir: desk.agentDir() };
-      // effect-bridge(C4a): run is still a promise; its abort interrupts the call, and a stopped desk drops what that rejects with
-      const raw = (await Effect.runPromise(askClaude(prompt, opts), { signal: this.abort.signal })).answer;
-      const answers = parseVerdicts(raw, ids);
-      if (desk.stopped) return;
+      const dir = yield* makeAgentDir(desk.home);
+      const answers = parseVerdicts((yield* askClaude(prompt, { schema: JUDGE_SCHEMA, dir })).answer, ids);
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.
       desk.store.set("judge_spent", [...this.spent(), ...batch.map(() => Date.now())]);
       const at = new Date().toISOString();
@@ -475,21 +480,38 @@ export class Judge {
       this.lastAt = at;
       desk.log(`judge: Claude sorted ${answers.size} of ${batch.length} items by the policy`);
       desk.retryAgents(NOT_LOGGED_IN);
-    } catch (err) {
-      if (desk.stopped) return;
-      this.failures++;
-      this.retryAt = Date.now() + BACKOFF[Math.min(this.failures, BACKOFF.length) - 1]!;
-      this.error = (err as Error).message;
-      report(err, "judge");
-      const detail = (err as { detail?: unknown }).detail; // effect-bridge(C4a): the login's own words, ClaudeNotLoggedIn's detail
-      desk.log(`judge failed on ${batch.length} items: ${this.error}${typeof detail === "string" ? ` (${detail})` : ""}`);
-    } finally {
-      this.running = false;
-      if (!desk.stopped) {
-        desk.changed();
-        this.pump();
-      }
-    }
+    }).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.sync(() => {
+          this.failed(batch.length, defect, "");
+        }),
+      ),
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          this.failed(batch.length, e, e._tag === "ClaudeNotLoggedIn" ? ` (${e.detail})` : ""); // the login's own words, for the log
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.running = false;
+          this.call = null;
+        }),
+      ),
+      Effect.andThen(
+        Effect.sync(() => {
+          desk.changed();
+          this.pump();
+        }),
+      ),
+    );
+  }
+
+  failed(n: number, err: unknown, detail: string): void {
+    this.failures++;
+    this.retryAt = Date.now() + BACKOFF[Math.min(this.failures, BACKOFF.length) - 1]!;
+    this.error = err instanceof Error ? err.message : String(err);
+    report(err, "judge");
+    this.desk.log(`judge failed on ${n} items: ${this.error}${detail}`);
   }
 
   status(): JudgeStatus {
@@ -525,6 +547,6 @@ export class Judge {
 
   stop(): void {
     clearTimeout(this.timer);
-    this.abort.abort();
+    this.call?.interruptUnsafe();
   }
 }

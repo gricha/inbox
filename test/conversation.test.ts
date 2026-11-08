@@ -10,6 +10,7 @@ import { owesReply } from "../src/stage.ts";
 import type { PrContext } from "../src/github/index.ts";
 import type { Item, ReviewView } from "../src/types.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
+import { GitHubHttpError, type GitHubReadError } from "../src/errors.ts";
 import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -404,6 +405,61 @@ test("a review fetched ahead (?ahead=1, the row the cursor rests on) has Claude 
   assert.equal(t.desk.convos.reading, null, "not a Reply row, and only fetched ahead: nothing read");
   await get();
   assert.equal(t.desk.convos.reading, "acme/web#4", "opened: Claude reads it");
+});
+
+test("what reviewers said: a failed fetch shows in the review and is tried again next time; views at once share one", async (c) => {
+  const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  await until(() => !t.desk.warming);
+  const asked: string[] = [];
+  let answer: Effect.Effect<PrContext, GitHubReadError> = Effect.fail(new GitHubHttpError({ status: 502, message: "GitHub HTTP 502" }));
+  t.gh.prContext = (nodeId) =>
+    Effect.suspend(() => {
+      asked.push(nodeId);
+      return answer;
+    });
+  t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
+  const failed = await t.desk.reviewView("web#3", true);
+  assert.deepEqual([failed.conversation, failed.conversation_error, failed.reading], [[], "GitHub HTTP 502", false]);
+
+  const held: (() => void)[] = [];
+  answer = Effect.callback<PrContext>((resume) => {
+    held.push(() => {
+      resume(Effect.succeed(CTX));
+    });
+  });
+  const both = Promise.all([t.desk.reviewView("web#3", true), t.desk.reviewView("web#3", true)]);
+  await until(() => held.length > 0);
+  assert.deepEqual(asked, ["PR_acme/web_3", "PR_acme/web_3"], "the failure wasn't kept, and the two views wait on one fetch");
+  held[0]!();
+  for (const v of await both) assert.deepEqual([v.conversation_error, v.conversation.length], [null, 7]);
+  assert.equal((await t.desk.reviewView("web#3", true)).conversation.length, 7);
+  assert.equal(asked.length, 2, "kept once it came back");
+});
+
+test("closing the desk while a read fetches what reviewers said starts no claude and records nothing", posix, async (c) => {
+  const fake = fakeClaude(c);
+  const t = await setup([myPr(3, { ci: "pending", thread_last: azulus })], { settings: JUDGE_OFF });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  await until(() => !t.desk.warming);
+  const held: (() => void)[] = [];
+  t.gh.prContext = () =>
+    Effect.callback<PrContext>((resume) => {
+      held.push(() => {
+        resume(Effect.succeed(CTX));
+      });
+    });
+  t.desk.convos.forget("acme/web#3"); // the sync fetched it ahead
+  t.desk.convos.read("acme/web#3");
+  assert.deepEqual([t.desk.convos.reading, held.length], ["acme/web#3", 1], "reading: its conversation is being fetched");
+  await t.desk.close();
+  for (const go of held) go();
+  await new Promise((r) => {
+    setTimeout(r, 200);
+  });
+  assert.deepEqual([fake.calls(), t.desk.convos.reading, t.desk.convos.errors.size], [0, null, 0]);
 });
 
 test("a reply goes only from the desk's window, to one of the PR's own conversations, and is logged", async (c) => {

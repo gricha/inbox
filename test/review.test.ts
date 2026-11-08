@@ -22,6 +22,7 @@ import {
   fetchPr,
   generateReview,
   filesHead,
+  makeAgentDir,
   numberPatch,
   parseFiles,
   parseReview,
@@ -314,6 +315,29 @@ test("a command that fails says why in its last lines, its exit, or the hint for
   const big = new CommandOutputTooLarge({ command: "gh", limitBytes: 64 * 1024 * 1024 });
   assert.deepEqual([big._tag, big.message], ["CommandOutputTooLarge", "gh printed more than 64 MB, so it was stopped"]);
   for (const x of [f, quiet, env]) fs.rmSync(x.dir, { recursive: true });
+});
+
+test("an agent directory that can't be made fails as an FsError, in Node's words", posix, async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-")), "home");
+  fs.writeFileSync(file, "");
+  const e = await failure(makeAgentDir(file));
+  assert.deepEqual([e._tag, e.op, e.path, e.code], ["FsError", "mkdir", path.join(file, "agent"), "ENOTDIR"]);
+  assert.match(e.message, /^ENOTDIR: not a directory, mkdir /);
+  assert.equal(await run(makeAgentDir(path.dirname(file))), path.join(path.dirname(file), "agent"));
+  fs.rmSync(path.dirname(file), { recursive: true });
+});
+
+test("a command that fails keeps only the last lines its message reads of all it wrote to stderr", posix, async () => {
+  const f = fakeAgent("tool", `yes spam | head -n 200000 >&2; printf "  last one\\nlast two\\nlast three\\n\\n" >&2; exit 2`);
+  const e = await failure(runCommand({ file: f.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
+  assert.deepEqual(e._tag === "CommandFailed" && [e.stderr, e.message], [
+    "…\n  last one\nlast two\nlast three",
+    "  last one last two last three",
+  ]);
+  const few = fakeAgent("few", `printf "\\n  one\\ntwo\\n" >&2; exit 2`);
+  const g = await failure(runCommand({ file: few.bin, args: [], shell: false }, { timeout: 5000, missing: "missing" }));
+  assert.deepEqual(g._tag === "CommandFailed" && [g.stderr, g.message], ["\n  one\ntwo\n", "one two"], "three lines or fewer: all of it");
+  for (const x of [f, few]) fs.rmSync(x.dir, { recursive: true });
 });
 
 test("an answer with no summary fails the review as bad output, and asks no second claude", posix, async () => {
@@ -991,15 +1015,16 @@ function fakeDeps(chunks?: unknown) {
   const gates = new Map<string, ReturnType<typeof deferred>>();
   let fail: string | null = null;
   const deps: ReviewDeps = {
-    fetchPr: (item) => {
-      fetched.push(`${item.id}@${item.head_oid}`);
-      return Effect.succeed({ body: "why", files: [FILE] } satisfies PrText);
-    },
-    generate: (item, _s, _why, pr) => {
-      started.push(item.id);
-      const g = deferred();
-      gates.set(item.id, g);
-      return Effect.gen(function* () {
+    fetchPr: (item) =>
+      Effect.sync(() => {
+        fetched.push(`${item.id}@${item.head_oid}`);
+        return { body: "why", files: [FILE] } satisfies PrText;
+      }),
+    generate: (item, _s, _why, pr) =>
+      Effect.gen(function* () {
+        started.push(item.id);
+        const g = deferred();
+        gates.set(item.id, g);
         yield* Effect.promise(() => g.promise);
         if (fail)
           return yield* Effect.fail(
@@ -1014,8 +1039,7 @@ function fakeDeps(chunks?: unknown) {
           model: "claude-opus-5[1m]",
           at: NOW.toISOString(),
         } satisfies AiReview;
-      });
-    },
+      }),
   };
   return {
     deps,
@@ -1128,16 +1152,15 @@ test("after a sync, the main page's PRs' diffs and conversations are fetched ahe
   const held: (() => void)[] = [];
   let open = 0;
   let most = 0;
-  t.f.deps.fetchPr = (item) => {
-    calls.push(`${item.id}@${item.head_oid}`);
-    most = Math.max(most, ++open);
-    return Effect.callback<PrText>((resume) => {
+  t.f.deps.fetchPr = (item) =>
+    Effect.callback<PrText>((resume) => {
+      calls.push(`${item.id}@${item.head_oid}`);
+      most = Math.max(most, ++open);
       held.push(() => {
         open--;
         resume(Effect.succeed({ body: "", files: [FILE] }));
       });
     });
-  };
   const drain = async () => {
     while (held.length) {
       held.shift()!();

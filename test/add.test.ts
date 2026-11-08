@@ -22,19 +22,19 @@ function fakeReview() {
   const started: string[] = [];
   const done = new Map<string, () => void>();
   const review: ReviewDeps = {
-    fetchPr: (item) => {
-      fetched.push(item.id);
-      return Effect.succeed({ body: "", files: [] });
-    },
-    generate: (item) => {
-      started.push(item.id);
-      return Effect.callback<AiReview>((resume) => {
+    fetchPr: (item) =>
+      Effect.sync(() => {
+        fetched.push(item.id);
+        return { body: "", files: [] };
+      }),
+    generate: (item) =>
+      Effect.callback<AiReview>((resume) => {
+        started.push(item.id);
         const ai = parseReview({ verdict: "skim", risk: "low", summary: "fine", notes: [] }, []);
         done.set(item.id, () => {
           resume(Effect.succeed({ ...ai, head_oid: item.head_oid, model: "fake", at: NOW.toISOString() }));
         });
-      });
-    },
+      }),
   };
   const finish = async (id: string) => {
     done.get(id)!();

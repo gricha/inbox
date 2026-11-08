@@ -15,10 +15,12 @@ import {
   CommandNotFound,
   CommandOutputTooLarge,
   CommandTimeout,
+  fsError,
   PrChangedDuringFetch,
   UnsafeArgument,
   type ClaudeError,
   type CommandError,
+  type FsError,
 } from "./errors.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { AiReview, ChunkRanking, Item, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder, ReviewRest, Signals } from "./types.ts";
@@ -123,6 +125,14 @@ export interface RunOpts {
 
 type RunError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed;
 
+// All CommandFailed's message reads of up to 64 MB of stderr: its last three lines, after a "…" line when there were more.
+function stderrTail(stderr: string): string {
+  const t = stderr.trim();
+  let at = t.length;
+  for (let n = 0; n < 3 && at >= 0; n++) at = t.lastIndexOf("\n", at - 1);
+  return at < 0 ? stderr : `…${t.slice(at)}`;
+}
+
 // `claude -p` exits non-zero on API errors but still prints its JSON envelope, so it opts into keeping stdout.
 // Not execFile: it can't start the process in a group of its own, and its timeout kills only the process itself.
 export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunError> {
@@ -157,7 +167,8 @@ export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunEr
             failed?.code === "ENOENT" ||
             (s.shell && (code === 9009 || /is not recognized as an internal or external command/i.test(stderr)));
           if (missing) return Effect.fail(new CommandNotFound({ command: s.file, hint: opts.missing }));
-          return Effect.fail(new CommandFailed({ command: s.file, code, signal: sig, stderr, ...(failed && { cause: failed }) }));
+          const fail = { command: s.file, code, signal: sig, stderr: stderrTail(stderr), ...(failed && { cause: failed }) };
+          return Effect.fail(new CommandFailed(fail));
         };
         child.stdout.setEncoding("utf8").on("data", (d: string) => {
           stdout += d;
@@ -449,6 +460,10 @@ export function agentDir(home: string): string {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+// agentDir for Effect code: what mkdir fails with is an FsError, in Node's words.
+export const makeAgentDir = (home: string): Effect.Effect<string, FsError> =>
+  Effect.try({ try: () => agentDir(home), catch: fsError("mkdir", path.join(home, "agent")) });
 
 // No --restricted: with no tools and no MCP servers, your settings only bring your model, effort and plugins.
 export const askClaude = Effect.fn("askClaude")(function* (

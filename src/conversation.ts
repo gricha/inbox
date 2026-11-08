@@ -1,10 +1,11 @@
 // What reviewers said on a PR, which of it waits on you, and Claude's read of what does. Read only: replies go through
 // Desk.reply(), on your click. Claude runs like the judge: your own claude, no tools, an empty directory.
 import { randomBytes } from "node:crypto";
-import { Effect } from "effect";
+import { Cache, Cause, Duration, Effect, Exit, type Fiber } from "effect";
 import type { Desk } from "./desk.ts";
+import type { GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
-import { askClaude } from "./review.ts";
+import { askClaude, makeAgentDir } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
 import { pushedAt, threadWaitsOnYou, waitsOnYou } from "./stage.ts";
@@ -13,6 +14,7 @@ const BATCH = 10; // conversations per call
 const BODY = 1500; // characters of each comment
 const HUNK = 1200; // characters of the code a thread is on
 const RETRY = 10 * 60_000; // after a failed read of a PR
+const CONTEXTS = 200; // PRs whose conversation is kept, the least recently asked for going first
 
 type Said = PrContext["comments"][number];
 type Convo = Omit<Conversation, "take">;
@@ -22,6 +24,7 @@ const lc = (s: string) => s.toLowerCase();
 // oxlint-disable-next-line no-control-regex -- one plain line, whatever Claude sent
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029\s]+/g, " ").trim();
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 const said = (c: Said) => ({ id: c.id, author: c.author, bot: c.bot, body: c.body, at: c.at, url: c.url });
 
@@ -158,61 +161,81 @@ export function parseTakes(raw: unknown, last: Map<string, string>, at: string):
 // Fetches a PR's conversation (again once a sync sees it updated) and has Claude read what waits on you, one PR at a time.
 export class Conversations {
   desk: Desk;
-  fetched = new Map<string, { at: string; ctx: Promise<PrContext> }>();
+  // By `<id> <node id> <updated_at>`, so a sync that sees the PR updated asks again; a failed fetch isn't kept, so it's
+  // tried again next time, and callers asking at once share one.
+  contexts: Cache.Cache<string, PrContext, GitHubReadError>;
   queue = new Set<string>(); // PRs with something Claude hasn't read, in the order they were asked
   reading: string | null = null;
+  call: Fiber.Fiber<void> | null = null; // the read in flight, which stop() interrupts
   errors = new Map<string, { message: string; at: number }>();
-  abort = new AbortController();
 
   constructor(desk: Desk) {
     this.desk = desk;
+    this.contexts = Effect.runSync(
+      Cache.makeWith((key: string) => this.desk.gh.api.prContext(key.split(" ")[1]!), {
+        capacity: CONTEXTS,
+        timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity),
+      }),
+    );
   }
 
-  context(id: string): Promise<PrContext> {
-    const it = this.desk.snapshot().entries.get(id)!.item;
-    const got = this.fetched.get(id);
-    if (got?.at === it.updated_at) return got.ctx;
-    const ctx = Effect.runPromise(this.desk.gh.api.prContext(it.node_id)); // effect-bridge(C4a): a Cache of the Effect replaces this promise
-    this.fetched.set(id, { at: it.updated_at, ctx });
-    // A failed fetch is tried again next time.
-    ctx.catch(() => {
-      if (this.fetched.get(id)?.ctx === ctx) this.fetched.delete(id);
+  context(id: string): Effect.Effect<PrContext, GitHubReadError> {
+    return Effect.suspend(() => {
+      const it = this.desk.snapshot().entries.get(id)!.item;
+      return Cache.get(this.contexts, `${id} ${it.node_id} ${it.updated_at}`);
     });
-    return ctx;
   }
 
   // Claude's take on each one waiting on you, once it has read its latest comment.
-  async list(id: string): Promise<Conversation[]> {
-    const e = this.desk.snapshot().entries.get(id)!;
-    const ctx = await this.context(id);
-    const takes = (this.desk.store.get(`take:${id}`) as Takes | null) ?? {};
-    const me = this.desk.me();
-    return conversation(ctx, me, e.analysis.signals.me.author, pushedAt(e.item, me)).map((c) => {
-      const t = takes[c.id];
-      return Object.assign(c, { take: c.waiting_on_you && t?.comment_id === c.comments.at(-1)!.id ? t : null });
+  list(id: string): Effect.Effect<Conversation[], GitHubReadError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = this.desk.snapshot().entries.get(id)!;
+      const ctx = yield* this.context(id);
+      const takes = (this.desk.store.get(`take:${id}`) as Takes | null) ?? {};
+      const me = this.desk.me();
+      return conversation(ctx, me, e.analysis.signals.me.author, pushedAt(e.item, me)).map((c) => {
+        const t = takes[c.id];
+        return Object.assign(c, { take: c.waiting_on_you && t?.comment_id === c.comments.at(-1)!.id ? t : null });
+      });
     });
   }
 
-  // GET /api/review/:id's fields. Claude reads in the background; the view updates when it's done.
-  async view(id: string, read = true): Promise<Pick<ReviewView, "conversation" | "conversation_error" | "reading" | "reading_error">> {
-    let list: Conversation[];
-    try {
-      list = await this.list(id);
-    } catch (err) {
-      return { conversation: [], conversation_error: (err as Error).message, reading: false, reading_error: null };
-    }
-    const unread = list.some((c) => c.waiting_on_you && !c.take);
-    if (unread && read) this.read(id);
-    const err = unread ? this.errors.get(id) : undefined;
-    return { conversation: list, conversation_error: null, reading: unread && !err, reading_error: err?.message ?? null };
+  // GET /api/review/:id's fields: whatever failed the fetch, a bug too, is conversation_error, as before. Claude reads in
+  // the background; the view updates when it's done.
+  view(id: string, read = true): Effect.Effect<Pick<ReviewView, "conversation" | "conversation_error" | "reading" | "reading_error">> {
+    return Effect.matchCauseEffect(this.list(id), {
+      onFailure: (cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.succeed({ conversation: [], conversation_error: messageOf(Cause.squash(cause)), reading: false, reading_error: null }),
+      onSuccess: (list) =>
+        Effect.sync(() => {
+          const unread = list.some((c) => c.waiting_on_you && !c.take);
+          if (unread && read) this.read(id);
+          const err = unread ? this.errors.get(id) : undefined;
+          return { conversation: list, conversation_error: null, reading: unread && !err, reading_error: err?.message ?? null };
+        }),
+    });
   }
 
   // After a sync: what a row asks you to reply to gets read before you open it.
-  async warm(ids: string[]): Promise<void> {
-    for (const id of ids) {
-      const list = await this.list(id).catch((): Conversation[] => []);
-      if (list.some((c) => c.waiting_on_you && !c.take)) this.read(id);
-    }
+  warm(ids: string[]): Effect.Effect<void> {
+    return Effect.forEach(
+      ids,
+      (id) =>
+        Effect.suspend(() => {
+          if (!this.desk.snapshot().entries.has(id)) return Effect.void; // gone since the sync
+          return this.list(id).pipe(
+            Effect.orElseSucceed((): Conversation[] => []), // ahead of time: opening it says what failed
+            Effect.flatMap((list) =>
+              Effect.sync(() => {
+                if (list.some((c) => c.waiting_on_you && !c.take)) this.read(id);
+              }),
+            ),
+          );
+        }),
+      { discard: true },
+    );
   }
 
   read(id: string): void {
@@ -227,46 +250,73 @@ export class Conversations {
     if (this.reading || this.desk.stopped || id === undefined) return;
     this.queue.delete(id);
     this.reading = id;
-    void this.run(id).finally(() => {
-      this.reading = null;
-      if (this.desk.stopped) return;
-      this.desk.changed();
-      this.pump();
-    });
+    const call = this.desk.runner.fork("conversations", this.run(id), id);
+    if (!call) this.reading = null;
+    else if (!call.pollUnsafe()) this.call = call; // one that ended before its first wait has pumped the next already
   }
 
-  async run(id: string): Promise<void> {
+  // One PR's read, which pump() forks through the desk's runner. What fails it, or a bug in what it records, is its
+  // reading_error until RETRY; the desk stopping interrupts it, which records nothing and reads no more.
+  run(id: string): Effect.Effect<void> {
     const desk = this.desk;
-    try {
+    return Effect.gen({ self: this }, function* () {
       const e = desk.snapshot().entries.get(id);
       if (!e) return;
-      const ctx = await this.context(id);
-      const unread = (await this.list(id)).filter((c) => c.waiting_on_you && !c.take).slice(0, BATCH);
+      const ctx = yield* this.context(id);
+      const unread = (yield* this.list(id)).filter((c) => c.waiting_on_you && !c.take).slice(0, BATCH);
       if (!unread.length) return;
       const prompt = buildTakePrompt(e.item, desk.me() || "the owner", unread, ctx);
-      // effect-bridge(C4a): run is still a promise; its abort interrupts the call, and a stopped desk drops what that rejects with
-      const { answer } = await Effect.runPromise(askClaude(prompt, { schema: TAKE_SCHEMA, dir: desk.agentDir() }), {
-        signal: this.abort.signal,
-      });
-      if (desk.stopped) return;
+      const dir = yield* makeAgentDir(desk.home);
+      const { answer } = yield* askClaude(prompt, { schema: TAKE_SCHEMA, dir });
       const got = parseTakes(answer, new Map(unread.map((c) => [c.id, c.comments.at(-1)!.id])), new Date().toISOString());
       desk.store.set(`take:${id}`, { ...(desk.store.get(`take:${id}`) as Takes | null), ...got });
       this.errors.delete(id);
       desk.log(`Claude read ${Object.keys(got).length} of ${unread.length} conversations waiting on you on ${id}`);
-    } catch (err) {
-      if (desk.stopped) return;
-      this.errors.set(id, { message: (err as Error).message, at: Date.now() });
-      report(err, "conversations", id);
-      desk.log(`reading the conversations on ${id} failed: ${(err as Error).message}`);
-    }
+    }).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.sync(() => {
+          this.failed(id, defect);
+        }),
+      ),
+      Effect.catch((err) =>
+        Effect.sync(() => {
+          this.failed(id, err);
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.reading = null;
+          this.call = null;
+        }),
+      ),
+      Effect.andThen(
+        Effect.sync(() => {
+          desk.changed();
+          this.pump();
+        }),
+      ),
+    );
+  }
+
+  failed(id: string, err: unknown): void {
+    const message = messageOf(err);
+    this.errors.set(id, { message, at: Date.now() });
+    report(err, "conversations", id);
+    this.desk.log(`reading the conversations on ${id} failed: ${message}`);
   }
 
   // After your reply: fetched again, so it's no longer waiting on you.
   forget(id: string): void {
-    this.fetched.delete(id);
+    const cache = this.contexts;
+    Effect.runSync(
+      Effect.gen(function* () {
+        const keys = Array.from(yield* Cache.keys(cache)).filter((k) => k.startsWith(`${id} `)); // before any goes
+        for (const key of keys) yield* Cache.invalidate(cache, key);
+      }),
+    );
   }
 
   stop(): void {
-    this.abort.abort();
+    this.call?.interruptUnsafe();
   }
 }

@@ -665,7 +665,8 @@ export class Desk {
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
-      void this.convos.warm([...top.now, ...top.today].filter((c) => c.cta === "reply").map((c) => c.id));
+      const replies = [...top.now, ...top.today].filter((c) => c.cta === "reply").map((c) => c.id);
+      this.runner.fork("conversations", this.convos.warm(replies)); // effect-bridge(C5c): warm is an Effect; this void hook forks it
     }
     void this.warmReviews();
     this.judge.pump();
@@ -691,7 +692,8 @@ export class Desk {
           for (const id of ids) {
             if (this.stopped) return;
             if (!this.snapshot().entries.has(id)) continue; // gone since: both would throw on it
-            await Promise.all([this.prText(id).catch(() => {}), this.convos.context(id).catch(() => {})]);
+            // effect-bridge(C5c): warmReviews becomes an Effect that yields both, ignoring what they fail with
+            await Promise.all([this.prText(id).catch(() => {}), Effect.runPromise(this.convos.context(id)).catch(() => {})]);
           }
         };
         await Promise.all(Array.from({ length: WARM_AT_ONCE }, next));
@@ -1430,7 +1432,7 @@ export class Desk {
     let files: ReviewFile[] = [];
     let diffHead: string | null = null;
     let filesError: string | null = null;
-    const talk = this.convos.view(id, !ahead);
+    const talk = Effect.runPromise(this.convos.view(id, !ahead)); // effect-bridge(C5c): reviewView yields it alongside the diff
     try {
       const t = await this.prText(id);
       files = t.files;
@@ -1898,7 +1900,7 @@ export class Desk {
   warmAdded(id: string): void {
     if (this.snapshot().entries.get(id)!.item.kind === "pr") {
       void this.prText(id).catch(() => {});
-      void this.convos.warm([id]);
+      this.runner.fork("conversations", this.convos.warm([id]), id); // effect-bridge(C5c): warm is an Effect; warmAdded forks it
     }
     this.pumpAi();
     this.judge.pump();
@@ -2405,7 +2407,8 @@ export class Desk {
     if (!text) throw new DeskError(400, "the reply is empty");
     if (text.length > MAX_REPLY) throw new DeskError(400, `keep a reply under ${MAX_REPLY} characters`);
     if (!this.writer) throw new DeskError(409, "replying isn't available in this desk");
-    const list = await this.convos.list(id).catch((err: unknown) => {
+    // effect-bridge(C5c): reply yields list and maps what it fails with to Upstream
+    const list = await Effect.runPromise(this.convos.list(id)).catch((err: unknown) => {
       throw new DeskError(502, `couldn't read the PR's conversations: ${(err as Error).message}`);
     });
     const c = list.find((x) => x.id === convoId);

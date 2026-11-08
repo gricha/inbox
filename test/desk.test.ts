@@ -9,6 +9,7 @@ import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { run } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubAuthError, GitHubHttpError } from "../src/errors.ts";
 
@@ -882,7 +883,7 @@ test("Blocked: sentry#129460 once your push changed the code under markstory's l
   );
   assert.deepEqual([...q.sections.now, ...q.sections.today], []);
   assert.deepEqual(
-    (await t.desk.convos.list(LIVE)).map((x) => [x.id, x.waiting_on_you]),
+    (await run(t.desk.convos.list(LIVE))).map((x) => [x.id, x.waiting_on_you]),
     [
       ["PRRT_a", false],
       ["PRRT_b", false],
