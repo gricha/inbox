@@ -1,13 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
-import { age, ago, clearedText, eventText, fromName, modelName, orgsLine, shortId, shortRef, snoozeOptions, tilde } from "../src/format.ts";
+import type { ActivityEvent, AgentStatus, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder } from "../../src/types.ts";
+import {
+  age,
+  ago,
+  clearedText,
+  eventText,
+  fromName,
+  githubTip,
+  modelName,
+  orgsLine,
+  shortId,
+  shortRef,
+  snoozeOptions,
+  tilde,
+  when,
+} from "../src/format.ts";
 import {
   acceleratorOf,
+  agentNeeds,
   authProblem,
   beside,
   cardFacts,
+  connectCommands,
   currentFile,
   DEFAULT_OPEN,
   diffRows,
@@ -153,6 +169,34 @@ test("Searches and rules' row says where each org's items start, an org no space
   );
   assert.equal(orgsLine([o("a", "Work"), o("b", "Work"), o("c", "Work")]), "a, b and c go to Work.");
   assert.equal(orgsLine([o("me", null), o("friend", "Personal")]), "Everything goes to Personal.");
+});
+
+test("GitHub's status row's tooltip has your teams and the rate limit, only what's known", () => {
+  const reset_at = new Date(Date.now() + 3_600_000).toISOString();
+  assert.equal(githubTip({ teams: [], rate_limit: null }), "");
+  assert.equal(githubTip({ teams: ["backend", "ml-team"], rate_limit: null }), "Your teams: @backend, @ml-team.");
+  assert.equal(githubTip({ teams: [], rate_limit: { remaining: 870, reset_at } }), `870 GitHub requests left until ${when(reset_at)}.`);
+  assert.equal(
+    githubTip({ teams: ["backend"], rate_limit: { remaining: 12, reset_at } }),
+    `Your teams: @backend. 12 GitHub requests left until ${when(reset_at)}.`,
+  );
+});
+
+test("Claude's part asks you to connect Claude Code or update its skill only while it needs it, and Connect runs only what's missing", () => {
+  const agent = (connected: boolean, state: AgentStatus["skill"]["state"]): AgentStatus => ({
+    driver: "claude-code",
+    mcp: { connected, command: "claude mcp add review-desk" },
+    skill: { state, path: "~/.claude/skills/review-desk/SKILL.md", command: "cp -R skills/review-desk ~/.claude/skills/" },
+  });
+  assert.equal(agentNeeds(agent(true, "installed")), null);
+  assert.equal(agentNeeds(agent(true, "missing")), "connect");
+  assert.equal(agentNeeds(agent(false, "installed")), "connect");
+  assert.equal(agentNeeds(agent(false, "outdated")), "connect");
+  assert.equal(agentNeeds(agent(true, "outdated")), "update");
+  assert.deepEqual(connectCommands(agent(true, "installed")), []);
+  assert.deepEqual(connectCommands(agent(true, "missing")), ["cp -R skills/review-desk ~/.claude/skills/"]);
+  assert.deepEqual(connectCommands(agent(false, "installed")), ["claude mcp add review-desk"]);
+  assert.deepEqual(connectCommands(agent(false, "outdated")), ["claude mcp add review-desk", "cp -R skills/review-desk ~/.claude/skills/"]);
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {

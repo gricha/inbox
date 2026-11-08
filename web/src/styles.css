@@ -3120,13 +3120,6 @@ p {
   margin-top: 28px;
 }
 
-/* Text a part shows outside its sheet starts where its heading's words do. */
-.s-part > .s-live {
-  max-width: none;
-  margin: 0 0 16px;
-  padding: 0 12px;
-}
-
 .s-skel .group-head .sk {
   width: 6em;
 }
@@ -3185,6 +3178,15 @@ p {
   text-wrap: pretty;
 }
 
+/* A status's help: red for what's yours to fix (GitHub's error, a failed connect), ink for an agent's failure or pause. */
+.s-help.t-bad {
+  color: var(--red);
+}
+
+.s-help.s-ink {
+  color: var(--ink);
+}
+
 /* Room above and below a control as tall as its row, so the message line under it clears the hairline. */
 .s-control {
   position: relative;
@@ -3193,6 +3195,11 @@ p {
   justify-self: end;
   gap: 8px;
   margin-block: 5px;
+}
+
+/* A status row's button is as tall as its row allows: no message line goes under it. */
+.setting.s-status .s-control {
+  margin-block: 0;
 }
 
 .s-unit {
@@ -3322,15 +3329,6 @@ p {
   font-size: 13px;
 }
 
-.agent {
-  margin-bottom: 16px;
-  padding: 0 12px;
-}
-
-.agent .btn {
-  margin-top: 12px;
-}
-
 .hotkey {
   display: flex;
   flex-wrap: wrap;
@@ -3345,63 +3343,6 @@ p {
 
 .hotkey-input:read-only {
   background: var(--wash);
-}
-
-.gh {
-  display: grid;
-  gap: 28px;
-  margin: 4px 0 24px;
-  padding: 0 12px;
-}
-
-.gh .notice {
-  margin: 0;
-}
-
-.gh-account {
-  display: grid;
-  gap: 4px;
-}
-
-.gh-who {
-  color: var(--ink);
-  font-size: 14.5px;
-}
-
-.gh-teams {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  color: var(--ink-2);
-}
-
-.orgs {
-  min-width: 360px;
-  margin-bottom: 10px;
-  border-collapse: collapse;
-  font-size: 13.5px;
-}
-
-.orgs td {
-  padding: 7px 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-.orgs .org {
-  padding-right: 28px;
-  color: var(--ink);
-  font-weight: 550;
-}
-
-.orgs .n {
-  padding-right: 28px;
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.orgs .space {
-  color: var(--ink-2);
 }
 
 /* Rules editor ------------------------------------------------------------- */

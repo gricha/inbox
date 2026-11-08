@@ -12,14 +12,25 @@ import type {
   SettingValue,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, MAC, orgsLine, when } from "../format.ts";
+import { cls, githubTip, MAC, orgsLine } from "../format.ts";
 import { Automations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
 import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
-import { acceleratorOf, authProblem, draftOf, judgeStatusText, routeHash, SETTINGS_VIEWS, settingsBack, valueOf } from "../view.ts";
+import {
+  acceleratorOf,
+  agentNeeds,
+  authProblem,
+  connectCommands,
+  draftOf,
+  judgeStatusText,
+  routeHash,
+  SETTINGS_VIEWS,
+  settingsBack,
+  valueOf,
+} from "../view.ts";
 import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
@@ -427,16 +438,6 @@ function Row({
   );
 }
 
-function PausedLine({ p, now }: { p: SettingsView["paused"]["ai"]; now: number }) {
-  if (!p) return null;
-  const left = Math.max(1, Math.round((Date.parse(p.until) - now) / 60_000));
-  return (
-    <p className="s-live">
-      <b>AI reviews are paused:</b> {withCode(p.why.replace(/\.?$/, "."))} Next try in {left}m.
-    </p>
-  );
-}
-
 function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   if (!s.accelerator) return <p className="s-live quiet">Off</p>;
   if (s.ok)
@@ -452,10 +453,68 @@ function HotkeyStatus({ s }: { s: DesktopStatus["hotkey"] }) {
   );
 }
 
-const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
+// Who the desk reads GitHub as, or its last sync's error and the fix; the teams and the rate limit are in the tooltip.
+function GitHubStatusRow({ gh }: { gh: GitHubStatus }) {
+  const tip = githubTip(gh);
+  return (
+    <div className="setting s-status" title={tip || undefined}>
+      <div className="s-label-col">
+        <p className="s-label">{gh.login ? `Signed in as @${gh.login}` : "Not signed in"}</p>
+        {gh.error ? (
+          <p className="s-help t-bad">
+            {withCode(gh.error.replace(/\.?$/, "."))}
+            {authProblem(gh.error) && (
+              <>
+                {" "}
+                Run <code>gh auth login</code> in a terminal, then sync.
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="s-help">
+            {gh.login
+              ? `Through ${gh.auth === "gh CLI" ? "gh" : gh.auth}. The desk writes to GitHub only when you click a button that says so.`
+              : "Not synced yet."}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
-// Whether Claude Code has the desk's MCP tools and skill, and Connect when it doesn't.
-function AgentLink({ active, loads }: { active: boolean; loads: number }) {
+const NEED = {
+  connect: {
+    label: "Claude Code isn't connected to the desk",
+    help: "Your agent and agents' questions need the desk's tools and skill.",
+    press: "Connect Claude Code",
+    busy: "Connecting…",
+    failed: "Couldn't connect",
+    done: "Connected Claude Code to the desk.",
+  },
+  update: {
+    label: "The desk's skill is out of date",
+    help: "Claude Code has an older copy than this desk.",
+    press: "Update the skill",
+    busy: "Updating…",
+    failed: "Couldn't update it",
+    done: "Updated Claude Code's copy of the desk's skill.",
+  },
+};
+
+// Claude's part starts with what needs you, and only then: Claude Code missing the desk's tools or skill, AI reviews paused.
+function ClaudeStatus({
+  active,
+  loads,
+  paused,
+  now,
+  flash,
+}: {
+  active: boolean;
+  loads: number;
+  paused: SettingsView["paused"]["ai"];
+  now: number;
+  flash: (text: string) => void;
+}) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -470,11 +529,19 @@ function AgentLink({ active, loads }: { active: boolean; loads: number }) {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
   }, [active, loads]);
 
+  const need = status && agentNeeds(status);
+  const say = need && NEED[need];
+
   function connect() {
     setBusy(true);
     setError(null);
     void runUi(
       api.connectAgent().pipe(
+        Effect.tap((s) =>
+          Effect.sync(() => {
+            if (say && !agentNeeds(s)) flash(say.done);
+          }),
+        ),
         Effect.catch((e) =>
           Effect.sync(() => {
             setError(e.message);
@@ -490,93 +557,41 @@ function AgentLink({ active, loads }: { active: boolean; loads: number }) {
     );
   }
 
-  if (!status) return null;
-  const missing = !status.mcp.connected || status.skill.state !== "installed";
   return (
-    <div className="agent">
-      <p className="s-live quiet" title={status.mcp.command}>
-        MCP tools: {status.mcp.connected ? "connected" : "not connected"}
-      </p>
-      <p className="s-live quiet" title={status.skill.path}>
-        Skill: {SKILL_STATE[status.skill.state]}
-      </p>
-      {missing && (
-        <button
-          type="button"
-          className="btn"
-          disabled={busy}
-          onClick={() => {
-            connect();
-          }}
-        >
-          {busy ? "Connecting…" : "Connect"}
-        </button>
-      )}
-      {error && <p className="s-live t-bad">Couldn't connect: {error}</p>}
-    </div>
-  );
-}
-
-function GitHubStatusView({ gh, now }: { gh: GitHubStatus; now: number }) {
-  return (
-    <div className="gh">
-      <div className="gh-account">
-        {gh.login ? (
-          <p className="gh-who">
-            Signed in as <b>@{gh.login}</b>
-          </p>
-        ) : (
-          <p className="gh-who">Not signed in yet</p>
-        )}
-        <p className="quiet">
-          Through {gh.auth}. {gh.synced_at ? `Last synced ${ago(gh.synced_at, now)}.` : "Not synced yet."}
-          {gh.rate_limit && ` ${gh.rate_limit.remaining.toLocaleString()} API requests left until ${when(gh.rate_limit.reset_at)}.`}
-        </p>
-      </div>
-      {gh.error && (
-        <div className="notice err" role="alert">
-          <span>
-            {gh.error}
-            {authProblem(gh.error) && (
-              <>
-                {" "}
-                Run <code>gh auth login</code> in a terminal, then sync.
-              </>
-            )}
-          </span>
+    <>
+      {status && say && (
+        <div className="setting s-status">
+          <div className="s-label-col">
+            <p className="s-label">{say.label}</p>
+            <p className={cls("s-help", error && "t-bad")}>{error ? `${say.failed}: ${error}` : say.help}</p>
+          </div>
+          <div className="s-control">
+            <button
+              type="button"
+              className="act primary"
+              disabled={busy}
+              title={connectCommands(status).join("\n")}
+              onClick={() => {
+                connect();
+              }}
+            >
+              {busy ? say.busy : say.press}
+            </button>
+          </div>
         </div>
       )}
-      {gh.teams.length > 0 && (
-        <div className="gh-block">
-          <h3 className="s-sub">Your teams</h3>
-          <p className="gh-teams">
-            {gh.teams.map((t) => (
-              <span key={t}>@{t}</span>
-            ))}
-          </p>
+      {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
+      {paused && (
+        <div className="setting s-status">
+          <div className="s-label-col">
+            <p className="s-label">AI reviews are paused</p>
+            <p className="s-help s-ink">
+              {withCode(paused.why.replace(/\.?$/, "."))} Next try in {Math.max(1, Math.round((Date.parse(paused.until) - now) / 60_000))}m.
+            </p>
+          </div>
         </div>
       )}
-      {gh.orgs.length > 0 && (
-        <div className="gh-block">
-          <h3 className="s-sub">Where your open items are</h3>
-          <table className="orgs">
-            <tbody>
-              {gh.orgs.map((o) => (
-                <tr key={o.org}>
-                  <td className="org">{o.org}</td>
-                  <td className="n">{o.items}</td>
-                  <td className="space">{o.space ? `in ${o.space}` : <span className="quiet">in Personal</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="quiet small">
-            Spaces decide which searches run for which orgs. Change them in{" "}
-            <a href={routeHash({ name: "settings", section: "rules" })}>Searches and rules</a>.
-          </p>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -619,7 +634,7 @@ function ThemeRow() {
 }
 
 // A row that opens one of Settings' views: its name and its Edit both go there.
-function ViewRow({ id, help, bad }: { id: string; help: ReactNode; bad?: boolean }) {
+function ViewRow({ id, help, tone }: { id: string; help: ReactNode; tone?: "bad" | "ink" }) {
   const href = routeHash({ name: "settings", section: id });
   const name = SETTINGS_VIEWS[id]?.name ?? id;
   return (
@@ -629,7 +644,7 @@ function ViewRow({ id, help, bad }: { id: string; help: ReactNode; bad?: boolean
         <a className="s-label s-name" href={href} tabIndex={-1}>
           {name}
         </a>
-        <p className={cls("s-help", bad && "t-bad")}>{help}</p>
+        <p className={cls("s-help", tone === "bad" && "t-bad", tone === "ink" && "s-ink")}>{help}</p>
       </div>
       <div className="s-control">
         <a className="s-edit" href={href} aria-label={`Edit ${name.toLowerCase()}`}>
@@ -642,25 +657,32 @@ function ViewRow({ id, help, bad }: { id: string; help: ReactNode; bad?: boolean
 
 // What a part's lookups get: the page's state, and a setting's row by its key.
 interface PartProps {
+  view: SettingsView;
+  active: boolean;
   now: number;
+  loads: number;
   configErrors: number;
   policy: PolicyDoc | null;
-  orgs: GitHubStatus["orgs"];
+  flash: (text: string) => void;
 }
 
 // Rows a part's sheet starts with, before its settings', by the part's id: a plugin's part adds one entry.
 const LEAD: Record<string, (p: PartProps) => ReactNode> = {
   github: (p) => (
-    <ViewRow
-      id="rules"
-      bad={p.configErrors > 0}
-      help={
-        p.configErrors > 0
-          ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
-          : (orgsLine(p.orgs) ?? "Which GitHub searches feed your desk, and where each item starts.")
-      }
-    />
+    <>
+      <GitHubStatusRow gh={p.view.github} />
+      <ViewRow
+        id="rules"
+        tone={p.configErrors > 0 ? "bad" : undefined}
+        help={
+          p.configErrors > 0
+            ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
+            : (orgsLine(p.view.github.orgs) ?? "Which GitHub searches feed your desk, and where each item starts.")
+        }
+      />
+    </>
   ),
+  agent: (p) => <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} now={p.now} flash={p.flash} />,
   app: () => <ThemeRow />,
 };
 
@@ -669,6 +691,7 @@ const AFTER: Record<string, (p: PartProps) => ReactNode> = {
   "policy.judge": ({ policy, now }) => (
     <ViewRow
       id="policy"
+      tone={policy?.judge.state === "error" ? "ink" : undefined}
       help={
         policy?.judge.state === "error"
           ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
@@ -782,7 +805,6 @@ export function Settings({
         }
       />
     );
-  const p: PartProps = { now, configErrors, policy, orgs: view?.github.orgs ?? [] };
 
   return (
     <div className="settings" hidden={!active}>
@@ -828,6 +850,7 @@ export function Settings({
           </div>
         )}
         {view?.sections.map((x) => {
+          const p: PartProps = { view, active, now, loads, configErrors, policy, flash };
           const defs = view.defs.filter((d) => d.section === x.id && !ELSEWHERE.has(d.key));
           const folded = defs.filter((d) => d.more);
           // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
@@ -838,14 +861,6 @@ export function Settings({
               <h2 id={`s-${x.id}-title`} className="group-head">
                 {x.title}
               </h2>
-              {x.id === "github" && <GitHubStatusView gh={view.github} now={now} />}
-              {x.id === "agent" && (
-                <>
-                  <AgentLink active={active} loads={loads} />
-                  {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
-                  <PausedLine p={view.paused.ai} now={now} />
-                </>
-              )}
               {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">

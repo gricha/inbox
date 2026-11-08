@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type Route } from "playwright-core";
 import { THEMES } from "../src/themes.ts";
-import type { Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView } from "../src/types.ts";
+import type { AgentStatus, Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView, SettingsView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const arg = (name: string) => {
@@ -312,6 +312,9 @@ const systemTheme = async (page: Page) => {
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
 // The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
+// A Settings part's status rows, by their labels, top to bottom.
+const statusRows = (page: Page, part: string) =>
+  page.evaluate<string[]>(`[...document.querySelectorAll("#s-${part} .s-status .s-label")].map((l) => l.textContent.trim())`);
 const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
 // The page head's words: a list's filter, a review's way back, or the page's name.
@@ -1777,6 +1780,11 @@ const SHOTS: Shot[] = [
       await at("#/settings/github")(page);
       if (await page.evaluate<boolean>(`!!document.getElementById("setting-github.poll_seconds")?.getClientRects().length`))
         failures.push("settings-github: More GitHub settings is open on arrival");
+      const rows = await statusRows(page, "github");
+      if (rows.length !== 1 || !rows[0]!.startsWith("Signed in as @"))
+        failures.push(`settings-github: GitHub's status rows read ${JSON.stringify(rows)}`);
+      const tip = await page.evaluate<string | null>(`document.querySelector("#s-github .s-status")?.title ?? null`);
+      if (!tip?.startsWith("Your teams: @")) failures.push(`settings-github: the status row's tooltip reads ${JSON.stringify(tip)}`);
     },
     sizes: ["wide", "mid", "min", "mac", "xl"],
   },
@@ -1796,6 +1804,34 @@ const SHOTS: Shot[] = [
     },
     after: async (page) => {
       await page.getByRole("button", { name: "More GitHub settings" }).click();
+    },
+  },
+  {
+    // GitHub's last sync failed on its login: the status row's help is the error in red, with the fix.
+    name: "settings-github-error",
+    go: async (page) => {
+      await page.route("**/api/settings", async (route) => {
+        const res = await route.fetch();
+        const v = (await res.json()) as SettingsView;
+        v.github.error = "GitHub rejected the token (HTTP 401)";
+        await route.fulfill({ response: res, json: v });
+      });
+      await at("#/")(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await at("#/settings/github")(page);
+      const help = await page.evaluate<{ text: string; red: boolean } | null>(`(() => {
+        const h = document.querySelector("#s-github .s-status .s-help");
+        return h && { text: h.textContent, red: h.classList.contains("t-bad") };
+      })()`);
+      if (!help?.red || !help.text.includes("Run gh auth login in a terminal, then sync."))
+        failures.push(`settings-github-error: the status row's help reads ${JSON.stringify(help)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await at("#/")(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
   },
   { name: "settings-queue", go: at("#/settings/queue") },
@@ -1845,7 +1881,41 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
     },
   },
-  { name: "settings-agent", go: at("#/settings/agent") },
+  {
+    // The mock's Claude Code has the tools but not the skill: one row says so, with the page's one filled button.
+    name: "settings-agent",
+    go: async (page) => {
+      await at("#/settings/agent")(page);
+      const rows = await statusRows(page, "agent");
+      if (rows.join("|") !== "Claude Code isn't connected to the desk")
+        failures.push(`settings-agent: Claude's status rows read ${JSON.stringify(rows)}`);
+      const filled = await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Claude Code" }).isVisible();
+      if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
+    },
+  },
+  {
+    // Claude Code has the tools and the skill: nothing to say, so no status row and no Connect anywhere.
+    name: "settings-agent-connected",
+    go: async (page) => {
+      await page.route("**/api/agents", async (route) => {
+        const res = await route.fetch();
+        const a = (await res.json()) as AgentStatus;
+        a.mcp.connected = true;
+        a.skill.state = "installed";
+        await route.fulfill({ response: res, json: a });
+      });
+      await at("#/")(page); // Settings reads it again only when it's opened
+      await at("#/settings/agent")(page);
+      const rows = await statusRows(page, "agent");
+      if (rows.length) failures.push(`settings-agent-connected: Claude's part still says ${JSON.stringify(rows)}`);
+      if (await page.evaluate<boolean>(`document.querySelector(".settings").textContent.includes("Connect")`))
+        failures.push("settings-agent-connected: Settings still offers Connect");
+    },
+    after: async (page) => {
+      await unroute(page);
+      await at("#/")(page);
+    },
+  },
   {
     // Your policy, a view of its own: the editor, the judge's status, then the hourly cap's row under it.
     name: "settings-policy",
@@ -1936,7 +2006,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Paused after failures in a row: one line in Claude's part, its label in ink, said once on the page.
+    // Paused after failures in a row: one status row in Claude's part, in ink, not red, said once on the page.
     name: "settings-agent-paused",
     writes: true,
     go: async (page) => {
@@ -1947,6 +2017,15 @@ const SHOTS: Shot[] = [
         `[...document.querySelectorAll(".settings *")].filter((el) => !el.children.length && el.textContent.includes("AI reviews are paused")).length`,
       );
       if (said !== 1) failures.push(`settings-agent-paused: Settings says AI reviews are paused ${said} times`);
+      const rows = await statusRows(page, "agent");
+      if (rows.filter((r) => r === "AI reviews are paused").length !== 1)
+        failures.push(`settings-agent-paused: Claude's status rows read ${JSON.stringify(rows)}`);
+      const ink = await page.evaluate<boolean>(`(() => {
+        const row = [...document.querySelectorAll("#s-agent .s-status")].find((r) => r.querySelector(".s-label")?.textContent === "AI reviews are paused");
+        const help = row && getComputedStyle(row.querySelector(".s-help")).color;
+        return !!help && help === getComputedStyle(row.querySelector(".s-label")).color;
+      })()`);
+      if (!ink) failures.push("settings-agent-paused: the pause's words aren't in ink");
     },
     after: pauseAi(false),
   },

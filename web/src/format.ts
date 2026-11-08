@@ -184,3 +184,11 @@ export function orgsLine(orgs: readonly { org: string; space: string | null }[])
   if (spaces.has("Personal")) said.push("everything else to Personal");
   return `${said.join(", ")}.`;
 }
+
+// GitHub's status row's tooltip, what's known of "Your teams: @a, @b. 4,870 GitHub requests left until Sun 0:23."
+export function githubTip(gh: { teams: readonly string[]; rate_limit: { remaining: number; reset_at: string } | null }): string {
+  const said: string[] = [];
+  if (gh.teams.length) said.push(`Your teams: ${gh.teams.map((t) => `@${t}`).join(", ")}.`);
+  if (gh.rate_limit) said.push(`${gh.rate_limit.remaining.toLocaleString()} GitHub requests left until ${when(gh.rate_limit.reset_at)}.`);
+  return said.join(" ");
+}

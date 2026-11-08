@@ -1,6 +1,7 @@
 import { Result } from "effect";
 import type {
   ActivityEvent,
+  AgentStatus,
   AskLines,
   Card,
   Conversation,
@@ -564,6 +565,18 @@ export function acceleratorOf(e: KeyLike, mac: boolean): string | null {
 
 // Errors that `gh auth login` fixes, e.g. "GitHub rejected the token (HTTP 401)".
 export const authProblem = (error: string) => /\b(401|token|bad credentials|unauthori[sz]ed|gh auth)\b/i.test(error);
+
+// What Claude's part asks of you about Claude Code: connect it (tools or skill missing), update its skill, or nothing.
+export function agentNeeds(s: AgentStatus): "connect" | "update" | null {
+  if (!s.mcp.connected || s.skill.state === "missing") return "connect";
+  return s.skill.state === "outdated" ? "update" : null;
+}
+
+// What Connect runs, as src/agents.ts's connect does it: only what's missing.
+export const connectCommands = (s: AgentStatus): string[] => [
+  ...(s.mcp.connected ? [] : [s.mcp.command]),
+  ...(s.skill.state === "installed" ? [] : [s.skill.command]),
+];
 
 // ---------------------------------------------------------------- the policy judge
 
