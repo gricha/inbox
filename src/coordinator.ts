@@ -244,9 +244,16 @@ export class Coordinator {
     return Effect.map(claudeSpawn(claudeCommand(), [line]), () => {
       this.desk.store.set(ASKS, [...this.asks(), line]);
       this.watch();
-      const told = this.again();
-      return Effect.promise(() => told);
+      return this.ran(this.again());
     });
+  }
+
+  // The run a caller waits on; the desk stopping ended it, so the caller ends as interrupted: nothing kept or reported.
+  ran(p: Promise<void>): Effect.Effect<void> {
+    return Effect.flatMap(
+      Effect.promise(() => p),
+      () => (this.desk.stopped ? Effect.interrupt : Effect.void),
+    );
   }
 
   // While one of your asks waits on its answer, what it's doing is looked at often, so the chat can say: on it,

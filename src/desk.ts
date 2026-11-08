@@ -2226,7 +2226,7 @@ export class Desk {
           .tell(askLine(a, this.askAbout(a.item_id)))
           .pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
         yield* told;
-      } else yield* Effect.promise(() => this.coordinator.now()); // it never rejects
+      } else yield* this.coordinator.ran(this.coordinator.now());
       return yield* this.coordinator.saved() ? Effect.void : this.didntStart();
     });
   }

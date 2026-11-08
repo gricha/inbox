@@ -789,6 +789,44 @@ test(
 );
 
 test(
+  "an ask and Wake it waiting on your agent's run when the desk stops end as interrupted: 499, nothing logged or written after",
+  posix,
+  async (c) => {
+    const t = await coordinated(c, { "notify.quiet": "" });
+    t.fake.hold(true);
+    const app = createApp(t.desk, 49401);
+    const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(`http://127.0.0.1:49401${p}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+    const asked = post("/api/ask", { text: "rebase it" }, OWNER);
+    await until(() => t.fake.calls().length === 1);
+    const woke = post("/api/coordinator/wake", {});
+    const logs: string[] = [];
+    t.desk.log = (m) => {
+      logs.push(m);
+    };
+    await settle(50);
+    t.desk.stop();
+    t.fake.hold(false);
+    const [a, w] = await Promise.all([asked, woke]);
+    assert.deepEqual([a.status, w.status], [499, 499], 'they were 500s: the closed store\'s "database is not open"');
+    await settle(300);
+    assert.deepEqual(logs, []);
+    assert.deepEqual([t.fake.calls(), t.fake.sessions(), t.notes], [[["agents", "--json", "--all"]], [], []], "it went no further");
+    const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+    assert.deepEqual(
+      [next.asks().map((x) => x.text), next.coordinator.asks().length],
+      [["rebase it"], 1],
+      "the ask stays for the next desk's run, as before the stop",
+    );
+    next.stop();
+  },
+);
+
+test(
   "what cmd.exe can't pass to your agent is refused before anything is kept: an ask and Wake it answer 400, your answer to its question logs it",
   posix,
   async (c) => {

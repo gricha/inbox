@@ -192,7 +192,9 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
   `report(err, what)` once), so the runner mostly sees bugs.
 - Deliberate change, with tests: the desk stopping interrupts the coordinator's run and an automation's run in flight,
   which then record, notify and report nothing (the coordinator's kept going and wrote to the closed store; an
-  automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`.
+  automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`. An ask or a Wake it waiting
+  on the coordinator's run then ends as interrupted (`Coordinator.ran`), a 499 nobody logs (it read the closed store: a
+  logged and reported 500).
 - Deliberate changes, each with a test: a bug with no words in the coordinator's run is kept and notified as "your
   agent's run failed" (its empty message erased the kept error and notified nothing), and a `claude agents --json` that
   isn't a list is a `CommandBadOutput` "claude agents --json didn't print a list" (a TypeError, which the watch's looks
