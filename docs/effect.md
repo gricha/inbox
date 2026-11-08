@@ -184,6 +184,10 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
 - Deliberate change, with tests: the desk stopping interrupts the coordinator's run and an automation's run in flight,
   which then record, notify and report nothing (the coordinator's kept going and wrote to the closed store; an
   automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`.
+- Deliberate changes, each with a test: a bug with no words in the coordinator's run is kept and notified as "your
+  agent's run failed" (its empty message erased the kept error and notified nothing), and a `claude agents --json` that
+  isn't a list is a `CommandBadOutput` "claude agents --json didn't print a list" (a TypeError, which the watch's looks
+  reported every tick and a run kept as its error).
 - A loop's pass catches a defect (`Effect.catchCause`, log and report) and keeps its schedule: a desk that hit a bug in
   one sync keeps syncing, where an unhandled rejection used to end it.
 - Deliberate change, with a test: the full pass after a write's refresh (approve, a reply, a comment, a line's comment)

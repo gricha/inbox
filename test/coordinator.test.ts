@@ -720,6 +720,36 @@ test("w says so when claude can't start it", async (c) => {
   assert.equal(runSync(t.desk.inflight()).coordinator.id, null);
 });
 
+test("a claude agents --json that isn't a list is bad output in words of its own, kept as the run's error", posix, async (c) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-coord-"));
+  const bin = path.join(dir, "claude");
+  fs.writeFileSync(bin, "#!/bin/sh\necho null\n");
+  fs.chmodSync(bin, 0o755);
+  const was = process.env.DESK_CLAUDE;
+  process.env.DESK_CLAUDE = bin;
+  const t = await setup([myPr(3)], { settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator": true } });
+  c.after(() => {
+    t.cleanup();
+    process.env.DESK_CLAUDE = was;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const e = await failure(t.desk.coordinator.find());
+  assert.deepEqual([e._tag, e.message], ["CommandBadOutput", "claude agents --json didn't print a list"]);
+  await run(t.desk.coordinator.run());
+  assert.equal(t.desk.coordinator.error(), "claude agents --json didn't print a list");
+});
+
+test("a bug with no words in the coordinator's run is kept and notified in the desk's, never as an empty error", async (c) => {
+  const t = await setup([myPr(3)], {
+    settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator": true, "notify.quiet": "" },
+  });
+  c.after(t.cleanup);
+  t.desk.coordinator.find = () => Effect.die(new Error());
+  await run(t.desk.coordinator.run());
+  assert.equal(t.desk.coordinator.error(), "your agent's run failed");
+  assert.deepEqual(t.notes, ["your agent's run failed"], "notified once");
+});
+
 const OWNER = { origin: "http://localhost:49401", "sec-fetch-site": "same-origin" };
 
 test(

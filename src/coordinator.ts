@@ -418,7 +418,7 @@ export class Coordinator {
     return body.pipe(
       Effect.catchDefect((bug) =>
         Effect.sync(() => {
-          this.broke(bug, bug instanceof Error ? bug.message : String(bug));
+          this.broke(bug, (bug instanceof Error ? bug.message : String(bug)).trim() || "your agent's run failed");
         }),
       ),
       Effect.catch((e) =>
@@ -477,10 +477,12 @@ export class Coordinator {
     return Effect.gen({ self: this }, function* () {
       const out = yield* claude(["agents", "--json", "--all"]);
       const listed = yield* Effect.try({
-        try: () => JSON.parse(out) as Agent[],
+        try: (): unknown => JSON.parse(out),
         catch: (cause) => new CommandBadOutput({ command: claudeCommand(), cause }),
       });
-      const all = listed.filter((a) => a.kind === "background");
+      if (!Array.isArray(listed))
+        return yield* new CommandBadOutput({ command: claudeCommand(), cause: new Error("claude agents --json didn't print a list") });
+      const all = (listed as (Agent | null)[]).filter((a): a is Agent => a?.kind === "background");
       const dir = yield* this.dir();
       const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
       const here = new Set([dir, real]);
