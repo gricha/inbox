@@ -150,14 +150,15 @@ When one is due (the last matching time passed since its last run, and since you
 
 ## Files
 
-|                                              |                                       |
-| -------------------------------------------- | ------------------------------------- |
-| `~/.review-desk/config.toml`                 | spaces, boards, rules                 |
-| `~/.review-desk/settings.json`               | settings you changed from the default |
-| `~/.review-desk/desk.db`                     | cache and your local state (SQLite)   |
-| [AGENTS.md](AGENTS.md)                       | where each kind of change goes        |
-| [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app   |
-| [docs/ui.md](docs/ui.md)                     | the UI                                |
+|                                              |                                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `~/.review-desk/config.toml`                 | spaces, boards, rules                                                          |
+| `~/.review-desk/settings.json`               | settings you changed from the default                                          |
+| `~/.review-desk/desk.db`                     | cache and your local state (SQLite)                                            |
+| [AGENTS.md](AGENTS.md)                       | where each kind of change goes                                                 |
+| [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app                                            |
+| [docs/ui.md](docs/ui.md)                     | the UI                                                                         |
+| [docs/visual.md](docs/visual.md)             | the mark, the colours, the layout, and how a design change is made and checked |
 
 ## Develop
 
@@ -167,7 +168,8 @@ npm run dev         # server + Vite in a browser at :5173
 npm test            # node:test, no network
 npm run check       # format, lint (type-aware), CSS lint, types, dead code, tests: what CI runs
 npm run smoke:app   # launches the app on a scratch home and checks it end to end
-npm run shots       # visual QA: screenshots of every key state, light and dark and each theme (.shots/index.html)
+npm run shots       # visual QA: screenshots of every key state, light and dark and each theme (.shots/index.html); docs/visual.md says what to look at
+npm run icons       # every icon (app, tray, favicon) from the mark in assets/brand/mark.svg
 ```
 
 Verification: Prettier formats; oxlint with type-aware rules (`.oxlintrc.json`) and stylelint lint; `tsc` runs with `noUncheckedIndexedAccess` and friends; knip catches dead code. A pre-commit hook formats and lints staged files, a pre-push hook runs `npm run check`, and CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs it on macOS, Linux and Windows.

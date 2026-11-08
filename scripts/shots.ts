@@ -1,6 +1,6 @@
 // npm run shots [-- --url http://localhost:47823] [--out .shots] [--only queue,review]: visual QA.
-// Screenshots every key state in light and dark at four window sizes, and each theme, and fails on sideways scrolling and
-// console errors.
+// Screenshots every key state in light and dark at its window sizes (SIZES, and a browser at 200 % zoom), and each theme,
+// and fails on sideways scrolling and console errors. docs/visual.md → Checking a design change says what to look at.
 // Without --url it starts the mock API and Vite, so the data is the same on every run.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -346,6 +346,7 @@ const SHOTS: Shot[] = [
   {
     // Nothing is selected on load: no row's fill, no filled call to action.
     name: "queue",
+    sizes: ["wide", "mid", "min", "mac", "xl"],
     go: async (page) => {
       await at("#/")(page);
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
@@ -386,6 +387,13 @@ const SHOTS: Shot[] = [
     [
       ["zoom-queue", at("#/")],
       ["zoom-review", review("acme/api#4127")],
+      [
+        "zoom-inquiry",
+        async (page: Page) => {
+          await at("#/inquiry/q1c0ffee")(page);
+          await page.locator(".inquiry .inq-options").waitFor();
+        },
+      ],
       ["zoom-settings", at("#/settings/github")],
     ] as const
   ).map(([name, go]): Shot => ({
@@ -1680,7 +1688,7 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
     },
   },
-  { name: "settings-github", go: at("#/settings/github") },
+  { name: "settings-github", go: at("#/settings/github"), sizes: ["wide", "mid", "min", "mac", "xl"] },
   { name: "settings-queue", go: at("#/settings/queue") },
   { name: "settings-rules", go: at("#/settings/rules") },
   { name: "settings-agent", go: at("#/settings/agent") },
@@ -1954,7 +1962,7 @@ const SIZES: { name: string; width: number; height: number; mac: boolean; asked?
   { name: "min", width: 780, height: 600, mac: false },
   // What the owner sees: the desktop app on macOS, which pads for the traffic lights.
   { name: "mac", width: 1280, height: 820, mac: true },
-  // A big window, the list beside a review with room: only for the shots that ask for it.
+  // A big window: the list beside a review with room, the queue and Settings; only for the shots that ask for it.
   { name: "xl", width: 1440, height: 900, mac: false, asked: true },
 ];
 

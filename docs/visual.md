@@ -1,0 +1,143 @@
+# Visual design
+
+How the desk looks, and how a design change gets in: the brand, the visual system and the layout as they are, then the process for taking in a design handoff and for checking a change. What each page does and says is [ui.md](ui.md); the product principle and the rules are [AGENTS.md](../AGENTS.md), and they win over anything here.
+
+Most of what's below came from the inbox design kit the owner brought on 2026-11-07, which was written without looking at this repository. It was mapped onto the desk's real states and actions (the table under The kit and the desk), and the owner decided where the two disagreed:
+
+1. **The list beside the review.** With nothing open, every list page is the full-width table, one line a row. A review or an agent's question in a wide window keeps the list it came from beside it, two lines a row, foldable to a rail; narrower, the review takes the width, with Back in its head.
+2. **The kit's petrol palette is Light and Dark.** The other seven themes stay as they were.
+3. **No top bar, icon A in petrol, and the name stays Review Desk** (from the kit, not contested).
+
+## The brand
+
+The mark is the kit's icon A: a broad tray with sloped inner shoulders and a short pill floating above it, two filled paths in a 64×64 viewBox.
+
+- One geometry: `assets/brand/mark.svg` (`currentColor`) is the master, and everything else is drawn from its two paths.
+- Never redraw, stretch, stroke, shadow, gradient or badge the mark. Keep its viewBox: the silhouette spans x 8–56 and y 19.6–44.5, and the room around it is deliberate. A status dot goes on the tile's corner (the tray's alert), never on the mark.
+- Petrol `#365D60` tiles with a warm-white `#F7F6F2` mark, the same in every theme. In the window the mark is `--accent-ink`: petrol in Light, a light petrol in Dark, each theme's own accent elsewhere. A coloured mark on a light surface, a light one on a dark surface, never the dark petrol on a dark panel.
+- In the window it's `Mark` (`web/src/components/Mark.tsx`): inline SVG at 20px, `aria-hidden`, always beside the words "Review Desk" in the sidebar's brand row. In the macOS app the traffic lights share that row and the mark stands alone (the menu bar names the app); at 641–1000px the words go and the mark stays.
+
+`npm run icons` (`scripts/icons.ts`, run in Electron, which rasterizes) reads the paths from the master and writes every other file:
+
+| File                                 | What                                                                                                                                         | Size       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `assets/brand/tile.svg`              | the petrol tile, corner 13.5 of 64, the warm-white mark at the kit's proportions                                                             | 64 viewBox |
+| `assets/icon.svg`, `assets/icon.png` | the app icon on macOS, Windows and Linux: the tile on the macOS grid (an 824px tile at 100,100), the mark scaled with it; flat, no highlight | 1024       |
+| `assets/trayTemplate.png`, `@2x`     | the macOS menu bar: the mark alone in black (macOS tints it), cropped to the silhouette and a margin                                         | 22×16, 2x  |
+| `assets/tray.png`, `@2x`             | the Windows and Linux tray: the tile                                                                                                         | 16, 32     |
+| `assets/tray-alert.png`, `@2x`       | the same, with the red dot in the corner the pill leaves clear                                                                               | 16, 32     |
+| `assets/overlay-alert.png`           | the Windows taskbar's badge: a red dot                                                                                                       | 16         |
+| `web/public/icon.svg`                | the favicon and the manifest's icon: the tile                                                                                                | any        |
+| `web/public/icon-maskable.svg`       | the manifest's maskable icon: full bleed, the mark at three quarters inside the safe zone                                                    | any        |
+
+`Mark.tsx` carries its own copy of the paths (inline, so it takes the colour; an `<img>` wouldn't), and `web/test/mark.test.ts` fails when it or an SVG above differs from the master. The manifest's colours are Light's paper. To change the mark: edit the master, run `npm run icons`, paste the paths into `Mark.tsx`, then look at the icon sheet (Checking a design change).
+
+## The visual system
+
+An informational app: ink and pencil on calm paper, colour only where it carries information, and the accent on calls to action. The tokens are in `web/src/styles.css`: Light on `:root`, Dark under `prefers-color-scheme: dark` (System) and again under `[data-theme="dark"]`, the two kept identical, and a `[data-theme]` block for each other theme. `src/themes.ts` has each theme's paper and pencil, which the desktop window and `index.html`'s pre-paint use before the CSS loads.
+
+| Token                                 | Role                                                                                                                | Light                           | Dark                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------- |
+| `--paper`                             | the canvas: the page and its head                                                                                   | `#f5f6f8`                       | `#14171c`                       |
+| `--sheet`                             | a panel: the rows' sheet, the list beside a review, menus                                                           | `#fff`                          | `#1b1f26`                       |
+| `--wash`                              | a quiet fill: the filter, loading bars, your words in the chat                                                      | `#edeff2`                       | `#242a33`                       |
+| `--ink`                               | text                                                                                                                | `#20242c`                       | `#eceff4`                       |
+| `--ink-2`                             | strong secondary text: the sidebar's pages                                                                          | `#3d4450`                       | `#c9cfd9`                       |
+| `--pencil`                            | secondary text: a row's facts, the sidebar's footer                                                                 | `#5c6573`                       | `#a7b0be`                       |
+| `--faint`                             | the quietest: separators, the PR or Issue label; never a sentence                                                   | `#979eaa`                       | `#6b7482`                       |
+| `--rule`, `--rule-strong`             | a hairline, a firmer one                                                                                            | `#dde1e7`, `#c9ced6`            | `#343b46`, `#424a57`            |
+| `--control`                           | a control's necessary edge (a field, a switch, the fold button's ring)                                              | `#7c8798`                       | `#6b7686`                       |
+| `--sel`                               | a selected thing's neutral fill outside the tables (the PR on screen in a stack, the file you're in)                | `#eef1f4`                       | `#222830`                       |
+| `--side`, `--side-hover`, `--side-on` | the sidebar, under the pointer, where you are                                                                       | `#eff1f4`, `#e7eaee`, `#dfe3e8` | `#111419`, `#1c2027`, `#252b34` |
+| `--red`, `--red-wash`                 | failing: CI failing, a high risk, the sync failed or the desk is offline, your agent can't run                      | `#b42318`, `#fcebe9`            | `#ffb4ab`, `#3b2421`            |
+| `--amber`, `--amber-wash`             | caution: changes requested, a merge conflict, a medium risk, the headings of Back to you and Waiting on your review | `#8a4b08`, `#faefdf`            | `#ebc076`, `#33291b`            |
+| `--green`                             | done or fine: a low risk, what you did in a review ("✓ Approved")                                                   | `#176847`                       | `#8dceaf`                       |
+| `--go`, `--on-go`                     | Approve and Hand off for merge, filled                                                                              | `#176847`, `#fff`               | `#8dceaf`, `#0e2419`            |
+| `--accent`, `--on-accent`             | the one call to action to press, filled                                                                             | `#365d60`, `#fff`               | `#a8cacb`, `#162b2d`            |
+| `--accent-ink`                        | links, the focus ring, a row's tinted call to action, the Agent label, the mark                                     | `#365d60`                       | `#a3c5c7`                       |
+| `--accent-wash`                       | a row's tinted call to action                                                                                       | `#d5e8e7`                       | `#243a3d`                       |
+| `--shadow`                            | only what lies over the page: menus, toasts, the chat over a narrow page                                            | ink at 6 % and 12 %             | black at 35 % and 50 %          |
+
+- **Colour carries information.** Red fails, amber cautions, green is done or fine, always with its words ("CI failing", "changes requested"); the brand colour never stands in for them. Everything else is ink and pencil: what a Merging row waits on, an AI review's failure (it's about the agent, not the PR), the judge's.
+- **Type.** Instrument Sans for the UI and JetBrains Mono for code, both bundled. A row's title 15px (`--title-size`), its facts 13px (`--meta-size`); the sidebar's items 13.5px, its sync line 12.5px; the PR or Issue label 11.5px semibold; a head's name 15px semibold; Settings' section heads 17px; a review's title 22–26px with the window. Sentence case, no all-caps, no monospace outside code. The kit's 14px titles weren't taken.
+- **Selection and focus.** The table row you opened, right-clicked or Tab-focused is a neutral fill (`--ink` mixed into `--sheet`, so it follows every theme) with a 2px `--accent` mark at its leading edge, down all the row shows; the petrol lives in the mark and the call to action, so a tinted one still reads on it. Keyboard focus is its own 2px `--accent-ink` ring round the row, selected or not; elsewhere `:focus-visible` is a 1.5px pencil outline. Nothing is selected when a page opens.
+- **Space and shape.** The kit's 4px base (8, 12, 16, 24, 32) where you touch spacing; don't restyle what you don't touch. Controls take 7–9px corners, the rows' sheet 10px. Motion is a spin while syncing or sending and a slow breath on loading bars, cut to nothing under reduced motion.
+- **A new theme** is a row in `src/themes.ts`, a block in `styles.css` that sets every token, and its id in `index.html`'s pre-paint list. `web/test/themes.test.ts` holds the three together and every theme to contrast floors (ink 10:1 on the sheet, secondary text and labels about 4.5:1, a hairline seen but quiet): tune the colour, never the test.
+
+## The layout
+
+No top bar: the sidebar is the window's only global chrome, and each page has its own head.
+
+```
+┌──────────┬──────────────┬────────────────────────────────┬────────────┐
+│ ▬ Review │ Inbox 21  ‹› │ ‹ Inbox                        │ Your agent │  the heads: 52px, sticky, drag handles
+│   Desk   ├──────────────┼────────────────────────────────┤            │
+│ Inbox 21 │ Title, two   │ api#4154 by priya              │            │
+│ Blocked  │ lines at most│ Planner: hash join stage       │            │
+│ FYI      │ PR · api#41… │ …                              │            │
+│ ──────── │              │                                │            │
+│ Merging  │              │                                │            │
+│ Archive  │              │                                │            │
+│          │              │                                │            │
+│ Ask …    │              │                                │            │
+│ Synced … │              │                                │            │
+│ Settings │              │                                │            │
+└──────────┴──────────────┴────────────────────────────────┴────────────┘
+  sidebar    the list beside  the page's column               the chat
+             a review
+```
+
+| Region                                            | Width                                                                                                                        | Scrolls                            |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| The sidebar (`Sidebar.tsx`)                       | 200px; 148px at 641–1000px; one row across the top at 640px and below                                                        | inside itself; sideways in its row |
+| The list beside a review (`Beside.tsx`)           | 320–360px (28vw), or a 28px rail; only for a review or a question, in a window 1160px or wider                               | inside itself                      |
+| The page's column (`.col`, `PageHead.tsx` on top) | what's left: a list and a review take all of it with the page's padding, Settings up to 1180px, a question 880px             | the window                         |
+| The chat (`Chat.tsx`)                             | 320–420px (25vw): a third column above 1100px, over the page's right edge at 1100px and below                                | inside itself                      |
+| A review's sidebar (`.rv-side`)                   | 280px beside the diff while the page's column is 1000px or wider (a container query, `pane`), otherwise over the diff's edge | inside itself                      |
+
+- **The sidebar**: the brand row (52px, the desktop app's drag handle; 86px of left padding for the macOS traffic lights), the pages (Inbox with its count, Blocked, FYI, a hairline, Merging, the Archive), then the footer, bottom up: Settings, the sync line, Ask your agent. The pill marks only where you are.
+- **The page's head**: sticky, 52px, as tall as the brand row and the list's head, on `--paper` with a hairline under it, the drag handle with its controls excepted. It holds only the page's own: a list's filter (on the table's edge), Merging's or Settings' name, a review's or a question's Back ("‹ Inbox", "‹ Question").
+- **The list beside a review** is the page it was opened from (a question's is the Inbox), from the same data: its parts, headings, filter and order. Two lines a row: the title, cut at two, then one pencil line cut at its end, with at most one indicator. Its chevron sits on its right divider by the head, always there, a 28px target across the divider ("Hide the list", "Show the list", `aria-expanded`, `aria-controls`); folded is kept per device (`desk.list`). With the chat open in a window under 1600px it folds to its rail without changing that choice. It's a sibling of the page's column in `App.tsx`, never wrapped round the review: so folding, a resize or the list coming and going never draws the review again or fetches it. Keep it that way.
+- **Widths at a glance**: at 640px and below the sidebar is a row and the page's padding is 12px; at 641–1000px the sidebar compacts and Ask your agent reads "Ask"; at 1100px and below the chat lies over the page; at 1160px and up a review keeps its list; under 1600px the chat folds that list. Inside a table, below 760px the stage column goes (and a question's sender), below 520px who it's from.
+- **Scrolling**: the window scrolls the page, so the heads stick, `scrollIntoView` works and the shots' scroll checks hold; the sidebar, the list, the chat and a review's sidebar scroll inside themselves. Code wraps. Nothing scrolls the page sideways (the shots fail on it).
+- **The desktop app**: at least 760×500 (`electron/main.ts`); on macOS the traffic lights sit at 18,19 in the sidebar's brand row, and no control may sit under them at any width (the mac shots check).
+
+## The kit and the desk
+
+The kit's information architecture, in the desk's terms. It names no state, owner or action the desk doesn't have.
+
+| The kit                                               | The desk                                                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Inbox: needs a human decision                         | Inbox: agents' questions, back to you, waiting on your review, issues and other PRs, your own            |
+| In flight: delegated, or waiting on an external event | Merging (handed to your agent) and Blocked (waiting on another PR or a review)                           |
+| History: completed, dismissed, superseded             | Archive (done by you or resolved by the world); FYI holds what was sorted away, snoozed or muted         |
+| One readable reason for attention on each row         | the part's heading and the stage column; no why line, AI gist or chips on a row                          |
+| Sources and Settings under the navigation             | Settings in the sidebar's footer; GitHub and the other sources are Settings sections                     |
+| Navigation, queue and review side by side, always     | the full-width table with nothing open; the list beside a review only once one is open, at 1160px and up |
+| The navigation collapses to a 64px rail               | the sidebar compacts to 148px and keeps its words: the window names every action in words                |
+| A separate Focus mode, a theme switcher in a bar      | not built: themes stay in Settings → Appearance                                                          |
+| 14px titles, 80px rows                                | 15px titles; a table row one line; a row beside a review two                                             |
+| Six brand colours, petrol recommended                 | petrol for the mark, Light and Dark; no colour picker for the brand                                      |
+
+## Taking in a design handoff
+
+A handoff (a kit, a mock-up, a review of the window) is input, not law: it was likely made without this repository.
+
+1. Read all of it, then AGENTS.md's product principle and Rules, ui.md and this file.
+2. Map every recommendation onto what the desk really has: its pages, buckets and parts, a card's fields, its actions and their words. Write the mapping down, as the table above. Never invent a state, an owner, a progress or an action: where the handoff assumes one, map it honestly to what exists, or leave it out.
+3. List the conflicts, with the product principle (one line a row, no chips, every action a click named in words, no key named in the window), with the Rules, and with what already works. Put each to the owner as a decision, its options and what each costs; never settle one yourself. Write the answers into the brief.
+4. Write the brief: the owner's decisions, what changes and what stays in each area, starting values, and how it'll be checked. Where the brief and the handoff disagree, the brief wins.
+5. Build it in steps, each committed with its tests, shots and docs: the tokens (`styles.css`, `src/themes.ts`, `index.html`'s pre-paint, the desktop window's colours, with `themes.test.ts`'s floors held); then the shell and the content (the sidebar, the heads, the columns, the rows); then the assets (the master, `npm run icons`, `Mark.tsx`); then the verification below. Keep every existing word unless the change is about words, and move a shot's assertion with the control it checks rather than deleting it.
+6. Bring this file, ui.md, README and AGENTS.md up to date as each step lands.
+
+## Checking a design change
+
+A design change is never done from code alone: look at the shots yourself, light and dark, and say what you didn't verify.
+
+- **The shots**: `npm run shots` drives Chrome against the mock, so the data is the same on every run, and writes `.shots/` (`index.html` shows them all). Each shot runs in light and dark at wide 1280×820, mid 900×700, min 780×600 and mac 1280×820 (the macOS app's shell, traffic lights and all); xl 1440×900 only for the shots that ask for it (`queue`, `settings-github`, the `beside-*` ones); and the `zoom-*` ones (`zoom-queue`, `zoom-review`, `zoom-inquiry`, `zoom-settings`) are a 1280×820 window at 200 %, 640×410 at 2x. Each theme has `theme-<id>`, `-review`, `-ask` and `-inflight` at the four main sizes and `-settings` at wide. While iterating, `npm run shots -- --only queue,beside` runs the shots whose names contain one of those words; `SHOTS_MOCK_PORT` and `SHOTS_VITE_PORT` keep two checkouts' runs apart.
+- **What to look at**: for a change to the shell, the rows or the palette, run them all, then look at `queue`, `review`, `beside-review`, `beside-folded`, `inquiry` and `settings-github` at each size and the `zoom-*` ones, in light and dark, and `theme-<id>` and `theme-<id>-review` for at least three other themes (a light one, a dark one and one with its own diff colours: Sand, Slate and Gruvbox, say).
+- **The icons**: `npm run shots -- --only icons` writes `icons-1x.png` and `icons-2x.png`: the Mark, the app icon, the favicon, the menu bar's template (with a count) and the trays, at 16, 20, 24, 32 and 64px on the light and the dark sidebar. Judge the 1x sheet at 100 %, the 16px ones above all.
+- **What the shots fail on by themselves**: the page scrolling sideways, a key chip on screen, a console error, the sidebar's or a head's words running past their edge, "Review Desk" wrapping, a control under the traffic lights; the list beside a review's width, its fold button's label, state and target, and the row it marks (`beside-review`, `beside-folded`, `beside-inquiry`); a long title on one line in a table and two at most beside a review (`beside-long`); the review, its typed comment, the file being read and no new fetch surviving a fold, an unfold and a resize (`beside-keeps`); the chat folding the list without touching the saved choice (`beside-chat`); the sidebar as one row at 640px (`zoom-*`); empty pages (`queue-empty`, `later-empty`, `inflight-empty`), loading (`queue-loading`, `review-loading`), and every page ending near the window's bottom (`*-bottom`).
+- **What they don't**, to try by hand against the mock (`MOCK_PORT=47824 node web/mock/server.ts`, then `DESK_API=http://127.0.0.1:47824 npx vite --config web/vite.config.ts`), or to script with `page.route` as the shots fake a slow desk: the desk going away and back (stop the mock: the list must stay under a red line saying the desk isn't running, with Retry, the sync line say Offline in red, and both catch up once it's back), a failing sync (`MOCK_SYNC_ERROR=1`: "Sync failed" in red, the error in its tooltip, the list kept, never an empty Inbox), a refused write (the toast says why and the item comes back), a refresh while you type a comment (your words stay), and the keyboard alone (Tab reaches a row and shows its ring, Enter opens it, Esc goes back).
+- **Then** `npm run check`: with the lint and types it runs `web/test/themes.test.ts` (every theme's tokens and contrast) and `web/test/mark.test.ts` (one geometry).
+- **Report** which PNGs you looked at, by name, and what you couldn't verify.
