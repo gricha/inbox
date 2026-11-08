@@ -1,6 +1,6 @@
 import type { Overview, QueueView } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
-import { pageOf, type ListPage, type Route } from "../view.ts";
+import { inboxCount, pageOf, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
@@ -43,8 +43,7 @@ export function Sidebar({
   const onBlocked = page === "blocked";
   const onArchive = page === "archive";
   const onSettings = route.name === "settings";
-  const urgent = (view?.sections.now.length ?? 0) + (view?.inquiries.length ?? 0); // an agent's question waits on you too
-  const today = view?.sections.today.length ?? 0;
+  const count = view ? inboxCount(view) : 0;
   const flight = overview?.inflight;
   const rate = overview?.rate_limit ? `GitHub API: ${overview.rate_limit.remaining} requests left` : undefined;
   return (
@@ -59,7 +58,7 @@ export function Sidebar({
           href="#/"
           className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
-          title={view ? `${urgent + today} need you` : undefined}
+          title={view ? `${count} need you` : undefined}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (route.name === "queue") {
@@ -69,7 +68,7 @@ export function Sidebar({
           }}
         >
           <span className="side-name">Inbox</span>
-          <span className="side-count">{view && urgent + today > 0 ? urgent + today : ""}</span>
+          <span className="side-count">{count > 0 ? count : ""}</span>
         </a>
         {/* What can't move yet: no count, nothing there can move. */}
         <a

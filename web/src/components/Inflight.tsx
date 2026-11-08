@@ -5,6 +5,7 @@ import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
+// Beside a review (compact), its rows alone, two lines each.
 export function Inflight({
   view,
   now,
@@ -12,6 +13,7 @@ export function Inflight({
   select,
   act,
   open,
+  compact = false,
 }: {
   view: InflightView | null;
   now: number;
@@ -19,6 +21,7 @@ export function Inflight({
   select: (id: string) => void;
   act: (k: "copy" | "wake") => void; // your agent's line: Copy attach command, Wake it
   open: (row: InflightRow) => void; // its review
+  compact?: boolean;
 }) {
   if (!view)
     return (
@@ -28,7 +31,9 @@ export function Inflight({
     );
   const live = view.rows.filter((r) => r.state === "open");
   const landed = view.rows.filter((r) => r.state !== "open");
-  const row = (r: InflightRow) => <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} open={open} />;
+  const row = (r: InflightRow) => (
+    <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} open={open} compact={compact} />
+  );
   // The desk sends a stack's rows together, bottom first: two or more sit under one quiet header.
   const rows = (list: InflightRow[]) => {
     const parts: InflightRow[][] = [];
@@ -56,7 +61,7 @@ export function Inflight({
   };
   return (
     <div className="queue lane">
-      <Coordinator c={view.coordinator} act={act} />
+      {!compact && <Coordinator c={view.coordinator} act={act} />}
       {live.length ? (
         rows(live)
       ) : (
@@ -140,22 +145,48 @@ function Row({
   on,
   select,
   open,
+  compact,
 }: {
   row: InflightRow;
   now: number;
   on: boolean;
   select: (id: string) => void;
   open: (row: InflightRow) => void;
+  compact: boolean;
 }) {
   const c = r.card;
   const live = r.state === "open";
   const since = c.resolved_at ?? c.waiting_since;
   const phrase = [r.waits_on ?? "merging", ...(r.note ? [r.note.text] : [])];
+  // A long repo name gives way before the title; the number never does.
+  const ref = (
+    <>
+      <span className="line-ref" title={`${c.repo}#${c.number}`}>
+        {c.repo.split("/")[1]}
+      </span>
+      <span className="line-num">#{c.number}</span>
+      {c.stack && (
+        <span className="line-stack" title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>
+          {c.stack.pos}/{c.stack.size}
+        </span>
+      )}
+    </>
+  );
+  const note = (whole: boolean) => (
+    <span className="line-note" title={live ? [...phrase, ...(r.note ? [age(r.note.at, now)] : [])].join(" \u00b7 ") : undefined}>
+      {live ? <Dots parts={whole ? phrase : phrase.slice(0, 1)} /> : r.state}
+    </span>
+  );
+  const ageEl = (
+    <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
+      {age(since, now)}
+    </span>
+  );
   return (
-    <div className={cls("line", "lane-row", on && "sel", !live && "dim")} data-id={c.id}>
+    <div className={cls("line", "lane-row", compact && "c-line", on && "sel", !live && "dim")} data-id={c.id}>
       <button
         type="button"
-        className="row-main line-main"
+        className={cls("row-main line-main", compact && "c-row")}
         onMouseDown={(e) => {
           e.preventDefault(); // a click opens without selecting first, as the main page's rows do
         }}
@@ -167,29 +198,25 @@ function Row({
         }}
       >
         <span className="line-title">{c.title}</span>
-        {/* One width for every ref, so what each waits on starts in one column. */}
-        <span className="lane-ref">
-          {/* A long repo name gives way before the title; the number never does. */}
-          <span className="line-ref" title={`${c.repo}#${c.number}`}>
-            {c.repo.split("/")[1]}
-          </span>
-          <span className="line-num">#{c.number}</span>
-          {c.stack && (
-            <span className="line-stack" title={`${c.stack.pos} of ${c.stack.size} open PRs in its stack`}>
-              {c.stack.pos}/{c.stack.size}
+        {compact ? (
+          <>
+            {/* What it waits on: the coordinator's note is the row's tooltip. */}
+            <span className="c-meta">
+              <span className="c-ref">{ref}</span>
+              {note(false)}
             </span>
-          )}
-        </span>
-        {!(on && live) && (
-          <span className="line-note" title={live ? [...phrase, ...(r.note ? [age(r.note.at, now)] : [])].join(" \u00b7 ") : undefined}>
-            {live ? <Dots parts={phrase} /> : r.state}
-          </span>
+            {ageEl}
+          </>
+        ) : (
+          <>
+            {/* One width for every ref, so what each waits on starts in one column. */}
+            <span className="lane-ref">{ref}</span>
+            {!(on && live) && note(true)}
+            {ageEl}
+          </>
         )}
-        <span className="line-age" title={`${c.resolved_at ? "resolved" : "waiting since"} ${new Date(since).toLocaleString()}`}>
-          {age(since, now)}
-        </span>
       </button>
-      {on && live && (
+      {on && live && !compact && (
         <div className="lane-more">
           <p className="lane-why">
             <Dots parts={r.note ? [...phrase, age(r.note.at, now)] : phrase} />

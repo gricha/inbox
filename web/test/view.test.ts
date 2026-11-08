@@ -6,6 +6,7 @@ import { age, ago, clearedText, eventText, fromName, modelName, shortId, shortRe
 import {
   acceleratorOf,
   authProblem,
+  beside,
   cardFacts,
   currentFile,
   DEFAULT_OPEN,
@@ -14,6 +15,7 @@ import {
   draftOf,
   foldOf,
   groupsOf,
+  inboxCount,
   inlineAt,
   judgeStatusText,
   judgeStepText,
@@ -120,6 +122,31 @@ test("the page the sidebar marks: a review's is where it was opened from, a ques
   assert.equal(pageOf({ name: "review", id: "acme/api#1" }, "later"), "later");
   assert.equal(pageOf({ name: "blocked" }, "queue"), "blocked");
   assert.equal(pageOf({ name: "settings", section: "github" }, "queue"), null);
+});
+
+test("the list beside a review or a question: from 1160px, folded by you or by the chat under 1600px, unless you opened it", () => {
+  const review = { name: "review", id: "acme/api#1" } as const;
+  const at = (o: Partial<Parameters<typeof beside>[0]>) =>
+    beside({ route: review, roomy: true, crowded: false, folded: false, chat: false, peek: false, ...o });
+  assert.equal(at({}), "open");
+  assert.equal(at({ route: { name: "inquiry", id: "q1" } }), "open");
+  assert.equal(at({ route: { name: "queue" } }), null);
+  assert.equal(at({ route: { name: "settings", section: "github" } }), null);
+  assert.equal(at({ roomy: false }), null);
+  assert.equal(at({ roomy: false, folded: true }), null); // no rail either
+  assert.equal(at({ folded: true }), "rail");
+  assert.equal(at({ chat: true }), "open"); // 1600px and wider: room for both
+  assert.equal(at({ chat: true, crowded: true }), "rail");
+  assert.equal(at({ chat: true, crowded: true, peek: true }), "open");
+  assert.equal(at({ crowded: true }), "open");
+  assert.equal(at({ folded: true, chat: true, crowded: true, peek: true }), "rail");
+});
+
+test("the Inbox counts what's on it and the agents' questions", () => {
+  const q = queue();
+  assert.equal(inboxCount(q), 2);
+  q.inquiries = [{ id: "q1" } as QueueView["inquiries"][number]];
+  assert.equal(inboxCount(q), 3);
 });
 
 test("settings fields: text to value and back", () => {

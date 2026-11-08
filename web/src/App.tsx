@@ -19,11 +19,15 @@ import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./for
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop } from "./theme.ts";
+import { getStored, setStored } from "./storage.ts";
 import {
+  beside,
   DEFAULT_OPEN,
   groupsOf,
+  inboxCount,
   inquiryOf,
   navigable,
+  pageOf,
   parseRoute,
   removeCard,
   routeHash,
@@ -38,6 +42,7 @@ import {
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
+import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
@@ -45,7 +50,7 @@ import { RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
-import { PageHead } from "./components/PageHead.tsx";
+import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { SourceNotice, useSourceDown } from "./components/Source.tsx";
 
@@ -80,6 +85,32 @@ const go = (r: Route) => {
 };
 type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
+const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
+// What FYI, Blocked and the Archive say with nothing on them.
+const EMPTY = {
+  later: "Nothing sorted away.",
+  blocked: "Nothing is blocked.",
+  archive: "Nothing here yet: what you finish, and what's dealt with, lands here.",
+};
+const ignore = () => {};
+
+// Whether the window is at least `px` wide, following it as it's resized.
+function useWide(px: number): boolean {
+  const query = `(width >= ${px}px)`;
+  const [on, setOn] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const m = matchMedia(query);
+    const change = () => {
+      setOn(m.matches);
+    };
+    change();
+    m.addEventListener("change", change);
+    return () => {
+      m.removeEventListener("change", change);
+    };
+  }, [query]);
+  return on;
+}
 
 // The desktop app's window needs room for the macOS traffic lights and a draggable title bar.
 if (desktop) {
@@ -126,6 +157,14 @@ export function App() {
   const [spot, setSpot] = useState<Spot | null>(null); // where in the open review you last were
   const [pageQuestion, setPageQuestion] = useState<Inquiry | null>(null); // the question page's own copy, kept once it's answered
   const [askWaiting, setAskWaiting] = useState(false); // the open review's latest ask is unanswered (Review says, and unsays it as it goes)
+  const [listFolded, setListFolded] = useState(() => getStored(LIST) === "folded");
+  const [peek, setPeek] = useState(false); // the list opened beside the chat in a window under 1600px, until the chat closes
+  const roomy = useWide(1160);
+  const crowded = !useWide(1600);
+  const chatOpen = !!asking;
+  useEffect(() => {
+    setPeek(false);
+  }, [chatOpen]);
   const rulesDirty = useRef(false);
 
   const routeRef = useRef(route);
@@ -361,14 +400,17 @@ export function App() {
     return groups.filter((g) => keys.includes(g.key));
   }, [groups, list]);
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
+  // The list on screen, or beside a review or a question: a review's is the page it was opened from, a question's the Inbox.
+  const listPage = pageOf(route, reviewFrom);
+  const laneList = listPage === "inflight";
   // Agents' questions lead the main page (one waits on each); the filter reads them too.
   const inquiries = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    if (route.name !== "queue" && route.name !== "inquiry") return []; // on a question's page, the queue's cursor stays on it
+    if (listPage !== "queue") return []; // on a question's page, the queue's cursor stays on it
     return (view?.inquiries ?? []).filter(
       (q) => !answered.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
     );
-  }, [view, answered, filter, route.name]);
+  }, [view, answered, filter, listPage]);
   const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
@@ -385,10 +427,11 @@ export function App() {
   const knownRef = useRef(known);
   knownRef.current = known;
 
-  // The cards of the rows on screen: Merging's on its page, else the list's, so a stale Merging card never stands in.
+  // The cards of the rows on screen: Merging's on its page or beside a review from it, else the list's, so a stale Merging
+  // card never stands in.
   const onScreen = useMemo(
-    () => (onLane ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
-    [onLane, laneRows, page],
+    () => (laneList ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
+    [laneList, laneRows, page],
   );
   // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu.
   function rowMenu(x: number, y: number, target: Element | null): boolean {
@@ -400,7 +443,7 @@ export function App() {
       return false;
     }
     stay.current = c.id;
-    if (onLane) setLaneSel(c.id);
+    if (laneList) setLaneSel(c.id);
     else setSelected(c.id);
     setMenuAt({ id: c.id, x, y });
     return true;
@@ -1020,6 +1063,71 @@ export function App() {
   const configErrors = overview?.config_errors.length ?? 0;
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
+  const inq = {
+    now,
+    selected,
+    select: (q: Inquiry) => {
+      setSelected(inquiryOf(q.id));
+    },
+    open: openInquiry,
+  };
+
+  // The list beside a review or a question, and the row it marks: the open item's.
+  const side = broken ? null : beside({ route, roomy, crowded, folded: listFolded, chat: chatOpen, peek });
+  const openSel = route.name === "review" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
+  // Kept per device; beside the chat in a window under 1600px, showing or hiding it lasts until the chat closes.
+  function foldList() {
+    if (side !== "open") {
+      setListFolded(false);
+      setStored(LIST, null);
+      setPeek(true);
+    } else if (chatOpen && crowded) setPeek(false);
+    else {
+      setListFolded(true);
+      setStored(LIST, "folded");
+    }
+  }
+
+  // The rows beside a review or a question: its list page's, two lines a row, the open item marked; focusing a row leaves the
+  // selection on it.
+  const compact: RowCtx = { ...ctx, compact: true, selected: openSel, select: ignore };
+  const besideRows =
+    side !== "open" || !listPage ? null : listPage === "queue" ? (
+      <Queue
+        view={view}
+        overview={overview}
+        groups={groups}
+        ctx={compact}
+        inquiries={inquiries}
+        inq={{ ...inq, compact: true, selected: openSel, select: ignore }}
+        filter={filter}
+        unfold={unfold}
+        selectFold={ignore}
+      />
+    ) : listPage === "inflight" ? (
+      <Inflight
+        view={lane}
+        now={now}
+        selected={openSel}
+        select={ignore}
+        act={ignore}
+        open={(r) => {
+          setLaneSel(r.card.id);
+          go({ name: "review", id: r.card.id });
+        }}
+        compact
+      />
+    ) : (
+      <Later
+        view={view}
+        groups={groups}
+        keys={PAGE_GROUPS[listPage]}
+        empty={EMPTY[listPage]}
+        ctx={compact}
+        filter={filter}
+        toggle={toggleGroup}
+      />
+    );
 
   return (
     <div className="app">
@@ -1039,6 +1147,20 @@ export function App() {
           openAsk();
         }}
       />
+      {/* A sibling of the page's column, never around it: the review keeps its place in the tree as this comes and goes. */}
+      {side && listPage && (
+        <Beside
+          name={PAGE_NAME[listPage]}
+          count={listPage === "queue" && view ? inboxCount(view) : null}
+          open={side === "open"}
+          filter={filter}
+          setFilter={laneList ? null : setFilter}
+          selected={openSel}
+          onFold={foldList}
+        >
+          {besideRows}
+        </Beside>
+      )}
       <div className="col">
         <PageHead
           route={route}
@@ -1096,14 +1218,7 @@ export function App() {
               groups={groups}
               ctx={ctx}
               inquiries={inquiries}
-              inq={{
-                now,
-                selected,
-                select: (q) => {
-                  setSelected(inquiryOf(q.id));
-                },
-                open: openInquiry,
-              }}
+              inq={inq}
               filter={filter}
               unfold={unfold}
               selectFold={(k) => {
@@ -1112,22 +1227,14 @@ export function App() {
             />
           )}
           {route.name === "later" && !broken && (
-            <Later
-              view={view}
-              groups={groups}
-              keys={SORTED_AWAY}
-              empty="Nothing sorted away."
-              ctx={ctx}
-              filter={filter}
-              toggle={toggleGroup}
-            />
+            <Later view={view} groups={groups} keys={SORTED_AWAY} empty={EMPTY.later} ctx={ctx} filter={filter} toggle={toggleGroup} />
           )}
           {route.name === "blocked" && !broken && (
             <Later
               view={view}
               groups={groups}
               keys={PAGE_GROUPS.blocked}
-              empty="Nothing is blocked."
+              empty={EMPTY.blocked}
               ctx={ctx}
               filter={filter}
               toggle={toggleGroup}
@@ -1138,7 +1245,7 @@ export function App() {
               view={view}
               groups={groups}
               keys={PAGE_GROUPS.archive}
-              empty="Nothing here yet: what you finish, and what's dealt with, lands here."
+              empty={EMPTY.archive}
               ctx={ctx}
               filter={filter}
               toggle={toggleGroup}

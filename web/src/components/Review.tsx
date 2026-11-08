@@ -102,14 +102,11 @@ const LEVEL: Record<NonNullable<Section["level"]>, string> = { look: "Look", ski
 const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
-const NARROW = 1100; // px: below it the sidebar opens over the diff, so it starts folded
+const ROOM = 1000; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
-const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded
-
-function sideSaved(): boolean {
-  const v = getStored(SIDE); // none, or storage off: the window's width decides
-  return v ? v === "open" : innerWidth > NARROW;
-}
+const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded, where it has room
+const pane = () => document.querySelector(".col");
+const roomy = () => (pane()?.clientWidth ?? innerWidth) >= ROOM;
 
 // Pierre draws the diff in a shadow root; its syntax colours and light or dark follow the app's theme (diffOptions).
 const DIFF: FileDiffOptions<Meta, undefined> = {
@@ -190,8 +187,10 @@ export function Review({
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
   const [restOpen, setRestOpen] = useState(false);
-  const [side, setSide] = useState(sideSaved);
-  const showSide = side && !chat;
+  const [side, setSide] = useState(() => getStored(SIDE) !== "folded");
+  const [room, setRoom] = useState(roomy); // the page's column has room for the sidebar beside the diff
+  const [over, setOver] = useState(false); // without room, Files opened it over the diff (not kept)
+  const showSide = (room ? side : over) && !chat;
   const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
@@ -234,6 +233,20 @@ export function Review({
 
   useEffect(() => {
     window.scrollTo(0, 0); // a different PR starts at the top; a refresh stays put
+  }, []);
+
+  // The page's column narrows with the list beside it, the chat or the window; given room again, the sidebar goes back beside the diff.
+  useEffect(() => {
+    const col = pane();
+    const watch = new ResizeObserver(() => {
+      const r = roomy();
+      setRoom(r);
+      if (r) setOver(false);
+    });
+    if (col) watch.observe(col);
+    return () => {
+      watch.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -468,8 +481,12 @@ export function Review({
 
   function toggleSide() {
     // With the chat open, Files puts the sidebar back in its place.
-    const show = chat || !side;
+    const show = chat || !(room ? side : over);
     if (chat) onCloseChat();
+    if (!room) {
+      setOver(show);
+      return;
+    }
     setSide(show);
     setStored(SIDE, show ? "open" : "folded");
   }

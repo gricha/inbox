@@ -90,6 +90,23 @@ export function pageOf(route: Route, from: ListPage): ListPage | null {
   return route.name === "settings" ? null : route.name;
 }
 
+// The list beside a review or a question, in a window 1160px or wider (`roomy`): open, or its rail when you folded it or
+// while the chat is open in a window under 1600px (`crowded`), unless you opened it beside the chat (`peek`).
+export function beside(o: {
+  route: Route;
+  roomy: boolean;
+  crowded: boolean;
+  folded: boolean;
+  chat: boolean;
+  peek: boolean;
+}): "open" | "rail" | null {
+  if (!o.roomy || (o.route.name !== "review" && o.route.name !== "inquiry")) return null;
+  return o.folded || (o.chat && o.crowded && !o.peek) ? "rail" : "open";
+}
+
+// What the Inbox counts: everything on it, an agent's question included (one waits on you too).
+export const inboxCount = (v: QueueView) => v.sections.now.length + v.sections.today.length + v.inquiries.length;
+
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
   if (r.name === "review" || r.name === "inquiry") return `#/${r.name}/${encodeURIComponent(r.id)}`;

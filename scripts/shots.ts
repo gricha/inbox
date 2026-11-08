@@ -55,7 +55,7 @@ interface Shot {
   go: (page: Page) => Promise<void>;
   after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
   writes?: true; // changes the desk's settings, policy or state: only against the mock, never a real desk at --url
-  sizes?: string[]; // only at these of SIZES
+  sizes?: string[]; // only at these of SIZES; without it, at every size but the ones a shot must ask for
 }
 const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
@@ -297,6 +297,51 @@ const moreItems = (page: Page) =>
   page.evaluate<string[]>(
     `[...(document.querySelector(".more-pop")?.children ?? [])].map((el) => (el.classList.contains("pop-title") ? "#" : "") + el.textContent.trim())`,
   );
+// The list beside a review or a question: how wide, its fold button, the row it marks, its rows' lines, and whether the
+// review's sidebar sits beside the diff; null where there's none.
+const besideSays = (page: Page) =>
+  page.evaluate<{
+    width: number;
+    open: string | null;
+    label: string | null;
+    controls: boolean;
+    hit: number;
+    sel: string | null;
+    titles: number;
+    metas: number;
+    sideInline: boolean;
+  } | null>(`(() => {
+    const col = document.querySelector(".beside"), fold = document.querySelector(".beside-fold");
+    if (!col || !fold) return null;
+    const f = fold.getBoundingClientRect(), side = document.querySelector(".rv-side");
+    const lh = (el) => parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.2;
+    const lines = (sel) => Math.max(0, ...[...document.querySelectorAll(sel)].map((el) => Math.round(el.getBoundingClientRect().height / lh(el))));
+    return {
+      width: Math.round(col.getBoundingClientRect().width),
+      open: fold.getAttribute("aria-expanded"),
+      label: fold.getAttribute("aria-label"),
+      controls: !!document.getElementById(fold.getAttribute("aria-controls") ?? ""),
+      hit: Math.min(f.width, f.height),
+      sel: document.querySelector(".beside .line.sel")?.dataset.id ?? null,
+      titles: lines(".beside .c-row .line-title"),
+      metas: lines(".beside .c-row .c-meta"),
+      sideInline: !!side && getComputedStyle(side).position !== "fixed",
+    };
+  })()`);
+// The list beside the review open with what its page shows, the open item marked, two lines a row at most.
+const besideOpen = async (page: Page, name: string, sel: string) => {
+  const b = await besideSays(page);
+  if (!b) {
+    failures.push(`${name}: no list beside it`);
+    return;
+  }
+  if (b.width < 320 || b.width > 360) failures.push(`${name}: the list beside it is ${b.width}px wide`);
+  if (b.open !== "true" || b.label !== "Hide the list" || !b.controls || b.hit < 28)
+    failures.push(`${name}: its fold button reads ${JSON.stringify(b)}`);
+  if (b.sel !== sel) failures.push(`${name}: the list marks ${JSON.stringify(b.sel)}, not ${sel}`);
+  if (b.titles > 2 || b.metas > 1) failures.push(`${name}: a row's title takes ${b.titles} lines and its facts ${b.metas}`);
+};
+const LONG = "Stream partial results to the client while the hash join stage spills its build side to disk under memory pressure";
 const SHOTS: Shot[] = [
   {
     // Nothing is selected on load: no row's fill, no filled call to action.
@@ -567,6 +612,189 @@ const SHOTS: Shot[] = [
       if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
         failures.push("review: the AI review isn't above the conversation and your comment");
     },
+  },
+  // From 1160px the list a review was opened from stays beside it, two lines a row, the open one marked; below, none.
+  {
+    name: "beside-review",
+    sizes: ["wide", "mac", "xl", "mid", "min"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      const wide = await page.evaluate<boolean>("innerWidth >= 1160");
+      const b = await besideSays(page);
+      if (!wide) {
+        if (b || (await page.locator(".beside").count())) failures.push("beside-review: a list or its rail beside the review below 1160px");
+        return;
+      }
+      await besideOpen(page, "beside-review", "acme/api#4127");
+      if (b?.sideInline) failures.push("beside-review: the review's sidebar squeezes in beside the diff next to the list");
+      // A row's right-click menu, as on the table.
+      await page.locator('.beside .line[data-id="acme/api#4099"] .row-main').click({ button: "right" });
+      if (!(await page.locator(".ctx").count())) failures.push("beside-review: a right-click on a row beside the review opens no menu");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+    },
+  },
+  // An issue in the list beside a review opens in place under its row, as in the table; the review stays.
+  {
+    name: "beside-issue",
+    sizes: ["wide", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      await page.locator(".beside .queue .fold").click();
+      await page.locator(".beside .line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
+      await page.locator(".beside .line.open .card-keys").waitFor();
+      await page.waitForTimeout(300);
+      if (!(await page.evaluate<boolean>(`location.hash.startsWith("#/review/")`)))
+        failures.push("beside-issue: opening an issue beside the review left the review");
+    },
+    after: async (page) => {
+      await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
+      await refold(page);
+    },
+  },
+  // Folded to its rail: the review's sidebar has room beside the diff again; the choice is kept on this device.
+  {
+    name: "beside-folded",
+    sizes: ["wide", "mac", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      await page.locator(".beside-fold").click();
+      await page.waitForTimeout(300);
+      const b = await besideSays(page);
+      if (!b || b.width !== 28 || b.open !== "false" || b.label !== "Show the list" || !b.controls)
+        failures.push(`beside-folded: the rail reads ${JSON.stringify(b)}`);
+      if (!b?.sideInline) failures.push("beside-folded: the review's sidebar isn't beside the diff with the list folded");
+      if ((await page.evaluate<string | null>(`localStorage.getItem("desk.list")`)) !== "folded")
+        failures.push("beside-folded: folding the list isn't kept on this device");
+    },
+    after: async (page) => {
+      if (await page.locator(".beside.folded").count()) await page.locator(".beside-fold").click();
+      await page.waitForTimeout(200);
+      if (await page.evaluate<string | null>(`localStorage.getItem("desk.list")`))
+        failures.push("beside-folded: showing the list again isn't kept on this device");
+    },
+  },
+  // The chat open in a window under 1600px: the list folds to its rail, the saved choice untouched, and comes back with the chat gone.
+  {
+    name: "beside-chat",
+    sizes: ["wide", "mac", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("me/notes-app#12")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      await page.waitForTimeout(300);
+      const b = await besideSays(page);
+      if (!b || b.width !== 28 || b.open !== "false") failures.push(`beside-chat: beside the chat, the list reads ${JSON.stringify(b)}`);
+      if (await page.evaluate<string | null>(`localStorage.getItem("desk.list")`))
+        failures.push("beside-chat: the chat folding the list changed the saved choice");
+    },
+    after: async (page) => {
+      await closeChat(page);
+      await page.waitForTimeout(200);
+      if ((await besideSays(page))?.open !== "true") failures.push("beside-chat: the list doesn't come back when the chat closes");
+    },
+  },
+  // An agent's question: the Inbox beside it, the question's row marked.
+  {
+    name: "beside-inquiry",
+    sizes: ["wide", "mac", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await at("#/inquiry/q2bead00")(page);
+      await page.locator(".inquiry .inq-write textarea").waitFor();
+      await page.waitForTimeout(200);
+      await besideOpen(page, "beside-inquiry", "ask:q2bead00");
+    },
+    after: at("#/"),
+  },
+  // A long title: one line in the table, two at most beside a review, cut at the second's end.
+  {
+    name: "beside-long",
+    sizes: ["wide", "xl"],
+    go: async (page) => {
+      await queueAs((q) => {
+        for (const c of [...q.sections.now, ...q.sections.today]) if (c.id === "acme/api#4127") c.title = LONG;
+      })(page);
+      await at("#/")(page);
+      // How many lines a row's title takes, and whether it's cut short.
+      const title = (sel: string) =>
+        page.evaluate<{ lines: number; cut: boolean } | null>(`(() => {
+          const el = document.querySelector(${JSON.stringify(`${sel} .line[data-id="acme/api#4127"] .line-title`)});
+          if (!el) return null;
+          const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.2;
+          return { lines: Math.round(el.getBoundingClientRect().height / lh), cut: el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1 };
+        })()`);
+      const table = await title(".queue");
+      if (table?.lines !== 1) failures.push(`beside-long: in the table, the long title reads ${JSON.stringify(table)}`);
+      await review("acme/api#4127")(page);
+      const cut = await title(".beside");
+      if (cut?.lines !== 2 || !cut.cut) failures.push(`beside-long: beside the review, the long title reads ${JSON.stringify(cut)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  // Folding, unfolding and resizing past 1160px and back draw nothing anew and fetch nothing again: the same review, its
+  // comment typed, the file you were reading.
+  {
+    name: "beside-keeps",
+    sizes: ["wide", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      const words = "A comment that outlives the list folding";
+      await page.locator(".rv-comment-input").fill(words);
+      await page.evaluate(`document.querySelectorAll(".rv-file-sec[id]")[1]?.scrollIntoView({ block: "start" })`);
+      await page.waitForTimeout(300);
+      const reading = () =>
+        page.evaluate<string | null>(`(() => {
+          let on = null;
+          for (const el of document.querySelectorAll(".rv-file-sec[id]")) if (el.getBoundingClientRect().top <= 96) on = el.getAttribute("aria-label");
+          return on;
+        })()`);
+      const before = await reading();
+      await page.evaluate(`window.__review = document.querySelector(".rv-main")`);
+      const gets: string[] = [];
+      const seen = (r: { method: () => string; url: () => string }) => {
+        const u = new URL(r.url());
+        if (r.method() === "GET" && u.pathname.startsWith("/api/")) gets.push(u.pathname + u.search);
+      };
+      page.on("request", seen);
+      const size = page.viewportSize()!;
+      await page.locator(".beside-fold").click();
+      await page.waitForTimeout(300);
+      await page.locator(".beside-fold").click();
+      await page.waitForTimeout(300);
+      await page.setViewportSize({ width: 1100, height: size.height });
+      await page.waitForTimeout(300);
+      await page.setViewportSize(size);
+      await page.waitForTimeout(400);
+      page.off("request", seen);
+      const same = await page.evaluate<boolean>(`document.querySelector(".rv-main") === window.__review`);
+      if (!same) failures.push("beside-keeps: the review was drawn anew as the list folded, unfolded or the window resized");
+      const kept = await page.locator(".rv-comment-input").inputValue();
+      if (kept !== words) failures.push(`beside-keeps: the comment box reads ${JSON.stringify(kept)}`);
+      const fetched = gets.filter((u) => u.startsWith("/api/review/") && !u.includes("ahead=1")).length;
+      const refreshes = gets.filter((u) => u === "/api/queue").length;
+      if (fetched > refreshes) failures.push(`beside-keeps: the review was fetched ${fetched} times in ${refreshes} refreshes`);
+      const after = await reading();
+      if (after !== before) failures.push(`beside-keeps: reading ${JSON.stringify(before)}, the page moved to ${JSON.stringify(after)}`);
+      // Another review from the list: the list stays as it was, marking the new one.
+      await page.evaluate(`window.__list = document.querySelector(".beside-list")`);
+      await page.locator('.beside .line[data-id="acme/api#4099"] .row-main').click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(400);
+      if (!(await page.evaluate<boolean>(`document.querySelector(".beside-list") === window.__list`)))
+        failures.push("beside-keeps: the list was drawn anew for the next review");
+      const next = await besideSays(page);
+      if (next?.sel !== "acme/api#4099") failures.push(`beside-keeps: the list marks ${JSON.stringify(next?.sel)} for the next review`);
+    },
+    after: fresh,
   },
   {
     // The owner's case: Skim it, low risk, a long summary with code names, folded under the facts.
@@ -1720,12 +1948,14 @@ const SHOTS: Shot[] = [
     },
   },
 ];
-const SIZES = [
+const SIZES: { name: string; width: number; height: number; mac: boolean; asked?: true }[] = [
   { name: "wide", width: 1280, height: 820, mac: false },
   { name: "mid", width: 900, height: 700, mac: false },
   { name: "min", width: 780, height: 600, mac: false },
   // What the owner sees: the desktop app on macOS, which pads for the traffic lights.
   { name: "mac", width: 1280, height: 820, mac: true },
+  // A big window, the list beside a review with room: only for the shots that ask for it.
+  { name: "xl", width: 1440, height: 900, mac: false, asked: true },
 ];
 
 // The icons shot: every icon and the window's Mark at real size on both sidebars, at 100 % and 2x, to judge the small ones.
@@ -1826,7 +2056,7 @@ try {
       await page.goto(`${url}/#/`);
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       for (const shot of shots) {
-        if (shot.sizes && !shot.sizes.includes(size.name)) continue;
+        if (shot.sizes ? !shot.sizes.includes(size.name) : size.asked) continue;
         await page.keyboard.press("Escape");
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click

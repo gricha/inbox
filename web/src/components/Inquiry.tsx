@@ -13,15 +13,29 @@ export interface InquiryCtx {
   selected: string | null;
   select: (q: Inquiry) => void;
   open: (q: Inquiry) => void; // a click: its page
+  compact?: boolean; // the list beside a review: two lines a row
 }
 
-// An agent session's question for you, a row like a PR's labeled Agent: a click opens its page.
+// An agent session's question for you, a row like a PR's labeled Agent: a click opens its page. Beside a review, two lines:
+// the question, then who asks, its age and Answer.
 export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
+  const kind = <span className="line-kind">Agent</span>;
+  const title = <span className="line-title">{q.question}</span>;
+  const from = (
+    <span className="line-ref inq-from" title={q.from}>
+      {fromName(q.from)}
+    </span>
+  );
+  const ageEl = (
+    <span className="line-age" title={`asked ${new Date(q.at).toLocaleString()}`}>
+      {age(q.at, ctx.now)}
+    </span>
+  );
   return (
-    <div className={cls("line inq", sel && "sel")} data-id={id}>
-      <div className="line-main line-row">
+    <div className={cls("line inq", ctx.compact && "c-line", sel && "sel")} data-id={id}>
+      <div className={cls("line-main line-row", ctx.compact && "c-row")}>
         <button
           type="button"
           className="row-main line-btn"
@@ -35,24 +49,33 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
             ctx.select(q);
           }}
         >
-          <span className="line-kind">Agent</span>
-          <span className="line-title">{q.question}</span>
-          <span className="line-ref inq-from" title={q.from}>
-            {fromName(q.from)}
-          </span>
+          {ctx.compact ? (
+            <>
+              {title}
+              <span className="c-meta">
+                {kind}
+                {from}
+              </span>
+              {ageEl}
+            </>
+          ) : (
+            <>
+              {kind}
+              {title}
+              {from}
+            </>
+          )}
         </button>
         <button
           type="button"
-          className="act line-cta line-reply"
+          className={ctx.compact ? "c-cta" : "act line-cta line-reply"}
           onClick={() => {
             ctx.open(q);
           }}
         >
           Answer
         </button>
-        <span className="line-age" title={`asked ${new Date(q.at).toLocaleString()}`}>
-          {age(q.at, ctx.now)}
-        </span>
+        {!ctx.compact && ageEl}
       </div>
     </div>
   );
