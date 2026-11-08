@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Effect } from "effect";
 import { stopAll } from "./children.ts";
 import { DeskError } from "./errors.ts";
 import { Automations } from "./automations.ts";
@@ -65,7 +66,8 @@ import type {
   Until,
 } from "./types.ts";
 import { byPart, RANK, UNTIL } from "./types.ts";
-import { report, webSentry } from "./sentry.ts";
+import { detached, report, webSentry } from "./sentry.ts";
+import { Runner } from "./runner.ts";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig, type LoadedConfig } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
@@ -253,6 +255,7 @@ export class Desk {
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   wrote = new Map<string, string>(); // a More menu write's item → its updated_at then: nothing more till a read shows the change
   sending = new Set<string>(); // conversations a reply is on its way to
+  readonly runner: Runner; // the work nobody waits on: see runner.ts
 
   constructor(opts: DeskOptions) {
     this.home = opts.home;
@@ -263,6 +266,13 @@ export class Desk {
       ((m) => {
         console.error(`[desk] ${m}`);
       });
+    this.runner = new Runner(
+      (m) => {
+        this.log(m);
+      },
+      report,
+      detached,
+    );
     this.review = opts.review ?? null;
     this.writer = opts.writer ?? null;
     fs.mkdirSync(this.home, { recursive: true });
@@ -343,6 +353,7 @@ export class Desk {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.runner.stop();
     for (const c of this.connectors) c.stop();
     this.judge.stop();
     this.convos.stop();
@@ -410,7 +421,11 @@ export class Desk {
     else this.log(`config has ${errors.length} error(s); keeping the last good config`);
     this.changed();
     this.judge.pump();
-    if (sync && loaded) void this.sync();
+    if (sync && loaded)
+      this.runner.fork(
+        "sync",
+        Effect.promise(() => this.sync()),
+      ); // effect-bridge(C5c): sync becomes an Effect
   }
 
   // ---------------------------------------------------------------- policy

@@ -14,6 +14,7 @@ import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
 import { Desk, DeskError } from "./desk.ts";
+import { errorBody, isDeskHttpError, legacyBody, type ErrorBody } from "./errors.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
@@ -156,9 +157,10 @@ export function createApp(desk: Desk, port: number): Hono {
   });
 
   app.onError((e, c) => {
-    if (e instanceof DeskError) return c.json({ error: e.message, candidates: e.candidates }, e.status as 400);
+    if (isDeskHttpError(e)) return c.json(errorBody(e), e.status);
+    if (e instanceof DeskError) return c.json(legacyBody(e), e.status as 400); // effect-bridge(C6): DeskError goes
     desk.log(`error: ${e.stack ?? e.message}`);
-    return c.json({ error: e.message }, 500);
+    return c.json({ error: e.message, tag: "Internal" } satisfies ErrorBody, 500);
   });
 
   const ready = () => {

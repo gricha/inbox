@@ -1,3 +1,159 @@
+// The desk's expected failures, as tagged errors: an Effect's error channel names them, catchTag recovers from one, and
+// each carries the words the owner sees verbatim (its message). A bug or a broken invariant is a defect instead (a throw
+// inside Effect code, or Effect.die) and never gets a class here. docs/effect.md has the rules. Tags are unique across
+// families (GitHub's 403 is GitHubForbidden, never Forbidden). A class added before its first user carries
+// `@public until C<n>` (knip skips it) until the step that first uses it removes the tag.
+import { Data } from "effect";
+
+// ---------------------------------------------------------------- what the HTTP API refuses with (status: its answer)
+
+// What you sent can't be read or isn't allowed.
+/** @public until C4b */
+export class BadRequest extends Data.TaggedError("BadRequest")<{ readonly message: string }> {
+  get status(): 400 {
+    return 400;
+  }
+}
+
+// Not from here: another site, another host, or a write only the desk's own window may send.
+/** @public until C5a */
+export class Forbidden extends Data.TaggedError("Forbidden")<{ readonly message: string }> {
+  get status(): 403 {
+    return 403;
+  }
+}
+
+// No such item, board, ask, inquiry, automation or route.
+/** @public until C4b */
+export class NotFound extends Data.TaggedError("NotFound")<{ readonly message: string }> {
+  get status(): 404 {
+    return 404;
+  }
+}
+
+// A ref that matches more than one item: the candidates go back so the caller can pick.
+/** @public until C5a */
+export class AmbiguousRef extends Data.TaggedError("AmbiguousRef")<{
+  readonly message: string;
+  readonly ref: string;
+  readonly candidates: readonly string[];
+}> {
+  get status(): 409 {
+    return 409;
+  }
+}
+
+// A state that refuses it: in Merging already, not your PR, already answered, your agent is off…
+/** @public until C4b */
+export class Conflict extends Data.TaggedError("Conflict")<{ readonly message: string }> {
+  get status(): 409 {
+    return 409;
+  }
+}
+
+// You changed an older version than the one there now (the policy's or rules' base, the head you approved).
+/** @public until C5a */
+export class Stale extends Data.TaggedError("Stale")<{ readonly message: string }> {
+  get status(): 409 {
+    return 409;
+  }
+}
+
+// The same write is already on its way: the desk refuses a second one at once rather than queueing it.
+/** @public until C5b */
+export class Busy extends Data.TaggedError("Busy")<{ readonly message: string }> {
+  get status(): 409 {
+    return 409;
+  }
+}
+
+// What the desk passes on: GitHub refused or failed, or your agent didn't start. cause is the original error object,
+// kept as is: Sentry skips one report() already sent.
+/** @public until C5b */
+export class Upstream extends Data.TaggedError("Upstream")<{ readonly message: string; readonly cause?: unknown }> {
+  get status(): 502 {
+    return 502;
+  }
+}
+
+// Your draft is marked ready on GitHub, but asking the reviewers failed: half done, so nothing is rolled back. Its cause
+// is the writer's error, so it's still reported.
+/** @public until C5b */
+export class ReviewersNotAsked extends Data.TaggedError("ReviewersNotAsked")<{ readonly message: string; readonly cause?: unknown }> {
+  get status(): 502 {
+    return 502;
+  }
+}
+
+// The desk can't answer yet: it's starting (the first sync), or its rules have errors.
+/** @public until C5a */
+export class Unavailable extends Data.TaggedError("Unavailable")<{ readonly message: string; readonly reason: "starting" | "config" }> {
+  get status(): 503 {
+    return 503;
+  }
+}
+
+export type DeskHttpError =
+  BadRequest | Forbidden | NotFound | AmbiguousRef | Conflict | Stale | Busy | Upstream | ReviewersNotAsked | Unavailable;
+
+const HTTP_CLASSES = [
+  BadRequest,
+  Forbidden,
+  NotFound,
+  AmbiguousRef,
+  Conflict,
+  Stale,
+  Busy,
+  Upstream,
+  ReviewersNotAsked,
+  Unavailable,
+] as const;
+
+// By class, not by _tag: another family's error, or a plain object with the same tag, has no status to answer with.
+export const isDeskHttpError = (u: unknown): u is DeskHttpError => HTTP_CLASSES.some((C) => u instanceof C);
+
+// The JSON an HTTP error answers with. error and candidates are what every client read before tags; tag (and reason for
+// a 503) let the UI and the CLI tell refusals apart without matching words. "Internal" is a 500: a failure or a bug the
+// desk didn't expect. Readers decode `tag ?? fromStatus(status)`: older desks send no tag.
+export type ErrorBody = {
+  error: string;
+  tag: DeskHttpError["_tag"] | "Internal";
+  candidates?: string[];
+  reason?: "starting" | "config";
+};
+
+export function errorBody(e: DeskHttpError): ErrorBody {
+  if (e._tag === "AmbiguousRef") return { error: e.message, tag: e._tag, candidates: [...e.candidates] };
+  if (e._tag === "Unavailable") return { error: e.message, tag: e._tag, reason: e.reason };
+  return { error: e.message, tag: e._tag };
+}
+
+// ---------------------------------------------------------------- files
+
+type FsOp = "read" | "write" | "rename" | "copy" | "mkdir" | "realpath" | "readdir" | "remove" | "stat" | "append" | "watch";
+
+// A file the desk reads or writes failed: cause is Node's own error (its code says which: ENOENT, EACCES…), and its
+// message is Node's, which already names the file.
+/** @public until C3 */
+export class FsError extends Data.TaggedError("FsError")<{ readonly op: FsOp; readonly path: string; readonly cause: unknown }> {
+  get code(): string | undefined {
+    const c = this.cause as { code?: unknown } | null;
+    return typeof c === "object" && c !== null && typeof c.code === "string" ? c.code : undefined;
+  }
+  override get message(): string {
+    return this.cause instanceof Error ? this.cause.message : `couldn't ${this.op} ${this.path}: ${String(this.cause)}`;
+  }
+}
+
+// For Effect.try's and Effect.tryPromise's catch: `catch: fsError("write", file)`.
+/** @public until C3 */
+export const fsError =
+  (op: FsOp, path: string) =>
+  (cause: unknown): FsError =>
+    new FsError({ op, path, cause });
+
+// ---------------------------------------------------------------- legacy (removed in C6, with DeskError)
+
 // An error the HTTP API answers with its status: 400 for what you sent, 404, 409 for a state that refuses it, 502 for GitHub.
 export class DeskError extends Error {
   status: number;
@@ -7,4 +163,25 @@ export class DeskError extends Error {
     this.status = status;
     this.candidates = candidates;
   }
+}
+
+const LEGACY_TAGS: Record<number, ErrorBody["tag"]> = {
+  400: "BadRequest",
+  403: "Forbidden",
+  404: "NotFound",
+  409: "Conflict",
+  502: "Upstream",
+  503: "Unavailable",
+};
+
+// A DeskError's answer, with the tag its status and words say. effect-bridge(C6): goes with DeskError.
+export function legacyBody(e: DeskError): ErrorBody {
+  const candidates = e.candidates?.length ? [...e.candidates] : undefined;
+  const tag: ErrorBody["tag"] = candidates
+    ? "AmbiguousRef"
+    : e.status === 502 && e.message.startsWith("Marked it ready")
+      ? "ReviewersNotAsked"
+      : (LEGACY_TAGS[e.status] ?? "Internal");
+  const reason = e.status === 503 ? (e.message.startsWith("config has errors") ? "config" : "starting") : undefined;
+  return { error: e.message, tag, ...(candidates && { candidates }), ...(reason && { reason }) };
 }

@@ -1087,7 +1087,7 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
   const five = await asked("web#5");
   assert.deepEqual([five.about?.state, five.push], ["merged", null], "merged");
 
-  assert.deepEqual(await place("nope"), { status: 404, body: { error: 'no ask "nope"' } });
+  assert.deepEqual(await place("nope"), { status: 404, body: { error: 'no ask "nope"', tag: "NotFound" } });
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-cold-"));
   const cold = new Desk({ home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
   c.after(() => {

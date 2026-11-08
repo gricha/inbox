@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import type * as SentrySdk from "@sentry/hono/node";
 import type { Hono } from "hono";
-import { DeskError } from "./errors.ts";
+import { DeskError, isDeskHttpError } from "./errors.ts";
 
 const SERVER_DSN = "https://67d41f6516775a8698be5de57fe53b85@o4511536895623168.ingest.us.sentry.io/4512382725718016";
 const WEB_DSN = "https://fde5d7d368ea4fb4b31bee7435f2b35b@o4511536895623168.ingest.us.sentry.io/4512382725783552";
@@ -40,12 +40,17 @@ export async function stopSentry(): Promise<void> {
   await sdk?.close(2_000);
 }
 
-// Each request as a trace, and a 5xx as an issue. A DeskError is an answer the desk chose: only a failure it passes on
-// (GitHub's, an agent's) is worth one, and not "still starting".
+// Each request as a trace, and a 5xx as an issue. A refusal (a DeskHttpError, or a legacy DeskError) is an answer the
+// desk chose: only a failure it passes on (GitHub's, an agent's) is worth one, not "still starting", and not one whose
+// cause report() already sent.
 export function instrument(app: Hono): void {
   if (!sdk) return;
-  const shouldHandleError = (e: unknown) =>
-    !(e instanceof DeskError) || (e.status >= 500 && e.status !== 503 && !(e.cause instanceof Object && sent.has(e.cause)));
+  const shouldHandleError = (e: unknown) => {
+    const status = isDeskHttpError(e) || e instanceof DeskError ? e.status : undefined; // effect-bridge(C6): DeskError goes
+    if (status === undefined) return true;
+    const cause = (e as { cause?: unknown }).cause;
+    return status >= 500 && status !== 503 && !(cause instanceof Object && sent.has(cause));
+  };
   app.use(sdk.sentry(app, { shouldHandleError }));
 }
 
