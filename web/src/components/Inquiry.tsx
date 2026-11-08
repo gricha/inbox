@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, fromName, issueUrl, MOD } from "../format.ts";
-import { parseUrl } from "../prose.ts";
+import { shownUrl, urlPlace } from "../prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
@@ -93,7 +93,7 @@ function rich(text: string): ReactNode[] {
         out.push(
           j % 2 ? (
             <a key={n++} href={bit} target="_blank" rel="noreferrer">
-              {shown(bit)}
+              {shownUrl(bit)}
             </a>
           ) : (
             bit
@@ -101,14 +101,6 @@ function rich(text: string): ReactNode[] {
         );
   }
   return out;
-}
-
-const shown = (url: string) => parseUrl(url)?.href ?? url; // percent-encodes what could make it read as another host
-
-// A link's place, short: the host's path without the noise, so the label leads.
-function where(url: string): string {
-  const u = parseUrl(url);
-  return u ? `${u.host.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}${u.hash}` : url;
 }
 
 // An agent's question on its own page: what it's about, everything it said, its links, and each answer with what it leads
@@ -265,7 +257,7 @@ export function InquiryPage({
                 <a href={l.url} target="_blank" rel="noreferrer">
                   {l.label}
                 </a>
-                <span className="inq-link-where">{where(l.url)}</span>
+                <span className="inq-link-where">{urlPlace(l.url)}</span>
               </li>
             ))}
           </ul>

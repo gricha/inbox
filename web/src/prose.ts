@@ -163,6 +163,15 @@ function urls(out: Span[], text: string, bold: boolean): void {
 // new URL, not URL.parse: the desk serves the window to any browser at localhost, and Safari 17 has no URL.parse.
 export const parseUrl = (raw: string): URL | null => Result.getOrNull(Result.try({ try: () => new URL(raw), catch: () => null }));
 
+// An agent's question's link as its page shows it: percent-encodes what could make it read as another host.
+export const shownUrl = (url: string): string => parseUrl(url)?.href ?? url;
+
+// A link's place, short: the host's path without the noise, so the label leads.
+export function urlPlace(url: string): string {
+  const u = parseUrl(url);
+  return u ? `${u.host.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}${u.hash}` : url;
+}
+
 // .href puts a lookalike host in punycode and resolves `..` and %2E; userinfo could make another host read as GitHub.
 function link(raw: string): string | null {
   const u = parseUrl(raw);

@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blocks, fencedCopy, inline, lead, parseUrl, textLines, unlinked, type Block, type Span } from "../src/prose.ts";
+import {
+  blocks,
+  fencedCopy,
+  inline,
+  lead,
+  parseUrl,
+  shownUrl,
+  textLines,
+  unlinked,
+  urlPlace,
+  type Block,
+  type Span,
+} from "../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });
@@ -98,6 +110,12 @@ test("links read the same in a browser without URL.parse (Safari 17), an agent's
   is("[the run](https://e.test/r)", [p(t("the run ("), a("https://e.test/r"), t(")"))]);
   assert.equal(parseUrl("https://www.e.test/a b#c")?.href, "https://www.e.test/a%20b#c");
   assert.equal(parseUrl("not a url"), null);
+  // The question's page: a link as it's shown, and its place.
+  assert.equal(shownUrl("https://gіthub.com/a/../x"), "https://xn--gthub-n2e.com/x");
+  assert.equal(shownUrl("not a url"), "not a url");
+  assert.equal(urlPlace("https://www.e.test/a b#c"), "e.test/a%20b#c");
+  assert.equal(urlPlace("https://e.test/"), "e.test");
+  assert.equal(urlPlace("not a url"), "not a url");
 });
 
 test("a markdown link reads label, then the URL it opens; an image is never one", () => {
