@@ -103,6 +103,8 @@ The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the 
   `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
   3 attempts, the delay then 3× it, no jitter, today's log lines. Not the `{ times, while }` options together with a
   tapping schedule (it logs retries that never happen). Never retry a GitHub write: a timed-out one may have landed.
+  Deliberate change, with a test: a rate limit's `Retry-After` sent as a date is read as one, and one that can't be read
+  waits a minute (it was a `RangeError`).
 - Timeouts: `Effect.timeout(d)` fails with `TimeoutError`; map it to the domain error with today's words.
 - **Effect's timers keep the process up**: a fiber left in `Effect.sleep` or a `Schedule` keeps `node --test` from
   exiting, silently. Periodic loops (the connector's poll and feed, the judge's backoff, the coordinator's ticker,

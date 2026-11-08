@@ -9,19 +9,23 @@ import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { Effect } from "effect";
+import { GitHubGraphQLError } from "../src/errors.ts";
 
 function fakeWriter(refuse = false, refuseReviews = false) {
   const calls: (string | string[])[][] = [];
   const writer: GitHubWriter = {
     ...refuseWrites(),
-    ready: (pr) => {
-      calls.push(["ready", pr]);
-      return refuse ? Promise.reject(new Error("Resource not accessible")) : Promise.resolve();
-    },
-    requestReviews: (pr, users, teams) => {
-      calls.push(["request_reviews", pr, users, teams]);
-      return refuseReviews ? Promise.reject(new Error("Could not resolve to a node")) : Promise.resolve();
-    },
+    ready: (pr) =>
+      Effect.suspend(() => {
+        calls.push(["ready", pr]);
+        return refuse ? Effect.fail(new GitHubGraphQLError({ message: "Resource not accessible" })) : Effect.void;
+      }),
+    requestReviews: (pr, users, teams) =>
+      Effect.suspend(() => {
+        calls.push(["request_reviews", pr, users, teams]);
+        return refuseReviews ? Effect.fail(new GitHubGraphQLError({ message: "Could not resolve to a node" })) : Effect.void;
+      }),
   };
   return { writer, calls };
 }

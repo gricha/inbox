@@ -3,7 +3,10 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createClient, GH_MISSING, RateLimitedError } from "../src/github/client.ts";
+import { Cause, Effect, Exit } from "effect";
+import { GitHubRateLimited } from "../src/errors.ts";
+import { createClient, GH_MISSING } from "../src/github/client.ts";
+import { failure, run } from "./helpers/run.ts";
 
 type Body = { query: string; variables: Record<string, unknown> };
 
@@ -41,9 +44,12 @@ const client = (f: typeof fetch, logs: string[] = []) =>
     },
   });
 
-test("refuses mutations without calling GitHub", async () => {
+test("refuses mutations without calling GitHub: a bug, not a failure anyone handles", async () => {
   const fake = fakeFetch(ok({}));
-  await assert.rejects(client(fake.fetch).query("mutation { addStar(input: {}) { clientMutationId } }"), /read-only/);
+  const mutation = client(fake.fetch).query("mutation { addStar(input: {}) { clientMutationId } }");
+  await assert.rejects(Effect.runPromise(mutation), /read-only/);
+  const exit = await Effect.runPromiseExit(mutation);
+  assert.ok(Exit.isFailure(exit) && Cause.hasDies(exit.cause) && !Cause.hasFails(exit.cause));
   assert.equal(fake.calls.length, 0);
 });
 
@@ -51,7 +57,7 @@ test("sends the token and variables, returns data, tracks the rate limit", async
   const fake = fakeFetch(ok({ viewer: { login: "octo-dev" } }));
   const c = client(fake.fetch);
   assert.equal(c.rateLimit(), null);
-  const d = await c.query<{ viewer: { login: string } }>("query($a: Int) { viewer { login } }", { a: 1 });
+  const d = await run(c.query<{ viewer: { login: string } }>("query($a: Int) { viewer { login } }", { a: 1 }));
   assert.equal(d.viewer.login, "octo-dev");
   assert.equal(fake.calls[0]?.headers.authorization, "bearer t0ken");
   assert.deepEqual(fake.calls[0]?.variables, { a: 1 });
@@ -67,15 +73,37 @@ test("retries 502 and network errors, then succeeds", async () => {
     },
     ok({ x: 1 }),
   );
-  assert.deepEqual(await client(fake.fetch, logs).query("query { x }"), { rateLimit: RL, x: 1 });
+  assert.deepEqual(await run(client(fake.fetch, logs).query("query { x }")), { rateLimit: RL, x: 1 });
   assert.equal(fake.calls.length, 3);
-  assert.equal(logs.length, 2);
+  assert.deepEqual(logs, ["GitHub HTTP 502; retry 1/2", "GitHub request failed: fetch failed; retry 2/2"]);
 });
 
 test("gives up after two retries", async () => {
   const fake = fakeFetch(status(503));
-  await assert.rejects(client(fake.fetch).query("query { x }"), /GitHub HTTP 503/);
+  const e = await failure(client(fake.fetch).query("query { x }"));
+  assert.equal(e._tag, "GitHubHttpError");
+  assert.deepEqual([e.message, e._tag === "GitHubHttpError" && e.status], ["GitHub HTTP 503", 503]);
   assert.equal(fake.calls.length, 3);
+});
+
+test("no answer after the retries is a network failure, with fetch's error as its cause", async () => {
+  const down = new TypeError("fetch failed");
+  const fake = fakeFetch(() => {
+    throw down;
+  });
+  const e = await failure(client(fake.fetch).query("query { x }"));
+  assert.deepEqual([e._tag, e.message], ["GitHubNetworkError", "GitHub request failed: fetch failed"]);
+  assert.equal(e._tag === "GitHubNetworkError" && e.cause, down);
+  assert.equal(fake.calls.length, 3);
+});
+
+test("an answer that isn't JSON is a bad response, in the parser's words, and isn't retried", async () => {
+  const fake = fakeFetch(status(200, "<html>sign in</html>"));
+  const e = await failure(client(fake.fetch).query("query { x }"));
+  assert.equal(e._tag, "GitHubBadResponse");
+  assert.match(e.message, /JSON/);
+  assert.ok(e._tag === "GitHubBadResponse" && e.cause instanceof SyntaxError);
+  assert.equal(fake.calls.length, 1);
 });
 
 test("retries a GraphQL-level timeout", async () => {
@@ -89,17 +117,21 @@ test("retries a GraphQL-level timeout", async () => {
       ),
     ok({ x: 2 }),
   );
-  assert.equal((await client(fake.fetch).query<{ x: number }>("query { x }")).x, 2);
+  assert.equal((await run(client(fake.fetch).query<{ x: number }>("query { x }"))).x, 2);
 });
 
 test("NOT_FOUND errors are not fatal; other errors throw", async () => {
   const notFound = fakeFetch(
     ok({ nodes: [{ id: "a" }, null] }, { errors: [{ type: "NOT_FOUND", path: ["nodes", 1], message: "Could not resolve to a node" }] }),
   );
-  assert.deepEqual((await client(notFound.fetch).query<{ nodes: unknown[] }>("query { nodes }")).nodes, [{ id: "a" }, null]);
+  assert.deepEqual((await run(client(notFound.fetch).query<{ nodes: unknown[] }>("query { nodes }"))).nodes, [{ id: "a" }, null]);
 
   const broken = fakeFetch(ok({}, { errors: [{ type: "INVALID", message: "Field 'nope' doesn't exist" }] }));
-  await assert.rejects(client(broken.fetch).query("query { nope }"), /Field 'nope' doesn't exist/);
+  const e = await failure(client(broken.fetch).query("query { nope }"));
+  assert.deepEqual(
+    [e._tag, e.message, e._tag === "GitHubGraphQLError" && e.types],
+    ["GitHubGraphQLError", "GitHub: Field 'nope' doesn't exist", ["INVALID"]],
+  );
   assert.equal(broken.calls.length, 1);
 });
 
@@ -111,34 +143,45 @@ test("FORBIDDEN (e.g. SAML) with partial data is skipped and logged; with no dat
     message: "Resource protected by organization SAML enforcement",
   };
   const partial = fakeFetch(ok({ orgs: [{ login: "acme" }, null] }, { errors: [saml] }));
-  assert.deepEqual((await client(partial.fetch, logs).query<{ orgs: unknown[] }>("query { orgs }")).orgs, [{ login: "acme" }, null]);
+  assert.deepEqual((await run(client(partial.fetch, logs).query<{ orgs: unknown[] }>("query { orgs }"))).orgs, [{ login: "acme" }, null]);
   assert.match(logs[0] ?? "", /SAML/);
 
   const empty = fakeFetch(
     () => new Response(JSON.stringify({ data: null, errors: [saml, { type: "NOT_FOUND", message: "Could not resolve" }] })),
   );
-  await assert.rejects(client(empty.fetch).query("query { x }"), /SAML.*Could not resolve/);
+  await assert.rejects(run(client(empty.fetch).query("query { x }")), /SAML.*Could not resolve/);
 });
 
-test("secondary rate limit (403/429) throws RateLimitedError with resetAt", async () => {
+test("secondary rate limit (403/429) fails with GitHubRateLimited and its resetAt", async () => {
   const fake = fakeFetch(status(403, '{"message":"You have exceeded a secondary rate limit"}', { "retry-after": "120" }));
   const before = Date.now();
-  const err = await client(fake.fetch)
-    .query("query { x }")
-    .catch((e) => e);
-  assert.ok(err instanceof RateLimitedError);
+  const err = await failure(client(fake.fetch).query("query { x }"));
+  assert.ok(err instanceof GitHubRateLimited);
   const wait = Date.parse(err.resetAt) - before;
   assert.ok(wait >= 119_000 && wait <= 125_000, `wait ${wait}`);
+  assert.equal(err.message, `GitHub rate limited until ${err.resetAt} (HTTP 403)`);
   assert.equal(fake.calls.length, 1);
 
-  await assert.rejects(client(fakeFetch(status(429)).fetch).query("query { x }"), RateLimitedError);
+  await assert.rejects(run(client(fakeFetch(status(429)).fetch).query("query { x }")), GitHubRateLimited);
 });
 
-test("a 403 that isn't a rate limit is a plain error", async () => {
-  await assert.rejects(
+test("a Retry-After that's a date, or unreadable, still gives a reset time", async () => {
+  const date = "Wed, 21 Oct 2099 07:28:00 GMT";
+  const at = await failure(client(fakeFetch(status(429, "", { "retry-after": date })).fetch).query("query { x }"));
+  assert.equal(at._tag === "GitHubRateLimited" && at.resetAt, new Date(date).toISOString());
+  const before = Date.now();
+  const junk = await failure(client(fakeFetch(status(429, "", { "retry-after": "soon" })).fetch).query("query { x }"));
+  const wait = junk._tag === "GitHubRateLimited" ? Date.parse(junk.resetAt) - before : NaN;
+  assert.ok(wait >= 59_000 && wait <= 65_000, `wait ${wait}`);
+  const huge = await failure(client(fakeFetch(status(429, "", { "retry-after": "1e300" })).fetch).query("query { x }"));
+  assert.equal(huge._tag, "GitHubRateLimited");
+});
+
+test("a 403 that isn't a rate limit is an HTTP error", async () => {
+  const e = await failure(
     client(fakeFetch(status(403, '{"message":"Resource not accessible by integration"}')).fetch).query("query { x }"),
-    (e: Error) => !(e instanceof RateLimitedError) && e.message.includes("HTTP 403"),
   );
+  assert.deepEqual([e._tag, e.message], ["GitHubHttpError", 'GitHub HTTP 403: {"message":"Resource not accessible by integration"}']);
 });
 
 test("primary limit exhausted (RATE_LIMITED) uses the reset header", async () => {
@@ -149,21 +192,21 @@ test("primary limit exhausted (RATE_LIMITED) uses the reset header", async () =>
         headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) },
       }),
   );
-  const err = await client(fake.fetch)
-    .query("query { x }")
-    .catch((e) => e);
-  assert.ok(err instanceof RateLimitedError);
+  const err = await failure(client(fake.fetch).query("query { x }"));
+  assert.ok(err instanceof GitHubRateLimited);
   assert.equal(err.resetAt, new Date(reset * 1000).toISOString());
+  assert.equal(err.message, `GitHub rate limited until ${err.resetAt} (API rate limit exceeded)`);
 });
 
 test("remaining below 200 blocks further calls until reset", async () => {
   const low = { remaining: 150, resetAt: "2099-01-01T00:00:00Z", cost: 1 };
   const fake = fakeFetch(() => new Response(JSON.stringify({ data: { rateLimit: low, x: 1 } })));
   const c = client(fake.fetch);
-  await c.query("query { x }");
-  const err = await c.query("query { x }").catch((e) => e);
-  assert.ok(err instanceof RateLimitedError);
+  await run(c.query("query { x }"));
+  const err = await failure(c.query("query { x }"));
+  assert.ok(err instanceof GitHubRateLimited);
   assert.equal(err.resetAt, "2099-01-01T00:00:00Z");
+  assert.equal(err.message, "GitHub rate limited until 2099-01-01T00:00:00Z (150 points left)");
   assert.equal(fake.calls.length, 1);
   assert.deepEqual(c.rateLimit(), { remaining: 150, reset_at: "2099-01-01T00:00:00Z" });
 });
@@ -171,8 +214,8 @@ test("remaining below 200 blocks further calls until reset", async () => {
 test("a past reset lets calls through again", async () => {
   const fake = fakeFetch(() => new Response(JSON.stringify({ data: { rateLimit: { remaining: 10, resetAt: "2000-01-01T00:00:00Z" } } })));
   const c = client(fake.fetch);
-  await c.query("query { x }");
-  await c.query("query { x }");
+  await run(c.query("query { x }"));
+  await run(c.query("query { x }"));
   assert.equal(fake.calls.length, 2);
 });
 
@@ -182,11 +225,43 @@ test("a missing gh says how to install it", async () => {
   delete process.env.GITHUB_TOKEN;
   try {
     const fake = fakeFetch(ok({}));
-    await assert.rejects(createClient({ fetch: fake.fetch }).query("query { viewer { login } }"), (e: Error) => e.message === GH_MISSING);
+    const c = createClient({ fetch: fake.fetch });
+    const e = await failure(c.query("query { viewer { login } }"));
+    assert.deepEqual([e._tag, e._tag === "GitHubAuthError" && e.reason, e.message], ["GitHubAuthError", "gh_missing", GH_MISSING]);
     assert.equal(fake.calls.length, 0);
+    // A failed read isn't kept: once there's a token, the same client uses it.
+    process.env.GITHUB_TOKEN = "from-env";
+    await run(c.query("query { viewer { login } }"));
+    assert.equal(fake.calls[0]?.headers.authorization, "bearer from-env");
   } finally {
     process.env.PATH = env.PATH;
     if (env.GITHUB_TOKEN !== undefined) process.env.GITHUB_TOKEN = env.GITHUB_TOKEN;
+    else delete process.env.GITHUB_TOKEN;
+  }
+});
+
+test("the token is read once and kept, and read again after GitHub rejects it", async () => {
+  const env = process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN = "first";
+  try {
+    const fake = fakeFetch(ok({}), ok({}), status(401, "Bad credentials"), ok({}));
+    const c = createClient({ fetch: fake.fetch, retryDelayMs: 0 });
+    await run(c.query("query { x }"));
+    process.env.GITHUB_TOKEN = "second";
+    await run(c.query("query { x }"));
+    const e = await failure(c.query("query { x }"));
+    assert.deepEqual(
+      [e._tag, e._tag === "GitHubAuthError" && e.reason, e.message],
+      ["GitHubAuthError", "rejected", "GitHub rejected the token (HTTP 401): run `gh auth login`"],
+    );
+    await run(c.query("query { x }"));
+    assert.deepEqual(
+      fake.calls.map((x) => x.headers.authorization),
+      ["bearer first", "bearer first", "bearer first", "bearer second"],
+    );
+  } finally {
+    if (env !== undefined) process.env.GITHUB_TOKEN = env;
+    else delete process.env.GITHUB_TOKEN;
   }
 });
 
@@ -204,10 +279,10 @@ function restFetch(...responses: (() => Response)[]) {
 test("REST: refuses anything but GET without calling GitHub, so it can never mark a thread read", async () => {
   const fake = restFetch();
   const c = client(fake.fetch);
-  await assert.rejects(c.get("/notifications/threads/1", { method: "PATCH" }), /read-only: refusing to send PATCH/);
-  await assert.rejects(c.get("/notifications", { method: "put" }), /read-only/);
-  await assert.rejects(c.get("https://evil.example/x"), /not a GitHub API path/);
-  await assert.rejects(c.get("//evil.example/x"), /not a GitHub API path/);
+  await assert.rejects(Effect.runPromise(c.get("/notifications/threads/1", { method: "PATCH" })), /read-only: refusing to send PATCH/);
+  await assert.rejects(Effect.runPromise(c.get("/notifications", { method: "put" })), /read-only/);
+  await assert.rejects(Effect.runPromise(c.get("https://evil.example/x")), /not a GitHub API path/);
+  await assert.rejects(Effect.runPromise(c.get("//evil.example/x")), /not a GitHub API path/);
   assert.equal(fake.calls.length, 0);
 });
 
@@ -217,22 +292,22 @@ test("REST: GETs api.github.com with the token and headers; a 304 has no body", 
     () => new Response(null, { status: 304, headers: { "x-poll-interval": "120" } }),
   );
   const c = client(fake.fetch);
-  const r = await c.get("/notifications?all=true");
+  const r = await run(c.get("/notifications?all=true"));
   assert.deepEqual([r.status, r.data, r.headers.get("last-modified")], [200, [{ id: "1" }], "Tue, 27 Oct 2026 12:00:00 GMT"]);
   assert.equal(fake.calls[0]?.url, "https://api.github.com/notifications?all=true");
   assert.equal(fake.calls[0]?.method, "GET");
   assert.equal(fake.calls[0]?.headers.authorization, "bearer t0ken");
-  const again = await c.get("/notifications", { headers: { "if-modified-since": "Tue, 27 Oct 2026 12:00:00 GMT" } });
+  const again = await run(c.get("/notifications", { headers: { "if-modified-since": "Tue, 27 Oct 2026 12:00:00 GMT" } }));
   assert.deepEqual([again.status, again.data], [304, null]);
   assert.equal(fake.calls[1]?.headers["if-modified-since"], "Tue, 27 Oct 2026 12:00:00 GMT");
 });
 
-test("REST: rate limits throw RateLimitedError; 502s are retried", async () => {
-  await assert.rejects(client(restFetch(() => new Response("", { status: 429 })).fetch).get("/notifications"), RateLimitedError);
+test("REST: rate limits fail with GitHubRateLimited; 502s are retried", async () => {
+  await assert.rejects(run(client(restFetch(() => new Response("", { status: 429 })).fetch).get("/notifications")), GitHubRateLimited);
   const flaky = restFetch(
     () => new Response("", { status: 502 }),
     () => new Response("[]"),
   );
-  assert.deepEqual((await client(flaky.fetch).get("/notifications")).data, []);
+  assert.deepEqual((await run(client(flaky.fetch).get("/notifications"))).data, []);
   assert.equal(flaky.calls.length, 2);
 });

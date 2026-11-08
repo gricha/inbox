@@ -14,6 +14,7 @@ import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { Effect } from "effect";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -283,14 +284,16 @@ function fakeWriter() {
   const calls: string[][] = [];
   const writer: GitHubWriter = {
     ...refuseWrites("not here"),
-    reply: (to, body) => {
-      calls.push(["reply", to, body]);
-      return Promise.resolve({ url: "https://github.com/acme/web/pull/3#discussion_r9" });
-    },
-    comment: (pr, body) => {
-      calls.push(["comment", pr, body]);
-      return Promise.resolve({ url: "https://github.com/acme/web/pull/3#issuecomment-9" });
-    },
+    reply: (to, body) =>
+      Effect.sync(() => {
+        calls.push(["reply", to, body]);
+        return { url: "https://github.com/acme/web/pull/3#discussion_r9" };
+      }),
+    comment: (pr, body) =>
+      Effect.sync(() => {
+        calls.push(["comment", pr, body]);
+        return { url: "https://github.com/acme/web/pull/3#issuecomment-9" };
+      }),
   };
   return { writer, calls };
 }

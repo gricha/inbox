@@ -1,8 +1,10 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
+import { Effect, Result } from "effect";
 import { buildAreas, type AreaPr } from "../areas.ts";
+import type { GitHubRateLimited, GitHubReadError } from "../errors.ts";
 import type { Areas, Context, Item, Reviewer, ReviewState } from "../types.ts";
-import { createClient, RateLimitedError } from "./client.ts";
+import { createClient, decode } from "./client.ts";
 import { isBot, login, normalize, toHit, type Actor, type RawHit, type RawNode } from "./normalize.ts";
 import {
   branchPrs as branchPrsQuery,
@@ -66,19 +68,21 @@ export interface PrContext {
   commits: { oid: string; headline: string; at: string; author: string }[]; // the latest 20, oldest first; author: login, "" if unknown
 }
 export interface GitHub {
-  viewer(): Promise<string>;
-  search(query: string, max?: number): Promise<{ hits: SearchHit[]; total: number }>;
-  details(hits: SearchHit[], me: string): Promise<Item[]>; // missing/deleted nodes are skipped
-  context(me: string): Promise<Omit<Context, "refreshed_at">>; // teams, 90-day affinity, repo_prs, orgs
-  areas(): Promise<Areas>; // the directories of your PRs and reviews, last 90 days
+  viewer(): Effect.Effect<string, GitHubReadError>;
+  search(query: string, max?: number): Effect.Effect<{ hits: SearchHit[]; total: number }, GitHubReadError>;
+  // Missing/deleted nodes are skipped, and so is a batch that failed: only a rate limit fails the call.
+  details(hits: SearchHit[], me: string): Effect.Effect<Item[], GitHubRateLimited>;
+  context(me: string): Effect.Effect<Omit<Context, "refreshed_at">, GitHubReadError>; // teams, 90-day affinity, repo_prs, orgs
+  areas(): Effect.Effect<Areas, GitHubReadError>; // the directories of your PRs and reviews, last 90 days
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
-  notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage>;
-  prContext(nodeId: string): Promise<PrContext>; // a PR's threads, reviews, comments and recent commits
+  notifications(opts: { since: string | null; last_modified: string | null }): Effect.Effect<NotificationPage, GitHubReadError>;
+  prContext(nodeId: string): Effect.Effect<PrContext, GitHubReadError>; // a PR's threads, reviews, comments and recent commits
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
   // open PRs based on it. pr: the PR whose number `branch` holds, any state; none for an issue or a number not there.
-  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]>;
-  lookup(repo: string, number: number): Promise<SearchHit | null>;
-  reviewers(repo: string, number: number, q: string): Promise<Reviewer[]>; // GitHub's suggestions first, then users, then teams
+  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Effect.Effect<SearchHit[], GitHubReadError>;
+  lookup(repo: string, number: number): Effect.Effect<SearchHit | null, GitHubReadError>;
+  // GitHub's suggestions first, then users, then teams
+  reviewers(repo: string, number: number, q: string): Effect.Effect<Reviewer[], GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
 }
 
@@ -186,50 +190,66 @@ function tally(keys: string[]): Record<string, number> {
   return out;
 }
 
-export async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  let next = 0;
-  let failed = false;
-  const worker = async () => {
-    while (!failed && next < items.length) {
-      const i = next++;
-      try {
-        out[i] = await fn(items[i]!); // in range: no await between the while check and next++
-      } catch (e) {
-        failed = true;
-        throw e;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
-  return out;
-}
-
 export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHub {
   const client = createClient(opts);
+  const log = (m: string) => opts.log?.(m);
 
   // A search's nodes, `per` a page, in whatever shape `doc` asks for.
-  async function pages(doc: string, q: string, max: number, per: number) {
+  const pages = Effect.fnUntraced(function* (doc: string, q: string, max: number, per: number) {
     // Keyed by node id: cursors are offsets, so an item that moves between pages can come back twice.
     const nodes = new Map<string, unknown>();
     let total = 0;
     let after: string | null = null;
     while (nodes.size < max) {
-      const { search: page }: SearchData = await client.query<SearchData>(doc, { q, first: Math.min(per, max - nodes.size), after });
-      total = page.issueCount;
-      for (const n of page.nodes) if (n?.id) nodes.set(n.id, n);
-      if (!page.pageInfo.hasNextPage || !page.pageInfo.endCursor) break;
-      after = page.pageInfo.endCursor;
+      const data: SearchData = yield* client.query<SearchData>(doc, { q, first: Math.min(per, max - nodes.size), after });
+      const page = yield* decode(() => {
+        const { search: p } = data;
+        for (const n of p.nodes) if (n?.id) nodes.set(n.id, n);
+        return { total: p.issueCount, next: p.pageInfo.hasNextPage ? p.pageInfo.endCursor : null };
+      });
+      total = page.total;
+      if (!page.next) break;
+      after = page.next;
     }
     return { nodes: [...nodes.values()], total };
-  }
+  });
 
-  async function search(q: string, max = 300) {
-    const { nodes, total } = await pages(LIGHT_SEARCH, q, max, 100);
-    return { hits: (nodes as RawHit[]).map(toHit), total };
-  }
+  const search = Effect.fn("GitHub.search")(function* (q: string, max: number = 300) {
+    const { nodes, total } = yield* pages(LIGHT_SEARCH, q, max, 100);
+    return { hits: yield* decode(() => (nodes as RawHit[]).map(toHit)), total };
+  });
 
-  async function details(hits: SearchHit[], me: string): Promise<Item[]> {
+  // A failed batch is skipped, not fatal: its items stay stale and are retried next sync. A rate limit stops them all.
+  const batch = Effect.fnUntraced(
+    function* (b: { mine: boolean; ids: string[] }, now: string) {
+      const data = b.mine
+        ? yield* client.query<Record<string, RawNode | null>>(
+            detailsMine(b.ids.length),
+            Object.fromEntries(b.ids.map((id, i) => [`id${i}`, id])),
+          )
+        : yield* client.query<{ nodes: (RawNode | null)[] }>(DETAILS_REVIEW, { ids: b.ids });
+      // normalize is pure: a node it can't read fails its batch, not the sync.
+      return yield* decode(() => {
+        const nodes = b.mine
+          ? b.ids.map((_, i) => (data as Record<string, RawNode | null>)[`n${i}`] ?? null)
+          : (data as { nodes: (RawNode | null)[] }).nodes;
+        return nodes.filter((n) => n !== null).map((n) => normalize(n, now));
+      });
+    },
+    (effect, b) =>
+      effect.pipe(
+        Effect.catch((e) =>
+          e._tag === "GitHubRateLimited"
+            ? Effect.fail(e)
+            : Effect.sync((): Item[] => {
+                log(`details batch of ${b.ids.length} failed: ${e.message}`);
+                return [];
+              }),
+        ),
+      ),
+  );
+
+  const details = Effect.fn("GitHub.details")(function* (hits: SearchHit[], me: string) {
     const unique = [...new Map(hits.map((h) => [h.node_id, h])).values()];
     const isMine = (h: SearchHit) => h.kind === "pr" && h.author.toLowerCase() === me.toLowerCase();
     const batches = [
@@ -240,49 +260,35 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       ).map((b) => ({ mine: false, ids: b.map((h) => h.node_id) })),
     ];
     const now = new Date().toISOString();
-    const fetchNodes = async (b: { mine: boolean; ids: string[] }): Promise<(RawNode | null)[]> => {
-      if (!b.mine) return (await client.query<{ nodes: (RawNode | null)[] }>(DETAILS_REVIEW, { ids: b.ids })).nodes;
-      const data = await client.query<Record<string, RawNode | null>>(
-        detailsMine(b.ids.length),
-        Object.fromEntries(b.ids.map((id, i) => [`id${i}`, id])),
-      );
-      return b.ids.map((_, i) => data[`n${i}`] ?? null);
-    };
-    // A failed batch is skipped, not fatal: its items stay stale and are retried next sync.
-    const results = await pool(batches, 3, async (b) => {
-      try {
-        const nodes = await fetchNodes(b);
-        return nodes.filter((n) => n !== null).map((n) => normalize(n, now));
-      } catch (e) {
-        if (e instanceof RateLimitedError) throw e;
-        opts.log?.(`details batch of ${b.ids.length} failed: ${(e as Error).message}`);
-        return [];
-      }
-    });
+    const results = yield* Effect.forEach(batches, (b) => batch(b, now), { concurrency: 3 });
     return results.flat();
-  }
+  });
 
-  async function context(me: string): Promise<Omit<Context, "refreshed_at">> {
+  const context = Effect.fn("GitHub.context")(function* (me: string) {
     const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
     // Keep whatever parts succeed; a failed part comes back empty and is logged.
-    const settled = await Promise.allSettled([
-      client.query<TeamsData>(TEAMS, { me }),
-      search(`is:pr reviewed-by:@me -author:@me updated:>=${since}`, 1000),
-      search(`is:pr commenter:@me -author:@me updated:>=${since}`, 1000),
-      search(`is:pr author:@me created:>=${since}`, 1000),
-      search("is:open involves:@me", 300),
-    ]);
-    const failed = settled.filter((r) => r.status === "rejected").map((r) => r.reason as Error);
+    const settled = yield* Effect.all(
+      {
+        teams: client.query<TeamsData>(TEAMS, { me }),
+        reviewed: search(`is:pr reviewed-by:@me -author:@me updated:>=${since}`, 1000),
+        commented: search(`is:pr commenter:@me -author:@me updated:>=${since}`, 1000),
+        authored: search(`is:pr author:@me created:>=${since}`, 1000),
+        involved: search("is:open involves:@me", 300),
+      },
+      { concurrency: "unbounded", mode: "result" },
+    );
+    const parts: Result.Result<unknown, GitHubReadError>[] = Object.values(settled);
+    const failed = parts.flatMap((r) => (Result.isFailure(r) ? [r.failure] : []));
     const [first] = failed;
-    if (first && failed.length === settled.length) throw first;
-    for (const e of failed) opts.log?.(`context: ${e.message}`);
-    const ok = <T>(r: PromiseSettledResult<T>, empty: T) => (r.status === "fulfilled" ? r.value : empty);
+    if (first && failed.length === parts.length) return yield* Effect.fail(first);
+    for (const e of failed) log(`context: ${e.message}`);
+    const ok = <T, E>(r: Result.Result<T, E>, empty: T) => (Result.isSuccess(r) ? r.success : empty);
     const none = { hits: [] as SearchHit[], total: 0 };
-    const teams = ok(settled[0], { viewer: { organizations: { nodes: [] } } });
-    const reviewed = ok(settled[1], none);
-    const commented = ok(settled[2], none);
-    const authored = ok(settled[3], none);
-    const involved = ok(settled[4], none);
+    const teams = ok(settled.teams, { viewer: { organizations: { nodes: [] } } });
+    const reviewed = ok(settled.reviewed, none);
+    const commented = ok(settled.commented, none);
+    const authored = ok(settled.authored, none);
+    const involved = ok(settled.involved, none);
     const engaged = new Map<string, Set<string>>();
     for (const h of [...reviewed.hits, ...commented.hits]) {
       if (h.author_bot) continue;
@@ -290,7 +296,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       engaged.get(h.author)!.add(h.node_id);
     }
     const latest = authored.hits.toSorted((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, RECENT);
-    return {
+    return yield* decode(() => ({
       me,
       name: teams.viewer.name ?? "",
       teams: [...new Set(teams.viewer.organizations.nodes.flatMap((o) => o?.teams.nodes.map((t) => t.slug) ?? []))],
@@ -298,76 +304,91 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       repo_prs: tally(authored.hits.map((h) => h.id.split("#")[0] ?? "")),
       orgs: tally(involved.hits.map((h) => h.id.split("/")[0] ?? "")),
       recent: latest.map((h) => h.title ?? "").filter(Boolean),
-    };
-  }
+    }));
+  });
 
-  async function areas(): Promise<Areas> {
+  const areas = Effect.fn("GitHub.areas")(function* () {
     const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-    const prs = async (q: string, authored: boolean): Promise<AreaPr[]> =>
-      ((await pages(FILES_SEARCH, `is:pr ${q}`, 500, 50)).nodes as RawFiles[]).map((n) => ({
-        repo: n.repository.nameWithOwner,
-        files: n.changedFiles,
-        paths: n.files?.nodes.map((f) => f.path) ?? [],
-        authored,
-      }));
-    const found = await Promise.all([
-      prs(`author:@me created:>=${since}`, true),
-      prs(`author:@me merged:>=${since} created:<${since}`, true),
-      prs(`reviewed-by:@me -author:@me updated:>=${since}`, false),
-    ]);
+    const prs = (q: string, authored: boolean) =>
+      pages(FILES_SEARCH, `is:pr ${q}`, 500, 50).pipe(
+        Effect.flatMap(({ nodes }) =>
+          decode((): AreaPr[] =>
+            (nodes as RawFiles[]).map((n) => ({
+              repo: n.repository.nameWithOwner,
+              files: n.changedFiles,
+              paths: n.files?.nodes.map((f) => f.path) ?? [],
+              authored,
+            })),
+          ),
+        ),
+      );
+    const found = yield* Effect.all(
+      [
+        prs(`author:@me created:>=${since}`, true),
+        prs(`author:@me merged:>=${since} created:<${since}`, true),
+        prs(`reviewed-by:@me -author:@me updated:>=${since}`, false),
+      ],
+      { concurrency: "unbounded" },
+    );
     return buildAreas(found.flat());
-  }
+  });
 
-  async function branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]> {
+  const branchPrs = Effect.fn("GitHub.branchPrs")(function* (repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]) {
     const [owner, name] = repo.split("/");
     const out = new Map<string, SearchHit>();
     for (const part of chunk(probes, PROBES)) {
       const vars = Object.fromEntries(part.map((p, i) => [`b${i}`, p.dir === "pr" ? Number(p.branch) : p.branch]));
-      const data = await client.query<BranchData>(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
-      part.forEach((p, i) => {
-        const got = data.repository?.[`p${i}`];
-        for (const n of !got ? [] : "nodes" in got ? got.nodes : [got]) {
-          if (!n?.id || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
-          out.set(n.id, toHit(n));
-        }
+      const data = yield* client.query<BranchData>(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
+      yield* decode(() => {
+        part.forEach((p, i) => {
+          const got = data.repository?.[`p${i}`];
+          for (const n of !got ? [] : "nodes" in got ? got.nodes : [got]) {
+            if (!n?.id || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
+            out.set(n.id, toHit(n));
+          }
+        });
       });
     }
     return [...out.values()];
-  }
+  });
 
-  async function lookup(repo: string, number: number): Promise<SearchHit | null> {
+  const lookup = Effect.fn("GitHub.lookup")(function* (repo: string, number: number) {
     const [owner, name] = repo.split("/");
-    const data = await client.query<{ repository: { issueOrPullRequest: RawHit | null } | null }>(LOOKUP, { owner, name, number });
-    const n = data.repository?.issueOrPullRequest;
-    return n ? toHit(n) : null;
-  }
+    const data = yield* client.query<{ repository: { issueOrPullRequest: RawHit | null } | null }>(LOOKUP, { owner, name, number });
+    return yield* decode(() => {
+      const n = data.repository?.issueOrPullRequest;
+      return n ? toHit(n) : null;
+    });
+  });
 
-  async function reviewers(repo: string, number: number, q: string): Promise<Reviewer[]> {
+  const reviewers = Effect.fn("GitHub.reviewers")(function* (repo: string, number: number, q: string) {
     const [owner, name] = repo.split("/");
     type U = { id: string; login: string; name: string | null };
-    const data = await client.query<{
+    const data = yield* client.query<{
       repository: { pullRequest: { suggestedReviewers: { reviewer: U }[] } | null; assignableUsers: { nodes: U[] } } | null;
       organization: { teams: { nodes: { id: string; slug: string; name: string }[] } } | null;
     }>(REVIEWERS, { owner, name, number, q: q || null });
-    const user = (u: U, suggested: boolean): Reviewer => ({ id: u.id, login: u.login, name: u.name ?? "", team: false, suggested });
-    const needle = q.toLowerCase();
-    const suggested = (data.repository?.pullRequest?.suggestedReviewers ?? [])
-      .map((s) => user(s.reviewer, true))
-      .filter((r) => !needle || r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle));
-    const users = (data.repository?.assignableUsers.nodes ?? []).map((u) => user(u, false));
-    const teams = (data.organization?.teams.nodes ?? []).map((t) => ({
-      id: t.id,
-      login: t.slug,
-      name: t.name,
-      team: true,
-      suggested: false,
-    }));
-    const out = new Map<string, Reviewer>();
-    for (const r of [...suggested, ...users, ...teams]) if (!out.has(r.id)) out.set(r.id, r);
-    return [...out.values()];
-  }
+    return yield* decode(() => {
+      const user = (u: U, suggested: boolean): Reviewer => ({ id: u.id, login: u.login, name: u.name ?? "", team: false, suggested });
+      const needle = q.toLowerCase();
+      const suggested = (data.repository?.pullRequest?.suggestedReviewers ?? [])
+        .map((s) => user(s.reviewer, true))
+        .filter((r) => !needle || r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle));
+      const users = (data.repository?.assignableUsers.nodes ?? []).map((u) => user(u, false));
+      const teams = (data.organization?.teams.nodes ?? []).map((t) => ({
+        id: t.id,
+        login: t.slug,
+        name: t.name,
+        team: true,
+        suggested: false,
+      }));
+      const out = new Map<string, Reviewer>();
+      for (const r of [...suggested, ...users, ...teams]) if (!out.has(r.id)) out.set(r.id, r);
+      return [...out.values()];
+    });
+  });
 
-  async function notifications(feed: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
+  const notifications = Effect.fn("GitHub.notifications")(function* (feed: { since: string | null; last_modified: string | null }) {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
       modified,
@@ -381,24 +402,27 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
       const q = new URLSearchParams({ all: "true", per_page: "50", page: String(page) });
       if (feed.since) q.set("since", feed.since);
       const conditional = page === 1 && feed.last_modified ? { "if-modified-since": feed.last_modified } : undefined;
-      const r = await client.get(`/notifications?${q.toString()}`, { headers: conditional });
+      const r = yield* client.get(`/notifications?${q.toString()}`, { headers: conditional });
       first ??= head(r.headers, r.status !== 304);
       if (r.status === 304) break;
-      const list = r.data as RawThread[];
-      for (const t of list) threads.push({ thread: t.id, item: threadItem(t), reason: t.reason, updated_at: t.updated_at });
-      if (list.length < 50) break;
+      const more = yield* decode(() => {
+        const list = r.data as RawThread[];
+        for (const t of list) threads.push({ thread: t.id, item: threadItem(t), reason: t.reason, updated_at: t.updated_at });
+        return list.length >= 50;
+      });
+      if (!more) break;
     }
     return first ?? head(new Headers(), false);
-  }
+  });
 
   return {
-    viewer: async () => (await client.query<{ viewer: { login: string } }>(VIEWER)).viewer.login,
+    viewer: () => client.query<{ viewer: { login: string } }>(VIEWER).pipe(Effect.flatMap((d) => decode(() => d.viewer.login))),
     search,
     details,
     context,
     areas,
     notifications,
-    prContext: async (id) => parsePrContext(await client.query<RawPrContext>(PR_CONTEXT, { id })),
+    prContext: (id) => client.query<RawPrContext>(PR_CONTEXT, { id }).pipe(Effect.flatMap((d) => decode(() => parsePrContext(d)))),
     branchPrs,
     lookup,
     reviewers,

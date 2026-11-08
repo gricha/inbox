@@ -1625,7 +1625,7 @@ export class Desk {
     this.approving.add(id);
     let url: string;
     try {
-      ({ url } = await this.writer!.approve(e.item.node_id, head, body));
+      ({ url } = await Effect.runPromise(this.writer!.approve(e.item.node_id, head, body))); // effect-bridge(C5b): it rejects with what the write fails with
     } catch (err) {
       throw new DeskError(502, `GitHub didn't take the approval: ${(err as Error).message}`);
     } finally {
@@ -1681,12 +1681,13 @@ export class Desk {
     try {
       let url = "";
       try {
-        if (action === "close") await (it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
-        else if (action === "draft") await w.draft(it.node_id);
-        else if (action === "ready") await w.ready(it.node_id);
-        else if (action === "merge") await w.merge(it.node_id, it.head_oid, it.merge_method!);
-        else if (action === "reopen") await w.reopen(it.node_id);
-        else ({ url } = await w.requestChanges(it.node_id, it.head_oid, body));
+        // effect-bridge(C5b): each rejects with what the write fails with
+        if (action === "close") await Effect.runPromise(it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
+        else if (action === "draft") await Effect.runPromise(w.draft(it.node_id));
+        else if (action === "ready") await Effect.runPromise(w.ready(it.node_id));
+        else if (action === "merge") await Effect.runPromise(w.merge(it.node_id, it.head_oid, it.merge_method!));
+        else if (action === "reopen") await Effect.runPromise(w.reopen(it.node_id));
+        else ({ url } = await Effect.runPromise(w.requestChanges(it.node_id, it.head_oid, body)));
       } catch (err) {
         throw new DeskError(502, `couldn't ${verb} on GitHub: ${(err as Error).message}`);
       }
@@ -2151,7 +2152,7 @@ export class Desk {
     this.approving.add(id);
     try {
       try {
-        await this.writer.requestReviews(e.item.node_id, ask.users, ask.teams);
+        await Effect.runPromise(this.writer.requestReviews(e.item.node_id, ask.users, ask.teams)); // effect-bridge(C5b): it rejects with what the write fails with
       } catch (err) {
         throw new DeskError(502, `GitHub didn't ask for the reviews: ${(err as Error).message}`);
       }
@@ -2410,7 +2411,8 @@ export class Desk {
     this.sending.add(convoId);
     let url: string;
     try {
-      ({ url } = c.kind === "thread" ? await this.writer.reply(c.id, text) : await this.writer.comment(e.item.node_id, text));
+      // effect-bridge(C5b): it rejects with what the write fails with
+      ({ url } = await Effect.runPromise(c.kind === "thread" ? this.writer.reply(c.id, text) : this.writer.comment(e.item.node_id, text)));
     } catch (err) {
       throw new DeskError(502, `GitHub didn't take the reply: ${(err as Error).message}`);
     } finally {
@@ -2443,7 +2445,7 @@ export class Desk {
     this.sending.add(id);
     let url: string;
     try {
-      ({ url } = await this.writer.comment(e.item.node_id, text));
+      ({ url } = await Effect.runPromise(this.writer.comment(e.item.node_id, text))); // effect-bridge(C5b): it rejects with what the write fails with
     } catch (err) {
       throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
     } finally {
@@ -2473,14 +2475,17 @@ export class Desk {
     const side = (s: "new" | "old") => (s === "old" ? "LEFT" : "RIGHT");
     let url: string;
     try {
-      ({ url } = await this.writer.inlineComment(e.item.node_id, head, {
-        path: at.path,
-        line: at.line,
-        side: side(at.side),
-        ...(at.start &&
-          !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
-        body: text,
-      }));
+      // effect-bridge(C5b): it rejects with what the write fails with
+      ({ url } = await Effect.runPromise(
+        this.writer.inlineComment(e.item.node_id, head, {
+          path: at.path,
+          line: at.line,
+          side: side(at.side),
+          ...(at.start &&
+            !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
+          body: text,
+        }),
+      ));
     } catch (err) {
       throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
     } finally {
@@ -2506,7 +2511,7 @@ export class Desk {
     this.approving.add(id);
     try {
       try {
-        await this.writer.ready(e.item.node_id);
+        await Effect.runPromise(this.writer.ready(e.item.node_id)); // effect-bridge(C5b): it rejects with what the write fails with
       } catch (err) {
         throw new DeskError(502, `GitHub didn't mark it ready: ${(err as Error).message}`);
       }
@@ -2518,7 +2523,7 @@ export class Desk {
       const n = users.length + teams.length;
       if (n > 0) {
         try {
-          await this.writer.requestReviews(e.item.node_id, users, teams);
+          await Effect.runPromise(this.writer.requestReviews(e.item.node_id, users, teams)); // effect-bridge(C5b): it rejects with what the write fails with
         } catch (err) {
           throw new DeskError(502, `Marked it ready, but GitHub didn't ask for the reviews: ${(err as Error).message}`);
         }
@@ -2536,7 +2541,8 @@ export class Desk {
     const e = this.pr(ref);
     if (!e.analysis.signals.me.author) throw new DeskError(409, `${e.item.id} isn't your PR`);
     const me = this.me().toLowerCase();
-    const list = await this.gh.api.reviewers(e.item.repo, e.item.number, q.trim());
+    // effect-bridge(C5b): it rejects with what GitHub fails with, a 500 as before (Upstream 502 once reviewers is an Effect)
+    const list = await Effect.runPromise(this.gh.api.reviewers(e.item.repo, e.item.number, q.trim()));
     return list.filter((r) => r.team || r.login.toLowerCase() !== me);
   }
 

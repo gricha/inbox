@@ -7,6 +7,7 @@ import type { GitHubWriter } from "../src/github/write.ts";
 import type { Inquiry } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { Effect } from "effect";
 
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 const CONTEXT =
@@ -176,11 +177,11 @@ function writer() {
   const calls: string[] = [];
   const w: GitHubWriter = {
     ...refuseWrites(),
-    ready: (pr) => (calls.push(`ready ${pr}`), Promise.resolve()),
-    close: (pr) => (calls.push(`close ${pr}`), Promise.resolve()),
-    reopen: (pr) => (calls.push(`reopen ${pr}`), Promise.resolve()),
-    draft: (pr) => (calls.push(`draft ${pr}`), Promise.resolve()),
-    comment: (pr, body) => (calls.push(`comment ${pr} ${body}`), Promise.resolve({ url: "" })),
+    ready: (pr) => Effect.sync(() => void calls.push(`ready ${pr}`)),
+    close: (pr) => Effect.sync(() => void calls.push(`close ${pr}`)),
+    reopen: (pr) => Effect.sync(() => void calls.push(`reopen ${pr}`)),
+    draft: (pr) => Effect.sync(() => void calls.push(`draft ${pr}`)),
+    comment: (pr, body) => Effect.sync(() => (calls.push(`comment ${pr} ${body}`), { url: "" })),
   };
   return { w, calls };
 }

@@ -231,6 +231,45 @@ export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput;
 
 // ---------------------------------------------------------------- GitHub
 
+// No token to send (gh isn't installed, or `gh auth token` failed: cause is its error), or GitHub refused the one a read
+// sent (a 401, after which the token is read again). The message says what to do.
+export class GitHubAuthError extends Data.TaggedError("GitHubAuthError")<{
+  readonly reason: "gh_missing" | "no_token" | "rejected";
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+// GitHub's rate limit, or the desk keeping the last of its budget: nothing more until resetAt (ISO).
+export class GitHubRateLimited extends Data.TaggedError("GitHubRateLimited")<{ readonly resetAt: string; readonly message: string }> {}
+
+// GitHub answered with an HTTP error: "GitHub HTTP 500: <the start of its body>" ("GitHub HTTP 503" alone after a read's retries).
+export class GitHubHttpError extends Data.TaggedError("GitHubHttpError")<{ readonly status: number; readonly message: string }> {}
+
+// GitHub took the query or the write and said no: "GitHub: <its messages>". types are its error types (INVALID…).
+export class GitHubGraphQLError extends Data.TaggedError("GitHubGraphQLError")<{
+  readonly message: string;
+  readonly types?: readonly string[];
+}> {}
+
+// A read got no answer (the network failed, or nothing came in 30 seconds), after its retries. cause is fetch's error.
+export class GitHubNetworkError extends Data.TaggedError("GitHubNetworkError")<{ readonly message: string; readonly cause: unknown }> {}
+
+// GitHub's answer isn't JSON or isn't the shape asked for: the parser's words, and its error as cause.
+export class GitHubBadResponse extends Data.TaggedError("GitHubBadResponse")<{ readonly message: string; readonly cause?: unknown }> {}
+
+// A write whose outcome isn't known (no answer in time, the network failed, an answer without what it wrote): it may have
+// landed, so it's never sent again by itself.
+export class GitHubWriteUncertain extends Data.TaggedError("GitHubWriteUncertain")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+export type GitHubReadError =
+  GitHubAuthError | GitHubRateLimited | GitHubHttpError | GitHubGraphQLError | GitHubNetworkError | GitHubBadResponse;
+export type GitHubWriteError = GitHubAuthError | GitHubHttpError | GitHubGraphQLError | GitHubBadResponse | GitHubWriteUncertain;
+/** @public until C5b */
+export type GitHubError = GitHubReadError | GitHubWriteError;
+
 // The pages of a PR's files were fetched across a push and disagree on its head commit.
 export class PrChangedDuringFetch extends Data.TaggedError("PrChangedDuringFetch")<{ readonly id: string }> {
   override get message(): string {

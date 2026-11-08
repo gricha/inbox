@@ -4,6 +4,8 @@ import { test } from "node:test";
 import type { Item } from "../src/types.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
+import { Effect } from "effect";
+import { GitHubRateLimited } from "../src/errors.ts";
 
 const later = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
 const iso = (h: number) => later(h).toISOString();
@@ -282,7 +284,8 @@ test("notifications: a failed refresh leaves the cursor, so the next poll handle
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.9), comments: [{ author: "dana", author_bot: false, at: iso(0.9) }] }));
   const threads = [{ thread: "t1", item: "acme/api#1", reason: "mention", updated_at: iso(0.9) }];
   const details = t.gh.details.bind(t.gh);
-  t.gh.details = () => Promise.reject(new Error("GitHub HTTP 500"));
+  // details fails only with a rate limit; anything else it dies with leaves the cursor too
+  t.gh.details = () => Effect.die(new Error("GitHub HTTP 500"));
   t.gh.threads = threads;
   await t.desk.gh.poll();
   assert.equal(t.desk.gh.feedError, "GitHub HTTP 500");
@@ -305,7 +308,8 @@ test("notifications: a rate-limit pause skips polls", async () => {
   await t.desk.gh.poll();
   assert.equal(t.gh.feedCalls.length, 0);
   assert.equal(t.desk.overview().connectors[0]?.status, "paused");
-  t.gh.notifications = () => Promise.reject(Object.assign(new Error("limited"), { name: "RateLimitedError", resetAt: iso(1) }));
+  t.gh.notifications = () =>
+    Effect.fail(new GitHubRateLimited({ resetAt: iso(1), message: `GitHub rate limited until ${iso(1)} (HTTP 403)` }));
   t.desk.gh.pausedUntil = 0;
   await t.desk.gh.poll();
   assert.equal(t.desk.gh.pausedUntil, Date.parse(iso(1)));

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createGitHub, type SearchHit } from "../src/github/index.ts";
 import type { RawNode } from "../src/github/normalize.ts";
+import { failure, run } from "./helpers/run.ts";
 
 type Body = { query: string; variables: Record<string, any> };
 const RL = { remaining: 4000, resetAt: "2099-01-01T00:00:00Z", cost: 1 };
@@ -55,7 +56,7 @@ const prs = (n: number, author = "maple", repo = "acme/widgets") =>
 test("search paginates 100 per page until no next page", async () => {
   const all = prs(250);
   const { gh, calls } = fakeGitHub((b) => searchPage(all, b));
-  const { hits, total } = await gh.search("is:pr is:open");
+  const { hits, total } = await run(gh.search("is:pr is:open"));
   assert.equal(total, 250);
   assert.equal(hits.length, 250);
   assert.deepEqual(
@@ -81,7 +82,7 @@ test("search paginates 100 per page until no next page", async () => {
 test("search stops at max", async () => {
   const all = prs(900);
   const { gh, calls } = fakeGitHub((b) => searchPage(all, b));
-  const { hits, total } = await gh.search("is:pr", 150);
+  const { hits, total } = await run(gh.search("is:pr", 150));
   assert.equal(total, 900);
   assert.equal(hits.length, 150);
   assert.deepEqual(
@@ -90,7 +91,7 @@ test("search stops at max", async () => {
   );
 
   const def = fakeGitHub((b) => searchPage(all, b));
-  assert.equal((await def.gh.search("is:pr")).hits.length, 300);
+  assert.equal((await run(def.gh.search("is:pr"))).hits.length, 300);
   assert.equal(def.calls.length, 3);
 });
 
@@ -105,7 +106,7 @@ test("search drops a node repeated across pages", async () => {
     }
     return page;
   });
-  const { hits } = await gh.search("is:pr");
+  const { hits } = await run(gh.search("is:pr"));
   assert.equal(hits.length, 149);
   assert.equal(new Set(hits.map((h) => h.node_id)).size, 149);
 });
@@ -140,7 +141,7 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
       errors: ids.includes("other3") ? [{ type: "NOT_FOUND", path: ["nodes", ids.indexOf("other3")], message: "gone" }] : undefined,
     };
   });
-  const items = await gh.details(hits, "octo-dev");
+  const items = await run(gh.details(hits, "octo-dev"));
 
   const mine = calls.filter((c) => c.query.includes("mergeable"));
   const review = calls.filter((c) => !c.query.includes("mergeable"));
@@ -163,7 +164,7 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
 
 test("details with no hits makes no calls", async () => {
   const { gh, calls } = fakeGitHub(() => ({}));
-  assert.deepEqual(await gh.details([], "octo-dev"), []);
+  assert.deepEqual(await run(gh.details([], "octo-dev")), []);
   assert.equal(calls.length, 0);
 });
 
@@ -208,7 +209,7 @@ test("context: your name, teams, affinity (distinct PRs per author), repo_prs, o
     assert.ok(all, b.variables.q);
     return searchPage(all, b);
   });
-  const ctx = await gh.context("octo-dev");
+  const ctx = await run(gh.context("octo-dev"));
   assert.equal(ctx.me, "octo-dev");
   assert.deepEqual(ctx.teams, ["platform-core", "infra"]);
   assert.deepEqual(ctx.affinity, { maple: 3, birch: 2, cedar: 1 });
@@ -265,7 +266,7 @@ test("areas: your PRs and reviews of the last 90 days with their paths, 50 a pag
       },
     };
   });
-  assert.deepEqual(await gh.areas(), { "acme/api": { "src/auth/": 180 }, "acme/web": { "app/views/": 4 } });
+  assert.deepEqual(await run(gh.areas()), { "acme/api": { "src/auth/": 180 }, "acme/web": { "app/views/": 4 } });
   assert.ok(calls.every((c) => c.query.includes("files(first: 50)") && c.variables.first <= 50));
   assert.equal(calls.length, 4); // 61 of your PRs: two pages
 });
@@ -273,7 +274,7 @@ test("areas: your PRs and reviews of the last 90 days with their paths, 50 a pag
 test("viewer and rateLimit", async () => {
   const { gh } = fakeGitHub(() => ({ data: { rateLimit: { ...RL, remaining: 4321 }, viewer: { login: "octo-dev" } } }));
   assert.equal(gh.rateLimit(), null);
-  assert.equal(await gh.viewer(), "octo-dev");
+  assert.equal(await run(gh.viewer()), "octo-dev");
   assert.deepEqual(gh.rateLimit(), { remaining: 4321, reset_at: RL.resetAt });
 });
 
@@ -302,7 +303,7 @@ test("notifications: every thread since a time, PRs and issues mapped to ids, pa
     return Promise.resolve(new Response(JSON.stringify(pages[page - 1] ?? []), { headers }));
   }) as unknown as typeof fetch;
   const gh = createGitHub({ token: "t", fetch: fake });
-  const r = await gh.notifications({ since: "2026-10-27T10:00:00Z", last_modified: "OLD" });
+  const r = await run(gh.notifications({ since: "2026-10-27T10:00:00Z", last_modified: "OLD" }));
   assert.equal(calls.length, 2);
   const q = new URL(calls[0]!.url).searchParams;
   assert.deepEqual([q.get("all"), q.get("since"), q.get("per_page")], ["true", "2026-10-27T10:00:00Z", "50"]);
@@ -326,7 +327,7 @@ test("notifications: a 304 means nothing changed and costs one call", async () =
     n++;
     return Promise.resolve(new Response(null, { status: 304, headers: { "x-poll-interval": "60" } }));
   }) as unknown as typeof fetch;
-  const r = await createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: "LM" });
+  const r = await run(createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: "LM" }));
   assert.deepEqual([r.modified, r.threads, r.poll_interval, n], [false, [], 60, 1]);
 });
 
@@ -361,7 +362,7 @@ test("branchPrs: one aliased query per 40 probes a repo; up drops a fork's PR on
     { dir: "down" as const, branch: "ref/b" },
     ...Array.from({ length: 40 }, (_, i) => ({ dir: "down" as const, branch: `x${i}` })),
   ];
-  const hits = await gh.branchPrs("getsentry/sentry", probes);
+  const hits = await run(gh.branchPrs("getsentry/sentry", probes));
   assert.deepEqual(
     hits.map((h) => h.id),
     ["getsentry/sentry#1", "getsentry/sentry#3"],
@@ -395,12 +396,14 @@ test("branchPrs: a pr probe asks for its number as an Int; a PR comes back, an i
     },
     errors: b.variables.b2 === 9 ? [{ type: "NOT_FOUND", message: "no issue or PR 9" }] : [],
   }));
-  const hits = await gh.branchPrs("GetSentry/Sentry", [
-    { dir: "pr", branch: "5" },
-    { dir: "pr", branch: "7" },
-    { dir: "pr", branch: "9" },
-    { dir: "down", branch: "main" },
-  ]);
+  const hits = await run(
+    gh.branchPrs("GetSentry/Sentry", [
+      { dir: "pr", branch: "5" },
+      { dir: "pr", branch: "7" },
+      { dir: "pr", branch: "9" },
+      { dir: "down", branch: "main" },
+    ]),
+  );
   assert.deepEqual(
     hits.map((h) => h.id),
     ["getsentry/sentry#5"],
@@ -429,7 +432,7 @@ test("lookup: one PR or issue by number, as a search hit; null when the repo or 
         : null;
     return { data: { rateLimit: RL, repository: { issueOrPullRequest: node } } };
   });
-  assert.deepEqual(await gh.lookup("getsentry/sentry", 7), {
+  assert.deepEqual(await run(gh.lookup("getsentry/sentry", 7)), {
     node_id: "I_7",
     id: "getsentry/sentry#7",
     kind: "issue",
@@ -440,8 +443,8 @@ test("lookup: one PR or issue by number, as a search hit; null when the repo or 
   });
   assert.deepEqual([calls[0]!.variables.owner, calls[0]!.variables.name, calls[0]!.variables.number], ["getsentry", "sentry", 7]);
   assert.doesNotMatch(calls[0]!.query, /mutation/);
-  assert.equal(await gh.lookup("getsentry/sentry", 8), null);
-  assert.equal(await gh.lookup("getsentry/gone", 1), null);
+  assert.equal(await run(gh.lookup("getsentry/sentry", 8)), null);
+  assert.equal(await run(gh.lookup("getsentry/gone", 1)), null);
 });
 
 test("reviewers: GitHub's suggestions that match what you typed first, then people and the org's teams, each once", async () => {
@@ -456,7 +459,7 @@ test("reviewers: GitHub's suggestions that match what you typed first, then peop
       organization: { teams: { nodes: [{ id: "T_1", slug: "data", name: "Data" }] } },
     },
   }));
-  assert.deepEqual(await gh.reviewers("acme/api", 7, "da"), [
+  assert.deepEqual(await run(gh.reviewers("acme/api", 7, "da")), [
     { id: "U_dana", login: "dana", name: "Dana Lee", team: false, suggested: true },
     { id: "U_dan", login: "dan", name: "", team: false, suggested: false },
     { id: "T_1", login: "data", name: "Data", team: true, suggested: false },
@@ -527,7 +530,7 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
       },
     },
   }));
-  const ctx = await gh.prContext("PR_1");
+  const ctx = await run(gh.prContext("PR_1"));
   assert.equal(calls.length, 1);
   assert.match(calls[0]!.query, /^query\(\$id: ID!\)/);
   assert.deepEqual(calls[0]!.variables, { id: "PR_1" });
@@ -568,4 +571,64 @@ test("prContext: a PR's threads with ids and the code they're on, reviews, comme
   assert.deepEqual(ctx.commits, [
     { oid: "abc1234aaaabbbbccccddddeeeeffff000011112", headline: "Retry 502s", at: "2026-03-01T12:00:00Z", author: "me" },
   ]);
+});
+
+test("details: a batch GitHub refuses, or answers with nodes it can't read, is skipped and logged; a rate limit fails the call", async () => {
+  const logs: string[] = [];
+  const hits = Array.from({ length: 45 }, (_, i) => hit(`other${i}`, "maple")); // batches of 20, 20 and 5
+  const node = (id: string, i: number) => ({ ...base, id, number: i + 1 });
+  const answer = (b: Body) => {
+    const ids = b.variables.ids as string[];
+    if (ids.includes("other0")) return { data: null, errors: [{ message: "Something went wrong" }] };
+    if (ids.includes("other20")) return { data: { rateLimit: RL, nodes: ids.map((id) => ({ id })) } };
+    return { data: { rateLimit: RL, nodes: ids.map(node) } };
+  };
+  const fake = ((_url: string, init: RequestInit) =>
+    Promise.resolve(new Response(JSON.stringify(answer(JSON.parse(init.body as string) as Body))))) as unknown as typeof fetch;
+  const gh = createGitHub({ token: "t", fetch: fake, log: (m) => void logs.push(m) });
+  const items = await run(gh.details(hits, "octo-dev"));
+  assert.deepEqual(
+    items.map((i) => i.node_id),
+    ["other40", "other41", "other42", "other43", "other44"],
+  );
+  assert.equal(logs.length, 2);
+  assert.ok(logs.includes("details batch of 20 failed: GitHub: Something went wrong"), logs.join("\n"));
+  assert.ok(
+    logs.some((l) => l.startsWith("details batch of 20 failed: Cannot read properties of undefined")),
+    logs.join("\n"),
+  );
+
+  const limited = ((_url: string, init: RequestInit) => {
+    const ids = (JSON.parse(init.body as string) as Body).variables.ids as string[];
+    const body = ids.includes("other20")
+      ? { data: null, errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }] }
+      : answer(JSON.parse(init.body as string) as Body);
+    return Promise.resolve(new Response(JSON.stringify(body)));
+  }) as unknown as typeof fetch;
+  const e = await failure(createGitHub({ token: "t", fetch: limited }).details(hits, "octo-dev"));
+  assert.equal(e._tag, "GitHubRateLimited");
+  assert.match(e.message, /^GitHub rate limited until .* \(API rate limit exceeded\)$/);
+});
+
+test("context: a part that fails comes back empty and is logged; when every part fails, so does the call, with the first", async () => {
+  const logs: string[] = [];
+  const teamsDown = ((_url: string, init: RequestInit) => {
+    const b = JSON.parse(init.body as string) as Body;
+    if (b.query.includes("organizations")) return Promise.resolve(new Response("oops", { status: 500 }));
+    return Promise.resolve(new Response(JSON.stringify(searchPage(prs(2, "maple"), b))));
+  }) as unknown as typeof fetch;
+  const ctx = await run(createGitHub({ token: "t", fetch: teamsDown, log: (m) => void logs.push(m) }).context("octo-dev"));
+  assert.deepEqual([ctx.teams, ctx.name, ctx.affinity], [[], "", { maple: 2 }]);
+  assert.deepEqual(logs, ["context: GitHub HTTP 500: oops"]);
+
+  const down = (() => Promise.resolve(new Response("down", { status: 500 }))) as unknown as typeof fetch;
+  const e = await failure(createGitHub({ token: "t", fetch: down }).context("octo-dev"));
+  assert.deepEqual([e._tag, e.message], ["GitHubHttpError", "GitHub HTTP 500: down"]);
+});
+
+test("notifications: an answer that isn't a list of threads is a bad response", async () => {
+  const fake = (() => Promise.resolve(new Response(JSON.stringify({ message: "Not Found" })))) as unknown as typeof fetch;
+  const e = await failure(createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: null }));
+  assert.equal(e._tag, "GitHubBadResponse");
+  assert.match(e.message, /not iterable/);
 });

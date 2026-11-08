@@ -1,8 +1,17 @@
 // Read-only GitHub transport (GraphQL queries and REST GETs): token, retries, rate-limit tracking.
 
 import { execFile } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
+import { Cache, Duration, Effect, Exit, Schedule } from "effect";
+import {
+  GitHubAuthError,
+  GitHubBadResponse,
+  GitHubGraphQLError,
+  GitHubHttpError,
+  GitHubNetworkError,
+  GitHubRateLimited,
+  type GitHubReadError,
+} from "../errors.ts";
 
 const ENDPOINT = "https://api.github.com/graphql";
 const REST = "https://api.github.com";
@@ -15,29 +24,32 @@ const execFileAsync = promisify(execFile);
 const PARTIAL = new Set(["NOT_FOUND", "FORBIDDEN"]);
 export const GH_MISSING = "GitHub CLI (gh) not found: install it from https://cli.github.com and run gh auth login, or set GITHUB_TOKEN";
 
-export async function readToken(token?: string): Promise<string> {
-  if (token) return token;
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  try {
-    return (await execFileAsync("gh", ["auth", "token"])).stdout.trim();
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    throw new Error(err.code === "ENOENT" ? GH_MISSING : `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${err.message})`, {
-      cause: e,
-    });
-  }
+export function readToken(token?: string): Effect.Effect<string, GitHubAuthError> {
+  return Effect.suspend((): Effect.Effect<string, GitHubAuthError> => {
+    if (token) return Effect.succeed(token);
+    if (process.env.GITHUB_TOKEN) return Effect.succeed(process.env.GITHUB_TOKEN);
+    return Effect.tryPromise({
+      try: (signal) => execFileAsync("gh", ["auth", "token"], { signal }),
+      catch: (cause) => {
+        const err = cause as NodeJS.ErrnoException;
+        return err.code === "ENOENT"
+          ? new GitHubAuthError({ reason: "gh_missing", message: GH_MISSING, cause })
+          : new GitHubAuthError({
+              reason: "no_token",
+              message: `no GitHub token: set GITHUB_TOKEN or run \`gh auth login\` (${err.message})`,
+              cause,
+            });
+      },
+    }).pipe(Effect.map((r) => r.stdout.trim()));
+  });
 }
 
-export class RateLimitedError extends Error {
-  resetAt: string;
-  constructor(resetAt: string, detail: string) {
-    super(`GitHub rate limited until ${resetAt} (${detail})`);
-    this.name = "RateLimitedError";
-    this.resetAt = resetAt;
-  }
-}
-
-class RetryableError extends Error {}
+// What GitHub sent can't be read, or isn't the shape the caller reads: its words, as a failure rather than a crash.
+export const decode = <A>(parse: () => A): Effect.Effect<A, GitHubBadResponse> =>
+  Effect.try({
+    try: parse,
+    catch: (cause) => new GitHubBadResponse({ message: cause instanceof Error ? cause.message : String(cause), cause }),
+  });
 
 interface GqlError {
   type?: string;
@@ -62,109 +74,158 @@ interface RestResponse {
 }
 
 export interface Client {
-  query<T>(query: string, variables?: Record<string, unknown>): Promise<T>;
+  query<T>(query: string, variables?: Record<string, unknown>): Effect.Effect<T, GitHubReadError>;
   // A REST read, e.g. "/notifications?all=true". Anything but GET is refused, so it can't mark threads read.
-  get(path: string, init?: { method?: string; headers?: Record<string, string> }): Promise<RestResponse>;
+  get(path: string, init?: { method?: string; headers?: Record<string, string> }): Effect.Effect<RestResponse, GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null;
 }
 
+const isoAt = (ms: number) => {
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+// Retry-After in seconds (or an HTTP date), else the primary limit's reset; anything unreadable waits the minute below.
 function resetFrom(h: Headers): string {
   const after = h.get("retry-after");
   const reset = h.get("x-ratelimit-reset");
-  if (after) return new Date(Date.now() + Number(after) * 1000).toISOString();
-  if (reset && h.get("x-ratelimit-remaining") === "0") return new Date(Number(reset) * 1000).toISOString();
-  return new Date(Date.now() + 60_000).toISOString(); // GitHub's advice for secondary limits: wait at least a minute
+  const at =
+    (after ? (isoAt(Date.now() + Number(after) * 1000) ?? isoAt(Date.parse(after))) : null) ??
+    (reset && h.get("x-ratelimit-remaining") === "0" ? isoAt(Number(reset) * 1000) : null);
+  return at ?? new Date(Date.now() + 60_000).toISOString(); // GitHub's advice for secondary limits: wait at least a minute
 }
+
+// What a read tries again: no answer, a gateway's 502/503/504, or GraphQL's own timeout.
+const retryable = (e: GitHubReadError) =>
+  e._tag === "GitHubNetworkError" ||
+  (e._tag === "GitHubHttpError" && RETRYABLE.has(e.status)) ||
+  (e._tag === "GitHubGraphQLError" && /timeout/i.test(e.message));
+
+// What a GraphQL answer says: its data, and the errors that fail it.
+function answerOf(text: string) {
+  const json = JSON.parse(text) as GqlResponse;
+  // Those nodes come back null and callers skip them; with no data at all, every error is fatal.
+  const fatal = (json.errors ?? []).filter((e) => !(json.data && PARTIAL.has(e.type ?? "")));
+  return {
+    data: json.data,
+    rateLimit: json.data?.rateLimit,
+    forbidden: json.data ? json.errors?.find((e) => e.type === "FORBIDDEN") : undefined,
+    failed: fatal.length > 0,
+    limited: fatal.some((e) => e.type === "RATE_LIMITED" || /rate limit/i.test(e.message)),
+    msg: fatal.map((e) => e.message).join("; "),
+    types: fatal.flatMap((e) => (e.type ? [e.type] : [])),
+  };
+}
+
+const TOKEN = "token";
 
 export function createClient(opts: ClientOptions = {}): Client {
   const doFetch = opts.fetch ?? fetch;
   const log = opts.log ?? (() => {});
   const delay = opts.retryDelayMs ?? 1000;
-  let token: Promise<string> | undefined;
   let last: { remaining: number; reset_at: string } | null = null;
+  // Read once and kept, but a failed read isn't: the next request reads it again, as it does after a 401.
+  const tokens = Effect.runSync(
+    Cache.makeWith<typeof TOKEN, string, GitHubAuthError>(() => readToken(opts.token), {
+      capacity: 1,
+      timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity),
+    }),
+  );
+  // 3 attempts, waiting delay then 3x it; the log says each retry.
+  const retrying = <A>(self: Effect.Effect<A, GitHubReadError>) =>
+    self.pipe(
+      Effect.retry(
+        Schedule.exponential(delay, 3).pipe(
+          Schedule.setInputType<GitHubReadError>(),
+          Schedule.while(({ input }) => retryable(input)),
+          Schedule.upTo({ times: RETRIES }),
+          Schedule.tap(({ input, attempt }) =>
+            Effect.sync(() => {
+              log(`${input.message}; retry ${attempt}/${RETRIES}`);
+            }),
+          ),
+        ),
+      ),
+    );
 
-  const getToken = () =>
-    (token ??= readToken(opts.token).catch((e: unknown) => {
-      token = undefined;
-      throw e;
-    }));
-
-  async function send(url: string, init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string }) {
-    const authorization = `bearer ${await getToken()}`;
-    let res: Response, text: string;
-    try {
-      res = await doFetch(url, {
-        method: init.method,
-        headers: { authorization, "user-agent": "review-desk", ...init.headers },
-        body: init.body,
-        signal: AbortSignal.timeout(30_000),
-      });
-      text = await res.text();
-    } catch (e) {
-      throw new RetryableError(`GitHub request failed: ${(e as Error).message}`);
-    }
-    if (RETRYABLE.has(res.status)) throw new RetryableError(`GitHub HTTP ${res.status}`);
+  const send = Effect.fnUntraced(function* (
+    url: string,
+    init: { method: "GET" | "POST"; headers: Record<string, string>; body?: string },
+  ): Effect.fn.Return<{ status: number; text: string; headers: Headers }, GitHubReadError> {
+    const authorization = `bearer ${yield* Cache.get(tokens, TOKEN)}`;
+    const { res, text } = yield* Effect.tryPromise({
+      try: async (signal) => {
+        const answer = await doFetch(url, {
+          method: init.method,
+          headers: { authorization, "user-agent": "review-desk", ...init.headers },
+          body: init.body,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+        });
+        return { res: answer, text: await answer.text() };
+      },
+      catch: (cause) =>
+        new GitHubNetworkError({ message: `GitHub request failed: ${cause instanceof Error ? cause.message : String(cause)}`, cause }),
+    });
+    if (RETRYABLE.has(res.status)) return yield* new GitHubHttpError({ status: res.status, message: `GitHub HTTP ${res.status}` });
     const limited =
       res.status === 429 ||
       (res.status === 403 &&
         (res.headers.has("retry-after") || res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(text)));
-    if (limited) throw new RateLimitedError(resetFrom(res.headers), `HTTP ${res.status}`);
+    if (limited) {
+      const resetAt = resetFrom(res.headers);
+      return yield* new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (HTTP ${res.status})` });
+    }
     if (res.status === 401) {
-      token = undefined; // re-read `gh auth token` next time
-      throw new Error("GitHub rejected the token (HTTP 401): run `gh auth login`");
+      yield* Cache.invalidate(tokens, TOKEN); // re-read `gh auth token` next time
+      return yield* new GitHubAuthError({ reason: "rejected", message: "GitHub rejected the token (HTTP 401): run `gh auth login`" });
     }
-    if (!res.ok && res.status !== 304) throw new Error(`GitHub HTTP ${res.status}: ${text.slice(0, 200)}`);
+    if (!res.ok && res.status !== 304)
+      return yield* new GitHubHttpError({ status: res.status, message: `GitHub HTTP ${res.status}: ${text.slice(0, 200)}` });
     return { status: res.status, text, headers: res.headers };
-  }
+  });
 
-  async function retrying<T>(fn: () => Promise<T>): Promise<T> {
-    for (let i = 0; ; i++) {
-      try {
-        return await fn();
-      } catch (e) {
-        if (!(e instanceof RetryableError) || i >= RETRIES) throw e;
-        log(`${e.message}; retry ${i + 1}/${RETRIES}`);
-        await sleep(delay * 3 ** i);
-      }
+  const ask = Effect.fnUntraced(function* <T>(body: string): Effect.fn.Return<T, GitHubReadError> {
+    const { text, headers } = yield* send(ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body });
+    const a = yield* decode(() => answerOf(text));
+    if (a.rateLimit) last = { remaining: a.rateLimit.remaining, reset_at: a.rateLimit.resetAt };
+    if (a.forbidden) log(`skipped inaccessible data: ${a.forbidden.message}`);
+    if (a.limited) {
+      const resetAt = resetFrom(headers);
+      return yield* new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (${a.msg})` });
     }
-  }
+    if (a.failed) return yield* new GitHubGraphQLError({ message: `GitHub: ${a.msg}`, ...(a.types.length > 0 && { types: a.types }) });
+    return a.data as T;
+  });
 
-  function query<T>(doc: string, variables: Record<string, unknown> = {}): Promise<T> {
-    if (/\bmutation\b/i.test(doc)) return Promise.reject(new Error("review-desk is read-only: refusing to send a mutation"));
-    // Stop before spending the last of the budget; the sync loop waits for resetAt.
-    if (last && last.remaining < MIN_REMAINING && Date.parse(last.reset_at) > Date.now()) {
-      return Promise.reject(new RateLimitedError(last.reset_at, `${last.remaining} points left`));
-    }
+  function query<T>(doc: string, variables: Record<string, unknown> = {}): Effect.Effect<T, GitHubReadError> {
+    if (/\bmutation\b/i.test(doc)) return Effect.die(new Error("review-desk is read-only: refusing to send a mutation"));
     const body = JSON.stringify({ query: doc, variables });
-    return retrying(async () => {
-      const { text, headers } = await send(ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body });
-      const json = JSON.parse(text) as GqlResponse;
-      const rl = json.data?.rateLimit;
-      if (rl) last = { remaining: rl.remaining, reset_at: rl.resetAt };
-      // Those nodes come back null and callers skip them; with no data at all, every error is fatal.
-      const errors = (json.errors ?? []).filter((e) => !(json.data && PARTIAL.has(e.type ?? "")));
-      const forbidden = json.data && json.errors?.find((e) => e.type === "FORBIDDEN");
-      if (forbidden) log(`skipped inaccessible data: ${forbidden.message}`);
-      const msg = errors.map((e) => e.message).join("; ");
-      if (errors.some((e) => e.type === "RATE_LIMITED" || /rate limit/i.test(e.message)))
-        throw new RateLimitedError(resetFrom(headers), msg);
-      if (errors.some((e) => /timeout/i.test(e.message))) throw new RetryableError(`GitHub: ${msg}`);
-      if (errors.length) throw new Error(`GitHub: ${msg}`);
-      return json.data as T;
+    return Effect.suspend((): Effect.Effect<T, GitHubReadError> => {
+      const budget = last;
+      // Stop before spending the last of the budget; the sync loop waits for resetAt.
+      if (budget && budget.remaining < MIN_REMAINING && Date.parse(budget.reset_at) > Date.now()) {
+        const message = `GitHub rate limited until ${budget.reset_at} (${budget.remaining} points left)`;
+        return Effect.fail(new GitHubRateLimited({ resetAt: budget.reset_at, message }));
+      }
+      return retrying(ask<T>(body));
     });
   }
 
-  function get(path: string, init: { method?: string; headers?: Record<string, string> } = {}): Promise<RestResponse> {
+  function get(
+    path: string,
+    init: { method?: string; headers?: Record<string, string> } = {},
+  ): Effect.Effect<RestResponse, GitHubReadError> {
     const method = init.method ?? "GET";
-    if (method.toUpperCase() !== "GET") return Promise.reject(new Error(`review-desk is read-only: refusing to send ${method}`));
-    if (!path.startsWith("/") || path.startsWith("//")) return Promise.reject(new Error(`not a GitHub API path: ${path}`));
-    return retrying(async () => {
-      const r = await send(REST + path, {
-        method: "GET",
-        headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...init.headers },
-      });
-      return { status: r.status, headers: r.headers, data: r.status === 304 ? null : (JSON.parse(r.text) as unknown) };
-    });
+    if (method.toUpperCase() !== "GET") return Effect.die(new Error(`review-desk is read-only: refusing to send ${method}`));
+    if (!path.startsWith("/") || path.startsWith("//")) return Effect.die(new Error(`not a GitHub API path: ${path}`));
+    const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...init.headers };
+    return retrying(
+      send(REST + path, { method: "GET", headers }).pipe(
+        Effect.flatMap((r) =>
+          decode(() => ({ status: r.status, headers: r.headers, data: r.status === 304 ? null : (JSON.parse(r.text) as unknown) })),
+        ),
+      ),
+    );
   }
 
   return { query, get, rateLimit: () => last };

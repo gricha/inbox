@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import type { GitHubRateLimited, GitHubReadError } from "../../src/errors.ts";
 import type { Areas, Context, Item, Reviewer } from "../../src/types.ts";
 import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
 
@@ -82,96 +84,110 @@ export class FakeGitHub implements GitHub {
     this.ctx = ctx;
   }
 
-  viewer() {
-    return Promise.resolve(this.ctx.me);
+  // Each answers when it runs, as GitHub would: a test that swaps one in returns an Effect too.
+  viewer(): Effect.Effect<string, GitHubReadError> {
+    return Effect.sync(() => this.ctx.me);
   }
 
-  search(query: string) {
-    this.searches.push(query);
-    const hits: SearchHit[] = this.route(query)
-      .map((id) => this.items.get(id))
-      .filter((it): it is Item => it !== undefined)
-      .map((it) => ({ node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author }));
-    return Promise.resolve({ hits, total: hits.length });
+  search(query: string): Effect.Effect<{ hits: SearchHit[]; total: number }, GitHubReadError> {
+    return Effect.sync(() => {
+      this.searches.push(query);
+      const hits: SearchHit[] = this.route(query)
+        .map((id) => this.items.get(id))
+        .filter((it): it is Item => it !== undefined)
+        .map((it) => ({ node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author }));
+      return { hits, total: hits.length };
+    });
   }
 
-  details(hits: SearchHit[]) {
-    this.detailCalls.push(hits.map((h) => h.id));
-    return Promise.resolve(hits.map((h) => ({ ...this.items.get(h.id)!, detail_at: this.clock().toISOString() })));
+  details(hits: SearchHit[]): Effect.Effect<Item[], GitHubRateLimited> {
+    return Effect.sync(() => {
+      this.detailCalls.push(hits.map((h) => h.id));
+      return hits.map((h) => ({ ...this.items.get(h.id)!, detail_at: this.clock().toISOString() }));
+    });
   }
 
-  context() {
-    const { refreshed_at: _, ...rest } = this.ctx;
-    return Promise.resolve(rest);
+  context(): Effect.Effect<Omit<Context, "refreshed_at">, GitHubReadError> {
+    return Effect.sync(() => {
+      const { refreshed_at: _, ...rest } = this.ctx;
+      return rest;
+    });
   }
 
-  // What areas() finds next: a test sets the directories, or an Error to fail the fetch.
-  found: Areas | Error = {};
+  // What areas() finds next: a test sets the directories, or a GitHub error to fail the fetch.
+  found: Areas | GitHubReadError = {};
   areaCalls = 0;
 
-  areas() {
-    this.areaCalls++;
-    return this.found instanceof Error ? Promise.reject(this.found) : Promise.resolve(this.found);
+  areas(): Effect.Effect<Areas, GitHubReadError> {
+    return Effect.suspend(() => {
+      this.areaCalls++;
+      return this.found instanceof Error ? Effect.fail(this.found) : Effect.succeed(this.found);
+    });
   }
 
-  notifications(opts: { since: string | null; last_modified: string | null }): Promise<NotificationPage> {
-    this.feedCalls.push(opts);
-    const threads = this.threads;
-    this.threads = [];
-    const date = this.clock().toISOString();
-    if (!threads.length && opts.last_modified)
-      return Promise.resolve({ modified: false, threads, last_modified: opts.last_modified, poll_interval: this.pollInterval, date });
-    return Promise.resolve({
-      modified: true,
-      threads,
-      last_modified: `lm-${this.feedCalls.length}`,
-      poll_interval: this.pollInterval,
-      date,
+  notifications(opts: { since: string | null; last_modified: string | null }): Effect.Effect<NotificationPage, GitHubReadError> {
+    return Effect.sync(() => {
+      this.feedCalls.push(opts);
+      const threads = this.threads;
+      this.threads = [];
+      const date = this.clock().toISOString();
+      if (!threads.length && opts.last_modified)
+        return { modified: false, threads, last_modified: opts.last_modified, poll_interval: this.pollInterval, date };
+      return { modified: true, threads, last_modified: `lm-${this.feedCalls.length}`, poll_interval: this.pollInterval, date };
     });
   }
 
   // Stack and dependency probes over the same items, as GitHub answers them; each call is logged as "repo dir branch".
   probeCalls: string[] = [];
 
-  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Promise<SearchHit[]> {
-    const hits = new Map<string, SearchHit>();
-    for (const p of probes) {
-      this.probeCalls.push(`${repo} ${p.dir} ${p.branch}`);
-      for (const it of this.items.values()) {
-        if (it.kind !== "pr" || it.repo.toLowerCase() !== repo.toLowerCase()) continue;
-        const up = p.dir === "up" && it.head_ref === p.branch && (it.head_repo ?? repo) === repo;
-        const down = p.dir === "down" && it.base === p.branch && it.state === "open";
-        const pr = p.dir === "pr" && it.number === Number(p.branch);
-        if (up || down || pr) hits.set(it.id, { node_id: it.node_id, id: it.id, kind: "pr", updated_at: it.updated_at, author: it.author });
+  branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Effect.Effect<SearchHit[], GitHubReadError> {
+    return Effect.sync(() => {
+      const hits = new Map<string, SearchHit>();
+      for (const p of probes) {
+        this.probeCalls.push(`${repo} ${p.dir} ${p.branch}`);
+        for (const it of this.items.values()) {
+          if (it.kind !== "pr" || it.repo.toLowerCase() !== repo.toLowerCase()) continue;
+          const up = p.dir === "up" && it.head_ref === p.branch && (it.head_repo ?? repo) === repo;
+          const down = p.dir === "down" && it.base === p.branch && it.state === "open";
+          const pr = p.dir === "pr" && it.number === Number(p.branch);
+          if (up || down || pr)
+            hits.set(it.id, { node_id: it.node_id, id: it.id, kind: "pr", updated_at: it.updated_at, author: it.author });
+        }
       }
-    }
-    return Promise.resolve([...hits.values()]);
+      return [...hits.values()];
+    });
   }
 
   // A PR's threads, reviews, comments and commits, by node id; empty unless a test sets one.
   contexts = new Map<string, PrContext>();
   contextCalls: string[] = [];
 
-  prContext(nodeId: string): Promise<PrContext> {
-    this.contextCalls.push(nodeId);
-    return Promise.resolve(this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [] });
+  prContext(nodeId: string): Effect.Effect<PrContext, GitHubReadError> {
+    return Effect.sync(() => {
+      this.contextCalls.push(nodeId);
+      return this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [] };
+    });
   }
 
   // Who a test offers as reviewers, and what each search asked.
   reviewerList: Reviewer[] = [];
   reviewerCalls: string[] = [];
 
-  reviewers(repo: string, number: number, q: string): Promise<Reviewer[]> {
-    this.reviewerCalls.push(`${repo}#${number} ${q}`);
-    return Promise.resolve(this.reviewerList);
+  reviewers(repo: string, number: number, q: string): Effect.Effect<Reviewer[], GitHubReadError> {
+    return Effect.sync(() => {
+      this.reviewerCalls.push(`${repo}#${number} ${q}`);
+      return this.reviewerList;
+    });
   }
 
   lookupCalls: string[] = [];
 
-  lookup(repo: string, number: number): Promise<SearchHit | null> {
-    this.lookupCalls.push(`${repo}#${number}`);
-    const it = [...this.items.values()].find((i) => i.repo.toLowerCase() === repo.toLowerCase() && i.number === number);
-    return Promise.resolve(it ? { node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author } : null);
+  lookup(repo: string, number: number): Effect.Effect<SearchHit | null, GitHubReadError> {
+    return Effect.sync(() => {
+      this.lookupCalls.push(`${repo}#${number}`);
+      const it = [...this.items.values()].find((i) => i.repo.toLowerCase() === repo.toLowerCase() && i.number === number);
+      return it ? { node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author } : null;
+    });
   }
 
   rateLimit() {

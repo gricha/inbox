@@ -1,7 +1,9 @@
 // GitHub as a connector: board searches plus details (reconcile), the notifications feed, and the snapshot diff.
 import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
-import { pool, type GitHub, type SearchHit } from "../github/index.ts";
+import { Effect } from "effect";
+import { GitHubRateLimited } from "../errors.ts";
+import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { ConnectorStatus, Item } from "../types.ts";
@@ -33,9 +35,8 @@ interface Feed {
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
 
-function isRateLimited(e: unknown): e is { resetAt: string } {
-  return (e as Error)?.name === "RateLimitedError" || (typeof e === "object" && e !== null && "resetAt" in e);
-}
+// effect-bridge(C2b): catchTag("GitHubRateLimited") replaces it once the connector is Effect code
+const isRateLimited = (e: unknown): e is GitHubRateLimited => e instanceof GitHubRateLimited;
 
 const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at: string; author: string }): SearchHit => ({
   node_id: m.node_id,
@@ -130,9 +131,9 @@ export class GitHubConnector implements Connector {
 
   async refreshContext(): Promise<void> {
     const desk = this.desk;
-    const me = desk.ctx?.me ?? (await this.api.viewer());
+    const me = desk.ctx?.me ?? (await Effect.runPromise(this.api.viewer())); // effect-bridge(C2b): it rejects with what viewer fails with
     try {
-      const c = await this.api.context(me);
+      const c = await Effect.runPromise(this.api.context(me)); // effect-bridge(C2b): it rejects with what context fails with
       desk.ctx = { ...desk.ctx, ...c, me, refreshed_at: desk.now().toISOString() };
       this.contextError = null;
     } catch (e) {
@@ -151,7 +152,7 @@ export class GitHubConnector implements Connector {
   async refreshAreas(): Promise<void> {
     const desk = this.desk;
     try {
-      const areas = await this.api.areas();
+      const areas = await Effect.runPromise(this.api.areas()); // effect-bridge(C2b): it rejects with what areas fails with
       if (desk.ctx) desk.ctx = { ...desk.ctx, areas, areas_at: desk.now().toISOString() };
     } catch (e) {
       desk.log(`areas refresh failed: ${(e as Error).message}`);
@@ -210,7 +211,7 @@ export class GitHubConnector implements Connector {
       const errors: string[] = [];
       for (const q of queries) {
         try {
-          const r = await this.api.search(q, 300);
+          const r = await Effect.runPromise(this.api.search(q, 300)); // effect-bridge(C2b): it rejects with what search fails with
           found.set(q, { ids: r.hits.map((h) => h.id), total: r.total });
           for (const h of r.hits) hits.set(h.id, h);
         } catch (e) {
@@ -242,7 +243,8 @@ export class GitHubConnector implements Connector {
         // Only on the pass it left: an item kept to show as resolved was last listed before that.
         return m && (last === null || m.last_hit_at >= last) ? [hitOf(id, m)] : [];
       });
-      const items = need.length || drops.length ? await this.api.details([...need, ...drops], desk.me()) : [];
+      // effect-bridge(C2b): it rejects with what details fails with
+      const items = need.length || drops.length ? await Effect.runPromise(this.api.details([...need, ...drops], desk.me())) : [];
       desk.ingest(this, items);
       const keep = (id: string) => {
         const m = meta.get(id);
@@ -320,15 +322,25 @@ export class GitHubConnector implements Connector {
           asked[probeKey(p)] = at.toISOString();
           repos.set(p.repo, [...(repos.get(p.repo) ?? []), p]);
         }
-        const answers = await pool([...repos], 3, async ([repo, ps]) => {
+        const probe = async (repo: string, ps: Probe[]) => {
           try {
-            return { ps, hits: await this.api.branchPrs(repo, ps) };
+            return { ps, hits: await Effect.runPromise(this.api.branchPrs(repo, ps)) }; // effect-bridge(C2b): it rejects with what branchPrs fails with
           } catch (e) {
             if (isRateLimited(e)) throw e;
             desk.log(`stack probes in ${repo} failed: ${(e as Error).message}`);
-            return { ps: [], hits: [] }; // nothing learned, so no misses
+            return { ps: [] as Probe[], hits: [] as SearchHit[] }; // nothing learned, so no misses
           }
-        });
+        };
+        // effect-bridge(C2b): 3 repos at a time, each the legacy probe above; only a rate limit gets out, and stops the rest
+        const answers = await Effect.runPromise(
+          Effect.forEach(
+            [...repos],
+            ([repo, ps]) => Effect.tryPromise({ try: () => probe(repo, ps), catch: (e) => e as GitHubRateLimited }),
+            {
+              concurrency: 3,
+            },
+          ),
+        );
         const hits = answers.flatMap((a) => a.hits);
         const found = new Set(hits.map((h) => h.id.toLowerCase()));
         for (const p of answers.flatMap((a) => a.ps))
@@ -341,7 +353,7 @@ export class GitHubConnector implements Connector {
         }
         for (const it of old) want.set(it.id, hitOf(it.id, it));
         if (!want.size) continue;
-        const items = await this.api.details([...want.values()], desk.me());
+        const items = await Effect.runPromise(this.api.details([...want.values()], desk.me())); // effect-bridge(C2b): it rejects with a rate limit
         desk.ingest(this, items, true);
         fetched += items.length;
       }
@@ -354,9 +366,9 @@ export class GitHubConnector implements Connector {
 
   // Not stored quietly like a stack's members: you added it, so its events count and the notifications feed follows it.
   async fetchOne(repo: string, number: number): Promise<string | null> {
-    const hit = await this.api.lookup(repo, number);
+    const hit = await Effect.runPromise(this.api.lookup(repo, number)); // effect-bridge(C2b): it rejects with what lookup fails with
     if (!hit) return null;
-    const [item] = await this.api.details([hit], this.desk.me());
+    const [item] = await Effect.runPromise(this.api.details([hit], this.desk.me())); // effect-bridge(C2b): it rejects with a rate limit
     if (!item) throw new Error(`couldn't fetch ${hit.id} from GitHub; try again`); // details skips a batch that failed
     this.desk.ingest(this, [item]);
     return item.id;
@@ -368,7 +380,7 @@ export class GitHubConnector implements Connector {
     const m = desk.store.itemMeta().get(id);
     if (!m || this.stopped || Date.now() < this.pausedUntil) return;
     try {
-      const items = await this.api.details([hitOf(id, m)], desk.me());
+      const items = await Effect.runPromise(this.api.details([hitOf(id, m)], desk.me())); // effect-bridge(C2b): it rejects with a rate limit
       if (this.stopped) return;
       desk.ingest(this, items);
       desk.synced();
@@ -390,7 +402,8 @@ export class GitHubConnector implements Connector {
     const first = this.feed.since === null;
     try {
       const since = this.feed.since ?? new Date(started - HOUR).toISOString();
-      const page = await this.api.notifications({ since, last_modified: this.feed.last_modified });
+      // effect-bridge(C2b): it rejects with what notifications fails with
+      const page = await Effect.runPromise(this.api.notifications({ since, last_modified: this.feed.last_modified }));
       this.feed.interval = page.poll_interval;
       this.feedError = null;
       if (!page.modified) return;
@@ -418,7 +431,8 @@ export class GitHubConnector implements Connector {
         }
       }
       // Before the cursor moves: if this fails, the next poll sees these threads again.
-      const items = refresh.size ? await this.api.details([...refresh.values()], desk.me()) : [];
+      // effect-bridge(C2b): it rejects with a rate limit
+      const items = refresh.size ? await Effect.runPromise(this.api.details([...refresh.values()], desk.me())) : [];
       // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
       const now = Date.parse(page.date ?? "") || started;
       this.feed.since = new Date(now - 60_000).toISOString();

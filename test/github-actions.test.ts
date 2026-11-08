@@ -8,6 +8,7 @@ import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { Effect } from "effect";
 
 const READY = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
 const DESK = "http://localhost:47823";
@@ -22,40 +23,41 @@ function fakeWriter(t: () => Awaited<ReturnType<typeof setup>>) {
   };
   const writer: GitHubWriter = {
     ...refuseWrites(),
-    close: (pr) => {
-      calls.push(["close", pr]);
-      land(pr, { state: "closed", closed_at: hoursAgo(0) });
-      return Promise.resolve();
-    },
-    closeIssue: (issue) => {
-      calls.push(["closeIssue", issue]);
-      land(issue, { state: "closed", closed_at: hoursAgo(0) });
-      return Promise.resolve();
-    },
-    reopen: (pr) => {
-      calls.push(["reopen", pr]);
-      land(pr, { state: "open", closed_at: null });
-      return Promise.resolve();
-    },
-    draft: (pr) => {
-      calls.push(["draft", pr]);
-      land(pr, { draft: true });
-      return Promise.resolve();
-    },
-    ready: (pr) => {
-      calls.push(["ready", pr]);
-      land(pr, { draft: false });
-      return Promise.resolve();
-    },
-    merge: (pr, head, method) => {
-      calls.push(["merge", pr, head, method]);
-      land(pr, { state: "merged", closed_at: hoursAgo(0), merged_by: "me" });
-      return Promise.resolve();
-    },
-    requestChanges: (pr, commit, body) => {
-      calls.push(["requestChanges", pr, commit, body]);
-      return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-2" });
-    },
+    close: (pr) =>
+      Effect.sync(() => {
+        calls.push(["close", pr]);
+        land(pr, { state: "closed", closed_at: hoursAgo(0) });
+      }),
+    closeIssue: (issue) =>
+      Effect.sync(() => {
+        calls.push(["closeIssue", issue]);
+        land(issue, { state: "closed", closed_at: hoursAgo(0) });
+      }),
+    reopen: (pr) =>
+      Effect.sync(() => {
+        calls.push(["reopen", pr]);
+        land(pr, { state: "open", closed_at: null });
+      }),
+    draft: (pr) =>
+      Effect.sync(() => {
+        calls.push(["draft", pr]);
+        land(pr, { draft: true });
+      }),
+    ready: (pr) =>
+      Effect.sync(() => {
+        calls.push(["ready", pr]);
+        land(pr, { draft: false });
+      }),
+    merge: (pr, head, method) =>
+      Effect.sync(() => {
+        calls.push(["merge", pr, head, method]);
+        land(pr, { state: "merged", closed_at: hoursAgo(0), merged_by: "me" });
+      }),
+    requestChanges: (pr, commit, body) =>
+      Effect.sync(() => {
+        calls.push(["requestChanges", pr, commit, body]);
+        return { url: "https://github.com/acme/api/pull/1#pullrequestreview-2" };
+      }),
   };
   return { writer, calls };
 }
@@ -212,10 +214,7 @@ test("a second write while the first's refresh still reads GitHub is refused, no
   const held = new Promise<void>((r) => {
     release = r;
   });
-  t.gh.details = async (hits) => {
-    await held;
-    return details(hits);
-  };
+  t.gh.details = (hits) => Effect.promise(() => held).pipe(Effect.andThen(details(hits)));
   const first = t.desk.githubAct("web#3", "close");
   await new Promise((r) => {
     setImmediate(r);
@@ -252,7 +251,7 @@ test("a refused write says why, and nothing is logged; an agent's /api/act can't
 test("a write whose refresh fails isn't offered again until a read shows the change", async (c) => {
   const { t, w } = await withWriter(c, [myPr(4, READY)]);
   const details = t.gh.details.bind(t.gh);
-  t.gh.details = () => Promise.reject(new Error("GitHub is down"));
+  t.gh.details = () => Effect.die(new Error("GitHub is down")); // details fails only with a rate limit, which pauses instead
   await t.desk.githubAct("web#4", "close");
   assert.equal(t.desk.item("web#4").card.actions, undefined, "the snapshot still says open, but nothing is offered");
   await assert.rejects(t.desk.githubAct("web#4", "merge"), /409|can't/);

@@ -9,6 +9,7 @@ import { createApp } from "../src/server.ts";
 import { setup } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { GitHubGraphQLError } from "../src/errors.ts";
 
 const HEAD = "a".repeat(40);
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
@@ -17,11 +18,12 @@ async function inline(c: TestContext, fail?: string) {
   const calls: [string, string, InlineThread][] = [];
   const writer: GitHubWriter = {
     ...refuseWrites("not here"),
-    inlineComment: (pr, commit, thread) => {
-      if (fail) return Promise.reject(new Error(fail));
-      calls.push([pr, commit, thread]);
-      return Promise.resolve({ url: "https://github.com/acme/web/pull/4#discussion_r1" });
-    },
+    inlineComment: (pr, commit, thread) =>
+      Effect.suspend(() => {
+        if (fail) return Effect.fail(new GitHubGraphQLError({ message: fail }));
+        calls.push([pr, commit, thread]);
+        return Effect.succeed({ url: "https://github.com/acme/web/pull/4#discussion_r1" });
+      }),
   };
   const t = await setup(
     [makeItem({ number: 4, repo: "acme/web", author: "dana", review_requests: [{ reviewer: "me", type: "user", codeowner: false }] })],

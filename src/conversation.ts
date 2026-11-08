@@ -172,7 +172,7 @@ export class Conversations {
     const it = this.desk.snapshot().entries.get(id)!.item;
     const got = this.fetched.get(id);
     if (got?.at === it.updated_at) return got.ctx;
-    const ctx = this.desk.gh.api.prContext(it.node_id);
+    const ctx = Effect.runPromise(this.desk.gh.api.prContext(it.node_id)); // effect-bridge(C4a): a Cache of the Effect replaces this promise
     this.fetched.set(id, { at: it.updated_at, ctx });
     // A failed fetch is tried again next time.
     ctx.catch(() => {

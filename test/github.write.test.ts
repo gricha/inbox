@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createClient as createDeskClient } from "../src/client.ts";
 import { createClient } from "../src/github/client.ts";
 import { ALLOWED, createWriter } from "../src/github/write.ts";
+import { Effect } from "effect";
+import { failure, run } from "./helpers/run.ts";
 
 function fakeFetch(reply: { status?: number; body: unknown }) {
   const calls: { body: string; headers: Record<string, string> }[] = [];
@@ -69,12 +71,12 @@ test("a reply and a comment send their mutation once and log it", async () => {
       logs.push(m);
     },
   });
-  assert.deepEqual(await w.reply("PRRT_1", "Fixed in abc"), { url: "https://github.com/a/b/pull/1#c1" });
+  assert.deepEqual(await run(w.reply("PRRT_1", "Fixed in abc")), { url: "https://github.com/a/b/pull/1#c1" });
   const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
   assert.equal(sent.query, ALLOWED.reply);
   assert.deepEqual(sent.variables, { thread: "PRRT_1", body: "Fixed in abc" });
   const g = fakeFetch({ body: { data: { addComment: { commentEdge: { node: { url: "https://github.com/a/b/pull/1#c2" } } } } } });
-  assert.deepEqual(await createWriter({ token: "t", fetch: g.fetch }).comment("PR_1", "Thanks"), {
+  assert.deepEqual(await run(createWriter({ token: "t", fetch: g.fetch }).comment("PR_1", "Thanks")), {
     url: "https://github.com/a/b/pull/1#c2",
   });
   assert.equal((JSON.parse(g.calls[0]!.body) as { query: string }).query, ALLOWED.comment);
@@ -101,16 +103,17 @@ test("an inline comment is one COMMENT review with one thread, pinned to the com
     },
   });
   const thread = { path: "src/a.ts", line: 9, side: "RIGHT" as const, startLine: 7, startSide: "RIGHT" as const, body: "Nit" };
-  assert.deepEqual(await w.inlineComment("PR_1", "abc", thread), { url });
+  assert.deepEqual(await run(w.inlineComment("PR_1", "abc", thread)), { url });
   assert.equal(f.calls.length, 1);
   const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
   assert.equal(sent.query, ALLOWED.inline_comment);
   assert.deepEqual(sent.variables, { pr: "PR_1", commit: "abc", thread });
   assert.deepEqual(logs, ["github write: inline_comment PR_1 at abc"]);
   const empty = fakeFetch({ body: { data: { addPullRequestReview: null } } });
-  await assert.rejects(
-    createWriter({ token: "t", fetch: empty.fetch }).inlineComment("PR_1", "abc", thread),
-    /answered without the comment/,
+  const e = await failure(createWriter({ token: "t", fetch: empty.fetch }).inlineComment("PR_1", "abc", thread));
+  assert.deepEqual(
+    [e._tag, e.message],
+    ["GitHubWriteUncertain", "GitHub answered without the comment: check the PR before you send it again"],
   );
 });
 
@@ -124,7 +127,7 @@ test("ready sends its mutation once and logs it", async () => {
       logs.push(m);
     },
   });
-  await w.ready("PR_1");
+  await run(w.ready("PR_1"));
   const sent = f.calls.map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
   assert.deepEqual(
     sent.map((x) => [x.query, x.variables]),
@@ -143,7 +146,7 @@ test("approve sends the allowlisted mutation once, pinned to the commit, with it
       logs.push(m);
     },
   });
-  assert.deepEqual(await w.approve("PR_node", "abc123", "LGTM"), { url: "https://github.com/a/b/pull/1#r1" });
+  assert.deepEqual(await run(w.approve("PR_node", "abc123", "LGTM")), { url: "https://github.com/a/b/pull/1#r1" });
   assert.equal(f.calls.length, 1);
   const sent = JSON.parse(f.calls[0]!.body) as { query: string; variables: unknown };
   assert.equal(sent.query, ALLOWED.approve);
@@ -162,12 +165,12 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
       logs.push(m);
     },
   });
-  await w.close("PR_1");
-  await w.draft("PR_1");
-  await w.merge("PR_1", "h1", "SQUASH");
-  await w.reopen("PR_1");
-  assert.deepEqual(await w.requestChanges("PR_1", "h1", "Add a test"), { url: "https://github.com/a/b/pull/1#r2" });
-  await w.closeIssue("I_1");
+  await run(w.close("PR_1"));
+  await run(w.draft("PR_1"));
+  await run(w.merge("PR_1", "h1", "SQUASH"));
+  await run(w.reopen("PR_1"));
+  assert.deepEqual(await run(w.requestChanges("PR_1", "h1", "Add a test")), { url: "https://github.com/a/b/pull/1#r2" });
+  await run(w.closeIssue("I_1"));
   const sent = f.calls.map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
   assert.deepEqual(
     sent.map((x) => [x.query, x.variables]),
@@ -192,15 +195,40 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
 
 test("GitHub's errors come back as errors, and nothing is retried", async () => {
   const gql = fakeFetch({ body: { errors: [{ message: "Can not approve your own pull request" }] } });
-  await assert.rejects(createWriter({ token: "t", fetch: gql.fetch }).approve("PR_x", "c"), /Can not approve your own pull request/);
+  const no = await failure(createWriter({ token: "t", fetch: gql.fetch }).approve("PR_x", "c"));
+  assert.deepEqual([no._tag, no.message], ["GitHubGraphQLError", "GitHub: Can not approve your own pull request"]);
   const down = fakeFetch({ status: 502, body: { message: "bad gateway" } });
-  await assert.rejects(createWriter({ token: "t", fetch: down.fetch }).approve("PR_x", "c"), /HTTP 502/);
+  const http = await failure(createWriter({ token: "t", fetch: down.fetch }).approve("PR_x", "c"));
+  assert.deepEqual([http._tag, http.message], ["GitHubHttpError", 'GitHub HTTP 502: {"message":"bad gateway"}']);
   assert.equal(down.calls.length, 1);
+});
+
+test("a write with no answer (a timeout, the network) may have landed: it's uncertain, in fetch's words, and never sent again", async () => {
+  for (const cause of [new DOMException("The operation was aborted due to timeout", "TimeoutError"), new TypeError("fetch failed")]) {
+    let calls = 0;
+    const fetch: typeof globalThis.fetch = () => {
+      calls++;
+      return Promise.reject(cause);
+    };
+    const e = await failure(createWriter({ token: "t", fetch }).comment("PR_1", "Thanks"));
+    assert.deepEqual([e._tag, e.message], ["GitHubWriteUncertain", cause.message]);
+    assert.equal(e._tag === "GitHubWriteUncertain" && e.cause, cause);
+    assert.equal(calls, 1);
+  }
+});
+
+test("a write is an Effect: nothing is sent until it runs", async () => {
+  const f = fakeFetch({ body: { data: {} } });
+  const ready = createWriter({ token: "t", fetch: f.fetch }).ready("PR_1");
+  assert.equal(f.calls.length, 0);
+  await run(ready);
+  assert.equal(f.calls.length, 1);
 });
 
 test("the read client still refuses mutations, and neither the CLI's nor MCP's client can write to GitHub", async () => {
   const f = fakeFetch({ body: { data: {} } });
-  for (const doc of Object.values(ALLOWED)) await assert.rejects(createClient({ token: "t", fetch: f.fetch }).query(doc), /read-only/);
+  for (const doc of Object.values(ALLOWED))
+    await assert.rejects(Effect.runPromise(createClient({ token: "t", fetch: f.fetch }).query(doc)), /read-only/);
   assert.equal(f.calls.length, 0);
   const api = createDeskClient(() => new Response("{}"));
   assert.ok(!Object.keys(api).some((k) => /approve|send|merge|ready|close|draft|reopen|changes|github/i.test(k)));

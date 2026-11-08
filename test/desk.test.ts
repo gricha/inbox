@@ -9,6 +9,8 @@ import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { Effect } from "effect";
+import { GitHubAuthError, GitHubHttpError } from "../src/errors.ts";
 
 test("first run writes a config with a space for the busiest org", async () => {
   const t = await setup([]);
@@ -268,7 +270,7 @@ test("your areas: fetched on the first sync, then daily; a failure keeps them an
 
   // The daily context refresh keeps them; the failed areas fetch does too.
   t.setNow(later(25));
-  t.gh.found = new Error("GitHub HTTP 502");
+  t.gh.found = new GitHubHttpError({ status: 502, message: "GitHub HTTP 502" });
   await t.desk.sync();
   assert.equal(t.gh.areaCalls, 2);
   assert.equal(t.desk.ctx?.refreshed_at, later(25).toISOString());
@@ -408,7 +410,8 @@ test("when every search fails, the last sync time stays and the error is shown",
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
   const before = t.desk.syncedAt;
-  t.gh.search = () => Promise.reject(new Error("GitHub rejected the token (HTTP 401): run `gh auth login`"));
+  t.gh.search = () =>
+    Effect.fail(new GitHubAuthError({ reason: "rejected", message: "GitHub rejected the token (HTTP 401): run `gh auth login`" }));
   t.setNow(new Date(NOW.getTime() + 3_600_000));
   await t.desk.sync();
   assert.equal(t.desk.syncedAt, before);
@@ -552,10 +555,11 @@ test("synced_at is when the sync finished; hits keep its start time", async () =
   const t = await setup([reviewAsk(1)]);
   const done = new Date(NOW.getTime() + 60_000);
   const search = t.gh.search.bind(t.gh);
-  t.gh.search = (q: string) => {
-    t.setNow(done);
-    return search(q);
-  };
+  t.gh.search = (q: string) =>
+    Effect.suspend(() => {
+      t.setNow(done);
+      return search(q);
+    });
   await t.desk.sync();
   assert.equal(t.desk.syncedAt, done.toISOString());
   assert.equal(t.desk.store.get("synced_at"), done.toISOString());

@@ -16,6 +16,8 @@ import {
 import type { Bucket, Card, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { Effect } from "effect";
+import { GitHubHttpError } from "../src/errors.ts";
 
 // A PR on branch b<n> of acme/api, based on `on`: a branch, or the number of the PR below it.
 const pr = (n: number, on: string | number, o: Partial<Item> = {}) =>
@@ -656,10 +658,11 @@ test("pr probes: at most 20 a sync, and a miss isn't asked again for a day; a fa
   };
   const real = t.gh.branchPrs.bind(t.gh);
   let failed = 0;
-  t.gh.branchPrs = () => {
-    failed++;
-    return Promise.reject(new Error("GitHub HTTP 500"));
-  };
+  t.gh.branchPrs = () =>
+    Effect.suspend(() => {
+      failed++;
+      return Effect.fail(new GitHubHttpError({ status: 500, message: "GitHub HTTP 500" }));
+    });
   await t.desk.sync();
   t.gh.branchPrs = real;
   assert.ok(failed > 0);

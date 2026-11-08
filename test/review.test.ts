@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
-import { ClaudeApiError, ClaudeNotLoggedIn, CommandOutputTooLarge, NOT_LOGGED_IN } from "../src/errors.ts";
+import { ClaudeApiError, ClaudeNotLoggedIn, CommandOutputTooLarge, GitHubGraphQLError, NOT_LOGGED_IN } from "../src/errors.ts";
 import { GH_MISSING } from "../src/github/client.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
@@ -1499,12 +1499,13 @@ function fakeWriter(landed = () => {}) {
   let fail = false;
   const writer: GitHubWriter = {
     ...refuseWrites("approve tests only approve"),
-    approve: (pr, commit, body) => {
-      calls.push({ pr, commit, body });
-      if (fail) return Promise.reject(new Error("Resource not accessible"));
-      landed();
-      return Promise.resolve({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
-    },
+    approve: (pr, commit, body) =>
+      Effect.suspend(() => {
+        calls.push({ pr, commit, body });
+        if (fail) return Effect.fail(new GitHubGraphQLError({ message: "Resource not accessible" }));
+        landed();
+        return Effect.succeed({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" });
+      }),
   };
   return {
     writer,
@@ -1580,14 +1581,16 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
   const calls: string[] = [];
   const details = t.gh.details.bind(t.gh);
   const search = t.gh.search.bind(t.gh);
-  t.gh.details = (hits) => {
-    calls.push(`details ${hits.map((h) => h.id).join(" ")}`);
-    return details(hits);
-  };
-  t.gh.search = (q) => {
-    calls.push("search");
-    return search(q);
-  };
+  t.gh.details = (hits) =>
+    Effect.suspend(() => {
+      calls.push(`details ${hits.map((h) => h.id).join(" ")}`);
+      return details(hits);
+    });
+  t.gh.search = (q) =>
+    Effect.suspend(() => {
+      calls.push("search");
+      return search(q);
+    });
 
   await t.desk.approve("api#1", "h1");
   await flush();
