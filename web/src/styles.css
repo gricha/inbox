@@ -184,6 +184,168 @@
   color-scheme: dark;
 }
 
+/* Solarized: Ethan Schoonover's cream base3 and blue-grey base tones, its accents darkened to read as text. */
+:root[data-theme="solarized"] {
+  --paper: #f6efdc;
+  --sheet: #fdf6e3;
+  --wash: #eee8d5;
+  --ink: #073642;
+  --ink-2: #2c4a53;
+  --pencil: #4f646b;
+  --faint: #859492;
+  --rule: #e4dcc4;
+  --rule-strong: #d8cfb5;
+  --control: #7f8e8e;
+  --sel: #ebe4ce;
+  --side: #eee8d5;
+  --side-on: #e3dcc5;
+  --side-hover: #e9e2cd;
+  --red: #bf2b28;
+  --red-wash: #f8e2d5;
+  --amber: #7f6100;
+  --amber-wash: #f3e6c2;
+  --green: #4d6e00;
+  --go: #4f7300;
+  --on-go: #fdf6e3;
+  --accent: #1e74b2;
+  --accent-ink: #1b679e;
+  --accent-wash: #dfe9ee;
+  --on-accent: #fdf6e3;
+  --shadow: 0 1px 2px rgb(7 54 66 / 7%), 0 10px 30px rgb(7 54 66 / 13%);
+
+  color-scheme: light;
+}
+
+/* Catppuccin Latte: its base, mantle and crust panes, with mauve for the call to action. */
+:root[data-theme="catppuccin"] {
+  --paper: #e6e9ef;
+  --sheet: #eff1f5;
+  --wash: #dce0e8;
+  --ink: #2f3142;
+  --ink-2: #4c4f69;
+  --pencil: #5c5f77;
+  --faint: #8c8fa1;
+  --rule: #d4d8e1;
+  --rule-strong: #c4c8d3;
+  --control: #8c8fa1;
+  --sel: #d8dae1;
+  --side: #dce0e8;
+  --side-on: #ccd0da;
+  --side-hover: #d4d8e1;
+  --red: #bf0e34;
+  --red-wash: #ecdae2;
+  --amber: #875612;
+  --amber-wash: #ece1d2;
+  --green: #2e741f;
+  --go: #2c7120;
+  --on-go: #eff1f5;
+  --accent: #7d33e0;
+  --accent-ink: #7c24ed;
+  --accent-wash: #e3dbf4;
+  --on-accent: #eff1f5;
+  --shadow: 0 1px 2px rgb(47 49 66 / 7%), 0 10px 30px rgb(47 49 66 / 14%);
+
+  color-scheme: light;
+}
+
+/* Sentry: the brand's aubergine black and Blurple, with its product dark theme's text. */
+:root[data-theme="sentry"] {
+  --paper: #181225;
+  --sheet: #1f1633;
+  --wash: #291f40;
+  --ink: #e7e5ea;
+  --ink-2: #c4c0cb;
+  --pencil: #9d95b0;
+  --faint: #726889;
+  --rule: #2c2347;
+  --rule-strong: #362d59;
+  --control: #74698d;
+  --sel: #2a2042;
+  --side: #130e1e;
+  --side-on: #2a2142;
+  --side-hover: #1d162c;
+  --red: #f78c95;
+  --red-wash: #3a1c33;
+  --amber: #e8b660;
+  --amber-wash: #35282f;
+  --green: #9cd88a;
+  --go: #24835e;
+  --on-go: #fff;
+  --accent: #7553ff;
+  --accent-ink: #b4a4ff;
+  --accent-wash: #342670;
+  --on-accent: #fff;
+  --shadow: 0 1px 2px rgb(10 6 20 / 40%), 0 12px 32px rgb(10 6 20 / 55%);
+
+  color-scheme: dark;
+}
+
+/* Gruvbox: morhetz's warm retro dark, its bg0 sheet on a warm near-black with bg1 and bg2 rules, its bright red and blue
+   (the call to action), and gruvbox-material's softer yellow and green: the bright ones glare, and its olive Approve sat
+   beside the amber as one yellow. */
+:root[data-theme="gruvbox"] {
+  --paper: #1f1d1c;
+  --sheet: #282828;
+  --wash: #32302f;
+  --ink: #ebdbb2;
+  --ink-2: #d5c4a1;
+  --pencil: #a89984;
+  --faint: #7c6f64;
+  --rule: #3c3836;
+  --rule-strong: #504945;
+  --control: #7c6f64;
+  --sel: #363230;
+  --side: #1b1918;
+  --side-on: #32302f;
+  --side-hover: #242322;
+  --red: #fb5f4d;
+  --red-wash: #362321;
+  --amber: #d8a657;
+  --amber-wash: #3a3020;
+  --green: #a9b665;
+  --go: #8a9a4a;
+  --on-go: #1d2021;
+  --accent: #83a598;
+  --accent-ink: #96b6a9;
+  --accent-wash: #2b3a36;
+  --on-accent: #1d2021;
+  --shadow: 0 1px 2px rgb(13 12 11 / 35%), 0 12px 32px rgb(13 12 11 / 50%);
+
+  color-scheme: dark;
+}
+
+/* Tokyo Night: folke's and enkia's deep indigo night, its own fg, blue and soft accents. */
+:root[data-theme="tokyo-night"] {
+  --paper: #15161f;
+  --sheet: #1a1b26;
+  --wash: #1f2335;
+  --ink: #c0caf5;
+  --ink-2: #a9b1d6;
+  --pencil: #838cb4;
+  --faint: #565f89;
+  --rule: #24283b;
+  --rule-strong: #30354d;
+  --control: #5d6690;
+  --sel: #24283b;
+  --side: #11121b;
+  --side-on: #202330;
+  --side-hover: #181a27;
+  --red: #f7768e;
+  --red-wash: #33202c;
+  --amber: #e0af68;
+  --amber-wash: #342b1e;
+  --green: #9ece6a;
+  --go: #3f7f35;
+  --on-go: #fff;
+  --accent: #4a6bc9;
+  --accent-ink: #7aa2f7;
+  --accent-wash: #232b45;
+  --on-accent: #fff;
+  --shadow: 0 1px 2px rgb(12 14 20 / 40%), 0 12px 32px rgb(12 14 20 / 55%);
+
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -681,6 +843,18 @@ p {
   background: var(--sheet);
 }
 
+/* Solarized's teal ink mixed into its cream comes out a cool sage: its base2 instead, as warm as the sidebar's. */
+:root[data-theme="solarized"] .lines {
+  --row-hover: #f6efdb;
+  --row-sel: #ebe3cb;
+}
+
+/* Gruvbox's cream ink mixed into its neutral bg0 comes out a faint olive: its own warm --sel, as the sidebar's. */
+:root[data-theme="gruvbox"] .lines {
+  --row-hover: #2e2c2b;
+  --row-sel: #363230;
+}
+
 .lines > * + * {
   border-top: 1px solid var(--rule);
 }
@@ -838,6 +1012,10 @@ p {
 
 .inq-option:hover {
   background: color-mix(in oklab, var(--ink) 3.5%, var(--sheet));
+}
+
+:root[data-theme="solarized"] .inq-option:hover {
+  background: #f6efdb;
 }
 
 .inq-options > li:first-child .inq-option {
@@ -4350,6 +4528,46 @@ p {
   overflow: hidden;
   border-radius: 8px;
   box-shadow: 0 0 0 1px var(--rule);
+}
+
+/* Where a theme's green or red mixed into its sheet comes out grey, muddy or louder than the other, its changed lines get
+   their own tint. Pierre's --diffs-bg-*-override (and its -number- one, for the line numbers) is not the band but what it
+   mixes into the sheet, in lab: 20% of it on a dark theme's line and 15% on its numbers, 12% and 9% on a light one's. So
+   each target is solved for the band wanted (lab()'s a and b are unbounded, so the band comes out exact); an -emphasis-
+   override, the changed words' box on top, is the colour itself. */
+
+/* Sentry: a deep teal (#1b302c, its numbers #1c2c29) beside a calm plum (#41283b), not a grey on the aubergine. */
+:root[data-theme="sentry"] .rv-diff {
+  --diffs-bg-addition-override: lab(51.4% -91.7 70);
+  --diffs-bg-addition-number-override: lab(55.3% -112.1 98.8);
+  --diffs-bg-deletion-override: #cd7f57;
+  --diffs-bg-deletion-number-override: #cd7f57;
+}
+
+/* Gruvbox: gruvbox-material's olive and a dark rust (#34371f, #3a2423), calm enough that the syntax colours, its red
+   keywords too, read on them. */
+:root[data-theme="gruvbox"] .rv-diff {
+  --diffs-bg-addition-override: lab(46.8% -24 73);
+  --diffs-bg-addition-number-override: lab(46.8% -24 73);
+  --diffs-bg-addition-emphasis-override: #3f4222;
+  --diffs-bg-deletion-override: lab(20.7% 53.4 25.9);
+  --diffs-bg-deletion-number-override: lab(20.7% 53.4 25.9);
+  --diffs-bg-deletion-emphasis-override: #442826;
+}
+
+/* Tokyo Night: its lime on the indigo sheet comes out a grey khaki, so a green (#263a2e) as strong as the rose. */
+:root[data-theme="tokyo-night"] .rv-diff {
+  --diffs-bg-addition-override: #2ecc40;
+  --diffs-bg-addition-number-override: #2ecc40;
+  --diffs-bg-deletion-emphasis-override: rgb(247 118 142 / 14%);
+}
+
+/* Solarized: its yellow-green (#e4e9d1) instead of a khaki on the cream, and a calmer peach (#f8e3d6) beside it. */
+:root[data-theme="solarized"] .rv-diff {
+  --diffs-bg-addition-override: #1b8a56;
+  --diffs-bg-addition-number-override: #1b8a56;
+  --diffs-bg-deletion-override: #c6567c;
+  --diffs-bg-deletion-number-override: #c6567c;
 }
 
 /* The review on its way: its header (when its row isn't at hand), actions, a file's name and code, the sidebar's files. */

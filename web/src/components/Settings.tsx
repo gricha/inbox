@@ -10,7 +10,7 @@ import { withCode } from "./Review.tsx";
 import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
 import { acceleratorOf, authProblem, draftOf, valueOf } from "../view.ts";
-import { applyTheme, desktop, savedTheme, THEMES, type ThemeId } from "../theme.ts";
+import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // Resolves to the value the server saved, or null when it was rejected (the row shows why).
@@ -519,10 +519,15 @@ function Appearance() {
               setTheme(t);
             }}
           >
-            {THEMES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
-              </option>
+            <option value="system">System</option>
+            {THEME_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.themes.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>

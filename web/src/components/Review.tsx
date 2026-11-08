@@ -53,6 +53,7 @@ import {
   type Acted,
   type Section,
 } from "../view.ts";
+import "../diffThemes.ts";
 import { diffTheme } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
@@ -113,9 +114,8 @@ function sideSaved(): boolean {
   return innerWidth > NARROW;
 }
 
-// Pierre draws the diff in a shadow root; its light or dark follows the app's theme (diffTheme).
+// Pierre draws the diff in a shadow root; its syntax colours and light or dark follow the app's theme (diffOptions).
 const DIFF: FileDiffOptions<Meta, undefined> = {
-  theme: { light: "pierre-light", dark: "pierre-dark" },
   diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word-alt",
@@ -124,9 +124,12 @@ const DIFF: FileDiffOptions<Meta, undefined> = {
   disableFileHeader: true,
   lineHoverHighlight: "disabled",
   // A band that starts or ends the file sits on the frame's edge; its words start where the line numbers do (2ch of the code).
+  // A removed line's dashed bar shows its number's band between the dashes: Pierre fills them with --diffs-bg-deletion, which
+  // is a theme's raw override (what it mixes into the sheet, styles.css) where one is set, so the dashes ran into a solid stripe.
   unsafeCSS: `[data-separator-first] { margin-top: calc(-1 * var(--diffs-gap-block, var(--diffs-gap-fallback))); }
 [data-separator-last] { margin-bottom: calc(-1 * max(0px, var(--diffs-gap-block, var(--diffs-gap-fallback)) - var(--diffs-scrollbar-gutter))); }
 [data-separator=line-info-basic] [data-separator-content] { padding-inline: calc(1.2 * var(--diffs-font-size)); }
+[data-indicators=bars] [data-line-type=change-deletion][data-column-number]::before { background-image: linear-gradient(0deg, transparent 50%, var(--diffs-deletion-base) 50%); }
 [data-utility-button] { background-color: var(--ink-2); color: var(--sheet); }
 :host { --diffs-selection-base: var(--pencil); }
 [data-annotation-content] { display: flex; flex-direction: column; }`,
@@ -136,8 +139,8 @@ const DIFF: FileDiffOptions<Meta, undefined> = {
 const OPTIONS = new Map<string, FileDiffOptions<Meta, undefined>>();
 function diffOptions(): FileDiffOptions<Meta, undefined> {
   const t = diffTheme();
-  const o = OPTIONS.get(t) ?? { ...DIFF, themeType: t };
-  OPTIONS.set(t, o);
+  const o = OPTIONS.get(t.id) ?? { ...DIFF, theme: t.theme, themeType: t.type };
+  OPTIONS.set(t.id, o);
   return o;
 }
 

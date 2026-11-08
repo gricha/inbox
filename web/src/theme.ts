@@ -1,18 +1,18 @@
+import { THEMES, themeOf, type Theme, type ThemeId as Named } from "../../src/themes.ts";
 import type { DesktopBridge } from "../../src/types.ts";
 
 // The theme is this device's (not a desk setting): the desktop app keeps it, a browser keeps it in its storage, and
-// index.html applies it before the first paint.
-export const THEMES = [
-  { id: "system", label: "System", diff: "system" },
-  { id: "light", label: "Light", diff: "light" },
-  { id: "dark", label: "Dark", diff: "dark" },
-  { id: "sand", label: "Sand", diff: "light" },
-  { id: "slate", label: "Slate", diff: "dark" },
-] as const;
-export type ThemeId = (typeof THEMES)[number]["id"];
+// index.html applies it before the first paint. The themes themselves are src/themes.ts's.
+export type ThemeId = "system" | Named;
 const KEY = "desk.theme"; // index.html reads it too
 
-const known = (t: unknown): t is ThemeId => THEMES.some((x) => x.id === t);
+// Settings → Appearance's choices after System: the light themes, then the dark, each in the list's order (Light and Dark first).
+export const THEME_GROUPS: { label: string; themes: Theme[] }[] = [
+  { label: "Light", themes: THEMES.filter((t) => t.scheme === "light") },
+  { label: "Dark", themes: THEMES.filter((t) => t.scheme === "dark") },
+];
+
+const known = (t: unknown): t is ThemeId => t === "system" || themeOf(t) !== undefined;
 export const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 function stored(): ThemeId | null {
@@ -47,8 +47,12 @@ export function adoptTheme(): void {
   if (desktop?.setTheme && desktop.theme === null && t) desktop.setTheme(t).catch(() => {});
 }
 
-// The diff's own light or dark, following the theme on screen.
-export function diffTheme(): "system" | "light" | "dark" {
-  const t = document.documentElement.dataset.theme;
-  return known(t) ? THEMES.find((x) => x.id === t)!.diff : "system";
+const SYSTEM_DIFF = { light: themeOf("light")!.diff, dark: themeOf("dark")!.diff };
+
+// The diff's syntax colours and its light or dark, following the theme on screen: System pairs Light's and Dark's.
+export function diffTheme(): { id: string; type: "system" | "light" | "dark"; theme: { light: string; dark: string } } {
+  const t = themeOf(document.documentElement.dataset.theme);
+  return t
+    ? { id: t.id, type: t.scheme, theme: { ...SYSTEM_DIFF, [t.scheme]: t.diff } }
+    : { id: "system", type: "system", theme: SYSTEM_DIFF };
 }

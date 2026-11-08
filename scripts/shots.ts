@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Route } from "playwright-core";
+import { THEMES } from "../src/themes.ts";
 import type { Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -1567,8 +1568,9 @@ const SHOTS: Shot[] = [
       await at("#/settings/notify")(page);
     },
   },
-  // Each theme picked on this device, over the system's light or dark: the queue, a row selected, and a review.
-  ...["light", "dark", "sand", "slate"].flatMap((id): Shot[] => [
+  // Each theme picked on this device, over the system's light or dark: the queue, a row selected, a review, the chat, Merging
+  // and Settings. `--only theme-<id>` shoots one theme's.
+  ...THEMES.map((t) => t.id).flatMap((id): Shot[] => [
     {
       name: `theme-${id}`,
       go: async (page) => {
@@ -1604,6 +1606,16 @@ const SHOTS: Shot[] = [
         await page.locator(".lane [data-id]").nth(1).locator(".row-main").focus();
       },
       after: systemTheme,
+    },
+    // Settings' switches, fields and editor, in the theme's controls.
+    {
+      name: `theme-${id}-settings`,
+      go: async (page) => {
+        await pickTheme(id)(page);
+        await at("#/settings/policy")(page);
+      },
+      after: systemTheme,
+      sizes: ["wide"],
     },
   ]),
   // The More menu open in a review.
