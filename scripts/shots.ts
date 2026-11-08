@@ -125,6 +125,14 @@ const hold = async (page: Page, glob: string) => {
   });
   await page.reload();
 };
+// Nothing in the Inbox: its one line, and no count beside Inbox in the sidebar.
+const emptyInbox = async (page: Page, name: string) => {
+  const seen = await page.evaluate<{ line: string | null; count: string | null }>(`({
+    line: document.querySelector(".queue-empty")?.textContent ?? null,
+    count: document.querySelector(".side-item .side-count")?.textContent ?? null,
+  })`);
+  if (seen.line !== "Nothing needs you right now." || seen.count) failures.push(`${name}: the empty Inbox reads ${JSON.stringify(seen)}`);
+};
 // The queue in a fresh page: nothing a changed answer left behind stands in for the next shot's.
 const fresh = async (page: Page) => {
   await page.evaluate(`location.hash = "#/"`);
@@ -636,11 +644,14 @@ const SHOTS: Shot[] = [
     // Nothing in the queue: one line, with no 0.
     name: "queue-empty",
     go: async (page) => {
+      await at("#/")(page);
       await queueAs((q) => {
         q.sections.now = [];
         q.sections.today = [];
+        q.inquiries = [];
       })(page);
       await top(page);
+      await emptyInbox(page, "queue-empty");
     },
     after: async (page) => {
       await unroute(page);
@@ -667,12 +678,17 @@ const SHOTS: Shot[] = [
     // Nothing on the queue yet, one on its way.
     name: "queue-empty-reviewing",
     go: async (page) => {
+      await at("#/")(page);
       await queueAs((q) => {
         q.sections.now = [];
         q.sections.today = [];
+        q.inquiries = [];
         q.reviewing = 1;
       })(page);
       await top(page);
+      await emptyInbox(page, "queue-empty-reviewing");
+      const [empty, reviewing] = await tops(page, [".queue-empty", ".queue-reviewing"]);
+      if (!(reviewing! > empty!)) failures.push("queue-empty-reviewing: the reviewing line isn't under the empty line");
     },
     after: async (page) => {
       await unroute(page);
@@ -2238,10 +2254,15 @@ const SHOTS: Shot[] = [
     // Your agent off: letting it run without asking would do nothing, so that row isn't drawn; Run your agent is.
     name: "settings-agent-off",
     go: async (page) => {
+      // Off as the desk would say it everywhere: the overview too, so no Ask your agent shows.
+      await overviewAs((o) => {
+        o.agent = false;
+      })(page);
       await settingsAs((v) => {
         v.values["agent.coordinator"] = false;
       })(page);
       await at("#/settings/agent")(page);
+      if (await page.locator(".side-ask").count()) failures.push("settings-agent-off: Ask your agent shows with your agent off");
       if (await page.locator('[id="row-agent.coordinator_bypass"]').count())
         failures.push("settings-agent-off: Let your agent run without asking is drawn while your agent is off");
       if (!(await page.locator('[id="row-agent.coordinator"]').isVisible())) failures.push("settings-agent-off: no Run your agent row");
@@ -2625,7 +2646,10 @@ const SHOTS: Shot[] = [
     // Done first, then what isn't a write, then the writes under "On GitHub".
     name: "more-review",
     go: async (page) => {
+      await at("#/")(page); // opened from the Inbox at every size, so they're one screen
       await review("acme/worker#875", [MORE])(page);
+      const back = (await page.locator(".page-head .back").textContent())?.trim();
+      if (back !== "Inbox") failures.push(`more-review: the review's way back reads ${JSON.stringify(back)}`);
       const items = await moreItems(page);
       const head = items.indexOf("#On GitHub");
       if (items[0] !== "Done" || head < 1 || head === items.length - 1 || items[head - 1] !== "Open on GitHub")
@@ -2711,14 +2735,34 @@ const SHOTS: Shot[] = [
       },
       after: systemTheme,
     },
-    // Settings' switches, fields and editor, in the theme's controls.
+    // Settings' controls in the theme's colours: from GitHub's select on, a switch on and one off, the filled Connect and the
+    // Inbox's numbers.
     {
       name: `theme-${id}-settings`,
       go: async (page) => {
+        await settingsAs((v) => {
+          v.values["agent.coordinator_bypass"] = false;
+        })(page);
         await pickTheme(id)(page);
-        await at("#/settings/agent")(page);
+        await at("#/settings/github")(page);
+        await page.locator("#s-agent .s-status .act.primary").waitFor();
+        await page.evaluate(
+          `scrollTo(0, document.getElementById("row-github.resolve_on_others_approval").getBoundingClientRect().top + scrollY - 64)`,
+        );
+        const seen = await page.evaluate<{ off: boolean; select: boolean; number: boolean }>(`(() => {
+          const shown = (el) => { const r = el?.getBoundingClientRect(); return !!r && r.top >= 52 && r.bottom <= innerHeight; };
+          return {
+            off: [...document.querySelectorAll(".settings .switch")].some((s) => !s.checked && shown(s)),
+            select: [...document.querySelectorAll(".settings select")].some(shown),
+            number: [...document.querySelectorAll(".settings .input.num")].some(shown),
+          };
+        })()`);
+        if (!seen.off || !seen.select || !seen.number) failures.push(`theme-${id}-settings: on screen ${JSON.stringify(seen)}`);
       },
-      after: systemTheme,
+      after: async (page) => {
+        await systemTheme(page);
+        await unsettle(page);
+      },
       sizes: ["wide"],
     },
   ]),
@@ -2904,6 +2948,19 @@ try {
         await page.addInitScript(
           `window.desktop = { platform: "darwin", version: "0.0.0", status: async () => window.__deskStatus ?? { hotkey: { accelerator: "Control+Alt+D", ok: true }, open_at_login: false, source: null } };`,
         );
+        // The window's traffic lights as the app places them (electron/main.ts: 18,19), drawn only, so the shots show the row
+        // the owner sees beside the mark.
+        await page.addInitScript(`document.addEventListener("DOMContentLoaded", () => {
+          const lights = document.createElement("div");
+          lights.setAttribute("aria-hidden", "true");
+          lights.style.cssText = "position:fixed;left:18px;top:19px;z-index:2147483647;display:flex;gap:8px;pointer-events:none";
+          for (const c of ["#ff5f57", "#febc2e", "#28c840"]) {
+            const d = document.createElement("span");
+            d.style.cssText = "width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 0.5px rgb(0 0 0 / 18%);background:" + c;
+            lights.append(d);
+          }
+          document.documentElement.append(lights);
+        });`);
       }
       page.on("console", (m) => {
         if (m.type() === "error") failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
