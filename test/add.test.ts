@@ -7,7 +7,7 @@ import type { AiReview } from "../src/types.ts";
 import { createApp } from "../src/server.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 // Adding starts Claude's read: never the real claude, even when run without the no-agent preload.
 process.env.DESK_CLAUDE = "/nonexistent/claude";
@@ -65,7 +65,7 @@ test("adding a PR the desk doesn't hold fetches it, pins it on the main page and
   await t.desk.sync();
   assert.equal(t.desk.snapshot().entries.has(ID), false, "no search returns it");
 
-  const r = await t.desk.add("https://github.com/acme/other/pull/9/files");
+  const r = await run(t.desk.add("https://github.com/acme/other/pull/9/files"));
   assert.deepEqual(t.gh.lookupCalls, [ID]);
   assert.equal(r.item.card.id, ID);
   assert.equal(r.item.state.pinned, true);
@@ -106,7 +106,7 @@ test("an added PR stays while it's pinned and open: refreshed each sync, never p
   c.after(t.cleanup);
   await t.desk.sync();
   t.gh.items.set(ID, unknown());
-  await t.desk.add(ID);
+  await run(t.desk.add(ID));
 
   t.setNow(new Date(NOW.getTime() + 15 * DAY));
   const before = t.gh.detailCalls.length;
@@ -174,9 +174,9 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   const card = (id: string) => runSync(t.desk.item(id)).card;
   const asked = card("acme/api#1").why;
 
-  const first = await t.desk.add("api#1", "  the retry budget\nchanged\u202e  ", "seer retry fix");
-  await t.desk.add(ID, "needs your call on the token transport", "seer write gate");
-  await t.desk.add("api#2", "your sign-off on the schema", "");
+  const first = await run(t.desk.add("api#1", "  the retry budget\nchanged\u202e  ", "seer retry fix"));
+  await run(t.desk.add(ID, "needs your call on the token transport", "seer write gate"));
+  await run(t.desk.add("api#2", "your sign-off on the schema", ""));
   assert.deepEqual(card("acme/api#1").handoff, { why: "the retry budget changed", from: "seer retry fix" }, "one plain line");
   assert.equal(card("acme/api#1").why, asked, "the rule's why stays its own");
   assert.deepEqual(card(ID).handoff, { why: "needs your call on the token transport", from: "seer write gate" });
@@ -190,9 +190,9 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   assert.equal(card("acme/api#1").handoff?.why, "the retry budget changed");
 
   // Each add's why goes with its own pin: a later one, or yours without a why, stands until it's undone.
-  const second = await t.desk.add("api#1", "now it's a schema change too", "seer retry fix");
+  const second = await run(t.desk.add("api#1", "now it's a schema change too", "seer retry fix"));
   assert.equal(card("acme/api#1").handoff?.why, "now it's a schema change too");
-  const bare = await t.desk.add("api#1");
+  const bare = await run(t.desk.add("api#1"));
   assert.equal(card("acme/api#1").handoff, undefined);
   runSync(t.desk.undo(bare.undo_seq));
   runSync(t.desk.undo(second.undo_seq));
@@ -205,7 +205,7 @@ test("an agent's hand-off says why it's on your desk, beside the rule's why, unt
   runSync(t.desk.act(ID, "pin"));
   assert.equal(card(ID).handoff, undefined);
 
-  await assert.rejects(t.desk.add("api#2", " \n "), /the why is empty/);
+  await assert.rejects(run(t.desk.add("api#2", " \n ")), /the why is empty/);
   const app = createApp(t.desk, 47823);
   const res = await app.request("http://127.0.0.1:47823/api/add", {
     method: "POST",
@@ -225,7 +225,7 @@ test("adding a done, snoozed or muted item brings it back, and its one undo puts
     runSync(t.desk.act("api#1", action));
     assert.equal(onDesk(), false, action);
     const before = runSync(t.desk.item("api#1")).state;
-    const r = await t.desk.add("acme/api#1");
+    const r = await run(t.desk.add("acme/api#1"));
     assert.equal(r.item.card.status, "active", action);
     assert.ok(onDesk(), `${action}: on the main page`);
     runSync(t.desk.undo(r.undo_seq));
@@ -246,7 +246,7 @@ test("what you pin yourself is on your desk at once, reviewed or not; an agent's
   assert.equal(runSync(t.desk.item("api#2")).held, false);
 
   t.gh.items.set(ID, unknown());
-  await t.desk.add(ID, "your call on the token transport", "seer write gate");
+  await run(t.desk.add(ID, "your call on the token transport", "seer write gate"));
   assert.equal(onDesk(ID), false);
   assert.equal(runSync(t.desk.item(ID)).held, true);
 });
@@ -257,6 +257,6 @@ test("adding several PRs at once starts their AI reviews two at a time, as the b
   c.after(t.cleanup);
   await t.desk.sync();
   for (const n of [9, 10, 11]) t.gh.items.set(`acme/other#${n}`, makeItem({ repo: "acme/other", number: n, author: "dave" }));
-  await Promise.all([9, 10, 11].map((n) => t.desk.add(`acme/other#${n}`)));
+  await Promise.all([9, 10, 11].map((n) => run(t.desk.add(`acme/other#${n}`))));
   assert.equal(t.desk.generating.size, 2);
 });

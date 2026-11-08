@@ -8,7 +8,7 @@ import type { Inquiry } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 const CONTEXT =
@@ -197,16 +197,16 @@ test("what the owner does in the desk takes it off the desk at once: ready for r
   c.after(t.cleanup);
   await t.desk.sync();
   const status = (ref: string) => runSync(t.desk.item(ref)).card.status;
-  await t.desk.markReady("web#3");
+  await run(t.desk.markReady("web#3"));
   assert.equal(status("web#3"), "done", "marked ready: it waits on reviewers now");
-  await t.desk.githubAct("web#4", "close");
+  await run(t.desk.githubAct("web#4", "close"));
   assert.equal(status("web#4"), "done");
-  await t.desk.githubAct("web#5", "draft");
+  await run(t.desk.githubAct("web#5", "draft"));
   assert.equal(status("web#5"), "active", "a draft is still yours to finish");
   const it = t.gh.items.get("acme/web#4")!;
   t.gh.items.set(it.id, { ...it, state: "closed", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
   await t.desk.sync();
-  await t.desk.githubAct("web#4", "reopen");
+  await run(t.desk.githubAct("web#4", "reopen"));
   assert.equal(status("web#4"), "active", "reopened: back on the desk");
 });
 
@@ -278,12 +278,12 @@ test("reopening what a close took off the desk puts back what it was before: sno
   c.after(t.cleanup);
   await t.desk.sync();
   runSync(t.desk.act("web#4", "snooze", "2d"));
-  await t.desk.githubAct("web#4", "close");
+  await run(t.desk.githubAct("web#4", "close"));
   assert.equal(runSync(t.desk.item("web#4")).card.status, "done");
   const it = t.gh.items.get("acme/web#4")!;
   t.gh.items.set(it.id, { ...it, state: "closed", updated_at: new Date(Date.parse(it.updated_at) + 60_000).toISOString() });
   await t.desk.sync();
-  await t.desk.githubAct("web#4", "reopen");
+  await run(t.desk.githubAct("web#4", "reopen"));
   assert.equal(runSync(t.desk.item("web#4")).card.status, "snoozed");
 });
 

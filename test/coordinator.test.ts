@@ -1070,7 +1070,7 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
     "acme/api#9",
     makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"], url: "https://github.com/acme/api/issues/9" }),
   );
-  await t.desk.add("acme/api#9");
+  await run(t.desk.add("acme/api#9"));
   runSync(t.desk.act("web#4", "inflight"));
   await t.merged("acme/web#5");
   const about = async (item_id: string) => {
@@ -1127,7 +1127,7 @@ test(
     const t = await coordinated(c);
     const api = asking(t);
     t.gh.items.set("acme/api#9", makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"] }));
-    await t.desk.add("acme/api#9");
+    await run(t.desk.add("acme/api#9"));
     const lines = { path: "src/plan.ts", line: 23, side: "new", head: "a".repeat(40) };
     const refused = async (body: Record<string, unknown>) => {
       const res = await api.ask({ text: "why?", ...body });

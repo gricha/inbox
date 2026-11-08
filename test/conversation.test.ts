@@ -512,7 +512,7 @@ test("an issue on your desk takes your comment, from the desk's window only, and
   c.after(t.cleanup);
   await t.desk.sync();
   t.gh.items.set("acme/api#9", issue);
-  await t.desk.add("acme/api#9");
+  await run(t.desk.add("acme/api#9"));
   const app = createApp(t.desk, 47823);
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/api#9")}/comment`, {

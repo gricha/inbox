@@ -11,7 +11,7 @@ import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
 import { GitHubGraphQLError } from "../src/errors.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 function fakeWriter(refuse = false, refuseReviews = false) {
   const calls: (string | string[])[][] = [];
@@ -442,7 +442,7 @@ test("a review request GitHub refuses after Ready for review says it's ready any
   c.after(t.cleanup);
   await t.desk.sync();
   await assert.rejects(
-    t.desk.markReady("web#3", { users: ["U_x"], teams: [] }),
+    run(t.desk.markReady("web#3", { users: ["U_x"], teams: [] })),
     (e: Error & { status: number }) =>
       e.status === 502 && e.message === "Marked it ready, but GitHub didn't ask for the reviews: Could not resolve to a node",
   );
@@ -470,7 +470,7 @@ test("reviewers to pick from are GitHub's for your own PR, without you; anyone e
     ["dana", "backend"],
   );
   assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 da"]);
-  await assert.rejects(t.desk.reviewers("api#1", ""), (e: Error & { status: number }) => e.status === 409);
+  await assert.rejects(run(t.desk.reviewers("api#1", "")), (e: Error & { status: number }) => e.status === 409);
 });
 
 test("a refused Ready for review says why, and nothing is logged", async (c) => {
@@ -478,7 +478,7 @@ test("a refused Ready for review says why, and nothing is logged", async (c) => 
   const t = await setup([myPr(3, { ci: "green", draft: true })], { desk: { writer: w.writer } });
   c.after(t.cleanup);
   await t.desk.sync();
-  await assert.rejects(t.desk.markReady("web#3"), /GitHub didn't mark it ready: Resource not accessible/);
+  await assert.rejects(run(t.desk.markReady("web#3")), /GitHub didn't mark it ready: Resource not accessible/);
   const t2 = await setup([myPr(3, { ci: "green", draft: true })]);
   c.after(t2.cleanup);
   await t2.desk.sync();
@@ -655,7 +655,7 @@ test("on a bot's PR opened for you, your own review doesn't count as anyone revi
     "acme/web#8",
     makeItem({ number: 8, repo: "acme/web", author: "junior[bot]", author_bot: true, via: "@me", ci: "green", reviews: [mine] }),
   );
-  await t.desk.add("acme/web#8");
+  await run(t.desk.add("acme/web#8"));
   const s = runSync(t.desk.item("web#8")).signals;
   assert.deepEqual([s.me.author, s.pr.unasked], [true, true]);
 });

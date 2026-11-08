@@ -9,7 +9,7 @@ import { Desk } from "../src/desk.ts";
 import { GitHubAuthError, GitHubRateLimited } from "../src/errors.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
-import { failure, runSync } from "./helpers/run.ts";
+import { failure, run, runSync } from "./helpers/run.ts";
 
 const ID = "acme/other#9";
 const refused = () => new GitHubAuthError({ reason: "rejected", message: "GitHub rejected the token (HTTP 401): run `gh auth login`" });
@@ -19,7 +19,7 @@ test("every search failing fails the pass with GitHubSearchesFailed, after it ke
   c.after(t.cleanup);
   await t.desk.sync();
   t.gh.items.set(ID, makeItem({ repo: "acme/other", number: 9, author: "dave" }));
-  await t.desk.add(ID); // pinned: no search returns it, so each pass refreshes it
+  await run(t.desk.add(ID)); // pinned: no search returns it, so each pass refreshes it
   const err = refused();
   t.gh.search = () => Effect.fail(err);
   t.setNow(new Date(NOW.getTime() + 4 * 60_000));
@@ -69,7 +69,7 @@ test("fetchOne fails with GitHubNotFetched when details skips the item; add answ
   const e = await failure(t.desk.gh.fetchOne("acme/other", 9));
   assert.equal(e._tag, "GitHubNotFetched");
   assert.equal(e.message, "couldn't fetch acme/other#9 from GitHub; try again");
-  await assert.rejects(t.desk.add(ID), (err: Error & { status: number }) => err.status === 502 && err.message === e.message);
+  await assert.rejects(run(t.desk.add(ID)), (err: Error & { status: number }) => err.status === 502 && err.message === e.message);
   assert.equal(t.desk.snapshot().entries.has(ID), false);
 });
 

@@ -328,7 +328,7 @@ test("refs fail with tagged errors: an ambiguous one has its candidates, one the
     ["AmbiguousRef", '"#1" matches 2 items', ["#1", ["acme/api#1", "acme/web#1"]]],
   );
   await assert.rejects(
-    t.desk.add("#1"),
+    run(t.desk.add("#1")),
     (e: { _tag: string; candidates: string[] }) => e._tag === "AmbiguousRef" && e.candidates.length === 2,
   );
   assert.equal(runSync(t.desk.itemId("acme/gone#5")), "acme/gone#5", "an exact id: its events outlive it");
@@ -408,8 +408,8 @@ test("the main page's parts: a hand-back, what waits on your review, the rest th
   await t.desk.sync();
   t.gh.items.set("acme/api#9", makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"] }));
   t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
-  await t.desk.add("acme/api#9");
-  await t.desk.add("acme/api#6"); // someone else's PR nobody asked you to review
+  await run(t.desk.add("acme/api#9"));
+  await run(t.desk.add("acme/api#6")); // someone else's PR nobody asked you to review
   runSync(t.desk.act("web#5", "inflight"));
   runSync(t.desk.handBack("web#5", "needs a product call on the retry budget"));
   const f = runSync(t.desk.focus());
@@ -1256,7 +1256,7 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
   c.after(t.cleanup);
   await t.desk.sync();
   const coordinator = "Review Desk coordinator";
-  await t.desk.add("acme/web#1", "waits on web#100: no review in 3 days", coordinator);
+  await run(t.desk.add("acme/web#1", "waits on web#100: no review in 3 days", coordinator));
   let q = runSync(t.desk.queue());
   assert.equal(
     q.sections.today.some((x) => x.id === "acme/web#1"),
@@ -1268,8 +1268,8 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
     [{ why: "waits on web#100: no review in 3 days", from: coordinator }],
   );
   t.gh.items.set("acme/api#6", makeItem({ number: 6, author: "carol" }));
-  await t.desk.add("acme/api#6", "carol's fix for the flaky retry", coordinator);
-  await t.desk.add("acme/web#2", "needs your call on the retry budget", "seer fix");
+  await run(t.desk.add("acme/api#6", "carol's fix for the flaky retry", coordinator));
+  await run(t.desk.add("acme/web#2", "needs your call on the retry budget", "seer fix"));
   q = runSync(t.desk.queue());
   assert.deepEqual(
     q.sections.today.map((x) => [x.id, x.board, x.why]),
@@ -1286,7 +1286,7 @@ test("a coordinator's desk_add on no other board stays on Added after you act on
   c.after(t.cleanup);
   t.gh.items.set("acme/api#77", makeItem({ number: 77, author: "carol" }));
   await t.desk.sync();
-  await t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Review Desk coordinator");
+  await run(t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Review Desk coordinator"));
   runSync(t.desk.act("api#77", "done"));
   let q = runSync(t.desk.queue());
   assert.deepEqual(

@@ -11,7 +11,7 @@ import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { makeItem, NOW } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run as runFx, runSync } from "./helpers/run.ts";
 
 async function until(cond: () => boolean): Promise<void> {
   for (let i = 0; i < 500 && !cond(); i++)
@@ -140,7 +140,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   await t.desk.sync();
   t.gh.items.set("acme/other#9", makeItem({ repo: "acme/other", number: 9, kind: "issue", author: "dave", title: "Crash on start" }));
   runSync(t.desk.act("api#2", "done"));
-  await t.desk.add("api#3");
+  await runFx(t.desk.add("api#3"));
   const five = t.gh.items.get("acme/api#5")!;
   t.gh.items.set(five.id, { ...five, state: "closed", updated_at: new Date(Date.parse(five.updated_at) + 60_000).toISOString() });
   await t.desk.sync();

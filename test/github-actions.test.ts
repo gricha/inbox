@@ -9,7 +9,7 @@ import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 const READY = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
 const DESK = "http://localhost:47823";
@@ -156,13 +156,13 @@ test("close goes through the write client once, from the desk's window only; the
 
 test("merge is pinned to the head the desk judged ready, with the repo's merge method, and resolves the PR", async (c) => {
   const { t, w } = await withWriter(c, [myPr(4, READY), myPr(6, { ...READY, mergeable: "conflict" })]);
-  await assert.rejects(t.desk.githubAct("web#6", "merge"), (e: Error & { status: number }) => e.status === 409);
+  await assert.rejects(run(t.desk.githubAct("web#6", "merge")), (e: Error & { status: number }) => e.status === 409);
   await assert.rejects(
-    t.desk.githubAct("web#4", "merge", { head: "h3" }),
+    run(t.desk.githubAct("web#4", "merge", { head: "h3" })),
     (e: Error & { status: number }) => e.status === 409 && e.message.includes("new commits since you opened it"),
   );
   assert.deepEqual(w.calls, [], "a push since the review showed it merges nothing");
-  await t.desk.githubAct("web#4", "merge", { head: "h4" });
+  await run(t.desk.githubAct("web#4", "merge", { head: "h4" }));
   assert.deepEqual(w.calls, [["merge", "PR_acme/web_4", "h4", "SQUASH"]]);
   assert.equal(runSync(t.desk.item("web#4")).card.resolved, "merged");
   assert.deepEqual(writes(t, "acme/web#4"), ["merge"]);
@@ -170,7 +170,7 @@ test("merge is pinned to the head the desk judged ready, with the repo's merge m
 
 test("draft sends your open PR back to draft, and its card shows it as one; only merge and a change request are pinned", async (c) => {
   const { t, w } = await withWriter(c, [myPr(3, { ci: "green" })]);
-  await t.desk.githubAct("web#3", "draft", { head: "a push ago" });
+  await run(t.desk.githubAct("web#3", "draft", { head: "a push ago" }));
   assert.deepEqual(w.calls, [["draft", "PR_acme/web_3"]]);
   const card = runSync(t.desk.item("web#3")).card;
   assert.deepEqual([card.draft, card.cta, card.actions], [true, "ready", ["close", "ready"]]);
@@ -179,7 +179,7 @@ test("draft sends your open PR back to draft, and its card shows it as one; only
 test("ready in the More menu marks your draft ready, red CI or not, and it leaves your desk as a does", async (c) => {
   const { t, w } = await withWriter(c, [myPr(3, { ci: "red", draft: true })]);
   assert.equal(runSync(t.desk.item("web#3")).card.cta, "ready", "the row offers it too");
-  await t.desk.githubAct("web#3", "ready");
+  await run(t.desk.githubAct("web#3", "ready"));
   assert.deepEqual(w.calls, [["ready", "PR_acme/web_3"]]);
   const d = runSync(t.desk.item("web#3"));
   assert.deepEqual([d.item.draft, d.card.status, d.card.actions], [false, "done", ["close", "draft"]]);
@@ -187,14 +187,14 @@ test("ready in the More menu marks your draft ready, red CI or not, and it leave
 
 test("request changes needs what you wrote, is pinned to the commit you read, and never on your own PR", async (c) => {
   const { t, w } = await withWriter(c, [reviewAsk(1, { head_oid: "h1" }), myPr(3, { ci: "green" })]);
-  await assert.rejects(t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "  " }), /say what needs to change/);
-  await assert.rejects(t.desk.githubAct("web#3", "request_changes", { head: "abc", body: "Fix it" }), /can't request changes/);
+  await assert.rejects(run(t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "  " })), /say what needs to change/);
+  await assert.rejects(run(t.desk.githubAct("web#3", "request_changes", { head: "abc", body: "Fix it" })), /can't request changes/);
   await assert.rejects(
-    t.desk.githubAct("api#1", "request_changes", { body: "Fix it" }),
+    run(t.desk.githubAct("api#1", "request_changes", { body: "Fix it" })),
     (e: Error & { status: number }) => e.status === 400,
     "pinned to the commit you read, like approve",
   );
-  const r = await t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "Please add a test\n" });
+  const r = await run(t.desk.githubAct("api#1", "request_changes", { head: "h1", body: "Please add a test\n" }));
   assert.equal(r.url, "https://github.com/acme/api/pull/1#pullrequestreview-2");
   assert.deepEqual(w.calls, [["requestChanges", "PR_acme/api_1", "h1", "Please add a test"]]);
   assert.deepEqual(writes(t, "acme/api#1"), ["request_changes"]);
@@ -204,7 +204,7 @@ test("a bot's PR whose untrusted via line names you gets no close, draft or merg
   const { t, w } = await withWriter(c, [reviewAsk(9, { author: "junior[bot]", author_bot: true, via: "@me", ...READY })]);
   assert.equal(runSync(t.desk.item("api#9")).signals.me.author, true, "the rules still call it yours");
   assert.equal(runSync(t.desk.item("api#9")).card.actions, undefined);
-  await assert.rejects(t.desk.githubAct("api#9", "merge"), (e: Error & { status: number }) => e.status === 409);
+  await assert.rejects(run(t.desk.githubAct("api#9", "merge")), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(w.calls, []);
 });
 
@@ -216,11 +216,11 @@ test("a second write while the first's refresh still reads GitHub is refused, no
     release = r;
   });
   t.gh.details = (hits) => Effect.promise(() => held).pipe(Effect.andThen(details(hits)));
-  const first = t.desk.githubAct("web#3", "close");
+  const first = run(t.desk.githubAct("web#3", "close"));
   await new Promise((r) => {
     setImmediate(r);
   });
-  const second = t.desk.githubAct("web#3", "close").then(
+  const second = run(t.desk.githubAct("web#3", "close")).then(
     () => "sent",
     (e: Error) => e.message,
   );
@@ -232,7 +232,7 @@ test("a second write while the first's refresh still reads GitHub is refused, no
 
 test("an issue you opened closes with closeIssue", async (c) => {
   const { t, w } = await withWriter(c, [makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" })]);
-  await t.desk.githubAct("api#7", "close");
+  await run(t.desk.githubAct("api#7", "close"));
   assert.deepEqual(w.calls, [["closeIssue", "I_7"]]);
   assert.equal(runSync(t.desk.item("api#7")).card.resolved, "closed");
 });
@@ -242,7 +242,7 @@ test("a refused write says why, and nothing is logged; an agent's /api/act can't
   c.after(t.cleanup);
   await t.desk.sync();
   await assert.rejects(
-    t.desk.githubAct("web#3", "close"),
+    run(t.desk.githubAct("web#3", "close")),
     (e: Error & { status: number }) => e.status === 502 && e.message.includes("Resource not accessible"),
   );
   assert.deepEqual(writes(t, "acme/web#3"), []);
@@ -253,9 +253,9 @@ test("a write whose refresh fails isn't offered again until a read shows the cha
   const { t, w } = await withWriter(c, [myPr(4, READY)]);
   const details = t.gh.details.bind(t.gh);
   t.gh.details = () => Effect.die(new Error("GitHub is down")); // details fails only with a rate limit, which pauses instead
-  await t.desk.githubAct("web#4", "close");
+  await run(t.desk.githubAct("web#4", "close"));
   assert.equal(runSync(t.desk.item("web#4")).card.actions, undefined, "the snapshot still says open, but nothing is offered");
-  await assert.rejects(t.desk.githubAct("web#4", "merge"), /409|can't/);
+  await assert.rejects(run(t.desk.githubAct("web#4", "merge")), /409|can't/);
   assert.deepEqual(w.calls, [["close", "PR_acme/web_4"]]);
   t.gh.details = details;
   await t.desk.sync();
