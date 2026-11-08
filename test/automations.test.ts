@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Effect } from "effect";
 import { dueAt, nextAt, parseSchedule, type Schedule } from "../src/automations.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
@@ -283,6 +284,32 @@ test("a run that fails says so, under the automation and in a notification", asy
   assert.match(run.error ?? "", /claude auth login|authenticate/i);
   assert.equal(t.desk.automations.view()[0]!.runs[0]!.error, run.error);
   assert.equal(t.notes.length, 1);
+});
+
+test("what fails an item is its error and the run goes on; a bug putting one on the desk is the run's, said once", async (c) => {
+  const fake = fakeClaude(c);
+  const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false, "notify.quiet": "" } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  fake.answer("Two things.", [
+    { ref: "what", why: "unreadable" },
+    { ref: "acme/api#1", why: "asks you" },
+  ]);
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
+  const ok = await t.desk.automations.run(a, "now");
+  assert.deepEqual(
+    ok.items.map((x) => [x.item_id, x.outcome, x.error ?? null]),
+    [
+      ["what", "failed", `can't read "what"; use owner/repo#123 or a GitHub URL`],
+      ["acme/api#1", "kept", null],
+    ],
+  );
+  // Deliberate change: a bug in push was that item's error, never reported; it fails the run, reported and notified once.
+  t.desk.push = () => Effect.die(new TypeError("entries.get(...) is undefined"));
+  const bug = await t.desk.automations.run(a, "now");
+  assert.equal(bug.error, "entries.get(...) is undefined");
+  assert.deepEqual(bug.items, []);
+  assert.equal(t.notes.at(-1), "entries.get(...) is undefined");
 });
 
 test("on its schedule it runs once per due time, not for ones before you set it, and not while it's off", async (c) => {

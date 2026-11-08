@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { Effect, Result, type Fiber } from "effect";
 import { DENY as COORDINATOR_DENY, denyDir } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
-import { BadRequest, ClaudeBadOutput, NotFound, type DeskError, type FsError } from "./errors.ts";
+import { BadRequest, ClaudeBadOutput, NotFound, type FsError } from "./errors.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { Automation, AutomationRun, AutomationView } from "./types.ts";
 import { report } from "./sentry.ts";
@@ -350,9 +350,10 @@ export class Automations {
         const x = (raw ?? {}) as { ref?: unknown; why?: unknown };
         if (typeof x.ref !== "string" || typeof x.why !== "string" || !x.why.trim()) continue;
         const listed = { ref: x.ref, why: x.why };
-        // effect-bridge(C5b): push becomes an Effect; what it rejects with is the item's error, as before
-        const pushed = Effect.tryPromise({ try: () => this.desk.push(listed.ref, listed.why, a), catch: (e) => e as DeskError });
-        run.items.push(yield* pushed.pipe(Effect.catch((e) => Effect.succeed(failedItem(listed, e.message)))));
+        // What fails one item is its error; the run goes on.
+        run.items.push(
+          yield* this.desk.push(listed.ref, listed.why, a).pipe(Effect.catch((e) => Effect.succeed(failedItem(listed, e.message)))),
+        );
       }
       if (found.length > ITEMS_MAX) run.summary += ` (It listed ${found.length}; the desk took the first ${ITEMS_MAX}.)`;
       return true;

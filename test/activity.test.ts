@@ -276,7 +276,7 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
   t.cleanup();
 });
 
-test("notifications: a failed refresh leaves the cursor, so the next poll handles the same threads", async () => {
+test("notifications: a refresh the rate limit stops leaves the cursor, so the poll after the pause handles the same threads", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
   await run(t.desk.gh.poll());
@@ -285,14 +285,18 @@ test("notifications: a failed refresh leaves the cursor, so the next poll handle
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.9), comments: [{ author: "dana", author_bot: false, at: iso(0.9) }] }));
   const threads = [{ thread: "t1", item: "acme/api#1", reason: "mention", updated_at: iso(0.9) }];
   const details = t.gh.details.bind(t.gh);
-  // details fails only with a rate limit; anything else it dies with leaves the cursor too
-  t.gh.details = () => Effect.die(new Error("GitHub HTTP 500"));
+  // The one way details fails (a batch GitHub refuses it skips): the feed pauses until the reset, and isn't an error.
+  const resetAt = new Date(Date.now() + 60_000).toISOString();
+  t.gh.details = () => Effect.fail(new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (HTTP 403)` }));
   t.gh.threads = threads;
   await run(t.desk.gh.poll());
-  assert.equal(t.desk.gh.feedError, "GitHub HTTP 500");
+  assert.equal(t.desk.gh.pausedUntil, Date.parse(resetAt));
+  assert.equal(t.desk.gh.feedError, null);
   assert.equal(t.desk.gh.feed.since, since);
   assert.deepEqual(t.desk.gh.feed.seen, {});
+  assert.deepEqual(kinds(t.desk).slice(1), [], "nothing logged");
 
+  t.desk.gh.pausedUntil = 0; // the reset came
   t.gh.details = details;
   t.gh.threads = threads; // GitHub sends them again: the cursor didn't move
   await run(t.desk.gh.poll());

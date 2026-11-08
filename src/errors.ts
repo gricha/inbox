@@ -54,7 +54,6 @@ export class Stale extends Data.TaggedError("Stale")<{ readonly message: string 
 }
 
 // The same write is already on its way: the desk refuses a second one at once rather than queueing it.
-/** @public until C5b */
 export class Busy extends Data.TaggedError("Busy")<{ readonly message: string }> {
   get status(): 409 {
     return 409;
@@ -63,7 +62,6 @@ export class Busy extends Data.TaggedError("Busy")<{ readonly message: string }>
 
 // What the desk passes on: GitHub refused or failed, or your agent didn't start. cause is the original error object,
 // kept as is: Sentry skips one report() already sent.
-/** @public until C5b */
 export class Upstream extends Data.TaggedError("Upstream")<{ readonly message: string; readonly cause?: unknown }> {
   get status(): 502 {
     return 502;
@@ -72,7 +70,6 @@ export class Upstream extends Data.TaggedError("Upstream")<{ readonly message: s
 
 // Your draft is marked ready on GitHub, but asking the reviewers failed: half done, so nothing is rolled back. Its cause
 // is the writer's error, so it's still reported.
-/** @public until C5b */
 export class ReviewersNotAsked extends Data.TaggedError("ReviewersNotAsked")<{ readonly message: string; readonly cause?: unknown }> {
   get status(): 502 {
     return 502;
@@ -303,7 +300,6 @@ export class GitHubNotFetched extends Data.TaggedError("GitHubNotFetched")<{ rea
 export type GitHubReadError =
   GitHubAuthError | GitHubRateLimited | GitHubHttpError | GitHubGraphQLError | GitHubNetworkError | GitHubBadResponse;
 export type GitHubWriteError = GitHubAuthError | GitHubHttpError | GitHubGraphQLError | GitHubBadResponse | GitHubWriteUncertain;
-/** @public until C5b */
 export type GitHubError = GitHubReadError | GitHubWriteError;
 
 // The pages of a PR's files were fetched across a push and disagree on its head commit.

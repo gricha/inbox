@@ -69,7 +69,10 @@ Recoveries: `itemId` catches `NotFound` by its tag (plus the exact-id check); `h
 `AmbiguousRef` and `Unavailable` through; `inquiryView` turns any `DeskHttpError` into `card: null`. A file the desk
 writes or reads for a request (`replaceFile`, config.toml, policy.md, settings.json) fails with `FsError` in Node's
 words, which a route answers as a logged 500, as before. The 409 of `putPolicy`'s and `putConfig`'s stale base now
-carries `Stale` as its tag (the legacy answer said `Conflict`); readers already read any 409 there as stale.
+carries `Stale` as its tag (the legacy answer said `Conflict`); readers already read any 409 there as stale. So do the
+409s of `approve`'s and `githubAct`'s stale head (`Stale`) and of a held lock (`Busy`); the UI shows any of them by its
+words. The GitHub writes, `hold` and `reviewers` keep GitHub's error as `Upstream`'s `cause`, which nothing reported, so
+Sentry still sees each 502.
 
 Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
 `wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus` and `askAbout` with broken rules
@@ -125,7 +128,8 @@ The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the 
   `wrote`, and `ask`'s rollback. A request going away never cancels a write the desk started or skips its bookkeeping;
   the write's own timeout still applies inside it. Never `restore` around the write.
 - Locks (`approving`, `sending`): taken before the region, released with `Effect.ensuring` after it; a held lock fails
-  at once with `Busy`, never queues.
+  at once with `Busy`, never queues. The region (`Desk.locked`) is the lock's check, the write, its bookkeeping and the
+  release, so nothing can interrupt it between taking the lock and the write.
 - Caches and singleflight: never `Effect.cached` where a failure must be retried (it caches failures). A keyed cache
   (`prContext` by `id@updated_at`, the GitHub token) is
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
@@ -134,7 +138,8 @@ The words stay: "config has errors: <path>: <msg>; …", "desk is starting; the 
   callers `Deferred.await` it, and the fiber deletes the entry before it completes the Deferred.
 - Interruption records nothing: no `onExit`, `ensuring` or `onInterrupt` writes the store or notifies (a cut automation
   run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
-  locks.
+  locks. An `ensuring` inside a write's uninterruptible region never sees an interruption: `markReady`'s and
+  `askReviewers`' refresh of the PR, forked whatever GitHub said, as before, is one.
 
 ## No throw, no catch
 
@@ -167,6 +172,12 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
   automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`.
 - A loop's pass catches a defect (`Effect.catchCause`, log and report) and keeps its schedule: a desk that hit a bug in
   one sync keeps syncing. This replaces today's crash on an unhandled rejection.
+- Deliberate change, with a test: the full pass after a write's refresh (approve, a reply, a comment, a line's comment)
+  runs in the refresh's own fiber, `gh.refresh(id)` and then every connector's `reconcile`, so the desk stopping
+  interrupts it (it ran in a nested `Effect.runPromise` the runner didn't hold, which kept going into the closed store).
+- Deliberate change, with a test: what fails one of an automation's items (`push`'s refusal) is still that item's
+  error, and the run goes on; a bug in `push` fails the run, reported and notified once (it was the item's error, never
+  reported).
 - `Effect.runFork` and `Effect.forkDetach` appear nowhere else in `src/` (a forked failure nobody observes vanishes),
   `Effect.forkChild` never for work that must outlive its caller (it's interrupted when the caller ends), and never
   `void Effect.runPromise(…)` (an unhandled rejection ends the desk).

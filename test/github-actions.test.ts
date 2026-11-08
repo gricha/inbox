@@ -8,8 +8,9 @@ import type { Item } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
-import { Effect } from "effect";
-import { run, runSync } from "./helpers/run.ts";
+import { Effect, Fiber } from "effect";
+import { GitHubRateLimited } from "../src/errors.ts";
+import { failure, run, runSync } from "./helpers/run.ts";
 
 const READY = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
 const DESK = "http://localhost:47823";
@@ -230,6 +231,28 @@ test("a second write while the first's refresh still reads GitHub is refused, no
   assert.deepEqual(w.calls, [["close", "PR_acme/web_3"]]);
 });
 
+test("a write its caller stops waiting for still lands, is logged and refreshed, and its lock goes with it", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "green" })]);
+  const close = w.writer.close.bind(w.writer);
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  w.writer.close = (pr) => Effect.promise(() => held).pipe(Effect.andThen(close(pr)));
+  const fiber = Effect.runFork(t.desk.githubAct("web#3", "close"));
+  const busy = await failure(t.desk.githubAct("web#3", "close"));
+  assert.deepEqual([busy._tag, busy.message, busy.status], ["Busy", "already writing to acme/web#3 on GitHub", 409]);
+  const gone = Effect.runPromise(Fiber.interrupt(fiber)); // a client that left: it waits for the write's region
+  release();
+  await gone;
+  assert.deepEqual(w.calls, [["close", "PR_acme/web_3"]]);
+  assert.deepEqual(writes(t, "acme/web#3"), ["close"], "in the action log");
+  const d = runSync(t.desk.item("web#3"));
+  assert.deepEqual([d.card.resolved, d.card.actions], ["closed", ["reopen"]], "refreshed as if it had waited");
+  await run(t.desk.githubAct("web#3", "reopen"));
+  assert.deepEqual(w.calls.at(-1), ["reopen", "PR_acme/web_3"], "not Busy: the lock went with the write");
+});
+
 test("an issue you opened closes with closeIssue", async (c) => {
   const { t, w } = await withWriter(c, [makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" })]);
   await run(t.desk.githubAct("api#7", "close"));
@@ -249,15 +272,29 @@ test("a refused write says why, and nothing is logged; an agent's /api/act can't
   assert.throws(() => runSync(t.desk.act("web#3", "close" as never, undefined, "agent")), /unknown action/);
 });
 
-test("a write whose refresh fails isn't offered again until a read shows the change", async (c) => {
-  const { t, w } = await withWriter(c, [myPr(4, READY)]);
+test("a write whose refresh reads nothing isn't offered again until a read shows the change", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(4, READY), myPr(3, { ci: "green" })]);
   const details = t.gh.details.bind(t.gh);
-  t.gh.details = () => Effect.die(new Error("GitHub is down")); // details fails only with a rate limit, which pauses instead
+  // A batch GitHub refuses: details skips it, so the refresh stores nothing and nothing pauses.
+  t.gh.details = () => Effect.succeed([]);
   await run(t.desk.githubAct("web#4", "close"));
+  assert.equal(t.desk.store.itemsById(["acme/web#4"]).get("acme/web#4")?.state, "open", "the refresh read nothing");
+  assert.equal(t.desk.gh.pausedUntil, 0);
   assert.equal(runSync(t.desk.item("web#4")).card.actions, undefined, "the snapshot still says open, but nothing is offered");
   await assert.rejects(run(t.desk.githubAct("web#4", "merge")), /409|can't/);
-  assert.deepEqual(w.calls, [["close", "PR_acme/web_4"]]);
+  // The rate limit, the one way details fails: the refresh pauses the loops until its reset, and the write still answers.
+  const resetAt = new Date(Date.now() + 60_000).toISOString();
+  t.gh.details = () => Effect.fail(new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (HTTP 403)` }));
+  await run(t.desk.githubAct("web#3", "close"));
+  assert.equal(t.desk.gh.pausedUntil, Date.parse(resetAt));
+  assert.equal(runSync(t.desk.item("web#3")).card.actions, undefined);
+  assert.deepEqual(w.calls, [
+    ["close", "PR_acme/web_4"],
+    ["close", "PR_acme/web_3"],
+  ]);
   t.gh.details = details;
+  t.desk.gh.pausedUntil = 0; // the reset came
   await t.desk.sync();
   assert.deepEqual(runSync(t.desk.item("web#4")).card.actions, ["reopen"], "a read shows it closed");
+  assert.deepEqual(runSync(t.desk.item("web#3")).card.actions, ["reopen"]);
 });

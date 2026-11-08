@@ -271,21 +271,27 @@ export function createApp(desk: Desk, port: number): Hono {
     return respond(c, act, { log });
   });
   // desk_add and `desk add`: a pin plus GitHub reads, so agents may call it.
-  app.post("/api/add", async (c) => {
-    ready();
-    const { id, why, from } = await input(c);
-    if (typeof id !== "string" || !id) throw new DeskError(400, "need { id }: owner/repo#123 or a GitHub URL");
-    const line = (v: unknown) => {
-      if (v !== undefined && typeof v !== "string") throw new DeskError(400, "why and from are lines of text");
-      return v;
-    };
-    return c.json({ ok: true, ...(await desk.add(id, line(why), line(from))) });
+  app.post("/api/add", (c) => {
+    const add = Effect.gen(function* () {
+      yield* up;
+      const { id, why, from } = yield* bodyOf(c);
+      if (typeof id !== "string" || !id) return yield* new BadRequest({ message: "need { id }: owner/repo#123 or a GitHub URL" });
+      const line = (v: unknown): Effect.Effect<string | undefined, BadRequest> =>
+        v === undefined || typeof v === "string"
+          ? Effect.succeed(v)
+          : Effect.fail(new BadRequest({ message: "why and from are lines of text" }));
+      return { ok: true, ...(yield* desk.add(id, yield* line(why), yield* line(from))) };
+    });
+    return respond(c, add, { log });
   });
   // Who you can ask to review your PR, as you type: a path of its own, since the review's GET takes any id.
-  app.get("/api/reviewers/:id{.+}", async (c) => {
-    ready();
-    return c.json(await desk.reviewers(c.req.param("id"), c.req.query("q") ?? ""));
-  });
+  app.get("/api/reviewers/:id{.+}", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.reviewers(c.req.param("id"), c.req.query("q") ?? "")),
+      { log, read: true },
+    ),
+  );
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123.
   app.get("/api/review/:id{.+}", async (c) => {
     ready();
@@ -296,76 +302,81 @@ export function createApp(desk: Desk, port: number): Hono {
     const { force } = await input(c);
     return c.json({ ok: true, ai: await desk.aiReview(c.req.param("id"), force === true) });
   });
-  app.post("/api/review/:id{.+}/approve", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "approve from the PR's review in the desk");
-    const { head_oid, body } = await input(c);
-    if (typeof head_oid !== "string" || !head_oid) throw new DeskError(400, "need { head_oid }: the commit you reviewed");
-    if (body !== undefined && typeof body !== "string") throw new DeskError(400, "body must be a string");
-    return c.json({ ok: true, ...(await desk.approve(c.req.param("id"), head_oid, body)) });
-  });
+  // The desk's GitHub writes below: from its own window only (`refused` otherwise), once it's up, with the body read as
+  // each says. A write never takes the request's signal: once sent it lands and is recorded, whoever still listens.
+  const write = <A, E>(c: Context, refused: string, then: (b: Record<string, unknown>) => Effect.Effect<A, E>) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        if (!fromDesk(c)) return yield* new Forbidden({ message: refused });
+        return yield* then(yield* bodyOf(c));
+      }),
+      { log },
+    );
+  const bad = (message: string) => Effect.fail(new BadRequest({ message }));
+  app.post("/api/review/:id{.+}/approve", (c) =>
+    write(c, "approve from the PR's review in the desk", ({ head_oid, body }) => {
+      if (typeof head_oid !== "string" || !head_oid) return bad("need { head_oid }: the commit you reviewed");
+      if (body !== undefined && typeof body !== "string") return bad("body must be a string");
+      return Effect.map(desk.approve(c.req.param("id"), head_oid, body), (r) => ({ ok: true, ...r }));
+    }),
+  );
   // Posts your reply to one of the PR's conversations, from the desk's own window only.
-  app.post("/api/review/:id{.+}/reply", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "replies are sent from the desk's window, by you");
-    const b = await input(c);
-    if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") throw new DeskError(400, "need { id, body }");
-    return c.json({ ok: true, ...(await desk.reply(c.req.param("id"), b.id, b.body)) });
-  });
+  app.post("/api/review/:id{.+}/reply", (c) =>
+    write(c, "replies are sent from the desk's window, by you", (b) => {
+      if (typeof b.id !== "string" || !b.id || typeof b.body !== "string") return bad("need { id, body }");
+      return Effect.map(desk.reply(c.req.param("id"), b.id, b.body), (r) => ({ ok: true, ...r }));
+    }),
+  );
   // Your comment on the PR or issue, from the desk's own window only.
-  app.post("/api/review/:id{.+}/comment", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
-    const b = await input(c);
-    if (typeof b.body !== "string") throw new DeskError(400, "need { body }");
-    return c.json({ ok: true, ...(await desk.comment(c.req.param("id"), b.body)) });
-  });
+  app.post("/api/review/:id{.+}/comment", (c) =>
+    write(c, "comments are sent from the desk's window, by you", (b) => {
+      if (typeof b.body !== "string") return bad("need { body }");
+      return Effect.map(desk.comment(c.req.param("id"), b.body), (r) => ({ ok: true, ...r }));
+    }),
+  );
   // Your comment on a line of the PR's diff, from the desk's own window only.
-  app.post("/api/review/:id{.+}/inline", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "comments are sent from the desk's window, by you");
-    const b = await input(c);
-    const at = inlineAtOf(b);
-    const { body, head_oid } = b;
-    if (!at || typeof body !== "string" || typeof head_oid !== "string" || !head_oid)
-      throw new DeskError(400, "need { path, line, side: new|old, start?: { line, side }, body, head_oid }");
-    return c.json({ ok: true, ...(await desk.inlineComment(c.req.param("id"), at, body, head_oid)) });
-  });
-  const reviewerIds = async (c: { req: { json<T>(): Promise<T> } }) => {
-    const b = await input(c);
+  app.post("/api/review/:id{.+}/inline", (c) =>
+    write(c, "comments are sent from the desk's window, by you", (b) => {
+      const at = inlineAtOf(b);
+      const { body, head_oid } = b;
+      if (!at || typeof body !== "string" || typeof head_oid !== "string" || !head_oid)
+        return bad("need { path, line, side: new|old, start?: { line, side }, body, head_oid }");
+      return Effect.map(desk.inlineComment(c.req.param("id"), at, body, head_oid), (r) => ({ ok: true, ...r }));
+    }),
+  );
+  const reviewerIds = (b: Record<string, unknown>): Effect.Effect<{ users: string[]; teams: string[] }, BadRequest> => {
     const ids = (v: unknown): string[] | null => {
       if (v === undefined) return [];
       return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
     };
     const users = ids(b.users);
     const teams = ids(b.teams);
-    if (!users || !teams) throw new DeskError(400, "users and teams are lists of node ids");
-    return { users, teams };
+    return users && teams ? Effect.succeed({ users, teams }) : bad("users and teams are lists of node ids");
   };
   // Your own draft's Ready for review, from the desk's own window only.
-  app.post("/api/review/:id{.+}/ready", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "mark your draft ready for review from the desk's window");
-    await desk.markReady(c.req.param("id"), await reviewerIds(c));
-    return c.json({ ok: true });
-  });
+  app.post("/api/review/:id{.+}/ready", (c) =>
+    write(c, "mark your draft ready for review from the desk's window", (b) =>
+      Effect.flatMap(reviewerIds(b), (ask) => Effect.as(desk.markReady(c.req.param("id"), ask), { ok: true })),
+    ),
+  );
   // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.
-  app.post("/api/review/:id{.+}/reviewers", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "ask reviewers from the PR's review in the desk's window");
-    await desk.askReviewers(c.req.param("id"), await reviewerIds(c));
-    return c.json({ ok: true });
-  });
+  app.post("/api/review/:id{.+}/reviewers", (c) =>
+    write(c, "ask reviewers from the PR's review in the desk's window", (b) =>
+      Effect.flatMap(reviewerIds(b), (ask) => Effect.as(desk.askReviewers(c.req.param("id"), ask), { ok: true })),
+    ),
+  );
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
-  app.post("/api/github", async (c) => {
-    ready();
-    if (!fromDesk(c)) throw new DeskError(403, "GitHub actions are yours, from the desk's window");
-    const b = await input(c);
-    if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) throw new DeskError(400, "need { id, action }");
-    if (b.head_oid !== undefined && typeof b.head_oid !== "string") throw new DeskError(400, "head_oid must be a string");
-    if (b.body !== undefined && typeof b.body !== "string") throw new DeskError(400, "body must be a string");
-    return c.json({ ok: true, ...(await desk.githubAct(b.id, b.action as GitHubAction, { head: b.head_oid, body: b.body })) });
-  });
+  app.post("/api/github", (c) =>
+    write(c, "GitHub actions are yours, from the desk's window", (b) => {
+      if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) return bad("need { id, action }");
+      if (b.head_oid !== undefined && typeof b.head_oid !== "string") return bad("head_oid must be a string");
+      if (b.body !== undefined && typeof b.body !== "string") return bad("body must be a string");
+      const opts = { head: b.head_oid, body: b.body };
+      return Effect.map(desk.githubAct(b.id, b.action as GitHubAction, opts), (r) => ({ ok: true, ...r }));
+    }),
+  );
   // Merging: your own PRs you handed off (Hand off for merge and Back to desk, through /api/act), which the coordinator gets merged.
   app.get("/api/inflight", (c) =>
     respond(

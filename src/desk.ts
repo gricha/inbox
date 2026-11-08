@@ -7,20 +7,26 @@ import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
   BadRequest,
+  Busy,
   Conflict,
   DeskError,
   Forbidden,
   fsError,
   NotFound,
+  ReviewersNotAsked,
   Stale,
   Unavailable,
+  Upstream,
   type ClaudeError,
   type CommandError,
   type FsError,
+  type GitHubError,
+  type GitHubNotFetched,
+  type GitHubWriteError,
 } from "./errors.ts";
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
-import type { GitHubWriter } from "./github/write.ts";
+import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import type { Connector, NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector, KEEP_RESOLVED } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
@@ -237,6 +243,15 @@ const replaceFile = Effect.fnUntraced(function* (file: string, text: string, bac
 
 // What resolving a ref fails with: the rules have errors, no such item, or several.
 type RefError = Unavailable | NotFound | AmbiguousRef;
+// What act fails with, and so what a write's done after it can: the item went, or the rules broke, since it was checked.
+type ActError = RefError | Forbidden | Conflict | BadRequest;
+// What a GitHub write the desk sends fails with, besides its own checks: the same write on its way, or GitHub refused it.
+type WriteError = ActError | Stale | Busy | Upstream;
+// What GitHub said, passed on after the desk's words. Its own error is the cause, which nothing reported: Sentry sees it.
+const upstream =
+  (said: string) =>
+  (err: GitHubError | GitHubNotFetched): Upstream =>
+    new Upstream({ message: `${said}${err.message}`, cause: err });
 
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Effect.Effect<PrText, FetchPrError>;
@@ -701,8 +716,12 @@ export class Desk {
 
   // A full pass on every connector; their own loops also run it on github.poll_seconds.
   async sync(): Promise<void> {
-    // effect-bridge(C5c): sync becomes an Effect that yields every connector's pass
-    await Effect.runPromise(Effect.forEach(this.connectors, (c) => c.reconcile(), { concurrency: "unbounded", discard: true }));
+    await Effect.runPromise(this.reconcileAll()); // effect-bridge(C5c): sync becomes an Effect that yields every connector's pass
+  }
+
+  // Every connector's full pass at once. Never fails: what fails a pass is in its status().
+  reconcileAll(): Effect.Effect<void> {
+    return Effect.forEach(this.connectors, (c) => c.reconcile(), { concurrency: "unbounded", discard: true });
   }
 
   // A connector brought in something new.
@@ -1691,29 +1710,49 @@ export class Desk {
   }
 
   // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your click; `head` is the commit the view showed, so a newer push isn't approved unread.
-  async approve(ref: string, head: string, body?: string): Promise<{ url: string }> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): approve yields pr
-    const id = e.item.id;
-    const can = this.canApprove(e);
-    if (!can.ok) throw new DeskError(409, `can't approve ${id}: ${can.reason}`);
-    if (head !== e.item.head_oid) throw new DeskError(409, `can't approve ${id}: it has new commits since you opened it`);
-    if (this.approving.has(id)) throw new DeskError(409, `already approving ${id}`);
-    this.approving.add(id);
-    let url: string;
-    try {
-      ({ url } = await Effect.runPromise(this.writer!.approve(e.item.node_id, head, body))); // effect-bridge(C5b): it rejects with what the write fails with
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't take the approval: ${(err as Error).message}`);
-    } finally {
-      this.approving.delete(id);
-    }
-    this.store.logWrite(id, "approve", this.now().toISOString());
-    this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
-    this.doneAfterWrite(id);
-    // The PR itself first, so it resolves as "you approved" within seconds; the search index lags, so a full pass alone wouldn't see it.
-    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
-    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
-    return { url };
+  approve(ref: string, head: string, body?: string): Effect.Effect<{ url: string }, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      const can = this.canApprove(e);
+      if (!can.ok) return yield* new Conflict({ message: `can't approve ${id}: ${can.reason}` });
+      if (head !== e.item.head_oid) return yield* new Stale({ message: `can't approve ${id}: it has new commits since you opened it` });
+      const write = Effect.gen({ self: this }, function* () {
+        const { url } = yield* this.writer!.approve(e.item.node_id, head, body).pipe(
+          Effect.mapError(upstream("GitHub didn't take the approval: ")),
+        );
+        this.store.logWrite(id, "approve", this.now().toISOString());
+        this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
+        yield* this.doneAfterWrite(id);
+        this.refreshAfter(id);
+        return { url };
+      });
+      return yield* this.locked(this.approving, id, `already approving ${id}`, write);
+    });
+  }
+
+  // A GitHub write under its lock (`approving` or `sending`): a second press while one is on its way is Busy at once, never
+  // queued. The write and what the desk records after it run uninterruptibly together, so a client that leaves mid-write
+  // never leaves it half recorded; the lock goes once it's done, whatever GitHub said.
+  private locked<A, E>(locks: Set<string>, key: string, busy: string, write: Effect.Effect<A, E>): Effect.Effect<A, E | Busy> {
+    return Effect.uninterruptible(
+      Effect.suspend((): Effect.Effect<A, E | Busy> => {
+        if (locks.has(key)) return Effect.fail(new Busy({ message: busy }));
+        locks.add(key);
+        return Effect.ensuring(
+          write,
+          Effect.sync(() => {
+            locks.delete(key);
+          }),
+        );
+      }),
+    );
+  }
+
+  // After a write: the PR itself first, so it resolves (as "you approved") within seconds, as a full pass alone wouldn't
+  // while the search index lags; then the full pass. One fiber the runner holds, so the desk stopping interrupts both.
+  private refreshAfter(id: string): void {
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(this.reconcileAll())), id);
   }
 
   // The More menu's GitHub writes this item allows now. A PR in Merging is the coordinator's: Back to desk brings it back first.
@@ -1738,65 +1777,60 @@ export class Desk {
 
   // POST /api/github: a More menu write, on your click in the desk's window. A change request needs `head`
   // (the commit its review showed), as approve does; a merge given one must match it, and is pinned to the desk's head either way.
-  async githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Promise<{ url: string }> {
-    const found = Effect.runSync(this.resolve(ref)); // effect-bridge(C5b): githubAct yields resolve, which checks the config first
-    const e = this.snapshot().entries.get(found)!;
-    const it = e.item;
-    const id = it.id;
-    const [verb, done] = GITHUB_VERB[action].map((x) => x.replace("%", id));
-    if (!this.actions(e).includes(action)) throw new DeskError(409, `can't ${verb} now`);
-    if (action === "request_changes" && opts.head === undefined) throw new DeskError(400, "need head_oid");
-    const pinned = action === "merge" || action === "request_changes";
-    if (pinned && opts.head !== undefined && opts.head !== it.head_oid)
-      throw new DeskError(409, `can't ${verb}: it has new commits since you opened it`);
-    const body = opts.body?.trim() ?? "";
-    if (action === "request_changes" && !body) throw new DeskError(400, "say what needs to change");
-    if (body.length > MAX_REPLY) throw new DeskError(400, `keep it under ${MAX_REPLY} characters`);
-    if (this.approving.has(id)) throw new DeskError(409, `already writing to ${id} on GitHub`);
-    const w = this.writer!;
-    this.approving.add(id);
-    try {
-      let url = "";
-      try {
-        // effect-bridge(C5b): each rejects with what the write fails with
-        if (action === "close") await Effect.runPromise(it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id));
-        else if (action === "draft") await Effect.runPromise(w.draft(it.node_id));
-        else if (action === "ready") await Effect.runPromise(w.ready(it.node_id));
-        else if (action === "merge") await Effect.runPromise(w.merge(it.node_id, it.head_oid, it.merge_method!));
-        else if (action === "reopen") await Effect.runPromise(w.reopen(it.node_id));
-        else ({ url } = await Effect.runPromise(w.requestChanges(it.node_id, it.head_oid, body)));
-      } catch (err) {
-        throw new DeskError(502, `couldn't ${verb} on GitHub: ${(err as Error).message}`);
-      }
-      this.store.logWrite(id, action, this.now().toISOString());
-      this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
-      // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish.
-      if (action === "reopen") {
-        // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
-        const ev = this.store.lastActionFor(id);
-        // effect-bridge(C5b): githubAct yields them inside the write's region
-        if (ev?.action === "done") Effect.runSync(this.undo(ev.seq));
-        else if (this.store.state(id).done_at) Effect.runSync(this.act(id, "restore"));
-      } else if (action !== "draft") this.doneAfterWrite(id);
-      this.changed();
-      // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
-      // since actions() reads the snapshot this refresh replaces.
-      await Effect.runPromise(this.gh.refresh(id)); // effect-bridge(C5b): githubAct becomes an Effect that yields it
-      // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
-      if (action !== "request_changes") this.wrote.set(id, it.updated_at);
-      return { url };
-    } finally {
-      this.approving.delete(id);
-    }
+  githubAct(ref: string, action: GitHubAction, opts: { head?: string; body?: string } = {}): Effect.Effect<{ url: string }, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const found = yield* this.resolve(ref);
+      const e = this.snapshot().entries.get(found)!;
+      const it = e.item;
+      const id = it.id;
+      const [verb, done] = GITHUB_VERB[action].map((x) => x.replace("%", id));
+      if (!this.actions(e).includes(action)) return yield* new Conflict({ message: `can't ${verb} now` });
+      if (action === "request_changes" && opts.head === undefined) return yield* new BadRequest({ message: "need head_oid" });
+      const pinned = action === "merge" || action === "request_changes";
+      if (pinned && opts.head !== undefined && opts.head !== it.head_oid)
+        return yield* new Stale({ message: `can't ${verb}: it has new commits since you opened it` });
+      const body = opts.body?.trim() ?? "";
+      if (action === "request_changes" && !body) return yield* new BadRequest({ message: "say what needs to change" });
+      if (body.length > MAX_REPLY) return yield* new BadRequest({ message: `keep it under ${MAX_REPLY} characters` });
+      const w = this.writer!;
+      const send = (): Effect.Effect<{ url: string }, GitHubWriteError> => {
+        const none = { url: "" };
+        if (action === "close") return Effect.as(it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id), none);
+        if (action === "draft") return Effect.as(w.draft(it.node_id), none);
+        if (action === "ready") return Effect.as(w.ready(it.node_id), none);
+        if (action === "merge") return Effect.as(w.merge(it.node_id, it.head_oid, it.merge_method!), none);
+        if (action === "reopen") return Effect.as(w.reopen(it.node_id), none);
+        return w.requestChanges(it.node_id, it.head_oid, body);
+      };
+      const write = Effect.gen({ self: this }, function* () {
+        const { url } = yield* send().pipe(Effect.mapError(upstream(`couldn't ${verb} on GitHub: `)));
+        this.store.logWrite(id, action, this.now().toISOString());
+        this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
+        // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish.
+        if (action === "reopen") {
+          // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
+          const ev = this.store.lastActionFor(id);
+          if (ev?.action === "done") yield* this.undo(ev.seq);
+          else if (this.store.state(id).done_at) yield* this.act(id, "restore");
+        } else if (action !== "draft") yield* this.doneAfterWrite(id);
+        this.changed();
+        // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
+        // since actions() reads the snapshot this refresh replaces.
+        yield* this.gh.refresh(id);
+        // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
+        if (action !== "request_changes") this.wrote.set(id, it.updated_at);
+        return { url };
+      });
+      return yield* this.locked(this.approving, id, `already writing to ${id} on GitHub`, write);
+    });
   }
 
   // ---------------------------------------------------------------- actions
 
   // You acted on it in the desk, so your part is done: it leaves the desk at once, as Done does, and comes back when someone
   // else acts. A PR in Merging stays the coordinator's.
-  private doneAfterWrite(id: string): void {
-    if (this.snapshot().entries.get(id)?.inflight) return;
-    Effect.runSync(this.act(id, "done")); // effect-bridge(C5b): doneAfterWrite yields act
+  private doneAfterWrite(id: string): Effect.Effect<void, ActError> {
+    return Effect.suspend(() => (this.snapshot().entries.get(id)?.inflight ? Effect.void : Effect.asVoid(this.act(id, "done"))));
   }
 
   // `agent`: not the desk's own window. Hand-offs are yours.
@@ -1940,44 +1974,47 @@ export class Desk {
   }
 
   // `why` and `from`: an agent's hand-off, what needs you and which task sends it; the item's why while this pin stays.
-  async add(ref: string, why?: string, from?: string): Promise<{ item: ItemDetail; undo_seq: number }> {
-    // effect-bridge(C5b): add yields line, and item below
-    const note = why === undefined ? null : Effect.runSync(this.line(why, "why"));
-    const who = note === null || !from?.trim() ? "" : Effect.runSync(this.line(from, "from", MAX_FROM));
-    const id = await this.hold(ref);
-    // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
-    const before = this.store.state(id);
-    this.store.putState({ ...before, ...ACTIVE, pinned: true });
-    // The coordinator's desk_add is its opinion, which Claude weighs: no floor, as the old desk-run coordinator's pins.
-    const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), who === COORDINATOR ? "coordinator" : undefined);
-    if (note !== null)
-      this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
-    this.changed();
-    this.warmAdded(id);
-    return { item: Effect.runSync(this.item(id)), undo_seq };
+  add(ref: string, why?: string, from?: string): Effect.Effect<{ item: ItemDetail; undo_seq: number }, RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const note = why === undefined ? null : yield* this.line(why, "why");
+      const who = note === null || !from?.trim() ? "" : yield* this.line(from, "from", MAX_FROM);
+      const id = yield* this.hold(ref);
+      // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
+      const before = this.store.state(id);
+      this.store.putState({ ...before, ...ACTIVE, pinned: true });
+      // The coordinator's desk_add is its opinion, which Claude weighs: no floor, as the old desk-run coordinator's pins.
+      const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), who === COORDINATOR ? "coordinator" : undefined);
+      if (note !== null)
+        this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
+      this.changed();
+      this.warmAdded(id);
+      return { item: yield* this.item(id), undo_seq };
+    });
   }
 
   // An automation's find: on your desk as desk_add puts it, with its why. One that's on your queue already stays as it is;
   // one you dealt with (done, snoozed, muted, handed off for merge), or that nobody needs now, stays that way too.
-  async push(ref: string, why: string, a: Automation): Promise<AutomationRun["items"][number]> {
-    const id = await this.hold(ref);
-    const note = Effect.runSync(this.line(why, "why", 300)); // effect-bridge(C5b): push yields line
-    this.store.set(`pushed:${id}`, { automation: a.id, name: a.name, why: note, at: this.now().toISOString() });
-    const snap = this.snapshot();
-    const e = snap.entries.get(id)!;
-    const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
-    let outcome: AutomationRun["items"][number]["outcome"] = "kept";
-    if (e.resolved) outcome = "resolved";
-    else if (e.status !== "active" || e.inflight) outcome = "left";
-    else if (!e.state.pinned && !queued) {
-      this.store.putState({ ...e.state, pinned: true });
-      this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
-      outcome = "added";
-      this.changed(); // the pump reads the snapshot: it must have the pin
-      this.warmAdded(id);
-    }
-    this.changed();
-    return { item_id: id, why: note, outcome };
+  push(ref: string, why: string, a: Automation): Effect.Effect<AutomationRun["items"][number], RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.hold(ref);
+      const note = yield* this.line(why, "why", 300);
+      this.store.set(`pushed:${id}`, { automation: a.id, name: a.name, why: note, at: this.now().toISOString() });
+      const snap = this.snapshot();
+      const e = snap.entries.get(id)!;
+      const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
+      let outcome: AutomationRun["items"][number]["outcome"] = "kept";
+      if (e.resolved) outcome = "resolved";
+      else if (e.status !== "active" || e.inflight) outcome = "left";
+      else if (!e.state.pinned && !queued) {
+        this.store.putState({ ...e.state, pinned: true });
+        this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
+        outcome = "added";
+        this.changed(); // the pump reads the snapshot: it must have the pin
+        this.warmAdded(id);
+      }
+      this.changed();
+      return { item_id: id, why: note, outcome };
+    });
   }
 
   // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to AI_AT_ONCE.
@@ -1990,24 +2027,23 @@ export class Desk {
     this.judge.pump();
   }
 
-  // The item's id, fetched read only if the desk doesn't hold it.
-  async hold(ref: string): Promise<string> {
-    Effect.runSync(this.requireConfig()); // effect-bridge(C5b): hold yields it
-    const r = normRef(ref);
-    if (!REF.test(r)) throw new DeskError(400, `can't read "${ref}"; use owner/repo#123 or a GitHub URL`);
-    // effect-bridge(C5b): hold yields resolve; what it doesn't hold is fetched, an ambiguous ref goes back
-    const held = Effect.runSync(Effect.catchTag(this.resolve(r), "NotFound", () => Effect.succeed(null)));
-    if (held !== null) return held;
-    const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
-    if (repo === undefined || num === undefined)
-      throw new DeskError(400, `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`);
-    // effect-bridge(C5b): hold becomes an Effect that maps what fetchOne fails with to Upstream
-    const got = await Effect.runPromise(this.gh.fetchOne(repo, Number(num))).catch((err: unknown) => {
-      throw new DeskError(502, (err as Error).message);
+  // The item's id, fetched read only if the desk doesn't hold it: an ambiguous ref goes back, and what GitHub fails with is
+  // passed on.
+  hold(ref: string): Effect.Effect<string, RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      yield* this.requireConfig();
+      const r = normRef(ref);
+      if (!REF.test(r)) return yield* new BadRequest({ message: `can't read "${ref}"; use owner/repo#123 or a GitHub URL` });
+      const held = yield* Effect.catchTag(this.resolve(r), "NotFound", () => Effect.succeed(null));
+      if (held !== null) return held;
+      const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
+      if (repo === undefined || num === undefined)
+        return yield* new BadRequest({ message: `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it` });
+      const got = yield* this.gh.fetchOne(repo, Number(num)).pipe(Effect.mapError(upstream("")));
+      if (got === null) return yield* new NotFound({ message: `GitHub has no PR or issue ${r}` });
+      this.changed();
+      return got;
     });
-    if (got === null) throw new DeskError(404, `GitHub has no PR or issue ${r}`);
-    this.changed();
-    return got;
   }
 
   // ---------------------------------------------------------------- merging (in flight)
@@ -2239,29 +2275,33 @@ export class Desk {
 
   // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (Ask reviewers in its review), one of the desk's
   // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
-  async askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Promise<void> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): askReviewers yields pr
-    const id = e.item.id;
-    if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
-    if (e.item.state !== "open" || e.item.draft) throw new DeskError(409, `${id} isn't open and ready for review`);
-    if (!ask.users.length && !ask.teams.length) throw new DeskError(400, "pick someone to ask");
-    if (!this.writer) throw new DeskError(409, "asking for reviews isn't available in this desk");
-    if (this.approving.has(id)) throw new DeskError(409, `already asking on ${id}`);
-    this.approving.add(id);
-    try {
-      try {
-        await Effect.runPromise(this.writer.requestReviews(e.item.node_id, ask.users, ask.teams)); // effect-bridge(C5b): it rejects with what the write fails with
-      } catch (err) {
-        throw new DeskError(502, `GitHub didn't ask for the reviews: ${(err as Error).message}`);
-      }
-      this.store.logWrite(id, "request_reviews", this.now().toISOString());
-      const n = ask.users.length + ask.teams.length;
-      this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
-      this.doneAfterWrite(id);
-    } finally {
-      this.approving.delete(id);
-      this.runner.fork("refresh", this.gh.refresh(id), id); // effect-bridge(C5b): the write becomes an Effect that forks it
-    }
+  askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });
+      if (e.item.state !== "open" || e.item.draft) return yield* new Conflict({ message: `${id} isn't open and ready for review` });
+      if (!ask.users.length && !ask.teams.length) return yield* new BadRequest({ message: "pick someone to ask" });
+      const writer = this.writer;
+      if (!writer) return yield* new Conflict({ message: "asking for reviews isn't available in this desk" });
+      const write = Effect.gen({ self: this }, function* () {
+        yield* writer
+          .requestReviews(e.item.node_id, ask.users, ask.teams)
+          .pipe(Effect.mapError(upstream("GitHub didn't ask for the reviews: ")));
+        this.store.logWrite(id, "request_reviews", this.now().toISOString());
+        const n = ask.users.length + ask.teams.length;
+        this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+        yield* this.doneAfterWrite(id);
+      }).pipe(Effect.ensuring(this.refreshed(id)));
+      return yield* this.locked(this.approving, id, `already asking on ${id}`, write);
+    });
+  }
+
+  // Whatever GitHub said to a write, the PR is read again; inside the write's region, so never on an interruption.
+  private refreshed(id: string): Effect.Effect<void> {
+    return Effect.sync(() => {
+      this.runner.fork("refresh", this.gh.refresh(id), id);
+    });
   }
 
   asks(item?: string): Ask[] {
@@ -2507,160 +2547,144 @@ export class Desk {
   }
 
   // POST /api/review/:id/reply: your reply to one of the PR's conversations, on your click. One of the desk's GitHub writes.
-  async reply(ref: string, convoId: string, body: string): Promise<{ url: string }> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): reply yields pr
-    const id = e.item.id;
-    const text = body.trim();
-    if (e.item.state !== "open") throw new DeskError(409, `can't reply on ${id}: it's ${e.item.state}`);
-    if (!text) throw new DeskError(400, "the reply is empty");
-    if (text.length > MAX_REPLY) throw new DeskError(400, `keep a reply under ${MAX_REPLY} characters`);
-    if (!this.writer) throw new DeskError(409, "replying isn't available in this desk");
-    // effect-bridge(C5c): reply yields list and maps what it fails with to Upstream
-    const list = await Effect.runPromise(this.convos.list(id)).catch((err: unknown) => {
-      throw new DeskError(502, `couldn't read the PR's conversations: ${(err as Error).message}`);
+  reply(ref: string, convoId: string, body: string): Effect.Effect<{ url: string }, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      const text = body.trim();
+      if (e.item.state !== "open") return yield* new Conflict({ message: `can't reply on ${id}: it's ${e.item.state}` });
+      if (!text) return yield* new BadRequest({ message: "the reply is empty" });
+      if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a reply under ${MAX_REPLY} characters` });
+      const writer = this.writer;
+      if (!writer) return yield* new Conflict({ message: "replying isn't available in this desk" });
+      const list = yield* this.convos.list(id).pipe(Effect.mapError(upstream("couldn't read the PR's conversations: ")));
+      const c = list.find((x) => x.id === convoId);
+      if (!c) return yield* new NotFound({ message: `no conversation "${convoId}" on ${id}` });
+      const write = Effect.gen({ self: this }, function* () {
+        const { url } = yield* (c.kind === "thread" ? writer.reply(c.id, text) : writer.comment(e.item.node_id, text)).pipe(
+          Effect.mapError(upstream("GitHub didn't take the reply: ")),
+        );
+        this.store.logWrite(id, c.kind === "thread" ? "reply" : "comment", this.now().toISOString());
+        this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
+        // Answering was all it asked of you, and nobody else waits on you there: it's done.
+        const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
+        const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
+        this.convos.forget(id);
+        if (only && last) yield* this.doneAfterWrite(id);
+        this.changed();
+        this.refreshAfter(id);
+        return { url };
+      });
+      return yield* this.locked(this.sending, convoId, "already sending that reply", write);
     });
-    const c = list.find((x) => x.id === convoId);
-    if (!c) throw new DeskError(404, `no conversation "${convoId}" on ${id}`);
-    if (this.sending.has(convoId)) throw new DeskError(409, "already sending that reply");
-    this.sending.add(convoId);
-    let url: string;
-    try {
-      // effect-bridge(C5b): it rejects with what the write fails with
-      ({ url } = await Effect.runPromise(c.kind === "thread" ? this.writer.reply(c.id, text) : this.writer.comment(e.item.node_id, text)));
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't take the reply: ${(err as Error).message}`);
-    } finally {
-      this.sending.delete(convoId);
-    }
-    this.store.logWrite(id, c.kind === "thread" ? "reply" : "comment", this.now().toISOString());
-    this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
-    // Answering was all it asked of you, and nobody else waits on you there: it's done.
-    const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
-    const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
-    this.convos.forget(id);
-    if (only && last) this.doneAfterWrite(id);
-    this.changed();
-    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
-    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
-    return { url };
   }
 
   // POST /api/review/:id/comment: your comment on the PR (Comment in its review) or the issue (Comment on it opened
   // in place), on your click. One of the desk's GitHub writes; it's yours done, so it leaves your desk until someone answers.
-  async comment(ref: string, body: string): Promise<{ url: string }> {
-    const found = Effect.runSync(this.resolve(ref)); // effect-bridge(C5b): comment yields resolve, which checks the config first
-    const e = this.snapshot().entries.get(found)!;
-    const id = e.item.id;
-    const text = body.trim();
-    if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
-    if (!text) throw new DeskError(400, "the comment is empty");
-    if (text.length > MAX_REPLY) throw new DeskError(400, `keep a comment under ${MAX_REPLY} characters`);
-    if (!this.writer) throw new DeskError(409, "commenting isn't available in this desk");
-    if (this.sending.has(id)) throw new DeskError(409, "already sending a comment there");
-    this.sending.add(id);
-    let url: string;
-    try {
-      ({ url } = await Effect.runPromise(this.writer.comment(e.item.node_id, text))); // effect-bridge(C5b): it rejects with what the write fails with
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
-    } finally {
-      this.sending.delete(id);
-    }
-    this.store.logWrite(id, "comment", this.now().toISOString());
-    this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
-    this.convos.forget(id);
-    this.doneAfterWrite(id);
-    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
-    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
-    return { url };
+  comment(ref: string, body: string): Effect.Effect<{ url: string }, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const found = yield* this.resolve(ref);
+      const e = this.snapshot().entries.get(found)!;
+      const id = e.item.id;
+      const text = body.trim();
+      if (e.item.state !== "open") return yield* new Conflict({ message: `can't comment on ${id}: it's ${e.item.state}` });
+      if (!text) return yield* new BadRequest({ message: "the comment is empty" });
+      if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a comment under ${MAX_REPLY} characters` });
+      const writer = this.writer;
+      if (!writer) return yield* new Conflict({ message: "commenting isn't available in this desk" });
+      const write = Effect.gen({ self: this }, function* () {
+        const { url } = yield* writer.comment(e.item.node_id, text).pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
+        this.store.logWrite(id, "comment", this.now().toISOString());
+        this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
+        this.convos.forget(id);
+        yield* this.doneAfterWrite(id);
+        this.refreshAfter(id);
+        return { url };
+      });
+      return yield* this.locked(this.sending, id, "already sending a comment there", write);
+    });
   }
 
   // POST /api/review/:id/inline: your comment on a line (or a range ending at it) of the diff, on your press, pinned to the
   // commit the review showed so its line numbers are the ones you read. Part of reviewing, not its end: the PR stays put.
-  async inlineComment(ref: string, at: InlineAt, body: string, head: string): Promise<{ url: string }> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): inlineComment yields pr
-    const id = e.item.id;
-    const text = body.trim();
-    if (e.item.state !== "open") throw new DeskError(409, `can't comment on ${id}: it's ${e.item.state}`);
-    if (!text) throw new DeskError(400, "the comment is empty");
-    if (text.length > MAX_REPLY) throw new DeskError(400, `keep a comment under ${MAX_REPLY} characters`);
-    if (!this.writer) throw new DeskError(409, "commenting isn't available in this desk");
-    const key = `${id} ${at.path}:${at.line}`;
-    if (this.sending.has(key)) throw new DeskError(409, "already sending a comment there");
-    this.sending.add(key);
-    const side = (s: "new" | "old") => (s === "old" ? "LEFT" : "RIGHT");
-    let url: string;
-    try {
-      // effect-bridge(C5b): it rejects with what the write fails with
-      ({ url } = await Effect.runPromise(
-        this.writer.inlineComment(e.item.node_id, head, {
-          path: at.path,
-          line: at.line,
-          side: side(at.side),
-          ...(at.start &&
-            !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
-          body: text,
-        }),
-      ));
-    } catch (err) {
-      throw new DeskError(502, `GitHub didn't take the comment: ${(err as Error).message}`);
-    } finally {
-      this.sending.delete(key);
-    }
-    this.store.logWrite(id, "inline_comment", this.now().toISOString());
-    this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
-    this.convos.forget(id);
-    this.changed();
-    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
-    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
-    return { url };
+  inlineComment(ref: string, at: InlineAt, body: string, head: string): Effect.Effect<{ url: string }, WriteError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      const text = body.trim();
+      if (e.item.state !== "open") return yield* new Conflict({ message: `can't comment on ${id}: it's ${e.item.state}` });
+      if (!text) return yield* new BadRequest({ message: "the comment is empty" });
+      if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a comment under ${MAX_REPLY} characters` });
+      const writer = this.writer;
+      if (!writer) return yield* new Conflict({ message: "commenting isn't available in this desk" });
+      const side = (s: "new" | "old") => (s === "old" ? "LEFT" : "RIGHT");
+      const thread: InlineThread = {
+        path: at.path,
+        line: at.line,
+        side: side(at.side),
+        ...(at.start &&
+          !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
+        body: text,
+      };
+      const write = Effect.gen({ self: this }, function* () {
+        const { url } = yield* writer
+          .inlineComment(e.item.node_id, head, thread)
+          .pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
+        this.store.logWrite(id, "inline_comment", this.now().toISOString());
+        this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
+        this.convos.forget(id);
+        this.changed();
+        this.refreshAfter(id);
+        return { url };
+      });
+      return yield* this.locked(this.sending, `${id} ${at.path}:${at.line}`, "already sending a comment there", write);
+    });
   }
 
   // POST /api/review/:id/ready: your own draft's "Ready for review", one of the desk's GitHub writes, on your click,
-  // then a review request to whoever you picked with it (node ids from reviewers()).
-  async markReady(ref: string, ask?: { users: string[]; teams: string[] }): Promise<void> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): markReady yields pr
-    const id = e.item.id;
-    if (!e.analysis.signals.me.author) throw new DeskError(409, `${id} isn't your PR`);
-    if (e.item.state !== "open" || !e.item.draft) throw new DeskError(409, `${id} isn't an open draft`);
-    if (!this.writer) throw new DeskError(409, "marking ready isn't available in this desk");
-    if (this.approving.has(id)) throw new DeskError(409, `already marking ${id} ready`);
-    this.approving.add(id);
-    try {
-      try {
-        await Effect.runPromise(this.writer.ready(e.item.node_id)); // effect-bridge(C5b): it rejects with what the write fails with
-      } catch (err) {
-        throw new DeskError(502, `GitHub didn't mark it ready: ${(err as Error).message}`);
-      }
-      this.store.logWrite(id, "ready", this.now().toISOString());
-      this.log(`marked ${id} ready for review on GitHub`);
-      this.doneAfterWrite(id);
-      const users = ask?.users ?? [];
-      const teams = ask?.teams ?? [];
-      const n = users.length + teams.length;
-      if (n > 0) {
-        try {
-          await Effect.runPromise(this.writer.requestReviews(e.item.node_id, users, teams)); // effect-bridge(C5b): it rejects with what the write fails with
-        } catch (err) {
-          throw new DeskError(502, `Marked it ready, but GitHub didn't ask for the reviews: ${(err as Error).message}`);
-        }
+  // then a review request to whoever you picked with it (node ids from reviewers()). Asking them failing leaves it ready.
+  markReady(ref: string, ask?: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError | ReviewersNotAsked> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });
+      if (e.item.state !== "open" || !e.item.draft) return yield* new Conflict({ message: `${id} isn't an open draft` });
+      const writer = this.writer;
+      if (!writer) return yield* new Conflict({ message: "marking ready isn't available in this desk" });
+      const write = Effect.gen({ self: this }, function* () {
+        yield* writer.ready(e.item.node_id).pipe(Effect.mapError(upstream("GitHub didn't mark it ready: ")));
+        this.store.logWrite(id, "ready", this.now().toISOString());
+        this.log(`marked ${id} ready for review on GitHub`);
+        yield* this.doneAfterWrite(id);
+        const users = ask?.users ?? [];
+        const teams = ask?.teams ?? [];
+        const n = users.length + teams.length;
+        if (n === 0) return;
+        yield* writer
+          .requestReviews(e.item.node_id, users, teams)
+          .pipe(
+            Effect.mapError(
+              (err) =>
+                new ReviewersNotAsked({ message: `Marked it ready, but GitHub didn't ask for the reviews: ${err.message}`, cause: err }),
+            ),
+          );
         this.store.logWrite(id, "request_reviews", this.now().toISOString());
         this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
-      }
-    } finally {
-      this.approving.delete(id);
-      this.runner.fork("refresh", this.gh.refresh(id), id); // effect-bridge(C5b): the write becomes an Effect that forks it
-    }
+      }).pipe(Effect.ensuring(this.refreshed(id)));
+      return yield* this.locked(this.approving, id, `already marking ${id} ready`, write);
+    });
   }
 
-  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first. Read only.
-  async reviewers(ref: string, q: string): Promise<Reviewer[]> {
-    const e = Effect.runSync(this.pr(ref)); // effect-bridge(C5b): reviewers yields pr
-    if (!e.analysis.signals.me.author) throw new DeskError(409, `${e.item.id} isn't your PR`);
-    const me = this.me().toLowerCase();
-    // effect-bridge(C5b): it rejects with what GitHub fails with, a 500 as before (Upstream 502 once reviewers is an Effect)
-    const list = await Effect.runPromise(this.gh.api.reviewers(e.item.repo, e.item.number, q.trim()));
-    return list.filter((r) => r.team || r.login.toLowerCase() !== me);
+  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first. Read only: what GitHub fails
+  // with is passed on in its words.
+  reviewers(ref: string, q: string): Effect.Effect<Reviewer[], RefError | BadRequest | Conflict | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${e.item.id} isn't your PR` });
+      const me = this.me().toLowerCase();
+      const list = yield* this.gh.api.reviewers(e.item.repo, e.item.number, q.trim()).pipe(Effect.mapError(upstream("")));
+      return list.filter((r) => r.team || r.login.toLowerCase() !== me);
+    });
   }
 
   // ---------------------------------------------------------------- config

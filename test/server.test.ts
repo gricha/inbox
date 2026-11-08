@@ -14,13 +14,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createServer as createViteServer } from "vite";
 import { Desk } from "../src/desk.ts";
-import { DeskError, NotFound, Upstream } from "../src/errors.ts";
+import { DeskError, GitHubGraphQLError, GitHubHttpError, NotFound, Upstream } from "../src/errors.ts";
+import type { GitHubWriter } from "../src/github/write.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond } from "../src/server.ts";
 import { myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { runSync } from "./helpers/run.ts";
+import { refuseWrites } from "./helpers/writer.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
 delete process.env.DESK_UI_ORIGIN;
@@ -704,6 +706,121 @@ test("the desk's refusals answer through respond with their tag, words and statu
   ];
   assert.deepEqual([failed, why.tag], [500, "Internal"]);
   assert.match(why.error, /settings\.json/);
+});
+
+test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstream in its words, a moved head Stale, a second press Busy", async (c) => {
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  const refused = "Resource not accessible by integration";
+  const writer: GitHubWriter = {
+    ...refuseWrites(refused),
+    ready: () => Effect.void,
+    approve: () => Effect.promise(() => held).pipe(Effect.as({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" })),
+  };
+  const ready = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
+  const t = await withItems([reviewAsk(1, { head_oid: "h1" }), myPr(3, { ci: "green", draft: true }), myPr(4, ready)], {
+    settings: { "policy.judge": false },
+    desk: { writer },
+  });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const app = createApp(t.desk, 47823);
+  const DESK = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  const call = async (method: string, p: string, body?: unknown, headers: Record<string, string> = DESK) => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, {
+      method,
+      headers: { "content-type": "application/json", ...headers },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    });
+    return [res.status, await res.json()];
+  };
+  const no = (tag: string, error: string) => ({ error, tag });
+  const review = (ref: string, what: string) => `/api/review/${encodeURIComponent(ref)}/${what}`;
+  assert.deepEqual(await call("POST", review("acme/api#1", "approve"), { head_oid: "h1" }, {}), [
+    403,
+    no("Forbidden", "approve from the PR's review in the desk"),
+  ]);
+  assert.deepEqual(await call("POST", review("acme/api#1", "approve"), { head_oid: "h0" }), [
+    409,
+    no("Stale", "can't approve acme/api#1: it has new commits since you opened it"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/github", { id: "acme/web#4", action: "merge", head_oid: "h3" }), [
+    409,
+    no("Stale", "can't merge acme/web#4: it has new commits since you opened it"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/github", { id: "acme/web#4", action: "reopen" }), [
+    409,
+    no("Conflict", "can't reopen acme/web#4 now"),
+  ]);
+  assert.deepEqual(await call("POST", "/api/github", { id: "acme/web#4", action: "close" }), [
+    502,
+    no("Upstream", `couldn't close acme/web#4 on GitHub: ${refused}`),
+  ]);
+  assert.deepEqual(await call("POST", review("acme/api#1", "comment"), { body: " " }), [400, no("BadRequest", "the comment is empty")]);
+  assert.deepEqual(await call("POST", review("acme/api#1", "comment"), { body: "Thanks" }), [
+    502,
+    no("Upstream", `GitHub didn't take the comment: ${refused}`),
+  ]);
+  const line = { path: "src/a.ts", line: 3, side: "new", body: "nit", head_oid: "h1" };
+  assert.deepEqual(await call("POST", review("acme/api#1", "inline"), line), [
+    502,
+    no("Upstream", `GitHub didn't take the comment: ${refused}`),
+  ]);
+  const context = t.gh.prContext.bind(t.gh);
+  t.gh.prContext = () => Effect.fail(new GitHubHttpError({ status: 502, message: "GitHub HTTP 502: bad gateway" }));
+  assert.deepEqual(await call("POST", review("acme/api#1", "reply"), { id: "PRRT_1", body: "Done" }), [
+    502,
+    no("Upstream", "couldn't read the PR's conversations: GitHub HTTP 502: bad gateway"),
+  ]);
+  t.gh.prContext = context;
+  assert.deepEqual(await call("POST", review("acme/api#1", "reply"), { id: "PRRT_1", body: "Done" }), [
+    404,
+    no("NotFound", 'no conversation "PRRT_1" on acme/api#1'),
+  ]);
+  assert.deepEqual(await call("POST", review("acme/web#4", "reviewers"), { users: ["U_dana"] }), [
+    502,
+    no("Upstream", `GitHub didn't ask for the reviews: ${refused}`),
+  ]);
+  assert.deepEqual(await call("POST", review("acme/web#3", "ready"), { users: ["U_dana"] }), [
+    502,
+    no("ReviewersNotAsked", `Marked it ready, but GitHub didn't ask for the reviews: ${refused}`),
+  ]);
+  assert.deepEqual(
+    t.desk.store.db
+      .prepare("SELECT action FROM events WHERE item_id = 'acme/web#3' ORDER BY seq")
+      .all()
+      .map((r) => r.action),
+    ["ready", "done"],
+    "ready landed and is kept: nothing rolled back",
+  );
+  t.gh.reviewers = () => Effect.fail(new GitHubGraphQLError({ message: "GitHub: Could not resolve to a Repository" }));
+  assert.deepEqual(
+    await call("GET", `/api/reviewers/${encodeURIComponent("acme/web#4")}?q=da`),
+    [502, no("Upstream", "GitHub: Could not resolve to a Repository")],
+    "it was a 500",
+  );
+  assert.deepEqual(await call("GET", `/api/reviewers/${encodeURIComponent("acme/api#1")}`), [
+    409,
+    no("Conflict", "acme/api#1 isn't your PR"),
+  ]);
+  t.gh.lookup = () => Effect.fail(new GitHubHttpError({ status: 500, message: "GitHub HTTP 500: oops" }));
+  assert.deepEqual(await call("POST", "/api/add", { id: "acme/other#9" }), [502, no("Upstream", "GitHub HTTP 500: oops")]);
+  assert.deepEqual(await call("POST", "/api/add", { id: "acme/api#1", why: 5 }), [400, no("BadRequest", "why and from are lines of text")]);
+  assert.deepEqual(await call("POST", "/api/add", { id: "what" }), [
+    400,
+    no("BadRequest", `can't read "what"; use owner/repo#123 or a GitHub URL`),
+  ]);
+
+  const first = call("POST", review("acme/api#1", "approve"), { head_oid: "h1" });
+  await sleep(20);
+  assert.deepEqual(await call("POST", review("acme/api#1", "approve"), { head_oid: "h1" }), [
+    409,
+    no("Busy", "already approving acme/api#1"),
+  ]);
+  release();
+  assert.deepEqual(await first, [200, { ok: true, url: "https://github.com/acme/api/pull/1#pullrequestreview-1" }]);
 });
 
 test("a desk whose config never loaded answers 503: starting until the config's errors say why, and Focus says so too", async (c) => {

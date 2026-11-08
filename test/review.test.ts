@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
 import {
@@ -1681,6 +1681,46 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
     "re-requested: back in Now",
   );
   assert.deepEqual(t.desk.store.activity({ after: 0, limit: 1, item: "acme/api#1", latest: true })[0]?.data, { was: "you approved" });
+  t.cleanup();
+});
+
+test("the refresh and the full pass after an approval are one fiber: the desk stopping interrupts both", async () => {
+  const w = fakeWriter();
+  const t = await setup([ask(1), ask(2)], { writer: w.writer, settings: { "review.auto_ai": false } });
+  await t.sync();
+  const search = t.gh.search.bind(t.gh);
+  const gate = deferred();
+  t.gh.search = (q) => Effect.promise(() => gate.promise).pipe(Effect.andThen(search(q)));
+  const searched = t.gh.searches.length;
+  await run(t.desk.approve("api#1", "h1"));
+  assert.equal(t.desk.syncing, true, "refreshed, and the full pass is waiting on its search");
+  t.desk.stop();
+  gate.resolve();
+  await flush();
+  assert.equal(t.gh.searches.length, searched, "the pass stopped with the desk: none of its searches ran");
+  t.cleanup();
+});
+
+test("an approval its caller stops waiting for still lands, logged and off your desk, and a second press meanwhile is Busy", async () => {
+  const gate = deferred();
+  const w = fakeWriter();
+  const approve = w.writer.approve.bind(w.writer);
+  w.writer.approve = (pr, commit, body) => Effect.promise(() => gate.promise).pipe(Effect.andThen(approve(pr, commit, body)));
+  const t = await setup([ask(1)], { writer: w.writer, settings: { "review.auto_ai": false } });
+  await t.sync();
+  const fiber = Effect.runFork(t.desk.approve("api#1", "h1"));
+  const busy = await failure(t.desk.approve("api#1", "h1"));
+  assert.deepEqual([busy._tag, busy.message, busy.status], ["Busy", "already approving acme/api#1", 409]);
+  const gone = Effect.runPromise(Fiber.interrupt(fiber));
+  gate.resolve();
+  await gone;
+  const logged = t.desk.store.db.prepare("SELECT action FROM events WHERE item_id = ? ORDER BY seq").all("acme/api#1");
+  assert.deepEqual(
+    logged.map((e) => e.action),
+    ["approve", "done"],
+  );
+  assert.equal(runSync(t.desk.item("api#1")).card.status, "done");
+  assert.equal(w.calls.length, 1);
   t.cleanup();
 });
 
