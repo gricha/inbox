@@ -737,6 +737,9 @@ const listen = (app: Hono, port: number, url: string) =>
     s.once("error", (cause: Error) => {
       resume(Effect.fail(new ListenFailed({ port, url, cause })));
     });
+    return Effect.sync(() => {
+      s.close();
+    });
   });
 
 // The desk on its port, its first config read and its loops started. Its port, GitHub's viewer or a file it can't read
@@ -794,7 +797,8 @@ export const startDesk = Effect.fnUntraced(function* (
     (server as { closeAllConnections?: () => void }).closeAllConnections?.();
     dropUpgrades();
   });
-  const closing = Effect.all([desk.close(), stopListening], { concurrency: 2, discard: true });
+  // The port is let go even when closing the desk dies.
+  const closing = Effect.all([Effect.exit(desk.close()), stopListening], { concurrency: 2 }).pipe(Effect.flatMap(([closed]) => closed));
   return { url, desk, close: () => Effect.runPromise(closing) };
 });
 

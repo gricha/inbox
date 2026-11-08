@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
-import type { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { main } from "../src/cli.ts";
 import * as api from "../src/client.ts";
 import { plistFor } from "../src/launchd.ts";
@@ -91,6 +91,13 @@ test("client maps 404 and 409 to readable errors, tagged by their status when th
       e.candidates.length === 2 &&
       e.message.includes("candidates: getsentry/sentry#1, other/sentry#1"),
   );
+});
+
+test("a body the client can't encode is a bug, not the desk not answering", async () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const exit = await Effect.runPromiseExit(api.createClient(() => new Response("{}")).putSettings(cyclic as never));
+  assert.ok(Exit.isFailure(exit) && Cause.hasDies(exit.cause) && !Cause.hasFails(exit.cause), String(exit));
 });
 
 // One answer, at any path, from a desk that isn't the fake.

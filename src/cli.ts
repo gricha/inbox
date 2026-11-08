@@ -595,12 +595,18 @@ const command = Effect.fnUntraced(function* (cmd: string, rest: string[], io: IO
   const run = COMMANDS[cmd];
   const arity = ARITY[cmd];
   if (!run || !arity) return yield* new UsageError({ message: `unknown command: ${cmd}` });
-  // parseArgs throws only for what was typed (ERR_PARSE_ARGS_*): an unknown option, a missing value.
+  // parseArgs throws for what was typed (ERR_PARSE_ARGS_*): an unknown option, a missing value; anything else is a bug.
   const { values, positionals } = yield* Effect.try({
     try: () =>
       parseArgs({ args: rest, allowPositionals: true, strict: true, options: { help: { type: "boolean", short: "h" }, ...OPTIONS[cmd] } }),
-    catch: (cause) => new UsageError({ message: (cause as Error).message }),
-  });
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause): Effect.Effect<never, UsageError> => {
+      const code = (cause as { code?: unknown }).code;
+      const typed = typeof code === "string" && code.startsWith("ERR_PARSE_ARGS");
+      return typed ? Effect.fail(new UsageError({ message: (cause as Error).message })) : Effect.die(cause);
+    }),
+  );
   if (values.help) return (io.stdout.write(USAGE), 0);
   const [min, max] = arity;
   if (positionals.length < min) return yield* new UsageError({ message: `${cmd}: missing argument` });

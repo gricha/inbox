@@ -129,13 +129,14 @@ const q = encodeURIComponent;
 export function createClient(send: (path: string, init: RequestInit) => Response | Promise<Response> = overNetwork) {
   function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Effect.Effect<T, ClientError> {
     return Effect.gen(function* () {
+      const json = body === undefined ? undefined : JSON.stringify(body); // a body that can't be encoded is a bug, not "no answer"
       const res = yield* Effect.tryPromise({
         try: (signal) =>
           Promise.resolve(
             send(path, {
               method,
-              headers: body === undefined ? undefined : { "content-type": "application/json" },
-              body: body === undefined ? undefined : JSON.stringify(body),
+              headers: json === undefined ? undefined : { "content-type": "application/json" },
+              body: json,
               signal: timeoutMs ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : signal,
             }),
           ),

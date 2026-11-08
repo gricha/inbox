@@ -314,7 +314,7 @@ export class GitHubNotFetched extends Data.TaggedError("GitHubNotFetched")<{ rea
 
 export type GitHubReadError =
   GitHubAuthError | GitHubRateLimited | GitHubHttpError | GitHubGraphQLError | GitHubNetworkError | GitHubBadResponse;
-export type GitHubWriteError = GitHubAuthError | GitHubHttpError | GitHubGraphQLError | GitHubBadResponse | GitHubWriteUncertain;
+export type GitHubWriteError = GitHubAuthError | GitHubHttpError | GitHubGraphQLError | GitHubWriteUncertain;
 export type GitHubError = GitHubReadError | GitHubWriteError;
 
 // The pages of a PR's files were fetched across a push and disagree on its head commit.

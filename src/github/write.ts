@@ -108,10 +108,11 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
       catch: (cause) => new GitHubWriteUncertain({ message: cause instanceof Error ? cause.message : String(cause), cause }),
     });
     if (!res.ok) return yield* new GitHubHttpError({ status: res.status, message: `GitHub HTTP ${res.status}: ${text.slice(0, 200)}` });
+    // A 2xx whose body can't be read may have landed: uncertain, in the parser's words.
     const { data, errors } = yield* decode(() => {
       const json = JSON.parse(text) as { data?: unknown; errors?: { type?: string; message: string }[] };
       return { data: json.data, errors: (json.errors ?? []).map((e) => ({ type: e.type, message: e.message })) };
-    });
+    }).pipe(Effect.mapError((e) => new GitHubWriteUncertain({ message: e.message, cause: e.cause })));
     const types = errors.flatMap((e) => (e.type ? [e.type] : []));
     if (errors.length)
       return yield* new GitHubGraphQLError({

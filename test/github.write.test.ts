@@ -217,6 +217,13 @@ test("a write with no answer (a timeout, the network) may have landed: it's unce
   }
 });
 
+test("a write GitHub answered 2xx with something unreadable may have landed: it's uncertain, in the parser's words", async () => {
+  const fetch: typeof globalThis.fetch = () => Promise.resolve(new Response("<html>oops</html>", { status: 200 }));
+  const e = await failure(createWriter({ token: "t", fetch }).comment("PR_1", "Thanks"));
+  assert.equal(e._tag, "GitHubWriteUncertain");
+  assert.ok(e._tag === "GitHubWriteUncertain" && e.cause instanceof SyntaxError && e.message === e.cause.message);
+});
+
 test("a write is an Effect: nothing is sent until it runs", async () => {
   const f = fakeFetch({ body: { data: {} } });
   const ready = createWriter({ token: "t", fetch: f.fetch }).ready("PR_1");
