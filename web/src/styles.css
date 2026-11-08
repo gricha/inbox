@@ -611,9 +611,10 @@ p {
 }
 
 .mark {
-  width: 18px;
-  height: 18px;
-  fill: var(--faint);
+  width: 20px;
+  height: 20px;
+  color: var(--accent-ink);
+  fill: currentcolor;
 }
 
 .crumb {

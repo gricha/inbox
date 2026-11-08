@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type Page, type Route } from "playwright-core";
+import { chromium, type Browser, type Page, type Route } from "playwright-core";
 import { THEMES } from "../src/themes.ts";
 import type { Ask, AskLines, AsksView, InflightView, Overview, QueueView, ReviewView } from "../src/types.ts";
 
@@ -1699,6 +1699,75 @@ const SIZES = [
   { name: "mac", width: 1280, height: 820, mac: true },
 ];
 
+// The icons shot: every icon and the window's Mark at real size on both sidebars, at 100 % and 2x, to judge the small ones.
+const ICON_PX = [16, 20, 24, 32, 64];
+async function iconSheets(browser: Browser, url: string): Promise<string[]> {
+  const data = (file: string, type = "image/png") => `data:${type};base64,${fs.readFileSync(path.join(root, file)).toString("base64")}`;
+  const sheets: string[] = [];
+  for (const scale of [1, 2]) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, deviceScaleFactor: scale });
+    // The @2x file at 2x where there is one, as Electron picks.
+    const asset = (name: string) => {
+      const x2 = `assets/${name.replace(".png", "@2x.png")}`;
+      return data(scale === 2 && fs.existsSync(path.join(root, x2)) ? x2 : `assets/${name}`);
+    };
+    const sides: string[] = [];
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto(`${url}/#/`);
+      const brand = page.locator(".side-brand");
+      await brand.waitFor({ timeout: 15_000 });
+      // The sidebar's colours and the Mark as the window draws them.
+      const s = await page.evaluate<{ side: string; pencil: string; color: string; mark: string; w: number; h: number }>(`(() => {
+        const css = getComputedStyle(document.documentElement), mark = document.querySelector(".side-brand .mark");
+        const r = document.querySelector(".side-brand").getBoundingClientRect();
+        return { side: css.getPropertyValue("--side"), pencil: css.getPropertyValue("--pencil"), color: getComputedStyle(mark).color, mark: mark.outerHTML, w: r.width, h: r.height };
+      })()`);
+      const row = (label: string, cells: string[]) =>
+        `<div class="row"><div class="label">${label}</div><div class="cells">${cells.join("")}</div></div>`;
+      const cell = (px: number | string, img: string) => `<figure>${img}<figcaption>${px}</figcaption></figure>`;
+      const marks = ICON_PX.map((px) =>
+        cell(px, `<span class="mk" style="width:${px}px;height:${px}px;color:${s.color}">${s.mark}</span>`),
+      );
+      const tiles = (src: string) => ICON_PX.map((px) => cell(px, `<img src="${src}" width="${px}" height="${px}">`));
+      // macOS draws a template image in the menu bar's text colour: black on a light bar, white on a dark one.
+      const template = `<img src="${asset("trayTemplate.png")}" width="22" height="16"${scheme === "dark" ? ' style="filter:invert(1)"' : ""}>`;
+      const row16 = (name: string) => `<img src="${asset(name)}" width="16" height="16">`;
+      const named = `<img src="data:image/png;base64,${(await brand.screenshot()).toString("base64")}" width="${s.w}" height="${s.h}">`;
+      sides.push(
+        `<section style="background:${s.side};color:${s.pencil}"><h2>${scheme === "light" ? "Light" : "Dark"} sidebar</h2>` +
+          row("Mark, in the window", marks) +
+          row("Beside the name", [named]) +
+          row("App icon", tiles(data("assets/icon.png"))) +
+          row("Favicon", tiles(data("web/public/icon.svg", "image/svg+xml"))) +
+          row("Menu bar", [cell("22×16", template), cell("with a count", `<span class="bar">${template}3</span>`)]) +
+          row("Tray, Windows and Linux", [
+            cell("tray", row16("tray.png")),
+            cell("alert", row16("tray-alert.png")),
+            cell("badge", row16("overlay-alert.png")),
+          ]) +
+          `</section>`,
+      );
+    }
+    await page.setViewportSize({ width: 900, height: 400 });
+    await page.setContent(
+      `<!doctype html><meta charset="utf-8"><style>
+        body{margin:0;display:grid;grid-template-columns:1fr 1fr;font:12px system-ui}
+        section{padding:16px 20px} h2{margin:0 0 12px;font-size:13px;font-weight:600}
+        .row{display:grid;grid-template-columns:150px 1fr;align-items:end;padding:10px 0}
+        .cells{display:flex;align-items:end;gap:18px} figure{margin:0;display:grid;justify-items:center;gap:4px}
+        .mk{display:block}.mk svg{display:block;width:100%;height:100%;fill:currentColor}
+        img{display:block}.bar{display:flex;align-items:center;gap:4px;font:14px system-ui}
+      </style>${sides.join("")}`,
+    );
+    const file = `icons-${scale}x.png`;
+    await page.screenshot({ path: path.join(out, file), fullPage: true });
+    sheets.push(file);
+    await page.close();
+  }
+  return sheets;
+}
+
 const files: string[] = [];
 try {
   const real = arg("--url");
@@ -1753,6 +1822,7 @@ try {
       await page.close();
     }
   }
+  if (!only || only.some((o) => "icons".includes(o))) files.push(...(await iconSheets(browser, url)));
   await browser.close();
   const sheet = files.map((f) => `<figure><img src="${f}" loading="lazy"><figcaption>${f}</figcaption></figure>`).join("\n");
   fs.writeFileSync(

@@ -1,6 +1,7 @@
 import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
 import { pageOf, routeHash, type ListPage, type Route } from "../view.ts";
+import { Mark } from "./Mark.tsx";
 
 const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
 const BACK_LABEL = { queue: "Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "Archive" };
@@ -46,11 +47,7 @@ export function TopBar({
   return (
     <header className="topbar">
       <a className="wordmark" href="#/" title="Inbox">
-        <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="2" y="3" width="16" height="4" rx="1.5" />
-          <rect x="2" y="9" width="12" height="2.5" rx="1.25" />
-          <rect x="2" y="14" width="9" height="2.5" rx="1.25" />
-        </svg>
+        <Mark />
         <span>Review Desk</span>
       </a>
       {inSettings || route.name === "inflight" ? (

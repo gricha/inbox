@@ -1,6 +1,7 @@
 import type { Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import { pageOf, type ListPage, type Route } from "../view.ts";
+import { Mark } from "./Mark.tsx";
 
 // The pages, in the owner's order: Inbox, Blocked, FYI, then Merging and the Archive under a hairline, and Settings in the
 // footer.
@@ -29,11 +30,7 @@ export function Sidebar({
     <aside className="side">
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
       <div className="wordmark side-brand">
-        <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="2" y="3" width="16" height="4" rx="1.5" />
-          <rect x="2" y="9" width="12" height="2.5" rx="1.25" />
-          <rect x="2" y="14" width="9" height="2.5" rx="1.25" />
-        </svg>
+        <Mark />
         <span>Review Desk</span>
       </div>
       <nav className="side-nav" aria-label="Pages">
