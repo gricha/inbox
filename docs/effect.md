@@ -78,14 +78,15 @@ answers 409 `Stale`, and a held lock 409 `Busy`; the UI shows any of them by its
 `reviewers` keep GitHub's error as `Upstream`'s `cause`, one `report()` hasn't sent, so Sentry sees each 502.
 
 Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
-`wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus` and `askAbout` with broken
-rules answer `Unavailable` "config" (was a TypeError 500); a body that isn't a JSON object at the routes that parse one
-(`json`) is a `BadRequest` "the body must be a JSON object" (was a 500), and `bodyOf`, for the routes that say what they
-need of it, reads JSON `null` or an array as `{}` too. `Unavailable` and `ReviewersNotAsked` say "config has errors:
-<path>: <msg>; …", "desk is starting; the first sync can take a minute" and "Marked it ready, but GitHub didn't ask for
-the reviews: …". Additive, with a test: an `/api/*` path the desk doesn't route, and one under `/api` or `/health` that
-`fromUi` won't pass to Vite, answer `{ error: "not found", tag: "NotFound" }` (there was no tag), and the
-host/origin/cross-site middleware's 403s carry `Forbidden`.
+`wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus`, an ask about an item and a
+wake that sends one again (`askAbout`) with broken rules answer `Unavailable` "config" (was a TypeError 500); a body
+that isn't a JSON object at the routes that parse one (`json`) is a `BadRequest` "the body must be a JSON object" (was a
+500), and `bodyOf`, for the routes that say what they need of it, reads JSON `null` or an array as `{}` too.
+`Unavailable` and `ReviewersNotAsked` say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can
+take a minute" and "Marked it ready, but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path
+the desk doesn't route, and one under `/api` or `/health` that `fromUi` won't pass to Vite, answer
+`{ error: "not found", tag: "NotFound" }` (there was no tag), and the host/origin/cross-site middleware's 403s carry
+`Forbidden`.
 
 ## Writing Effect code
 
@@ -149,7 +150,9 @@ host/origin/cross-site middleware's 403s carry `Forbidden`.
   `generating.has(id)` and `.size` stay synchronous; callers `Deferred.await` it, and the fiber deletes the entry (and
   does its bookkeeping) before it completes the Deferred, which keeps no failure: the next caller starts a fresh run
   (`Desk.shared`). The desk stopping interrupts the fiber, which ends its callers with it; a stopped desk starts none
-  and ends them at once.
+  and ends them at once. Deliberate change, with a test: a bug in the bookkeeping after it (`after`: an AI review's
+  notifying) is the runner's, logged and reported once, and its callers get the work's own result (a stored review
+  answered 502 with the bug's words).
 - Interruption records nothing: no `onExit`, `ensuring` or `onInterrupt` writes the store or notifies (a cut automation
   run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
   locks. An `ensuring` inside a write's uninterruptible region never sees an interruption: `markReady`'s and

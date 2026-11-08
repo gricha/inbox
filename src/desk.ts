@@ -799,11 +799,19 @@ export class Desk {
           .filter((c) => c.kind === "pr")
           .map((c) => c.id)
           .values();
-        // WARM_AT_ONCE of these share the one list. Ahead of time, what fails is ignored: opening it says what failed.
+        const quietly = (fx: Effect.Effect<unknown, unknown>, id: string) =>
+          Effect.catchCause(fx, (cause) =>
+            Effect.sync(() => {
+              if (!Cause.hasDies(cause)) return;
+              this.log(`warm failed: ${Cause.pretty(cause)}`);
+              report(Cause.squash(cause), "warm", id);
+            }),
+          );
+        // WARM_AT_ONCE of these share the one list. A failure is ignored (opening it says what failed), a bug logged and reported.
         const next = Effect.gen({ self: this }, function* () {
           for (const id of ids) {
             if (!this.snapshot().entries.has(id)) continue; // gone since: both would fail on it
-            yield* Effect.all([Effect.ignore(this.prText(id)), Effect.ignore(this.convos.context(id))], {
+            yield* Effect.all([quietly(this.prText(id), id), quietly(this.convos.context(id), id)], {
               concurrency: "unbounded",
               discard: true,
             });
@@ -1698,9 +1706,11 @@ export class Desk {
     if (running) return running;
     const d = Deferred.makeUnsafe<A, E>();
     runs.set(id, d);
+    let result: Exit.Exit<A, E> | undefined; // the work's own: a bug in after() is the runner's, not its callers'
     const run = Effect.exit(work).pipe(
       Effect.tap((exit) =>
         Effect.sync(() => {
+          result = exit;
           runs.delete(id);
           if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return;
           after(Exit.isSuccess(exit));
@@ -1709,7 +1719,7 @@ export class Desk {
       Effect.onExit((ended) =>
         Effect.sync(() => {
           if (runs.get(id) === d) runs.delete(id);
-          Deferred.doneUnsafe(d, Exit.isSuccess(ended) ? ended.value : Exit.failCause(ended.cause));
+          Deferred.doneUnsafe(d, result ?? (Exit.isSuccess(ended) ? ended.value : Exit.failCause(ended.cause)));
         }),
       ),
     );
@@ -2210,11 +2220,12 @@ export class Desk {
   // w, or Wake it under an ask it stopped without answering: that ask goes to it again, your words as you wrote them.
   // What cmd.exe can't pass is a BadRequest, as in ask; one that didn't start says so, with what stopped its run (reported
   // there) as the cause.
-  wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream> {
+  wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream | Unavailable> {
     return Effect.gen({ self: this }, function* () {
       if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
       const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
       if (a) {
+        if (a.item_id) yield* this.requireConfig(); // askAbout reads the snapshot
         const told = yield* this.coordinator
           .tell(askLine(a, this.askAbout(a.item_id)))
           .pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
@@ -2464,7 +2475,8 @@ export class Desk {
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Agents" });
-      const item = b.item_id ? this.snapshot().entries.get(yield* this.resolve(b.item_id))!.item : null;
+      const ref = b.item_id ? yield* this.resolve(b.item_id) : null; // before the snapshot, which needs the config
+      const item = ref ? this.snapshot().entries.get(ref)!.item : null;
       const bad = (message: string) => new BadRequest({ message });
       const l = b.lines;
       if (l) {
@@ -2627,12 +2639,13 @@ export class Desk {
         this.inquiries().map((x) => (x.id === id ? done : x)),
       );
       this.changed();
-      // The coordinator ends its turn once it asks; your answer is what wakes it. What cmd.exe can't pass is only logged: your
-      // answer is kept.
+      // Your answer is what wakes the coordinator (it ends its turn once it asks); what cmd.exe can't pass is only logged.
       if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
         const asked = `your question ${q.id} ("${q.question}")`;
         const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
-        const tell = Effect.flatten(this.coordinator.tell(line)).pipe(
+        // tell() keeps the line and wakes it; nothing here waits for that run.
+        const tell = this.coordinator.tell(line).pipe(
+          Effect.asVoid,
           Effect.catch((e) =>
             Effect.sync(() => {
               this.log(`coordinator: couldn't pass on your answer to ${q.id}: ${e.message}`);

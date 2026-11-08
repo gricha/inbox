@@ -1594,6 +1594,37 @@ test("an AI review runs to the end when the one asking leaves; a bug in it is it
   assert.equal(t.f.started.length, 2, "a stopped desk starts no claude");
 });
 
+test("a bug after an AI review is stored is the runner's, logged once: its caller still gets the review", async (c) => {
+  const t = await setup([ask(1)], { settings: { "review.auto_ai": false } });
+  c.after(t.cleanup);
+  await t.sync();
+  t.desk.notifyNew = () => {
+    throw new TypeError("x");
+  };
+  const asked = run(t.desk.aiReview("api#1"));
+  await flush();
+  await t.f.release("acme/api#1");
+  assert.equal((await asked).summary, "Review of acme/api#1");
+  assert.deepEqual(
+    t.logs.filter((l) => l.startsWith("ai_review failed:")).map((l) => l.split("\n")[0]),
+    ["ai_review failed: TypeError: x"],
+  );
+});
+
+test("warming the main page's PRs ahead: a bug on one is logged and reported once, and the others are still fetched", async (c) => {
+  const t = await setup([ask(1), ask(2), ask(3), ask(4), ask(5)], { settings: { "review.auto_ai": false } });
+  c.after(t.cleanup);
+  const fetch = t.f.deps.fetchPr.bind(t.f.deps);
+  t.f.deps.fetchPr = (item, since) => (item.number === 5 ? Effect.die(new TypeError("bug")) : fetch(item, since));
+  await t.sync();
+  while (t.desk.warming) await flush();
+  assert.deepEqual(t.f.fetched.toSorted(), ["acme/api#1@h1", "acme/api#2@h2", "acme/api#3@h3", "acme/api#4@h4"]);
+  assert.deepEqual(
+    t.logs.filter((l) => l.startsWith("warm failed:")).map((l) => l.split("\n")[0]),
+    ["warm failed: TypeError: bug"],
+  );
+});
+
 test("the desk stopping while an AI review waits on its PR's diff records nothing and notifies nothing", async () => {
   const t = await setup([ask(1)]);
   t.f.deps.fetchPr = () => Effect.never;

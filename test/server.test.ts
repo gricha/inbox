@@ -913,6 +913,43 @@ test("a desk whose config never loaded answers 503: starting until the config's 
     assert.deepEqual(await get(p), [503, broken], `${p}: focus was a TypeError 500`);
 });
 
+test("with broken rules, an ask about an item and a wake that sends one again answer 503 config, not a TypeError 500", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-srv-"));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "agent.coordinator": true }));
+  const cold = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    cold.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(home, "config.toml"), "[[boards]]\nid = 7\n");
+  runSync(cold.reloadConfig());
+  const ask = {
+    id: "a1",
+    at: NOW.toISOString(),
+    text: "x",
+    item_id: "acme/web#3",
+    thread_id: null,
+    thread_url: null,
+    lines: null,
+    answer: null,
+  };
+  cold.store.set("asks", [ask]);
+  const broken = {
+    error: `config has errors: ${cold.configErrors.map((e) => `${e.path}: ${e.message}`).join("; ")}`,
+    tag: "Unavailable",
+    reason: "config",
+  };
+  const app = createApp(cold, 47823);
+  const DESK = { "content-type": "application/json", "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  for (const [p, body] of [
+    ["/api/coordinator/wake", { ask: "a1" }],
+    ["/api/ask", { text: "hi", item_id: "acme/web#3" }],
+  ] as const) {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, { method: "POST", headers: DESK, body: JSON.stringify(body) });
+    assert.deepEqual([res.status, await res.json()], [503, broken], p);
+  }
+});
+
 test("the desk's reviews, AI, asks, wakes, agents and event log answer through respond: the run's words as Upstream, your agent off a Conflict, a client gone from the long-poll 499", async (c) => {
   const issue = makeItem({
     number: 9,
