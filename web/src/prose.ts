@@ -160,12 +160,8 @@ function urls(out: Span[], text: string, bold: boolean): void {
 
 // .href puts a lookalike host in punycode and resolves `..` and %2E; userinfo could make another host read as GitHub.
 function link(raw: string): string | null {
-  try {
-    const u = new URL(raw);
-    return u.protocol === "https:" && !u.username && !u.password ? u.href : null;
-  } catch {
-    return null;
-  }
+  const u = URL.parse(raw);
+  return u?.protocol === "https:" && !u.username && !u.password ? u.href : null;
 }
 
 function tidy(spans: Span[]): Span[] {

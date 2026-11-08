@@ -1,5 +1,8 @@
+import { Effect } from "effect";
 import { THEMES, themeOf, type Theme, type ThemeId as Named } from "../../src/themes.ts";
 import type { DesktopBridge } from "../../src/types.ts";
+import { runUi } from "./api.ts";
+import { getStored, setStored } from "./storage.ts";
 
 // The theme is this device's (not a desk setting): the desktop app keeps it, a browser keeps it in its storage, and
 // index.html applies it before the first paint. The themes themselves are src/themes.ts's.
@@ -16,12 +19,8 @@ const known = (t: unknown): t is ThemeId => t === "system" || themeOf(t) !== und
 export const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 function stored(): ThemeId | null {
-  try {
-    const t = localStorage.getItem(KEY);
-    return known(t) ? t : null;
-  } catch {
-    return null;
-  }
+  const t = getStored(KEY);
+  return known(t) ? t : null;
 }
 
 export function savedTheme(): ThemeId {
@@ -29,22 +28,24 @@ export function savedTheme(): ThemeId {
   return known(app) ? app : (stored() ?? "system");
 }
 
+// The desktop app keeps it for the next start; an app that refuses it (one too old to know the theme) leaves this window
+// showing it anyway, so there's nothing to say.
+function keepInApp(id: ThemeId): void {
+  if (desktop?.setTheme)
+    void runUi(Effect.tryPromise({ try: () => desktop?.setTheme?.(id) ?? Promise.resolve(), catch: (e) => e }).pipe(Effect.ignore));
+}
+
 export function applyTheme(id: ThemeId): void {
   if (id === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = id;
-  try {
-    if (id === "system") localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, id);
-  } catch {
-    // storage off (a private window): the theme holds until the window closes
-  }
-  desktop?.setTheme?.(id).catch(() => {});
+  setStored(KEY, id === "system" ? null : id);
+  keepInApp(id);
 }
 
 // A theme picked before the app kept it lives in this origin's storage only: hand it to the app once.
 export function adoptTheme(): void {
   const t = stored();
-  if (desktop?.setTheme && desktop.theme === null && t) desktop.setTheme(t).catch(() => {});
+  if (desktop?.theme === null && t) keepInApp(t);
 }
 
 const SYSTEM_DIFF = { light: themeOf("light")!.diff, dark: themeOf("dark")!.diff };

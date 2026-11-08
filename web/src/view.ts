@@ -1,3 +1,4 @@
+import { Result } from "effect";
 import type {
   ActivityEvent,
   AskLines,
@@ -76,11 +77,8 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/archive") return { name: "archive" };
   const page = /^#\/(review|inquiry)\/(.+)$/.exec(hash);
   if (page) {
-    try {
-      return { name: page[1] as "review" | "inquiry", id: decodeURIComponent(page[2]!) };
-    } catch {
-      return { name: "queue" }; // a mangled link
-    }
+    const id = Result.try({ try: () => decodeURIComponent(page[2]!), catch: () => "a mangled link" });
+    return Result.isSuccess(id) ? { name: page[1] as "review" | "inquiry", id: id.success } : { name: "queue" };
   }
   return { name: "queue" };
 }

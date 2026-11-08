@@ -1,6 +1,7 @@
+import { Effect } from "effect";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AskLines, AsksView, CoordinatorView, Inquiry } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { shortId, sinceText } from "../format.ts";
 import { linesLabel } from "../view.ts";
 import { Prose } from "./Prose.tsx";
@@ -56,26 +57,28 @@ export function Chat({
   const log = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const v = await api.asks();
-        if (!live) return;
-        seen = v;
-        setView(v);
-      } catch {
-        // the next update tries again
-      }
-    })();
+    const stop = new AbortController();
+    void runUi(
+      api.asks().pipe(
+        Effect.tap((v) =>
+          Effect.sync(() => {
+            seen = v;
+            setView(v);
+          }),
+        ),
+        Effect.ignore, // the next update tries again
+      ),
+      { signal: stop.signal },
+    );
     return () => {
-      live = false;
+      stop.abort();
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [loads]);
 
   const off = view?.on === false;
 
-  async function send() {
+  function send() {
     const t = text.trim();
     if (!t || busy || off) return;
     setBusy(true);
@@ -84,23 +87,34 @@ export function Chat({
     kept.delete(key);
     setText("");
     const s = about.spot;
-    try {
-      const { ask } = await api.ask({
-        text: t,
-        item_id: about.item ?? undefined,
-        ...(s?.kind === "thread" && { thread_id: s.id, thread_url: s.url }),
-        ...(s?.kind === "lines" && { lines: s.lines }),
-      });
-      // An update can land first and bring the ask already.
-      seen = seen && (seen.asks.some((x) => x.id === ask.id) ? seen : { ...seen, asks: [...seen.asks, ask] });
-      setView(seen);
-    } catch (e) {
-      if (!kept.get(key)) kept.set(key, t);
-      setText((cur) => cur || t);
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
+    void runUi(
+      api
+        .ask({
+          text: t,
+          item_id: about.item ?? undefined,
+          ...(s?.kind === "thread" && { thread_id: s.id, thread_url: s.url }),
+          ...(s?.kind === "lines" && { lines: s.lines }),
+        })
+        .pipe(
+          Effect.match({
+            onSuccess: ({ ask }) => {
+              // An update can land first and bring the ask already.
+              seen = seen && (seen.asks.some((x) => x.id === ask.id) ? seen : { ...seen, asks: [...seen.asks, ask] });
+              setView(seen);
+            },
+            onFailure: (e) => {
+              if (!kept.get(key)) kept.set(key, t);
+              setText((cur) => cur || t);
+              setError(e.message);
+            },
+          }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              setBusy(false);
+            }),
+          ),
+        ),
+    );
   }
 
   const mine = (view?.asks ?? []).filter((a) => a.item_id === about.item);
@@ -225,7 +239,7 @@ export function Chat({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.repeat && !e.nativeEvent.isComposing) {
               e.preventDefault(); // Cmd+Enter sends too, as every other box in the desk does
-              void send();
+              send();
             } else if (e.key === "Escape" && !e.nativeEvent.isComposing) {
               e.preventDefault();
               if (text.trim()) e.currentTarget.blur();
@@ -243,7 +257,7 @@ export function Chat({
               title="Send (Enter; Shift+Enter for a new line)"
               disabled={!text.trim() || busy}
               onClick={() => {
-                void send();
+                send();
               }}
             >
               {busy ? "Sending\u2026" : "Send"}
@@ -299,14 +313,18 @@ function Waiting({ ask, live }: { ask: string; live?: CoordinatorView | undefine
         type="button"
         className="act"
         onClick={() => {
-          void (async () => {
-            try {
-              await api.wakeCoordinator(ask);
-              setWoke("Asked it again");
-            } catch (e) {
-              setWoke(message(e));
-            }
-          })();
+          void runUi(
+            api.wakeCoordinator(ask).pipe(
+              Effect.match({
+                onSuccess: () => {
+                  setWoke("Asked it again");
+                },
+                onFailure: (e) => {
+                  setWoke(e.message);
+                },
+              }),
+            ),
+          );
         }}
       >
         Wake it

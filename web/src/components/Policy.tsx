@@ -1,8 +1,9 @@
 // Settings → Policy: ~/.review-desk/policy.md, prose Claude sorts by. Saved with ⌘S, like the rules.
 // While the file is empty the starter is in effect, so the editor shows it: editing it and saving makes it yours.
+import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { cls, MOD, tilde } from "../format.ts";
 import { ActButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
@@ -33,44 +34,76 @@ export function Policy({
   latest.current = { doc, text };
 
   // While you edit, only the judge's status refreshes; the text and its base stay as you opened them.
-  const load = useCallback(async () => {
-    try {
-      const p = await api.policy();
-      const { doc: d, text: t } = latest.current;
-      if (d !== null && t !== shown(d)) setDoc({ ...d, judge: p.judge });
-      else {
-        setDoc(p);
-        setText(shown(p));
-      }
-      setLoadError("");
-    } catch (e) {
-      setLoadError(message(e));
-    }
-  }, []);
+  const load = useCallback(
+    (): Effect.Effect<void> =>
+      api.policy().pipe(
+        Effect.match({
+          onSuccess: (p) => {
+            const { doc: d, text: t } = latest.current;
+            if (d !== null && t !== shown(d)) setDoc({ ...d, judge: p.judge });
+            else {
+              setDoc(p);
+              setText(shown(p));
+            }
+            setLoadError("");
+          },
+          onFailure: (e) => {
+            setLoadError(e.message);
+          },
+        }),
+      ),
+    [],
+  );
 
   useEffect(() => {
-    if (active) void load();
+    const stop = new AbortController();
+    if (active) void runUi(load(), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
   }, [active, load, refresh]);
 
-  async function save() {
+  function save() {
     if (!doc) return;
     setBusy(true);
-    try {
-      const r = await api.savePolicy(text, doc.hash);
-      setDoc({ ...doc, text, hash: r.hash });
-      if (!text.trim()) setText(doc.starter);
-      flash(text.trim() ? "Policy saved. Claude sorts your desk by it." : "Policy cleared. Claude sorts by the starter policy again.");
-    } catch (e) {
-      if ((e as { status?: number }).status === 409) {
-        // Changed under us (an agent, an editor): keep your edit, take the new file as the base.
-        const p = await api.policy().catch(() => null);
-        if (p) setDoc(p);
-        flash("policy.md changed since you opened it. Your edit is still here: Revert loads the new text, Save again overwrites it.", true);
-      } else flash(message(e), true);
-    } finally {
-      setBusy(false);
-    }
+    void runUi(
+      api.savePolicy(text, doc.hash).pipe(
+        Effect.tap((r) =>
+          Effect.sync(() => {
+            setDoc({ ...doc, text, hash: r.hash });
+            if (!text.trim()) setText(doc.starter);
+            flash(
+              text.trim() ? "Policy saved. Claude sorts your desk by it." : "Policy cleared. Claude sorts by the starter policy again.",
+            );
+          }),
+        ),
+        Effect.catch((e) =>
+          e._tag === "DeskConflict" && e.kind === "Stale"
+            ? // Changed under us (an agent, an editor): keep your edit, take the new file as the base.
+              api.policy().pipe(
+                Effect.map(setDoc),
+                Effect.ignore, // no new base: the toast still says why it wasn't saved
+                Effect.andThen(
+                  Effect.sync(() => {
+                    flash(
+                      "policy.md changed since you opened it. Your edit is still here: Revert loads the new text, Save again overwrites it.",
+                      true,
+                    );
+                  }),
+                ),
+              )
+            : Effect.sync(() => {
+                flash(e.message, true);
+              }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(false);
+          }),
+        ),
+      ),
+    );
   }
 
   // ⌘S saves the editor you're in: Rules has its own on the same page.
@@ -78,7 +111,7 @@ export function Policy({
   keys.current = (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s" || !wrap.current?.contains(document.activeElement)) return;
     e.preventDefault();
-    if (!busy && dirty) void save();
+    if (!busy && dirty) save();
   };
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -122,7 +155,7 @@ export function Policy({
           title={`Save (${MOD}S)`}
           disabled={busy || !dirty}
           run={() => {
-            void save();
+            save();
           }}
         />
         <ActButton

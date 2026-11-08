@@ -1,6 +1,7 @@
+import { Effect } from "effect";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Reviewer } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { cls } from "../format.ts";
 
 // Who Ready for review asks to review your draft: GitHub's suggestions on the line, a click each, and in the list as you
@@ -26,33 +27,40 @@ export function Reviewers({
 
   // GitHub's suggestions, on the line before you look for anyone: who you'd likely ask anyway.
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      try {
-        const r = await api.reviewers(id, "");
-        if (live) setSuggested(r.filter((x) => x.suggested));
-      } catch {
-        // the list says why when you open it
-      }
-    })();
+    const stop = new AbortController();
+    void runUi(
+      api.reviewers(id, "").pipe(
+        Effect.tap((r) =>
+          Effect.sync(() => {
+            setSuggested(r.filter((x) => x.suggested));
+          }),
+        ),
+        Effect.ignore, // the list says why when you open it
+      ),
+      { signal: stop.signal },
+    );
     return () => {
-      live = false;
+      stop.abort();
     };
   }, [id]);
 
   useEffect(() => {
     const n = ++seq.current;
-    const search = async () => {
-      try {
-        const r = await api.reviewers(id, q);
-        if (n === seq.current) setFound({ q, list: r });
-      } catch (e) {
-        if (n === seq.current) setFound(message(e));
-      }
-    };
-    const t = open ? setTimeout(() => void search(), q ? 150 : 0) : undefined;
+    const stop = new AbortController();
+    const search = api.reviewers(id, q).pipe(
+      Effect.match({
+        onSuccess: (r) => {
+          if (n === seq.current) setFound({ q, list: r });
+        },
+        onFailure: (e) => {
+          if (n === seq.current) setFound(e.message);
+        },
+      }),
+    );
+    const t = open ? setTimeout(() => void runUi(search, { signal: stop.signal }), q ? 150 : 0) : undefined;
     return () => {
       clearTimeout(t);
+      stop.abort();
     };
   }, [id, q, open]);
 

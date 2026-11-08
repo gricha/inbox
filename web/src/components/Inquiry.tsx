@@ -1,6 +1,7 @@
+import { Effect } from "effect";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
-import { api, message } from "../api.ts";
+import { api, runUi } from "../api.ts";
 import { age, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
@@ -78,22 +79,12 @@ function rich(text: string): ReactNode[] {
   return out;
 }
 
-const shown = (url: string) => {
-  try {
-    return new URL(url).href; // percent-encodes what could make it read as another host
-  } catch {
-    return url;
-  }
-};
+const shown = (url: string) => URL.parse(url)?.href ?? url; // percent-encodes what could make it read as another host
 
 // A link's place, short: the host's path without the noise, so the label leads.
 function where(url: string): string {
-  try {
-    const u = new URL(url);
-    return `${u.host.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}${u.hash}`;
-  } catch {
-    return url;
-  }
+  const u = URL.parse(url);
+  return u ? `${u.host.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}${u.hash}` : url;
 }
 
 // An agent's question on its own page: what it's about, everything it said, its links, and each answer with what it leads
@@ -111,7 +102,7 @@ export function InquiryPage({
   loads: number; // bumped on every refresh: an answer from elsewhere shows
   now: number;
   flash: (text: string, error?: boolean) => void;
-  onAnswer: (q: Inquiry, text: string, dismiss?: boolean) => Promise<boolean>; // true once the desk has it
+  onAnswer: (q: Inquiry, text: string, dismiss?: boolean) => Effect.Effect<boolean>; // true once the desk has it
   onBack: () => void;
   onLoad: (q: Inquiry) => void; // the queue's view drops a question once it's answered; this page's copy stays
 }) {
@@ -122,14 +113,23 @@ export function InquiryPage({
 
   useEffect(() => {
     const n = ++seq.current;
-    void (async () => {
-      try {
-        const r = await api.inquiry(id);
-        if (n === seq.current) setQ(r);
-      } catch (e) {
-        if (n === seq.current) setQ((cur) => (cur && typeof cur === "object" ? cur : message(e)));
-      }
-    })();
+    const stop = new AbortController();
+    void runUi(
+      api.inquiry(id).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            if (n === seq.current) setQ(r);
+          },
+          onFailure: (e) => {
+            if (n === seq.current) setQ((cur) => (cur && typeof cur === "object" ? cur : e.message));
+          },
+        }),
+      ),
+      { signal: stop.signal },
+    );
+    return () => {
+      stop.abort();
+    };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [id, loads]);
 
@@ -140,7 +140,7 @@ export function InquiryPage({
   const answer = v?.answer ?? sent;
   const card = v?.card ?? null;
 
-  async function send(t: string, dismiss = false) {
+  function send(t: string, dismiss = false) {
     if (!v) return;
     if (answer) {
       flash(answer.dismissed ? "You dismissed it" : "You answered it already");
@@ -149,8 +149,16 @@ export function InquiryPage({
     if (!dismiss && !t.trim()) return;
     const mine = { text: dismiss ? "" : t.trim(), at: "", dismissed: dismiss }; // the desk stamps it
     setSent(mine);
-    if (await onAnswer(v, t, dismiss)) setText("");
-    else setSent(null);
+    void runUi(
+      onAnswer(v, t, dismiss).pipe(
+        Effect.tap((ok) =>
+          Effect.sync(() => {
+            if (ok) setText("");
+            else setSent(null);
+          }),
+        ),
+      ),
+    );
   }
 
   // Esc goes back, loading or failed too; the answer box keeps its own Esc.
@@ -256,7 +264,7 @@ export function InquiryPage({
                     type="button"
                     className={cls("inq-option", i === 0 && "pick")}
                     onClick={() => {
-                      void send(o.answer);
+                      send(o.answer);
                     }}
                   >
                     <span className="inq-option-text">
@@ -288,7 +296,7 @@ export function InquiryPage({
                 if (e.key === "Escape") e.currentTarget.blur();
                 else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  void send(text);
+                  send(text);
                 }
               }}
             />
@@ -299,7 +307,7 @@ export function InquiryPage({
                 title={`Send it to ${fromName(q.from, false)} (${MOD}\u21b5)`}
                 disabled={!text.trim()}
                 onClick={() => {
-                  void send(text);
+                  send(text);
                 }}
               >
                 Send
@@ -309,7 +317,7 @@ export function InquiryPage({
                 className="act"
                 title="Leave it unanswered: the agent decides itself"
                 onClick={() => {
-                  void send("", true);
+                  send("", true);
                 }}
               >
                 Dismiss

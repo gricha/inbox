@@ -15,6 +15,7 @@ import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, 
 import { FIELDS, plainWhy, waitable } from "../../src/signals.ts";
 import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
+import type { ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
   Action,
@@ -3133,13 +3134,23 @@ function policyDoc(): PolicyDoc {
 // ---------------------------------------------------------------------------
 // HTTP
 
+const TAGS: Partial<Record<number, ErrorBody["tag"]>> = {
+  400: "BadRequest",
+  403: "Forbidden",
+  404: "NotFound",
+  409: "Conflict",
+  502: "Upstream",
+  503: "Unavailable",
+};
+
+// An error answer as the desk sends it: its words, its tag (its status's, unless one is given), a 409's candidates, a 503's reason.
 class HttpError extends Error {
   status: number;
-  extra: object;
-  constructor(code: number, message: string, extra: object = {}) {
+  body: ErrorBody;
+  constructor(code: number, message: string, extra: Partial<Omit<ErrorBody, "error">> = {}) {
     super(message);
     this.status = code;
-    this.extra = extra;
+    this.body = { error: message, tag: extra.candidates ? "AmbiguousRef" : (TAGS[code] ?? "Internal"), ...extra };
   }
 }
 
@@ -3279,7 +3290,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       const why = reviewView(r).approve.reason;
       if (why) throw new HttpError(409, `can't approve ${r.id}: ${why}`);
       if ((await readBody(req)).head_oid !== itemOf(r).head_oid)
-        throw new HttpError(409, `can't approve ${r.id}: it has new commits since you opened it`);
+        throw new HttpError(409, `can't approve ${r.id}: it has new commits since you opened it`, { tag: "Stale" });
       approved.add(r.id);
       // Like the desk: your approval resolves it, as of now.
       r.seed.resolved = "you approved";
@@ -3383,7 +3394,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "PUT /api/policy") {
     const body = await readBody(req);
     if (body.base !== policyHash())
-      throw new HttpError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit");
+      throw new HttpError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit", { tag: "Stale" });
     savePolicy(textOf(body));
     return { ok: true, hash: policyHash() };
   }
@@ -3428,8 +3439,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   try {
     send(res, await respond(req, url));
   } catch (e) {
-    if (e instanceof HttpError) send(res, { error: e.message, ...e.extra }, e.status);
-    else send(res, { error: (e as Error).message }, 500);
+    if (e instanceof HttpError) send(res, e.body, e.status);
+    else send(res, { error: (e as Error).message, tag: "Internal" } satisfies ErrorBody, 500);
   }
 }
 
