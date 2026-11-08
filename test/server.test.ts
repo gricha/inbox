@@ -132,9 +132,12 @@ test("startServer rejects with what stopped the desk, in its words: its port in 
     taken.listen(0, "127.0.0.1", r);
   });
   const port = (taken.address() as AddressInfo).port;
+  const stopped = c.mock.method(Desk.prototype, "stop");
   await assert.rejects(startServer({ port, home, log: () => {} }), {
     message: `port ${port} is in use; is desk already running? (http://localhost:${port})`,
   });
+  assert.equal(stopped.mock.callCount(), 1, "the desk it made is let go");
+  stopped.mock.restore();
   taken.close();
   // No gh and no token: GitHub's viewer fails init, and the desk and its port are let go for a retry.
   process.env.PATH = home;
@@ -142,6 +145,83 @@ test("startServer rejects with what stopped the desk, in its words: its port in 
   const free = await unusedPort();
   for (const _ of [1, 2])
     await assert.rejects(startServer({ port: free, home, log: () => {} }), { message: /GitHub CLI \(gh\) not found/ });
+});
+
+test("startServer's close lets go of its port: a second desk on the same port and home starts", async (c) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-start-"));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false }));
+  // A desk that ran here before keeps GitHub's context and a config, so init asks GitHub nothing.
+  const before = new Desk({ home, github: new FakeGitHub([], () => []), now: () => new Date(), notify: () => {}, log: () => {} });
+  await run(before.init());
+  before.stop();
+  const saved = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  c.after(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  process.env.PATH = home; // no gh: its syncs fail at once, and nothing reaches GitHub
+  delete process.env.GITHUB_TOKEN;
+  const port = await unusedPort();
+  const refusedAt = () =>
+    new Promise<string>((resolve) => {
+      const s = net.connect(port, "127.0.0.1");
+      s.once("connect", () => {
+        s.destroy();
+        resolve("connected");
+      });
+      s.once("error", (e: NodeJS.ErrnoException) => {
+        resolve(e.code ?? "error");
+      });
+    });
+  const srv = await startServer({ port, home, log: () => {} });
+  assert.equal(await refusedAt(), "connected");
+  await srv.close();
+  assert.equal(await refusedAt(), "ECONNREFUSED");
+  const again = await startServer({ port, home, log: () => {} });
+  await again.close();
+});
+
+test("a route that can't fail but throws is a logged 500 in the bug's words", async (c) => {
+  const t = await setup();
+  c.after(t.cleanup);
+  const logs: string[] = [];
+  c.mock.method(t.desk, "log", (m: string) => {
+    logs.push(m);
+  });
+  c.mock.method(t.desk, "getPolicy", () => {
+    throw new TypeError("x is undefined");
+  });
+  const res = await t.req("/api/policy");
+  assert.deepEqual([res.status, await res.json()], [500, { error: "x is undefined", tag: "Internal" }]);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0]!, /^error: .*x is undefined/s);
+});
+
+test("a bug in a tool at /mcp is its error and is logged in the desk's log", async (c) => {
+  const t = await setup();
+  const logs: string[] = [];
+  c.mock.method(t.desk, "log", (m: string) => {
+    logs.push(m);
+  });
+  c.mock.method(t.desk, "item", () => Effect.succeed(null));
+  const srv = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const s = serve({ fetch: t.app.fetch, port: 0, hostname: "127.0.0.1" }, () => {
+      resolve(s);
+    });
+  });
+  const client = new Client({ name: "test", version: "0" });
+  c.after(async () => {
+    await client.close();
+    srv.close();
+    t.cleanup();
+  });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`)));
+  const r = await client.callTool({ name: "desk_item", arguments: { ref: "api#7" } });
+  assert.equal(r.isError, true);
+  assert.equal(logs.filter((l) => l.startsWith("desk mcp: ")).length, 1, logs.join("\n"));
 });
 
 test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", async () => {
@@ -769,16 +849,30 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
   const held = new Promise<void>((r) => {
     release = r;
   });
+  let entered = () => {};
+  const started = new Promise<void>((r) => {
+    entered = r;
+  });
   const refused = "Resource not accessible by integration";
   const writer: GitHubWriter = {
     ...refuseWrites(refused),
     ready: () => Effect.void,
-    approve: () => Effect.promise(() => held).pipe(Effect.as({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" })),
+    approve: () =>
+      Effect.sync(entered).pipe(
+        Effect.andThen(Effect.promise(() => held)),
+        Effect.as({ url: "https://github.com/acme/api/pull/1#pullrequestreview-1" }),
+      ),
   };
   const ready = { ci: "green", review_decision: "approved", mergeable: "clean", merge_method: "SQUASH", head_oid: "h4" } as const;
+  const logs: string[] = [];
   const t = await withItems([reviewAsk(1, { head_oid: "h1" }), myPr(3, { ci: "green", draft: true }), myPr(4, ready)], {
     settings: { "policy.judge": false },
-    desk: { writer },
+    desk: {
+      writer,
+      log: (m) => {
+        logs.push(m);
+      },
+    },
   });
   c.after(t.cleanup);
   await run(t.desk.sync());
@@ -814,6 +908,12 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
     502,
     no("Upstream", `couldn't close acme/web#4 on GitHub: ${refused}`),
   ]);
+  // A bug in a write is a logged 500 in its own words, never Upstream; the lock goes with it, so the second isn't Busy.
+  const close = writer.close.bind(writer);
+  writer.close = () => Effect.die(new TypeError("x"));
+  for (const _ of [1, 2])
+    assert.deepEqual(await call("POST", "/api/github", { id: "acme/web#4", action: "close" }), [500, no("Internal", "x")]);
+  writer.close = close;
   assert.deepEqual(await call("POST", review("acme/api#1", "comment"), { body: " " }), [400, no("BadRequest", "the comment is empty")]);
   assert.deepEqual(await call("POST", review("acme/api#1", "comment"), { body: "Thanks" }), [
     502,
@@ -861,6 +961,26 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
     409,
     no("Conflict", "acme/api#1 isn't your PR"),
   ]);
+  // A read: the window going away interrupts it, a 499 nobody logs.
+  let letGo = () => {};
+  const gate = new Promise<void>((r) => {
+    letGo = r;
+  });
+  let asked = () => {};
+  const asking = new Promise<void>((r) => {
+    asked = r;
+  });
+  t.gh.reviewers = () => Effect.sync(asked).pipe(Effect.andThen(Effect.promise(() => gate)), Effect.as([]));
+  const gone = new AbortController();
+  const logged = logs.length;
+  const left = app.request(
+    new Request(`http://127.0.0.1:47823/api/reviewers/${encodeURIComponent("acme/web#4")}`, { headers: DESK, signal: gone.signal }),
+  );
+  await asking;
+  gone.abort();
+  assert.equal((await left).status, 499);
+  letGo();
+  assert.deepEqual(logs.slice(logged), [], "nothing logged");
   t.gh.lookup = () => Effect.fail(new GitHubHttpError({ status: 500, message: "GitHub HTTP 500: oops" }));
   assert.deepEqual(await call("POST", "/api/add", { id: "acme/other#9" }), [502, no("Upstream", "GitHub HTTP 500: oops")]);
   assert.deepEqual(await call("POST", "/api/add", { id: "acme/api#1", why: 5 }), [400, no("BadRequest", "why and from are lines of text")]);
@@ -870,7 +990,7 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
   ]);
 
   const first = call("POST", review("acme/api#1", "approve"), { head_oid: "h1" });
-  await sleep(20);
+  await started; // Desk.locked holds the lock before the write starts
   assert.deepEqual(await call("POST", review("acme/api#1", "approve"), { head_oid: "h1" }), [
     409,
     no("Busy", "already approving acme/api#1"),
