@@ -287,10 +287,10 @@ export function App() {
   useEffect(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setExpanded(null);
+    // Settings scrolls itself, to the part or view the link names, once its parts have loaded.
     if (settingsSection !== null) {
       setSection(settingsSection);
       setSettingsSeen(true);
-      window.scrollTo(0, 0);
     } else if (rulesDirty.current) flash("Your rule edits are kept. Save them in Settings → GitHub → Searches and rules.");
     const stop = new AbortController();
     void runUi(load(), { signal: stop.signal });

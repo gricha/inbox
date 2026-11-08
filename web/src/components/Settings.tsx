@@ -151,17 +151,7 @@ const emptyLabel = (p: FieldProps) => (!p.def.required && p.value === "" ? (p.de
 
 function StringField(p: FieldProps) {
   const d = useDraft(p);
-  // A value with a set shape (a time window) is short; free text gets the column.
-  return (
-    <input
-      className={cls("input", p.def.pattern && "short")}
-      type="text"
-      placeholder={emptyLabel(p)}
-      autoCapitalize="off"
-      autoCorrect="off"
-      {...d.bind}
-    />
-  );
+  return <input className="input" type="text" placeholder={emptyLabel(p)} autoCapitalize="off" autoCorrect="off" {...d.bind} />;
 }
 
 function TextField(p: FieldProps) {
@@ -364,11 +354,13 @@ function QuietHours({ value, commit, clear, id, invalid, disabled }: FieldProps)
       setOn(!v);
     });
   }
-  // On leaving a field, as every other field here saves: a time typed digit by digit isn't saved halfway.
+  // On leaving a field, as every other field here saves: a time typed digit by digit isn't saved halfway, and one you didn't
+  // change isn't saved at all (a stored "9:30-17:05" reads as 09:30 and 17:05).
   function leave() {
     editing.current = false;
+    const had = quietTimes(saved)?.join("-") ?? saved;
     if (escaped.current) escaped.current = false;
-    else if (on && times[0] && times[1] && times.join("-") !== saved) put(times.join("-"), () => {}); // refused: kept as typed, the row says why
+    else if (on && times[0] && times[1] && times.join("-") !== had) put(times.join("-"), () => {}); // refused: kept as typed, the row says why
   }
 
   const time = (i: 0 | 1) => (
@@ -437,6 +429,7 @@ const BY_KEY: Record<string, ComponentType<FieldProps> | undefined> = { "notify.
 function Row({
   def,
   view,
+  loads,
   onView,
   extra,
   help,
@@ -445,6 +438,7 @@ function Row({
 }: {
   def: SettingDef;
   view: SettingsView;
+  loads: number; // bumped on every refresh: the desk answering again
   onView: (v: SettingsView) => void;
   extra?: ReactNode;
   help?: { text: string; bad: boolean } | null; // a live line in place of the def's help: null keeps the def's
@@ -460,6 +454,15 @@ function Row({
     },
     [],
   );
+  // Not saved because the desk was down: once it answers again, the row shows what it has, not that old refusal.
+  const away = useRef(false);
+  useEffect(() => {
+    if (!away.current) return;
+    away.current = false;
+    setStatus(null);
+    setEpoch((n) => n + 1);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a refresh is what says the desk is back
+  }, [loads]);
 
   // The settings as saved, or null when it wasn't (the row says why): it never fails.
   function put(patch: { set?: Record<string, SettingValue>; reset?: string[] }): Effect.Effect<SettingsView | null> {
@@ -468,6 +471,7 @@ function Row({
       return api.saveSettings(patch).pipe(
         Effect.match({
           onSuccess: (r) => {
+            away.current = false;
             onView(r.settings);
             if (!r.ok) {
               setStatus({ error: r.errors.map((e) => e.message).join("; ") || "not saved" });
@@ -480,6 +484,7 @@ function Row({
             return r.settings;
           },
           onFailure: (e) => {
+            away.current = e._tag === "DeskUnreachable";
             setStatus({ error: e.message });
             return null;
           },
@@ -819,9 +824,9 @@ const ELSEWHERE = new Set(["policy.max_per_hour"]);
 function ViewHead({ id, line }: { id: string; line: string }) {
   return (
     <>
-      <h2 id={`s-view-${id}`} className="s-view-name">
+      <h1 id={`s-view-${id}`} className="s-view-name">
         {SETTINGS_VIEWS[id]?.name}
-      </h2>
+      </h1>
       <p className="s-view-line">{line}</p>
     </>
   );
@@ -902,13 +907,53 @@ export function Settings({
     };
   }, [view, hotkey]);
 
-  // One page of parts; a link to a part scrolls to it, and a view opens at its top.
+  // One page of parts; a link to a part scrolls to it, each time you come to it, and a view opens at its top.
   const ready = view !== null;
+  const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!active || !ready) return;
-    if (section === "github" || inView) window.scrollTo({ top: 0 });
-    else document.querySelector(`#${CSS.escape(`s-${section}`)}`)?.scrollIntoView({ block: "start" }); // escaped: a mistyped #/settings/github/x mustn't throw
+    const top = section === "github" || inView;
+    // escaped: a mistyped #/settings/github/x mustn't throw
+    const jump = () => {
+      if (top) window.scrollTo({ top: 0 });
+      else document.querySelector(`#${CSS.escape(`s-${section}`)}`)?.scrollIntoView({ block: "start" });
+    };
+    if (active && ready) jump();
+    // The parts above load their own rows after the page (Claude's status, the automations): it jumps again as they grow, until
+    // you scroll or a moment has passed.
+    const ro = new ResizeObserver(jump);
+    if (active && ready && !top && page.current) ro.observe(page.current);
+    const stop = () => {
+      ro.disconnect();
+    };
+    const t = setTimeout(stop, 2000);
+    const input = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const e of input) window.addEventListener(e, stop, { once: true, passive: true });
+    return () => {
+      stop();
+      clearTimeout(t);
+      for (const e of input) window.removeEventListener(e, stop);
+    };
   }, [active, section, ready, inView]);
+
+  // Back from a view to its part, focus goes to what opened it (its row's Edit, an automation's name or Review), so Tab goes on
+  // from there; after App's route change, which blurs whatever had it.
+  const lastSection = useRef(section);
+  useEffect(() => {
+    const was = lastSection.current;
+    lastSection.current = section;
+    const back = active && was !== section && settingsBack(was) === section;
+    const href = routeHash({ name: "settings", section: was });
+    const frame = back
+      ? requestAnimationFrame(() => {
+          document
+            .querySelector<HTMLElement>(`#${CSS.escape(`s-${section}`)} a[href="${CSS.escape(href)}"]:not([tabindex="-1"])`)
+            ?.focus({ preventScroll: true });
+        })
+      : 0;
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [active, section]);
 
   const row = (d: SettingDef | undefined, folded = false) =>
     view &&
@@ -917,6 +962,7 @@ export function Settings({
         key={d.key}
         def={d}
         view={view}
+        loads={loads}
         onView={onView}
         hidden={folded}
         disabled={DISABLED[d.key]?.(view.values) ?? false}
@@ -927,7 +973,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div className="s-page" hidden={inView}>
+      <div ref={page} className="s-page" hidden={inView}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
             <h2 className="group-head">

@@ -254,7 +254,6 @@ export function Rules({
             autoCapitalize="off"
             autoCorrect="off"
             aria-label="Config TOML"
-            title="Tab indents, Esc leaves the editor."
             onChange={(e) => {
               setText(e.target.value);
             }}
@@ -263,14 +262,18 @@ export function Rules({
               if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
                 insert("  ");
-              } else if (e.key === "Escape") e.currentTarget.blur();
+              } else if (e.key === "Escape")
+                // Onto its foot, so Tab and Enter go on from Save (Preview changes while there's nothing to save).
+                e.currentTarget.closest(".editor-col")?.querySelector<HTMLButtonElement>(".editor-foot button:not(:disabled)")?.focus();
             }}
           />
           <div className="editor-foot">
+            {/* Filled while there's something to save: the one to press. */}
             <ActButton
               label={busy === "save" ? "Saving…" : "Save"}
-              title={doc ? `Save to ${tilde(doc.path)} (${MOD}S)` : `Save (${MOD}S)`}
+              title={`Save (${MOD}S). In the editor, Tab indents and Esc leaves it.`}
               disabled={!!busy || !dirty}
+              className={cls(dirty && !errors.length && "primary")}
               run={() => {
                 save();
               }}
@@ -292,6 +295,7 @@ export function Rules({
                 setPreview(null);
               }}
             />
+            {doc && <code className="s-path">{tilde(doc.path)}</code>}
             <span className="grow" />
             {dirty && <span className="unsaved">Unsaved changes</span>}
             <span className="pos">Line {pos.replace(":", ", column ")}</span>
@@ -301,7 +305,7 @@ export function Rules({
         <div className="side-col">
           {warnings.length > 0 && (
             <section className="side-block">
-              <h3 className="s-sub t-warn">Moved to Settings</h3>
+              <h2 className="s-sub t-warn">Moved to Settings</h2>
               <ul className="plain">
                 {warnings.map((w) => (
                   <li key={w.path}>
@@ -313,9 +317,9 @@ export function Rules({
           )}
           {errors.length > 0 && (
             <section className="side-block errors">
-              <h3 className="s-sub t-bad">
+              <h2 className="s-sub t-bad">
                 {errors.length} {errors.length === 1 ? "error" : "errors"}
-              </h3>
+              </h2>
               <ul>
                 {errors.map((e, i) => (
                   // oxlint-disable-next-line react/no-array-index-key -- errors have no id and can repeat a path
@@ -338,7 +342,7 @@ export function Rules({
           )}
 
           <section className="side-block">
-            <h3 className="s-sub">Rules Claude can't sort below</h3>
+            <h2 className="s-sub">Rules Claude can't sort below</h2>
             {hard.length ? (
               <p className="small">
                 What a hard rule matches stays at least in its bucket (<code>today</code> for a <code>now</code> rule), whatever Claude,
@@ -367,7 +371,7 @@ export function Rules({
           </section>
 
           <section className="side-block">
-            <h3 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h3>
+            <h2 className="s-sub">What would move {stale && <span className="stale">(edited since)</span>}</h2>
             {!preview ? (
               <p className="small">Preview changes shows what moves before you save. Nothing changes until you save.</p>
             ) : pvBoards.length === 0 ? (
@@ -423,7 +427,7 @@ export function Rules({
           </section>
 
           <section className="side-block">
-            <h3 className="s-sub">Fields</h3>
+            <h2 className="s-sub">Fields</h2>
             <input
               className="input"
               type="search"
@@ -455,7 +459,7 @@ export function Rules({
           </section>
 
           <section className="side-block">
-            <h3 className="s-sub">Syntax</h3>
+            <h2 className="s-sub">Syntax</h2>
             <dl className="cheat">
               <div className="fact">
                 <dt>rules</dt>

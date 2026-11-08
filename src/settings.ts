@@ -216,7 +216,7 @@ export const SETTINGS = [
     placeholder: "Control+Alt+D",
     pattern: ACCELERATOR,
     pattern_hint: "modifiers and a key, like Control+Alt+D",
-    help: "Works from any app.",
+    help: "From any app, while the desktop app runs.", // until the app says whether it took it (Settings.tsx)
   },
   { key: "app.open_at_login", section: "app", label: "Open at login", type: "boolean", default: false },
   { key: "app.menu_bar_count", section: "app", label: "Show the Inbox count in the menu bar", type: "boolean", default: true },

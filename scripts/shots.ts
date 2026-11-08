@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type Browser, type Page, type Route } from "playwright-core";
+import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
 import { THEMES } from "../src/themes.ts";
 import type {
   AgentStatus,
@@ -283,18 +283,18 @@ const linesInChat = async (page: Page) => {
 const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
 // A Settings view: the head is its way back to Settings' part `part`, the view names itself, and the column is `col` at most.
 const settingsView = async (page: Page, name: string, title: string, part: string, col: string) => {
-  const seen = await page.evaluate<{ back: string | null; href: string | null; h2: string | null; col: string }>(`(() => {
+  const seen = await page.evaluate<{ back: string | null; href: string | null; h1: string | null; col: string }>(`(() => {
     const back = document.querySelector(".page-head a.back");
     return {
       back: back?.textContent.trim() ?? null,
       href: back?.getAttribute("href") ?? null,
-      h2: [...document.querySelectorAll(".s-view")].find((v) => !v.hidden)?.querySelector("h2")?.textContent.trim() ?? null,
+      h1: [...document.querySelectorAll(".s-view")].find((v) => !v.hidden)?.querySelector("h1")?.textContent.trim() ?? null,
       col: getComputedStyle(document.querySelector(".main")).maxWidth,
     };
   })()`);
   if (seen.back !== "Settings") failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}`);
   if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
-  if (seen.h2 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h2)}`);
+  if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
   if (seen.col !== col) failures.push(`${name}: the column is ${seen.col}, not ${col}`);
   if (await page.locator(".s-page").isVisible()) failures.push(`${name}: Settings' parts show beside the view`);
 };
@@ -1938,6 +1938,27 @@ const SHOTS: Shot[] = [
     after: unsettle,
   },
   { name: "settings-queue", go: at("#/settings/queue") },
+  {
+    // Quiet hours stored unpadded, as `desk settings set` may write it: in and out of its time without a change saves nothing.
+    name: "settings-queue-quiet-kept",
+    go: async (page) => {
+      await settingsAs((v) => {
+        v.values["notify.quiet"] = "9:30-17:05";
+      })(page);
+      await at("#/settings/queue")(page);
+      const puts: string[] = [];
+      const put = (r: Sent) => {
+        if (r.method() === "PUT" && r.url().includes("/api/settings")) puts.push(r.postData() ?? "");
+      };
+      page.on("request", put);
+      await page.locator('[id="setting-notify.quiet-from"]').click();
+      await page.locator('[id="setting-queue.cards"]').click();
+      await page.waitForTimeout(400);
+      page.off("request", put);
+      if (puts.length) failures.push(`settings-queue-quiet-kept: leaving quiet hours unchanged saved ${puts.join(", ")}`);
+    },
+    after: unsettle,
+  },
   {
     // Notifications off: quiet hours has nothing to do, so its words and its field are greyed and the field takes nothing.
     name: "settings-queue-off",

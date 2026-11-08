@@ -35,15 +35,17 @@ const slug = (s: string) =>
 const viewOf = (id: string) => routeHash({ name: "settings", section: `automations/${id}` });
 const drafted = (a: Auto) => !a.on && a.by === "an agent"; // what an agent wrote is on screen before you turn it on
 
-// The last run, the end of its row's help: what it put on your desk, or why it failed.
-function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: boolean } {
-  if (!r) return { text: "hasn't run yet", bad: false };
-  if (!r.done_at) return { text: `running since ${ago(r.at, now)}`, bad: false };
-  if (r.error) return { text: `failed ${ago(r.at, now)}: ${r.error.split("\n")[0] ?? ""}`, bad: true };
+// The last run, the end of its row's help: what it put on your desk, then (red, the only part that is) why it failed or what
+// it couldn't add.
+function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: string } {
+  if (!r) return { text: "hasn't run yet", bad: "" };
+  if (!r.done_at) return { text: `running since ${ago(r.at, now)}`, bad: "" };
+  if (r.error) return { text: "", bad: `failed ${ago(r.at, now)}: ${r.error.split("\n")[0] ?? ""}` };
   const added = r.items.filter((x) => x.outcome === "added").length;
   const failed = r.items.filter((x) => x.outcome === "failed").length;
-  const said = [added && `put ${added} on your desk`, failed && `couldn't add ${failed}`].filter(Boolean).join(", ");
-  return { text: `ran ${ago(r.at, now)}, ${said || "nothing new needed you"}`, bad: failed > 0 };
+  const ran = `ran ${ago(r.at, now)}, `;
+  if (failed) return { text: added ? `${ran}put ${added} on your desk, ` : ran, bad: `couldn't add ${failed}` };
+  return { text: `${ran}${added ? `put ${added} on your desk` : "nothing new needed you"}`, bad: "" };
 }
 
 export type Automations = ReturnType<typeof useAutomations>;
@@ -55,6 +57,11 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   const [busy, setBusy] = useState(false);
   // A new one being written: the part's last row opens it, and its editor sits under the part's sheet.
   const [writing, setWriting] = useState<Draft | null>(null);
+  // An edit open in an automation's view, by its id: kept across a trip to another automation's view, or anywhere, and back.
+  const [edits, setEdits] = useState<Record<string, Draft | undefined>>({});
+  const keep = useCallback((id: string, d: Draft | null) => {
+    setEdits((e) => ({ ...e, [id]: d ?? undefined }));
+  }, []);
 
   const load = useCallback(
     (): Effect.Effect<void> =>
@@ -143,7 +150,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     return put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
   }
 
-  return { list, error, busy, writing, setWriting, turn, runNow, remove, save };
+  return { list, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save };
 }
 
 const editing = (a: Auto): Draft => ({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
@@ -214,7 +221,8 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
             `An agent wrote it; read it before it runs · ${scheduleWords(a.schedule)}`
           ) : (
             <>
-              {timing} · <span className={cls(last.bad && "t-bad")}>{last.text}</span>
+              {timing} · {last.text}
+              {last.bad && <span className="t-bad">{last.bad}</span>}
             </>
           )}
         </p>
@@ -231,7 +239,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
                 type="button"
                 className="s-edit"
                 disabled={a.running}
-                aria-label={`Run ${a.name} now`}
+                aria-label={`Run now: ${a.name}`}
                 onClick={() => {
                   void runUi(au.runNow(a));
                 }}
@@ -298,10 +306,27 @@ export function AutomationView({
   settingsPath: string | null; // settings.json's: the runs' folder is beside it, in the desk's home
   flash: (text: string, error?: boolean) => void;
 }) {
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const draft = au.edits[id] ?? null;
+  const setDraft = (d: Draft | null) => {
+    au.keep(id, d);
+  };
 
-  if (au.error && !au.list) return <p className="s-view-line t-bad">Couldn't load automations: {au.error}</p>;
-  if (!au.list) return null;
+  if (au.error && !au.list)
+    return (
+      <p id="s-view-automation" className="s-view-line t-bad">
+        Couldn't load automations: {au.error}
+      </p>
+    );
+  // On its way: its name's and its line's places.
+  if (!au.list)
+    return (
+      <div aria-busy="true">
+        <h1 id="s-view-automation" className="s-view-name" aria-label="Loading">
+          <span className="sk" />
+        </h1>
+        <SkLines count={1} className="s-view-line" />
+      </div>
+    );
   const a = au.list.find((x) => x.id === id);
   if (!a)
     return (
@@ -345,15 +370,16 @@ export function AutomationView({
 
   return (
     <>
-      <h2 id="s-view-automation" className="s-view-name">
+      <h1 id="s-view-automation" className="s-view-name">
         {a.name}
-      </h2>
+      </h1>
       <p className="s-view-line">{line}</p>
       <div className="au-view">
         {draft ? (
           <Editor
             draft={draft}
             busy={au.busy}
+            onChange={setDraft}
             onSave={(d) => {
               void runUi(
                 au.save(d).pipe(
@@ -374,6 +400,7 @@ export function AutomationView({
                   Effect.tap((ok) =>
                     Effect.sync(() => {
                       if (!ok) return;
+                      setDraft(null);
                       flash(`Deleted ${a.name}`);
                       location.replace(routeHash({ name: "settings", section: "automations" })); // its view is gone with it
                     }),
@@ -421,7 +448,7 @@ export function AutomationView({
           </>
         )}
       </div>
-      <h3 className="group-head au-runs-head">Runs</h3>
+      <h2 className="group-head au-runs-head">Runs</h2>
       {a.runs.length ? <Runs a={a} resume={resume} /> : <p className="s-view-line">It hasn&rsquo;t run yet.</p>}
     </>
   );
@@ -430,14 +457,14 @@ export function AutomationView({
 // Each run: when, what it found, and what came of each item; its session one click from your clipboard.
 function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }) {
   return (
-    <div className="lines au-runs">
+    <div className="lines">
       {a.runs.map((r) => (
         <section key={r.id} className="au-run" aria-label={`Run ${when(r.at)}`}>
           <div className="au-run-top">
-            <h4 className="au-run-head">
+            <h3 className="au-run-head">
               {when(r.at)} · {r.trigger === "now" ? "run now" : "on schedule"}
               {!r.done_at && <span className="busy" aria-label="running" />}
-            </h4>
+            </h3>
             {r.session && resume(r.session)}
           </div>
           {r.error && <p className="t-bad au-run-error">{r.error}</p>}
@@ -468,17 +495,23 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
 function Editor({
   draft,
   busy,
+  onChange,
   onSave,
   onCancel,
   onDelete,
 }: {
   draft: Draft;
   busy: boolean;
+  onChange?: (d: Draft) => void; // where it's kept while you write
   onSave: (d: Draft) => void;
   onCancel: () => void;
   onDelete: (() => void) | null;
 }) {
-  const [d, setD] = useState(draft);
+  const [d, setDraft] = useState(draft);
+  const setD = (next: Draft) => {
+    setDraft(next);
+    onChange?.(next);
+  };
   const ready = !!d.name.trim() && !!d.schedule.trim() && !!d.prompt.trim();
   // ⌘S or ⌘↵ saves from any field, Esc leaves it as it was.
   const keys = (e: KeyboardEvent) => {

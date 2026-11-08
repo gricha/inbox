@@ -160,10 +160,12 @@ export function Policy({
         }}
       />
       <div className="editor-foot">
+        {/* Filled while there's something to save: the one to press. */}
         <ActButton
           label={busy ? "Saving…" : "Save"}
-          title={doc ? `Save to ${tilde(doc.path)} (${MOD}S)` : `Save (${MOD}S)`}
+          title={`Save (${MOD}S)`}
           disabled={busy || !dirty}
+          className={cls(dirty && "primary")}
           run={() => {
             save();
           }}
@@ -175,6 +177,7 @@ export function Policy({
             if (doc) setText(startOf(doc));
           }}
         />
+        {doc && <code className="s-path">{tilde(doc.path)}</code>}
         <span className="grow" />
         {dirty && <span className="unsaved">Unsaved changes</span>}
       </div>

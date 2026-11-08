@@ -2499,12 +2499,6 @@ p {
   cursor: pointer;
 }
 
-/* A value with a set shape (a time window): short, beside its label. */
-.input.short {
-  width: 160px;
-  font-variant-numeric: tabular-nums;
-}
-
 .input.area {
   display: block;
   max-width: none;
@@ -3223,8 +3217,14 @@ p {
   font-size: 13px;
 }
 
+/* A short unit takes the longest short one's room, so the number fields on a sheet share their edges. */
+.st-number .s-unit {
+  min-width: 4.4em;
+}
+
 .setting.st-list .input.area {
   width: 240px;
+  font: 13.5px/1.5 var(--sans); /* repos and logins, written as the window writes them everywhere else */
 }
 
 /* Free text: the label and its help, then the field across the row. */
@@ -3243,6 +3243,11 @@ p {
   max-width: none;
 }
 
+/* A path, as code. */
+.setting.wide input.input {
+  font: 12.5px var(--mono);
+}
+
 /* Under its control, in the row's bottom padding: it reserves no line, and showing it moves nothing. */
 .s-msg {
   position: absolute;
@@ -3252,6 +3257,25 @@ p {
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+}
+
+/* Why it wasn't saved can run long: it wraps within its control's column, under the control, and the row grows for it. */
+.s-msg:has(.t-bad) {
+  position: static;
+  max-width: 100%;
+  margin-top: 6px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.s-control:has(> .s-msg .t-bad) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.s-control:has(> .s-msg .t-bad) > .s-msg {
+  flex-basis: 100%;
+  text-align: right;
 }
 
 .s-msg .link-btn {
@@ -3280,6 +3304,23 @@ p {
   .setting:not(.st-boolean) .s-msg {
     right: auto;
     left: 0;
+  }
+
+  .setting:not(.st-boolean) .s-control:has(> .s-msg .t-bad) {
+    justify-content: flex-start;
+  }
+
+  .setting:not(.st-boolean) .s-control:has(> .s-msg .t-bad) > .s-msg {
+    text-align: left;
+  }
+
+  /* Quiet hours' times under its words, its switch still on the row's right edge with the others. */
+  .setting .quiet-hours {
+    flex: 1;
+  }
+
+  .setting .quiet-hours .switch {
+    margin-left: auto;
   }
 
   .setting .input.choice,
@@ -3468,6 +3509,14 @@ button.s-edit:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+/* The file the editor saves to, quietly in its foot: editing it directly works too. */
+.s-path {
+  min-width: 0;
+  color: var(--pencil);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 /* Policy: prose, so the UI font and wrapped lines, across its view's column. */
 .policy {
   margin-top: 18px;
@@ -3483,6 +3532,20 @@ button.s-edit:hover:not(:disabled) {
   min-height: 160px;
   font: 14px/1.6 var(--sans);
   white-space: pre-wrap;
+}
+
+/* Your policy grows with what's in it, as far as the window leaves room for its foot, its status lines and the cap under it;
+   past that it scrolls. */
+.policy .editor.prose {
+  height: auto;
+  min-height: 240px;
+  max-height: max(240px, calc(100vh - 360px));
+  field-sizing: content;
+}
+
+/* An automation's instruction starts its words where its name's and its schedule's fields do. */
+.au-field .editor.prose {
+  padding: 8px 11px;
 }
 
 .editor.prose::placeholder {
@@ -3565,19 +3628,29 @@ button.s-edit:hover:not(:disabled) {
 
 .au-found {
   display: grid;
-  gap: 4px;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  gap: 4px 10px;
   margin: 0;
   padding: 0;
   list-style: none;
   font-size: 13px;
 }
 
+/* Each item is a row of the list's one grid, so its outcome, its ref and its why start in one column, a long why wrapping in
+   its own. */
 .au-found li {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
-  gap: 2px 10px;
   min-width: 0;
+}
+
+/* A narrow sheet: the why under the ref, across the row. */
+@container (width < 560px) {
+  .au-found li > .au-why {
+    grid-column: 2 / -1;
+  }
 }
 
 .au-outcome {
