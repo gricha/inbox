@@ -2,7 +2,15 @@
 import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
 import { Cause, Effect, Result } from "effect";
-import { GitHubNotFetched, GitHubRateLimited, GitHubSearchesFailed, messageOf, type GitHubReadError } from "../errors.ts";
+import {
+  GitHubNotFetched,
+  GitHubRateLimited,
+  GitHubSearchesFailed,
+  messageOf,
+  NotFound,
+  Upstream,
+  type GitHubReadError,
+} from "../errors.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
@@ -27,6 +35,9 @@ const STACK_ROUNDS = 3; // probe, fetch, probe again: a chain a few PRs deep fil
 const DEP_TTL = 10 * 60_000; // a stored PR another one needs is refreshed after this
 const MAX_DEP_PROBES = 20; // probes a pass for PRs a listed one needs that the desk doesn't hold, apart from the stacks'
 const DEP_MISS_TTL = 24 * HOUR; // a number that's no PR (an issue, gone, no access) isn't asked again before this
+
+const normRef = (ref: string) => ref.trim().replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
+const REF = /^(?:(?:([\w.-]+)\/)?([\w.-]+)#|#)?(\d+)$/;
 
 interface Feed {
   since: string | null; // ask for threads updated after this
@@ -433,13 +444,29 @@ export class GitHubConnector implements Connector {
     );
   }
 
+  // owner/repo#123, repo#123, #123, 123 or a GitHub URL; owner/repo#123 and a URL name one exactly, which fetchOne reads.
+  refOf(text: string, held: readonly string[]): { held: string[]; id?: string } | null {
+    const r = normRef(text);
+    const m = REF.exec(r);
+    if (!m) return null;
+    const [, owner, name, num] = m;
+    const found = held.filter((id) => {
+      const [repo = "", n] = id.split("#");
+      const [o = "", repoName = ""] = repo.split("/");
+      return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
+    });
+    return owner ? { held: found, id: r } : { held: found };
+  }
+
   // Not stored quietly like a stack's members: you added it, so its events count and the notifications feed follows it.
-  fetchOne(repo: string, number: number): Effect.Effect<string | null, GitHubReadError | GitHubNotFetched> {
+  fetchOne(id: string): Effect.Effect<string, Upstream | NotFound> {
+    const upstream = (e: GitHubReadError | GitHubNotFetched) => new Upstream({ message: e.message, cause: e });
     return Effect.gen({ self: this }, function* () {
-      const hit = yield* this.api.lookup(repo, number);
-      if (!hit) return null;
-      const [item] = yield* this.api.details([hit], this.desk.me());
-      if (!item) return yield* new GitHubNotFetched({ id: hit.id }); // details skips a batch that failed
+      const at = id.lastIndexOf("#");
+      const hit = yield* this.api.lookup(id.slice(0, at), Number(id.slice(at + 1))).pipe(Effect.mapError(upstream));
+      if (!hit) return yield* new NotFound({ message: `GitHub has no PR or issue ${id}` });
+      const [item] = yield* this.api.details([hit], this.desk.me()).pipe(Effect.mapError(upstream));
+      if (!item) return yield* upstream(new GitHubNotFetched({ id: hit.id })); // details skips a batch that failed
       this.desk.ingest(this, [item]);
       return item.id;
     });

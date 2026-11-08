@@ -22,7 +22,6 @@ import {
   type CommandError,
   type FsError,
   type GitHubError,
-  type GitHubNotFetched,
   type GitHubReadError,
   type GitHubWriteError,
 } from "./errors.ts";
@@ -188,9 +187,6 @@ const ADDED: CompiledBoard = {
 };
 const boardsOf = (loaded: LoadedConfig) => [...loaded.boards, ADDED];
 
-const normRef = (ref: string) => ref.trim().replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
-const REF = /^(?:(?:([\w.-]+)\/)?([\w.-]+)#|#)?(\d+)$/;
-
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
 
@@ -250,7 +246,7 @@ type WriteError = ActError | Stale | Busy | Upstream;
 // What GitHub said, passed on after the desk's words. Its own error is the cause, which nothing reported: Sentry sees it.
 const upstream =
   (said: string) =>
-  (err: GitHubError | GitHubNotFetched): Upstream =>
+  (err: GitHubError): Upstream =>
     new Upstream({ message: `${said}${err.message}`, cause: err });
 
 export interface ReviewDeps {
@@ -936,7 +932,7 @@ export class Desk {
   // A ref on the desk, or an exact id the desk no longer holds (its events outlive it).
   itemId(ref: string): Effect.Effect<string, RefError> {
     return Effect.catchTag(this.resolve(ref), "NotFound", (e) =>
-      /^[\w.-]+\/[\w.-]+#\d+$/.test(ref) ? Effect.succeed(ref) : Effect.fail(e),
+      this.connectors.some((c) => c.refOf(ref, [])?.id === ref) ? Effect.succeed(ref) : Effect.fail(e),
     );
   }
 
@@ -1534,14 +1530,9 @@ export class Desk {
       yield* this.requireConfig();
       const ids = [...this.snapshot().entries.keys()];
       if (ids.includes(ref)) return ref;
-      const m = REF.exec(normRef(ref));
-      if (!m) return yield* new NotFound({ message: `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL` });
-      const [, owner, name, num] = m;
-      const found = ids.filter((id) => {
-        const [repo = "", n] = id.split("#");
-        const [o = "", repoName = ""] = repo.split("/");
-        return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
-      });
+      const refs = this.connectors.flatMap((c) => c.refOf(ref, ids) ?? []);
+      if (!refs.length) return yield* new NotFound({ message: `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL` });
+      const found = refs.flatMap((r) => r.held);
       const [first] = found;
       if (found.length === 1 && first !== undefined) return first;
       if (found.length === 0) return yield* new NotFound({ message: `no item "${ref}" on the desk` });
@@ -2162,19 +2153,22 @@ export class Desk {
     this.judge.pump();
   }
 
-  // The item's id, fetched read only if the desk doesn't hold it; an ambiguous ref and what GitHub fails with are passed on.
+  // The item's id, fetched read only if the desk doesn't hold it; an ambiguous ref and what its source fails with are passed on.
   hold(ref: string): Effect.Effect<string, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       yield* this.requireConfig();
-      const r = normRef(ref);
-      if (!REF.test(r)) return yield* new BadRequest({ message: `can't read "${ref}"; use owner/repo#123 or a GitHub URL` });
-      const held = yield* Effect.catchTag(this.resolve(r), "NotFound", () => Effect.succeed(null));
+      const refs = this.connectors.flatMap((c) => {
+        const r = c.refOf(ref, []);
+        return r ? [{ id: r.id, from: c }] : [];
+      });
+      if (!refs.length) return yield* new BadRequest({ message: `can't read "${ref}"; use owner/repo#123 or a GitHub URL` });
+      const exact = refs.find((r) => r.id !== undefined);
+      // What it names exactly, or the ref trimmed, is what an ambiguous ref's words quote.
+      const held = yield* Effect.catchTag(this.resolve(exact?.id ?? ref.trim()), "NotFound", () => Effect.succeed(null));
       if (held !== null) return held;
-      const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
-      if (repo === undefined || num === undefined)
+      if (exact?.id === undefined)
         return yield* new BadRequest({ message: `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it` });
-      const got = yield* this.gh.fetchOne(repo, Number(num)).pipe(Effect.mapError(upstream("")));
-      if (got === null) return yield* new NotFound({ message: `GitHub has no PR or issue ${r}` });
+      const got = yield* exact.from.fetchOne(exact.id);
       this.changed();
       return got;
     });

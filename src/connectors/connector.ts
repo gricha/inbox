@@ -1,5 +1,6 @@
 // A connector turns one source (GitHub today) into item snapshots and events. The desk runs every connector it has.
 import type { Effect } from "effect";
+import type { NotFound, Upstream } from "../errors.ts";
 import type { ActivityEvent, ConnectorStatus, Item } from "../types.ts";
 
 export type NewEvent = Omit<ActivityEvent, "seq" | "source">;
@@ -14,4 +15,7 @@ export interface Connector {
   poll(): Effect.Effect<void>; // the change feed: refresh what changed, start a reconcile if something new appeared
   events(prev: Item | null, next: Item): NewEvent[]; // what changed between two snapshots of one item
   status(): ConnectorStatus;
+  // The held ids `text` names, and `id` when it names one exactly (what fetchOne reads; a short ref doesn't); null: not its ref.
+  refOf(text: string, held: readonly string[]): { held: string[]; id?: string } | null;
+  fetchOne(id: string): Effect.Effect<string, Upstream | NotFound>; // reads the item `id` names and stores it; answers the id it's stored under
 }

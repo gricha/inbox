@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { Effect } from "effect";
 import { Desk } from "../src/desk.ts";
-import { GitHubAuthError, GitHubRateLimited } from "../src/errors.ts";
+import { GitHubAuthError, GitHubNotFetched, GitHubRateLimited } from "../src/errors.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
 import { failure, run, runSync } from "./helpers/run.ts";
@@ -59,15 +59,15 @@ test("a rate limit in a pass pauses the loops until GitHub's reset, and the next
   assert.equal(asked, 1, "paused: no pass");
 });
 
-test("fetchOne fails with GitHubNotFetched when details skips the item; add answers 502 with its words", async (c) => {
+test("fetchOne fails with GitHubNotFetched, as Upstream's cause, when details skips the item; add answers 502 with its words", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
   await run(t.desk.sync());
   t.gh.items.set(ID, makeItem({ repo: "acme/other", number: 9, author: "dave" }));
   t.gh.details = () => Effect.succeed([]); // GitHub refused the batch it was in, which details skips
 
-  const e = await failure(t.desk.gh.fetchOne("acme/other", 9));
-  assert.equal(e._tag, "GitHubNotFetched");
+  const e = await failure(t.desk.gh.fetchOne(ID));
+  assert.deepEqual([e._tag, e._tag === "Upstream" && e.cause instanceof GitHubNotFetched], ["Upstream", true]);
   assert.equal(e.message, "couldn't fetch acme/other#9 from GitHub; try again");
   await assert.rejects(run(t.desk.add(ID)), (err: Error & { status: number }) => err.status === 502 && err.message === e.message);
   assert.equal(t.desk.snapshot().entries.has(ID), false);
