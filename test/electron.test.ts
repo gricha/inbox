@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Scheduler } from "effect";
 import { BadRequest } from "../src/errors.ts";
 import { failure, run } from "./helpers/run.ts";
 import {
@@ -46,6 +46,7 @@ import {
   quietly,
   readJson,
   restoreBounds,
+  saveBounds,
   SHELL_PATH_COMMAND,
   sourceDir,
   sourceEnv,
@@ -406,6 +407,28 @@ test("restoreBounds keeps saved bounds only when they're on a screen", () => {
   assert.deepEqual(restoreBounds({ x: 3000, y: 60, width: 900, height: 600 }, screens, def), { width: 900, height: 600 });
 });
 
+test("saveBounds writes where the window is, and nothing for one destroyed before its save timer fired", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-bounds-"));
+  try {
+    const file = path.join(dir, "window.json");
+    const bounds = { x: 100, y: 60, width: 900, height: 600 };
+    saveBounds({ isDestroyed: () => false, getNormalBounds: () => bounds }, file);
+    assert.deepEqual(readJson(file), bounds);
+    fs.rmSync(file);
+    const destroyed = {
+      isDestroyed: () => true,
+      getNormalBounds: (): typeof bounds => {
+        throw new TypeError("Object has been destroyed");
+      },
+    };
+    saveBounds(destroyed, file);
+    assert.equal(fs.existsSync(file), false);
+    saveBounds({ isDestroyed: () => false, getNormalBounds: () => bounds }, path.join(dir, "no-such-dir", "window.json"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("desktopEntry quotes Exec arguments", () => {
   const text = desktopEntry("/home/me/Apps/Review Desk.AppImage", ["--hidden"]);
   assert.match(text, /^\[Desktop Entry\]\n/);
@@ -417,6 +440,16 @@ test("desktopEntry quotes Exec arguments", () => {
 test("commandOutput: one spawn refuses before it starts gives no output, like one that fails to start", async () => {
   assert.deepEqual(await run(commandOutput("bad\0command", [], 5000)), { stdout: "", timedOut: false });
   assert.deepEqual(await run(commandOutput(path.join(os.tmpdir(), "desk-no-such-command"), [], 5000)), { stdout: "", timedOut: false });
+});
+
+test("commandOutput: a spawn failure is heard however soon its fiber yields", async () => {
+  const missing = path.join(os.tmpdir(), "desk-no-such-command");
+  // From 3: below it, the runtime itself misses timers.
+  for (let ops = 3; ops <= 8; ops++)
+    assert.deepEqual(await run(Effect.provideService(commandOutput(missing, [], 5000), Scheduler.MaxOpsBeforeYield, ops)), {
+      stdout: "",
+      timedOut: false,
+    });
 });
 
 test("commandOutput interrupted stops its whole group before it ends", { skip: process.platform === "win32" }, async () => {

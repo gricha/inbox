@@ -134,53 +134,55 @@ export function parseShellPath(out: string): string | null {
 
 // SIGKILL to its whole group at the deadline: an interactive shell ignores SIGTERM, and what its rc files started would linger.
 // One that can't start prints nothing, as one that fails to: its caller reads no output either way.
+// Spawned in the register beside its listeners: a fiber yielding in between would leave a spawn failure's error uncaught.
 export const commandOutput = (cmd: string, args: string[], timeoutMs: number): Effect.Effect<{ stdout: string; timedOut: boolean }> =>
-  Effect.suspend(() => {
+  Effect.callback<{ stdout: string; timedOut: boolean }>((resume) => {
     const group = process.platform !== "win32";
     const started = Result.try({
       try: () => spawn(cmd, args, { detached: group, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }),
       catch: () => null,
     });
-    if (Result.isFailure(started)) return Effect.succeed({ stdout: "", timedOut: false });
+    if (Result.isFailure(started)) {
+      resume(Effect.succeed({ stdout: "", timedOut: false }));
+      return Effect.void; // nothing started, nothing to stop
+    }
     const child = started.success;
-    return Effect.callback<{ stdout: string; timedOut: boolean }>((resume) => {
-      let stdout = "";
-      let timedOut = false;
-      let closed = false;
-      child.stdout.setEncoding("utf8").on("data", (s: string) => {
-        stdout += s;
+    let stdout = "";
+    let timedOut = false;
+    let closed = false;
+    child.stdout.setEncoding("utf8").on("data", (s: string) => {
+      stdout += s;
+    });
+    const stop = () => {
+      const pid = child.pid;
+      if (pid)
+        quietly(() => {
+          process.kill(group ? -pid : pid, "SIGKILL");
+        }); // already gone
+      child.stdout.destroy(); // a background job that kept the pipe can't hold up close
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeoutMs);
+    const done = () => {
+      closed = true;
+      clearTimeout(timer);
+      resume(Effect.succeed({ stdout, timedOut }));
+    };
+    child.on("error", done);
+    child.on("close", done);
+    // Interrupted: the group goes, and the run ends once it has.
+    return Effect.callback<void>((gone) => {
+      clearTimeout(timer);
+      if (closed) {
+        gone(Effect.void);
+        return;
+      }
+      child.once("close", () => {
+        gone(Effect.void);
       });
-      const stop = () => {
-        const pid = child.pid;
-        if (pid)
-          quietly(() => {
-            process.kill(group ? -pid : pid, "SIGKILL");
-          }); // already gone
-        child.stdout.destroy(); // a background job that kept the pipe can't hold up close
-      };
-      const timer = setTimeout(() => {
-        timedOut = true;
-        stop();
-      }, timeoutMs);
-      const done = () => {
-        closed = true;
-        clearTimeout(timer);
-        resume(Effect.succeed({ stdout, timedOut }));
-      };
-      child.on("error", done);
-      child.on("close", done);
-      // Interrupted: the group goes, and the run ends once it has.
-      return Effect.callback<void>((gone) => {
-        clearTimeout(timer);
-        if (closed) {
-          gone(Effect.void);
-          return;
-        }
-        child.once("close", () => {
-          gone(Effect.void);
-        });
-        stop();
-      });
+      stop();
     });
   });
 
@@ -558,6 +560,12 @@ export function restoreBounds(saved: Partial<Bounds> | null, screens: Bounds[], 
   const onScreen = screens.some((s) => px >= s.x && px < s.x + s.width && py >= s.y && py < s.y + s.height);
   return onScreen ? { x: saved.x, y: saved.y, width, height } : { width, height };
 }
+
+// Where the window was is a nicety: unsaved (it's gone, or the file can't be written), it opens at its default size.
+export const saveBounds = (w: { isDestroyed(): boolean; getNormalBounds(): Bounds }, file: string): void => {
+  if (w.isDestroyed()) return; // a destroyed window throws on getNormalBounds, uncaught in a timer
+  Effect.runSync(Effect.ignore(writeFile(file, JSON.stringify(w.getNormalBounds()))));
+};
 
 // ---------------------------------------------------------------- Linux autostart
 

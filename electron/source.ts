@@ -197,18 +197,21 @@ export const startSource = (o: {
       signal(desk.pid, "SIGTERM", false); // node --watch hands it on to the desk, which closes cleanly
     });
 
+    // Checked in the register: one that exits between a check outside and the listener would hold up a quit for 5 s.
     const exited = (c: ChildProcess): Effect.Effect<void> =>
-      c.exitCode !== null || c.signalCode !== null || !c.pid
-        ? Effect.void
-        : Effect.callback<void>((resume) => {
-            const done = () => {
-              resume(Effect.void);
-            };
-            c.once("exit", done);
-            return Effect.sync(() => {
-              c.off("exit", done);
-            });
-          });
+      Effect.callback<void>((resume) => {
+        if (c.exitCode !== null || c.signalCode !== null || !c.pid) {
+          resume(Effect.void);
+          return Effect.void;
+        }
+        const done = () => {
+          resume(Effect.void);
+        };
+        c.once("exit", done);
+        return Effect.sync(() => {
+          c.off("exit", done);
+        });
+      });
 
     const kill = () => {
       if (stopping) return;

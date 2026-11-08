@@ -60,6 +60,7 @@ import {
   removeFile,
   request,
   restoreBounds,
+  saveBounds,
   SHELL_PATH_COMMAND,
   sourceDir,
   themeColors,
@@ -625,10 +626,12 @@ function createWindow(): void {
   const save = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      // Where it was is a nicety: unsaved, the window opens at its default size.
-      Effect.runSync(Effect.ignore(writeFile(stateFile(), JSON.stringify(w.getNormalBounds()))));
+      saveBounds(w, stateFile());
     }, 500);
   };
+  w.on("closed", () => {
+    clearTimeout(saveTimer);
+  });
   nativeTheme.on("updated", () => {
     if (!w.isDestroyed()) w.setBackgroundColor(paper());
   });
