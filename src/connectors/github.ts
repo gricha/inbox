@@ -353,8 +353,10 @@ export class GitHubConnector implements Connector {
         for (const h of r.hits) hits.set(h.id, h);
       }
       const meta = desk.store.itemMeta();
-      // An open pin no search returns (desk_add's) would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.
-      const off = [...desk.store.states().values()].filter((s) => s.pinned && !hits.has(s.id) && meta.has(s.id)).map((s) => s.id);
+      // Its own open pin (a bare id) no search returns would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.
+      const off = [...desk.store.states().values()]
+        .filter((s) => s.pinned && !s.id.includes(":") && !hits.has(s.id) && meta.has(s.id))
+        .map((s) => s.id);
       const pinned = [...desk.store.itemsById(off).values()].filter((i) => i.state === "open").map((i) => hitOf(i.id, meta.get(i.id)!));
       const need = [...hits.values(), ...pinned].filter((h) => {
         const m = meta.get(h.id);
@@ -493,6 +495,7 @@ export class GitHubConnector implements Connector {
     if (!m) return null;
     const [, owner, name, num] = m;
     const found = held.filter((id) => {
+      if (id.includes(":")) return false; // another source's: a bare id is GitHub's
       const [repo = "", n] = id.split("#");
       const [o = "", repoName = ""] = repo.split("/");
       return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());

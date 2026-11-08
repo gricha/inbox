@@ -98,21 +98,28 @@ class Notes implements Connector {
   }
 }
 
-test("a note outlives GitHub's 14-day prune, which still drops GitHub's rows no search returns", async (c) => {
+test("a note outlives GitHub's 14-day prune, which drops GitHub's rows no search returns, and GitHub refreshes only its own pins", async (c) => {
   const t = await setup([reviewAsk(1)], { settings: { "policy.judge": false } });
   c.after(t.cleanup);
   await run(t.desk.sync());
-  const note = new Notes(t.desk).add("Call Ann about the release");
+  const notes = new Notes(t.desk);
+  const note = notes.add("Call Ann about the release");
+  // Open and pinned, as GitHub's own pins are, but not GitHub's to read.
+  const pinned = { ...notes.write("Book the venue"), state: "open" as const };
+  t.desk.store.putItems([pinned], NOW.toISOString());
+  t.desk.store.putState({ ...t.desk.store.state(pinned.id), pinned: true });
   const unlisted = makeItem({ number: 9 });
   t.desk.store.putItems([unlisted], NOW.toISOString());
   const meta = t.desk.store.itemMeta().get(note.id);
   assert.deepEqual([meta?.node_id, meta?.detail_at], ["", NOW.toISOString()]);
 
   t.setNow(new Date(NOW.getTime() + 15 * DAY));
+  t.gh.detailCalls = [];
   await run(t.desk.gh.pass()); // its pass alone: the recompute a sync ends with still reads every item as GitHub's
-  const ids = [note.id, unlisted.id, reviewAsk(1).id];
-  assert.deepEqual([...t.desk.store.itemsById(ids).keys()], [note.id, reviewAsk(1).id]);
+  const ids = [note.id, pinned.id, unlisted.id, reviewAsk(1).id];
+  assert.deepEqual([...t.desk.store.itemsById(ids).keys()], [note.id, pinned.id, reviewAsk(1).id]);
   assert.deepEqual(t.desk.store.itemsById([note.id]).get(note.id), note, "stored whole");
+  assert.ok(!t.gh.detailCalls.flat().some((id) => id.startsWith("notes:")), "GitHub asks about none of the notes");
 });
 
 test("a note's ref is its source's: the desk holds one by fetching it from there, and its exact id names its events", async (c) => {
@@ -126,6 +133,9 @@ test("a note's ref is its source's: the desk holds one by fetching it from there
   assert.equal(failureSync(t.desk.resolve(note.id)).message, 'no item "notes:1" on the desk', "read by its source, not held");
   assert.equal(failureSync(t.desk.resolve("nope:1")).message, `can't read "nope:1"; use owner/repo#123, repo#123 or a GitHub URL`);
   assert.equal(runSync(t.desk.itemId(note.id)), note.id, "an exact id: its events outlive it");
+  // Another source's id with a "/" and a "#" in it is still not GitHub's.
+  assert.deepEqual(t.desk.gh.refOf("api#7", ["acme/api#1", "notes:acme/api#7"]), { held: [] });
+  assert.deepEqual(t.desk.gh.refOf("#1", ["acme/api#1", "notes:acme/api#1"]), { held: ["acme/api#1"] });
 
   assert.equal(await run(t.desk.hold(note.id)), note.id);
   assert.deepEqual(t.desk.store.itemsById([note.id]).get(note.id), note, "fetched from its source and held whole");
