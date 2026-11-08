@@ -246,6 +246,7 @@ export interface SettingDef {
   options?: readonly { value: string; label: string }[]; // select only
   min?: number;
   max?: number;
+  unit?: string; // a number's, shown after its field ("days")
   pattern?: string; // strings and list items must match (an empty "string" is always allowed unless required)
   pattern_hint?: string;
   required?: boolean;

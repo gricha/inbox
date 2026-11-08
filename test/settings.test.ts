@@ -6,10 +6,19 @@ import path from "node:path";
 import { parse } from "smol-toml";
 import { checkSetting, DEFAULTS, effective, loadSettings, migrateLegacy, readSettings, SETTINGS, writeSettings } from "../src/settings.ts";
 import { defaultConfigText, parseConfig } from "../src/config.ts";
+import type { SettingDef } from "../src/types.ts";
 import { failureSync, runSync } from "./helpers/run.ts";
 
 test("every setting's default is valid", () => {
   for (const d of SETTINGS) assert.equal(checkSetting(d.key, d.default), null, d.key);
+});
+
+test("a number names its unit after its field, never in its label", () => {
+  for (const d of SETTINGS as readonly SettingDef[]) {
+    assert.doesNotMatch(d.label, /\(\w+\)$/, d.key);
+    if (d.type === "number") assert.ok(d.unit, `${d.key} has a unit`);
+    else assert.equal(d.unit, undefined, `${d.key}: only a number has a unit`);
+  }
 });
 
 test("checkSetting", () => {

@@ -67,7 +67,16 @@ export const SECTIONS: SettingsSection[] = [
 ];
 
 export const SETTINGS = [
-  { key: "github.poll_seconds", section: "github", label: "Sync every (seconds)", type: "number", default: 90, min: 30, max: 3600 },
+  {
+    key: "github.poll_seconds",
+    section: "github",
+    label: "Sync every",
+    type: "number",
+    default: 90,
+    min: 30,
+    max: 3600,
+    unit: "seconds",
+  },
   {
     key: "github.close_collaborator_min",
     section: "github",
@@ -76,6 +85,7 @@ export const SETTINGS = [
     default: 5,
     min: 1,
     max: 100,
+    unit: "PRs",
     help: "author.close is true when you reviewed or commented on at least this many of their PRs in 90 days.",
   },
   {
@@ -114,11 +124,12 @@ export const SETTINGS = [
   {
     key: "queue.quiet_days",
     section: "queue",
-    label: "Move quiet items to Later after (days)",
+    label: "Move quiet items to Later after",
     type: "number",
     default: 14,
     min: 0,
     max: 365,
+    unit: "days",
     help: "An item nobody has touched for this long leaves the Inbox for Later, on FYI. Pinned items, what a hard rule placed, and a review you were asked for in that time stay. 0 keeps everything.",
   },
   {
@@ -129,6 +140,7 @@ export const SETTINGS = [
     default: 10,
     min: 0,
     max: 100,
+    unit: "items",
     help: "Items, in the desk's order; the rest sit behind one line you can open. 0 shows them all.",
   },
   {
@@ -163,6 +175,7 @@ export const SETTINGS = [
     default: 300,
     min: 1,
     max: 1000,
+    unit: "items an hour",
     help: "20 items a call, on your own Claude Code login.",
   },
   {

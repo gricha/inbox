@@ -98,7 +98,25 @@ function useDraft({ def, value, commit, clear, id, invalid }: FieldProps) {
 
 function NumberField(p: FieldProps) {
   const d = useDraft(p);
-  return <input className="input num" type="number" min={p.def.min} max={p.def.max} step={1} {...d.bind} />;
+  const unit = p.def.unit && `${p.id}-unit`;
+  return (
+    <>
+      <input
+        className="input num"
+        type="number"
+        min={p.def.min}
+        max={p.def.max}
+        step={1}
+        {...d.bind}
+        aria-describedby={cls(unit, d.bind["aria-describedby"])}
+      />
+      {unit && (
+        <span className="s-unit" id={unit}>
+          {p.def.unit}
+        </span>
+      )}
+    </>
+  );
 }
 
 // An optional setting saved as "" is off, not the default: say so instead of greying in the example.
@@ -159,7 +177,6 @@ function BooleanField({ value, commit, id }: FieldProps) {
       // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked; ARIA in HTML forbids aria-checked here
       role="switch"
       checked={on}
-      aria-labelledby={`${id}-label`}
       aria-describedby={`${id}-msg`}
       onChange={(e) => {
         flip(e.target.checked);
@@ -350,7 +367,7 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
       commit={(v) => put({ set: { [def.key]: v } }).pipe(Effect.map((saved) => saved?.values[def.key] ?? null))}
     />
   );
-  const reset = view.overridden.includes(def.key) && (
+  const reset = status === null && view.overridden.includes(def.key) && (
     <button
       type="button"
       className="link-btn"
@@ -362,31 +379,27 @@ function Row({ def, view, onView, extra }: { def: SettingDef; view: SettingsView
       Reset to default
     </button>
   );
+  // Free text (a prompt, a path) takes the row's width under its label; a value with a set shape stays beside it.
+  const wide = def.type === "text" || (def.type === "string" && !def.pattern);
 
   return (
-    <div className={cls("setting", `st-${def.type}`)}>
+    <div className={cls("setting", `st-${def.type}`, wide && "wide")}>
       <div className="s-label-col">
-        {/* Reset sits on the label's line, so it never reads as the setting's help. */}
-        <div className="s-label-row">
-          {def.type === "boolean" ? (
-            <span className="s-label" id={`${id}-label`}>
-              {def.label}
-            </span>
-          ) : (
-            <label className="s-label" htmlFor={id}>
-              {def.label}
-            </label>
-          )}
-          {reset}
-        </div>
+        <label className="s-label" htmlFor={id}>
+          {def.label}
+        </label>
         {def.help && <p className="s-help">{def.help}</p>}
+        {!wide && extra}
       </div>
       <div className="s-control">
         {control}
-        {extra}
-        <div className="s-msg" id={`${id}-msg`} aria-live="polite">
-          {status === "saved" && <span className="t-good">Saved</span>}
-          {typeof status === "object" && status !== null && <span className="t-bad">Not saved: {status.error}</span>}
+        {wide && extra}
+        <div className="s-msg">
+          <span id={`${id}-msg`} aria-live="polite">
+            {status === "saved" && <span className="t-good">Saved</span>}
+            {typeof status === "object" && status !== null && <span className="t-bad">Not saved: {status.error}</span>}
+          </span>
+          {reset}
         </div>
       </div>
     </div>
@@ -551,7 +564,7 @@ const APPEARANCE = { id: "appearance", title: "Appearance", help: "This device's
 function Appearance() {
   const [theme, setTheme] = useState<ThemeId>(savedTheme);
   return (
-    <div className="s-fields">
+    <div className="lines s-sheet">
       <div className="setting st-select">
         <div className="s-label-col">
           <label className="s-label" htmlFor="s-theme">
@@ -701,7 +714,7 @@ export function Settings({
             {x.id === "automations" && <Automations active={active} refresh={loads} now={now} flash={flash} />}
             {x.id === "appearance" && <Appearance />}
             {view && defs.length > 0 && (
-              <div className="s-fields">
+              <div className="lines s-sheet">
                 {defs.map((d) => (
                   <Row
                     key={d.key}

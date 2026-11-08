@@ -2474,10 +2474,19 @@ p {
   border-color: var(--red);
 }
 
-/* Two widths: short values (numbers, time windows, a hotkey) and free text across the control column. */
-.input.num,
+.input.num {
+  width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+.input.choice {
+  width: 240px;
+  cursor: pointer;
+}
+
+/* A value with a set shape (a time window): short, beside its label. */
 .input.short {
-  max-width: 240px;
+  width: 160px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2492,6 +2501,7 @@ p {
   resize: vertical;
 }
 
+/* Off: a quiet track ringed by the control's edge; on: filled in ink-2, calmer than ink on a dark page. */
 .switch {
   position: relative;
   flex: none;
@@ -2499,10 +2509,13 @@ p {
   height: 22px;
   margin: 0;
   border-radius: 999px;
-  background: var(--control);
+  background: var(--wash);
+  box-shadow: inset 0 0 0 1px var(--control);
   appearance: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
 }
 
 .switch::after {
@@ -2513,18 +2526,25 @@ p {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
-  transition: transform 0.15s;
+  background: var(--control);
+  transition:
+    transform 0.15s,
+    background 0.15s;
 }
 
 .switch:checked {
-  background: var(--ink);
+  background: var(--ink-2);
+  box-shadow: none;
 }
 
 .switch:checked::after {
-  background: var(--paper);
+  background: var(--sheet);
   transform: translateX(16px);
+}
+
+.switch:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* Snooze menu, toasts, dialog ---------------------------------------------- */
@@ -3103,7 +3123,7 @@ p {
 
 /* Under the page head's rule, so a jump to a section shows one hairline, not two. */
 .s-section {
-  padding: 36px 0 12px;
+  padding: 36px 0 24px;
   scroll-margin-top: 51px;
 }
 
@@ -3146,81 +3166,136 @@ p {
   margin-top: 3px;
 }
 
-.s-fields {
+/* Each section's settings on one sheet, as the Inbox's table: a hairline between rows. */
+.s-sheet {
   margin-top: 24px;
 }
 
-.s-section > h2 + .s-fields {
-  margin-top: 4px;
+.s-section > h2 + .s-sheet {
+  margin-top: 14px;
 }
 
-/* One column at every width: the label, its help at a reading measure, then its control. */
+/* The label and its help, then the control on the sheet's right edge, so controls line up row to row. */
 .setting {
+  position: relative;
   display: grid;
-  gap: 8px;
-  padding: 20px 0;
-}
-
-.setting.st-boolean .s-control {
-  display: flex;
-  flex-wrap: wrap;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  column-gap: 24px;
+  min-height: 52px;
+  padding: 13px 16px;
 }
 
-.setting.st-boolean .s-msg {
-  position: static;
-  margin: 0;
+/* A list grows a line at a time: its top stays with the label's. */
+.setting.st-list {
+  align-items: start;
 }
 
 .s-label-col {
   display: grid;
   align-content: start;
-  gap: 4px;
+  gap: 2px;
 }
 
 .s-label {
   color: var(--ink);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 550;
+  line-height: 1.35;
 }
 
 .s-help {
   max-width: 64ch;
   color: var(--pencil);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
-.s-label-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 14px;
-}
-
-/* Under its control, in the setting's padding: it reserves no line, and showing it moves nothing. */
+/* Room above and below a control as tall as its row, so the message line under it clears the hairline. */
 .s-control {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 8px;
+  margin-block: 5px;
 }
 
+.s-unit {
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.setting.st-list .input.area {
+  width: 240px;
+}
+
+/* Free text: the label and its help, then the field across the row. */
+.setting.wide {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 8px;
+}
+
+.setting.wide .s-control {
+  display: block;
+  justify-self: stretch;
+  margin-top: 0;
+}
+
+.setting.wide .input {
+  max-width: none;
+}
+
+/* Under its control, in the row's bottom padding: it reserves no line, and showing it moves nothing. */
 .s-msg {
   position: absolute;
   top: 100%;
-  margin-top: 3px;
-  font-size: 12.5px;
+  right: 0;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.s-msg .link-btn {
+  color: var(--pencil);
+  font-size: inherit;
+  text-underline-offset: 2px;
+}
+
+.s-msg .link-btn:hover {
+  color: var(--ink);
+}
+
+/* A sheet too narrow for two columns puts each control under its words, but a switch stays beside them. */
+@container (width < 560px) {
+  .setting:not(.st-boolean) {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  /* Across the row, its controls from the start, so a select or a list can take up to 320px of it. */
+  .setting:not(.st-boolean, .wide) .s-control {
+    justify-self: stretch;
+    margin-top: 0;
+  }
+
+  .setting:not(.st-boolean) .s-msg {
+    right: auto;
+    left: 0;
+  }
+
+  .setting .input.choice,
+  .setting.st-list .input.area {
+    width: 100%;
+    max-width: 320px;
+  }
 }
 
 .s-live {
   max-width: 72ch;
   margin-top: 8px;
   font-size: 13px;
-}
-
-.input.choice {
-  width: auto;
-  min-width: 200px;
-  cursor: pointer;
 }
 
 .agent .btn {
@@ -3235,7 +3310,7 @@ p {
 }
 
 .hotkey-input {
-  max-width: 240px;
+  width: 160px;
   font-weight: 550;
 }
 
