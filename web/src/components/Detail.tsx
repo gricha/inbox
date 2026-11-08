@@ -130,7 +130,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
             <b>{handoffLabel(card.handoff)}</b> {card.handoff.why}
           </p>
         )}
-        <p className="card-facts">
+        <p className="card-facts dots">
           {facts.map((f) => (
             <span key={f}>{f}</span>
           ))}

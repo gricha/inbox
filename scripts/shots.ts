@@ -503,6 +503,7 @@ const besideOpen = async (page: Page, name: string, sel: string) => {
   if (b.sel !== sel) failures.push(`${name}: the list marks ${JSON.stringify(b.sel)}, not ${sel}`);
   if (b.titles > 2 || b.metas > 1) failures.push(`${name}: a row's title takes ${b.titles} lines and its facts ${b.metas}`);
 };
+let skTop = -1; // where queue-loading's placeholders started
 const LONG = "Stream partial results to the client while the hash join stage spills its build side to disk under memory pressure";
 const SHOTS: Shot[] = [
   {
@@ -683,11 +684,20 @@ const SHOTS: Shot[] = [
     // The first load while the desk is slow: quiet rows where the rows will be.
     name: "queue-loading",
     go: async (page) => {
+      await at("#/")(page);
       await hold(page, "**/api/queue");
       await page.locator(".queue .sk-row").first().waitFor();
       await page.waitForTimeout(600); // the placeholders show only once the wait is noticeable
+      skTop = (await tops(page, [".queue .lines"]))[0] ?? -1;
     },
-    after: release("**/api/queue"),
+    // The rows land where their placeholders were: the first sheet starts where the placeholders' did.
+    after: async (page) => {
+      await release("**/api/queue")(page);
+      await top(page);
+      const [loaded] = await tops(page, [".queue .lines"]);
+      if (Math.abs(loaded! - skTop) > 1)
+        failures.push(`queue-loading: the rows land at ${loaded}px, their placeholders were at ${skTop}px`);
+    },
   },
   {
     // The queue's "n more" line, Tab-focused; a click opens the rest in place.

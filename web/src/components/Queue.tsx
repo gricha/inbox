@@ -46,7 +46,17 @@ export function Queue({
     const first = !!overview && !overview.synced_at;
     return (
       <div className="queue">
-        {first ? <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p> : <SkRows />}
+        {first ? (
+          <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p>
+        ) : (
+          // Under a part's heading, as its rows will be, so the sheet doesn't move when they land.
+          <section className="group part">
+            <h2 className="group-head" aria-hidden="true">
+              <span className="sk" />
+            </h2>
+            <SkRows />
+          </section>
+        )}
       </div>
     );
   }

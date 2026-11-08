@@ -785,7 +785,7 @@ p {
 }
 
 .queue-empty {
-  padding: 8px 12px;
+  padding: 8px 15px;
   color: var(--pencil);
   font-size: 16px;
 }
@@ -1127,7 +1127,7 @@ p {
 .line-kind {
   flex: none;
   width: 2.9em;
-  color: var(--faint);
+  color: var(--pencil);
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1159,9 +1159,10 @@ p {
   white-space: nowrap;
 }
 
-/* The title is what you read: a long repo name is cut short (its title attribute has it whole), the number never. */
+/* The title is what you read: a long repo name is cut short, down to its floor before the title gives way at all (its title
+   attribute has it whole), the number never. */
 .line-ref {
-  flex: 0 100 auto;
+  flex: 0 1000 auto;
   min-width: calc-size(max-content, min(size, 6ch));
   max-width: 16ch;
   overflow: hidden;
@@ -1213,9 +1214,13 @@ p {
 }
 
 .blocked-row .line-note {
+  display: -webkit-box;
   flex: 0 1 auto;
   min-width: 0;
   white-space: normal;
+  text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* One width for every age, so the calls to action before it end in one column. */
@@ -1297,7 +1302,7 @@ p {
 /* PRs held back until Claude has reviewed them: said once, under the queue, as quiet as its "n more". */
 .queue-reviewing {
   margin: 0;
-  padding: 0 14px;
+  padding: 0 15px;
   color: var(--pencil);
   font-size: 14px;
 }
@@ -1697,7 +1702,7 @@ p {
 
 /* Beside a review the Questions heading says what they are: Agent goes quiet, so Answer is the line's one accent. */
 .c-line.inq .c-meta > .line-kind {
-  color: var(--faint);
+  color: var(--pencil);
 }
 
 /* The row's call to action, as accent text before its age, so the ages end in one column. */
@@ -1813,7 +1818,7 @@ p {
   align-items: baseline;
   gap: 10px;
   margin: 0 0 6px;
-  padding: 0 12px;
+  padding: 0 15px; /* on the rows' first column: their 14px inside the sheet's 1px edge */
   color: var(--ink);
   font-size: var(--title-size);
   font-weight: 650;
@@ -1831,7 +1836,7 @@ p {
 /* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
 .ai-paused {
   margin: 0 0 6px;
-  padding: 0 12px;
+  padding: 0 15px;
   color: var(--ink-2);
   font-size: 14px;
 }
@@ -1839,6 +1844,11 @@ p {
 .ai-paused b {
   color: var(--ink);
   font-weight: 600;
+}
+
+/* A command it says to run stays on one line. */
+.ai-paused code {
+  white-space: nowrap;
 }
 
 /* The queue's "n more": a click opens it in place. */
@@ -1983,10 +1993,10 @@ p {
 .card-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  gap: 2px 0;
   margin: -8px 0 0;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--meta-size);
 }
 
 .card-keys {
@@ -2011,7 +2021,7 @@ p {
 /* Your agent's state, where to watch it and its buttons, above the rows. */
 .lane-coord {
   margin: 0 0 12px;
-  padding: 0 12px;
+  padding: 0 15px;
   color: var(--pencil);
   font-size: 13px;
 }
@@ -2082,7 +2092,7 @@ p {
 }
 
 .lane-more {
-  padding: 2px 12px 10px;
+  padding: 2px 14px 10px;
 }
 
 .lane-why {
@@ -2310,6 +2320,14 @@ p {
 .line .line-cta:not(.line-reply) {
   justify-content: center;
   min-width: 152px;
+}
+
+/* In a tight table, a row's call to action is as wide as its words: the title needs the room. */
+@container (width < 760px) {
+  .line .line-cta:not(.line-reply) {
+    min-width: 0;
+    padding: 0 12px;
+  }
 }
 
 .act.primary {
@@ -3167,8 +3185,17 @@ p {
   margin-top: 28px;
 }
 
-.s-skel .group-head .sk {
+/* A part's heading on its labels' edge: a row's 16px inside the sheet's 1px. */
+.s-part > .group-head {
+  padding: 0 17px;
+}
+
+.s-skel .group-head .sk,
+.queue .group-head .sk {
   width: 6em;
+
+  /* A heading's line tall, as its words will be: the heading is a flex box, so no line box holds it open. */
+  margin-block: calc((1lh - 0.7em) / 2);
 }
 
 .s-skel .sk-lines {
@@ -3599,7 +3626,7 @@ button.s-edit:hover:not(:disabled) {
    words on a narrow sheet. A new one's editor goes under the sheet, lined up with the part's heading as in a view. */
 .au-new {
   margin-top: 14px;
-  padding: 0 12px;
+  padding: 0 17px;
 }
 
 /* An automation's view: its instruction, how it runs and its buttons under the view's name, lined up with it; then its runs,
