@@ -264,6 +264,17 @@ export class GitHubWriteUncertain extends Data.TaggedError("GitHubWriteUncertain
   readonly cause?: unknown;
 }> {}
 
+// Every board search failed in a pass (what each listed before stays): the first one's words without its query, and its
+// error as cause.
+export class GitHubSearchesFailed extends Data.TaggedError("GitHubSearchesFailed")<{ readonly message: string; readonly cause: unknown }> {}
+
+// GitHub has the PR or issue, but its details didn't come back (details skips a batch it refused): nothing was added.
+export class GitHubNotFetched extends Data.TaggedError("GitHubNotFetched")<{ readonly id: string }> {
+  override get message(): string {
+    return `couldn't fetch ${this.id} from GitHub; try again`;
+  }
+}
+
 export type GitHubReadError =
   GitHubAuthError | GitHubRateLimited | GitHubHttpError | GitHubGraphQLError | GitHubNetworkError | GitHubBadResponse;
 export type GitHubWriteError = GitHubAuthError | GitHubHttpError | GitHubGraphQLError | GitHubBadResponse | GitHubWriteUncertain;

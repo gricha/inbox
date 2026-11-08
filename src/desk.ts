@@ -312,7 +312,7 @@ export class Desk {
   // ---------------------------------------------------------------- lifecycle
 
   async init(): Promise<void> {
-    if (!this.ctx) await this.gh.refreshContext();
+    if (!this.ctx) await Effect.runPromise(this.gh.refreshContext()); // effect-bridge(C5c): init yields it; viewer's failure fails init
     if (!fs.existsSync(this.configPath)) {
       // The default spaces come from where your work is; don't guess them from a failed fetch.
       if (!this.ctx || Date.parse(this.ctx.refreshed_at) < this.now().getTime() - 24 * HOUR)
@@ -642,7 +642,8 @@ export class Desk {
 
   // A full pass on every connector; their own loops also run it on github.poll_seconds.
   async sync(): Promise<void> {
-    await Promise.all(this.connectors.map((c) => c.reconcile()));
+    // effect-bridge(C5c): sync becomes an Effect that yields every connector's pass
+    await Effect.runPromise(Effect.forEach(this.connectors, (c) => c.reconcile(), { concurrency: "unbounded", discard: true }));
   }
 
   // A connector brought in something new.
@@ -1635,7 +1636,8 @@ export class Desk {
     this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
     this.doneAfterWrite(id);
     // The PR itself first, so it resolves as "you approved" within seconds; the search index lags, so a full pass alone wouldn't see it.
-    void this.gh.refresh(id).then(() => this.sync());
+    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
     return { url };
   }
 
@@ -1703,7 +1705,7 @@ export class Desk {
       this.changed();
       // Before answering, so the window shows it closed (or a draft) at once and its u finds it so; held till then,
       // since actions() reads the snapshot this refresh replaces.
-      await this.gh.refresh(id);
+      await Effect.runPromise(this.gh.refresh(id)); // effect-bridge(C5b): githubAct becomes an Effect that yields it
       // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
       if (action !== "request_changes") this.wrote.set(id, it.updated_at);
       return { url };
@@ -1915,7 +1917,8 @@ export class Desk {
       const [, repo, num] = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(r) ?? [];
       if (repo === undefined || num === undefined)
         throw new DeskError(400, `"${ref}" isn't on the desk; give owner/repo#123 or its URL so the desk can fetch it`);
-      const got = await this.gh.fetchOne(repo, Number(num)).catch((err: unknown) => {
+      // effect-bridge(C5b): hold becomes an Effect that maps what fetchOne fails with to Upstream
+      const got = await Effect.runPromise(this.gh.fetchOne(repo, Number(num))).catch((err: unknown) => {
         throw new DeskError(502, (err as Error).message);
       });
       if (got === null) throw new DeskError(404, `GitHub has no PR or issue ${r}`);
@@ -2162,7 +2165,7 @@ export class Desk {
       this.doneAfterWrite(id);
     } finally {
       this.approving.delete(id);
-      void this.gh.refresh(id);
+      this.runner.fork("refresh", this.gh.refresh(id), id); // effect-bridge(C5b): the write becomes an Effect that forks it
     }
   }
 
@@ -2426,7 +2429,8 @@ export class Desk {
     this.convos.forget(id);
     if (only && last) this.doneAfterWrite(id);
     this.changed();
-    void this.gh.refresh(id).then(() => this.sync());
+    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
     return { url };
   }
 
@@ -2455,7 +2459,8 @@ export class Desk {
     this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
     this.convos.forget(id);
     this.doneAfterWrite(id);
-    void this.gh.refresh(id).then(() => this.sync());
+    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
     return { url };
   }
 
@@ -2495,7 +2500,8 @@ export class Desk {
     this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
     this.convos.forget(id);
     this.changed();
-    void this.gh.refresh(id).then(() => this.sync());
+    // effect-bridge(C5b): the write becomes an Effect that forks the refresh and then a sync itself
+    this.runner.fork("refresh", this.gh.refresh(id).pipe(Effect.andThen(Effect.promise(() => this.sync()))), id);
     return { url };
   }
 
@@ -2532,7 +2538,7 @@ export class Desk {
       }
     } finally {
       this.approving.delete(id);
-      void this.gh.refresh(id);
+      this.runner.fork("refresh", this.gh.refresh(id), id); // effect-bridge(C5b): the write becomes an Effect that forks it
     }
   }
 

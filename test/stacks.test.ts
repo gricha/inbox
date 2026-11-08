@@ -16,6 +16,7 @@ import {
 import type { Bucket, Card, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
+import { run } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubHttpError } from "../src/errors.ts";
 
@@ -562,11 +563,11 @@ test("the feed takes a member stored quietly for one the desk doesn't hold: an a
   const t = await setup([reviewAsk(1, { head_ref: "b1" }), theirs(2, 1)]);
   tc.after(t.cleanup);
   await t.desk.sync();
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   t.gh.items.set(id(2), reviewAsk(2, { head_ref: "b2", base: "b1", updated_at: at(1) }));
   t.gh.threads = [{ thread: "t1", item: id(2), reason: "review_requested", updated_at: at(1) }];
   const searches = t.gh.searches.length;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   await idle(t.desk);
   assert.ok(t.gh.searches.length > searches);
   assert.deepEqual(

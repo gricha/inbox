@@ -14,6 +14,7 @@ import { createApp } from "../src/server.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { run } from "./helpers/run.ts";
 import { Effect } from "effect";
 
 const posix = { skip: process.platform === "win32" };
@@ -473,7 +474,7 @@ test("an issue on your desk takes your comment, from the desk's window only, and
   assert.equal(t.desk.item("api#9").card.status, "done", "your part is done until someone else acts");
 
   t.gh.items.set("acme/api#9", { ...issue, state: "closed", closed_at: hoursAgo(0), updated_at: hoursAgo(0) });
-  await t.desk.gh.refresh("acme/api#9");
+  await run(t.desk.gh.refresh("acme/api#9"));
   assert.equal((await post({ body: "One more thing." }, desk)).status, 409, "closed: as a PR's review offers none");
   assert.equal(w.calls.length, 1);
 });

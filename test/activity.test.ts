@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { Item } from "../src/types.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
+import { run } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { GitHubRateLimited } from "../src/errors.ts";
 
@@ -212,7 +213,7 @@ test("settings: never resolving on others' approvals puts it back", async () => 
 test("notifications: a tracked item is refreshed and diffed right away; the poll honours X-Poll-Interval", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
-  await t.desk.gh.poll(); // the first poll learns where the feed stands
+  await run(t.desk.gh.poll()); // the first poll learns where the feed stands
   assert.equal(t.gh.feedCalls.length, 1);
   assert.equal(t.gh.feedCalls[0]?.since, hoursAgo(1));
 
@@ -222,7 +223,7 @@ test("notifications: a tracked item is refreshed and diffed right away; the poll
   t.gh.pollInterval = 120;
   t.gh.detailCalls = [];
   const searches = t.gh.searches.length;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.deepEqual(t.gh.detailCalls, [["acme/api#1"]]);
   assert.equal(t.gh.searches.length, searches, "no reconcile for a tracked item");
   assert.deepEqual(kinds(t.desk).at(-1), "commented acme/api#1");
@@ -231,7 +232,7 @@ test("notifications: a tracked item is refreshed and diffed right away; the poll
   // The same thread update again is skipped.
   t.gh.threads = [{ thread: "t1", item: "acme/api#1", reason: "review_requested", updated_at: iso(0.9) }];
   t.gh.detailCalls = [];
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.deepEqual(t.gh.detailCalls, []);
   t.cleanup();
 });
@@ -239,18 +240,18 @@ test("notifications: a tracked item is refreshed and diffed right away; the poll
 test("notifications: something new asking for you starts an early reconcile; other noise doesn't", async () => {
   const t = await setup([]);
   await t.desk.sync();
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   t.gh.items.set("acme/api#7", reviewAsk(7));
   t.gh.threads = [
     { thread: "t2", item: "acme/api#8", reason: "subscribed", updated_at: hoursAgo(0.1) },
     { thread: "t3", item: null, reason: "ci_activity", updated_at: hoursAgo(0.1) },
   ];
   const before = t.gh.searches.length;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   await idle(t.desk);
   assert.equal(t.gh.searches.length, before);
   t.gh.threads = [{ thread: "t4", item: "acme/api#7", reason: "review_requested", updated_at: hoursAgo(0.1) }];
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   await idle(t.desk);
   assert.ok(t.gh.searches.length > before);
   assert.deepEqual(kinds(t.desk), ["new acme/api#7"]);
@@ -261,12 +262,12 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
   t.gh.threads = [{ thread: "t1", item: "acme/api#1", reason: "mention", updated_at: hoursAgo(0.5) }];
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.ok(!kinds(t.desk).includes("mentioned acme/api#1"));
   t.gh.threads = [{ thread: "t9", item: "acme/api#1", reason: "team_mention", updated_at: hoursAgo(0.2) }];
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   t.gh.threads = [{ thread: "t9", item: "acme/api#1", reason: "team_mention", updated_at: hoursAgo(0.1) }];
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   const mentions = t.desk.store.activity({ after: 0, limit: 10 }).filter((e) => e.kind === "mentioned");
   assert.deepEqual(
     mentions.map((e) => e.data),
@@ -278,7 +279,7 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
 test("notifications: a failed refresh leaves the cursor, so the next poll handles the same threads", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   const since = t.desk.gh.feed.since;
   t.setNow(later(1));
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: iso(0.9), comments: [{ author: "dana", author_bot: false, at: iso(0.9) }] }));
@@ -287,14 +288,14 @@ test("notifications: a failed refresh leaves the cursor, so the next poll handle
   // details fails only with a rate limit; anything else it dies with leaves the cursor too
   t.gh.details = () => Effect.die(new Error("GitHub HTTP 500"));
   t.gh.threads = threads;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.equal(t.desk.gh.feedError, "GitHub HTTP 500");
   assert.equal(t.desk.gh.feed.since, since);
   assert.deepEqual(t.desk.gh.feed.seen, {});
 
   t.gh.details = details;
   t.gh.threads = threads; // GitHub sends them again: the cursor didn't move
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.equal(t.gh.feedCalls.at(-1)?.since, since);
   assert.deepEqual(kinds(t.desk).slice(1), ["commented acme/api#1", "mentioned acme/api#1"]);
   assert.notEqual(t.desk.gh.feed.since, since);
@@ -305,13 +306,13 @@ test("notifications: a rate-limit pause skips polls", async () => {
   const t = await setup([reviewAsk(1)]);
   await t.desk.sync();
   t.desk.gh.pausedUntil = Date.now() + 60_000;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.equal(t.gh.feedCalls.length, 0);
   assert.equal(t.desk.overview().connectors[0]?.status, "paused");
   t.gh.notifications = () =>
     Effect.fail(new GitHubRateLimited({ resetAt: iso(1), message: `GitHub rate limited until ${iso(1)} (HTTP 403)` }));
   t.desk.gh.pausedUntil = 0;
-  await t.desk.gh.poll();
+  await run(t.desk.gh.poll());
   assert.equal(t.desk.gh.pausedUntil, Date.parse(iso(1)));
   t.cleanup();
 });

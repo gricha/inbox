@@ -1,8 +1,8 @@
 // GitHub as a connector: board searches plus details (reconcile), the notifications feed, and the snapshot diff.
 import type { LoadedConfig } from "../config.ts";
 import type { Desk } from "../desk.ts";
-import { Effect } from "effect";
-import { GitHubRateLimited } from "../errors.ts";
+import { Cause, Effect, Result } from "effect";
+import { GitHubNotFetched, GitHubRateLimited, GitHubSearchesFailed, type GitHubReadError } from "../errors.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
@@ -10,7 +10,7 @@ import type { ConnectorStatus, Item } from "../types.ts";
 import type { Connector, NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
 import { botCheck } from "../signals.ts";
-import { detached, report } from "../sentry.ts";
+import { report } from "../sentry.ts";
 
 const HOUR = 3_600_000;
 const MAX_QUERY = 256; // GitHub search rejects longer queries
@@ -35,9 +35,6 @@ interface Feed {
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
 
-// effect-bridge(C2b): catchTag("GitHubRateLimited") replaces it once the connector is Effect code
-const isRateLimited = (e: unknown): e is GitHubRateLimited => e instanceof GitHubRateLimited;
-
 const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at: string; author: string }): SearchHit => ({
   node_id: m.node_id,
   id,
@@ -45,6 +42,23 @@ const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at:
   updated_at: m.updated_at,
   author: m.author,
 });
+
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+// A pass's boundary: what failed it, a failure or a bug, goes to `handle`. Interruption (the desk stopping) isn't a failure:
+// it passes through, recording nothing.
+const settle =
+  (handle: (e: unknown) => void) =>
+  <A, E>(self: Effect.Effect<A, E>): Effect.Effect<A | void> =>
+    self.pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.sync(() => {
+              handle(Cause.squash(cause));
+            }),
+      ),
+    );
 
 export class GitHubConnector implements Connector {
   readonly id = "github";
@@ -76,7 +90,7 @@ export class GitHubConnector implements Connector {
 
   start(): void {
     this.started = true;
-    void this.tick();
+    this.tick();
     this.armFeed(this.feed.interval * 1000);
   }
 
@@ -90,31 +104,58 @@ export class GitHubConnector implements Connector {
     if (this.started && !this.stopped) this.arm();
   }
 
-  async tick(): Promise<void> {
-    await this.reconcile();
-    if (!this.stopped) this.arm();
+  tick(): void {
+    this.loop("sync", this.reconcile(), () => {
+      this.arm();
+    });
   }
 
   arm(): void {
     if (this.timer) clearTimeout(this.timer);
     const wait = Math.max(this.desk.settings["github.poll_seconds"] * 1000, this.pausedUntil - Date.now());
     this.timer = setTimeout(() => {
-      detached(() => void this.tick());
+      this.tick();
     }, wait);
+    this.timer.unref();
   }
 
-  async feedTick(): Promise<void> {
-    await this.poll();
-    if (!this.stopped) this.armFeed(this.feedError ? FEED_RETRY : this.feed.interval * 1000);
+  feedTick(): void {
+    this.loop("notifications", this.poll(), () => {
+      this.armFeed(this.feedError ? FEED_RETRY : this.feed.interval * 1000);
+    });
   }
 
   armFeed(wait: number): void {
     if (this.feedTimer) clearTimeout(this.feedTimer);
     this.feedTimer = setTimeout(
       () => {
-        detached(() => void this.feedTick());
+        this.feedTick();
       },
       Math.max(wait, this.pausedUntil - Date.now()),
+    );
+    this.feedTimer.unref();
+  }
+
+  // One pass of a loop, in the desk's runner: a bug that gets past the pass's own boundary (the desk's hooks after it) is
+  // logged and reported, and the loop keeps its schedule. Interrupted (the desk stopping), it doesn't re-arm.
+  loop(what: string, once: Effect.Effect<void>, again: () => void): void {
+    this.desk.runner.fork(
+      what,
+      once.pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.sync(() => {
+                this.desk.log(`${what} failed: ${Cause.pretty(cause)}`);
+                report(Cause.squash(cause), what);
+              }),
+        ),
+        Effect.andThen(
+          Effect.sync(() => {
+            if (!this.stopped) again();
+          }),
+        ),
+      ),
     );
   }
 
@@ -129,36 +170,41 @@ export class GitHubConnector implements Connector {
 
   // ---------------------------------------------------------------- context and searches
 
-  async refreshContext(): Promise<void> {
-    const desk = this.desk;
-    const me = desk.ctx?.me ?? (await Effect.runPromise(this.api.viewer())); // effect-bridge(C2b): it rejects with what viewer fails with
-    try {
-      const c = await Effect.runPromise(this.api.context(me)); // effect-bridge(C2b): it rejects with what context fails with
-      desk.ctx = { ...desk.ctx, ...c, me, refreshed_at: desk.now().toISOString() };
-      this.contextError = null;
-    } catch (e) {
-      this.contextError = (e as Error).message;
-      desk.log(`context refresh failed: ${this.contextError}`);
-      // Retry in about an hour rather than on every poll.
-      const retry = new Date(desk.now().getTime() - 23 * HOUR).toISOString();
-      desk.ctx = desk.ctx
-        ? { ...desk.ctx, refreshed_at: retry }
-        : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
-    }
-    desk.store.set("context", desk.ctx);
+  // Fails only when there's no context yet and GitHub won't say who you are; the rest falls back to what the desk had.
+  refreshContext(): Effect.Effect<void, GitHubReadError> {
+    return Effect.gen({ self: this }, function* () {
+      const desk = this.desk;
+      const me = desk.ctx?.me ?? (yield* this.api.viewer());
+      const got = yield* Effect.result(this.api.context(me));
+      if (Result.isSuccess(got)) {
+        desk.ctx = { ...desk.ctx, ...got.success, me, refreshed_at: desk.now().toISOString() };
+        this.contextError = null;
+      } else {
+        this.contextError = got.failure.message;
+        desk.log(`context refresh failed: ${this.contextError}`);
+        // Retry in about an hour rather than on every poll.
+        const retry = new Date(desk.now().getTime() - 23 * HOUR).toISOString();
+        desk.ctx = desk.ctx
+          ? { ...desk.ctx, refreshed_at: retry }
+          : { me, teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: new Date(0).toISOString() };
+      }
+      desk.store.set("context", desk.ctx);
+    });
   }
 
   // Daily, apart from the context: a failure keeps the last areas and tries again in about an hour.
-  async refreshAreas(): Promise<void> {
-    const desk = this.desk;
-    try {
-      const areas = await Effect.runPromise(this.api.areas()); // effect-bridge(C2b): it rejects with what areas fails with
-      if (desk.ctx) desk.ctx = { ...desk.ctx, areas, areas_at: desk.now().toISOString() };
-    } catch (e) {
-      desk.log(`areas refresh failed: ${(e as Error).message}`);
-      if (desk.ctx) desk.ctx = { ...desk.ctx, areas_at: new Date(desk.now().getTime() - 23 * HOUR).toISOString() };
-    }
-    desk.store.set("context", desk.ctx);
+  refreshAreas(): Effect.Effect<void> {
+    return Effect.gen({ self: this }, function* () {
+      const desk = this.desk;
+      const got = yield* Effect.result(this.api.areas());
+      if (Result.isSuccess(got)) {
+        if (desk.ctx) desk.ctx = { ...desk.ctx, areas: got.success, areas_at: desk.now().toISOString() };
+      } else {
+        desk.log(`areas refresh failed: ${got.failure.message}`);
+        if (desk.ctx) desk.ctx = { ...desk.ctx, areas_at: new Date(desk.now().getTime() - 23 * HOUR).toISOString() };
+      }
+      desk.store.set("context", desk.ctx);
+    });
   }
 
   // Board query → expanded GitHub search string (null when it can't run, e.g. no collaborators yet).
@@ -187,38 +233,75 @@ export class GitHubConnector implements Connector {
 
   // ---------------------------------------------------------------- reconcile: every board search, then details
 
-  async reconcile(): Promise<void> {
-    const desk = this.desk;
-    if (!desk.loaded || this.stopped) return;
-    if (this.syncing) {
-      this.syncAgain = true;
-      return;
-    }
-    if (Date.now() < this.pausedUntil) return;
-    this.syncing = true;
-    desk.changed();
-    try {
+  // Never fails: what failed the pass is in status(), and a rate limit pauses both loops. One already running runs again after.
+  reconcile(): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => {
+      const desk = this.desk;
+      if (!desk.loaded || this.stopped) return Effect.void;
+      if (this.syncing) {
+        this.syncAgain = true;
+        return Effect.void;
+      }
+      if (Date.now() < this.pausedUntil) return Effect.void;
+      this.syncing = true;
+      desk.changed();
+      return this.pass().pipe(
+        settle((e) => {
+          if (this.stopped) return;
+          this.error = messageOf(e);
+          if (e instanceof GitHubRateLimited) this.pause(e);
+          else report(e, "sync");
+          desk.log(`sync failed: ${this.error}`);
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.syncing = false;
+          }),
+        ),
+        Effect.andThen(
+          Effect.sync(() => {
+            if (this.stopped) return;
+            desk.synced();
+            if (this.syncAgain) {
+              this.syncAgain = false;
+              desk.runner.fork("sync", this.reconcile());
+            }
+          }),
+        ),
+      );
+    });
+  }
+
+  // The pass itself. Every search failing fails it, but only after what it could do (pinned items, the hits it kept) is stored.
+  pass(): Effect.Effect<void, GitHubReadError | GitHubSearchesFailed> {
+    return Effect.gen({ self: this }, function* () {
+      const desk = this.desk;
       const now = desk.now();
       const iso = now.toISOString();
-      if (!desk.ctx || now.getTime() - Date.parse(desk.ctx.refreshed_at) > 24 * HOUR) await this.refreshContext();
-      if (now.getTime() - (Date.parse(desk.ctx?.areas_at ?? "") || 0) > 24 * HOUR) await this.refreshAreas();
+      if (!desk.ctx || now.getTime() - Date.parse(desk.ctx.refreshed_at) > 24 * HOUR) yield* this.refreshContext();
+      if (now.getTime() - (Date.parse(desk.ctx?.areas_at ?? "") || 0) > 24 * HOUR) yield* this.refreshAreas();
+      const loaded = desk.loaded!; // reconcile checked it, and a reload never unsets it
       const me = desk.me().toLowerCase();
-      const loaded = desk.loaded;
       const queries = [...new Set(loaded.boards.flatMap((b) => this.queriesFor(loaded, b)))];
       const listed = desk.store.hits(); // what each search returned last time
       const found = new Map<string, { ids: string[]; total: number }>();
       const hits = new Map<string, SearchHit>();
-      const errors: string[] = [];
+      const errors: { why: string; e: GitHubReadError }[] = []; // why: "<query>: <its words>"
       for (const q of queries) {
-        try {
-          const r = await Effect.runPromise(this.api.search(q, 300)); // effect-bridge(C2b): it rejects with what search fails with
-          found.set(q, { ids: r.hits.map((h) => h.id), total: r.total });
-          for (const h of r.hits) hits.set(h.id, h);
-        } catch (e) {
-          if (isRateLimited(e)) throw e;
-          desk.store.setQueryError(q, (e as Error).message, iso);
-          errors.push(`${q}: ${(e as Error).message}`);
-        }
+        const r = yield* this.api.search(q, 300).pipe(
+          Effect.catch((e) =>
+            e._tag === "GitHubRateLimited"
+              ? Effect.fail(e)
+              : Effect.sync(() => {
+                  desk.store.setQueryError(q, e.message, iso);
+                  errors.push({ why: `${q}: ${e.message}`, e });
+                  return null;
+                }),
+          ),
+        );
+        if (!r) continue;
+        found.set(q, { ids: r.hits.map((h) => h.id), total: r.total });
+        for (const h of r.hits) hits.set(h.id, h);
       }
       const meta = desk.store.itemMeta();
       // An open pin no search returns (desk_add's) would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.
@@ -243,8 +326,7 @@ export class GitHubConnector implements Connector {
         // Only on the pass it left: an item kept to show as resolved was last listed before that.
         return m && (last === null || m.last_hit_at >= last) ? [hitOf(id, m)] : [];
       });
-      // effect-bridge(C2b): it rejects with what details fails with
-      const items = need.length || drops.length ? await Effect.runPromise(this.api.details([...need, ...drops], desk.me())) : [];
+      const items = need.length || drops.length ? yield* this.api.details([...need, ...drops], desk.me()) : [];
       desk.ingest(this, items);
       const keep = (id: string) => {
         const m = meta.get(id);
@@ -257,39 +339,30 @@ export class GitHubConnector implements Connector {
       const listedIds = new Set([...hits.keys(), ...pinned.map((h) => h.id)]);
       desk.store.touchItems([...listedIds], iso);
       if (!desk.store.get("baseline_at")) desk.store.set("baseline_at", iso);
-      const [firstError] = errors;
-      if (errors.length === queries.length && firstError !== undefined) throw new Error(firstError.replace(/^.*?: (?=GitHub)/, ""));
+      const [first] = errors;
+      if (first && errors.length === queries.length)
+        return yield* new GitHubSearchesFailed({ message: first.why.replace(/^.*?: (?=GitHub)/, ""), cause: first.e });
       desk.store.set("reconciled_at", iso);
-      const { fetched: filled, members } = await this.fillStacks(listedIds);
-      desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
-      this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
-      desk.store.set("synced_at", this.syncedAt);
-      this.error = errors.length ? `${errors.length} search(es) failed: ${errors[0]}` : null;
-      const left = drops.length ? `, ${drops.length} left the searches` : "";
-      const stacked = filled ? `, ${filled} for stacks` : "";
-      desk.log(`synced ${queries.length} searches, ${hits.size} items, ${items.length} refreshed${left}${stacked}`);
-    } catch (e) {
-      if (this.stopped) return;
-      this.error = (e as Error).message;
-      if (isRateLimited(e)) this.pause(e);
-      else report(e, "sync");
-      desk.log(`sync failed: ${this.error}`);
-    } finally {
-      this.syncing = false;
-      if (!this.stopped) {
-        desk.synced();
-        if (this.syncAgain) {
-          this.syncAgain = false;
-          void this.reconcile();
-        }
-      }
-    }
+      return yield* this.fillStacks(listedIds).pipe(
+        Effect.andThen(({ fetched: filled, members }) =>
+          Effect.sync(() => {
+            desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
+            this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
+            desk.store.set("synced_at", this.syncedAt);
+            this.error = first ? `${errors.length} search(es) failed: ${first.why}` : null;
+            const left = drops.length ? `, ${drops.length} left the searches` : "";
+            const stacked = filled ? `, ${filled} for stacks` : "";
+            desk.log(`synced ${queries.length} searches, ${hits.size} items, ${items.length} refreshed${left}${stacked}`);
+          }),
+        ),
+      );
+    });
   }
 
   // Stack members no board search returns (the PR below a stack's bottom, PRs stacked on one on the desk) and stored ones
   // gone stale, with the PRs listed ones need, fetched read only and stored without events: they're context, not news.
   // Returns how many, and the members of the listed PRs' stacks with the PRs they need, which pruning keeps.
-  async fillStacks(listed: Set<string>): Promise<{ fetched: number; members: Set<string> }> {
+  fillStacks(listed: Set<string>): Effect.Effect<{ fetched: number; members: Set<string> }, GitHubRateLimited> {
     const desk = this.desk;
     const at = desk.now();
     const since = (key: string, ttl: number) =>
@@ -298,11 +371,28 @@ export class GitHubConnector implements Connector {
       );
     const asked = since("stack_probes", PROBE_TTL);
     const misses = since("dep_misses", DEP_MISS_TTL);
-    let budget = MAX_PROBES;
-    let depBudget = MAX_DEP_PROBES;
-    let fetched = 0;
-    const members = new Set<string>();
-    try {
+    // What was asked counts even when a rate limit stops the rounds; the desk stopping keeps nothing.
+    const persist = Effect.sync(() => {
+      desk.store.set("stack_probes", asked);
+      desk.store.set("dep_misses", misses);
+    });
+    const probe = (repo: string, ps: Probe[]) =>
+      this.api.branchPrs(repo, ps).pipe(
+        Effect.map((hits) => ({ ps, hits })),
+        Effect.catch((e) =>
+          e._tag === "GitHubRateLimited"
+            ? Effect.fail(e)
+            : Effect.sync(() => {
+                desk.log(`stack probes in ${repo} failed: ${e.message}`);
+                return { ps: [] as Probe[], hits: [] as SearchHit[] }; // nothing learned, so no misses
+              }),
+        ),
+      );
+    return Effect.gen({ self: this }, function* () {
+      let budget = MAX_PROBES;
+      let depBudget = MAX_DEP_PROBES;
+      let fetched = 0;
+      const members = new Set<string>();
       for (let round = 0; round < STACK_ROUNDS; round++) {
         const stored = desk.store.items();
         const before = new Date(at.getTime() - PROBE_TTL).toISOString();
@@ -322,25 +412,8 @@ export class GitHubConnector implements Connector {
           asked[probeKey(p)] = at.toISOString();
           repos.set(p.repo, [...(repos.get(p.repo) ?? []), p]);
         }
-        const probe = async (repo: string, ps: Probe[]) => {
-          try {
-            return { ps, hits: await Effect.runPromise(this.api.branchPrs(repo, ps)) }; // effect-bridge(C2b): it rejects with what branchPrs fails with
-          } catch (e) {
-            if (isRateLimited(e)) throw e;
-            desk.log(`stack probes in ${repo} failed: ${(e as Error).message}`);
-            return { ps: [] as Probe[], hits: [] as SearchHit[] }; // nothing learned, so no misses
-          }
-        };
-        // effect-bridge(C2b): 3 repos at a time, each the legacy probe above; only a rate limit gets out, and stops the rest
-        const answers = await Effect.runPromise(
-          Effect.forEach(
-            [...repos],
-            ([repo, ps]) => Effect.tryPromise({ try: () => probe(repo, ps), catch: (e) => e as GitHubRateLimited }),
-            {
-              concurrency: 3,
-            },
-          ),
-        );
+        // 3 repos at a time; only a rate limit gets out, and stops the rest.
+        const answers = yield* Effect.forEach([...repos], ([repo, ps]) => probe(repo, ps), { concurrency: 3 });
         const hits = answers.flatMap((a) => a.hits);
         const found = new Set(hits.map((h) => h.id.toLowerCase()));
         for (const p of answers.flatMap((a) => a.ps))
@@ -353,111 +426,128 @@ export class GitHubConnector implements Connector {
         }
         for (const it of old) want.set(it.id, hitOf(it.id, it));
         if (!want.size) continue;
-        const items = await Effect.runPromise(this.api.details([...want.values()], desk.me())); // effect-bridge(C2b): it rejects with a rate limit
+        const items = yield* this.api.details([...want.values()], desk.me());
         desk.ingest(this, items, true);
         fetched += items.length;
       }
-    } finally {
-      desk.store.set("stack_probes", asked);
-      desk.store.set("dep_misses", misses);
-    }
-    return { fetched, members };
+      return { fetched, members };
+    }).pipe(
+      Effect.tapCause(() => persist),
+      Effect.tap(() => persist),
+    );
   }
 
   // Not stored quietly like a stack's members: you added it, so its events count and the notifications feed follows it.
-  async fetchOne(repo: string, number: number): Promise<string | null> {
-    const hit = await Effect.runPromise(this.api.lookup(repo, number)); // effect-bridge(C2b): it rejects with what lookup fails with
-    if (!hit) return null;
-    const [item] = await Effect.runPromise(this.api.details([hit], this.desk.me())); // effect-bridge(C2b): it rejects with a rate limit
-    if (!item) throw new Error(`couldn't fetch ${hit.id} from GitHub; try again`); // details skips a batch that failed
-    this.desk.ingest(this, [item]);
-    return item.id;
+  fetchOne(repo: string, number: number): Effect.Effect<string | null, GitHubReadError | GitHubNotFetched> {
+    return Effect.gen({ self: this }, function* () {
+      const hit = yield* this.api.lookup(repo, number);
+      if (!hit) return null;
+      const [item] = yield* this.api.details([hit], this.desk.me());
+      if (!item) return yield* new GitHubNotFetched({ id: hit.id }); // details skips a batch that failed
+      this.desk.ingest(this, [item]);
+      return item.id;
+    });
   }
 
   // One item's details now, outside the loops: after you approve it, so it resolves in seconds, not at the next pass.
-  async refresh(id: string): Promise<void> {
-    const desk = this.desk;
-    const m = desk.store.itemMeta().get(id);
-    if (!m || this.stopped || Date.now() < this.pausedUntil) return;
-    try {
-      const items = await Effect.runPromise(this.api.details([hitOf(id, m)], desk.me())); // effect-bridge(C2b): it rejects with a rate limit
-      if (this.stopped) return;
-      desk.ingest(this, items);
-      desk.synced();
-    } catch (e) {
-      if (isRateLimited(e)) this.pause(e);
-      else report(e, "refresh", id);
-      desk.log(`refresh of ${id} failed: ${(e as Error).message}`);
-    }
+  // Never fails: a rate limit pauses the loops, anything else is logged and reported.
+  refresh(id: string): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => {
+      const desk = this.desk;
+      const m = desk.store.itemMeta().get(id);
+      if (!m || this.stopped || Date.now() < this.pausedUntil) return Effect.void;
+      return Effect.gen({ self: this }, function* () {
+        const items = yield* this.api.details([hitOf(id, m)], desk.me());
+        if (this.stopped) return;
+        desk.ingest(this, items);
+        desk.synced();
+      }).pipe(
+        settle((e) => {
+          if (e instanceof GitHubRateLimited) this.pause(e);
+          else report(e, "refresh", id);
+          desk.log(`refresh of ${id} failed: ${messageOf(e)}`);
+        }),
+      );
+    });
   }
 
   // ---------------------------------------------------------------- the change feed: notifications
 
-  async poll(): Promise<void> {
-    const desk = this.desk;
-    if (this.stopped || this.polling || !desk.loaded || !desk.ctx || Date.now() < this.pausedUntil) return;
-    this.polling = true;
-    const started = desk.now().getTime();
-    // The first poll only learns where the feed stands; a thread's old mention isn't news.
-    const first = this.feed.since === null;
-    try {
-      const since = this.feed.since ?? new Date(started - HOUR).toISOString();
-      // effect-bridge(C2b): it rejects with what notifications fails with
-      const page = await Effect.runPromise(this.api.notifications({ since, last_modified: this.feed.last_modified }));
-      this.feed.interval = page.poll_interval;
-      this.feedError = null;
-      if (!page.modified) return;
-      // A stack's member stored quietly isn't the desk's until a board lists it, as if it weren't held.
-      const tracked = new Map([...desk.store.itemMeta()].filter(([, m]) => !m.quiet).map(([id, m]) => [id.toLowerCase(), { id, m }]));
-      const refresh = new Map<string, SearchHit>();
-      const mentions: NewEvent[] = [];
-      const seen = { ...this.feed.seen };
-      let unknown = 0;
-      for (const t of page.threads) {
-        const before = seen[t.thread];
-        if (before?.at === t.updated_at) continue;
-        seen[t.thread] = { at: t.updated_at, reason: t.reason };
-        if (!t.item) continue;
-        const known = tracked.get(t.item.toLowerCase());
-        if (!known) {
-          if (FRESH_REASONS.has(t.reason)) unknown++;
-          continue;
+  // Never fails: what failed is feedError (the next poll comes sooner), and a rate limit pauses both loops.
+  poll(): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => {
+      const desk = this.desk;
+      if (this.stopped || this.polling || !desk.loaded || !desk.ctx || Date.now() < this.pausedUntil) return Effect.void;
+      this.polling = true;
+      const started = desk.now().getTime();
+      // The first poll only learns where the feed stands; a thread's old mention isn't news.
+      const first = this.feed.since === null;
+      return Effect.gen({ self: this }, function* () {
+        const since = this.feed.since ?? new Date(started - HOUR).toISOString();
+        const page = yield* this.api.notifications({ since, last_modified: this.feed.last_modified });
+        this.feed.interval = page.poll_interval;
+        this.feedError = null;
+        if (!page.modified) return;
+        // A stack's member stored quietly isn't the desk's until a board lists it, as if it weren't held.
+        const tracked = new Map([...desk.store.itemMeta()].filter(([, m]) => !m.quiet).map(([id, m]) => [id.toLowerCase(), { id, m }]));
+        const refresh = new Map<string, SearchHit>();
+        const mentions: NewEvent[] = [];
+        const seen = { ...this.feed.seen };
+        let unknown = 0;
+        for (const t of page.threads) {
+          const before = seen[t.thread];
+          if (before?.at === t.updated_at) continue;
+          seen[t.thread] = { at: t.updated_at, reason: t.reason };
+          if (!t.item) continue;
+          const known = tracked.get(t.item.toLowerCase());
+          if (!known) {
+            if (FRESH_REASONS.has(t.reason)) unknown++;
+            continue;
+          }
+          if (t.updated_at > known.m.updated_at) refresh.set(known.id, hitOf(known.id, known.m));
+          // The reason stays "mention" while the thread goes on; only a change to it is a new mention.
+          if (!first && MENTIONS.has(t.reason) && before?.reason !== t.reason) {
+            const at = t.updated_at < new Date(started).toISOString() ? t.updated_at : new Date(started).toISOString();
+            mentions.push({ at, item_id: known.id, kind: "mentioned", actor: "", data: { reason: t.reason } });
+          }
         }
-        if (t.updated_at > known.m.updated_at) refresh.set(known.id, hitOf(known.id, known.m));
-        // The reason stays "mention" while the thread goes on; only a change to it is a new mention.
-        if (!first && MENTIONS.has(t.reason) && before?.reason !== t.reason) {
-          const at = t.updated_at < new Date(started).toISOString() ? t.updated_at : new Date(started).toISOString();
-          mentions.push({ at, item_id: known.id, kind: "mentioned", actor: "", data: { reason: t.reason } });
-        }
-      }
-      // Before the cursor moves: if this fails, the next poll sees these threads again.
-      // effect-bridge(C2b): it rejects with a rate limit
-      const items = refresh.size ? await Effect.runPromise(this.api.details([...refresh.values()], desk.me())) : [];
-      // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
-      const now = Date.parse(page.date ?? "") || started;
-      this.feed.since = new Date(now - 60_000).toISOString();
-      this.feed.last_modified = page.last_modified;
-      const horizon = new Date(now - 2 * 24 * HOUR).toISOString();
-      this.feed.seen = Object.fromEntries(Object.entries(seen).filter(([, s]) => s.at >= horizon));
-      desk.ingest(this, items);
-      desk.record(this.id, mentions);
-      if (items.length || mentions.length) desk.synced();
-      if (page.threads.length)
-        desk.log(
-          `notifications: ${page.threads.length} updated, ${items.length} refreshed${unknown ? `, ${unknown} new to the desk` : ""}`,
-        );
-      if (unknown) void this.reconcile();
-    } catch (e) {
-      if (isRateLimited(e)) this.pause(e);
-      else {
-        this.feedError = (e as Error).message;
-        report(e, "notifications");
-      }
-      desk.log(`notifications failed: ${(e as Error).message}`);
-    } finally {
-      this.polling = false;
-      if (!this.stopped) desk.store.set("github.feed", this.feed);
-    }
+        // Before the cursor moves: if this fails, the next poll sees these threads again.
+        const items = refresh.size ? yield* this.api.details([...refresh.values()], desk.me()) : [];
+        // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
+        const now = Date.parse(page.date ?? "") || started;
+        this.feed.since = new Date(now - 60_000).toISOString();
+        this.feed.last_modified = page.last_modified;
+        const horizon = new Date(now - 2 * 24 * HOUR).toISOString();
+        this.feed.seen = Object.fromEntries(Object.entries(seen).filter(([, s]) => s.at >= horizon));
+        desk.ingest(this, items);
+        desk.record(this.id, mentions);
+        if (items.length || mentions.length) desk.synced();
+        if (page.threads.length)
+          desk.log(
+            `notifications: ${page.threads.length} updated, ${items.length} refreshed${unknown ? `, ${unknown} new to the desk` : ""}`,
+          );
+        if (unknown) desk.runner.fork("sync", this.reconcile());
+      }).pipe(
+        settle((e) => {
+          if (e instanceof GitHubRateLimited) this.pause(e);
+          else {
+            this.feedError = messageOf(e);
+            report(e, "notifications");
+          }
+          desk.log(`notifications failed: ${messageOf(e)}`);
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.polling = false;
+          }),
+        ),
+        Effect.andThen(
+          Effect.sync(() => {
+            if (!this.stopped) desk.store.set("github.feed", this.feed);
+          }),
+        ),
+      );
+    });
   }
 
   events(prev: Item | null, next: Item): NewEvent[] {
