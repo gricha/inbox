@@ -118,10 +118,12 @@ test("an /api path the desk doesn't route is a NotFound, and a window-only delet
 
 // A spawn of a gh that isn't there forks a child that holds the desk's socket until it exits: how a connection ends once nothing answers, or after 2 s.
 async function whenLetGo(port: number): Promise<string> {
-  let ended = await connectTo(port);
-  for (let i = 0; i < 200 && (ended === "connected" || ended === "ECONNRESET"); i++) {
+  const start = Date.now();
+  // A holder that never accepts fills its queue (128 on macOS), and a connect past that waits: each probe gets 100 ms.
+  let ended = await connectTo(port, 100);
+  while ((ended === "connected" || ended === "ECONNRESET" || ended === "timeout") && Date.now() - start < 2000) {
     await sleep(10);
-    ended = await connectTo(port);
+    ended = await connectTo(port, 100);
   }
   return ended;
 }

@@ -496,10 +496,15 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
   return api;
 }
 
-// How a connection to the port on 127.0.0.1 ends: "connected", or its error's code.
-export function connectTo(port: number): Promise<string> {
+// How a connection to the port on 127.0.0.1 ends: "connected", its error's code, or "timeout" after ms (0: no limit).
+export function connectTo(port: number, ms = 0): Promise<string> {
   return new Promise((r) => {
     const s = connect(port, "127.0.0.1");
+    if (ms)
+      s.setTimeout(ms, () => {
+        s.destroy();
+        r("timeout");
+      });
     s.once("connect", () => {
       s.destroy();
       r("connected");
