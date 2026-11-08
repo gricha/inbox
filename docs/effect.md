@@ -33,7 +33,9 @@ services, `Data.TaggedError`, the desk's own `log`.
 
 - Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the desk's own server
   (`ListenFailed`), the rules' expressions, files, child processes, Claude Code, GitHub. The UI's own (the desk
-  unreachable, an API refusal) live in `web/src/api.ts`. Tags are unique across families: GitHub's 403 is
+  unreachable, an API refusal) live in `web/src/api.ts`; the CLI's and MCP's client's (`DeskDown`, `DeskNoAnswer`,
+  `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
+  `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. Tags are unique across families: GitHub's 403 is
   `GitHubForbidden`, never `Forbidden`.
 - `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
   bundle about 14 KB.
@@ -215,9 +217,14 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
 - **CLI** (`src/cli.ts`): `main` runs one Effect and maps its exit. `UsageError` (and parseArgs' `ERR_PARSE_ARGS_*`,
   turned into one where parseArgs is called) exits 2 with `desk: <msg>` and "run 'desk help' for usage". `DeskDown`
   prints its message alone, exit 1. Any other failure, or a defect, prints `desk: <message>`, exit 1. stdout is flushed
-  before `process.exit`. `DeskApiError`'s message keeps " — candidates: a, b"; a client timeout keeps "The operation was
-  aborted due to timeout". `status --short` ends in `Effect.catchCause`: whatever happens it prints a status word, exit 0.
-- **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged.
+  before `process.exit`. `DeskApiError`'s message keeps " — candidates: a, b"; a client timeout (`DeskNoAnswer`) keeps
+  "The operation was aborted due to timeout". `ls` lists the boards on a `NotFound` and `config` works offline on
+  `DeskDown`, both by tag. `status --short` ends in `Effect.catchCause`: whatever happens it prints a status word, exit
+  0, and tells a config error from starting by the 503's `reason`. `serve` yields `startDesk`, and refreshes the
+  skill through the desk's runner.
+- **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged (the desk's log at `/mcp`,
+  stderr for `desk mcp`). Tools take no signal, as before: `desk_inquiry`'s wait is an `Effect.sleep` loop of at most a
+  minute.
 - **Electron** (`electron/main.ts`): an IPC handler runs its Effect and rejects with a plain `Error(message)` (only the
   message survives the structured clone). Callbacks that must answer synchronously (`will-quit`, `desktop:theme`'s
   `returnValue`, `will-navigate`, the window-open handler) stay plain code and fork only their async tail.

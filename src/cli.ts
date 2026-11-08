@@ -5,10 +5,11 @@ import { readFileSync, realpathSync, watchFile } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { Effect } from "effect";
+import { Cause, Data, Effect, Exit, Option } from "effect";
 import * as agents from "./agents.ts";
 import * as api from "./client.ts";
-import { DeskApiError, DeskDownError, untilText } from "./client.ts";
+import { untilText } from "./client.ts";
+import { fsError } from "./errors.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
@@ -52,7 +53,15 @@ const USAGE = `usage: desk <command>
 <ref> is owner/repo#123, or repo#123 when unique.
 `;
 
-class UsageError extends Error {}
+// What you typed isn't a command the CLI knows how to run: exit 2, with the usage hint.
+class UsageError extends Data.TaggedError("UsageError")<{ readonly message: string }> {}
+
+// The command can't do what you asked: its words, exit 1.
+class CliError extends Data.TaggedError("CliError")<{ readonly message: string; readonly cause?: unknown }> {}
+
+// Every command's failure is a tagged error main tells apart by its tag and shows by its message.
+type Failure = Error & { readonly _tag: string };
+type Command = (x: Ctx) => Effect.Effect<number, Failure>;
 
 const GLYPH: Record<Bucket, string> = { now: "\u25cf", today: "\u25d0", blocked: "\u2298", later: "\u25cb", fyi: "\u00b7", hide: "\u00d7" };
 const PAST: Record<string, string> = {
@@ -167,17 +176,21 @@ function printCards(x: Ctx, groups: [Bucket, Card[], string?][]): void {
   });
 }
 
-async function ls(x: Ctx): Promise<number> {
+const ls = Effect.fnUntraced(function* (x: Ctx) {
   const which = x.args[0] ?? "focus";
+  // An unknown board lists the ones there are.
+  const board = api.board(which).pipe(
+    Effect.catchTag("DeskApiError", (e) =>
+      e.tag !== "NotFound"
+        ? Effect.fail(e)
+        : Effect.flatMap(api.overview(), (o) => {
+            const ids = o.spaces.flatMap((s) => s.boards.map((b) => b.id));
+            return Effect.fail(new CliError({ message: `${e.message} — boards: focus, ${ids.join(", ")}` }));
+          }),
+    ),
+  );
   // Focus is the queue's Now and Today; the queue has the rest for --all and the counts.
-  const v =
-    which === "focus"
-      ? await api.queue()
-      : await api.board(which).catch(async (e) => {
-          if (!(e instanceof DeskApiError) || e.status !== 404) throw e;
-          const ids = (await api.overview()).spaces.flatMap((s) => s.boards.map((b) => b.id));
-          throw new Error(`${e.message} — boards: focus, ${ids.join(", ")}`);
-        });
+  const v = which === "focus" ? yield* api.queue() : yield* board;
   if (x.opts.json) return (x.out(JSON.stringify(v, null, 2)), 0);
   const s = v.sections;
   const groups: [Bucket, Card[], string?][] = [
@@ -203,10 +216,10 @@ async function ls(x: Ctx): Promise<number> {
     !x.opts.all && (s.blocked.length || s.later.length || s.fyi.length) ? `  (desk ls ${which === "focus" ? "" : `${which} `}--all)` : "";
   if (more.length) x.out("\n" + x.c.dim(clip(more.join(" · ") + hint, x.width)));
   return 0;
-}
+});
 
-async function show(x: Ctx): Promise<number> {
-  const d = await api.item(x.args[0]!);
+const show = Effect.fnUntraced(function* (x: Ctx) {
+  const d = yield* api.item(x.args[0]!);
   if (x.opts.json) return (x.out(JSON.stringify(d, null, 2)), 0);
   const k = d.card;
   const st = d.state;
@@ -241,46 +254,51 @@ async function show(x: Ctx): Promise<number> {
     if (p.judge) x.out(`  → ${plain(judgeText(p.judge))}`);
   }
   return 0;
-}
+});
 
 const act =
-  (action: Action) =>
-  async (x: Ctx): Promise<number> => {
+  (action: Action): Command =>
+  (x) => {
     const until = action === "snooze" ? (x.args[1] ?? "tomorrow") : undefined;
-    const r = await api.act(x.args[0]!, action, until);
-    const s = r.state;
-    const when = untilText(until, s, localTime);
-    x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
-    return 0;
+    return Effect.map(api.act(x.args[0]!, action, until), (r) => {
+      const s = r.state;
+      const when = untilText(until, s, localTime);
+      x.out(`${x.c.green("✓")} ${PAST[action]} ${s.id}${when}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
+      return 0;
+    });
   };
 
-async function add(x: Ctx): Promise<number> {
-  const r = await api.add(x.args[0]!, x.args[1], typeof x.opts.from === "string" ? x.opts.from : undefined);
-  const d = r.item;
-  const ai = d.generating ? ", AI review started" : "";
-  x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${ai}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
-  return 0;
+const add: Command = (x) =>
+  Effect.map(api.add(x.args[0]!, x.args[1], typeof x.opts.from === "string" ? x.opts.from : undefined), (r) => {
+    const d = r.item;
+    const ai = d.generating ? ", AI review started" : "";
+    x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${ai}  ${x.c.dim(`(desk undo ${r.undo_seq} to revert)`)}`);
+    return 0;
+  });
+
+// 503 = up but not serving: still starting, or the config never loaded. Anything else (no answer, a bug) is offline.
+function statusWord(cause: Cause.Cause<api.ClientError>): string {
+  const e = Option.getOrUndefined(Cause.findErrorOption(cause));
+  if (e?._tag !== "DeskApiError" || e.tag !== "Unavailable") return "desk offline";
+  return e.reason === "config" ? "desk config error" : "desk starting";
 }
 
-async function status(x: Ctx): Promise<number> {
-  if (x.opts.short) {
-    // Feeds a status line: never fail, never hang.
-    try {
-      const s = await api.status(1000);
-      if (s.text) x.out(s.text);
-    } catch (e) {
-      // 503 = up but not serving: still starting, or the config never loaded.
-      x.out(
-        !(e instanceof DeskApiError && e.status === 503)
-          ? "desk offline"
-          : e.message.includes("config")
-            ? "desk config error"
-            : "desk starting",
-      );
-    }
-    return 0;
-  }
-  const o = await api.overview();
+const status = Effect.fnUntraced(function* (x: Ctx) {
+  // Feeds a status line: never fail, never hang.
+  if (x.opts.short)
+    return yield* api.status(1000).pipe(
+      Effect.map((s) => {
+        if (s.text) x.out(s.text);
+        return 0;
+      }),
+      Effect.catchCause((cause) =>
+        Effect.sync(() => {
+          x.out(statusWord(cause));
+          return 0;
+        }),
+      ),
+    );
+  const o = yield* api.overview();
   const sync = o.syncing ? "syncing…" : `synced ${ago(o.synced_at)}`;
   x.out(`${x.glyph("now")} ${o.focus.now} now  ${x.glyph("today")} ${o.focus.today} today  +${o.focus.new} new   ${x.c.dim(sync)}`);
   if (o.sync_error) x.out(x.c.red(`sync error: ${o.sync_error}`));
@@ -302,16 +320,15 @@ async function status(x: Ctx): Promise<number> {
     }
   }
   return 0;
-}
+});
 
-async function config(x: Ctx): Promise<number> {
+const readText = (file: string) => Effect.try({ try: () => readFileSync(file, "utf8"), catch: fsError("read", file) });
+
+const config = Effect.fnUntraced(function* (x: Ctx) {
   const sub = x.args[0] ?? "path";
-  if (!["path", "check", "edit"].includes(sub)) throw new UsageError(`unknown config command: ${sub}`);
+  if (!["path", "check", "edit"].includes(sub)) return yield* new UsageError({ message: `unknown config command: ${sub}` });
   // Works with the server down too: that's when you most need to fix the config.
-  const up = await api.getConfig().catch((e) => {
-    if (e instanceof DeskDownError) return null;
-    throw e;
-  });
+  const up = yield* api.getConfig().pipe(Effect.catchTag("DeskDown", () => Effect.succeed(null)));
   const path = up?.path ?? join(deskHome(), "config.toml");
   if (sub === "path") return (x.out(path), 0);
   if (sub === "edit") {
@@ -321,11 +338,11 @@ async function config(x: Ctx): Promise<number> {
       process.platform === "win32"
         ? spawnSync(`${editor} "${path}"`, { shell: true, stdio: "inherit" })
         : spawnSync("/bin/sh", ["-c", `${editor} "$1"`, "sh", path], { stdio: "inherit" });
-    if (r.status !== 0) throw new Error(`editor exited with ${r.status ?? r.signal}`);
+    if (r.status !== 0) return yield* new CliError({ message: `editor exited with ${r.status ?? r.signal}` });
   }
   if (!up) {
-    const { parseConfig } = await import("./config.ts");
-    const { errors, warnings } = parseConfig(readFileSync(path, "utf8"));
+    const { parseConfig } = yield* Effect.promise(() => import("./config.ts"));
+    const { errors, warnings } = parseConfig(yield* readText(path));
     for (const e of errors) x.out(`${x.c.red("✗")} ${e.path}: ${e.message}`);
     for (const w of warnings) x.out(`${x.c.yellow("!")} ${w.path}: ${w.message}`);
     x.out(
@@ -336,8 +353,8 @@ async function config(x: Ctx): Promise<number> {
     return errors.length ? 1 : 0;
   }
   // Validate what's on disk, which may differ from what the server loaded.
-  const text = readFileSync(path, "utf8");
-  const { errors, warnings = [] } = sub === "edit" ? await api.putConfig(text) : await api.previewConfig(text);
+  const text = yield* readText(path);
+  const { errors, warnings = [] } = sub === "edit" ? yield* api.putConfig(text) : yield* api.previewConfig(text);
   for (const e of errors) x.out(`${x.c.red("✗")} ${e.path}: ${e.message}`);
   for (const w of warnings) x.out(`${x.c.yellow("!")} ${w.path}: ${w.message}`);
   if (errors.length) {
@@ -346,7 +363,7 @@ async function config(x: Ctx): Promise<number> {
   }
   x.out(`${x.c.green("✓")} ${path} ${sub === "edit" ? "saved; syncing" : "is valid"}`);
   return 0;
-}
+});
 
 function showSetting(v: SettingValue | undefined): string {
   if (Array.isArray(v)) return v.length ? v.join(", ") : "(none)";
@@ -356,38 +373,40 @@ function showSetting(v: SettingValue | undefined): string {
 }
 
 // The server checks ranges and patterns; this only turns the argument into the setting's type.
-function parseSetting(d: SettingDef, raw: string): SettingValue {
+function parseSetting(d: SettingDef, raw: string): Effect.Effect<SettingValue, CliError> {
+  const bad = (message: string) => Effect.fail(new CliError({ message }));
   if (d.type === "number") {
-    if (!raw.trim() || Number.isNaN(Number(raw))) throw new Error(`${d.key} must be a number`);
-    return Number(raw);
+    if (!raw.trim() || Number.isNaN(Number(raw))) return bad(`${d.key} must be a number`);
+    return Effect.succeed(Number(raw));
   }
   if (d.type === "boolean") {
     const v = raw.trim().toLowerCase();
-    if (["true", "yes", "on"].includes(v)) return true;
-    if (["false", "no", "off"].includes(v)) return false;
-    throw new Error(`${d.key} must be true or false (yes/no, on/off)`);
+    if (["true", "yes", "on"].includes(v)) return Effect.succeed(true);
+    if (["false", "no", "off"].includes(v)) return Effect.succeed(false);
+    return bad(`${d.key} must be true or false (yes/no, on/off)`);
   }
   if (d.type === "list") {
     if (!raw.trim().startsWith("["))
-      return raw
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    try {
-      return JSON.parse(raw) as string[];
-    } catch (e) {
-      throw new Error(`${d.key}: bad JSON list (${(e as Error).message})`, { cause: e });
-    }
+      return Effect.succeed(
+        raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+    return Effect.try({
+      try: () => JSON.parse(raw) as string[],
+      catch: (cause) => new CliError({ message: `${d.key}: bad JSON list (${(cause as Error).message})`, cause }),
+    });
   }
-  return raw;
+  return Effect.succeed(raw);
 }
 
-async function settings(x: Ctx): Promise<number> {
+const settings = Effect.fnUntraced(function* (x: Ctx) {
   const [sub, key, raw] = x.args;
-  if (sub === "set" && x.args.length !== 3) throw new UsageError("settings set needs <key> <value>");
-  if (sub === "reset" && x.args.length !== 2) throw new UsageError("settings reset needs <key>");
-  if (sub !== undefined && sub !== "set" && sub !== "reset") throw new UsageError(`unknown settings command: ${sub}`);
-  const v = await api.settings();
+  if (sub === "set" && x.args.length !== 3) return yield* new UsageError({ message: "settings set needs <key> <value>" });
+  if (sub === "reset" && x.args.length !== 2) return yield* new UsageError({ message: "settings reset needs <key>" });
+  if (sub !== undefined && sub !== "set" && sub !== "reset") return yield* new UsageError({ message: `unknown settings command: ${sub}` });
+  const v = yield* api.settings();
   if (sub === undefined) {
     if (x.opts.json) return (x.out(JSON.stringify(v, null, 2)), 0);
     const w = Math.max(...v.defs.map((d) => d.key.length));
@@ -403,13 +422,13 @@ async function settings(x: Ctx): Promise<number> {
     return 0;
   }
   const d = v.defs.find((def) => def.key === key);
-  if (!d) throw new Error(`unknown setting "${key}"; desk settings lists them`);
-  const r = await api.putSettings(sub === "set" ? { set: { [d.key]: parseSetting(d, raw!) } } : { reset: [d.key] });
-  if (!r.ok) throw new Error(r.errors.map((e) => `${e.path} ${e.message}`).join("; "));
+  if (!d) return yield* new CliError({ message: `unknown setting "${key}"; desk settings lists them` });
+  const r = yield* api.putSettings(sub === "set" ? { set: { [d.key]: yield* parseSetting(d, raw!) } } : { reset: [d.key] });
+  if (!r.ok) return yield* new CliError({ message: r.errors.map((e) => `${e.path} ${e.message}`).join("; ") });
   const isDefault = !r.settings.overridden.includes(d.key);
   x.out(`${x.c.green("✓")} ${d.key} = ${showSetting(r.settings.values[d.key])}${isDefault ? x.c.dim("  (default)") : ""}`);
   return 0;
-}
+});
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
 
@@ -420,12 +439,11 @@ const HARNESSES: Record<string, { id: agents.DriverId; label: string }> = {
   codex: { id: "codex", label: "Codex" },
 };
 
-async function connect(x: Ctx): Promise<number> {
+const connect = Effect.fnUntraced(function* (x: Ctx) {
   const driver = HARNESSES[x.args[0] ?? "claude"];
-  if (!driver) throw new UsageError(`unknown agent: ${x.args[0]} (try: desk connect claude, or codex)`);
+  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[0]} (try: desk connect claude, or codex)` });
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
-  // effect-bridge(C6): connect becomes an Effect; what they fail with throws as before
-  const s = x.opts.apply ? await Effect.runPromise(agents.connect(driver.id, url)) : Effect.runSync(agents.status(driver.id, url));
+  const s = x.opts.apply ? yield* agents.connect(driver.id, url) : yield* agents.status(driver.id, url);
   if (s.mcp.connected && s.skill.state === "installed") {
     x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
     return 0;
@@ -437,46 +455,62 @@ async function connect(x: Ctx): Promise<number> {
   if (s.skill.state !== "installed") x.out(s.skill.command);
   x.out(`# The tools work while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
   return 0;
-}
+});
 
 // launchd is macOS-only; elsewhere the desktop app's login item does the job.
-function macOnly(cmd: string): void {
-  if (process.platform !== "darwin")
-    throw new Error(`${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app`);
-}
+const macOnly = (cmd: string): Effect.Effect<void, CliError> =>
+  process.platform === "darwin"
+    ? Effect.void
+    : Effect.fail(
+        new CliError({
+          message: `${cmd} is macOS-only. On Linux and Windows, use Settings → Desktop app → Open at login in the desktop app`,
+        }),
+      );
 
-async function serve(x: Ctx): Promise<number> {
+const serve = Effect.fnUntraced(function* (x: Ctx) {
   const raw = typeof x.opts.port === "string" ? x.opts.port : (process.env.DESK_PORT ?? "") || 47823;
   const port = Number(raw);
   // Port 0 would pick a random port no client can find.
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`bad port: ${raw}`);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return yield* new UsageError({ message: `bad port: ${raw}` });
   // Before the server's modules load, so Sentry instruments them.
-  await startSentry();
-  const { startServer } = await import("./server.ts");
-  const srv = await startServer({ port, open: !!x.opts.open });
-  const refresh = () => {
-    try {
-      const done = Effect.runSync(agents.refreshSkills(srv.desk.home)); // effect-bridge(C6): serve's refresh catches its FsError
-      for (const f of done) srv.desk.log(`refreshed the Review Desk skill at ${f}`);
-    } catch (e) {
-      srv.desk.log(`couldn't refresh the Review Desk skill: ${(e as Error).message}`);
-    }
+  yield* Effect.promise(() => startSentry());
+  const { startDesk } = yield* Effect.promise(() => import("./server.ts"));
+  const srv = yield* startDesk({ port, open: !!x.opts.open });
+  const desk = srv.desk;
+  const refresh = agents.refreshSkills(desk.home).pipe(
+    Effect.match({
+      onSuccess: (done) => {
+        for (const f of done) desk.log(`refreshed the Review Desk skill at ${f}`);
+      },
+      onFailure: (e) => {
+        desk.log(`couldn't refresh the Review Desk skill: ${e.message}`);
+      },
+    }),
+  );
+  const again = () => {
+    desk.runner.fork("skill refresh", refresh);
   };
-  refresh();
+  again();
   // The checkout's desk restarts on src/ changes only, so a skill-only merge would wait for an unrelated one.
-  watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, refresh);
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
+  watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, again);
+  yield* Effect.callback<void>((resume) => {
+    const stop = () => {
+      resume(Effect.void);
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
   });
-  await srv.close();
-  await stopSentry();
+  yield* Effect.promise(() => srv.close());
+  yield* Effect.promise(() => stopSentry());
   return 0;
-}
+});
 
-const cliPath = () => realpathSync(import.meta.filename);
+const cliPath = () => {
+  const file = import.meta.filename;
+  return Effect.try({ try: () => realpathSync(file), catch: fsError("realpath", file) });
+};
 
-const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
+const COMMANDS: Record<string, Command> = {
   serve,
   status,
   ls,
@@ -492,95 +526,107 @@ const COMMANDS: Record<string, (x: Ctx) => Promise<number>> = {
   unpin: act("unpin"),
   restore: act("restore"),
   snooze: act("snooze"),
-  open: async () => {
-    await api.health();
-    spawnSync(...openCommand(api.baseUrl() + "/"));
-    return 0;
-  },
-  undo: async (x) => {
+  open: () =>
+    Effect.map(api.health(), () => {
+      spawnSync(...openCommand(api.baseUrl() + "/"));
+      return 0;
+    }),
+  undo: Effect.fnUntraced(function* (x: Ctx) {
     const seq = x.args[0] === undefined ? undefined : Number(x.args[0]);
-    if (seq !== undefined && !Number.isInteger(seq)) throw new UsageError(`bad undo number: ${x.args[0]}`);
-    const r = await api.undo(seq);
+    if (seq !== undefined && !Number.isInteger(seq)) return yield* new UsageError({ message: `bad undo number: ${x.args[0]}` });
+    const r = yield* api.undo(seq);
     x.out(`${x.c.green("✓")} Undid ${r.action} on ${r.id.split("/")[1]}`);
     return 0;
-  },
-  sync: async (x) => {
-    await api.sync();
-    x.out("sync started");
-    return 0;
-  },
+  }),
+  sync: (x) =>
+    Effect.map(api.sync(), () => {
+      x.out("sync started");
+      return 0;
+    }),
   // The prompt template can interpolate the title; keep newlines and tabs, drop other control chars.
-  prompt: async (x) => {
-    x.out((await api.item(x.args[0]!)).handoff_prompt.replaceAll(/(?![\t\n])\p{Cc}/gu, ""));
-    return 0;
-  },
-  fields: async (x) => {
-    const fs = await api.fields();
-    const w = Math.max(...fs.map((f) => f.path.length));
-    for (const f of fs) x.out(`${f.path.padEnd(w)}  ${x.c.dim(f.type.padEnd(8))}  ${f.doc}`);
-    return 0;
-  },
-  brief: async (x) => {
-    const b = (await api.aiReview(x.args[0]!, !!x.opts.force)).ai;
-    const clean = (t: string) => t.replaceAll(/\p{Cc}/gu, " ");
-    const color = b.verdict === "look" ? x.c.red : b.verdict === "skim" ? x.c.yellow : x.c.dim;
-    x.out(`${color(b.verdict.toUpperCase())} · risk ${b.risk} · ${b.model}`);
-    x.out(clean(b.summary));
-    for (const r of b.concerns) x.out(`  - ${clean(r)}`);
-    if (b.notes.length) x.out(x.c.dim(`${b.notes.length} notes on the code: open the PR in the desk to read them`));
-    return 0;
-  },
-  mcp: async () => {
-    const { runMcp } = await import("./mcp.ts");
-    await runMcp();
-    await new Promise((r) => {
-      process.stdin.once("end", r);
-    });
-    return 0;
-  },
-  install: async (x) => {
-    macOnly("install");
-    const file = await Effect.runPromise(install(cliPath())); // effect-bridge(C6): it rejects with what it fails with
+  prompt: (x) =>
+    Effect.map(api.item(x.args[0]!), (d) => {
+      x.out(d.handoff_prompt.replaceAll(/(?![\t\n])\p{Cc}/gu, ""));
+      return 0;
+    }),
+  fields: (x) =>
+    Effect.map(api.fields(), (fs) => {
+      const w = Math.max(...fs.map((f) => f.path.length));
+      for (const f of fs) x.out(`${f.path.padEnd(w)}  ${x.c.dim(f.type.padEnd(8))}  ${f.doc}`);
+      return 0;
+    }),
+  brief: (x) =>
+    Effect.map(api.aiReview(x.args[0]!, !!x.opts.force), ({ ai: b }) => {
+      const clean = (t: string) => t.replaceAll(/\p{Cc}/gu, " ");
+      const color = b.verdict === "look" ? x.c.red : b.verdict === "skim" ? x.c.yellow : x.c.dim;
+      x.out(`${color(b.verdict.toUpperCase())} · risk ${b.risk} · ${b.model}`);
+      x.out(clean(b.summary));
+      for (const r of b.concerns) x.out(`  - ${clean(r)}`);
+      if (b.notes.length) x.out(x.c.dim(`${b.notes.length} notes on the code: open the PR in the desk to read them`));
+      return 0;
+    }),
+  // The MCP server answers its tools' failures itself; it runs until stdin ends.
+  mcp: () =>
+    Effect.promise(async () => {
+      const { runMcp } = await import("./mcp.ts");
+      await runMcp();
+      await new Promise((r) => {
+        process.stdin.once("end", r);
+      });
+      return 0;
+    }),
+  install: Effect.fnUntraced(function* (x: Ctx) {
+    yield* macOnly("install");
+    const file = yield* install(yield* cliPath());
     x.out(`${x.c.green("✓")} installed ${file}\n  desk serve now runs at login; log: ~/.review-desk/desk.log`);
     return 0;
-  },
-  uninstall: (x) => {
-    macOnly("uninstall");
-    x.out(`${x.c.green("✓")} removed ${Effect.runSync(uninstall())}`); // effect-bridge(C6): it throws its FsError
-    return Promise.resolve(0);
-  },
+  }),
+  uninstall: Effect.fnUntraced(function* (x: Ctx) {
+    yield* macOnly("uninstall");
+    x.out(`${x.c.green("✓")} removed ${yield* uninstall()}`);
+    return 0;
+  }),
 };
 
 const STDIO: IO = { stdout: process.stdout, stderr: process.stderr };
 
+// The command, with its arguments read as it takes them.
+const command = Effect.fnUntraced(function* (cmd: string, rest: string[], io: IO) {
+  const run = COMMANDS[cmd];
+  const arity = ARITY[cmd];
+  if (!run || !arity) return yield* new UsageError({ message: `unknown command: ${cmd}` });
+  // parseArgs throws only for what was typed (ERR_PARSE_ARGS_*): an unknown option, a missing value.
+  const { values, positionals } = yield* Effect.try({
+    try: () =>
+      parseArgs({ args: rest, allowPositionals: true, strict: true, options: { help: { type: "boolean", short: "h" }, ...OPTIONS[cmd] } }),
+    catch: (cause) => new UsageError({ message: (cause as Error).message }),
+  });
+  if (values.help) return (io.stdout.write(USAGE), 0);
+  const [min, max] = arity;
+  if (positionals.length < min) return yield* new UsageError({ message: `${cmd}: missing argument` });
+  if (positionals.length > max) return yield* new UsageError({ message: `${cmd}: unexpected argument ${positionals[max]}` });
+  return yield* run(ctxFor(io, positionals, values));
+});
+
+// The CLI's boundary (docs/effect.md): a usage error exits 2 with the hint, the desk down says so alone, and anything
+// else, a bug too, is `desk: <its words>`, exit 1.
 export async function main(argv: string[], io: IO = STDIO): Promise<number> {
   const [cmd = "help", ...rest] = argv;
   if (cmd === "help" || cmd === "--help" || cmd === "-h") return (io.stdout.write(USAGE), 0);
-  try {
-    const run = COMMANDS[cmd];
-    const arity = ARITY[cmd];
-    if (!run || !arity) throw new UsageError(`unknown command: ${cmd}`);
-    const { values, positionals } = parseArgs({
-      args: rest,
-      allowPositionals: true,
-      strict: true,
-      options: { help: { type: "boolean", short: "h" }, ...OPTIONS[cmd] },
-    });
-    if (values.help) return (io.stdout.write(USAGE), 0);
-    const [min, max] = arity;
-    if (positionals.length < min) throw new UsageError(`${cmd}: missing argument`);
-    if (positionals.length > max) throw new UsageError(`${cmd}: unexpected argument ${positionals[max]}`);
-    return await run(ctxFor(io, positionals, values));
-  } catch (e) {
-    const err = e as Error & { code?: unknown };
-    // A CommandFailed's code is its exit status, a number.
-    if (e instanceof UsageError || (typeof err.code === "string" && err.code.startsWith("ERR_PARSE_ARGS"))) {
-      io.stderr.write(`desk: ${err.message}\nrun 'desk help' for usage\n`);
-      return 2;
-    }
-    io.stderr.write(e instanceof DeskDownError ? `${err.message}\n` : `desk: ${err.message}\n`);
+  const exit = await Effect.runPromiseExit(command(cmd, rest, io));
+  if (Exit.isSuccess(exit)) return exit.value;
+  const failed = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
+  if (failed?._tag === "UsageError") {
+    io.stderr.write(`desk: ${failed.message}\nrun 'desk help' for usage\n`);
+    return 2;
+  }
+  if (failed?._tag === "DeskDown") {
+    io.stderr.write(`${failed.message}\n`);
     return 1;
   }
+  const e = failed ?? Cause.squash(exit.cause);
+  io.stderr.write(`desk: ${e instanceof Error ? e.message : String(e)}\n`);
+  return 1;
 }
 
 if (import.meta.main) {

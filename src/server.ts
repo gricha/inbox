@@ -688,7 +688,7 @@ export function createApp(desk: Desk, port: number): Hono {
     const api = createClient((p, init) => app.request(p, init));
     const transport = new WebStandardStreamableHTTPServerTransport();
     const handled = Effect.promise(async () => {
-      await createMcpServer(api).connect(transport);
+      await createMcpServer(api, log).connect(transport);
       return transport.handleRequest(c.req.raw);
     });
     return respond(c, handled, { log });
@@ -741,7 +741,7 @@ const listen = (app: Hono, port: number, url: string) =>
 
 // The desk on its port, its first config read and its loops started. Its port, GitHub's viewer or a file it can't read
 // or write fails it, and then it leaves nothing open: the desktop app retries.
-const startDesk = Effect.fnUntraced(function* (
+export const startDesk = Effect.fnUntraced(function* (
   opts: ServeOptions = {},
 ): Effect.fn.Return<Served, ListenFailed | GitHubReadError | Upstream | FsError> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);

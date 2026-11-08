@@ -4,6 +4,7 @@ import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createClient } from "../src/client.ts";
 import { createMcpServer } from "../src/mcp.ts";
 import { startFakeApi, unusedPort, type FakeApi } from "./helpers/fake-api.ts";
 
@@ -409,6 +410,33 @@ test("tools report a down desk as an error", async () => {
   } finally {
     process.env.DESK_PORT = prev;
   }
+});
+
+test("a tool's refusal is its error text, and a bug in one is that too and logged", async (c) => {
+  const logs: string[] = [];
+  // A desk that answers 200 with nothing: the tool reads null, a bug.
+  const api = createClient(() => new Response("null", { status: 200 }));
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await createMcpServer(api, (m) => {
+    logs.push(m);
+  }).connect(a);
+  const other = new Client({ name: "bug-test", version: "0" });
+  await other.connect(b);
+  c.after(() => other.close());
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const r = await other.callTool({ name, arguments: args });
+    return { text: (r.content as { text: string }[]).map((x) => x.text).join("\n"), isError: !!r.isError };
+  };
+  assert.deepEqual(await tool("desk_policy", { action: "set", text: "x" }), {
+    text: "set needs text and base (the hash from desk_policy get)",
+    isError: true,
+  });
+  assert.equal(logs.length, 0, "a refusal isn't logged");
+  const bug = await tool("desk_item", { ref: "seer#8949" });
+  assert.equal(bug.isError, true);
+  assert.match(bug.text, /null/);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0]!, /^desk mcp: .*null/s);
 });
 
 test("`desk mcp` serves over stdio", async () => {

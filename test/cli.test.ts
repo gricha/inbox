@@ -7,10 +7,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
+import type { Effect } from "effect";
 import { main } from "../src/cli.ts";
 import * as api from "../src/client.ts";
 import { plistFor } from "../src/launchd.ts";
 import { startFakeApi, unusedPort, type FakeApi } from "./helpers/fake-api.ts";
+import { failure, run as runFx } from "./helpers/run.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const BIN = join(ROOT, "bin", "desk");
@@ -65,28 +67,77 @@ const lastCall = () => {
   return last;
 };
 
-test("client throws DeskDownError when nothing is listening", async () => {
+test("client fails with DeskDown when nothing is listening", async () => {
   await withPort(await unusedPort(), async () => {
-    await assert.rejects(
-      api.overview(),
-      (e: Error) => e instanceof api.DeskDownError && e.message === "desk is not running — start it with: desk serve",
-    );
+    const down = await failure(api.overview());
+    assert.equal(down._tag, "DeskDown");
+    assert.equal(down.message, "desk is not running — start it with: desk serve");
     const r = await run(["ls"]);
     assert.equal(r.code, 1);
     assert.equal(r.err, "desk is not running — start it with: desk serve\n");
   });
 });
 
-test("client maps 404 and 409 to readable errors", async () => {
+test("client maps 404 and 409 to readable errors, tagged by their status when the desk sends no tag", async () => {
   await assert.rejects(
-    api.item("nope#9"),
-    (e: Error) => e instanceof api.DeskApiError && e.status === 404 && e.message === "unknown item nope#9",
+    runFx(api.item("nope#9")),
+    (e: Error) => e instanceof api.DeskApiError && e.status === 404 && e.tag === "NotFound" && e.message === "unknown item nope#9",
   );
   await assert.rejects(
-    api.item("sentry#1"),
+    runFx(api.item("sentry#1")),
     (e: api.DeskApiError) =>
-      e.status === 409 && e.candidates.length === 2 && e.message.includes("candidates: getsentry/sentry#1, other/sentry#1"),
+      e.status === 409 &&
+      e.tag === "AmbiguousRef" &&
+      e.candidates.length === 2 &&
+      e.message.includes("candidates: getsentry/sentry#1, other/sentry#1"),
   );
+});
+
+// One answer, at any path, from a desk that isn't the fake.
+async function answering<T>(status: number, body: unknown, fn: () => Promise<T>): Promise<T> {
+  const srv = createServer((_, res) => {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise<void>((r) => {
+    srv.listen(0, "127.0.0.1", r);
+  });
+  try {
+    return await withPort((srv.address() as AddressInfo).port, fn);
+  } finally {
+    srv.closeAllConnections();
+    srv.close();
+  }
+}
+
+// What the desk refused with: an API error, nothing else.
+async function refusal<A>(effect: Effect.Effect<A, api.ClientError>): Promise<api.DeskApiError> {
+  const e = await failure(effect);
+  assert.ok(e instanceof api.DeskApiError, e.message);
+  return e;
+}
+
+test("client keeps the tag and reason the desk sends, and a request with no answer in time keeps fetch's words", async () => {
+  const stale = await answering(409, { error: "policy.md changed since you opened it", tag: "Stale" }, () => refusal(api.item("x")));
+  assert.deepEqual([stale.status, stale.tag, stale.message], [409, "Stale", "policy.md changed since you opened it"]);
+  // The words say nothing about config: the reason does.
+  const broken = await answering(503, { error: "the rules have errors", tag: "Unavailable", reason: "config" }, () =>
+    refusal(api.status(1000)),
+  );
+  assert.deepEqual([broken.tag, broken.reason], ["Unavailable", "config"]);
+  const bug = await answering(500, { error: "x is undefined", tag: "Internal" }, () => refusal(api.overview()));
+  assert.deepEqual([bug.status, bug.tag, bug.message], [500, "Internal", "x is undefined"]);
+  const hung = createServer(() => {});
+  await new Promise<void>((r) => {
+    hung.listen(0, "127.0.0.1", r);
+  });
+  try {
+    const late = await withPort((hung.address() as AddressInfo).port, () => failure(api.status(50)));
+    assert.deepEqual([late._tag, late.message], ["DeskNoAnswer", "The operation was aborted due to timeout"]);
+  } finally {
+    hung.closeAllConnections();
+    hung.close();
+  }
 });
 
 test("ls defaults to focus, grouped by bucket, with counts of the rest", async () => {
@@ -249,25 +300,17 @@ test("status --short prints the status text, or 'desk offline' fast", async () =
   await withPort(await unusedPort(), async () => {
     assert.deepEqual(await run(["status", "--short"]), { code: 0, out: "desk offline\n", err: "" });
   });
-  // 503 means up but not serving yet, or the config never loaded.
-  for (const [error, out] of [
-    ["desk is starting; the first sync can take a minute", "desk starting\n"],
-    ["config has errors: boards[0].id: missing", "desk config error\n"],
-  ]) {
-    const busy = createServer((_, res) => {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error }));
-    });
-    await new Promise<void>((r) => {
-      busy.listen(0, "127.0.0.1", r);
-    });
-    try {
-      assert.equal((await withPort((busy.address() as AddressInfo).port, () => run(["status", "--short"]))).out, out);
-    } finally {
-      busy.closeAllConnections();
-      busy.close();
-    }
+  // 503 means up but not serving yet, or the config never loaded: by its reason, or an older desk's words.
+  for (const [body, out] of [
+    [{ error: "desk is starting; the first sync can take a minute" }, "desk starting\n"],
+    [{ error: "config has errors: boards[0].id: missing" }, "desk config error\n"],
+    [{ error: "config has errors: boards[0].id: missing", tag: "Unavailable", reason: "config" }, "desk config error\n"],
+    [{ error: "the rules have errors", tag: "Unavailable", reason: "config" }, "desk config error\n"],
+    [{ error: "the config is loading", tag: "Unavailable", reason: "starting" }, "desk starting\n"],
+  ] as const) {
+    assert.equal((await answering(503, body, () => run(["status", "--short"]))).out, out, JSON.stringify(body));
   }
+  assert.equal((await answering(500, { error: "oops", tag: "Internal" }, () => run(["status", "--short"]))).out, "desk offline\n");
   // A server that accepts but never answers must not hang the status line.
   const hung = createServer(() => {});
   await new Promise<void>((r) => {
@@ -282,6 +325,13 @@ test("status --short prints the status text, or 'desk offline' fast", async () =
     hung.closeAllConnections();
     hung.close();
   }
+});
+
+test("a bug in a command is `desk: <its words>`, exit 1", async () => {
+  // A desk that answers 200 with nothing: ls reads null.
+  const r = await answering(200, null, () => run(["ls"]));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /^desk: .*null.*\n$/);
 });
 
 test("usage errors exit 2", async () => {

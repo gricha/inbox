@@ -1,5 +1,9 @@
-// Typed HTTP client for the desk API. Used by the CLI and the MCP server.
+// Typed HTTP client for the desk API. Used by the CLI and the MCP server: each call is an Effect that fails with one of
+// the client's own errors below, decoded from the desk's answer ({ error, tag, candidates?, reason? }, docs/effect.md →
+// The wire).
 
+import { Data, Effect } from "effect";
+import type { ErrorBody } from "./errors.ts";
 import {
   UNTIL,
   type Action,
@@ -58,23 +62,54 @@ export interface SettingsPatch {
   reset?: string[];
 }
 
-export class DeskDownError extends Error {
-  constructor() {
-    super("desk is not running — start it with: desk serve");
-    this.name = "DeskDownError";
+// Nothing listens on the desk's port: it isn't running.
+class DeskDown extends Data.TaggedError("DeskDown")<{ readonly cause?: unknown }> {
+  override get message(): string {
+    return "desk is not running — start it with: desk serve";
   }
 }
 
-export class DeskApiError extends Error {
-  status: number;
-  candidates: string[];
-  constructor(status: number, error: string | undefined, candidates: string[] = []) {
-    const msg = (error ?? "") || `HTTP ${status}`;
-    super(candidates.length ? `${msg} — candidates: ${candidates.join(", ")}` : msg);
-    this.name = "DeskApiError";
-    this.status = status;
-    this.candidates = candidates;
+// The request got no answer: it timed out, or the connection failed. Its words are fetch's ("The operation was aborted due
+// to timeout").
+class DeskNoAnswer extends Data.TaggedError("DeskNoAnswer")<{ readonly cause: unknown }> {
+  override get message(): string {
+    return this.cause instanceof Error ? this.cause.message : String(this.cause);
   }
+}
+
+// The desk refused: its status and words, and its tag (and a 503's reason) to tell refusals apart by. An older desk sends
+// no tag: its status says it, and a 503's words its reason. The message names the candidates an ambiguous ref matched.
+export class DeskApiError extends Data.TaggedError("DeskApiError")<{
+  readonly status: number;
+  readonly said: string;
+  readonly tag: ErrorBody["tag"];
+  readonly candidates: readonly string[];
+  readonly reason?: "starting" | "config";
+}> {
+  override get message(): string {
+    const msg = this.said || `HTTP ${this.status}`;
+    return this.candidates.length ? `${msg} — candidates: ${this.candidates.join(", ")}` : msg;
+  }
+}
+
+export type ClientError = DeskDown | DeskNoAnswer | DeskApiError;
+
+const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
+  400: "BadRequest",
+  403: "Forbidden",
+  404: "NotFound",
+  409: "Conflict",
+  502: "Upstream",
+  503: "Unavailable",
+};
+
+function refusal(status: number, data: unknown): DeskApiError {
+  const b = (typeof data === "object" && data !== null ? data : {}) as Partial<ErrorBody>;
+  const said = b.error ?? "";
+  const candidates = b.candidates ?? [];
+  const tag = b.tag ?? (status === 409 && candidates.length ? "AmbiguousRef" : (BY_STATUS[status] ?? "Internal"));
+  const reason = status === 503 ? (b.reason ?? (said.includes("config") ? "config" : "starting")) : undefined;
+  return new DeskApiError({ status, said, tag, candidates, ...(reason && { reason }) });
 }
 
 export function baseUrl(): string {
@@ -82,36 +117,38 @@ export function baseUrl(): string {
 }
 
 function refused(e: unknown): boolean {
-  const cause = (e as { cause?: { code?: string; errors?: { code?: string }[] } }).cause;
+  const cause = (e as { cause?: { code?: string; errors?: { code?: string }[] } } | null)?.cause;
   return cause?.code === "ECONNREFUSED" || !!cause?.errors?.some((x) => x.code === "ECONNREFUSED");
 }
 
-async function overNetwork(path: string, init: RequestInit): Promise<Response> {
-  try {
-    return await fetch(baseUrl() + path, init);
-  } catch (e) {
-    if (refused(e)) throw new DeskDownError();
-    throw e;
-  }
-}
+const overNetwork = (path: string, init: RequestInit): Promise<Response> => fetch(baseUrl() + path, init);
 
 const q = encodeURIComponent;
 
 // `send` is fetch over loopback by default; the server's /mcp passes its own app to call the same routes in-process.
 export function createClient(send: (path: string, init: RequestInit) => Response | Promise<Response> = overNetwork) {
-  async function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
-    const res = await send(path, {
-      method,
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  function call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Effect.Effect<T, ClientError> {
+    return Effect.gen(function* () {
+      const res = yield* Effect.tryPromise({
+        try: (signal) =>
+          Promise.resolve(
+            send(path, {
+              method,
+              headers: body === undefined ? undefined : { "content-type": "application/json" },
+              body: body === undefined ? undefined : JSON.stringify(body),
+              signal: timeoutMs ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : signal,
+            }),
+          ),
+        catch: (cause) => (refused(cause) ? new DeskDown({ cause }) : new DeskNoAnswer({ cause })),
+      });
+      // A body that isn't JSON reads as null, as before: a refusal still says what it is by its status.
+      const data = yield* Effect.orElseSucceed(
+        Effect.tryPromise({ try: (): Promise<unknown> => res.json(), catch: (cause) => cause }),
+        () => null,
+      );
+      if (!res.ok) return yield* refusal(res.status, data);
+      return data as T;
     });
-    const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) {
-      const e = (data ?? {}) as { error?: string; candidates?: string[] };
-      throw new DeskApiError(res.status, e.error, e.candidates);
-    }
-    return data as T;
   }
 
   return {
