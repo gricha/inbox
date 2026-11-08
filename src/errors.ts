@@ -1,8 +1,7 @@
 // The desk's expected failures, as tagged errors: an Effect's error channel names them, catchTag recovers from one, and
 // each carries the words the owner sees verbatim (its message). A bug or a broken invariant is a defect instead (a throw
 // inside Effect code, or Effect.die) and never gets a class here. docs/effect.md has the rules. Tags are unique across
-// families (GitHub's 403 is GitHubForbidden, never Forbidden). A class added before its first user carries
-// `@public until C<n>` (knip skips it) until the step that first uses it removes the tag.
+// families (GitHub's 403 is GitHubForbidden, never Forbidden).
 import { Data } from "effect";
 
 // ---------------------------------------------------------------- what the HTTP API refuses with (status: its answer)
