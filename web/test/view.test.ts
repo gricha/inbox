@@ -278,6 +278,8 @@ test("the Inbox counts what's on it and the agents' questions", () => {
   assert.equal(inboxCount(q), 2);
   q.inquiries = [{ id: "q1" } as QueueView["inquiries"][number]];
   assert.equal(inboxCount(q), 3);
+  // A row you acted on and a question you answered leave the count at once.
+  assert.equal(inboxCount(q, new Set([q.sections.now[0]!.id]), new Set(["q1"])), 1);
 });
 
 test("settings fields: text to value and back", () => {

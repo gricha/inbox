@@ -1,6 +1,6 @@
-import type { Overview, QueueView } from "../../../src/types.ts";
+import type { Overview } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
-import { inboxCount, pageOf, type ListPage, type Route } from "../view.ts";
+import { pageOf, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
 function syncText(o: Overview | null, now: number, offline: boolean): string {
@@ -16,7 +16,7 @@ function syncText(o: Overview | null, now: number, offline: boolean): string {
 export function Sidebar({
   route,
   from,
-  view,
+  count,
   overview,
   offline,
   now,
@@ -27,7 +27,7 @@ export function Sidebar({
 }: {
   route: Route;
   from: ListPage; // where a review was opened from: it stays that page's
-  view: QueueView | null;
+  count: number | null; // what the Inbox counts, less what's leaving it; null until the queue loads
   overview: Overview | null;
   offline: boolean;
   now: number;
@@ -43,7 +43,6 @@ export function Sidebar({
   const onBlocked = page === "blocked";
   const onArchive = page === "archive";
   const onSettings = route.name === "settings";
-  const count = view ? inboxCount(view) : 0;
   const flight = overview?.inflight;
   const rate = overview?.rate_limit ? `GitHub API: ${overview.rate_limit.remaining} requests left` : undefined;
   return (
@@ -58,7 +57,7 @@ export function Sidebar({
           href="#/"
           className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
-          title={view ? `${count} need you` : undefined}
+          title={count === null ? undefined : `${count} need you`}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (route.name === "queue") {
@@ -68,7 +67,7 @@ export function Sidebar({
           }}
         >
           <span className="side-name">Inbox</span>
-          <span className="side-count">{count > 0 ? count : ""}</span>
+          <span className="side-count">{count !== null && count > 0 ? count : ""}</span>
         </a>
         {/* What can't move yet: no count, nothing there can move. */}
         <a

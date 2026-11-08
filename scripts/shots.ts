@@ -1880,7 +1880,7 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await unfold(page);
       await page.locator('.line[data-id="acme/web#2303"] .line-cta').click();
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500); // past the row's fade and fold
     },
     after: fresh,
   },
@@ -2756,6 +2756,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await page.route("**/approve", () => {});
       await review("acme/api#4127", ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(400); // past its row's fade and fold beside it
       // Its toast centres on the page's column, beside the list as without it.
       const off = await page.evaluate<number | null>(`(() => {
         const t = document.querySelector(".toast")?.getBoundingClientRect(), c = document.querySelector(".col")?.getBoundingClientRect();

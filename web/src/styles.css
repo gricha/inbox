@@ -1242,6 +1242,11 @@ p {
   font-weight: 400;
 }
 
+/* The first row leaving: the next one's hairline would double the sheet's own top edge. */
+.lines > .line.leaving:first-child + * {
+  border-top-color: transparent;
+}
+
 /* Leaving: it fades, then gives up its room, so a write still on its way to GitHub leaves no gap in the table. */
 .line.leaving {
   interpolate-size: allow-keywords;

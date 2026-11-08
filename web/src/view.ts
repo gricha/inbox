@@ -164,8 +164,10 @@ export function beside(o: {
   return o.folded || (o.chat && o.crowded && !o.peek) ? "rail" : "open";
 }
 
-// What the Inbox counts: everything on it, an agent's question included (one waits on you too).
-export const inboxCount = (v: QueueView) => v.sections.now.length + v.sections.today.length + v.inquiries.length;
+// What the Inbox counts: everything on it, an agent's question included (one waits on you too); a row on its way off (you
+// acted on it) or a question you answered no longer counts.
+export const inboxCount = (v: QueueView, leaving: ReadonlySet<string> = new Set(), answered: ReadonlySet<string> = new Set()) =>
+  [...v.sections.now, ...v.sections.today].filter((c) => !leaving.has(c.id)).length + v.inquiries.filter((q) => !answered.has(q.id)).length;
 
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;

@@ -51,6 +51,8 @@ export function Queue({
     );
   }
   const g = groups.find((x) => x.key === "queue");
+  // A row you acted on is on its way off: it fades out where it is, but no longer counts, and a part it was the last of goes.
+  const staying = (c: Card) => !ctx.leaving.has(c.id);
   // The cards come in their parts' order (byPart): a heading where the part changes, each counting all of its lines.
   const parts: { key: QueueGroup; cards: Card[] }[] = [];
   for (const c of g?.cards ?? []) {
@@ -59,17 +61,20 @@ export function Queue({
     if (last?.key === key) last.cards.push(c);
     else parts.push({ key, cards: [c] });
   }
-  const total = (k: QueueGroup) => [...view.sections.now, ...view.sections.today].filter((c) => (c.group ?? "other") === k).length;
+  const live = parts.filter((p) => p.cards.some(staying));
+  const total = (k: QueueGroup) =>
+    [...view.sections.now, ...view.sections.today].filter((c) => (c.group ?? "other") === k && staying(c)).length;
+  const shown = (p: { cards: Card[] }) => p.cards.filter(staying).length;
   // Filtering, a heading says how many of its lines match, as FYI's do.
-  const count = (p: { key: QueueGroup; cards: Card[] }) => (filter.trim() ? `${p.cards.length} of ${total(p.key)}` : total(p.key));
+  const count = (p: { key: QueueGroup; cards: Card[] }) => (filter.trim() ? `${shown(p)} of ${total(p.key)}` : total(p.key));
   // The fold is only there unfiltered, so what each part has behind it is its total less what shows.
-  const folded = QUEUE_GROUPS.map((k) => [k, total(k) - (parts.find((p) => p.key === k)?.cards.length ?? 0)] as const).filter(
+  const folded = QUEUE_GROUPS.map((k) => [k, total(k) - shown(parts.find((p) => p.key === k) ?? { cards: [] })] as const).filter(
     ([, n]) => n > 0,
   );
   const foldText =
     folded.length === 1
       ? `${folded[0]![1]} more ${FOLDED[folded[0]![0]]}`
-      : `${g?.fold ?? 0} more: ${folded.map(([k, n]) => `${n} ${FOLDED[k]}`).join(", ")}`;
+      : `${folded.reduce((n, [, x]) => n + x, 0)} more: ${folded.map(([k, n]) => `${n} ${FOLDED[k]}`).join(", ")}`;
   return (
     <div className="queue">
       {view.paused && (
@@ -77,7 +82,7 @@ export function Queue({
           <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
-      {inquiries.length > 0 || parts.length > 0 ? (
+      {inquiries.length > 0 || live.length > 0 ? (
         <>
           {inquiries.length > 0 && (
             <section className="group part" aria-labelledby="h-questions">
@@ -91,7 +96,7 @@ export function Queue({
               </div>
             </section>
           )}
-          {parts.map((p) => (
+          {live.map((p) => (
             <section key={p.key} className={`group part part-${p.key}`} aria-labelledby={`h-${p.key}`}>
               <h2 id={`h-${p.key}`} className="group-head">
                 {PART[p.key]} <span className="count">{count(p)}</span>

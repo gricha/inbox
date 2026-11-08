@@ -1099,6 +1099,7 @@ export function App() {
     menu: openRowMenu,
   };
   const configErrors = overview?.config_errors.length ?? 0;
+  const inbox = view ? inboxCount(view, leaving, answered) : null;
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
   const inq = {
@@ -1173,7 +1174,7 @@ export function App() {
       <Sidebar
         route={route}
         from={reviewFrom}
-        view={view}
+        count={inbox}
         overview={overview}
         offline={offline}
         now={now}
@@ -1190,7 +1191,7 @@ export function App() {
       {side && listPage && (
         <Beside
           name={PAGE_NAME[listPage]}
-          count={listPage === "queue" && view ? inboxCount(view) : null}
+          count={listPage === "queue" ? inbox : null}
           open={side === "open"}
           filter={filter}
           setFilter={laneList ? null : setFilter}
