@@ -342,7 +342,7 @@ export class GitHubConnector implements Connector {
       return yield* this.fillStacks(listedIds).pipe(
         Effect.andThen(({ fetched: filled, members }) =>
           Effect.sync(() => {
-            desk.store.pruneItems(new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
+            desk.store.pruneItems(this.id, new Date(now.getTime() - 14 * 24 * HOUR).toISOString(), members);
             this.syncedAt = desk.now().toISOString(); // when it finished: "Synced 12s ago" means fresh data
             desk.store.set("synced_at", this.syncedAt);
             this.error = first ? `${errors.length} search(es) failed: ${first.why}` : null;

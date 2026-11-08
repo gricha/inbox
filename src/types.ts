@@ -11,16 +11,24 @@ export type ReviewState = "approved" | "changes_requested" | "commented" | "dism
 export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "merged" | "closed"; // blocked: only Desk.card() sets it
 
 // ---------------------------------------------------------------------------
+// What the desk reads of any source's item, stored whole as JSON. Its source is the id's prefix ("notes:1"); a bare id is GitHub's.
+
+export interface Head {
+  id: string;
+  url: string; // where it lives, "" for none
+  created_at: string;
+  updated_at: string; // an older snapshot never replaces a newer one
+}
+
 // GitHub item, normalized from GraphQL. Times are ISO strings.
 
-export interface Item {
+export interface Item extends Head {
   id: string; // "owner/repo#123"
   node_id: string;
   kind: "pr" | "issue";
   repo: string; // "owner/repo"
   number: number;
   title: string;
-  url: string;
   author: string; // login, "ghost" if deleted
   author_bot: boolean;
   via?: string; // who a bot's PR says it was opened for (its last "via …" line: "@login" or a name), "" if none; absent on items stored before it was fetched
@@ -28,8 +36,6 @@ export interface Item {
   draft: boolean;
   labels: string[];
   assignees: string[];
-  created_at: string;
-  updated_at: string;
   closed_at?: string | null; // merged or closed; absent on items stored before it was fetched
   body?: string; // the description's first 600 characters, one paragraph a line (untrusted); absent on items stored before it was fetched
   requires?: string[]; // PR only: the PRs its whole markdown description says must merge first, as owner/repo#N in the case written, at most 10; absent on items stored before it was fetched

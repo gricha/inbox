@@ -1,6 +1,6 @@
-// SQLite cache of GitHub items, your local triage state, and the event log.
+// SQLite cache of every source's items (GitHub's today), your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Item, ItemState } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Head, Item, ItemState } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -143,14 +143,15 @@ export class Store {
 
   // last_hit_at is set on insert and by touchItems: refreshing an item no search returns doesn't renew it. `quiet`: stored
   // without logging its events, which keeps what they were last logged against in `said`.
-  putItems(items: Item[], now: string, quiet = false): void {
+  putItems(items: readonly (Head & Partial<Item>)[], now: string, quiet = false): void {
     const stmt = this.db.prepare(
       `INSERT INTO items (id, node_id, data, updated_at, detail_at, last_hit_at, said) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET node_id = excluded.node_id, data = excluded.data, updated_at = excluded.updated_at, detail_at = excluded.detail_at,
          said = ${quiet ? "COALESCE(items.said, items.data)" : "NULL"}`,
     );
     this.tx(() => {
-      for (const it of items) stmt.run(it.id, it.node_id, JSON.stringify(it), it.updated_at, it.detail_at, now, quiet ? "null" : null);
+      for (const it of items)
+        stmt.run(it.id, it.node_id ?? "", JSON.stringify(it), it.updated_at, it.detail_at ?? now, now, quiet ? "null" : null);
     });
   }
 
@@ -172,10 +173,14 @@ export class Store {
     });
   }
 
-  pruneItems(before: string, keep: Set<string> = new Set()): void {
+  // Only `source`'s rows: an id's source is its prefix ("notes:1"), and a bare id is GitHub's.
+  pruneItems(source: string, before: string, keep: Set<string> = new Set()): void {
     this.db
-      .prepare("DELETE FROM items WHERE last_hit_at < ? AND id NOT IN (SELECT value FROM json_each(?))")
-      .run(before, JSON.stringify([...keep]));
+      .prepare(
+        `DELETE FROM items WHERE last_hit_at < ? AND id NOT IN (SELECT value FROM json_each(?))
+           AND (CASE instr(id, ':') WHEN 0 THEN 'github' ELSE substr(id, 1, instr(id, ':') - 1) END) = ?`,
+      )
+      .run(before, JSON.stringify([...keep]), source);
   }
 
   // --- query results

@@ -15,3 +15,16 @@ test("a PR stored without requires lacks it; one with [] doesn't", () => {
   );
   store.close();
 });
+
+test("pruning one source's rows leaves the others'", () => {
+  const store = new Store(":memory:");
+  const at = NOW.toISOString();
+  const note = { id: "notes:1", url: "", created_at: at, updated_at: at };
+  store.putItems([makeItem({ number: 1 }), note, { ...note, id: "notesy:1" }], at);
+  const later = new Date(NOW.getTime() + 1).toISOString();
+  store.pruneItems("notes", later);
+  assert.deepEqual([...store.itemMeta().keys()].sort(), ["acme/api#1", "notesy:1"]);
+  store.pruneItems("github", later);
+  assert.deepEqual([...store.itemMeta().keys()], ["notesy:1"]);
+  store.close();
+});
