@@ -134,7 +134,7 @@ export const botCheck = (listed: string[]) => {
   return (login: string, flagged = false) => flagged || set.has(lc(login)) || login.endsWith("[bot]");
 };
 
-// A why in plain words for the Rules page: a field reads as "someone" or "some", and the blocked rules' as what they stand for.
+// A why in plain words for Searches and rules: a field reads as "someone" or "some", and the blocked rules' as what they stand for.
 const WORDS: Record<string, string> = {
   "pr.blocker": "another PR",
   "pr.blocker_waits": "waits on something",

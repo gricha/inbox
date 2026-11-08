@@ -363,6 +363,7 @@ const SEEDS: Seed[] = [
     size: [341, 802, 22],
     close: 5,
     pushed: true,
+    review: "changes_requested", // as GitHub decides it from your review below
     reviews: [
       [ME, "changes_requested", 50],
       ["sam", "commented", 40],
@@ -2207,7 +2208,7 @@ const ASKS: Ask[] = [
 ];
 let askN = 0;
 function addAsk(b: Record<string, unknown>): Ask {
-  if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings \u2192 Agents");
+  if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings \u2192 Claude");
   const text = textOf(b).trim();
   if (!text) throw new HttpError(400, "the ask is empty");
   const str = (k: string) => (typeof b[k] === "string" && b[k] ? b[k] : null);
@@ -2619,7 +2620,7 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
       });
     });
     if (process.env.MOCK_ANALYZE_FAIL)
-      throw new HttpError(502, 'claude command "claude" not found: set its full path under Settings → AI review → Claude command');
+      throw new HttpError(502, 'claude command "claude" not found: install Claude Code, or put it on your PATH');
     const ai = written(r, itemOf(r).head_oid);
     reviews.set(r.id, ai);
     return ai;
@@ -2736,7 +2737,7 @@ const tomlArr = (xs: string[]) => `[${xs.map(tomlStr).join(", ")}]`;
 
 function toToml(c: Config): string {
   const out = [
-    "# Review Desk config. ⌘/Ctrl+Enter previews, ⌘/Ctrl+S saves.",
+    "# Review Desk config. Edit it in Settings → GitHub → Searches and rules, or here; the desk reloads it on save.",
     "# Sync interval, bots, notifications and agents' prompts are in Settings (settings.json).",
   ];
   for (const s of c.spaces) out.push("", "[[spaces]]", `id = ${tomlStr(s.id)}`, `name = ${tomlStr(s.name)}`, `scope = ${tomlStr(s.scope)}`);

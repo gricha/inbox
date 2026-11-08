@@ -111,7 +111,7 @@ export const SETTINGS = [
     type: "text",
     default: DEFAULT_PROMPT,
     required: true,
-    help: "Fields like {item.url}, {item.number} and {item.author} are filled in; leave titles out: anyone writes them.",
+    help: "{item.url}, {item.repo}, {item.number} and {item.author} are filled in; leave titles out: anyone writes them.",
   },
   {
     key: "handoff.mine",

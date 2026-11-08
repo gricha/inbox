@@ -138,8 +138,8 @@ export class ListenFailed extends Data.TaggedError("ListenFailed")<{
 
 // ---------------------------------------------------------------- the rules' expressions (config.toml)
 
-// A board's filter or priority, or a rule's when, doesn't parse, or names a field or function there isn't: the words the
-// Rules page shows at its path. pos is where it went wrong (1-based), hint the field it may have meant.
+// A board's filter or priority, or a rule's when, doesn't parse, or names a field or function there isn't: the words
+// the Searches and rules view shows at its path. pos is where it went wrong (1-based), hint the field it may have meant.
 export class ExprSyntaxError extends Data.TaggedError("ExprSyntaxError")<{
   readonly source: string;
   readonly message: string;

@@ -134,7 +134,7 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
   t.cleanup();
 });
 
-test("the Rules page lists the final rules with the hard ones, in board order, their whys in plain words", async (c) => {
+test("Searches and rules lists the final rules with the hard ones, in board order, their whys in plain words", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
   const review = t.desk.getConfig().hard.filter((h) => h.board === "PRs to review (acme)");

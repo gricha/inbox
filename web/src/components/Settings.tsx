@@ -767,7 +767,7 @@ function ViewRow({ id, help, tone }: { id: string; help: ReactNode; tone?: "bad"
   );
 }
 
-// What a part's lookups get: the page's state, and a setting's row by its key.
+// What a part's lookups get: the page's state.
 interface PartProps {
   view: SettingsView;
   active: boolean;

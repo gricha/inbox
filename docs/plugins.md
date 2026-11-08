@@ -142,7 +142,7 @@ export interface Plugin<I extends Head = Head> {
   wake?(e: ActivityEvent): string | null; // what an event tells your agent while the item is in Merging ("CI failed"): ids and kinds, never source text
   happened?(item: I, key: string): boolean; // WAIT: a snooze on `key` is over
   waits?: Readonly<Record<string, string>>; // until D4: each kind's words (GitHub: UNTIL)
-  fields?: readonly FieldDoc[]; // what rules on its boards read: the Rules page, /api/fields, expr's compile-time check
+  fields?: readonly FieldDoc[]; // what rules on its boards read: the Searches and rules view, /api/fields, expr's compile-time check
   brief?(batch: readonly JudgeItem<I>[]): string[]; // the judge's lines: who you are, each item's facts
   write?(item: I, action: string, input: unknown, writer: unknown): Effect.Effect<Write, WriteError>; // PUSH OUT: only Desk.write calls it; it narrows its own writer
   agent?: { allow: string[]; deny: string[] }; // what automation runs may and never use, beside the core's lists
