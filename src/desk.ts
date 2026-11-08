@@ -28,7 +28,7 @@ import {
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
-import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connectors/connector.ts";
+import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector } from "./connectors/github.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
@@ -186,7 +186,6 @@ const ADDED: CompiledBoard = {
   rules: [],
 };
 const boardsOf = (loaded: LoadedConfig) => [...loaded.boards, ADDED];
-const NO_MEMBERS: Members = { ids: new Set(), kept: new Set(), queries: [], unfetched: [] }; // a board whose source the desk doesn't run
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
@@ -498,7 +497,7 @@ export class Desk {
 
   reloadConfig(sync = false): Effect.Effect<void, FsError> {
     return Effect.map(this.readConfig(), (text) => {
-      const { loaded, errors, warnings } = parseConfig(text, this.settings);
+      const { loaded, errors, warnings } = parseConfig(text, this.settings, this.connectors);
       this.configText = text;
       this.configErrors = errors;
       this.configWarnings = warnings;
@@ -629,7 +628,7 @@ export class Desk {
       const m = migrateLegacy(text);
       if (!m) {
         // Nothing to move, so it's done: legacy keys saved later (desk_config save, an agent) only warn, never become settings.
-        if (parseConfig(text, this.settings).loaded) this.store.set("settings_migrated", this.now().toISOString());
+        if (parseConfig(text, this.settings, this.connectors).loaded) this.store.set("settings_migrated", this.now().toISOString());
         return;
       }
       if (this.settingsErrors.some((e) => e.path === "settings.json")) {
@@ -1054,8 +1053,8 @@ export class Desk {
       : undefined;
     for (const board of boardsOf(loaded)) {
       const scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "";
-      const source = this.connectors.find((c) => c.id === (board.config.source ?? "github"));
-      const m = source?.boardIds(board, scope, loaded) ?? NO_MEMBERS;
+      // config.ts refuses a board whose source the desk doesn't run.
+      const m = this.connectors.find((c) => c.id === (board.config.source ?? "github"))!.boardIds(board, scope, loaded);
       const ids = new Set(m.ids);
       // A coordinator's desk_add too, after you act on it, so it doesn't vanish once its pin stops counting as yours.
       if (board === ADDED)
@@ -2845,7 +2844,7 @@ export class Desk {
   }
 
   preview(text: string): PreviewResult {
-    const { loaded, errors, warnings } = parseConfig(text, this.settings);
+    const { loaded, errors, warnings } = parseConfig(text, this.settings, this.connectors);
     if (!loaded) return { errors, warnings, boards: [] };
     const cur = this.loaded ? this.snapshot() : null;
     const next = this.compute(loaded, -1);
@@ -2881,7 +2880,7 @@ export class Desk {
     return Effect.gen({ self: this }, function* () {
       if (base !== undefined && base !== this.configText && base !== textHash(this.configText))
         return yield* new Stale({ message: "config.toml changed on disk since you opened it; reload to see it, then reapply your edit" });
-      const { loaded, errors, warnings } = parseConfig(text, this.settings);
+      const { loaded, errors, warnings } = parseConfig(text, this.settings, this.connectors);
       if (!loaded) return { ok: false, errors, warnings };
       // A save never brings settings back into config.toml: an unmigrated desk would move them to settings.json on its next start.
       if (warnings.length) return { ok: false, errors: warnings, warnings: [] };

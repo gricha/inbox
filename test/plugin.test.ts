@@ -169,8 +169,12 @@ test("a board lists only its source's items: a notes board the notes, which GitH
   c.after(t.cleanup);
   fs.writeFileSync(path.join(t.home, "config.toml"), boards);
   runSync(t.desk.reloadConfig());
+  assert.deepEqual(t.desk.configErrors, [{ path: "boards[1].source", message: "must be one of github" }], "a source the desk doesn't run");
+  assert.ok(!t.desk.loaded?.boards.some((b) => b.config.id === "notes"), "the last good config stays");
   const notes = new Notes(t.desk);
   t.desk.connectors.push(notes);
+  runSync(t.desk.reloadConfig());
+  assert.deepEqual(t.desk.configErrors, []);
   // What a board places is still read as GitHub's, so this note carries GitHub's fields under its own id.
   const note = { ...makeItem({ kind: "issue", number: 1 }), ...notes.write("Call Ann about the release") };
   t.desk.store.putItems([note], note.updated_at);

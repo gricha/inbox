@@ -192,7 +192,7 @@ Four members are required: `id`, `look`, `resolved` and `row`. The optional ones
 
 Actions follow the same split. `row.actions` is what the menus offer, `row.cta` the one the row offers, and `write` checks and sends it. Only what's `yours` can be handed to your agent, and `handoff` says when it can't.
 
-**config.toml.** A board names its `source`, which defaults to `"github"`, so today's files parse unchanged. The core asks only that plugin's `members`, with the board's space's `scope` (GitHub's `org:x`). Its other keys are its source's; `queries` stays GitHub's, and config.ts's "needs at least one GitHub search query" applies to GitHub's boards.
+**config.toml.** A board names its `source`, which defaults to `"github"`, so today's files parse unchanged; one the desk doesn't run is a config error (`must be one of github`), as the key was before it existed. The core asks only that plugin's `members`, with the board's space's `scope` (GitHub's `org:x`). Its other keys are its source's; `queries` stays GitHub's, and config.ts's "needs at least one GitHub search query" applies to GitHub's boards.
 
 ```toml
 [[boards]]
@@ -296,7 +296,7 @@ Steps 2 to 5 do what any plugin design needs, whatever its shape: items carry th
 1. Add docs/plugins.md.
 2. **Items carry their source; the prune is per source.** The id's prefix is the source, so there's no column and no data migration. Add `Head`, with `Item extends Head`. `putItems` writes `node_id ?? ""` and `detail_at ?? now`. `pruneItems(source, before, keep)` deletes only that source's rows. Only the test fake needs it until Q. Test: a `notes:1` row outlives GitHub's 14-day prune.
 3. **Refs and fetch per source:** `Connector.refOf(text, held)` and `fetchOne`, which answers the stored id. `normRef`, `REF`, `resolve`'s matching, `itemId`'s regex and `hold`'s split move into github.ts. `hold`, `resolve` and `itemId` loop over `connectors`, with today's words and statuses.
-4. **Board membership per source:** boards get an optional `source`, and `Connector.boardIds(board, scope)` answers `Members`. `compute()` stops calling `gh.queriesFor` (desk.ts:1053) and reading `hits`, `kept` and `queries`. `KEEP_RESOLVED` becomes the core's. config.ts's query check applies to GitHub's boards.
+4. **Board membership per source:** boards get an optional `source`, one the desk runs, and `Connector.boardIds(board, scope)` answers `Members`. `compute()` stops calling `gh.queriesFor` (desk.ts:1053) and reading `hits`, `kept` and `queries`. `KEEP_RESOLVED` becomes the core's. config.ts's query check applies to GitHub's boards.
 5. **Context:** `Desk.me()` and `ctx` delegate to the connector, and init's first config comes from it. `agentKey`, `searchKey` and `github.poll_seconds` are still read in desk.ts.
 6. **`look()`, part 1:** `fields`, `activity` (others only), `since` (today's `waiting_since`), `freed`, `waits_since` and `resolved()`. `Entry` keeps GitHub's typed `analysis` beside `lens` until step 26, and each later step removes one group of its reads. `compute`, ingest's flips and `classify` read the lens; quiet is the later of updated_at and `since` (pinned by a new test).
 7. **Waits:** `until`, `happened` and `waits` (`UNTIL`). `act("snooze")` stores the plugin's key and refuses in `waits`' words. Card and the clients don't change.

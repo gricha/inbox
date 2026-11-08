@@ -33,6 +33,7 @@ function tomlError(e: unknown): ConfigError {
 export function parseConfig(
   text: string,
   settings: Settings = DEFAULTS,
+  sources: readonly { id: string }[] = [{ id: "github" }], // the connectors the desk runs: a board's `source` names one
 ): { loaded: LoadedConfig | null; errors: ConfigError[]; warnings: ConfigError[] } {
   const parsed = Result.try({ try: (): Raw => parse(text), catch: tomlError });
   if (Result.isFailure(parsed)) return { loaded: null, errors: [parsed.failure], warnings: [] };
@@ -139,6 +140,8 @@ export function parseConfig(
     const space = str(t.space, `${path}.space`, spaces[0]?.id ?? "");
     if (!spaces.some((s) => s.id === space)) err(`${path}.space`, `no space with id "${space}"`);
     const source = t.source === undefined ? undefined : str(t.source, `${path}.source`, "github");
+    if (source !== undefined && !sources.some((c) => c.id === source))
+      err(`${path}.source`, `must be one of ${sources.map((c) => c.id).join(", ")}`);
     const queries = [...strs(t.query, `${path}.query`), ...strs(t.queries, `${path}.queries`)];
     if (queries.length === 0 && (source ?? "github") === "github") err(`${path}.queries`, "needs at least one GitHub search query");
     const rawRules = t.rules === undefined ? [] : Array.isArray(t.rules) ? t.rules : (err(`${path}.rules`, "must be a list"), []);

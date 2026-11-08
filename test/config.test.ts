@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { defaultConfigText, migrateBotAsk, migrateConflict, migrateDrafts, migrateHard, parseConfig } from "../src/config.ts";
+import { DEFAULTS } from "../src/settings.ts";
 
 test("default configs parse cleanly", () => {
   for (const orgs of [["acme"], ["acme", "globex"], []]) {
@@ -60,8 +61,9 @@ query = "x"
   assert.ok(errors.some((e) => e.message.includes("duplicate board id")));
 });
 
-test("only GitHub's boards need a search query, and a board that names no source parses as before", () => {
-  const { errors } = parseConfig(`
+test("only GitHub's boards need a search query, a board's source is one the desk runs, and one that names none parses as before", () => {
+  const { errors } = parseConfig(
+    `
 [[spaces]]
 id = "w"
 [[boards]]
@@ -73,14 +75,27 @@ source = "github"
 [[boards]]
 id = "c"
 source = 1
-`);
+[[boards]]
+id = "d"
+source = "GitHub"
+query = "x"
+`,
+    DEFAULTS,
+    [{ id: "github" }, { id: "notes" }],
+  );
   assert.deepEqual(
     errors.map((e) => `${e.path}: ${e.message}`),
     [
       "boards[1].queries: needs at least one GitHub search query",
       "boards[2].source: must be a string",
       "boards[2].queries: needs at least one GitHub search query",
+      "boards[3].source: must be one of github, notes",
     ],
+  );
+  assert.deepEqual(
+    parseConfig(`[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nsource = "notes"\n`).errors,
+    [{ path: "boards[0].source", message: "must be one of github" }],
+    "a desk that runs only GitHub",
   );
   const board = parseConfig(`[[spaces]]\nid = "w"\n[[boards]]\nid = "a"\nquery = "x"\n`).loaded!.config.boards[0]!;
   assert.equal("source" in board, false);
