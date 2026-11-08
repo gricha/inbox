@@ -8,13 +8,16 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { Effect } from "effect";
+import { Hono } from "hono";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createServer as createViteServer } from "vite";
 import { Desk } from "../src/desk.ts";
+import { DeskError, NotFound, Upstream } from "../src/errors.ts";
 import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
-import { createApp, proxyUpgrades } from "../src/server.ts";
+import { createApp, proxyUpgrades, respond } from "../src/server.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
@@ -566,4 +569,49 @@ test("agents: Claude Code's status, and connect", async () => {
     }
     t.cleanup();
   }
+});
+
+test("a route's Effect answers a refusal with its status and tag, a client that left with 499, and anything else with a logged 500 Sentry sees", async () => {
+  const logs: string[] = [];
+  const log = (m: string) => {
+    logs.push(m);
+  };
+  const seen = new Map<string, unknown>();
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    await next();
+    seen.set(c.req.path, c.error);
+  });
+  const upstream = new Upstream({ message: "GitHub HTTP 500: oops" });
+  app.get("/value", (c) => respond(c, Effect.succeed({ ok: true }), { log }));
+  app.get("/refused", (c) => respond(c, Effect.fail(new NotFound({ message: 'no automation "nope"' })), { log }));
+  app.get("/legacy", (c) => respond(c, Effect.fail(new DeskError(409, "already answered")), { log }));
+  app.get("/upstream", (c) => respond(c, Effect.fail(upstream), { log }));
+  app.get("/bug", (c) => respond(c, Effect.die(new TypeError("x is undefined")), { log }));
+  app.get("/wait", (c) => respond(c, Effect.never, { log, read: true }));
+  const get = async (p: string) => {
+    const res = await app.request(`http://127.0.0.1${p}`);
+    return [res.status, await res.json()];
+  };
+  assert.deepEqual(await get("/value"), [200, { ok: true }]);
+  assert.deepEqual(await get("/refused"), [404, { error: 'no automation "nope"', tag: "NotFound" }]);
+  assert.deepEqual(await get("/legacy"), [409, { error: "already answered", tag: "Conflict" }]);
+  assert.deepEqual(await get("/upstream"), [502, { error: "GitHub HTTP 500: oops", tag: "Upstream" }]);
+  assert.deepEqual(await get("/bug"), [500, { error: "x is undefined", tag: "Internal" }]);
+  assert.deepEqual(
+    [seen.get("/refused"), seen.get("/legacy"), seen.get("/upstream")],
+    [undefined, undefined, upstream],
+    "the failure itself, for Sentry",
+  );
+  assert.ok(seen.get("/bug") instanceof TypeError);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0]!, /^error: .*x is undefined/s);
+  // The request kept here: a Request built from init follows its signal only while something holds it.
+  const gone = new AbortController();
+  const req = new Request("http://127.0.0.1/wait", { signal: gone.signal });
+  const waiting = app.request(req);
+  await sleep(20);
+  gone.abort();
+  assert.equal((await waiting).status, 499, "nothing to answer, and nothing logged");
+  assert.equal(logs.length, 1);
 });

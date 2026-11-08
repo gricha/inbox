@@ -8,7 +8,15 @@ import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { Desk, type ReviewDeps } from "../src/desk.ts";
-import { ClaudeApiError, ClaudeNotLoggedIn, CommandOutputTooLarge, GitHubGraphQLError, NOT_LOGGED_IN } from "../src/errors.ts";
+import {
+  ClaudeApiError,
+  ClaudeNotLoggedIn,
+  CommandFailed,
+  CommandNotFound,
+  CommandOutputTooLarge,
+  GitHubGraphQLError,
+  NOT_LOGGED_IN,
+} from "../src/errors.ts";
 import { GH_MISSING } from "../src/github/client.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
@@ -315,6 +323,22 @@ test("a command that fails says why in its last lines, its exit, or the hint for
   const big = new CommandOutputTooLarge({ command: "gh", limitBytes: 64 * 1024 * 1024 });
   assert.deepEqual([big._tag, big.message], ["CommandOutputTooLarge", "gh printed more than 64 MB, so it was stopped"]);
   for (const x of [f, quiet, env]) fs.rmSync(x.dir, { recursive: true });
+});
+
+test("a command's or claude's error is never empty: the coordinator keeps its words, and empty ones would erase its error", () => {
+  const blank = new CommandFailed({ command: "claude", code: 1, signal: null, stderr: "  \n\n" });
+  assert.deepEqual([blank._tag, blank.message], ["CommandFailed", "claude exited with 1"]);
+  const killed = new CommandFailed({ command: "claude", code: null, signal: "SIGTERM", stderr: "", cause: new Error("") });
+  assert.equal(killed.message, "claude exited with SIGTERM");
+  assert.equal(new CommandNotFound({ command: "claude", hint: "" }).message, "claude not found");
+  const busy = new ClaudeApiError({ message: " ", status: 529 });
+  assert.deepEqual([busy._tag, busy.message, busy.status], ["ClaudeApiError", "claude failed: API error 529", 529]);
+  assert.equal(new ClaudeApiError({ message: "" }).message, "claude failed");
+  assert.equal(
+    failureSync(claudeEnvelope(JSON.stringify({ is_error: true, result: "", api_error_status: 500 }))).message,
+    "claude failed: API error 500",
+  );
+  assert.equal(new ClaudeApiError({ message: "Overloaded" }).message, "Overloaded", "words of its own stay as they are");
 });
 
 test("an agent directory that can't be made fails as an FsError, in Node's words", posix, async () => {

@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { Hono } from "hono";
+import { Cause, Effect, Exit, Option } from "effect";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -14,7 +15,7 @@ import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
 import { Desk, DeskError } from "./desk.ts";
-import { errorBody, isDeskHttpError, legacyBody, type ErrorBody } from "./errors.ts";
+import { BadRequest, Conflict, errorBody, isDeskHttpError, legacyBody, type ErrorBody } from "./errors.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
@@ -122,6 +123,33 @@ export function proxyUpgrades(server: Server, port: number, ui: string): () => v
 // the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
 const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
+
+// A route's Effect, answered (docs/effect.md, Boundaries → HTTP). A refusal answers with its status and words; the client
+// going away (only a read passes its signal) with nothing; anything else is a logged 500. At 500 or more c.error is what
+// failed, so the Sentry middleware decides on it as on a throw.
+export async function respond<A, E>(
+  c: Context,
+  effect: Effect.Effect<A, E>,
+  opts: { log: (m: string) => void; read?: boolean },
+): Promise<Response> {
+  const exit = await Effect.runPromiseExit(effect, opts.read ? { signal: c.req.raw.signal } : undefined);
+  if (Exit.isSuccess(exit)) return c.json(exit.value as object);
+  if (Cause.hasInterruptsOnly(exit.cause)) return new Response(null, { status: 499 });
+  const failed = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
+  if (isDeskHttpError(failed)) {
+    if (failed.status >= 500) c.error = failed;
+    return c.json(errorBody(failed), failed.status);
+  }
+  if (failed instanceof DeskError) {
+    // effect-bridge(C6): DeskError goes
+    if (failed.status >= 500) c.error = failed;
+    return c.json(legacyBody(failed), failed.status as 400);
+  }
+  opts.log(`error: ${Cause.pretty(exit.cause)}`);
+  const e = Cause.squash(exit.cause);
+  c.error = e instanceof Error ? e : new Error(String(e));
+  return c.json({ error: c.error.message, tag: "Internal" } satisfies ErrorBody, 500);
+}
 
 // A line of a PR's diff, or a range from `start` to it, rebuilt from its parts; null when any of them is bad.
 function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
@@ -400,31 +428,50 @@ export function createApp(desk: Desk, port: number): Hono {
   });
   // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
   // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one.
-  app.get("/api/automations", (c) => c.json(desk.automations.view()));
+  const log = (m: string) => {
+    desk.log(m);
+  };
+  app.get("/api/automations", (c) =>
+    respond(
+      c,
+      Effect.sync(() => desk.automations.view()),
+      { log, read: true },
+    ),
+  );
   app.put("/api/automations/:id", async (c) => {
     ready();
     const b = await input(c);
-    if (
-      typeof b.name !== "string" ||
-      typeof b.schedule !== "string" ||
-      typeof b.prompt !== "string" ||
-      (b.on !== undefined && typeof b.on !== "boolean")
-    )
-      throw new DeskError(400, "need { name, schedule, prompt, on? }");
-    const a = desk.automations.set(c.req.param("id"), { name: b.name, schedule: b.schedule, prompt: b.prompt, on: b.on }, fromDesk(c));
-    return c.json({ ok: true, automation: a });
+    const set = Effect.gen(function* () {
+      if (
+        typeof b.name !== "string" ||
+        typeof b.schedule !== "string" ||
+        typeof b.prompt !== "string" ||
+        (b.on !== undefined && typeof b.on !== "boolean")
+      )
+        return yield* new BadRequest({ message: "need { name, schedule, prompt, on? }" });
+      const a = yield* desk.automations.set(
+        c.req.param("id"),
+        { name: b.name, schedule: b.schedule, prompt: b.prompt, on: b.on },
+        fromDesk(c),
+      );
+      return { ok: true, automation: a };
+    });
+    return respond(c, set, { log });
   });
   app.delete("/api/automations/:id", (c) => {
     if (!fromDesk(c)) throw new DeskError(403, "delete it in the desk's window: Settings → Automations");
-    desk.automations.remove(c.req.param("id"));
-    return c.json({ ok: true });
+    return respond(c, Effect.as(desk.automations.remove(c.req.param("id")), { ok: true }), { log });
   });
   app.post("/api/automations/:id/run", (c) => {
     ready();
-    const a = desk.automations.get(c.req.param("id"));
-    if (!a.on && !fromDesk(c)) throw new DeskError(409, `"${a.name}" is off: the owner turns it on in Settings → Automations`);
-    void desk.automations.run(a.id, "now");
-    return c.json({ ok: true, running: a.id });
+    const run = Effect.gen(function* () {
+      const a = yield* desk.automations.get(c.req.param("id"));
+      if (!a.on && !fromDesk(c))
+        return yield* new Conflict({ message: `"${a.name}" is off: the owner turns it on in Settings → Automations` });
+      void desk.automations.run(a, "now");
+      return { ok: true, running: a.id };
+    });
+    return respond(c, run, { log });
   });
   app.post("/api/undo", async (c) => {
     ready();

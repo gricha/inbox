@@ -1,13 +1,13 @@
 // Automations: your instructions, run on their schedule by your own Claude Code, read only. What a run finds that needs you
 // goes on your desk with its why; nothing else comes of it. Agents may draft one; only you turn it on, in the desk.
 import { randomBytes } from "node:crypto";
-import { Cause, Effect, Exit } from "effect";
+import { Effect, Result, type Fiber } from "effect";
 import { DENY as COORDINATOR_DENY, denyDir } from "./coordinator.ts";
 import type { Desk } from "./desk.ts";
-import { DeskError } from "./errors.ts";
+import { BadRequest, ClaudeBadOutput, NotFound, type DeskError, type FsError } from "./errors.ts";
 import { claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { Automation, AutomationRun, AutomationView } from "./types.ts";
-import { detached, report } from "./sentry.ts";
+import { report } from "./sentry.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -149,11 +149,13 @@ export function nextAt(s: Schedule, now: Date): Date {
   }
 }
 
+type Item = AutomationRun["items"][number];
+
 export class Automations {
   desk: Desk;
   timer: NodeJS.Timeout | null = null;
-  running = new Map<string, { p: Promise<AutomationRun>; stop: AbortController }>();
-  abort = new AbortController();
+  // Each run in progress: p settles with it however it ends, and interrupting its fiber stops it.
+  running = new Map<string, { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null }>();
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -167,10 +169,11 @@ export class Automations {
     return (this.desk.store.get(RUNS) as AutomationRun[] | null) ?? [];
   }
 
-  get(id: string): Automation {
-    const a = this.all().find((x) => x.id === id);
-    if (!a) throw new DeskError(404, `no automation "${id}"`);
-    return a;
+  get(id: string): Effect.Effect<Automation, NotFound> {
+    return Effect.suspend((): Effect.Effect<Automation, NotFound> => {
+      const a = this.all().find((x) => x.id === id);
+      return a ? Effect.succeed(a) : Effect.fail(new NotFound({ message: `no automation "${id}"` }));
+    });
   }
 
   view(): AutomationView[] {
@@ -187,47 +190,56 @@ export class Automations {
   }
 
   // Yours from the desk's window; an agent's draft or edit is off until you turn it on there.
-  set(id: string, b: { name: string; schedule: string; prompt: string; on?: boolean }, byYou: boolean): Automation {
-    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) throw new DeskError(400, "an automation's id is lowercase letters, digits and -, up to 40");
-    const name = this.desk.line(b.name, "name", 80);
-    const s = parseSchedule(b.schedule);
-    if (typeof s === "string") throw new DeskError(400, `schedule: ${s}`);
-    const said = b.prompt.trim();
-    if (!said) throw new DeskError(400, "the instruction is empty");
-    if (said.length > 8_000) throw new DeskError(400, "keep the instruction under 8000 characters");
-    const all = this.all();
-    const was = all.find((x) => x.id === id);
-    // Its name goes into the run's prompt as yours too, so an agent's rename is a change.
-    const changed = !was || was.name !== name || was.prompt !== said || was.schedule !== b.schedule.trim().toLowerCase();
-    const on = byYou ? (b.on ?? was?.on ?? true) : was?.on === true && !changed;
-    const a: Automation = {
-      id,
-      name,
-      schedule: b.schedule.trim().toLowerCase(),
-      prompt: said,
-      on,
-      by: byYou ? "you" : changed ? "an agent" : (was?.by ?? "an agent"),
-      updated_at: this.desk.now().toISOString(),
-    };
-    this.desk.store.set(KEY, was ? all.map((x) => (x.id === id ? a : x)) : [...all, a]);
-    this.desk.changed();
-    return a;
+  set(
+    id: string,
+    b: { name: string; schedule: string; prompt: string; on?: boolean },
+    byYou: boolean,
+  ): Effect.Effect<Automation, BadRequest | DeskError> {
+    return Effect.gen({ self: this }, function* () {
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id))
+        return yield* new BadRequest({ message: "an automation's id is lowercase letters, digits and -, up to 40" });
+      // effect-bridge(C5a): line becomes an Effect; what it throws is the 400 it was
+      const name = yield* Effect.try({ try: () => this.desk.line(b.name, "name", 80), catch: (e) => e as DeskError });
+      const s = parseSchedule(b.schedule);
+      if (typeof s === "string") return yield* new BadRequest({ message: `schedule: ${s}` });
+      const said = b.prompt.trim();
+      if (!said) return yield* new BadRequest({ message: "the instruction is empty" });
+      if (said.length > 8_000) return yield* new BadRequest({ message: "keep the instruction under 8000 characters" });
+      const all = this.all();
+      const was = all.find((x) => x.id === id);
+      // Its name goes into the run's prompt as yours too, so an agent's rename is a change.
+      const changed = !was || was.name !== name || was.prompt !== said || was.schedule !== b.schedule.trim().toLowerCase();
+      const on = byYou ? (b.on ?? was?.on ?? true) : was?.on === true && !changed;
+      const a: Automation = {
+        id,
+        name,
+        schedule: b.schedule.trim().toLowerCase(),
+        prompt: said,
+        on,
+        by: byYou ? "you" : changed ? "an agent" : (was?.by ?? "an agent"),
+        updated_at: this.desk.now().toISOString(),
+      };
+      this.desk.store.set(KEY, was ? all.map((x) => (x.id === id ? a : x)) : [...all, a]);
+      this.desk.changed();
+      return a;
+    });
   }
 
   // Its run in progress stops, and adds nothing.
-  remove(id: string): void {
-    this.get(id);
-    this.running.get(id)?.stop.abort();
-    this.running.delete(id);
-    this.desk.store.set(
-      KEY,
-      this.all().filter((x) => x.id !== id),
-    );
-    this.desk.store.set(
-      RUNS,
-      this.runs().filter((r) => r.automation !== id),
-    );
-    this.desk.changed();
+  remove(id: string): Effect.Effect<void, NotFound> {
+    return Effect.map(this.get(id), () => {
+      this.running.get(id)?.fiber?.interruptUnsafe();
+      this.running.delete(id);
+      this.desk.store.set(
+        KEY,
+        this.all().filter((x) => x.id !== id),
+      );
+      this.desk.store.set(
+        RUNS,
+        this.runs().filter((r) => r.automation !== id),
+      );
+      this.desk.changed();
+    });
   }
 
   start(): void {
@@ -236,18 +248,22 @@ export class Automations {
     const now = this.desk.now().toISOString();
     for (const r of this.runs()) if (!r.done_at) this.record({ ...r, done_at: now, error: CUT });
     this.timer = setInterval(() => {
-      detached(() => {
-        this.tick();
-      });
+      this.desk.runner.fork(
+        "automations",
+        Effect.sync(() => {
+          this.tick();
+        }),
+      );
     }, TICK);
     this.timer.unref();
     this.tick();
   }
 
+  // The desk stopping: its runs are interrupted, so they record nothing and the next start marks them cut.
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.abort.abort();
+    for (const r of this.running.values()) r.fiber?.interruptUnsafe();
   }
 
   // Each on automation whose last due time passed since its last run (or since you set it) runs once: a desk that slept
@@ -261,28 +277,17 @@ export class Automations {
       if (!a.on || typeof s === "string" || this.running.has(a.id)) continue;
       const due = dueAt(s, now)?.toISOString();
       const last = runs.findLast((r) => r.automation === a.id && r.error !== CUT)?.at ?? "";
-      if (due && due > a.updated_at && due > last) void this.run(a.id, "schedule");
+      if (due && due > a.updated_at && due > last) void this.run(a, "schedule");
     }
   }
 
-  // Run now: yours from the desk's window, even before you turn it on; an agent's only once it's on.
-  run(id: string, trigger: AutomationRun["trigger"]): Promise<AutomationRun> {
-    const going = this.running.get(id);
+  // Run now: yours from the desk's window, even before you turn it on; an agent's only once it's on. Forked through the
+  // desk's runner, one at a time per automation: what it gives settles with the run however it ends, interrupted (deleted
+  // while it runs, or the desk stopping) as far as it got.
+  run(a: Automation, trigger: AutomationRun["trigger"]): Promise<AutomationRun> {
+    const going = this.running.get(a.id);
     if (going) return going.p;
-    const a = this.get(id);
-    const stop = new AbortController();
-    const p = this.go(a, trigger, stop.signal).finally(() => {
-      if (this.running.get(id)?.p === p) this.running.delete(id);
-      this.desk.changed();
-    });
-    this.running.set(id, { p, stop });
-    this.desk.changed();
-    return p;
-  }
-
-  async go(a: Automation, trigger: AutomationRun["trigger"], stop: AbortSignal): Promise<AutomationRun> {
-    const runs = this.runs();
-    const last = runs.findLast((r) => r.automation === a.id && !r.error) ?? null;
+    const last = this.runs().findLast((r) => r.automation === a.id && !r.error) ?? null;
     const run: AutomationRun = {
       id: randomBytes(4).toString("hex"),
       automation: a.id,
@@ -295,8 +300,28 @@ export class Automations {
       session: null,
     };
     this.record(run);
-    try {
-      const spawnAs = claudeSpawn(claudeCommand(), [
+    let resolve: (done: AutomationRun) => void = () => {};
+    const p = new Promise<AutomationRun>((r) => {
+      resolve = r;
+    });
+    const entry: { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null } = { p, fiber: null };
+    this.running.set(a.id, entry);
+    const end = () => {
+      if (this.running.get(a.id) === entry) this.running.delete(a.id);
+      this.desk.changed();
+      resolve(run);
+    };
+    entry.fiber = this.desk.runner.fork("automation", Effect.ensuring(this.go(a, run, last), Effect.sync(end)), a.id);
+    if (!entry.fiber) end();
+    this.desk.changed();
+    return p;
+  }
+
+  // One run: what fails it, or a bug in it, is its error, reported and notified once. Interrupted, it records and
+  // notifies nothing, and its done_at stays null.
+  go(a: Automation, run: AutomationRun, last: AutomationRun | null): Effect.Effect<void> {
+    const body = Effect.gen({ self: this }, function* () {
+      const spawnAs = yield* claudeSpawn(claudeCommand(), [
         "-p",
         "--output-format",
         "json",
@@ -307,49 +332,51 @@ export class Automations {
         "--json-schema",
         JSON.stringify(SCHEMA),
       ]);
-      const call = Effect.flatMap(spawnAs, (s) =>
-        runCommand(s, {
-          input: prompt(a, run.at, last),
-          cwd: this.dir(),
-          timeout: TIMEOUT,
-          stdoutOnError: true,
-          missing: claudeMissing(claudeCommand()),
-        }),
-      );
-      // effect-bridge(C4b): go is still a promise; its AbortControllers interrupt the call, which reads "stopped" as before
-      const exit = await Effect.runPromiseExit(call, { signal: AbortSignal.any([this.abort.signal, stop]) });
-      if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) throw new Error("stopped");
-      const out = await Effect.runPromise(exit);
-      if (stop.aborted || !this.all().some((x) => x.id === a.id)) return run; // deleted while it ran
+      const out = yield* runCommand(spawnAs, {
+        input: prompt(a, run.at, last),
+        cwd: yield* this.dir(),
+        timeout: TIMEOUT,
+        stdoutOnError: true,
+        missing: claudeMissing(claudeCommand()),
+      });
+      if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
       run.session = sessionOf(out);
-      const env = await Effect.runPromise(claudeEnvelope(out)); // effect-bridge(C4b): what it fails with rejects, as its throw did
+      const env = yield* claudeEnvelope(out);
       const answer = (env.answer ?? {}) as { summary?: unknown; items?: unknown };
-      if (typeof answer.summary !== "string") throw new Error("the run gave no answer: no summary and no list");
+      if (typeof answer.summary !== "string")
+        return yield* new ClaudeBadOutput({ message: "the run gave no answer: no summary and no list", excerpt: out.slice(0, 500) });
       run.summary = answer.summary.trim();
       const found = Array.isArray(answer.items) ? answer.items : [];
       for (const raw of found.slice(0, ITEMS_MAX)) {
         const x = (raw ?? {}) as { ref?: unknown; why?: unknown };
         if (typeof x.ref !== "string" || typeof x.why !== "string" || !x.why.trim()) continue;
-        try {
-          run.items.push(await this.desk.push(x.ref, x.why, a));
-        } catch (e) {
-          // As the run wrote it, on one short line: it shows in the desk, and never goes into a later prompt.
-          const ref = x.ref.replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
-          const one = (t: string, n: number) => t.replaceAll(/\s+/g, " ").trim().slice(0, n);
-          run.items.push({ item_id: one(ref, 100), why: one(x.why, 300), outcome: "failed", error: (e as Error).message });
-        }
+        const listed = { ref: x.ref, why: x.why };
+        // effect-bridge(C5b): push becomes an Effect; what it rejects with is the item's error, as before
+        const pushed = Effect.tryPromise({ try: () => this.desk.push(listed.ref, listed.why, a), catch: (e) => e as DeskError });
+        run.items.push(yield* pushed.pipe(Effect.catch((e) => Effect.succeed(failedItem(listed, e.message)))));
       }
       if (found.length > ITEMS_MAX) run.summary += ` (It listed ${found.length}; the desk took the first ${ITEMS_MAX}.)`;
-    } catch (e) {
-      if (stop.aborted) return run;
-      report(e, "automation", a.id);
-      run.error = (e as Error).message.trim() || "the run failed";
-    }
-    run.done_at = this.desk.now().toISOString();
-    if (this.desk.stopped || stop.aborted) return run;
-    this.record(run);
-    this.tell(a, run);
-    return run;
+      return true;
+    });
+    const failed = (e: unknown, message: string) =>
+      Effect.sync(() => {
+        report(e, "automation", a.id);
+        run.error = message.trim() || "the run failed";
+        return true;
+      });
+    return body.pipe(
+      Effect.catchDefect((bug) => failed(bug, bug instanceof Error ? bug.message : String(bug))),
+      Effect.catch((e) => failed(e, e.message)),
+      Effect.flatMap((kept) =>
+        Effect.sync(() => {
+          if (!kept) return;
+          run.done_at = this.desk.now().toISOString();
+          if (this.desk.stopped) return;
+          this.record(run);
+          this.tell(a, run);
+        }),
+      ),
+    );
   }
 
   record(run: AutomationRun): void {
@@ -371,18 +398,23 @@ export class Automations {
   }
 
   // The desk home's automations directory; its project settings keep the deny list, beside the owner's own.
-  dir(): string {
+  dir(): Effect.Effect<string, FsError> {
     return denyDir(this.desk.home, "automations", DENY);
   }
 }
 
+// As the run wrote it, on one short line: it shows in the desk, and never goes into a later prompt.
+function failedItem(x: { ref: string; why: string }, error: string): Item {
+  const ref = x.ref.replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
+  const one = (t: string, n: number) => t.replaceAll(/\s+/g, " ").trim().slice(0, n);
+  return { item_id: one(ref, 100), why: one(x.why, 300), outcome: "failed", error };
+}
+
+// What claude printed that isn't its envelope has no session.
 function sessionOf(out: string): string | null {
-  try {
-    const id = (JSON.parse(out) as { session_id?: unknown }).session_id;
-    return typeof id === "string" ? id : null;
-  } catch {
-    return null;
-  }
+  const parsed = Result.try({ try: () => (JSON.parse(out) as { session_id?: unknown }).session_id, catch: () => null });
+  const id = Result.getOrElse(parsed, () => null);
+  return typeof id === "string" ? id : null;
 }
 
 // The owner's instruction is theirs and trusted; everything a run reads is data.

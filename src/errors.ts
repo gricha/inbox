@@ -8,7 +8,6 @@ import { Data } from "effect";
 // ---------------------------------------------------------------- what the HTTP API refuses with (status: its answer)
 
 // What you sent can't be read or isn't allowed.
-/** @public until C4b */
 export class BadRequest extends Data.TaggedError("BadRequest")<{ readonly message: string }> {
   get status(): 400 {
     return 400;
@@ -24,7 +23,6 @@ export class Forbidden extends Data.TaggedError("Forbidden")<{ readonly message:
 }
 
 // No such item, board, ask, inquiry, automation or route.
-/** @public until C4b */
 export class NotFound extends Data.TaggedError("NotFound")<{ readonly message: string }> {
   get status(): 404 {
     return 404;
@@ -44,7 +42,6 @@ export class AmbiguousRef extends Data.TaggedError("AmbiguousRef")<{
 }
 
 // A state that refuses it: in Merging already, not your PR, already answered, your agent is off…
-/** @public until C4b */
 export class Conflict extends Data.TaggedError("Conflict")<{ readonly message: string }> {
   get status(): 409 {
     return 409;
@@ -170,7 +167,7 @@ export const fsError =
 // The command isn't on PATH (or cmd.exe can't find it): the hint, what to install, is the whole message.
 export class CommandNotFound extends Data.TaggedError("CommandNotFound")<{ readonly command: string; readonly hint: string }> {
   override get message(): string {
-    return this.hint;
+    return this.hint || `${this.command} not found`;
   }
 }
 
@@ -196,8 +193,9 @@ export class CommandOutputTooLarge extends Data.TaggedError("CommandOutputTooLar
   }
 }
 
-// It exited non-zero or couldn't start: the last lines it wrote to stderr, else Node's error (cause), else its exit.
-// summary: the words of a caller that has its own (your agent's CLI says what to run yourself, launchctl its step).
+// It exited non-zero or couldn't start: the last lines it wrote to stderr, else Node's error (cause), else its exit, which
+// is also what a stderr of blank lines says. summary: the words of a caller that has its own (your agent's CLI says what to
+// run yourself, launchctl its step).
 export class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly command: string;
   readonly code: number | null;
@@ -210,7 +208,7 @@ export class CommandFailed extends Data.TaggedError("CommandFailed")<{
     if (this.summary) return this.summary;
     const why =
       this.stderr || (this.cause instanceof Error ? this.cause.message : `${this.command} exited with ${this.code ?? this.signal}`);
-    return why.trim().split("\n").slice(-3).join(" ");
+    return why.trim().split("\n").slice(-3).join(" ") || `${this.command} exited with ${this.code ?? this.signal}`;
   }
 }
 
@@ -238,8 +236,18 @@ export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ r
   }
 }
 
-// claude answered with an error (is_error): the API's message ("Overloaded"), and its status when it gave one.
-export class ClaudeApiError extends Data.TaggedError("ClaudeApiError")<{ readonly message: string; readonly status?: number }> {}
+// claude answered with an error (is_error): the API's message ("Overloaded"), and its status when it gave one. With no
+// words, its status says it: the coordinator keeps the message, and an empty one would erase the error it keeps.
+export class ClaudeApiError extends Data.TaggedError("ClaudeApiError")<{ readonly message: string; readonly status?: number }> {
+  constructor(args: { readonly message: string; readonly status?: number }) {
+    const said = args.message.trim()
+      ? args.message
+      : args.status === undefined
+        ? "claude failed"
+        : `claude failed: API error ${args.status}`;
+    super({ ...args, message: said });
+  }
+}
 
 // What claude answered can't be read, or isn't an answer (no summary): excerpt is what it printed, cause the parser's error.
 export class ClaudeBadOutput extends Data.TaggedError("ClaudeBadOutput")<{

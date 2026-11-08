@@ -3,12 +3,12 @@
 // owner's ask. Claude's own daemon runs it, so a desk restart leaves it be.
 import fs from "node:fs";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
+import { ClaudeBadOutput, CommandBadOutput, fsError, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
-import { detached, report } from "./sentry.ts";
+import { report } from "./sentry.ts";
 
 export const NAME = COORDINATOR_NAME;
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
@@ -49,20 +49,29 @@ type Mode = keyof typeof PERMISSION;
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
 
-// <home>/<name>, whose project settings keep every rule of deny beside the owner's own.
-export function denyDir(home: string, name: string, deny: string[]): string {
+// <home>/<name>, whose project settings keep every rule of deny beside the owner's own. Settings that don't parse fail as
+// their read, in the parser's words.
+export const denyDir = Effect.fnUntraced(function* (home: string, name: string, deny: string[]): Effect.fn.Return<string, FsError> {
   const dir = path.join(home, name);
   const file = path.join(dir, ".claude", "settings.json");
-  const s = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as { permissions?: { deny?: string[] } }) : {};
+  type Settings = { permissions?: { deny?: string[] } };
+  const s: Settings = fs.existsSync(file)
+    ? yield* Effect.try({ try: () => JSON.parse(fs.readFileSync(file, "utf8")) as Settings, catch: fsError("read", file) })
+    : {};
   const have = s.permissions?.deny ?? [];
   const missing = deny.filter((r) => !have.includes(r));
   if (missing.length > 0) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    yield* Effect.try({ try: () => fs.mkdirSync(path.dirname(file), { recursive: true }), catch: fsError("mkdir", path.dirname(file)) });
     const next = { ...s, permissions: { ...s.permissions, deny: [...have, ...missing] } };
-    fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+    yield* Effect.try({
+      try: () => {
+        fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+      },
+      catch: fsError("write", file),
+    });
   }
   return dir;
-}
+});
 
 interface Agent {
   id: string;
@@ -74,20 +83,25 @@ interface Agent {
   startedAt?: number;
 }
 
-// effect-bridge(C4b): the coordinator is still promises; cmd.exe's refusal still throws before anything starts
-const claude = (args: string[], cwd?: string) =>
-  Effect.runPromise(
-    runCommand(Effect.runSync(claudeSpawn(claudeCommand(), args)), { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
+// A minute at most; what cmd.exe can't pass fails before anything starts. Interrupted, it stops the command and waits for it.
+const claude = (args: string[], cwd?: string): Effect.Effect<string, CommandError> =>
+  Effect.flatMap(claudeSpawn(claudeCommand(), args), (s) =>
+    runCommand(s, { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
   );
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+// What a run fails with: a claude command, what it printed, or the coordinator's folder.
+type RunError = CommandError | CommandBadOutput | ClaudeBadOutput | FsError;
+
+// The id claude says it backgrounded.
+function backgrounded(out: string): Effect.Effect<string, ClaudeBadOutput> {
+  const id = /backgrounded\W+([\w-]+)/.exec(out)?.[1];
+  if (id) return Effect.succeed(id);
+  const message = `claude didn't background it: ${out.trim().split("\n").at(-1) ?? ""}`;
+  return Effect.fail(new ClaudeBadOutput({ message, excerpt: out.slice(0, 500) }));
+}
+
+// kill(pid, 0) refuses a process that's gone.
+const alive = (pid: number) => Result.isSuccess(Result.try({ try: () => process.kill(pid, 0), catch: () => null }));
 
 const span = (s: "new" | "old") => (s === "old" ? "removed " : "");
 // Where lines are, by number and side only: the file's name is PR text, so desk_ask gives it.
@@ -145,8 +159,8 @@ export class Coordinator {
   asked = false; // Wake it or Start it now in Merging
   timer: NodeJS.Timeout | null = null;
   ticker: NodeJS.Timeout | null = null;
-  flushing: Promise<void> | null = null;
-  stopping: Promise<void> | null = null;
+  flushing: Promise<void> | null = null; // the run in flight, forked through the desk's runner; it settles, never rejecting
+  stopping: Promise<void> | null = null; // turning it off: its process stopping, which a run waits for
   checked = 0;
   status: CoordinatorView["status"] = null;
   watching: NodeJS.Timeout | null = null;
@@ -190,7 +204,7 @@ export class Coordinator {
   }
 
   // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.
-  dir(): string {
+  dir(): Effect.Effect<string, FsError> {
     return denyDir(this.desk.home, "coordinator", DENY);
   }
 
@@ -211,7 +225,7 @@ export class Coordinator {
   start(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
-      detached(() => void this.flush());
+      void this.flush();
     }, this.every);
     this.ticker.unref();
     void this.flush();
@@ -226,12 +240,15 @@ export class Coordinator {
     this.schedule();
   }
 
-  // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle.
-  tell(line: string): Promise<void> {
-    Effect.runSync(claudeSpawn(claudeCommand(), [line])); // effect-bridge(C4b): throws on what cmd.exe can't pass
-    this.desk.store.set(ASKS, [...this.asks(), line]);
-    this.watch();
-    return this.again();
+  // The owner's ask goes now, not with the next batch: once a run in progress is done, and once it's idle. What cmd.exe
+  // can't pass fails before it's kept; what it gives waits for the run that hands it over, which never fails.
+  tell(line: string): Effect.Effect<Effect.Effect<void>, UnsafeArgument> {
+    return Effect.map(claudeSpawn(claudeCommand(), [line]), () => {
+      this.desk.store.set(ASKS, [...this.asks(), line]);
+      this.watch();
+      const told = this.again();
+      return Effect.promise(() => told);
+    });
   }
 
   // While one of your asks waits on its answer, what it's doing is looked at often, so the chat can say: on it,
@@ -245,7 +262,7 @@ export class Coordinator {
         this.watching = null;
         return;
       }
-      if (!this.flushing) detached(() => void this.find().catch(() => null));
+      if (!this.flushing) this.desk.runner.fork("coordinator", Effect.ignore(this.find())); // a look that fails: the next run says why
     }, this.watchEvery);
     this.watching.unref();
   }
@@ -268,7 +285,7 @@ export class Coordinator {
     if (this.timer || this.desk.stopped || !this.on || !(this.news().length || this.asks().length || this.asked)) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      detached(() => void this.flush());
+      void this.flush();
     }, this.batch);
     this.timer.unref();
   }
@@ -287,23 +304,50 @@ export class Coordinator {
     this.desk.store.set(NEWS, null);
     this.desk.store.set(ASKS, null);
     this.asked = false;
-    this.stopping = (async () => {
-      await this.flushing;
+    const flushing = this.flushing;
+    const halt = Effect.gen({ self: this }, function* () {
+      if (flushing) yield* Effect.promise(() => flushing);
       if (!this.saved()) return;
-      try {
-        const a = await this.find();
-        if (a) await this.halt(a);
-      } catch (e) {
-        this.desk.log(`coordinator: ${(e as Error).message}`);
-      }
-    })();
+      const a = yield* this.find();
+      if (a) yield* this.halt(a);
+    });
+    this.stopping = this.fork(
+      halt.pipe(
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            this.desk.log(`coordinator: ${e.message}`);
+          }),
+        ),
+      ),
+    );
     return this.stopping;
   }
 
   // Picks it up, resumes it if it stopped, and hands it what's waiting once it's idle; looks again a batch later while it works.
+  // One run at a time, forked through the desk's runner: the desk stopping interrupts it, and what was waiting stays.
   flush(): Promise<void> {
-    this.flushing ??= this.run();
-    return this.flushing;
+    if (this.flushing) return this.flushing;
+    let ended = false; // a run that ends before its first wait (it's off) has ended already
+    const p = this.fork(this.run(), () => {
+      ended = true;
+      this.flushing = null;
+    });
+    if (!ended) this.flushing = p;
+    return p;
+  }
+
+  // Forked through the desk's runner; what it gives settles, never rejecting, once the fiber ends, however it ends.
+  fork(effect: Effect.Effect<void>, ended: () => void = () => {}): Promise<void> {
+    let resolve = () => {};
+    const p = new Promise<void>((r) => {
+      resolve = r;
+    });
+    const end = () => {
+      ended();
+      resolve();
+    };
+    if (!this.desk.runner.fork("coordinator", Effect.ensuring(effect, Effect.sync(end)))) end();
+    return p;
   }
 
   // The run in progress may have read the asks or settings before they changed.
@@ -312,12 +356,15 @@ export class Coordinator {
     await this.flush();
   }
 
-  // A failure keeps what's waiting for the next wake or check.
-  async run(): Promise<void> {
-    try {
-      await this.stopping; // on again right after off: its process must be gone first, or the resume starts a copy
+  // A failure keeps what's waiting for the next wake or check, and says why in Merging; a bug in it does the same. It
+  // never fails: failure keeps what failed it for the routes' "didn't start".
+  run(): Effect.Effect<void> {
+    const body: Effect.Effect<void, RunError> = Effect.gen({ self: this }, function* () {
+      // On again right after off: its process must be gone first, or the resume starts a copy.
+      const stopping = this.stopping;
+      if (stopping) yield* Effect.promise(() => stopping);
       if (!this.on) return;
-      const a = await this.find();
+      const a = yield* this.find();
       this.checked = Date.now(); // here, not in find(): the watch's looks mustn't hold off the link lookup
       const news = this.news(); // after looking, so a wake that came meanwhile isn't left to the next check
       const asks = this.asks();
@@ -337,24 +384,26 @@ export class Coordinator {
         this.asked = false;
         // Created only with something to deliver: a scratch desk's would reach the owner's desk through its MCP tools.
         if (!a)
-          await this.launch(
+          yield* this.launch(
             ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : []), `${ROLE} ${text}`],
             mode,
           );
         else {
-          await this.halt(a);
-          await this.launch([...resume, text], mode);
+          yield* this.halt(a);
+          yield* this.launch([...resume, text], mode);
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
         this.saw("busy"); // it has a turn now; the next look says how it goes
       } else if (a && (!a.pid || (switching && idle))) {
-        await this.halt(a);
-        await this.launch(resume, mode); // no prompt, so no turn
+        yield* this.halt(a);
+        yield* this.launch(resume, mode); // no prompt, so no turn
       }
       const s = this.saved();
       if (s && !s.url) {
-        const url = /https:\/\/claude\.ai\/code\/session_\w+/.exec(await claude(["logs", s.id]).catch(() => ""))?.[0];
+        // The link is best effort: a lookup that fails looks again on the next run.
+        const logs = yield* claude(["logs", s.id]).pipe(Effect.orElseSucceed(() => ""));
+        const url = /https:\/\/claude\.ai\/code\/session_\w+/.exec(logs)?.[0];
         if (url) {
           this.desk.store.set(KEY, { ...s, url });
           this.desk.changed();
@@ -363,21 +412,36 @@ export class Coordinator {
       this.failure = null;
       this.failed(null);
       this.schedule();
-    } catch (e) {
-      this.asked = false;
-      this.failure = e;
-      if (!this.desk.stopped) report(e, "coordinator"); // not when the desk stopping killed it
-      this.desk.log(`coordinator: ${(e as Error).message}`);
-      this.failed((e as Error).message.trim());
-    } finally {
-      this.flushing = null;
-    }
+    });
+    return body.pipe(
+      Effect.catchDefect((bug) =>
+        Effect.sync(() => {
+          this.broke(bug, bug instanceof Error ? bug.message : String(bug));
+        }),
+      ),
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          this.broke(e, e.message);
+        }),
+      ),
+    );
+  }
+
+  // What stopped a run: reported once, logged, kept for the routes, and shown in Merging.
+  broke(e: unknown, message: string): void {
+    this.asked = false;
+    this.failure = e;
+    if (!this.desk.stopped) report(e, "coordinator");
+    this.desk.log(`coordinator: ${message}`);
+    this.failed(message.trim());
   }
 
   // --resume continues it (same id and history) only once its process has exited, and only with no other flag.
-  async halt(a: Agent): Promise<void> {
-    if (a.status) await claude(["stop", a.id]);
-    for (let i = 0; a.pid && i < 50 && alive(a.pid); i++) await sleep(200);
+  halt(a: Agent): Effect.Effect<void, CommandError> {
+    return Effect.gen(function* () {
+      if (a.status) yield* claude(["stop", a.id]);
+      for (let i = 0; a.pid && i < 50 && alive(a.pid); i++) yield* Effect.sleep(200);
+    });
   }
 
   message(news: [string, string][], asks: string[]): string {
@@ -392,39 +456,48 @@ export class Coordinator {
   }
 
   // Keeps the id claude says it backgrounded: a copy's, if it made one.
-  async launch(args: string[], mode: Mode): Promise<void> {
-    const out = await claude(args, this.dir());
-    const id = /backgrounded\W+([\w-]+)/.exec(out)?.[1];
-    if (!id) throw new Error(`claude didn't background it: ${out.trim().split("\n").at(-1) ?? ""}`);
-    const s = this.saved();
-    if (id !== s?.id || mode !== s.mode) {
-      this.desk.store.set(KEY, id === s?.id ? { ...s, mode } : { id, mode });
-      this.desk.changed();
-    }
-    const note = /^note: .*/m.exec(out)?.[0];
-    this.desk.log(`coordinator: ${args[0] === "--bg" ? "created" : "resumed"} ${id}${note ? ` (${note})` : ""}`);
+  launch(args: string[], mode: Mode): Effect.Effect<void, CommandError | FsError | ClaudeBadOutput> {
+    return Effect.gen({ self: this }, function* () {
+      const out = yield* claude(args, yield* this.dir());
+      const id = yield* backgrounded(out);
+      const s = this.saved();
+      if (id !== s?.id || mode !== s.mode) {
+        this.desk.store.set(KEY, id === s?.id ? { ...s, mode } : { id, mode });
+        this.desk.changed();
+      }
+      const note = /^note: .*/m.exec(out)?.[0];
+      this.desk.log(`coordinator: ${args[0] === "--bg" ? "created" : "resumed"} ${id}${note ? ` (${note})` : ""}`);
+    });
   }
 
   // Its row in claude agents: the id it keeps, else the latest running one here (a start it didn't see finish; not one a switch stopped).
-  async find(): Promise<Agent | null> {
-    const all = (JSON.parse(await claude(["agents", "--json", "--all"])) as Agent[]).filter((a) => a.kind === "background");
-    const dir = this.dir();
-    const here = new Set([dir, fs.realpathSync(dir)]);
-    const saved = this.saved();
-    const a =
-      all.find((x) => x.id === saved?.id) ??
-      all
-        .filter((x) => here.has(x.cwd) && x.pid)
-        .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
-        .at(-1) ??
-      null;
-    if (a?.id !== saved?.id) {
-      // The desk didn't see its mode, so the next launch sets the setting's.
-      this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
-      this.desk.changed();
-    }
-    this.saw(a ? (a.pid ? ((a.status as CoordinatorView["status"]) ?? "idle") : "stopped") : null);
-    return a;
+  find(): Effect.Effect<Agent | null, CommandError | CommandBadOutput | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const out = yield* claude(["agents", "--json", "--all"]);
+      const listed = yield* Effect.try({
+        try: () => JSON.parse(out) as Agent[],
+        catch: (cause) => new CommandBadOutput({ command: claudeCommand(), cause }),
+      });
+      const all = listed.filter((a) => a.kind === "background");
+      const dir = yield* this.dir();
+      const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
+      const here = new Set([dir, real]);
+      const saved = this.saved();
+      const a =
+        all.find((x) => x.id === saved?.id) ??
+        all
+          .filter((x) => here.has(x.cwd) && x.pid)
+          .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
+          .at(-1) ??
+        null;
+      if (a?.id !== saved?.id) {
+        // The desk didn't see its mode, so the next launch sets the setting's.
+        this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
+        this.desk.changed();
+      }
+      this.saw(a ? (a.pid ? ((a.status as CoordinatorView["status"]) ?? "idle") : "stopped") : null);
+      return a;
+    });
   }
 
   saw(status: CoordinatorView["status"]): void {

@@ -150,7 +150,7 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
   c.after(t.cleanup);
   await t.desk.sync();
   const told: string[] = [];
-  t.desk.coordinator.tell = (line: string) => (told.push(line), Promise.resolve());
+  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   const mine = t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3 onto main?" }));
   t.desk.answerInquiry(mine.id, "Yes,\nthen merge");
   assert.deepEqual(told, [`My answer to your question ${mine.id} ("Rebase #3 onto main?"): "Yes, then merge"`]);
@@ -289,7 +289,7 @@ test("Wake it under an ask it stopped without answering hands that ask over agai
   c.after(t.cleanup);
   await t.desk.sync();
   const told: string[] = [];
-  t.desk.coordinator.tell = (line: string) => (told.push(line), Promise.resolve());
+  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   t.desk.coordinator.now = () => Promise.reject(new Error("not this one"));
   t.desk.coordinator.saved = () => ({ id: "c0ffee01" });
   const a = {

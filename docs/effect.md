@@ -41,6 +41,8 @@ services, `Data.TaggedError`, the desk's own `log`.
   message erases a stored error (the coordinator's `coordinator_error`), so never leave one empty. A command whose
   caller has words of its own keeps them: `CommandNotFound`'s `hint` is its whole message, and `CommandFailed` and
   `CommandTimeout` take a `summary` ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …").
+  Deliberate change, with a test: a `CommandFailed` whose stderr is blank says "<command> exited with <code or signal>",
+  and a `ClaudeApiError` with no words "claude failed: API error <status>" (both were empty).
 - `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
   that aren't an error go in a field of their own (Claude's login `detail`).
 - The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix
@@ -157,6 +159,9 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
 
 - Each site handles its expected failures as it does today (stores its `*_error`, logs in its own words, calls
   `report(err, what)` once), so the runner mostly sees bugs.
+- Deliberate change, with tests: the desk stopping interrupts the coordinator's run and an automation's run in flight,
+  which then record, notify and report nothing (the coordinator's kept going and wrote to the closed store; an
+  automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`.
 - A loop's pass catches a defect (`Effect.catchCause`, log and report) and keeps its schedule: a desk that hit a bug in
   one sync keeps syncing. This replaces today's crash on an unhandled rejection.
 - `Effect.runFork` and `Effect.forkDetach` appear nowhere else in `src/` (a forked failure nobody observes vanishes),
@@ -169,7 +174,7 @@ nothing about interruption or anything that ends after `stop()`, and `stop()` in
 
 Each runs an Effect whose failures it answers for, and nothing gets past it unhandled.
 
-- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`. Only reads and waits (GET views,
+- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through `respond(c, effect, { log, read? })`. Only reads and waits (GET views,
   `/api/activity`, the SSE streams) pass `{ signal: c.req.raw.signal }`, so a client going away interrupts them; a write
   and any work shared with other callers never take the request's signal. A `DeskHttpError` answers with its status and
   `errorBody`. An interrupt-only exit (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null,

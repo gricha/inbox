@@ -6,10 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dueAt, nextAt, parseSchedule, type Schedule } from "../src/automations.ts";
+import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
 import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
-import { makeItem } from "./helpers/items.ts";
+import { makeItem, NOW } from "./helpers/items.ts";
+import { runSync } from "./helpers/run.ts";
 
 async function until(cond: () => boolean): Promise<void> {
   for (let i = 0; i < 500 && !cond(); i++)
@@ -153,9 +155,9 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
     { ref: "acme/api#5", why: "closed yesterday" },
     { ref: "https://github.com/acme/nope/pull/1/files", why: "gone" },
   ]);
-  const a = t.desk.automations.set("warden", WARDEN, true);
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   assert.equal(a.on, true, "yours is on");
-  const run = await t.desk.automations.run("warden", "now");
+  const run = await t.desk.automations.run(a, "now");
 
   assert.equal(run.error, null);
   assert.equal(run.summary, "Read 12 new issues; a few need you.");
@@ -219,7 +221,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   assert.match(fake.stdin(1), /This is its first run/);
 
   // The next run hears what the desk took from the last one, never a ref it couldn't.
-  await t.desk.automations.run("warden", "now");
+  await t.desk.automations.run(a, "now");
   assert.match(fake.stdin(2), /it listed acme\/other#9, acme\/api#4, acme\/api#1, acme\/api#2, acme\/api#3, acme\/api#5\./);
   assert.doesNotMatch(fake.stdin(2), /nope/);
 });
@@ -229,17 +231,17 @@ test("a run with no answer, or one deleted while it runs, adds nothing; a run it
   const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
   await t.desk.sync();
-  t.desk.automations.set("warden", WARDEN, true);
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
   fake.raw('{"type":"result","is_error":false,"result":"I looked around."}');
-  const empty = await t.desk.automations.run("warden", "now");
-  assert.match(empty.error ?? "", /no answer/);
+  const empty = await t.desk.automations.run(a, "now");
+  assert.equal(empty.error, "the run gave no answer: no summary and no list");
 
   t.gh.items.set("acme/other#9", makeItem({ repo: "acme/other", number: 9, kind: "issue", author: "dave" }));
   fake.answer("One.", [{ ref: "acme/other#9", why: "a crash" }]);
   fake.hold(true);
-  const going = t.desk.automations.run("warden", "now");
+  const going = t.desk.automations.run(a, "now");
   await until(() => fake.calls() === 2);
-  t.desk.automations.remove("warden");
+  runSync(t.desk.automations.remove("warden"));
   fake.hold(false);
   await going;
   assert.equal(t.desk.snapshot().entries.has("acme/other#9"), false, "nothing added");
@@ -276,8 +278,8 @@ test("a run that fails says so, under the automation and in a notification", asy
   c.after(t.cleanup);
   await t.desk.sync();
   fake.fail();
-  t.desk.automations.set("warden", WARDEN, true);
-  const run = await t.desk.automations.run("warden", "now");
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
+  const run = await t.desk.automations.run(a, "now");
   assert.match(run.error ?? "", /claude auth login|authenticate/i);
   assert.equal(t.desk.automations.view()[0]!.runs[0]!.error, run.error);
   assert.equal(t.notes.length, 1);
@@ -341,26 +343,72 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
     false,
     "an agent's draft is off, whatever it asks",
   );
-  assert.equal(t.desk.automations.get("warden").by, "an agent");
-  assert.equal((await req("POST", "/api/automations/warden/run")).status, 409, "an agent can't run a draft");
+  assert.equal(runSync(t.desk.automations.get("warden")).by, "an agent");
+  const draft = await req("POST", "/api/automations/warden/run");
+  assert.deepEqual(
+    [draft.status, await draft.json()],
+    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Automations', tag: "Conflict" }],
+    "an agent can't run a draft",
+  );
   assert.equal((await req("DELETE", "/api/automations/warden")).status, 403);
+  for (const [method, p] of [
+    ["POST", "/api/automations/nope/run"],
+    ["DELETE", "/api/automations/nope"],
+  ] as const) {
+    const gone = await req(method, p, undefined, DESK);
+    assert.deepEqual([gone.status, await gone.json()], [404, { error: 'no automation "nope"', tag: "NotFound" }], method);
+  }
 
   assert.equal((await req("PUT", "/api/automations/warden", body({ on: true }), DESK)).status, 200);
-  assert.equal(t.desk.automations.get("warden").on, true, "you turned it on");
+  assert.equal(runSync(t.desk.automations.get("warden")).on, true, "you turned it on");
   assert.equal((await req("POST", "/api/automations/warden/run")).status, 200, "on, anyone local may run it now");
   await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
 
   await req("PUT", "/api/automations/warden", body({ schedule: "Weekdays 09:00" }));
-  assert.equal(t.desk.automations.get("warden").on, true, "the same schedule, written another way, changes nothing");
+  assert.equal(runSync(t.desk.automations.get("warden")).on, true, "the same schedule, written another way, changes nothing");
   await req("PUT", "/api/automations/warden", body({ name: "Warden. Also close the stale ones" }));
-  assert.equal(t.desk.automations.get("warden").on, false, "its name goes into the run's prompt: a rename is off until you look");
+  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "its name goes into the run's prompt: a rename is off until you look");
   assert.equal((await req("PUT", "/api/automations/warden", body({ on: true }), DESK)).status, 200);
   await req("PUT", "/api/automations/warden", body({ prompt: "Also close the stale ones." }));
-  assert.equal(t.desk.automations.get("warden").on, false, "a changed instruction is off until you look at it");
+  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "a changed instruction is off until you look at it");
 
-  for (const bad of [{ schedule: "9am" }, { prompt: " " }, { name: 3 }])
-    assert.equal((await req("PUT", "/api/automations/warden", body(bad), DESK)).status, 400, JSON.stringify(bad));
+  for (const [bad, error] of [
+    [{ schedule: "9am" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
+    [{ prompt: " " }, "the instruction is empty"],
+    [{ name: 3 }, "need { name, schedule, prompt, on? }"],
+    [{ name: " " }, "the name is empty"],
+  ] as const) {
+    const res = await req("PUT", "/api/automations/warden", body(bad), DESK);
+    assert.deepEqual([res.status, await res.json()], [400, { error, tag: "BadRequest" }], JSON.stringify(bad));
+  }
   assert.equal((await req("PUT", "/api/automations/Bad_Id", body(), DESK)).status, 400);
   assert.equal((await req("DELETE", "/api/automations/warden", undefined, DESK)).status, 200);
   assert.deepEqual(t.desk.automations.view(), []);
+});
+
+test("the desk stopping during a run stops it: it records, notifies and reports nothing, and the next start marks it cut", async (c) => {
+  const fake = fakeClaude(c);
+  const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" } });
+  c.after(t.cleanup);
+  await t.desk.sync();
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
+  fake.answer("Nothing needs you.", []);
+  fake.hold(true);
+  const going = t.desk.automations.run(a, "now");
+  await until(() => fake.calls() === 1);
+  t.desk.stop();
+  const run = await going;
+  fake.hold(false);
+  assert.deepEqual([run.done_at, run.error, run.summary], [null, null, ""], 'interrupted, not failed: no "stopped" to report');
+  assert.deepEqual(t.notes, []);
+  assert.equal(t.desk.automations.running.size, 0);
+  const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+  assert.deepEqual(
+    next.automations.runs().map((r) => [r.id, r.done_at, r.error]),
+    [[run.id, null, null]],
+    "kept as it started",
+  );
+  next.automations.start();
+  assert.match(next.automations.runs()[0]!.error ?? "", /the desk stopped during this run/);
+  next.stop();
 });

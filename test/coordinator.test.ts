@@ -4,12 +4,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { askLine, wakeFor } from "../src/coordinator.ts";
+import { Effect } from "effect";
+import { askLine, denyDir, DENY, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace, AsksView } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { makeItem, NOW } from "./helpers/items.ts";
+import { failure, failureSync, run } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 
@@ -42,6 +44,8 @@ const f = path.join(__dirname, "state.json");
 const st = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : { sessions: [], n: 0 };
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(__dirname, "calls"), JSON.stringify(args) + "\\n");
+// While hold exists, a look doesn't answer: a run in flight, for as long as a test wants.
+while (args[0] === "agents" && fs.existsSync(path.join(__dirname, "hold"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 const busy = fs.existsSync(path.join(__dirname, "busy")) ? fs.readFileSync(path.join(__dirname, "busy"), "utf8") : null;
 const fail = fs.existsSync(path.join(__dirname, "fail"));
 const nobypass = fs.existsSync(path.join(__dirname, "nobypass"));
@@ -151,6 +155,10 @@ if (args[0] !== "agents" && args[0] !== "logs") {
     fail: (on: boolean) => {
       if (on) fs.writeFileSync(path.join(dir, "fail"), "");
       else fs.rmSync(path.join(dir, "fail"), { force: true });
+    },
+    hold: (on: boolean) => {
+      if (on) fs.writeFileSync(path.join(dir, "hold"), "");
+      else fs.rmSync(path.join(dir, "hold"), { force: true });
     },
     // A managed disableBypassPermissionsMode, or bypass mode never accepted.
     nobypass: (on: boolean) => {
@@ -710,6 +718,113 @@ test("w says so when claude can't start it", async (c) => {
 
 const OWNER = { origin: "http://localhost:49401", "sec-fetch-site": "same-origin" };
 
+test(
+  "the desk stopping interrupts a run in flight: its claude is stopped, and nothing starts, is kept or notifies after",
+  posix,
+  async (c) => {
+    const t = await coordinated(c, { "notify.quiet": "" });
+    t.fake.hold(true);
+    t.desk.act("web#3", "inflight");
+    await until(() => t.fake.calls().length === 1);
+    const flushing = t.desk.coordinator.flushing;
+    assert.ok(flushing, "the batch's run is looking");
+    const logs: string[] = [];
+    t.desk.log = (m) => {
+      logs.push(m);
+    };
+    t.desk.stop();
+    t.fake.hold(false); // a run that kept going would start one now
+    const at = Date.now();
+    await flushing;
+    assert.ok(Date.now() - at < 5_000, "it ended with its claude, not after its minute");
+    await settle(300);
+    assert.equal(t.desk.coordinator.flushing, null);
+    assert.deepEqual(t.fake.calls(), [["agents", "--json", "--all"]], "it went no further");
+    assert.deepEqual([t.fake.sessions(), t.notes, logs], [[], [], []], "and wrote nothing to the closed store");
+    const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+    assert.deepEqual(
+      [next.coordinator.error(), next.coordinator.news()],
+      [null, [["acme/web#3", "handed off"]]],
+      "what it was given stays",
+    );
+    next.stop();
+  },
+);
+
+test(
+  "what cmd.exe can't pass to your agent is refused before anything is kept: an ask and Wake it answer 400, your answer to its question logs it",
+  posix,
+  async (c) => {
+    const logs: string[] = [];
+    const t = await setup([myPr(3)], {
+      settings: { "policy.judge": false, "review.auto_ai": false },
+      desk: {
+        log: (m) => {
+          logs.push(m);
+        },
+      },
+    });
+    c.after(t.cleanup);
+    await t.desk.sync();
+    const app = createApp(t.desk, 49401);
+    const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
+      app.request(`http://127.0.0.1:49401${p}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+    const ask = {
+      id: "a1",
+      at: NOW.toISOString(),
+      text: "rebase & merge it",
+      item_id: null,
+      thread_id: null,
+      thread_url: null,
+      lines: null,
+      answer: null,
+    };
+    t.desk.store.set("asks", [ask]);
+    const question = t.desk.inquire({ question: "Rebase #3?", from: "Review Desk coordinator", context: "x ".repeat(120), item: "web#3" });
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" }); // claude.cmd, which only cmd.exe starts
+    try {
+      const told = failureSync(t.desk.coordinator.tell("a & b"));
+      assert.equal(told._tag, "UnsafeArgument");
+      assert.match(told.message, /^can't start .+ through cmd\.exe: % ! \^ & \| < > aren't allowed$/);
+      assert.deepEqual(t.desk.coordinator.asks(), [], "nothing kept");
+      const asked = await post("/api/ask", { text: "rebase & merge it" }, OWNER);
+      assert.deepEqual([asked.status, ((await asked.json()) as { tag: string }).tag], [400, "BadRequest"]);
+      assert.deepEqual(t.desk.asks(), [ask], "the ask isn't kept");
+      const woke = await post("/api/coordinator/wake", { ask: "a1" });
+      const body = (await woke.json()) as { error: string; tag: string };
+      assert.deepEqual([woke.status, body.tag, body.error], [400, "BadRequest", told.message], "as an ask is: it was a 500");
+      assert.equal(
+        (await failure(Effect.tryPromise({ try: () => t.desk.wakeCoordinator("a1"), catch: (e) => e as Error }))).message,
+        told.message,
+      );
+      t.desk.answerInquiry(question.id, "yes & then merge");
+      assert.ok(logs.includes(`coordinator: couldn't pass on your answer to ${question.id}: ${told.message}`), logs.join("\n"));
+      assert.ok(t.desk.inquiry(question.id).answer, "your answer is kept");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+    assert.deepEqual(t.desk.coordinator.asks(), []);
+  },
+);
+
+test("coordinator settings that don't parse fail its folder as their read, in the parser's words", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-deny-"));
+  const file = path.join(home, "coordinator", ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "{ nope");
+  const e = await failure(denyDir(home, "coordinator", DENY));
+  assert.deepEqual([e._tag, e.op, e.path], ["FsError", "read", file]);
+  assert.match(e.message, /JSON/);
+  fs.writeFileSync(file, "{}");
+  assert.equal(await run(denyDir(home, "coordinator", DENY)), path.join(home, "coordinator"));
+  fs.rmSync(home, { recursive: true });
+});
+
 function asking(t: Awaited<ReturnType<typeof coordinated>>) {
   const app = createApp(t.desk, 49401);
   return {
@@ -935,7 +1050,7 @@ async function telling(c: TestContext, items = [myPr(3), myPr(4), reviewAsk(7, {
   c.after(t.cleanup);
   await t.desk.sync();
   const told: string[] = [];
-  t.desk.coordinator.tell = (line: string) => (told.push(line), Promise.resolve());
+  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   t.desk.coordinator.saved = () => ({ id: "c0ffee01" });
   t.desk.coordinator.wake = () => {}; // a hand-off's news isn't what these are about
   const merged = async (id: string) => {

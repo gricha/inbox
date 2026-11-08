@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import { stopAll } from "./children.ts";
-import { DeskError, type ClaudeError, type CommandError } from "./errors.ts";
+import { BadRequest, DeskError, type ClaudeError, type CommandError } from "./errors.ts";
 import { Automations } from "./automations.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter } from "./github/write.ts";
@@ -1989,8 +1989,11 @@ export class Desk {
   async wakeCoordinator(askId?: string): Promise<void> {
     if (!this.settings["agent.coordinator"]) throw new DeskError(409, "your agent is off: Settings \u2192 Agents");
     const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
-    if (a) await this.coordinator.tell(askLine(a, this.askAbout(a.item_id)));
-    else await this.coordinator.now();
+    if (a) {
+      const tell = this.coordinator.tell(askLine(a, this.askAbout(a.item_id)));
+      // effect-bridge(C5c): wakeCoordinator yields it; what cmd.exe can't pass is a BadRequest, as in ask
+      await Effect.runPromise(Effect.flatten(Effect.mapError(tell, (e) => new BadRequest({ message: e.message }))));
+    } else await this.coordinator.now();
     if (!this.coordinator.saved())
       throw Object.assign(new DeskError(502, "your agent didn't start; the desk's log says why"), { cause: this.coordinator.failure });
   }
@@ -2243,17 +2246,13 @@ export class Desk {
     };
     const line = askLine(a, this.askAbout(a.item_id));
     const started = !!this.coordinator.saved();
-    let told: Promise<void>;
-    try {
-      told = this.coordinator.tell(line);
-    } catch (err) {
-      throw new DeskError(400, (err as Error).message);
-    }
+    // effect-bridge(C5c): ask yields it; what cmd.exe can't pass throws its BadRequest, a 400 as before
+    const told = Effect.runSync(Effect.mapError(this.coordinator.tell(line), (e) => new BadRequest({ message: e.message })));
     this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
     this.changed();
     // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
     if (!started) {
-      await told;
+      await Effect.runPromise(told); // effect-bridge(C5c): ask yields it
       if (!this.coordinator.saved()) {
         this.coordinator.untell(line);
         this.store.set(
@@ -2370,13 +2369,16 @@ export class Desk {
     if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
       const asked = `your question ${q.id} ("${q.question}")`;
       const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
-      try {
-        this.coordinator.tell(line).catch((e: unknown) => {
-          this.log(`coordinator: ${(e as Error).message}`);
-        });
-      } catch (e) {
-        this.log(`coordinator: couldn't pass on your answer to ${q.id}: ${(e as Error).message}`);
-      }
+      // effect-bridge(C5c): answerInquiry yields it; what cmd.exe can't pass is logged, as before
+      Effect.runSync(
+        this.coordinator.tell(line).pipe(
+          Effect.catch((e) =>
+            Effect.sync(() => {
+              this.log(`coordinator: couldn't pass on your answer to ${q.id}: ${e.message}`);
+            }),
+          ),
+        ),
+      );
     }
     return done;
   }
