@@ -155,7 +155,7 @@ When one is due (the last matching time passed since its last run, and since you
 | `~/.review-desk/config.toml`                 | spaces, boards, rules                 |
 | `~/.review-desk/settings.json`               | settings you changed from the default |
 | `~/.review-desk/desk.db`                     | cache and your local state (SQLite)   |
-| [CLAUDE.md](CLAUDE.md)                       | where each kind of change goes        |
+| [AGENTS.md](AGENTS.md)                       | where each kind of change goes        |
 | [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app   |
 | [docs/ui.md](docs/ui.md)                     | the UI                                |
 
