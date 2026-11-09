@@ -55,8 +55,10 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   const asked = request(s);
   // Its activity, less the desk's own "first seen" and what the why already says ("assigned to you").
   const events = detail.activity.filter((e) => e.kind !== "new" && !says(card.why, eventText(e, ctx.me)));
-  // The why, the board and the trace, saying only what the card's own why doesn't. Claude's bucket, unless a hard rule's floor held.
+  // The why, the board and the trace, saying only what the card's own why doesn't. Claude's bucket, or an automation's,
+  // unless a hard rule's floor held.
   const claude = !!main?.judge?.bucket && main.judge.bucket === main.rule_bucket;
+  const sorter = main?.judge?.by ? `automation ${main.judge.by}` : "Claude";
   const why = main && (
     <div className="why-block">
       {card.resolved && (
@@ -68,13 +70,13 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         <p className="pl-head">
           {card.resolved && "Otherwise "}
           <b>{PLACE[main.bucket]}</b>, from the {ctx.boardLabel(main.board)} board
-          {claude && main.judge?.why && ", sorted by Claude"}
+          {claude && main.judge?.why && `, sorted by ${sorter}`}
           {main.why && main.why !== card.why && <>: {main.why}</>}
         </p>
       )}
       {main.demoted && (
         <p className="demote-note">
-          {claude ? "Claude" : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
+          {claude ? sorter.replace(/^a/, "A") : "The rule"} said {BUCKET_LABEL[main.rule_bucket].toLowerCase()}; it moved to{" "}
           {BUCKET_LABEL[main.bucket].toLowerCase()} because {main.demoted.charAt(0).toLowerCase() + main.demoted.slice(1)}.
         </p>
       )}
@@ -246,8 +248,11 @@ function PlacementView({ p }: { p: Placement }) {
         {p.judge && (
           <li className={cls(p.judge.bucket && "hit")}>
             <span className={cls("tick", p.judge.bucket ? "ok" : "no")}>{p.judge.bucket ? "→" : "…"}</span>
-            <span className="idx">Claude</span>
-            <span>{judgeStepText(p.judge)}</span>
+            <span className="idx">{p.judge.by ? "automation" : "Claude"}</span>
+            <span>
+              {p.judge.by && `${p.judge.by}: `}
+              {judgeStepText(p.judge)}
+            </span>
           </li>
         )}
       </ol>

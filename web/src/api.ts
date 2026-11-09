@@ -17,6 +17,7 @@ import type {
   GitHubAction,
   InflightView,
   Automation,
+  AutomationBody,
   AutomationView,
   Inquiry,
   InquiryView,
@@ -190,7 +191,7 @@ export const api = {
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewers`, ask),
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
-  setAutomation: (id: string, b: { name: string; schedule: string; prompt: string; on: boolean }) =>
+  setAutomation: (id: string, b: AutomationBody) =>
     call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}`, b),
   deleteAutomation: (id: string) => call<{ ok: true }>("DELETE", `/api/automations/${encodeURIComponent(id)}`),
   runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${encodeURIComponent(id)}/run`),

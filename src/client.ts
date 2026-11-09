@@ -12,6 +12,7 @@ import {
   type Ask,
   type AskPlace,
   type Automation,
+  type AutomationBody,
   type AutomationView,
   type Inquiry,
   type InquiryLink,
@@ -188,8 +189,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     unreadAnswers: () => call<Inquiry[]>("GET", "/api/inquiries/unread"),
     answerRead: (id: string) => call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${q(id)}/read`),
     automations: () => call<AutomationView[]>("GET", "/api/automations"),
-    setAutomation: (id: string, b: { name: string; schedule: string; prompt: string }) =>
-      call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${q(id)}`, b),
+    setAutomation: (id: string, b: AutomationBody) => call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${q(id)}`, b),
     runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${q(id)}/run`),
     activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
       const params = new URLSearchParams();

@@ -550,16 +550,18 @@ export function createApp(desk: Desk, port: number): Hono {
     const set = Effect.gen(function* () {
       yield* up;
       const b = yield* bodyOf(c);
+      const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
       if (
         typeof b.name !== "string" ||
         typeof b.schedule !== "string" ||
         typeof b.prompt !== "string" ||
+        (b.can !== undefined && !strings(b.can)) ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
-        return yield* new BadRequest({ message: "need { name, schedule, prompt, on? }" });
+        return yield* new BadRequest({ message: "need { name, schedule, prompt, can?, on? }" });
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name: b.name, schedule: b.schedule, prompt: b.prompt, on: b.on },
+        { name: b.name, schedule: b.schedule, prompt: b.prompt, can: b.can, on: b.on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { plan } from "../../src/agents.ts";
-import { nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { didntText, didText, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
@@ -33,6 +33,7 @@ import type {
   Automation,
   AutomationRun,
   AutomationView,
+  Verb,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -2303,7 +2304,9 @@ function automationsView(): AutomationView[] {
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
       next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
       running: false,
-      runs: RUNS.filter((r) => r.automation === a.id).toReversed(),
+      runs: RUNS.filter((r) => r.automation === a.id)
+        .toReversed()
+        .map((r) => Object.assign({}, r, { did: didText(r.items), didnt: didntText(r.items) })),
     };
   });
 }
@@ -3513,6 +3516,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         name: String(b.name),
         schedule: String(b.schedule),
         prompt: String(b.prompt),
+        ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can as Verb[] }),
         on: b.on !== false,
         by: "you",
         updated_at: new Date().toISOString(),

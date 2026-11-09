@@ -423,11 +423,12 @@ export interface Placement {
   hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers (for good on a final rule)
 }
 
-// The policy judge's step in a placement.
+// The policy judge's step in a placement, or an automation's sort standing in for it.
 export interface JudgeStep {
   bucket: Bucket | null; // its answer; null: none, so where the rules put it
   why: string;
   pending: boolean; // not judged under this policy since the item last changed (an earlier answer may still show)
+  by?: string; // the automation that sorted it, by name; absent: Claude
 }
 
 // Kept per item in kv `judge:<id>`: good while what the judge read of the item (judgeKey) and the policy stay the same.
@@ -501,7 +502,7 @@ export interface Card {
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
   group?: QueueGroup; // a Now or Today card: which part of the main page's order it's in (QUEUE_GROUPS)
-  placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
+  placed_by?: "hard" | "pin" | "claude" | "automation" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, an automation's sort, the rules until Claude answers, or since it gave no answer; unset with the judge off and no sort
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
   stack?: StackRef; // an open PR whose line has two or more open
   // An open PR blocked by another: the item id at the end of the chain, as pr.blocker says it ("sentry#129460 (through api#2)"), and what that one waits on
@@ -986,16 +987,61 @@ export interface InquiryLink {
   url: string; // http(s), or claude: for a Claude session
 }
 
+// What an automation may do with an item. add: on your desk, pinned to Today, with its why. today, later, fyi, hide: sorted
+// there as Claude's answer would be, until the item changes or you act on it. snooze, done, mute: the desk's own, logged as
+// the automation's, so Undo works. Never now: only a rule's own bucket or Claude's answer puts an item first.
+export const VERBS = ["add", "today", "later", "fyi", "hide", "snooze", "done", "mute"] as const;
+export type Verb = (typeof VERBS)[number];
+export const VERB: Record<Verb, string> = {
+  add: "add to your desk",
+  today: "sort to Today",
+  later: "sort to Later",
+  fyi: "sort to FYI",
+  hide: "hide",
+  snooze: "snooze",
+  done: "mark done",
+  mute: "mute",
+};
+
 // An automation (Settings → Automations): your instruction, run on its schedule by your own Claude Code, read only. What a
-// run finds that needs you goes on your desk with its why. An agent may draft or edit one; it's off until you turn it on.
+// run lists, the desk acts on: only the verbs you allow it (`can`). An agent may draft or edit one; it's off until you turn it on.
 export interface Automation {
   id: string; // a slug: "warden-issues"
   name: string;
   schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time
   prompt: string; // the instruction, in your words
+  can?: Verb[]; // what it may do with an item; absent: add only
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
+}
+
+// What came of one item of a run, as its record says it: "Added", "Sorted to FYI", "Snoozed until CI passes", "Couldn't mute".
+const DID: Record<Verb, string> = {
+  add: "Added",
+  today: "Sorted to Today",
+  later: "Sorted to Later",
+  fyi: "Sorted to FYI",
+  hide: "Hidden",
+  snooze: "Snoozed",
+  done: "Marked done",
+  mute: "Muted",
+};
+export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">): string {
+  const verb = x.do ?? "add";
+  const u = x.until ?? "tomorrow";
+  const until = Object.hasOwn(UNTIL, u) ? `until ${UNTIL[u as Until]}` : /^\d+[hd]$/.test(u) ? `for ${u}` : `until ${u}`;
+  if (x.outcome === "did") return verb === "snooze" ? `Snoozed ${u === "activity" ? "until new activity" : until}` : DID[verb];
+  if (x.outcome === "failed") return verb === "add" ? "Couldn't add" : `Couldn't ${VERB[verb]}`;
+  const said = {
+    added: "Added",
+    kept: "Already on your desk",
+    left: "You'd dealt with it",
+    resolved: "Nobody needs it now",
+    held: "Held where it is",
+    refused: "Not allowed",
+  };
+  return said[x.outcome];
 }
 
 export interface AutomationRun {
@@ -1006,19 +1052,34 @@ export interface AutomationRun {
   done_at: string | null; // null while it runs
   error: string | null;
   summary: string; // the agent's: untrusted
-  // added: it's on your desk now; kept: it was already; left: you'd dealt with it (done, snoozed, muted, in Merging), so it
-  // stays that way; resolved: nobody needs it now (closed, merged, approved by someone else); failed: the desk couldn't
-  // take it (error says why)
-  items: { item_id: string; why: string; outcome: "added" | "kept" | "left" | "resolved" | "failed"; error?: string }[];
+  items: AutomationItem[];
   session: string | null; // the run's Claude Code session: claude --resume <id> shows what it did
 }
+
+export interface AutomationItem {
+  item_id: string;
+  why: string;
+  do?: Verb; // what the run said to do with it; absent: add
+  until?: string; // a snooze's, as the run said it
+  // added: it's on your desk now; did: the desk did `do` (a sort, a snooze, done, mute); kept: it was on your desk already;
+  // left: you'd dealt with it (done, snoozed, muted, in Merging), so it stays that way; resolved: nobody needs it now (closed,
+  // merged, approved by someone else); held: its sort is kept, but a hard rule, a final rule or your pin holds it where it is
+  // (error says which); refused: the automation may not do that (its `can`); failed: the desk couldn't (error says why)
+  outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed";
+  error?: string;
+}
+
+// PUT /api/automations/:id: the whole automation; what's left out is its default.
+export type AutomationBody = Pick<Automation, "name" | "schedule" | "prompt" | "can"> & { on?: boolean };
 
 // GET /api/automations
 export interface AutomationView extends Automation {
   when: string; // its schedule in words ("Mon and Thu at 17:30"), or as written when it can't be read
   next_at: string | null; // while it's on
   running: boolean;
-  runs: AutomationRun[]; // newest first, the last 10
+  // Newest first, the last 10. did: what it did, by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"); didnt: what it couldn't
+  // ("couldn't add 1, refused 2"); each "" when there's nothing to say.
+  runs: (AutomationRun & { did: string; didnt: string })[];
 }
 
 // GET /api/asks

@@ -48,7 +48,7 @@ import type {
   AskLines,
   AskPlace,
   Automation,
-  AutomationRun,
+  AutomationItem,
   Inquiry,
   InquiryLink,
   InquiryOption,
@@ -111,7 +111,7 @@ import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import { agentDir, agentDown, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
-import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
+import { DEFAULT_POLICY, Judge, judgeKey, sortKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
 import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
@@ -190,6 +190,7 @@ interface Snapshot {
   unasked: Set<string>; // your ready PRs nobody's asked to review: their call to action is Add reviewers
   pins: Map<string, string>; // who pinned each pinned item: "them", or "the coordinator"
   auto: Map<string, string>; // an automation's pin: "<its name>: <its why>"
+  acted: Map<string, string>; // an automation's snooze, done or mute, while it stands: "<its name>: <its why>"
   handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
   stacks: Stacks;
   deps: Map<string, DepFacts>; // open PRs' dependency facts (src/deps.ts)
@@ -203,6 +204,23 @@ const ADDED: CompiledBoard = {
   rules: [],
 };
 const boardsOf = (loaded: LoadedConfig) => [...loaded.boards, ADDED];
+
+// An automation's sort of an item (kv `sorted:<id>`): good while the item is what it sorted (sortKey) and you haven't acted
+// on it.
+interface Sorted {
+  automation: string;
+  name: string;
+  bucket: Bucket;
+  why: string;
+  key: string;
+  at: string;
+}
+// An automation's snooze, done or mute of an item (kv `acted:<id>`): its why, while that action is the item's latest.
+interface Acted {
+  name: string;
+  why: string;
+  seq: number;
+}
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
 const laneOwned = (e: Entry) => e.inflight && e.status === "active";
@@ -811,6 +829,8 @@ export class Desk {
     this.store.pruneKv("judge:", kept);
     this.store.pruneKv("sitter:", kept);
     this.store.pruneKv("added:", kept);
+    this.store.pruneKv("sorted:", kept);
+    this.store.pruneKv("acted:", kept);
     this.store.pruneKv("shown:", kept);
     this.store.pruneKv("take:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
@@ -987,6 +1007,7 @@ export class Desk {
         (c) =>
           c.placed_by !== "pending" &&
           c.placed_by !== "pin" &&
+          c.placed_by !== "automation" && // its run told you, as for its pin
           c.board !== ADDED.config.id &&
           !(c.draft && c.author.toLowerCase() === me) &&
           !snap.auto.has(c.id), // its automation's run told you
@@ -1102,18 +1123,29 @@ export class Desk {
     // An answer for what the item was (judgeKey: its activity, commit, reviews, files, AI review) or an older policy stays
     // until a fresh one lands, so the queue doesn't jump back to the rules' placements each time the policy changes.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
-    const judge = answers
-      ? (id: string): JudgeStep => {
-          const a = answers.get(id);
-          if (!a) return { bucket: null, why: "", pending: true };
-          const e = entries.get(id);
-          const stale =
-            !e ||
-            a.policy !== this.policy.hash ||
-            a.key !== judgeKey(e.item, e.analysis.activity_at, reviews.get(id), pins.get(id), e.analysis.signals.pr.blocker);
-          return { bucket: a.bucket, why: a.why, pending: stale };
-        }
-      : undefined;
+    const keyOf = (e: Entry) =>
+      judgeKey(e.item, e.analysis.activity_at, reviews.get(e.item.id), pins.get(e.item.id), e.analysis.signals.pr.blocker);
+    // An automation's sort stands in for Claude's answer while the item is what it sorted; once it changes, Claude's again.
+    const sorts = this.store.prefixed<Sorted | null>("sorted:");
+    const sorted = (id: string): JudgeStep | null => {
+      const s = sorts.get(id);
+      const e = entries.get(id);
+      const same = s && e && s.key === sortKey(e.item, e.analysis.activity_at, pins.get(id), e.analysis.signals.pr.blocker);
+      return same ? { bucket: s.bucket, why: s.why, pending: false, by: s.name } : null;
+    };
+    const claude = (id: string): JudgeStep => {
+      const a = answers?.get(id);
+      if (!a) return { bucket: null, why: "", pending: true };
+      const e = entries.get(id);
+      return { bucket: a.bucket, why: a.why, pending: !e || a.policy !== this.policy.hash || a.key !== keyOf(e) };
+    };
+    const judge = answers ? (id: string) => sorted(id) ?? claude(id) : sorts.size ? sorted : undefined;
+    // What an automation snoozed, marked done or muted says why, while that's still the last thing done to it.
+    const acted = new Map<string, string>();
+    for (const [id, a] of this.store.prefixed<Acted | null>("acted:")) {
+      const e = entries.get(id);
+      if (a && e && e.status !== "active" && this.store.lastActionFor(id)?.seq === a.seq) acted.set(id, `${a.name}: ${a.why}`);
+    }
     for (const board of boardsOf(loaded)) {
       const scope = loaded.config.spaces.find((s) => s.id === board.config.space)?.scope ?? "";
       // config.ts refuses a board whose source the desk doesn't run.
@@ -1201,6 +1233,7 @@ export class Desk {
       unasked: asking,
       pins,
       auto,
+      acted,
       handed,
       stacks,
       deps,
@@ -1245,7 +1278,7 @@ export class Desk {
       by: me.author ? "you" : via || it.author,
       ...(shown && { stage: shown }),
       bucket: p?.bucket ?? "fyi",
-      why: e.resolved?.reason ?? p?.why ?? "",
+      why: e.resolved?.reason ?? snap.acted.get(it.id) ?? p?.why ?? "",
       ...(snap.handed.has(it.id) && { handoff: snap.handed.get(it.id) }),
       demoted: p?.demoted,
       board: p?.board ?? "",
@@ -2101,7 +2134,7 @@ export class Desk {
     return Effect.suspend(() => (this.snapshot().entries.get(id)?.inflight ? Effect.void : Effect.asVoid(this.act(id, "done"))));
   }
 
-  // `agent`: not the desk's own window. Hand-offs are yours.
+  // `agent`: not the desk's own window. Hand-offs are yours. An automation's ("automation:<id>") is logged as its own.
   act(
     ref: string,
     action: Action,
@@ -2210,7 +2243,10 @@ export class Desk {
       if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
         s.pinned = false;
       this.store.putState(s);
-      const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString());
+      const auto = agent?.startsWith("automation:") ? agent : undefined;
+      const seq = action === "seen" ? 0 : this.store.logAction(id, action, before, now.toISOString(), auto);
+      // An automation's sort was its opinion too, and its why for what it did: what you do with the item ends both.
+      if (action !== "seen" && !auto) for (const k of [`sorted:${id}`, `acted:${id}`]) if (this.store.get(k)) this.store.set(k, null);
       // What you bring onto your desk is there now, reviewed or not.
       if (action === "pin" || action === "restore" || action === "unmute") this.store.set(`shown:${id}`, true);
       this.changed();
@@ -2262,7 +2298,7 @@ export class Desk {
 
   // An automation's find: on your desk as desk_add puts it, with its why. One that's on your queue already stays as it is;
   // one you dealt with (done, snoozed, muted, handed off for merge), or that nobody needs now, stays that way too.
-  push(ref: string, why: string, a: Automation): Effect.Effect<AutomationRun["items"][number], RefError | BadRequest | Upstream> {
+  push(ref: string, why: string, a: Automation): Effect.Effect<AutomationItem, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.hold(ref);
       const note = yield* this.line(why, "why", 300);
@@ -2270,7 +2306,7 @@ export class Desk {
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
-      let outcome: AutomationRun["items"][number]["outcome"] = "kept";
+      let outcome: AutomationItem["outcome"] = "kept";
       if (e.resolved) outcome = "resolved";
       else if (e.status !== "active" || e.inflight) outcome = "left";
       else if (!e.state.pinned && !queued) {
@@ -2282,6 +2318,63 @@ export class Desk {
       }
       this.changed();
       return { item_id: id, why: note, outcome };
+    });
+  }
+
+  // An automation's sort: kept like Claude's answer for the item (compute()), so it holds until the item changes or you act
+  // on it, and a hard rule's floor, a final rule and your pin bind it as they bind Claude: held says which did. Only what
+  // the desk holds: a sort fetches nothing.
+  sort(
+    ref: string,
+    bucket: "today" | "later" | "fyi" | "hide",
+    why: string,
+    a: Automation,
+  ): Effect.Effect<AutomationItem, RefError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const note = yield* this.line(why, "why", 300);
+      const said = { item_id: id, why: note, do: bucket };
+      const snap = this.snapshot();
+      const e = snap.entries.get(id)!;
+      if (e.resolved) return { ...said, outcome: "resolved" as const };
+      if (e.status !== "active" || e.inflight) return { ...said, outcome: "left" as const };
+      if (!snap.best.has(id)) return { ...said, outcome: "failed" as const, error: "no board lists it, so there's nowhere to sort it" };
+      const key = sortKey(e.item, e.analysis.activity_at, snap.pins.get(id), e.analysis.signals.pr.blocker);
+      // Its own sort of the item as it is still stands: nothing to do, and its first why stays.
+      const was = this.store.get(`sorted:${id}`) as Sorted | null;
+      if (was?.automation === a.id && was.bucket === bucket && was.key === key) return { ...said, why: was.why, outcome: "kept" as const };
+      const sorted: Sorted = { automation: a.id, name: a.name, bucket, why: note, key, at: this.now().toISOString() };
+      this.store.set(`sorted:${id}`, sorted);
+      this.changed();
+      const p = this.snapshot().best.get(id);
+      if (p?.judge?.by === a.name && p.rule_bucket === bucket) return { ...said, outcome: "did" as const };
+      const at = { now: "Now", today: "Today", blocked: "Blocked", later: "Later", fyi: "FYI", hide: "Hidden" };
+      const floor = p?.floor ? `${p.hard ? "a hard rule" : "your pin"} keeps it in ${at[p.floor]} or above` : "a final rule places it";
+      return { ...said, outcome: "held" as const, error: floor };
+    });
+  }
+
+  // An automation's snooze, done or mute: the desk's own act(), in the action log as the automation's, so Undo takes it back;
+  // the item says why while it stands. One you'd dealt with stays as you left it, and so does one nobody needs now.
+  clear(
+    ref: string,
+    action: "snooze" | "done" | "mute",
+    why: string,
+    until: string | undefined,
+    a: Automation,
+  ): Effect.Effect<AutomationItem, ActError> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const note = yield* this.line(why, "why", 300);
+      const said = { item_id: id, why: note, do: action, ...(action === "snooze" && { until: until ?? "tomorrow" }) };
+      const e = this.snapshot().entries.get(id)!;
+      if (e.resolved) return { ...said, outcome: "resolved" as const };
+      if (e.status !== "active" || e.inflight) return { ...said, outcome: "left" as const };
+      const { undo_seq } = yield* this.act(id, action, until, `automation:${a.id}`);
+      const acted: Acted = { name: a.name, why: note, seq: undo_seq };
+      this.store.set(`acted:${id}`, acted);
+      this.changed();
+      return { ...said, outcome: "did" as const };
     });
   }
 

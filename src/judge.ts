@@ -94,6 +94,11 @@ export function judgeKey(item: Item, activityAt: string, ai: AiReview | null | u
   return textHash(JSON.stringify([...facts, ...text, ...(pinned ? [pinned] : []), ...(blocker ? [`blocked by ${blocker}`] : [])]));
 }
 
+// What an automation's sort of an item holds for: the judge's key, less what the desk itself brings later (the PR's files,
+// its AI review). Those make Claude look again; they aren't the item changing.
+export const sortKey = (item: Item, activityAt: string, pinned?: string, blocker = ""): string =>
+  judgeKey({ ...item, paths: undefined }, activityAt, null, pinned, blocker);
+
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim();
 const clip = (s: string, n: number) => {
@@ -109,12 +114,14 @@ const ago = (h: number) =>
   h < 0 ? "never" : h < 1 ? "under an hour ago" : h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`;
 const minutesAgo = (h: number) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min ago` : ago(h));
 
-// The judge's step in a rule trace: "Claude: today, <why>". An empty why keeps the rule's.
+// The judge's step in a rule trace: "Claude: today, <why>", or "automation <its name>: fyi, <why>" for an automation's
+// sort. An empty why keeps the rule's.
 export function judgeText(j: JudgeStep): string {
   if (j.bucket === null)
     return j.pending ? "Claude: not sorted yet, so where the rules put it" : "Claude: no answer, so where the rules put it";
   const why = j.why ? oneLine(j.why) : "keeps the rule's why";
-  return `Claude: ${j.bucket}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
+  const who = j.by ? `automation ${oneLine(j.by)}` : "Claude";
+  return `${who}: ${j.bucket}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
 }
 
 function asked(s: Signals): string {

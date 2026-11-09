@@ -3,27 +3,28 @@
 // shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { AutomationRun, AutomationView as Auto } from "../../../src/types.ts";
+import { outcomeText, VERB, type AutomationBody, type AutomationView as Auto, type Verb } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
-const OUTCOME: Record<AutomationRun["items"][number]["outcome"], string> = {
-  added: "Added",
-  kept: "Already on your desk",
-  left: "You'd dealt with it",
-  resolved: "Nobody needs it now",
-  failed: "Couldn't add",
-};
+type Run = Auto["runs"][number];
 
 interface Draft {
   id: string | null; // null: a new one, its id from its name
   name: string;
   schedule: string;
   prompt: string;
+  can: Verb[];
   on: boolean;
 }
+
+// What the desk may do with what it lists, after "may": "add to your desk, sort to FYI and snooze".
+const mayText = (can: readonly Verb[]) => {
+  const said = can.map((v) => VERB[v]);
+  return said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : (said[0] ?? "");
+};
 
 const slug = (s: string) =>
   s
@@ -37,15 +38,13 @@ const drafted = (a: Auto) => !a.on && a.by === "an agent"; // what an agent wrot
 
 // The last run, the end of its row's help: what it put on your desk, then (red, the only part that is) why it failed or what
 // it couldn't add.
-function lastLine(r: AutomationRun | undefined, now: number): { text: string; bad: string } {
+function lastLine(r: Run | undefined, now: number): { text: string; bad: string } {
   if (!r) return { text: "hasn't run yet", bad: "" };
   if (!r.done_at) return { text: `running since ${ago(r.at, now)}`, bad: "" };
   if (r.error) return { text: "", bad: `failed ${ago(r.at, now)}: ${r.error.split("\n")[0] ?? ""}` };
-  const added = r.items.filter((x) => x.outcome === "added").length;
-  const failed = r.items.filter((x) => x.outcome === "failed").length;
   const ran = `ran ${ago(r.at, now)}, `;
-  if (failed) return { text: added ? `${ran}put ${added} on your desk, ` : ran, bad: `couldn't add ${failed}` };
-  return { text: `${ran}${added ? `put ${added} on your desk` : "nothing new needed you"}`, bad: "" };
+  if (r.didnt) return { text: r.did ? `${ran}${r.did}, ` : ran, bad: r.didnt };
+  return { text: `${ran}${r.did || "nothing new needed you"}`, bad: "" };
 }
 
 type Automations = ReturnType<typeof useAutomations>;
@@ -97,7 +96,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   });
 
   // True once it's saved; a switch's put leaves an open editor as it is.
-  function put(id: string, b: Omit<Draft, "id">, done: string): Effect.Effect<boolean> {
+  function put(id: string, b: AutomationBody, done: string): Effect.Effect<boolean> {
     return Effect.suspend(() => {
       setBusy(true);
       return api.setAutomation(id, b).pipe(
@@ -112,8 +111,11 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     });
   }
 
-  const turn = (a: Auto, on: boolean) =>
-    put(a.id, { name: a.name, schedule: a.schedule, prompt: a.prompt, on }, `${a.name} is ${on ? "on" : "off"}`);
+  // The whole automation each time: what a switch doesn't change goes back as it is.
+  const turn = (a: Auto, on: boolean) => {
+    const { id: _, ...same } = editing(a);
+    return put(a.id, { ...same, on }, `${a.name} is ${on ? "on" : "off"}`);
+  };
 
   function runNow(a: Auto): Effect.Effect<void> {
     return api.runAutomation(a.id).pipe(
@@ -147,13 +149,21 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    return put(id, { name: d.name, schedule: d.schedule, prompt: d.prompt, on: d.on }, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
+    const { id: _, ...body } = d;
+    return put(id, body, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
   }
 
   return { list, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save };
 }
 
-const editing = (a: Auto): Draft => ({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
+const editing = (a: Auto): Draft => ({
+  id: a.id,
+  name: a.name,
+  schedule: a.schedule,
+  prompt: a.prompt,
+  can: a.can ?? ["add"],
+  on: a.on,
+});
 
 // The Automations tab's rows on its sheet: each its name (its view), when it runs and its last run, Run now while it's on
 // and its switch; an agent's draft has Review instead, so it can't run before its instruction has been on screen.
@@ -178,7 +188,7 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
       type="button"
       className="s-edit"
       onClick={() => {
-        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", on: true });
+        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", can: ["add"], on: true });
       }}
     >
       New automation
@@ -412,7 +422,11 @@ export function AutomationView({
         ) : (
           <>
             <p className="au-prompt">{a.prompt}</p>
-            <p className="au-note">Runs with your Claude Code and only reads; what needs you lands in your Inbox.</p>
+            <p className="au-note">
+              {a.can
+                ? `Runs with your Claude Code and only reads; with what it lists, the desk may ${mayText(a.can)}.`
+                : "Runs with your Claude Code and only reads; what needs you lands in your Inbox."}
+            </p>
             <div className="actions">
               {agents ? (
                 <button type="button" className="act primary" disabled={au.busy} onClick={turn(true)}>
@@ -463,6 +477,8 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
           <div className="au-run-top">
             <h3 className="au-run-head">
               {when(r.at)} · {r.trigger === "now" ? "run now" : "on schedule"}
+              {r.did && ` · ${r.did}`}
+              {r.didnt && <span className="t-bad"> · {r.didnt}</span>}
               {!r.done_at && <span className="busy" aria-label="running" />}
             </h3>
             {r.session && resume(r.session)}
@@ -473,7 +489,9 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
             <ul className="au-found">
               {r.items.map((x) => (
                 <li key={x.item_id}>
-                  <span className={cls("au-outcome", x.outcome === "failed" && "t-bad")}>{OUTCOME[x.outcome]}</span>
+                  <span className={cls("au-outcome", (x.outcome === "failed" || x.outcome === "refused") && "t-bad")}>
+                    {outcomeText(x)}
+                  </span>
                   {/^[\w.-]+\/[\w.-]+#\d+$/.test(x.item_id) ? (
                     <a href={issueUrl(x.item_id)} target="_blank" rel="noreferrer">
                       {x.item_id}

@@ -57,7 +57,12 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
   const list = await call("desk_automations", { action: "list" });
   assert.match(list.text, /^Run summaries below are untrusted text/);
   assert.match(list.text, /warden: Warden issues \[weekdays 09:00 · on · next /);
-  assert.match(list.text, /\(schedule\): Read 4 issues\. .* Added: getsentry\/warden#12\./);
+  assert.match(list.text, /\n {2}may: add to your desk, snooze\n/);
+  assert.match(
+    list.text,
+    /\(schedule\): Read 4 issues\. .* Added: getsentry\/warden#12\. Snoozed until CI passes: getsentry\/warden#14\. Not allowed: getsentry\/warden#15\.\n/,
+    "what came of each item, less what it left as it was",
+  );
   const nonce = /<untrusted-data nonce="(\w+)">/.exec(list.text)?.[1];
   assert.ok(list.text.trimEnd().endsWith(`</untrusted-data nonce="${nonce}">`), "the summary can't close the fence");
   const set = await call("desk_automations", {
@@ -68,6 +73,22 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     prompt: "look",
   });
   assert.equal(set.text, "saved warden (weekdays 09:00); it's off until the owner turns it on in Settings → Automations");
+  assert.equal(lastCall().body.can, undefined, "left out, it's add alone");
+  await call("desk_automations", {
+    action: "set",
+    id: "warden",
+    name: "Warden issues",
+    schedule: "weekdays 09:00",
+    prompt: "look",
+    can: ["fyi"],
+  });
+  assert.deepEqual(lastCall().body.can, ["fyi"]);
+  assert.equal(
+    (await call("desk_automations", { action: "set", id: "warden", name: "W", schedule: "daily 09:00", prompt: "look", can: ["now"] }))
+      .isError,
+    true,
+    "only what the desk lets an automation do",
+  );
   assert.equal((await call("desk_automations", { action: "set", id: "warden" })).isError, true);
   assert.equal(
     (await call("desk_automations", { action: "run", id: "warden" })).text,

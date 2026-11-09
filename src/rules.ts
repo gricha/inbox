@@ -54,8 +54,8 @@ function truthy(c: Expr, s: Signals): { matched: boolean; error?: string } {
   return Result.isSuccess(v) ? { matched: Boolean(v.success) } : { matched: false, error: v.failure.message };
 }
 
-// The policy judge's answer for an item, while judging is on.
-export type JudgeLookup = (id: string) => JudgeStep;
+// The policy judge's answer for an item while judging is on, or an automation's sort of it; null: nobody sorts it.
+export type JudgeLookup = (id: string) => JudgeStep | null;
 
 // A hard rule's floor: Today for a Now rule, so Claude still picks Now or Today for what it matches.
 export const floorOf = (b: Bucket): Bucket => (b === "now" ? "today" : b);
@@ -72,7 +72,7 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     if (!r.matched) return null;
   }
   // Where the rules put it is Claude's hint, and holds until it answers. Its empty why keeps the rules'. Below a hard
-  // rule's floor, or your pin's, the floor holds with the rule's why.
+  // rule's floor, or your pin's, the floor holds with the rule's why. An automation's sort is bound the same, and says its name.
   const judged = (rule: number | null, ruled: Bucket, why: string, hard?: Bucket, final?: boolean): Placement => {
     const floor = e.floor ? atLeast(e.floor, hard) : hard;
     const bucket = atLeast(ruled, floor);
@@ -87,13 +87,14 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
       ...(hard && { hard: true }),
       ...(floor && { floor }),
     };
-    if (!judge) return p;
+    const j = judge?.(e.id);
+    if (!j) return p;
     const hint = { bucket: ruled, why: p.why };
     if (final) return { ...p, hint }; // a final rule: Claude doesn't re-sort it
-    const j = judge(e.id);
     if (j.bucket === null) return { ...p, judge: j, hint };
     const to = atLeast(j.bucket, floor);
-    const own = to === j.bucket && j.why.trim() ? j.why : (lifted(j.bucket, to) ?? p.why);
+    const said = j.by ? `${j.by}: ${j.why}` : j.why;
+    const own = to === j.bucket && j.why.trim() ? said : (lifted(j.bucket, to) ?? p.why);
     return { ...p, bucket: to, rule_bucket: to, why: own, judge: j, hint };
   };
   for (const [i, c] of board.rules.entries()) {
@@ -107,10 +108,10 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
   return judged(null, cfg.default, cfg.default_why);
 }
 
-// Who placed it, for its card: Claude where it chose the bucket (a hard rule's floor, or a pin's, may overrule it), else a
-// hard rule, a pin, or the rules while Claude hasn't answered (or gave no answer).
+// Who placed it, for its card: Claude or an automation where it chose the bucket (a hard rule's floor, or a pin's, may
+// overrule it), else a hard rule, a pin, or the rules while Claude hasn't answered (or gave no answer).
 export function placedBy(p: Placement): Card["placed_by"] {
-  if (p.judge?.bucket && p.judge.bucket === p.rule_bucket) return "claude";
+  if (p.judge?.bucket && p.judge.bucket === p.rule_bucket) return p.judge.by ? "automation" : "claude";
   if (p.hard) return "hard";
   if (p.floor && p.hint && p.rule_bucket !== (p.judge?.bucket ?? p.hint.bucket)) return "pin";
   if (!p.judge) return undefined;
