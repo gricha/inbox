@@ -2336,8 +2336,18 @@ const SHOTS: Shot[] = [
       lines[bad] = 'bucket = "soon"';
       lines.splice(1, 0, `# ${"a comment long enough to wrap ".repeat(20)}`);
       await editor.fill(lines.join("\n"));
+      // What's wrong is on screen, in the rail beside the editor or, the rail under it, the editor's foot: on preview and
+      // with the line it picked.
+      const said = () =>
+        page.evaluate<boolean>(`[...document.querySelectorAll(".err-row, .foot-err")].some((el) => {
+          const r = el.getBoundingClientRect();
+          return r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && el.textContent.includes('"soon" is not a bucket');
+        })`);
       await page.getByRole("button", { name: "Preview changes" }).click();
+      await page.locator(".err-row").first().waitFor();
+      if (!(await said())) failures.push("settings-rules-errors: after Preview changes, no error is on screen");
       await page.locator(".err-row").first().click();
+      if (!(await said())) failures.push("settings-rules-errors: with its line picked, the error isn't on screen");
       const seen = await page.evaluate<{ red: boolean; picked: string; hidden: number }>(`(() => {
         const ed = document.querySelector(".rules-wrap .editor");
         const head = getComputedStyle(document.querySelector(".errors .s-sub")).color;

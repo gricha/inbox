@@ -268,6 +268,20 @@ export function Rules({
             }}
           />
           <div className="editor-foot">
+            {/* In a narrow window the errors' list is under the editor: the first one stays in sight here, with its line. */}
+            {errors[0] && (
+              <button
+                type="button"
+                className="foot-err"
+                onClick={() => {
+                  jump(errors[0]!.path);
+                }}
+                title="Jump to this line"
+              >
+                <code>{errors[0].path}</code> {errors[0].message}
+                {errors.length > 1 && ` (and ${errors.length - 1} more under the editor)`}
+              </button>
+            )}
             {/* Filled while there's something to save: the one to press. */}
             <ActButton
               label={busy === "save" ? "Saving…" : "Save"}

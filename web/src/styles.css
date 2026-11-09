@@ -3862,6 +3862,35 @@ button.s-edit:hover:not(:disabled) {
   outline: none;
 }
 
+/* A jump to an error selects its line: in the theme's accent, not the browser's blue. */
+.editor::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* The first error, in the editor's foot, only where the list of them is under the editor. */
+.foot-err {
+  display: none;
+  flex-basis: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--red);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.foot-err:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.foot-err code {
+  color: inherit;
+  font-weight: 600;
+}
+
 .editor-foot {
   display: flex;
   flex-wrap: wrap;
@@ -5461,6 +5490,10 @@ button.s-edit:hover:not(:disabled) {
 
   .rules {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .foot-err {
+    display: block;
   }
 
   .side-col {
