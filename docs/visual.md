@@ -15,7 +15,7 @@ The mark is the kit's icon A: a broad tray with sloped inner shoulders and a sho
 - One geometry: `assets/brand/mark.svg` (`currentColor`) is the master, and everything else is drawn from its two paths.
 - Never redraw, stretch, stroke, shadow, gradient or badge the mark. Keep its viewBox: the silhouette spans x 8–56 and y 19.6–44.5, and the room around it is deliberate. A status dot goes on the tile's corner (the tray's alert), never on the mark.
 - Petrol `#365D60` tiles with a warm-white `#F7F6F2` mark, the same in every theme. In the window the mark is `--accent-ink`: petrol in Light, a light petrol in Dark, each theme's own accent elsewhere. A coloured mark on a light surface, a light one on a dark surface, never the dark petrol on a dark panel.
-- In the window it's `Mark` (`web/src/components/Mark.tsx`): inline SVG at 24px (a silhouette about 18×9px, so it holds its own beside the 15px name), `aria-hidden`, beside the word "Inbox" in the sidebar's brand row, right above the Inbox page's row. In the macOS app the traffic lights share that row and the mark stands alone (the menu bar names the app); at 641–1000px the words go and the mark stays.
+- In the window it's `Mark` (`web/src/components/Mark.tsx`): inline SVG at 24px (a silhouette about 18×9px, so it holds its own beside the 15px name), `aria-hidden`, beside the word "Inbox" in the sidebar's brand row, right above the Inbox page's row. In the macOS app the traffic lights share that row and the mark stands alone (the menu bar names the app); at 641–1000px the word goes and the mark stays.
 
 `npm run icons` (`scripts/icons.ts`, run in Electron, which rasterizes) reads the paths from the master and writes every other file:
 
@@ -70,8 +70,8 @@ No top bar: the sidebar is the window's only global chrome, and each page has it
 
 ```
 ┌──────────┬──────────────┬────────────────────────────────┬────────────┐
-│ ▬ Review │ Inbox 21  ‹› │ ‹ Inbox                        │ Your agent │  the heads: 52px, sticky, drag handles
-│   Desk   ├──────────────┼────────────────────────────────┤            │
+│ ▬ Inbox  │ Inbox 21  ‹› │ ‹ Inbox                        │ Your agent │  the heads: 52px, sticky, drag handles
+│          ├──────────────┼────────────────────────────────┤            │
 │ Inbox 21 │ Title, two   │ api#4154 by priya              │            │
 │ Blocked  │ lines at most│ Planner: hash join stage       │            │
 │ FYI      │ PR · api#41… │ …                              │            │
