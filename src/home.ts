@@ -71,7 +71,12 @@ export const settleHome = (
     if (env) return env;
     const to = defaultHome(home);
     const from = path.join(home, OLD);
-    if (fs.existsSync(to) || !fs.existsSync(from)) return to;
+    if (fs.existsSync(to)) {
+      if (isDir(from) && real(from) !== real(to))
+        log(`${from} is still there beside ${to}: the desk's home is ${to}, and ${from} is left as it is`);
+      return to;
+    }
+    if (!fs.existsSync(from)) return to;
     if (!isDir(from)) {
       log(`${from} isn't a folder, so it stays as it is; the desk's home is ${to}`);
       return to;

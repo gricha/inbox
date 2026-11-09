@@ -61,15 +61,19 @@ test("DESK_HOME wins over both, and nothing moves", async (c) => {
   assert.deepEqual(s.lines, []);
 });
 
-test("with ~/.inbox there, it's the home and the old folder is left as it is", async (c) => {
+test("with ~/.inbox there, it's the home and the old folder is left as it is, which each start says", async (c) => {
   const s = scratch(c);
   s.keep(s.old);
   fs.mkdirSync(s.inbox);
   assert.equal(deskHome("", s.home), s.inbox);
-  assert.equal(await run(settleHome(await unusedPort(), s.log, "", s.home)), s.inbox);
+  const port = await unusedPort();
+  assert.equal(await run(settleHome(port, s.log, "", s.home)), s.inbox);
   assert.equal(fs.readFileSync(path.join(s.old, "config.toml"), "utf8"), "# mine\n");
   assert.deepEqual(fs.readdirSync(s.inbox), []);
-  assert.deepEqual(s.lines, []);
+  const beside = `${s.old} is still there beside ${s.inbox}: the desk's home is ${s.inbox}, and ${s.old} is left as it is`;
+  assert.deepEqual(s.lines, [beside]);
+  assert.equal(await run(settleHome(port, s.log, "", s.home)), s.inbox);
+  assert.deepEqual(s.lines, [beside, beside], "once per start");
 });
 
 test("with neither, it's ~/.inbox, which the desk makes as it starts", async (c) => {
