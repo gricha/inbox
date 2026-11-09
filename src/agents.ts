@@ -49,14 +49,23 @@ const commandOf = (d: Driver, args: string[]) => [d.bin, ...args].map(sh).join("
 const urlOf = (u: unknown) => Result.getOrNull(Result.try({ try: () => new URL(String(u)), catch: () => null }));
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-// The desk's own entry: its /mcp on its port, or `desk mcp` over stdio. Another server of the owner's may be named inbox.
+const CLI = fileURLToPath(new URL("cli.ts", import.meta.url));
+
+// The desk's own entry: its /mcp on its port, or `desk mcp` over stdio (bin/desk, bin/desk.cmd, or node on this desk's
+// src/cli.ts) at its port, which `desk mcp` takes from DESK_PORT as the desk does. Another server of the owner's may be
+// named inbox, and a helpdesk's `mcp` isn't the desk's.
 function desks(entry: unknown, url: string): boolean {
   if (typeof entry !== "object" || entry === null) return false;
-  const e = entry as { url?: unknown; command?: unknown; args?: unknown };
-  if (typeof e.command === "string")
-    return [e.command, ...(Array.isArray(e.args) ? (e.args as unknown[]) : [])].join(" ").endsWith("desk mcp");
-  const at = urlOf(e.url);
+  const e = entry as { url?: unknown; command?: unknown; args?: unknown; env?: { DESK_PORT?: unknown } };
   const desk = urlOf(url);
+  if (typeof e.command === "string") {
+    const argv = [e.command, ...(Array.isArray(e.args) ? (e.args as unknown[]) : [])].map(String);
+    const prog = argv.at(-2) ?? "";
+    const own = typeof e.env?.DESK_PORT === "string" ? e.env.DESK_PORT : "";
+    const port = own || (process.env.DESK_PORT ?? "") || "47823";
+    return argv.at(-1) === "mcp" && (/^desk(\.cmd)?$/i.test(prog.split(/[\\/]/).at(-1) ?? "") || prog === CLI) && port === desk?.port;
+  }
+  const at = urlOf(e.url);
   return !!at && !!desk && LOOPBACK.has(at.hostname) && at.port === desk.port && at.pathname === desk.pathname;
 }
 

@@ -10,7 +10,7 @@ import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "inbox", "SKILL.md"), "utf8");
 const MCP = "http://localhost:47961/mcp";
-const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH };
+const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH, DESK_PORT: process.env.DESK_PORT };
 let home = "";
 let bin = "";
 
@@ -20,6 +20,7 @@ beforeEach(() => {
   bin = join(home, "bin");
   mkdirSync(bin);
   Object.assign(process.env, { HOME: home, USERPROFILE: home, PATH: bin });
+  delete process.env.DESK_PORT;
 });
 afterEach(() => {
   for (const [k, v] of Object.entries(saved)) {
@@ -81,6 +82,9 @@ test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
   assert.equal(s.skill?.path, join(home, ".agents", "skills", "inbox", "SKILL.md"));
   write(join(".codex", "config.toml"), `model = "o3"\n\n[mcp_servers.inbox]\nurl = "${MCP}"\n`);
   assert.equal(runSync(status("codex", MCP)).mcp?.connected, true);
+  const cmd = String.raw`C:\Users\me\code\review-desk\bin\desk.cmd`;
+  write(join(".codex", "config.toml"), `[mcp_servers.inbox]\ncommand = '${cmd}'\nargs = ["mcp"]\nenv = { DESK_PORT = "47961" }\n`);
+  assert.equal(runSync(status("codex", MCP)).mcp?.connected, true, "desk.cmd mcp, on Windows");
 });
 
 // Already registered, so no agent CLI runs: this part works on every OS.
@@ -304,6 +308,14 @@ test(
     ]);
     assert.equal(existsSync(join(home, "claude-calls")), false, "nothing was added or removed");
     assert.deepEqual(servers(), ["review-desk", "inbox"]);
+    // A command that only ends in desk mcp isn't the desk's: the desk's review-desk isn't removed for it.
+    const helpdesk = { type: "stdio", command: "npx", args: ["-y", "@acme/helpdesk", "mcp"] };
+    write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: MCP }, inbox: helpdesk } }));
+    assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [
+      "kept claude's MCP server review-desk: inbox is another server's name there",
+    ]);
+    assert.equal(existsSync(join(home, "claude-calls")), false);
+    assert.deepEqual(servers(), ["review-desk", "inbox"]);
 
     write(".claude.json", JSON.stringify({ mcpServers: { inbox: mail } }));
     assert.equal(runSync(status("claude-code", MCP)).mcp.connected, false, "a server named inbox isn't the desk's by its name");
@@ -313,16 +325,31 @@ test(
       ["Conflict", "claude has another MCP server named inbox, not the desk's: rename or remove it, then connect again"],
     );
     assert.equal(existsSync(join(home, "claude-calls")), false);
-    // The desk's own, by its URL on any loopback name or as `desk mcp` over stdio.
+    // The desk's own, by its URL on any loopback name, or as `desk mcp` over stdio (bin/desk, bin/desk.cmd, or node on this
+    // desk's src/cli.ts) aimed at its port; another port, or another program's mcp, isn't this desk.
+    const cli = join(import.meta.dirname, "..", "src", "cli.ts");
+    const at = { DESK_PORT: "47961" };
+    const connected = (inbox: object) => {
+      write(".claude.json", JSON.stringify({ mcpServers: { inbox } }));
+      return runSync(status("claude-code", MCP)).mcp.connected;
+    };
     for (const inbox of [
       { type: "http", url: "http://127.0.0.1:47961/mcp" },
+      { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"], env: at },
+      { type: "stdio", command: String.raw`C:\Users\me\code\review-desk\bin\desk.cmd`, args: ["mcp"], env: at },
+      { type: "stdio", command: "/opt/homebrew/bin/node", args: ["--disable-warning=ExperimentalWarning", cli, "mcp"], env: at },
+    ])
+      assert.equal(connected(inbox), true, JSON.stringify(inbox));
+    for (const inbox of [
+      { type: "http", url: "http://localhost:47962/mcp" },
+      { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"], env: { DESK_PORT: "47823" } },
       { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"] },
-    ]) {
-      write(".claude.json", JSON.stringify({ mcpServers: { inbox } }));
-      assert.equal(runSync(status("claude-code", MCP)).mcp.connected, true, JSON.stringify(inbox));
-    }
-    write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: "http://localhost:47962/mcp" } } }));
-    assert.equal(runSync(status("claude-code", MCP)).mcp.connected, false, "another desk's port isn't this desk");
+      { type: "stdio", command: "npx", args: ["-y", "@acme/helpdesk", "mcp"], env: at },
+      { type: "stdio", command: "node", args: ["/elsewhere/src/cli.ts", "mcp"], env: at },
+    ])
+      assert.equal(connected(inbox), false, JSON.stringify(inbox));
+    process.env.DESK_PORT = "47961";
+    assert.equal(connected({ type: "stdio", command: "desk", args: ["mcp"] }), true, "no DESK_PORT of its own: the desk's");
   },
 );
 
