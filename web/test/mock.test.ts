@@ -572,8 +572,11 @@ test("your own draft carries one call to action, Ready for review, and the mock 
   assert.ok(drafts.every((c) => c.cta === "ready"));
   assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta === "ready" && (!c.draft || c.author !== "me")));
   const id = encodeURIComponent(drafts[0]!.id);
-  assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 200);
+  const ready = await call<{ done: boolean }>("POST", `/api/review/${id}/ready`);
+  assert.deepEqual([ready.status, ready.data.done], [200, false], "nobody's asked to review it: it stays on your desk");
   assert.equal((await call("POST", `/api/review/${id}/ready`)).status, 409, "not a draft any more");
+  const next = encodeURIComponent(drafts[1]!.id);
+  assert.equal((await call<{ done: boolean }>("POST", `/api/review/${next}/ready`, { users: ["U_dana"] })).data.done, true);
 });
 
 test("the More menu's GitHub writes: the cards say which, and the mock takes them like the desk", async () => {

@@ -288,7 +288,7 @@ test("what the owner does in the desk takes it off the desk at once: ready for r
   await run(t.desk.sync());
   const status = (ref: string) => runSync(t.desk.item(ref)).card.status;
   await run(t.desk.markReady("web#3"));
-  assert.equal(status("web#3"), "done", "marked ready: it waits on reviewers now");
+  assert.equal(status("web#3"), "done", "marked ready with dana asked: it waits on reviewers now");
   await run(t.desk.githubAct("web#4", "close"));
   assert.equal(status("web#4"), "done");
   await run(t.desk.githubAct("web#5", "draft"));

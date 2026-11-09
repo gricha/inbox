@@ -391,7 +391,7 @@ export function createApp(desk: Desk, port: number): Hono {
   // Your own draft's Ready for review, from the desk's own window only.
   app.post("/api/review/:id{.+}/ready", (c) =>
     write(c, "mark your draft ready for review from the desk's window", (b) =>
-      Effect.flatMap(reviewerIds(b), (ask) => Effect.as(desk.markReady(c.req.param("id"), ask), { ok: true })),
+      Effect.flatMap(reviewerIds(b), (ask) => Effect.map(desk.markReady(c.req.param("id"), ask), (r) => ({ ok: true, ...r }))),
     ),
   );
   // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.

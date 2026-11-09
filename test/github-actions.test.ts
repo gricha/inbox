@@ -179,13 +179,16 @@ test("draft sends your open PR back to draft, and its card shows it as one; only
   assert.deepEqual([card.draft, card.cta, card.actions], [true, "ready", ["close", "ready"]]);
 });
 
-test("ready in the More menu marks your draft ready, red CI or not, and it leaves your desk as a does", async (c) => {
-  const { t, w } = await withWriter(c, [myPr(3, { ci: "red", draft: true })]);
+test("ready in the More menu marks your draft ready, red CI or not, and it leaves your desk as a does: not with nobody asked to review it", async (c) => {
+  const { t, w } = await withWriter(c, [myPr(3, { ci: "red", draft: true }), myPr(4, { draft: true, review_requests: [] })]);
   assert.equal(runSync(t.desk.item("web#3")).card.cta, "ready", "the row offers it too");
   await run(t.desk.githubAct("web#3", "ready"));
   assert.deepEqual(w.calls, [["ready", "PR_acme/web_3"]]);
   const d = runSync(t.desk.item("web#3"));
   assert.deepEqual([d.item.draft, d.card.status, d.card.actions], [false, "done", ["close", "draft"]]);
+  await run(t.desk.githubAct("web#4", "ready"));
+  const alone = runSync(t.desk.item("web#4"));
+  assert.deepEqual([alone.item.draft, alone.card.status, alone.card.cta], [false, "active", "reviewers"], "still yours: Add reviewers");
 });
 
 test("request changes needs what you wrote, is pinned to the commit you read, and never on your own PR", async (c) => {

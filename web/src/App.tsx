@@ -716,7 +716,7 @@ export function App() {
     c: Card,
     sending: string,
     did: Acted,
-    write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean }, ApiError>,
+    write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
       // Sent already from this review.
@@ -731,8 +731,9 @@ export function App() {
       return write.pipe(
         Effect.match({
           onSuccess: (r) => {
-            mark({ ...did, sending: false });
-            setView((v) => v && removeCard(v, c.id));
+            // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
+            mark(r.stays ? null : { ...did, sending: false });
+            if (!r.stays) setView((v) => v && removeCard(v, c.id));
             flash(r.text, r.error, r.undo);
             return true;
           },
@@ -757,9 +758,11 @@ export function App() {
       const w = undoWrite.current;
       if (w) {
         undoWrite.current = null;
-        // Marking it ready took it off your desk; undoing the draft keeps it where it was.
+        // Marking it ready took it off your desk, unless nobody's asked to review it; undoing the draft keeps it where it was.
         const revert: Effect.Effect<unknown, ApiError> =
-          w.to === "ready" ? api.ready(w.id).pipe(Effect.andThen(api.act(w.id, "undo"))) : api.github(w.id, "reopen");
+          w.to === "ready"
+            ? api.ready(w.id).pipe(Effect.flatMap((r): Effect.Effect<unknown, ApiError> => (r.done ? api.act(w.id, "undo") : Effect.void)))
+            : api.github(w.id, "reopen");
         return revert.pipe(
           Effect.match({
             onSuccess: () => {
@@ -854,14 +857,17 @@ export function App() {
     });
   }
 
-  // Ready for review on GitHub, from its row or its review (asking whoever was picked there). Only the review request
-  // failing leaves it ready, so it stays gone and the toast says who to ask.
+  // Ready for review on GitHub, from its row or its review (asking whoever was picked there). With nobody asked to review
+  // it, or the review request refused, it's ready but stays on your desk: the desk says which (`done`).
   function ready(c: Card, picked: Reviewer[] = []): Effect.Effect<boolean> {
     const names = picked.map((p) => p.login).join(", ");
     const ask = { users: picked.filter((p) => !p.team).map((p) => p.id), teams: picked.filter((p) => p.team).map((p) => p.id) };
+    const did = `Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub`;
     const write = api.ready(c.id, ask).pipe(
-      Effect.as({ text: `Marked ${shortRef(c)} ready for review${names ? ` and asked ${names}` : ""} on GitHub` }),
-      Effect.catchTag("DeskReviewersNotAsked", (e) => Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true })),
+      Effect.map((r) => ({ text: r.done ? did : `${did}. Nobody's asked to review it yet`, stays: !r.done })),
+      Effect.catchTag("DeskReviewersNotAsked", (e) =>
+        Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true, stays: true }),
+      ),
     );
     return finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, write);
   }

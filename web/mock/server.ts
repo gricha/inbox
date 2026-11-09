@@ -3348,7 +3348,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
   }
-  // Ready for review on your own draft, and the reviewers picked with it: the mock only remembers them.
+  // Ready for review on your own draft, and the reviewers picked with it: the mock only remembers them. `done` as the desk
+  // answers it: with nobody asked to review it, it stays on your desk.
   const ready = /^\/api\/review\/(.+)\/ready$/.exec(url.pathname);
   if (ready && req.method === "POST") {
     const r = resolve(decodeURIComponent(ready[1]!));
@@ -3356,9 +3357,9 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const body = await readBody(req);
     const ids = [...((body.users as string[] | undefined) ?? []), ...((body.teams as string[] | undefined) ?? [])];
     r.seed.draft = false;
-    r.seed.asked = ids.map((id) => ROSTER.find((x) => x.id === id)?.login ?? id);
+    r.seed.asked = [...(r.seed.asked ?? []), ...ids.map((id) => ROSTER.find((x) => x.id === id)?.login ?? id)];
     bump();
-    return { ok: true };
+    return { ok: true, done: r.seed.asked.length > 0 };
   }
   // A comment on a line: the mock keeps it as your thread there, as GitHub would show it.
   const inline = /^\/api\/review\/(.+)\/inline$/.exec(url.pathname);

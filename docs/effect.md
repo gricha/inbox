@@ -176,7 +176,7 @@ middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound`
   run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
   locks, and on a stopped desk the last write's lock closes the store (`closeIfIdle`). An `ensuring` inside a write's
   uninterruptible region never sees an interruption: `markReady`'s and `askReviewers`' refresh of the PR, forked
-  whatever GitHub said, is one.
+  whatever GitHub said and waited for, is one.
 
 ## No throw, no catch
 

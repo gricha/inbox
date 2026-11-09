@@ -1011,8 +1011,8 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
       .prepare("SELECT action FROM events WHERE item_id = 'acme/web#3' ORDER BY seq")
       .all()
       .map((r) => r.action),
-    ["ready", "done"],
-    "ready landed and is kept: nothing rolled back",
+    ["ready"],
+    "ready landed and is kept: nothing rolled back, and with the request refused it isn't done",
   );
   t.gh.reviewers = () => Effect.fail(new GitHubGraphQLError({ message: "GitHub: Could not resolve to a Repository" }));
   assert.deepEqual(

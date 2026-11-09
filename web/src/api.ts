@@ -185,7 +185,7 @@ export const api = {
     call<{ ok: true; url: string }>("POST", `/api/review/${encodeURIComponent(id)}/reply`, { id: convo, body }),
   // With the reviewers you picked (node ids), asked right after it's marked ready.
   ready: (id: string, ask?: { users: string[]; teams: string[] }) =>
-    call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
+    call<{ ok: true; done: boolean }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
   askReviewers: (id: string, ask: { users: string[]; teams: string[] }) =>
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewers`, ask),
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),

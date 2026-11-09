@@ -422,7 +422,8 @@ test("Ready for review asks the reviewers you picked with it, after marking it r
   assert.equal((await ready("acme/web#3", { users: "U_dana" })).status, 400, "a list of node ids, not one");
   assert.equal((await ready("acme/web#3", { users: [""] })).status, 400);
   assert.deepEqual(w.calls, []);
-  assert.equal((await ready("acme/web#3", { users: ["U_dana"], teams: ["T_backend"] })).status, 200);
+  const asked = await ready("acme/web#3", { users: ["U_dana"], teams: ["T_backend"] });
+  assert.deepEqual([asked.status, await asked.json()], [200, { ok: true, done: true }]);
   assert.equal((await ready("acme/web#4", {})).status, 200, "nobody picked: only marked ready");
   assert.deepEqual(w.calls, [
     ["ready", "PR_acme/web_3"],
@@ -451,6 +452,49 @@ test("a review request GitHub refuses after Ready for review says it's ready any
     logged.map((r) => r.action),
     ["ready"],
   );
+  assert.equal(runSync(t.desk.item("web#3")).card.status, "active", "refused, so it's back on your desk");
+});
+
+test("Ready for review with nobody asked to review it isn't done: it stays out of the Archive and tops your desk with Add reviewers", async (c) => {
+  const draft = { ci: "green" as const, draft: true };
+  const t = await setup([myPr(3, { ...draft, review_requests: [] }), myPr(4, { ...draft, review_requests: [] }), myPr(5, draft)], {
+    settings: { "policy.judge": false, "notify.quiet": "" },
+    desk: { writer: fakeWriter().writer },
+  });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const card = (ref: string) => runSync(t.desk.item(ref)).card;
+  const archive = () =>
+    runSync(t.desk.queue())
+      .cleared.map((x) => x.id)
+      .sort();
+  // GitHub has what the press wrote by the time the desk reads the PR again.
+  const lands = (n: number, asked: Item["review_requests"] = []) => {
+    const it = t.gh.items.get(`acme/web#${n}`)!;
+    t.gh.items.set(it.id, { ...it, draft: false, review_requests: [...it.review_requests, ...asked], updated_at: hoursAgo(0) });
+  };
+  lands(3);
+  const alone = await run(t.desk.markReady("web#3"));
+  assert.deepEqual([card("web#3").status, archive()], ["active", []], "nobody's asked, so it isn't done");
+  assert.deepEqual([card("web#3").cta, card("web#3").handed_back], ["reviewers", undefined], "a workflow may still ask someone");
+  assert.deepEqual(alone, { done: false });
+
+  lands(4, [{ reviewer: "sam", type: "user", codeowner: false }]);
+  assert.deepEqual(await run(t.desk.markReady("web#4", { users: ["U_sam"], teams: [] })), { done: true }, "asked in the same press");
+  lands(5);
+  assert.deepEqual(await run(t.desk.markReady("web#5")), { done: true }, "dana was asked while it was a draft");
+  assert.deepEqual([card("web#4").status, card("web#5").status, archive()], ["done", "done", ["acme/web#4", "acme/web#5"]]);
+
+  t.setNow(new Date(NOW.getTime() + 11 * 60_000));
+  await run(t.desk.sync());
+  const top = runSync(t.desk.focus()).sections.now[0];
+  assert.deepEqual(
+    [top?.id, top?.group, top?.cta, card("web#3").why],
+    ["acme/web#3", "back", "reviewers", "nobody's asked to review it: add reviewers"],
+    "ten minutes on, it's on top of your desk",
+  );
+  assert.deepEqual(archive(), ["acme/web#4", "acme/web#5"]);
+  assert.deepEqual(t.notes, ["web#3 · nobody's asked to review it: add reviewers"]);
 });
 
 test("reviewers to pick from are GitHub's for your own PR, without you; anyone else's PR has none", async (c) => {

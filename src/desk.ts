@@ -2043,13 +2043,14 @@ export class Desk {
         const { url } = yield* send().pipe(Effect.mapError(upstream(`couldn't ${verb} on GitHub: `)));
         this.store.logWrite(id, action, this.now().toISOString());
         this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
-        // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish.
+        // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish,
+        // as is one marked ready with nobody asked to review it.
         if (action === "reopen") {
           // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
           const ev = this.store.lastActionFor(id);
           if (ev?.action === "done") yield* this.undo(ev.seq);
           else if (this.store.state(id).done_at) yield* this.act(id, "restore");
-        } else if (action !== "draft") yield* this.doneAfterWrite(id);
+        } else if (action !== "draft" && !(action === "ready" && this.unaskedOnceReady(it))) yield* this.doneAfterWrite(id);
         this.changed();
         // Awaited, so the window and its u see it closed (actions() reads the snapshot this replaces); the runner's, so a stop cuts it.
         const refresh = this.runner.fork("refresh", this.gh.refresh(id), id);
@@ -2558,6 +2559,12 @@ export class Desk {
     return sig.me.author && sig.pr.unasked && sig.item.updated_hours >= UNASKED_AFTER;
   }
 
+  // pr.unasked as your draft will read once it's ready: nobody was asked while it was a draft either. Ready for review
+  // then isn't done: it stays on your desk, for Add reviewers.
+  private unaskedOnceReady(draft: Item): boolean {
+    return analyze({ ...draft, draft: false }, this.ctx ?? NO_CONTEXT, this.loaded!.config, this.now()).signals.pr.unasked;
+  }
+
   // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (Ask reviewers in its review), one of the desk's
   // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
   askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError> {
@@ -2583,10 +2590,12 @@ export class Desk {
     });
   }
 
-  // Whatever GitHub said to a write, the PR is read again; inside the write's region, so never on an interruption.
+  // Whatever GitHub said to a write, the PR is read again; inside the write's region, so never on an interruption. Waited
+  // for, so the window sees a PR that stays on your desk as the write left it (ready, with Add reviewers).
   private refreshed(id: string): Effect.Effect<void> {
-    return Effect.sync(() => {
-      this.runner.fork("refresh", this.gh.refresh(id), id);
+    return Effect.suspend(() => {
+      const refresh = this.runner.fork("refresh", this.gh.refresh(id), id);
+      return refresh ? Effect.asVoid(Fiber.await(refresh)) : Effect.void;
     });
   }
 
@@ -2978,7 +2987,8 @@ export class Desk {
 
   // POST /api/review/:id/ready: your own draft's "Ready for review", one of the desk's GitHub writes, on your click,
   // then a review request to whoever you picked with it (node ids from reviewers()). Asking them failing leaves it ready.
-  markReady(ref: string, ask?: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError | ReviewersNotAsked> {
+  // `done`: it left your desk. Ready with nobody asked to review it is still yours, so it stays, for Add reviewers.
+  markReady(ref: string, ask?: { users: string[]; teams: string[] }): Effect.Effect<{ done: boolean }, WriteError | ReviewersNotAsked> {
     return Effect.gen({ self: this }, function* () {
       yield* this.notStopped();
       const e = yield* this.pr(ref);
@@ -2991,21 +3001,24 @@ export class Desk {
         yield* writer.ready(e.item.node_id).pipe(Effect.mapError(upstream("GitHub didn't mark it ready: ")));
         this.store.logWrite(id, "ready", this.now().toISOString());
         this.log(`marked ${id} ready for review on GitHub`);
-        yield* this.doneAfterWrite(id);
         const users = ask?.users ?? [];
         const teams = ask?.teams ?? [];
         const n = users.length + teams.length;
-        if (n === 0) return;
-        yield* writer
-          .requestReviews(e.item.node_id, users, teams)
-          .pipe(
-            Effect.mapError(
-              (err) =>
-                new ReviewersNotAsked({ message: `Marked it ready, but GitHub didn't ask for the reviews: ${err.message}`, cause: err }),
-            ),
-          );
-        this.store.logWrite(id, "request_reviews", this.now().toISOString());
-        this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+        if (n > 0) {
+          yield* writer
+            .requestReviews(e.item.node_id, users, teams)
+            .pipe(
+              Effect.mapError(
+                (err) =>
+                  new ReviewersNotAsked({ message: `Marked it ready, but GitHub didn't ask for the reviews: ${err.message}`, cause: err }),
+              ),
+            );
+          this.store.logWrite(id, "request_reviews", this.now().toISOString());
+          this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+        }
+        const done = n > 0 || !this.unaskedOnceReady(e.item);
+        if (done) yield* this.doneAfterWrite(id);
+        return { done };
       }).pipe(Effect.ensuring(this.refreshed(id)));
       return yield* this.locked(this.approving, id, `already marking ${id} ready`, write);
     });
