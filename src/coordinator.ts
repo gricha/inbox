@@ -491,13 +491,19 @@ export class Coordinator {
       const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
       const here = new Set([dir, real]);
       const saved = this.saved();
-      const a =
+      let a =
         all.find((x) => x.id === saved?.id) ??
         all
           .filter((x) => here.has(x.cwd) && x.pid)
           .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
           .at(-1) ??
         null;
+      // claude resumes a session only from its own folder: one whose folder is gone (the home moved to ~/.inbox) is let go.
+      if (a?.cwd && !here.has(a.cwd) && !fs.existsSync(a.cwd)) {
+        this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, which is gone, so the next wake starts a fresh one in ${dir}`);
+        yield* this.halt(a);
+        a = null;
+      }
       if (a?.id !== saved?.id) {
         // The desk didn't see its mode, so the next launch sets the setting's.
         this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });

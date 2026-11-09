@@ -390,6 +390,56 @@ test("a desk restart picks up the running coordinator: it only looks, and the ne
   assert.equal(starts(t.fake.calls()).length, 1);
 });
 
+test(
+  "after the desk's home moves (~/.review-desk to ~/.inbox), the session from the old folder is stopped and the next wake starts a fresh one",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    t.desk.start();
+    runSync(t.desk.act("web#3", "inflight"));
+    await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
+    await settle();
+    await run(t.desk.close());
+    const moved = `${t.home}-moved`;
+    fs.renameSync(t.home, moved);
+    c.after(() => {
+      fs.rmSync(moved, { recursive: true, force: true });
+    });
+    const before = t.fake.calls().length;
+    const lines: string[] = [];
+    const desk = new Desk({
+      home: moved,
+      github: t.gh,
+      now: () => NOW,
+      notify: () => {},
+      log: (m) => {
+        lines.push(m);
+      },
+    });
+    c.after(() => {
+      desk.stop();
+    });
+    desk.coordinator.batch = 30;
+    await run(desk.init());
+    desk.start();
+    await until(() => !t.fake.sessions()[0]!.running);
+    await desk.coordinator.flushing;
+    assert.deepEqual(t.fake.calls().slice(before), [
+      ["agents", "--json", "--all"],
+      ["stop", "c0ffee01"],
+    ]);
+    assert.equal(desk.coordinator.saved(), null, "forgotten: claude couldn't resume it from the new folder");
+    assert.ok(lines.some((l) => /^coordinator: c0ffee01 ran in \S+, which is gone, so the next wake starts a fresh one in /.test(l)));
+    desk.record("github", [{ at: NOW.toISOString(), item_id: "acme/web#3", kind: "commented", actor: "dana", data: {} }]);
+    await until(() => t.fake.sessions().length === 2);
+    const fresh = t.fake.sessions()[1]!;
+    assert.equal(fs.realpathSync(fresh.cwd), fs.realpathSync(path.join(moved, "coordinator")));
+    assert.deepEqual(fresh.said, [`${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new comment.`], "as a first start");
+    assert.deepEqual(resumes(t.fake.calls()), []);
+    await until(() => desk.coordinator.saved()?.id === "c0ffee02");
+  },
+);
+
 test("a coordinator that crashed or was stopped comes back at the desk's next check, with no turn", posix, async (c) => {
   const t = await coordinated(c);
   t.desk.coordinator.every = 50;
