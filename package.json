@@ -86,6 +86,14 @@
       "package.json"
     ],
     "npmRebuild": false,
+    "protocols": [
+      {
+        "name": "Inbox",
+        "schemes": [
+          "inbox"
+        ]
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [

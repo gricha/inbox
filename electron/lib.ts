@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Cause, Data, Effect, Result } from "effect";
 import { fsError, messageOf, type FsError } from "../src/errors.ts";
+import { hashOf, placeOf } from "../src/links.ts";
 import { Runner } from "../src/runner.ts";
 import { detached, report } from "../src/sentry.ts";
 import { DEFAULTS } from "../src/settings.ts";
@@ -566,6 +567,17 @@ export const isGitHubUrl = (url: string): boolean => {
   const u = URL.parse(url);
   return u?.protocol === "https:" && u.host === "github.com";
 };
+
+// ---------------------------------------------------------------- inbox:// links (src/links.ts)
+
+export const PROTOCOL = "inbox";
+// The inbox:// link Windows and Linux start the app with, or hand a second instance, among Chromium's switches.
+export const linkArg = (argv: readonly string[]): string | undefined => argv.find((a) => a.toLowerCase().startsWith(`${PROTOCOL}:`));
+// The window's route to what an inbox:// link names; null for one that names nothing, or any other link.
+export function linkHash(link: string): string | null {
+  const p = link.trim().toLowerCase().startsWith(`${PROTOCOL}:`) ? placeOf(link) : null;
+  return p ? hashOf(p) : null;
+}
 
 // ---------------------------------------------------------------- window bounds
 

@@ -49,6 +49,8 @@ import {
   isHttpUrl,
   isTheme,
   keepsView,
+  linkArg,
+  linkHash,
   loginShellPath,
   makeDir,
   menuLabel,
@@ -56,6 +58,7 @@ import {
   OLD_APP_NAME,
   parseNotice,
   probeHealth,
+  PROTOCOL,
   quietly,
   readJson,
   removeFile,
@@ -108,6 +111,7 @@ let status: Status | null = null;
 let queueCards: Card[] = []; // the queue's top: now, then today
 let loginApplied: boolean | null = null; // last applied, so a refused registration isn't retried on every update
 let theme: string | null = null; // this device's, as Settings → This device picked it; kept here, since the UI's origin can change
+let pendingHash: string | null = null; // where an inbox:// link asked the window to go before the UI loaded
 
 // A separate DESK_HOME (tests, a second desk) gets its own window state, logs and single-instance lock.
 if (process.env.DESK_HOME) {
@@ -135,7 +139,18 @@ const runner = appRunner(log);
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", showWindow);
+  // Windows and Linux start a second instance for a clicked inbox:// link; macOS hands it to open-url, at launch too.
+  app.on("second-instance", (_e, argv) => {
+    const link = linkArg(argv);
+    if (link) openPermalink(link);
+    else showWindow();
+  });
+  app.on("open-url", (e, url) => {
+    e.preventDefault();
+    openPermalink(url);
+  });
+  const launched = linkArg(process.argv);
+  if (launched) openPermalink(launched);
   runner.fork("starting the app", main());
 }
 
@@ -163,6 +178,9 @@ function main(): Effect.Effect<void> {
     yield* Effect.promise(() => app.whenReady());
     log(`Inbox ${app.getVersion()} (Electron ${process.versions.electron}), desk ${deskUrl}, home ${home}`);
     if (!process.env.DESK_HOME) yield* carryOverFiles();
+    // Only the packaged app on the owner's home takes inbox:// links: from the repo they'd start a bare Electron.
+    if (app.isPackaged && !process.env.DESK_HOME && !app.isDefaultProtocolClient(PROTOCOL))
+      log(app.setAsDefaultProtocolClient(PROTOCOL) ? `opening ${PROTOCOL}:// links` : `couldn't take ${PROTOCOL}:// links`);
     if (mac && !app.isPackaged) app.dock?.setIcon(asset("icon.png")); // from the repo the Dock would show Electron's icon
     secureSession();
     handle("desktop:status", (e) =>
@@ -265,13 +283,16 @@ function loadUi(): Effect.Effect<void> {
       );
     }
     if (!win) return;
-    yield* load(win, uiUrl).pipe(
+    const hash = pendingHash;
+    pendingHash = null;
+    yield* load(win, hash ? `${uiUrl}/${hash}` : uiUrl).pipe(
       Effect.catch((e) =>
         Effect.sync(() => {
           log(`loading ${uiUrl}: ${e.message}`);
         }),
       ),
     );
+    if (pendingHash) goTo(pendingHash); // a link clicked while it loaded
   });
 }
 
@@ -721,12 +742,27 @@ function toggleWindow(): void {
 
 function openSettings(): void {
   showWindow();
+  goTo("#/settings");
+}
+
+// An inbox:// link clicked anywhere: the window comes forward at its item or page; one that names nothing just brings it.
+function openPermalink(link: string): void {
+  const hash = linkHash(link);
+  if (hash === null) log(`an ${PROTOCOL}:// link that names nothing: ${link}`);
+  else goTo(hash);
+  showWindow();
+}
+
+// The window's route: now, on the UI; while the start page shows, once the UI loads.
+function goTo(hash: string): void {
   const w = win;
-  if (!w) return;
+  pendingHash = hash;
+  if (!w || !isAppUrl(w.webContents.getURL(), origins)) return;
+  pendingHash = null;
   runner.fork(
-    "opening Settings",
+    "going to a page",
     Effect.tryPromise({
-      try: () => w.webContents.executeJavaScript(`location.hash = "#/settings"`),
+      try: () => w.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`),
       catch: (cause) => new ElectronRefused({ cause }),
     }),
   );

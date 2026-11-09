@@ -36,6 +36,8 @@ import {
   isHttpUrl,
   isTheme,
   keepsView,
+  linkArg,
+  linkHash,
   loginShellPath,
   menuLabel,
   mergePath,
@@ -391,6 +393,20 @@ test("URL checks", () => {
   assert.ok(
     !isGitHubUrl("http://github.com/x") && !isGitHubUrl("https://github.com.evil.example/x") && !isGitHubUrl("https://gist.github.com/x"),
   );
+});
+
+test("an inbox:// link, at launch or handed to a second instance, routes the window to its item or page", () => {
+  // Windows and Linux put the link among Chromium's switches; from the repo, after the app's path.
+  assert.equal(linkArg(["Inbox.exe", "--allow-file-access-from-files", "inbox://item/acme/api/7"]), "inbox://item/acme/api/7");
+  assert.equal(linkArg(["electron", ".", "INBOX://blocked"]), "INBOX://blocked");
+  assert.equal(linkArg(["Inbox.exe", "--hidden"]), undefined);
+  assert.equal(linkHash("inbox://item/acme/api/7"), "#/item/acme%2Fapi%237");
+  assert.equal(linkHash("inbox://merging"), "#/inflight");
+  assert.equal(linkHash("inbox://fyi/"), "#/later");
+  assert.equal(linkHash("inbox://inbox"), "#/");
+  // What names nothing just brings the window forward; an http link isn't the app's to route.
+  for (const link of ["inbox://item/acme", "inbox://settings", "http://localhost:47823/#/review/acme%2Fapi%237"])
+    assert.equal(linkHash(link), null, link);
 });
 
 test("keepsView: after the desk comes back, only a window still on its UI reloads; the wait page loads the UI", () => {
