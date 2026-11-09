@@ -62,6 +62,7 @@ const TARGETS: [string, string, number, number?][] = [
   ["--red", "--sheet", 4.5],
   ["--red", "--red-wash", 4.5],
   ["--amber", "--sheet", 4.5],
+  ["--amber", "--paper", 4.5], // Back to you's and Waiting on your review's headings
   ["--amber", "--amber-wash", 4.5],
   ["--green", "--sheet", 4.5],
   ["--rule", "--sheet", 1.08, 1.6], // a hairline: visible, never loud
