@@ -18,6 +18,11 @@ import { registerCustomTheme, resolveTheme, type DiffsTheme } from "@pierre/diff
 // - Shiki's Gruvbox draws broken code in its dark red at 2.9:1: its bright red.
 // - Shiki's Tokyo Night draws comments, doc comments and markdown punctuation at 2.4:1 to 3.5:1: lighter, comments in folke's
 //   dark5 (4.1:1 on the sheet, about 3:1 on a changed line).
+// - Shiki's Nord draws comments, preprocessor lines and errors at 2.4:1 to 3.1:1: lighter, comments still under the code.
+// - Shiki's Rosé Pine Dawn draws strings, variables, numbers, types and comments in gold, rose, foam and muted at 2.2:1 to
+//   3.3:1 on its surface: darkened to about 4:1, comments a step under.
+// - Flexoki has no Shiki theme: GitHub Light Default's in kepano's 600 accents (keywords green, functions orange, strings
+//   cyan, constants purple, names blue), yellow its 700 and comments base-500, since its tx-3 is 2:1 on the paper.
 const COPIES: Record<string, { of: string; colours: Record<string, string> }> = {
   "pierre-light-desk": {
     of: "pierre-light",
@@ -104,6 +109,40 @@ const COPIES: Record<string, { of: string; colours: Record<string, string> }> = 
   "github-light-default-desk": {
     of: "github-light-default",
     colours: { "#f6f8fa": "#1f2328", "#eaeef2": "#1f2328" },
+  },
+  "nord-desk": {
+    of: "nord",
+    colours: {
+      "#616e88": "#8592aa", // comments
+      "#bf616a": "#d57780", // errors, deleted markup
+      "#5e81ac": "#81a1c1", // preprocessor: nord9
+    },
+  },
+  "rose-pine-dawn-desk": {
+    of: "rose-pine-dawn",
+    colours: {
+      "#ea9d34": "#a86c1c", // gold: strings
+      "#d7827e": "#b0605c", // rose: variables, numbers
+      "#56949f": "#3e7d88", // foam: types, tags
+      "#9893a5": "#857f97", // muted: comments
+    },
+  },
+  "flexoki-light-desk": {
+    of: "github-light-default",
+    colours: {
+      "#1f2328": "#100f0f", // tx
+      "#57606a": "#6f6e69", // punctuation: tx-2
+      "#6e7781": "#878580", // comments: base-500
+      "#cf222e": "#66800b", // keywords: green
+      "#8250df": "#bc5215", // functions: orange
+      "#0a3069": "#24837b", // strings: cyan
+      "#0550ae": "#5e409d", // constants, numbers: purple
+      "#953800": "#205ea6", // variables, names: blue
+      "#116329": "#8e6b01", // tags, attributes: yellow
+      "#82071e": "#af3029", // invalid: red
+      "#f6f8fa": "#100f0f",
+      "#eaeef2": "#100f0f",
+    },
   },
   "gruvbox-dark-medium-desk": {
     of: "gruvbox-dark-medium",

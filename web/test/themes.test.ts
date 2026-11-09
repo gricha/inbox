@@ -114,8 +114,9 @@ test("the system's dark is the Dark theme", () => {
 test("index.html paints the same themes and colours before the UI loads", () => {
   const list = /\[([^\]]*)\]\.includes\(t\)/.exec(html)?.[1];
   assert.ok(list, "no theme list in index.html's pre-paint script");
+  // Prettier lays a long list out one id a line, with a trailing comma.
   assert.deepEqual(
-    JSON.parse(`[${list}]`),
+    JSON.parse(`[${list.replace(/,\s*$/, "")}]`),
     THEMES.map((t) => t.id),
   );
   const meta = (scheme: string) =>

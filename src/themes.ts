@@ -21,6 +21,12 @@ export const THEMES = [
   { id: "sentry-dawn", label: "Sentry Dawn", scheme: "light", paper: "#f6f5f8", pencil: "#6a6383", diff: "github-light-default-desk" },
   { id: "gruvbox", label: "Gruvbox", scheme: "dark", paper: "#1f1d1c", pencil: "#a89984", diff: "gruvbox-dark-medium-desk" },
   { id: "tokyo-night", label: "Tokyo Night", scheme: "dark", paper: "#15161f", pencil: "#838cb4", diff: "tokyo-night-desk" },
+  // Omarchy's own, by its names: its themes/<id>, mapped from each one's published palette.
+  { id: "everforest", label: "Everforest", scheme: "dark", paper: "#272e33", pencil: "#9da9a0", diff: "everforest-dark" },
+  { id: "kanagawa", label: "Kanagawa", scheme: "dark", paper: "#1a1a22", pencil: "#a09c87", diff: "kanagawa-wave" },
+  { id: "nord", label: "Nord", scheme: "dark", paper: "#292e39", pencil: "#adb5c4", diff: "nord-desk" },
+  { id: "rose-pine", label: "Rose Pine", scheme: "light", paper: "#faf4ed", pencil: "#65617f", diff: "rose-pine-dawn-desk" },
+  { id: "flexoki-light", label: "Flexoki Light", scheme: "light", paper: "#f2f0e5", pencil: "#64635e", diff: "flexoki-light-desk" },
 ] as const satisfies readonly Theme[];
 
 export type ThemeId = (typeof THEMES)[number]["id"];

@@ -380,6 +380,172 @@
   color-scheme: dark;
 }
 
+/* Everforest, as Omarchy has it: sainnhe's medium dark, its bg0 sheet on bg_dim with bg1 and bg2 rules, fg under an ink a
+   step lighter (its own reads at 7:1), its blue-aqua for the call to action and its green for Approve, the red lifted to
+   read on its wash. */
+:root[data-theme="everforest"] {
+  --paper: #272e33;
+  --sheet: #2d353b;
+  --wash: #343f44;
+  --ink: #ece6d6;
+  --ink-2: #d3c6aa;
+  --pencil: #9da9a0;
+  --faint: #7a8478;
+  --rule: #3d484d;
+  --rule-strong: #475258;
+  --control: #859289;
+  --sel: #343f44;
+  --side: #1e2326;
+  --side-on: #343f44;
+  --side-hover: #272e33;
+  --red: #eb9899;
+  --red-wash: #3c3b41;
+  --amber: #dbbc7f;
+  --amber-wash: #45443a;
+  --green: #a7c080;
+  --go: #a7c080;
+  --on-go: #2d353b;
+  --accent: #7fbbb3;
+  --accent-ink: #7fbbb3;
+  --accent-wash: #344045;
+  --on-accent: #2d353b;
+  --shadow: 0 1px 2px rgb(16 20 22 / 35%), 0 12px 32px rgb(16 20 22 / 50%);
+
+  color-scheme: dark;
+}
+
+/* Kanagawa, as Omarchy has it: rebelot's wave, its sumiInk sheet and panes, fujiWhite and oldWhite text, crystalBlue on
+   waveBlue1 for the call to action, and its winter red and yellow under the red and amber. */
+:root[data-theme="kanagawa"] {
+  --paper: #1a1a22;
+  --sheet: #1f1f28;
+  --wash: #2a2a37;
+  --ink: #dcd7ba;
+  --ink-2: #c8c093;
+  --pencil: #a09c87;
+  --faint: #54546d;
+  --rule: #2a2a37;
+  --rule-strong: #363646;
+  --control: #727169;
+  --sel: #2a2a37;
+  --side: #16161d;
+  --side-on: #2a2a37;
+  --side-hover: #1f1f28;
+  --red: #e8808a;
+  --red-wash: #43242b;
+  --amber: #e6c384;
+  --amber-wash: #49443c;
+  --green: #98bb6c;
+  --go: #98bb6c;
+  --on-go: #1f1f28;
+  --accent: #7e9cd8;
+  --accent-ink: #7e9cd8;
+  --accent-wash: #223249;
+  --on-accent: #1f1f28;
+  --shadow: 0 1px 2px rgb(10 10 14 / 40%), 0 12px 32px rgb(10 10 14 / 55%);
+
+  color-scheme: dark;
+}
+
+/* Nord, as Omarchy has it: its polar night sheet and rules, snow storm text, frost nord8 for the call to action and aurora
+   for the rest, the red lifted from nord11 (3.4:1 on the sheet). */
+:root[data-theme="nord"] {
+  --paper: #292e39;
+  --sheet: #2e3440;
+  --wash: #3b4252;
+  --ink: #eceff4;
+  --ink-2: #d8dee9;
+  --pencil: #adb5c4;
+  --faint: #616e88;
+  --rule: #3b4252;
+  --rule-strong: #434c5e;
+  --control: #68758f;
+  --sel: #3b4252;
+  --side: #242933;
+  --side-on: #3b4252;
+  --side-hover: #2e3440;
+  --red: #e0969c;
+  --red-wash: #3a3843;
+  --amber: #ebcb8b;
+  --amber-wash: #47463f;
+  --green: #a3be8c;
+  --go: #a3be8c;
+  --on-go: #2e3440;
+  --accent: #88c0d0;
+  --accent-ink: #88c0d0;
+  --accent-wash: #353f4c;
+  --on-accent: #2e3440;
+  --shadow: 0 1px 2px rgb(20 23 30 / 35%), 0 12px 32px rgb(20 23 30 / 50%);
+
+  color-scheme: dark;
+}
+
+/* Rose Pine, as Omarchy has it: Rosé Pine Dawn, its surface sheet on base with overlay panes, its text under a deeper ink,
+   iris for the call to action and pine (its green) for Approve, love and gold darkened to read as text. */
+:root[data-theme="rose-pine"] {
+  --paper: #faf4ed;
+  --sheet: #fffaf3;
+  --wash: #f4ede8;
+  --ink: #3b3660;
+  --ink-2: #575279;
+  --pencil: #65617f;
+  --faint: #9893a5;
+  --rule: #efe7df;
+  --rule-strong: #dfdad9;
+  --control: #9893a5;
+  --sel: #f2e9e1;
+  --side: #f2e9e1;
+  --side-on: #e6dcd5;
+  --side-hover: #ece3db;
+  --red: #a24f67;
+  --red-wash: #f9efec;
+  --amber: #965c0e;
+  --amber-wash: #fbf0df;
+  --green: #286983;
+  --go: #286983;
+  --on-go: #fffaf3;
+  --accent: #7a62a3;
+  --accent-ink: #7a62a3;
+  --accent-wash: #f6f1f2;
+  --on-accent: #fffaf3;
+  --shadow: 0 1px 2px rgb(87 82 121 / 7%), 0 10px 30px rgb(87 82 121 / 13%);
+
+  color-scheme: light;
+}
+
+/* Flexoki Light, as Omarchy has it: kepano's paper sheet on bg-2, its ui greys for rules, black text and tx-2 beside it,
+   and its 600 and 700 accents (Omarchy's 400s are for dark paper), blue for the call to action. */
+:root[data-theme="flexoki-light"] {
+  --paper: #f2f0e5;
+  --sheet: #fffcf0;
+  --wash: #f2f0e5;
+  --ink: #100f0f;
+  --ink-2: #403e3c;
+  --pencil: #64635e;
+  --faint: #a8a69e;
+  --rule: #e6e4d9;
+  --rule-strong: #dad8ce;
+  --control: #9f9d96;
+  --sel: #eceadf;
+  --side: #eae8dd;
+  --side-on: #dad8ce;
+  --side-hover: #e2e0d5;
+  --red: #af3029;
+  --red-wash: #fbe6dd;
+  --amber: #8e6b01;
+  --amber-wash: #fcf6e2;
+  --green: #536907;
+  --go: #536907;
+  --on-go: #fffcf0;
+  --accent: #205ea6;
+  --accent-ink: #205ea6;
+  --accent-wash: #e1e7ec;
+  --on-accent: #fffcf0;
+  --shadow: 0 1px 2px rgb(16 15 15 / 6%), 0 10px 30px rgb(16 15 15 / 12%);
+
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
