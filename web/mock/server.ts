@@ -2300,7 +2300,7 @@ function automationsView(): AutomationView[] {
     const s = parseSchedule(a.schedule);
     return {
       ...a,
-      when: scheduleWords(a.schedule),
+      trigger: scheduleWords(a.schedule),
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
       next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
       running: false,
@@ -3516,6 +3516,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         name: String(b.name),
         schedule: String(b.schedule),
         prompt: String(b.prompt),
+        ...(typeof b.when === "string" && b.when.trim() && { when: b.when.trim() }),
         ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can as Verb[] }),
         on: b.on !== false,
         by: "you",

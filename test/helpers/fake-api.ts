@@ -123,11 +123,12 @@ const AUTO: AutomationView = {
   name: "Warden issues",
   schedule: "weekdays 09:00",
   prompt: "Look at getsentry/warden's new issues.",
+  when: "item.repo == 'getsentry/warden'",
   can: ["add", "snooze"],
   on: true,
   by: "you",
   updated_at: ago(48),
-  when: "Weekdays at 9:00",
+  trigger: "Weekdays at 9:00",
   next_at: ago(-20),
   running: false,
   runs: [

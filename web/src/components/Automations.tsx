@@ -16,6 +16,7 @@ interface Draft {
   name: string;
   schedule: string;
   prompt: string;
+  when: string;
   can: Verb[];
   on: boolean;
 }
@@ -161,6 +162,7 @@ const editing = (a: Auto): Draft => ({
   name: a.name,
   schedule: a.schedule,
   prompt: a.prompt,
+  when: a.when ?? "",
   can: a.can ?? ["add"],
   on: a.on,
 });
@@ -188,7 +190,7 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
       type="button"
       className="s-edit"
       onClick={() => {
-        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", can: ["add"], on: true });
+        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", when: "", can: ["add"], on: true });
       }}
     >
       New automation
@@ -218,7 +220,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
   const href = viewOf(a.id);
   const draft = drafted(a);
   const last = lastLine(a.runs[0], now);
-  const timing = [a.when, a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
+  const timing = [a.trigger, a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
   return (
     <div className="setting au-row">
       <div className="s-label-col">
@@ -228,7 +230,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
         </a>
         <p className="s-help">
           {draft ? (
-            `An agent wrote it; read it before it runs · ${a.when}`
+            `An agent wrote it; read it before it runs · ${a.trigger}`
           ) : (
             <>
               {timing} · {last.text}
@@ -346,7 +348,7 @@ export function AutomationView({
     );
 
   const agents = drafted(a);
-  const line = `${a.when} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
+  const line = `${a.trigger} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
   const turn = (on: boolean) => () => {
     runUi(au.turn(a, on));
   };

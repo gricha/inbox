@@ -211,9 +211,10 @@ function threads(it: Item, me: string): string | null {
   return `unresolved threads: ${n}${parts.length ? `, ${parts.join("; ")}` : ""}`;
 }
 
-// One item for the prompt: its id, title and labels, then a line per fact.
-function describe(g: JudgeItem, ctx: Context | null): string[] {
-  const { item: it, signals: s, hint } = g;
+// One item for a prompt (the judge's, or an automation's): its id, title and labels, then a line per fact, then the asker's
+// own lines about it (`more`).
+export function describe(g: Pick<JudgeItem, "item" | "signals" | "ai">, ctx: Context | null, more: (string | null)[]): string[] {
+  const { item: it, signals: s } = g;
   const pr = it.kind === "pr";
   const body = it.body ? oneLine(it.body) : "";
   const theirPush = s.me.author && it.head_author.toLowerCase() === s.me.login.toLowerCase() && s.pr.pushed_hours >= 0;
@@ -235,10 +236,7 @@ function describe(g: JudgeItem, ctx: Context | null): string[] {
     pr && !s.me.author ? touches(it, ctx) : null,
     pr ? preflight(it, g.ai) : null,
     body ? `description: ${clip(body, BODY)}` : null,
-    `hint: the rules would put it in ${hint.bucket} on the "${g.board}" board${hint.why ? ` (${hint.why})` : ""}`,
-    g.floor ? `a hard rule keeps it in ${g.floor} or above, so answer within that` : null,
-    g.pinned === "them" ? `pinned by them, which keeps it in today or above` : null,
-    g.pinned && g.pinned !== "them" ? `pinned by ${g.pinned}, which thinks it belongs on their desk; their policy decides` : null,
+    ...more,
   ].filter((f) => f !== null);
   return [
     `- id: ${it.id}`,
@@ -247,6 +245,14 @@ function describe(g: JudgeItem, ctx: Context | null): string[] {
     ...facts.map((f) => `  ${oneLine(f)}`),
   ];
 }
+
+// Where the rules put an item and what holds it there, as the judge is told.
+const hintLines = (g: JudgeItem): (string | null)[] => [
+  `hint: the rules would put it in ${g.hint.bucket} on the "${g.board}" board${g.hint.why ? ` (${g.hint.why})` : ""}`,
+  g.floor ? `a hard rule keeps it in ${g.floor} or above, so answer within that` : null,
+  g.pinned === "them" ? `pinned by them, which keeps it in today or above` : null,
+  g.pinned && g.pinned !== "them" ? `pinned by ${g.pinned}, which thinks it belongs on their desk; their policy decides` : null,
+];
 
 // Who they are: their teams, what they've been building (their latest PRs) and whose PRs they review most.
 function ownerLines(ctx: Context | null, me: string): string[] {
@@ -310,7 +316,7 @@ export function buildJudgePrompt(
     `<items-${tag}>`,
     ...ownerLines(ctx, me),
     ...areaLines(items, ctx, me),
-    ...items.flatMap((g) => describe(g, ctx)),
+    ...items.flatMap((g) => describe(g, ctx, hintLines(g))),
     `</items-${tag}>`,
   ].join("\n");
 }

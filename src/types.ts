@@ -1010,6 +1010,7 @@ export interface Automation {
   name: string;
   schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time
   prompt: string; // the instruction, in your words
+  when?: string; // its check, in the rules' language (FIELDS): the desk asks it of each item first, and only what passes is handed on
   can?: Verb[]; // what it may do with an item; absent: add only
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
@@ -1070,11 +1071,11 @@ export interface AutomationItem {
 }
 
 // PUT /api/automations/:id: the whole automation; what's left out is its default.
-export type AutomationBody = Pick<Automation, "name" | "schedule" | "prompt" | "can"> & { on?: boolean };
+export type AutomationBody = Pick<Automation, "name" | "schedule" | "prompt" | "when" | "can"> & { on?: boolean };
 
 // GET /api/automations
 export interface AutomationView extends Automation {
-  when: string; // its schedule in words ("Mon and Thu at 17:30"), or as written when it can't be read
+  trigger: string; // what starts it, in words: its schedule ("Mon and Thu at 17:30"), or as written when it can't be read
   next_at: string | null; // while it's on
   running: boolean;
   // Newest first, the last 10. did: what it did, by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"); didnt: what it couldn't
