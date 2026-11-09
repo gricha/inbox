@@ -17,7 +17,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/cli.ts serve",
     "dev": "concurrently -k \"DESK_DEV=1 node --watch --disable-warning=ExperimentalWarning src/cli.ts serve\" \"vite --config web/vite.config.ts\"",
     "build": "vite build --config web/vite.config.ts",
-    "test": "node --disable-warning=ExperimentalWarning --import ./test/helpers/no-agent.ts --test \"test/**/*.test.ts\" \"web/test/*.test.ts\"",
+    "test": "node --disable-warning=ExperimentalWarning --import ./test/helpers/no-agent.ts --test \"test/**/*.test.ts\" \"web/test/*.test.ts\" \"integrations/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "app": "npm run build && electron .",
     "app:dev": "node --disable-warning=ExperimentalWarning scripts/dev-app.ts",

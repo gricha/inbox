@@ -1,6 +1,6 @@
 {
   "name": "inbox",
   "version": "0.1.0",
-  "description": "Inbox in Claude: a /desk pane with your Focus queue and a status-line count. Needs `desk serve` running.",
-  "types": "./types/index.d.ts"
+  "description": "Inbox in Claude: a /desk pane with what needs you, one line each in the desk's order, and the desk's count as a status line. Needs the desk running (the Inbox app, or `desk serve`).",
+  "author": { "name": "Greg Pstrucha" }
 }

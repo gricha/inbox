@@ -111,7 +111,7 @@ desk status --short           # "desk 10 +2" (10 in the queue, 2 new), for a sta
 
 Clients that only speak stdio can run `desk mcp` instead. Routes, tools, connecting and the security model: [docs/api.md](docs/api.md).
 
-There's also a `/desk` pane for Claude Code / Desktop in [integrations/claude-desktop/inbox](integrations/claude-desktop/inbox). Install it with `claude plugin marketplace add ~/code/review-desk`, then `claude plugin install inbox@inbox`. Installed it as `review-desk` before the rename to Inbox? Run `claude plugin uninstall review-desk@review-desk` and `claude plugin marketplace remove review-desk` first.
+There's also a `/desk` pane for Claude Code (the Desktop app or a terminal) in [integrations/claude-desktop/inbox](integrations/claude-desktop/inbox): your Inbox beside the chat, one line an item in the desk's order, each opening in the desk, with the desk's count (`desk 10 +2`) as a status line. Install it with `claude plugin marketplace add ~/code/review-desk`, then `claude plugin install inbox@inbox`, and type `/desk` in a new session. Installed it as `review-desk` before the rename to Inbox? Run `claude plugin uninstall review-desk@review-desk` and `claude plugin marketplace remove review-desk` first.
 
 ## Coordinator
 
