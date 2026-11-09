@@ -23,6 +23,11 @@ export function CommentBar({
   // another row, which focusing would select), so Tab goes on from it.
   useEffect(() => {
     box.current?.focus();
+    // The issue you're commenting on, its actions with it, stays in sight above the bar.
+    const item = document.querySelector(`[data-id="${CSS.escape(card.id)}"]`);
+    const bar = box.current?.closest(".composer");
+    const over = item && bar ? item.getBoundingClientRect().bottom + 18 - bar.getBoundingClientRect().top : 0;
+    if (over > 0) window.scrollBy({ top: over });
     return () => {
       const row = document.querySelector(`[data-id="${CSS.escape(card.id)}"] .row-main`);
       if (row instanceof HTMLElement) row.focus({ preventScroll: true });

@@ -3061,16 +3061,17 @@ p {
   cursor: pointer;
 }
 
-/* Your comment on an issue opened in place, over the page's bottom where the toast shows: centred on the page's column as
-   the toast is, clear of the sidebar and the list beside a review. */
+/* Your comment on an issue opened in place, over the page's bottom: across the page's column from edge to edge, as its table
+   is, so it covers whole rows rather than show them cut either side; clear of the sidebar, the list beside a review and the
+   chat beside the page. */
 .composer {
   position: fixed;
+  right: var(--composer-right, 24px);
   bottom: 18px;
-  left: calc(50% + (var(--side-w) + var(--list-w)) / 2);
+  left: calc(var(--side-w) + var(--list-w) + 24px);
   z-index: 35;
   display: grid;
   gap: 8px;
-  width: min(720px, calc(100% - var(--side-w) - var(--list-w) - 32px));
   max-height: calc(100vh - 120px);
   padding: 12px;
   overflow: auto;
@@ -3082,8 +3083,14 @@ p {
   box-shadow:
     var(--shadow),
     0 -20px 20px -4px var(--paper);
-  transform: translateX(-50%);
-  animation: rise 160ms ease-out;
+  animation: rise-in 160ms ease-out;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .app:has(.composer) .main {
@@ -3161,6 +3168,8 @@ p {
 
 @media (width > 1100px) {
   .app:has(> .chat) {
+    --composer-right: calc(var(--chat-w) + 24px);
+
     grid-template-columns: var(--side-w) minmax(0, 1fr) var(--chat-w);
   }
 
@@ -5519,6 +5528,11 @@ button.s-edit:hover:not(:disabled) {
 
   .main {
     padding: 18px 12px 84px;
+  }
+
+  .composer {
+    right: 12px;
+    left: 12px;
   }
 
   .ref {
