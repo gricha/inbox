@@ -57,6 +57,8 @@ const TARGETS: [string, string, number, number?][] = [
   ["--faint", "--sheet", 2.2, 4.5], // deliberately quiet: placeholders, separators in text
   ["--accent-ink", "--sheet", 4.5],
   ["--accent-ink", "--accent-wash", 4.5],
+  ["--accent-wash", "--sheet", 1.08], // a row's tinted call to action reads as one
+  ["--accent-wash", "--paper", 1.07], // and a conversation's, on the paper
   ["--on-accent", "--accent", 4.5], // the filled call to action
   ["--on-go", "--go", 4.5], // Approve, Hand off for merge
   ["--red", "--sheet", 4.5],

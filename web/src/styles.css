@@ -407,7 +407,7 @@
   --on-go: #2d353b;
   --accent: #7fbbb3;
   --accent-ink: #7fbbb3;
-  --accent-wash: #344045;
+  --accent-wash: #2a4542;
   --on-accent: #2d353b;
   --shadow: 0 1px 2px rgb(16 20 22 / 35%), 0 12px 32px rgb(16 20 22 / 50%);
 
@@ -473,7 +473,7 @@
   --on-go: #2e3440;
   --accent: #88c0d0;
   --accent-ink: #88c0d0;
-  --accent-wash: #353f4c;
+  --accent-wash: #34495a;
   --on-accent: #2e3440;
   --shadow: 0 1px 2px rgb(20 23 30 / 35%), 0 12px 32px rgb(20 23 30 / 50%);
 
@@ -481,7 +481,8 @@
 }
 
 /* Rose Pine, as Omarchy has it: Rosé Pine Dawn, its surface sheet on base with overlay panes, its text under a deeper ink,
-   iris for the call to action and pine (its green) for Approve, love and gold darkened to read as text. */
+   iris for the call to action (deepened as text on an iris wash) and pine (its green) for Approve, love and gold darkened
+   to read as text. */
 :root[data-theme="rose-pine"] {
   --paper: #faf4ed;
   --sheet: #fffaf3;
@@ -505,8 +506,8 @@
   --go: #286983;
   --on-go: #fffaf3;
   --accent: #7a62a3;
-  --accent-ink: #7a62a3;
-  --accent-wash: #f6f1f2;
+  --accent-ink: #6b5394;
+  --accent-wash: #efe6f4;
   --on-accent: #fffaf3;
   --shadow: 0 1px 2px rgb(87 82 121 / 7%), 0 10px 30px rgb(87 82 121 / 13%);
 
