@@ -287,6 +287,7 @@ interface Seed {
   head?: string; // its head branch, default "<author>/<n>"
   moved?: [string, number]; // GitHub moved it to main when the PR below merged: the branch it was on, hours ago
   blocker?: [string, string]; // another PR it needs merged first, as pr.blocker, and what that one waits on
+  needs?: string[]; // the open PRs it needs directly (pr.blocked_by); else the one its blocker goes through, or the blocker
   blocks?: string[]; // pr.blocks
   waits?: string; // pr.waits
   asked2?: string[]; // pr.waiting_on: who's asked and hasn't approved, teams as @slug
@@ -300,6 +301,7 @@ interface Flight {
 }
 
 const SILO = "waits on your reply to dana, then a review from sam, kai and 6 more"; // what api#1294 waits on
+const EXPORT = "waits on a review from sam, @backend and 1 more"; // what web#2306 waits on
 
 const SEEDS: Seed[] = [
   {
@@ -1161,7 +1163,7 @@ const SEEDS: Seed[] = [
     size: [214, 38, 7],
     threads: [1, 1],
     asked2: ["sam", "kai", "@hybrid-cloud", "@security", "@api", "@billing", "@enterprise", "@owners-auth"],
-    blocks: ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302"],
+    blocks: ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302", "billing#2303"],
     waits: SILO,
     on: { "work-mine": ["root"] },
   },
@@ -1181,7 +1183,7 @@ const SEEDS: Seed[] = [
         2300,
         "Show service-account usage on the billing page",
         44,
-        { review: "required", blocks: ["billing#2302"], on: { "work-mine": ["mineBlocked"] } },
+        { review: "required", blocks: ["billing#2302", "billing#2303"], on: { "work-mine": ["mineBlocked"] } },
       ],
       [
         2301,
@@ -1194,7 +1196,13 @@ const SEEDS: Seed[] = [
           fly: { note: ["Nothing to fix here: its CI needs service accounts on control silo, which api#1294 adds", 2] },
         },
       ],
-      [2302, "Email teams a monthly service-account usage summary", 20, { blocker: ["api#1294 (through billing#2300)", SILO] }],
+      [
+        2302,
+        "Email teams a monthly service-account usage summary",
+        20,
+        { blocker: ["api#1294 (through billing#2300)", SILO], blocks: ["billing#2303"] },
+      ],
+      [2303, "Link each summary email to its team's usage page", 16, { blocker: ["api#1294 (through billing#2302)", SILO] }],
     ] as [number, string, number, Partial<Seed>][]
   ).map(([n, title, age, o]): Seed =>
     Object.assign(
@@ -1240,9 +1248,40 @@ const SEEDS: Seed[] = [
     mergeable: "clean",
     size: [48, 10, 3],
     asked2: ["sam", "@backend", "kai"],
-    waits: "waits on a review from sam, @backend and 1 more",
+    waits: EXPORT,
+    blocks: ["web#2307", "web#2308", "web#2309"],
     on: { "work-mine": ["waitsrev"] },
   },
+  // A diamond on it: web#2309 needs web#2307 and web#2308, and both need web#2306.
+  ...(
+    [
+      [2307, "Default the export dialog to the remembered format", 9, { blocks: ["web#2309"] }],
+      [2308, "Remember the format per project as well as per person", 8, { blocks: ["web#2309"] }],
+      [
+        2309,
+        "Say in the export dialog which format was remembered",
+        6,
+        { blocker: ["web#2306 (through web#2307)", EXPORT], needs: ["web#2307", "web#2308"] },
+      ],
+    ] as [number, string, number, Partial<Seed>][]
+  ).map(([n, title, age, o]): Seed =>
+    Object.assign(
+      {
+        repo: "acme/web",
+        n,
+        title,
+        author: ME,
+        age,
+        upd: age / 2,
+        review: "approved" as const,
+        mergeable: "clean" as const,
+        size: [30 + (n % 5) * 11, 4 + (n % 3), 2] as [number, number, number],
+        blocker: ["web#2306", EXPORT] as [string, string],
+        on: { "work-mine": ["mineBlocked"] as Key[] },
+      },
+      o,
+    ),
+  ),
 ];
 
 interface Rec {
@@ -1427,6 +1466,9 @@ const recs: Rec[] = SEEDS.map((s) => {
 
 const isBot = (login: string) => login.endsWith("[bot]") || config.signals.bots.includes(login);
 
+// The PRs it needs directly: its own list, else the one its blocker's chain goes through, else its blocker.
+const needsOf = (s: Seed) => s.needs ?? (s.blocker ? [/\(through (\S+)\)/.exec(s.blocker[0])?.[1] ?? s.blocker[0]] : []);
+
 function signals(r: Rec): Signals {
   const s = r.seed;
   const [owner = "", name = ""] = s.repo.split("/");
@@ -1439,8 +1481,7 @@ function signals(r: Rec): Signals {
   // Removing the ask, or your approval, clears it.
   const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
   const myAreaFiles = areaFiles({ repo: s.repo, paths: r.paths }, { areas: AREAS });
-  // The PR it needs directly: the one a chain goes through, else its blocker.
-  const direct = s.blocker ? (/\(through (\S+)\)/.exec(s.blocker[0])?.[1] ?? s.blocker[0]) : "";
+  const needs = needsOf(s);
   return {
     item: {
       kind,
@@ -1476,9 +1517,9 @@ function signals(r: Rec): Signals {
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
-      requires: direct ? [direct] : [],
+      requires: needs,
       blocked: !!s.blocker,
-      blocked_by: direct ? [direct] : [],
+      blocked_by: needs,
       blocker: s.blocker?.[0] ?? "",
       blocker_waits: s.blocker?.[1] ?? "",
       blocks: s.blocks ?? [],
@@ -1753,7 +1794,10 @@ function cardOf(r: Rec, p: Placement): Card {
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),
-    ...(s.blocker && { blocker: { id: `${s.repo.split("/")[0]}/${s.blocker[0].split(" ")[0]}`, ref: s.blocker[0], waits: s.blocker[1] } }),
+    ...(s.blocker && {
+      blocker: { id: `${s.repo.split("/")[0]}/${s.blocker[0].split(" ")[0]}`, ref: s.blocker[0], waits: s.blocker[1] },
+      needs: sig.pr.blocked_by,
+    }),
     ...(sig.pr.blocks.length > 0 && { blocks: sig.pr.blocks }),
   };
 }
@@ -1888,7 +1932,10 @@ function queue(): QueueView {
       ? [{ ...cardOf(r, shownAt(r, bestPlacement(r))), why: `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}` }]
       : [];
   });
-  sections.blocked = blockedOrder([...sections.blocked, ...merging]);
+  sections.blocked = blockedOrder([...sections.blocked, ...merging], (id) => {
+    const r = recs.find((x) => x.id === id);
+    return r ? needsOf(r.seed).map((ref) => `${r.seed.repo.split("/")[0]}/${ref}`) : [];
+  });
   const hidden = of("hide");
   const clearedCards = [...cleared.values()].filter((c) => !best.has(c.id));
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));

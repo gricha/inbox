@@ -640,7 +640,7 @@ test("a dependency in another repo is fetched quietly and blocks the PR that nee
   assert.equal(dependencies(items, buildStacks(items)).get("acme/web#1")?.root, dep.id);
   assert.deepEqual(
     runSync(t.desk.queue()).sections.blocked.map((c) => [c.id, c.why]),
-    [["acme/web#1", "blocked by sentry#5, which waits on a review"]],
+    [["acme/web#1", "needs sentry#5, which waits on a review"]],
   );
   assert.deepEqual(
     t.desk.store.activity({ after: 0, limit: 100 }).filter((e) => e.item_id === dep.id),

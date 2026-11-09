@@ -71,6 +71,7 @@ import {
   SHOWN,
   stops,
   threadsOn,
+  treeGuides,
   valueOf,
   whereIs,
   type KeyLike,
@@ -1099,4 +1100,10 @@ test("a lapsed login that pauses the AI reviews and fails the sorting is one pau
   assert.equal(onePause(ai, { ...judge, state: "idle", error: null }), null, "the sorting is fine");
   assert.equal(onePause(null, judge), null, "the AI reviews aren't paused");
   assert.equal(onePause(ai), null, "the policy not loaded yet");
+});
+
+test("treeGuides draws Blocked's tree from its depths: a branch with more under it, its last, the line past a deeper row, none", () => {
+  // web#1; web#2 and web#3 under it, web#4 under web#3 and web#5 under web#2; then a chain of its own.
+  assert.deepEqual(treeGuides([0, 1, 2, 1, 2, 0, 1]), [[], ["tee"], ["rail", "end"], ["end"], ["gap", "end"], [], ["end"]]);
+  assert.deepEqual(treeGuides([0, 0]), [[], []], "rows of their own draw nothing");
 });

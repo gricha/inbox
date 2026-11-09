@@ -1,6 +1,6 @@
 import { QUEUE_GROUPS, type Card, type Inquiry, type Overview, type QueueGroup, type QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { foldOf, type Group, type GroupKey } from "../view.ts";
+import { foldOf, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { withCode } from "./Review.tsx";
@@ -179,6 +179,9 @@ export function Later({
     );
   const filtering = !!filter.trim();
   const away = groups.filter((g) => keys.includes(g.key) && (filtering ? g.cards.length : g.total));
+  // Blocked is a tree in the desk's order; filtered, some of it is missing, so it lies flat.
+  const tree = (k: GroupKey, cards: Card[]) => (k === "blocked" && !filtering ? treeGuides(cards.map((c) => c.depth ?? 0)) : []);
+  const trees = new Map(away.map((g) => [g.key, tree(g.key, g.cards)]));
   return (
     <div className="queue later">
       {!away.length && <p className="queue-empty">{filtering ? "No matches." : empty}</p>}
@@ -201,8 +204,8 @@ export function Later({
           </h2>
           {g.open && (
             <div className="lines">
-              {g.cards.map((c) => (
-                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} why />
+              {g.cards.map((c, i) => (
+                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} why tree={trees.get(g.key)![i]} />
               ))}
             </div>
           )}

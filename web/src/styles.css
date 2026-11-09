@@ -1532,6 +1532,48 @@ p.side-sync {
   -webkit-line-clamp: 2;
 }
 
+/* Blocked as a tree: a 20px step a level on the rows' text edge (CardRow's TREE_STEP), a quiet guide from the PR a row hangs
+   under: on down to a later one under it (├, │) or ending at this one (└), at the title's middle. */
+.tree {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--pad, 14px);
+  display: flex;
+  pointer-events: none;
+}
+
+.tree > * {
+  position: relative;
+  width: 20px;
+}
+
+.tree > :is(.tree-tee, .tree-rail, .tree-end)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  border-left: 1px solid var(--rule-strong);
+}
+
+.tree > .tree-end::before {
+  bottom: auto;
+  width: 6px;
+  height: 21px;
+  border-bottom: 1px solid var(--rule-strong);
+  border-bottom-left-radius: 5px;
+}
+
+.tree > .tree-tee::after {
+  content: "";
+  position: absolute;
+  top: 20px;
+  left: 7px;
+  width: 6px;
+  border-top: 1px solid var(--rule-strong);
+}
+
 /* One width for every age, so the calls to action before it end in one column. */
 .line-age {
   flex: none;

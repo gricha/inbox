@@ -1,6 +1,6 @@
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls } from "../format.ts";
-import type { Variant } from "../view.ts";
+import type { Guide, Variant } from "../view.ts";
 import { Detail } from "./Detail.tsx";
 
 // Everything a row needs from the app; `run` takes an action id (enter close o e d m b p why comment a t).
@@ -19,6 +19,8 @@ export interface RowCtx {
   menu: (c: Card, at: HTMLElement, snooze?: boolean) => void; // its row's menu, at a button
   compact?: boolean; // the list beside a review: two lines a row
 }
+
+const TREE_STEP = 20; // px a level, as .tree's steps are wide
 
 // A row's one call to action: what it says, and its tooltip.
 const CTA = {
@@ -57,8 +59,8 @@ function noteOf(card: Card, variant: Variant): string {
 
 // One line: whether it's a PR or an issue, the title, quietly its repo#number, its one call to action, then who it's from,
 // a PR's stage and its age in columns on the right. Beside a review (compact), two: the title, then all the rest on one line.
-// A click opens an issue in place under it.
-export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean }) {
+// A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide.
+export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
   const note = why ? noteOf(card, variant) : "";
@@ -127,7 +129,18 @@ export function CardRow({ card, variant, ctx, why }: { card: Card; variant: Vari
       data-id={card.id}
     >
       {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
-      <div className={cls("line-main line-row", ctx.compact && "c-row")}>
+      <div
+        className={cls("line-main line-row", ctx.compact && "c-row")}
+        style={tree?.length ? { paddingLeft: `calc(var(--pad, 14px) + ${tree.length * TREE_STEP}px)` } : undefined}
+      >
+        {!!tree?.length && (
+          <span className="tree" aria-hidden="true">
+            {tree.map((g, i) => (
+              // oxlint-disable-next-line react/no-array-index-key -- a step is its level: its place is all that tells it apart
+              <span key={i} className={`tree-${g}`} />
+            ))}
+          </span>
+        )}
         {/* Focus selects (Tab); not on mousedown, so a click opens without selecting first. */}
         <button
           type="button"

@@ -244,7 +244,9 @@ interface Card {
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in Merging
   stack?: StackRef; // an open PR whose line has two or more open PRs (Stacks, below)
   stage?: "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "merged" | "closed"; // a PR's; "blocked" in place of approved or waiting for review while another PR blocks it
-  blocker?: { id: string; ref: string; waits: string }; // an open PR blocked by another (Dependencies, below): the item id at the end of the chain, as its why says it ("sentry#129460 (through api#2)"), and what that one waits on
+  blocker?: { id: string; ref: string; waits: string }; // an open PR blocked by another (Dependencies, below): the item id at the end of the chain, as pr.blocker says it ("sentry#129460 (through api#2)"), and what that one waits on
+  needs?: string[]; // a blocked PR's open PRs it needs merged first directly, as repo#number (pr.blocked_by)
+  depth?: number; // on Blocked: how deep in its chain the row hangs, 0 for a chain's first rows
   blocks?: string[]; // open PRs that need this one merged first, directly or not, as repo#number
 }
 
@@ -260,7 +262,7 @@ interface Preflight {
 
 interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
-  sections: { now: Card[]; today: Card[]; blocked: Card[]; later: Card[]; fyi: Card[] }; // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks ("in Merging · blocked by …"); a chain's rows together, the PR blocking them first, chains by their longest wait; only a chain's first row says what its blocker waits on; waiting_since: since it was blocked (kv blocked), or your PR's latest ask
+  sections: { now: Card[]; today: Card[]; blocked: Card[]; later: Card[]; fyi: Card[] }; // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks, as a forest (blockedOrder() in src/deps.ts): a chain (rows joined by what they need, through PRs not listed too) at a time, by its longest wait; in it each PR before the PRs that need it, hung under the last of them listed (depth), older waits first; the template's "blocked by …, which …" reads "needs <the PRs it needs directly>" ("in Merging · needs …"), and a chain says once what its blocker waits on, on the blocker's own row when it's listed, else on the first row it blocks ("needs sentry#129460, which waits on …"; "needs api#5; sentry#129460 waits on …" when that's not a direct need); a rule's own why stays as written; waiting_since: since it was blocked (kv blocked), or your PR's latest ask
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first

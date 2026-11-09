@@ -1,4 +1,5 @@
 // What a PR needs merged before it, and who blocks whom: from its description and its git stack. Pure.
+import { andMore } from "./stage.ts";
 import type { Stacks } from "./stacks.ts";
 import type { Card, Item } from "./types.ts";
 
@@ -74,6 +75,7 @@ export function requiresOf(md: string, repo: string, number: number): string[] {
 export interface DepFacts {
   requires: string[]; // repo#number, any state: the stack parent, then the description's (unknown refs too; another org's in full)
   open: string[]; // repo#number: open PRs the desk holds that it needs directly, edges that close a loop left out
+  needs: string[]; // item.id: the same PRs as open
   closed: string[]; // repo#number: needs closed without merging
   merged: { ref: string; at: string }[]; // needs that merged, oldest first
   root: string | null; // item.id: the open PR at the end of its first open chain; null when nothing open blocks it
@@ -93,7 +95,7 @@ export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFact
   const facts = new Map<string, DepFacts>();
   const edges = new Map<string, Item[]>();
   for (const x of live) {
-    const f: DepFacts = { requires: [], open: [], closed: [], merged: [], root: null, through: null, blocks: [] };
+    const f: DepFacts = { requires: [], open: [], needs: [], closed: [], merged: [], root: null, through: null, blocks: [] };
     const seen = new Set([x.id.toLowerCase()]);
     const out: Item[] = [];
     for (const ref of [stacks.nodes.get(x.id)?.parent, ...(x.requires ?? [])]) {
@@ -138,6 +140,7 @@ export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFact
     const f = facts.get(x.id)!;
     const r = rootOf(x.id);
     f.open = kept.get(x.id)!.map(short);
+    f.needs = kept.get(x.id)!.map((y) => y.id);
     f.root = r?.root ?? null;
     f.through = r?.through ?? null;
     const reached = new Set<string>();
@@ -153,30 +156,68 @@ export function dependencies(items: Item[], stacks: Stacks): Map<string, DepFact
   return facts;
 }
 
-// A chain says once what its blocker waits on: on the blocker's own row when it's listed, else on the chain's first row.
-export function blockedOrder(cards: Card[]): Card[] {
-  const key = (c: Card) => c.blocker?.id ?? c.id;
-  const since = new Map<string, string>();
+const refOf = (id: string) => id.slice(id.indexOf("/") + 1);
+
+// Blocked as a forest: a chain (rows joined by what they need) at a time, by its oldest wait; in it each PR before the PRs that
+// need it, hung under the last of them listed, older waits first. A row names what it needs; a chain says once what its
+// blocker waits on: on the blocker's own row when it's listed, else on the first row it blocks. `needsOf` is dependencies()'s
+// kept edges, which have no loop.
+export function blockedOrder(cards: Card[], needsOf: (id: string) => string[]): Card[] {
+  const listed = new Map(cards.map((c) => [c.id, c]));
+  const joined = new Map<string, string>();
+  const find = (x: string): string => {
+    const up = joined.get(x) ?? x;
+    if (up === x) return x;
+    const top = find(up);
+    joined.set(x, top);
+    return top;
+  };
+  // The nearest listed PRs each row needs, through any the page doesn't list; anything it reaches joins its chain.
+  const ups = new Map<string, string[]>();
   for (const c of cards) {
-    const was = since.get(key(c));
-    if (was === undefined || c.waiting_since < was) since.set(key(c), c.waiting_since);
+    const near: string[] = [];
+    const seen = new Set([c.id]);
+    const todo = [...needsOf(c.id)];
+    for (let y = todo.shift(); y !== undefined; y = todo.shift()) {
+      if (seen.has(y)) continue;
+      seen.add(y);
+      joined.set(find(y), find(c.id));
+      if (listed.has(y)) near.push(y);
+      else todo.push(...needsOf(y));
+    }
+    ups.set(c.id, near);
   }
-  const ids = new Set(cards.map((c) => c.id));
+  const older = (a: Card, b: Card) => a.waiting_since.localeCompare(b.waiting_since) || a.id.localeCompare(b.id);
+  const kids = new Map<string, Card[]>();
+  for (const c of cards.toSorted(older)) for (const y of ups.get(c.id)!) kids.set(y, [...(kids.get(y) ?? []), c]);
+  const chains = new Map<string, Card[]>();
+  for (const c of cards.toSorted(older)) chains.set(find(c.id), [...(chains.get(find(c.id)) ?? []), c]);
+  const placed: Card[] = [];
+  const done = new Set<string>();
+  const place = (c: Card, depth: number) => {
+    done.add(c.id);
+    placed.push({ ...c, depth });
+    for (const k of kids.get(c.id) ?? []) if (!done.has(k.id) && ups.get(k.id)!.every((y) => done.has(y))) place(k, depth + 1);
+  };
+  // Each chain's rows come oldest first, so its first is its oldest wait.
+  for (const chain of [...chains.values()].toSorted((a, b) => older(a[0]!, b[0]!)))
+    for (const c of chain) if (!ups.get(c.id)!.length) place(c, 0);
+  // The rows are place()'s copies, so their words change here and not the cards it was given.
   const said = new Set<string>();
-  const out = cards.toSorted(
-    (a, b) =>
-      since.get(key(a))!.localeCompare(since.get(key(b))!) ||
-      key(a).localeCompare(key(b)) ||
-      Number(a.id !== key(a)) - Number(b.id !== key(b)) ||
-      a.waiting_since.localeCompare(b.waiting_since),
-  );
-  for (const [i, c] of out.entries()) {
+  for (const c of placed) {
     if (!c.blocker) continue;
-    const tail = `, which ${c.blocker.waits}`;
-    const k = `${c.blocker.id}\n${tail}`;
-    if (!c.why.endsWith(tail)) continue;
-    if (ids.has(c.blocker.id) || said.has(k)) out[i] = { ...c, why: c.why.slice(0, -tail.length) };
-    said.add(k);
+    // Only the desk's own words (the template's "blocked by …, which …"); a rule's own why stays as written.
+    const lead = `blocked by ${c.blocker.ref}`;
+    const at = c.why.indexOf(lead);
+    if (at < 0) continue;
+    const which = `, which ${c.blocker.waits}`;
+    const rest = c.why.slice(at + lead.length);
+    const root = refOf(c.blocker.id);
+    const needs = c.needs?.length ? c.needs : [root];
+    const tell = !listed.has(c.blocker.id) && !said.has(c.blocker.id);
+    said.add(c.blocker.id);
+    const tail = !tell ? "" : needs.length === 1 && needs[0] === root ? which : `; ${root} ${c.blocker.waits}`;
+    c.why = `${c.why.slice(0, at)}needs ${andMore(needs)}${tail}${rest.startsWith(which) ? rest.slice(which.length) : rest}`;
   }
-  return out;
+  return placed;
 }

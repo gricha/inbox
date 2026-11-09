@@ -440,6 +440,19 @@ export function whereIs(view: QueueView, id: string): { page: keyof typeof PAGE_
   return group && page ? { page, group } : null;
 }
 
+// Blocked's tree guide, from its rows' depths in the desk's order: per row, one per level, as `tree` draws them (├ └ │ or none).
+export type Guide = "tee" | "end" | "rail" | "gap";
+export function treeGuides(depths: number[]): Guide[][] {
+  // Whether a later row hangs at level k under the same row as this one does, before the tree climbs above k.
+  const more = (i: number, k: number) => {
+    for (const d of depths.slice(i + 1)) if (d <= k) return d === k;
+    return false;
+  };
+  return depths.map((d, i) =>
+    Array.from({ length: d }, (_, l): Guide => (l + 1 === d ? (more(i, d) ? "tee" : "end") : more(i, l + 1) ? "rail" : "gap")),
+  );
+}
+
 // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
 const MEANINGS = [
   /conflict/i,

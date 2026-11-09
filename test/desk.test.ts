@@ -917,10 +917,10 @@ test("Blocked: getsentry#22982 and #22983, handed back while sentry#129460 waits
   let q = runSync(t.desk.queue());
   assert.deepEqual(back(q.sections.now), [], "not back to you while #129460 blocks them");
   assert.deepEqual(
-    q.sections.blocked.map((x) => [x.id, x.why, x.stage]),
+    q.sections.blocked.map((x) => [x.id, x.why, x.stage, x.needs, x.depth]),
     [
-      ["getsentry/getsentry#22982", `blocked by sentry#129460, which ${WAITS}`, "blocked"],
-      ["getsentry/getsentry#22983", "blocked by sentry#129460", "blocked"],
+      ["getsentry/getsentry#22982", `needs sentry#129460, which ${WAITS}`, "blocked", ["sentry#129460"], 0],
+      ["getsentry/getsentry#22983", "needs sentry#129460", "blocked", ["sentry#129460"], 0],
     ],
   );
   assert.deepEqual(
@@ -1019,7 +1019,7 @@ test("A review asked of you by name that requires an open PR waits in Blocked; o
   );
   assert.deepEqual(
     q.sections.blocked.map((x) => [x.id, x.why]),
-    [["acme/api#9", "blocked by api#5, which waits on a review"]],
+    [["acme/api#9", "needs api#5, which waits on a review"]],
   );
   const at = new Date(NOW.getTime() + 3_600_000).toISOString();
   t.desk.store.putItems([{ ...five, state: "merged", closed_at: at, updated_at: at }], at, true);
@@ -1068,9 +1068,33 @@ test("A change request or a reply you owe on a blocked PR is yours: not in Block
     q.sections.blocked.map((x) => [x.id, x.why]),
     [
       ["acme/web#100", "waits on a review from dana"],
-      ["acme/web#3", "blocked by web#100"],
+      ["acme/web#3", "needs web#100"],
     ],
     "a reply you owe keeps web#2 out; web#100's own row says what it waits on",
+  );
+});
+
+test("Blocked as a tree from your descriptions: each card names the PRs it needs and how deep it hangs, a PR before those that need it", async (c) => {
+  const t = await setup(
+    [
+      myPr(100, { ci: "green", created_at: hoursAgo(80) }),
+      myPr(1, { ci: "green", requires: ["acme/web#100"], created_at: hoursAgo(10) }),
+      myPr(2, { ci: "green", requires: ["acme/web#1"], created_at: hoursAgo(30) }),
+      myPr(3, { ci: "green", requires: ["acme/web#100", "acme/web#1"], created_at: hoursAgo(90) }),
+    ],
+    { settings: QUIET },
+  );
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  assert.deepEqual(
+    runSync(t.desk.queue()).sections.blocked.map((x) => [x.id, x.why, x.needs ?? null, x.depth]),
+    [
+      ["acme/web#100", "waits on a review from dana", null, 0],
+      ["acme/web#1", "needs web#100", ["web#100"], 1],
+      ["acme/web#3", "needs web#100 and web#1", ["web#100", "web#1"], 2],
+      ["acme/web#2", "needs web#1", ["web#1"], 2],
+    ],
+    "web#3 waits longest, but it needs web#1",
   );
 });
 
@@ -1189,8 +1213,8 @@ test("Merging's PRs another PR blocks are on Blocked, in their chain, marked in 
   assert.deepEqual(
     q.sections.blocked.map((x) => [x.id, x.why, x.inflight]),
     [
-      ["getsentry/getsentry#22982", `blocked by sentry#129460, which ${WAITS}`, false],
-      ["getsentry/getsentry#22983", "in Merging \u00b7 blocked by sentry#129460", true],
+      ["getsentry/getsentry#22982", `needs sentry#129460, which ${WAITS}`, false],
+      ["getsentry/getsentry#22983", "in Merging \u00b7 needs sentry#129460", true],
     ],
   );
   const elsewhere = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi, ...q.hidden, ...q.cleared];

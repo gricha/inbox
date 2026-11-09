@@ -513,19 +513,23 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
   assert.equal((await act("acme/web#2295", "inflight")).status, 200);
 });
 
-test("Blocked: api#1294's chain together, saying once what it waits on, Merging's marked; dana's api#1301, then a review wait", async () => {
+test("Blocked as a tree: api#1294's chain, 3 deep under billing#2300, saying once what it waits on, Merging's marked; dana's api#1301; web#2306 and a diamond on it", async () => {
   const silo = "waits on your reply to dana, then a review from sam, kai and 6 more";
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   assert.deepEqual(
-    q.sections.blocked.map((c) => [c.id, c.why, c.inflight]),
+    q.sections.blocked.map((c) => [c.id, c.why, c.depth, c.inflight]),
     [
-      ["acme/billing#2298", `blocked by api#1294, which ${silo}`, false],
-      ["acme/billing#2299", "blocked by api#1294", false],
-      ["acme/billing#2300", "blocked by api#1294", false],
-      ["acme/billing#2301", "in Merging \u00b7 blocked by api#1294", true],
-      ["acme/billing#2302", "blocked by api#1294 (through billing#2300)", false],
-      ["acme/api#1301", "blocked by api#1299, which waits on a review from kai", false],
-      ["acme/web#2306", "waits on a review from sam, @backend and 1 more", false],
+      ["acme/billing#2298", `needs api#1294, which ${silo}`, 0, false],
+      ["acme/billing#2299", "needs api#1294", 0, false],
+      ["acme/billing#2300", "needs api#1294", 0, false],
+      ["acme/billing#2302", "needs billing#2300", 1, false],
+      ["acme/billing#2303", "needs billing#2302", 2, false],
+      ["acme/billing#2301", "in Merging \u00b7 needs api#1294", 0, true],
+      ["acme/api#1301", "needs api#1299, which waits on a review from kai", 0, false],
+      ["acme/web#2306", "waits on a review from sam, @backend and 1 more", 0, false],
+      ["acme/web#2307", "needs web#2306", 1, false],
+      ["acme/web#2308", "needs web#2306", 1, false],
+      ["acme/web#2309", "needs web#2307 and web#2308", 2, false],
     ],
   );
   const held = q.sections.blocked[0]!;
@@ -541,9 +545,9 @@ test("Blocked: api#1294's chain together, saying once what it waits on, Merging'
   assert.deepEqual(
     [root.why, root.cta, root.blocks],
     [
-      `blocks billing#2298, billing#2299 and 3 more; it ${silo}`,
+      `blocks billing#2298, billing#2299 and 4 more; it ${silo}`,
       "reply",
-      ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302"],
+      ["billing#2298", "billing#2299", "billing#2300", "billing#2301", "billing#2302", "billing#2303"],
     ],
   );
 

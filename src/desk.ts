@@ -1230,7 +1230,10 @@ export class Desk {
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),
-      ...(sig.blocked && { blocker: { id: snap.deps.get(it.id)!.root!, ref: sig.blocker, waits: sig.blocker_waits } }),
+      ...(sig.blocked && {
+        blocker: { id: snap.deps.get(it.id)!.root!, ref: sig.blocker, waits: sig.blocker_waits },
+        needs: sig.blocked_by,
+      }),
       ...(sig.blocks.length > 0 && { blocks: sig.blocks }),
     };
   }
@@ -1456,7 +1459,7 @@ export class Desk {
           c.why = `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}`;
           return c;
         });
-      sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged));
+      sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged), (id) => snap.deps.get(id)?.needs ?? []);
       const cleared: Card[] = [];
       const resolved: Card[] = [];
       // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden

@@ -494,8 +494,10 @@ export interface Card {
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
   stack?: StackRef; // an open PR whose line has two or more open
-  // An open PR blocked by another: the item id at the end of the chain, as its why says it ("sentry#129460 (through api#2)"), and what that one waits on
+  // An open PR blocked by another: the item id at the end of the chain, as pr.blocker says it ("sentry#129460 (through api#2)"), and what that one waits on
   blocker?: { id: string; ref: string; waits: string };
+  needs?: string[]; // a blocked PR's open PRs it needs merged first directly, as repo#number (pr.blocked_by)
+  depth?: number; // on Blocked: how deep in its chain the row hangs, 0 for a chain's first rows
   blocks?: string[]; // open PRs that need this one merged first, directly or not, as repo#number
 }
 

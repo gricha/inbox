@@ -126,7 +126,7 @@ test("transitive: A requires api#2, api#2 is stacked on open api#3, so A's root 
   const f = deps([a, two, three]);
   assert.equal(f.get(a.id)?.root, "acme/api#3");
   assert.equal(f.get(a.id)?.through, "api#2");
-  assert.deepEqual(f.get(a.id)?.open, ["api#2"]);
+  assert.deepEqual([f.get(a.id)?.open, f.get(a.id)?.needs], [["api#2"], ["acme/api#2"]]);
   assert.deepEqual(f.get(two.id)?.requires, ["api#3"], "its stack parent");
   assert.equal(f.get(two.id)?.root, "acme/api#3");
   assert.equal(f.get(two.id)?.through, null);
@@ -184,45 +184,90 @@ test("a PR stacked on an open PR is blocked by it, with no description", () => {
   assert.deepEqual(f.get(below.id)?.blocks, ["api#2"]);
 });
 
-const WAITS = "waits on your reply to markstory, then a review from cvxluo, skaasten and 6 more";
-const row = (id: string, why: string, since: number, blocker?: string): Card =>
-  ({ id, why, waiting_since: hoursAgo(since), ...(blocker && { blocker: { id: blocker, ref: "sentry#129460", waits: WAITS } }) }) as Card;
-const FULL = `blocked by sentry#129460, which ${WAITS}`;
-const ROOT = "getsentry/sentry#129460";
+// A Blocked row as the desk makes it: the template's why for a PR another blocks, its root, the PRs it needs directly.
+const row = (
+  id: string,
+  since: number,
+  o: { why?: string; root?: string; through?: string; waits?: string; needs?: string[] } = {},
+): Card => {
+  const ref = (x: string) => x.slice(x.indexOf("/") + 1);
+  const waits = o.waits ?? "waits on CI";
+  const blocker = o.root && { id: o.root, ref: `${ref(o.root)}${o.through ? ` (through ${o.through})` : ""}`, waits };
+  return {
+    id,
+    waiting_since: hoursAgo(since),
+    why: o.why ?? (blocker ? `blocked by ${blocker.ref}, which ${waits}` : "waits on a review from dana"),
+    ...(blocker && { blocker, needs: (o.needs ?? [o.root!]).map(ref) }),
+  } as Card;
+};
+// dependencies()'s kept edges, by item.id.
+const edges = (m: Record<string, string[]>) => (id: string) => m[id] ?? [];
+const tree = (cs: Card[]) => cs.map((c) => [c.id, c.why, c.depth]);
 
-test("blockedOrder: a chain's rows together, the PR blocking them first, chains by their longest wait; the chain says once what its blocker waits on", () => {
+test("blockedOrder, a diamond: web#4 needs web#2 and web#3, both need web#1; the root's own row first, each PR before those that need it", () => {
+  const D = "acme/web#1";
   const cards = [
-    row("getsentry/getsentry#22983", FULL, 30, ROOT),
-    row("acme/web#1", "waits on a review from dana", 20),
-    row("getsentry/getsentry#22984", FULL, 10, ROOT),
-    row("getsentry/getsentry#22982", FULL, 50, ROOT),
-    row("getsentry/getsentry#22990", `in Merging \u00b7 ${FULL}`, 40, ROOT),
-    row("acme/web#7", "blocked by api#4, which waits on CI", 60, "acme/api#4"),
-    row("acme/web#8", "approved by hand", 5, ROOT),
+    row("acme/web#4", 50, { root: D, through: "web#2", needs: ["acme/web#2", "acme/web#3"], waits: "waits on a review from dana" }),
+    row("acme/web#3", 20, { root: D, waits: "waits on a review from dana" }),
+    row(D, 5),
+    row("acme/web#2", 30, { root: D, waits: "waits on a review from dana" }),
   ];
-  const got = blockedOrder(cards);
-  assert.deepEqual(
-    got.map((c) => [c.id, c.why]),
-    [
-      ["acme/web#7", "blocked by api#4, which waits on CI"],
-      ["getsentry/getsentry#22982", FULL],
-      ["getsentry/getsentry#22990", "in Merging \u00b7 blocked by sentry#129460"],
-      ["getsentry/getsentry#22983", "blocked by sentry#129460"],
-      ["getsentry/getsentry#22984", "blocked by sentry#129460"],
-      ["acme/web#8", "approved by hand"],
-      ["acme/web#1", "waits on a review from dana"],
-    ],
+  const got = blockedOrder(cards, edges({ "acme/web#4": ["acme/web#2", "acme/web#3"], "acme/web#3": [D], "acme/web#2": [D] }));
+  assert.deepEqual(tree(got), [
+    [D, "waits on a review from dana", 0],
+    ["acme/web#2", "needs web#1", 1],
+    ["acme/web#3", "needs web#1", 1],
+    ["acme/web#4", "needs web#2 and web#3", 2],
+  ]);
+  assert.equal(
+    cards[0]!.why,
+    "blocked by web#1 (through web#2), which waits on a review from dana",
+    "the cards it was given stay as they were",
   );
-  assert.equal(cards[2]!.why, FULL, "the cards it was given are left as they were");
+});
 
-  const withRoot = blockedOrder([...cards.slice(0, 3), row(ROOT, "waits on your reply to markstory", 1)]);
-  assert.deepEqual(
-    withRoot.map((c) => [c.id, c.why]),
+test("blockedOrder, a chain of 3 whose root isn't listed: its first row says once what the root waits on, each hangs under the PR it needs", () => {
+  const R = "acme/api#9"; // on the Inbox, not on Blocked
+  const got = blockedOrder(
     [
-      [ROOT, "waits on your reply to markstory"],
-      ["getsentry/getsentry#22983", "blocked by sentry#129460"],
-      ["getsentry/getsentry#22984", "blocked by sentry#129460"],
-      ["acme/web#1", "waits on a review from dana"],
+      row("acme/api#3", 40, { root: R, through: "api#2", needs: ["acme/api#2"] }),
+      row("acme/api#4", 5, { root: R, why: "in Merging \u00b7 blocked by api#9, which waits on CI" }),
+      row("acme/api#2", 30, { root: R, through: "api#1", needs: ["acme/api#1"] }),
+      row("acme/api#1", 10, { root: R }),
     ],
+    edges({ "acme/api#1": [R], "acme/api#2": ["acme/api#1"], "acme/api#3": ["acme/api#2"], "acme/api#4": [R] }),
   );
+  assert.deepEqual(tree(got), [
+    ["acme/api#1", "needs api#9, which waits on CI", 0],
+    ["acme/api#2", "needs api#1", 1],
+    ["acme/api#3", "needs api#2", 2],
+    ["acme/api#4", "in Merging \u00b7 needs api#9", 0],
+  ]);
+});
+
+test("blockedOrder, two chains and a review wait: chains by their oldest wait, a rule's own why kept, a chain joined through a PR not listed", () => {
+  const got = blockedOrder(
+    [
+      row("acme/web#7", 50, { why: "waits on a review from kai" }),
+      row("acme/api#2", 60, { root: "acme/api#9", through: "api#1", needs: ["acme/api#1"] }),
+      row("acme/api#1", 10, { root: "acme/api#9" }),
+      row("acme/billing#5", 40, { root: "acme/billing#1", through: "billing#3", needs: ["acme/billing#3"], why: "stacked on billing#3" }),
+      // Through billing#3, on the Inbox: the same chain as billing#5, so the first of the two says what billing#1 waits on.
+      row("acme/billing#4", 20, { root: "acme/billing#1", through: "billing#3", needs: ["acme/billing#3"] }),
+    ],
+    edges({
+      "acme/api#1": ["acme/api#9"],
+      "acme/api#2": ["acme/api#1"],
+      "acme/billing#5": ["acme/billing#3"],
+      "acme/billing#4": ["acme/billing#3"],
+      "acme/billing#3": ["acme/billing#1"],
+    }),
+  );
+  assert.deepEqual(tree(got), [
+    ["acme/api#1", "needs api#9, which waits on CI", 0],
+    ["acme/api#2", "needs api#1", 1],
+    ["acme/web#7", "waits on a review from kai", 0],
+    ["acme/billing#5", "stacked on billing#3", 0],
+    ["acme/billing#4", "needs billing#3; billing#1 waits on CI", 0],
+  ]);
 });
