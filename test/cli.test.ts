@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -613,8 +613,10 @@ test(
       "# mine\n",
       "the home moved before ~/.inbox was made for the log",
     );
-    assert.ok(!existsSync(join(home, ".review-desk")));
-    assert.deepEqual(said, [`moved the desk's home from ${join(home, ".review-desk")} to ${join(home, ".inbox")}`]);
+    assert.ok(lstatSync(join(home, ".review-desk")).isSymbolicLink(), "left as a link to the home");
+    assert.deepEqual(said, [
+      `moved the desk's home from ${join(home, ".review-desk")} to ${join(home, ".inbox")}, and left ${join(home, ".review-desk")} as a link to it`,
+    ]);
     assert.match(
       readFileSync(plist, "utf8"),
       new RegExp(`<key>StandardOutPath</key>\\s*<string>${join(home, ".inbox", "desk.log")}</string>`),

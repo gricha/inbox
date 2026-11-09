@@ -153,7 +153,7 @@ export class ExprEvalError extends Data.TaggedError("ExprEvalError")<{ readonly 
 
 // ---------------------------------------------------------------- files
 
-type FsOp = "read" | "write" | "rename" | "copy" | "mkdir" | "realpath" | "readdir" | "remove" | "stat" | "append" | "watch";
+type FsOp = "read" | "write" | "rename" | "copy" | "mkdir" | "realpath" | "readdir" | "remove" | "stat" | "append" | "watch" | "link";
 
 // A file the desk reads or writes failed: cause is Node's own error (its code says which: ENOENT, EACCES…), and its
 // message is Node's, which already names the file.

@@ -501,9 +501,10 @@ export class Coordinator {
           .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
           .at(-1) ??
         null;
-      // claude resumes a session only from its own folder: one whose folder is gone (the home moved to ~/.inbox) is let go.
-      if (a?.cwd && !here.has(a.cwd) && !fs.existsSync(a.cwd)) {
-        this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, which is gone, so the next wake starts a fresh one in ${dir}`);
+      // claude resumes a session only from its own folder: one from another (the old home's, before it moved to ~/.inbox,
+      // which the link left there still opens) is let go.
+      if (a?.cwd && !here.has(a.cwd)) {
+        this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, not ${dir}, so the next wake starts a fresh one here`);
         yield* this.halt(a);
         a = null;
       }

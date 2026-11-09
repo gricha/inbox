@@ -28,16 +28,23 @@ function scratch(c: TestContext) {
   return { home, old, inbox, lines, log, keep };
 }
 
-test("the first start moves ~/.review-desk to ~/.inbox, all of it, logged once", async (c) => {
+// What the move leaves at ~/.review-desk: a link to ~/.inbox, so Review Desk.app or an old job opens the home, never an empty one.
+const linked = (s: ReturnType<typeof scratch>) =>
+  fs.lstatSync(s.old).isSymbolicLink() && fs.realpathSync(s.old) === fs.realpathSync(s.inbox);
+
+test("the first start moves ~/.review-desk to ~/.inbox, all of it, logged once, and leaves a link to it", async (c) => {
   const s = scratch(c);
   s.keep(s.old);
   assert.equal(deskHome("", s.home), s.old, "until a desk starts, it's where it was");
   const port = await unusedPort();
   assert.equal(await run(settleHome(port, s.log, "", s.home)), s.inbox);
-  assert.equal(fs.existsSync(s.old), false);
+  assert.ok(fs.lstatSync(s.inbox).isDirectory());
+  assert.ok(linked(s));
+  if (process.platform !== "win32") assert.equal(fs.readlinkSync(s.old), ".inbox", "relative, so it follows the home folder");
   assert.equal(fs.readFileSync(path.join(s.inbox, "config.toml"), "utf8"), "# mine\n");
+  assert.equal(fs.readFileSync(path.join(s.old, "config.toml"), "utf8"), "# mine\n", "the old path opens the same home");
   assert.ok(fs.existsSync(path.join(s.inbox, "coordinator", ".claude", "settings.json")));
-  assert.deepEqual(s.lines, [`moved the desk's home from ${s.old} to ${s.inbox}`]);
+  assert.deepEqual(s.lines, [`moved the desk's home from ${s.old} to ${s.inbox}, and left ${s.old} as a link to it`]);
   assert.equal(await run(settleHome(port, s.log, "", s.home)), s.inbox);
   assert.equal(deskHome("", s.home), s.inbox);
   assert.equal(s.lines.length, 1, "logged once");
@@ -92,21 +99,34 @@ test("while a desk answers on the port, both stay and the log says so; the next 
     });
   });
   assert.equal(await run(settleHome(port, s.log, "", s.home)), s.inbox);
-  assert.equal(fs.existsSync(s.old), false);
+  assert.ok(linked(s));
 });
 
-test(
-  "a link at ~/.review-desk isn't a folder to move: it stays, and the home is ~/.inbox",
-  { skip: process.platform === "win32" },
-  async (c) => {
-    const s = scratch(c);
-    const elsewhere = path.join(s.home, "elsewhere");
-    s.keep(elsewhere);
-    fs.symlinkSync(elsewhere, s.old);
-    assert.equal(deskHome("", s.home), s.inbox);
-    assert.equal(await run(settleHome(await unusedPort(), s.log, "", s.home)), s.inbox);
-    assert.ok(fs.lstatSync(s.old).isSymbolicLink());
-    assert.equal(fs.existsSync(s.inbox), false);
-    assert.deepEqual(s.lines, [`${s.old} isn't a folder, so it stays as it is; the desk's home is ${s.inbox}`]);
-  },
-);
+test("a link at ~/.review-desk to a folder (a dotfiles home) moves as the link: ~/.inbox points where it did", async (c) => {
+  const s = scratch(c);
+  const dotfiles = path.join(s.home, "dotfiles", "desk");
+  s.keep(dotfiles);
+  fs.symlinkSync(dotfiles, s.old, "junction");
+  assert.equal(deskHome("", s.home), s.old);
+  assert.equal(await run(settleHome(await unusedPort(), s.log, "", s.home)), s.inbox);
+  assert.ok(fs.lstatSync(s.inbox).isSymbolicLink());
+  assert.equal(fs.realpathSync(s.inbox), fs.realpathSync(dotfiles));
+  assert.equal(fs.readFileSync(path.join(s.inbox, "config.toml"), "utf8"), "# mine\n");
+  assert.ok(linked(s));
+  assert.deepEqual(s.lines, [`moved the desk's home from ${s.old} to ${s.inbox}, and left ${s.old} as a link to it`]);
+});
+
+test("a file or a broken link at ~/.review-desk isn't a home: it stays as it is, and the home is ~/.inbox", async (c) => {
+  const s = scratch(c);
+  fs.writeFileSync(s.old, "not a folder");
+  assert.equal(deskHome("", s.home), s.inbox);
+  assert.equal(await run(settleHome(await unusedPort(), s.log, "", s.home)), s.inbox);
+  assert.equal(fs.readFileSync(s.old, "utf8"), "not a folder");
+  assert.equal(fs.existsSync(s.inbox), false);
+  assert.deepEqual(s.lines, [`${s.old} isn't a folder, so it stays as it is; the desk's home is ${s.inbox}`]);
+  fs.rmSync(s.old);
+  fs.symlinkSync(path.join(s.home, "gone"), s.old, "junction");
+  assert.equal(await run(settleHome(await unusedPort(), s.log, "", s.home)), s.inbox);
+  assert.ok(fs.lstatSync(s.old).isSymbolicLink());
+  assert.equal(s.lines.length, 1, "a link to nothing is nothing to move");
+});

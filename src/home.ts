@@ -1,5 +1,6 @@
 // The desk's home: DESK_HOME, else ~/.inbox. Its folder before the rename to Inbox, ~/.review-desk, moves there with one
-// rename on the first start of a desk that finds it. The CLI, the server and the desktop app all ask here.
+// rename on the first start of a desk that finds it, and is left as a link to it. The CLI, the server and the desktop app
+// all ask here.
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -12,9 +13,10 @@ const OLD = ".review-desk";
 
 const defaultHome = (home: string): string => path.join(home, HOME);
 
-const realDir = (p: string): boolean =>
+// A folder, or a link to one (a dotfiles home, say), which a rename moves as the link.
+const isDir = (p: string): boolean =>
   Result.getOrElse(
-    Result.try({ try: () => fs.lstatSync(p, { throwIfNoEntry: false })?.isDirectory() === true, catch: () => false }),
+    Result.try({ try: () => fs.statSync(p, { throwIfNoEntry: false })?.isDirectory() === true, catch: () => false }),
     () => false,
   );
 
@@ -22,7 +24,7 @@ const realDir = (p: string): boolean =>
 export function deskHome(env = process.env.DESK_HOME, home = os.homedir()): string {
   if (env) return env;
   const to = defaultHome(home);
-  return !fs.existsSync(to) && realDir(path.join(home, OLD)) ? path.join(home, OLD) : to;
+  return !fs.existsSync(to) && isDir(path.join(home, OLD)) ? path.join(home, OLD) : to;
 }
 
 const real = (p: string): string =>
@@ -57,6 +59,8 @@ export const held = (port: number): Effect.Effect<boolean> =>
 // The home a desk starting on `port` runs from, moving ~/.review-desk to ~/.inbox first when that's all there is. Never when
 // ~/.inbox is there already, and never while something answers on the port: with no desk on ~/.inbox yet, that's one
 // running from the old folder, which keeps it until a start finds the port free. A move that fails leaves it where it is.
+// What still opens ~/.review-desk after the move (Review Desk.app at login, its checkout's desk, a desk install job from
+// before) finds the home through the link the move leaves there, rather than making an empty one.
 export const settleHome = (
   port: number,
   log: (m: string) => void,
@@ -68,7 +72,7 @@ export const settleHome = (
     const to = defaultHome(home);
     const from = path.join(home, OLD);
     if (fs.existsSync(to) || !fs.existsSync(from)) return to;
-    if (!realDir(from)) {
+    if (!isDir(from)) {
       log(`${from} isn't a folder, so it stays as it is; the desk's home is ${to}`);
       return to;
     }
@@ -78,24 +82,33 @@ export const settleHome = (
       );
       return from;
     }
-    const moved = Effect.try({
-      try: () => {
-        fs.renameSync(from, to);
-      },
-      catch: fsError("rename", from),
-    });
-    return yield* moved.pipe(
-      Effect.match({
-        onSuccess: () => {
-          log(`moved the desk's home from ${from} to ${to}`);
-          return to;
+    const moved = yield* Effect.result(
+      Effect.try({
+        try: () => {
+          fs.renameSync(from, to);
         },
-        // Another desk starting at the same moment may have moved it first.
-        onFailure: (e) => {
-          const now = deskHome(env, home);
-          if (now === from) log(`couldn't move ${from} to ${to}, so the desk runs from ${from}: ${e.message}`);
-          return now;
-        },
+        catch: fsError("rename", from),
       }),
     );
+    // Another desk starting at the same moment may have moved it first.
+    if (Result.isFailure(moved)) {
+      const now = deskHome(env, home);
+      if (now === from) log(`couldn't move ${from} to ${to}, so the desk runs from ${from}: ${moved.failure.message}`);
+      return now;
+    }
+    const linked = yield* Effect.result(
+      Effect.try({
+        // A junction on Windows, which needs no privilege; elsewhere relative, so it follows the home folder.
+        try: () => {
+          fs.symlinkSync(process.platform === "win32" ? to : HOME, from, "junction");
+        },
+        catch: fsError("link", from),
+      }),
+    );
+    log(
+      Result.isSuccess(linked)
+        ? `moved the desk's home from ${from} to ${to}, and left ${from} as a link to it`
+        : `moved the desk's home from ${from} to ${to}; couldn't leave a link to it there: ${linked.failure.message}`,
+    );
+    return to;
   });

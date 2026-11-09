@@ -409,6 +409,7 @@ test(
     await run(t.desk.close());
     const moved = `${t.home}-moved`;
     fs.renameSync(t.home, moved);
+    fs.symlinkSync(moved, t.home, "junction"); // as the move leaves it: the old folder still opens
     c.after(() => {
       fs.rmSync(moved, { recursive: true, force: true });
     });
@@ -436,7 +437,7 @@ test(
       ["stop", "c0ffee01"],
     ]);
     assert.equal(desk.coordinator.saved(), null, "forgotten: claude couldn't resume it from the new folder");
-    assert.ok(lines.some((l) => /^coordinator: c0ffee01 ran in \S+, which is gone, so the next wake starts a fresh one in /.test(l)));
+    assert.ok(lines.some((l) => /^coordinator: c0ffee01 ran in \S+, not \S+, so the next wake starts a fresh one here$/.test(l)));
     desk.record("github", [{ at: NOW.toISOString(), item_id: "acme/web#3", kind: "commented", actor: "dana", data: {} }]);
     await until(() => t.fake.sessions().length === 2);
     const fresh = t.fake.sessions()[1]!;
