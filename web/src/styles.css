@@ -513,12 +513,12 @@
   color-scheme: light;
 }
 
-/* Flexoki Light, as Omarchy has it: kepano's paper sheet on bg-2, its ui greys for rules, black text and tx-2 beside it,
-   and its 600 and 700 accents (Omarchy's 400s are for dark paper), blue for the call to action. */
+/* Flexoki Light, as Omarchy has it: kepano's paper sheet on bg-2, its ui greys for rules and washes, black text and tx-2
+   beside it, and its 600 and 700 accents (Omarchy's 400s are for dark paper), blue for the call to action. */
 :root[data-theme="flexoki-light"] {
   --paper: #f2f0e5;
   --sheet: #fffcf0;
-  --wash: #f2f0e5;
+  --wash: #e6e4d9;
   --ink: #100f0f;
   --ink-2: #403e3c;
   --pencil: #64635e;

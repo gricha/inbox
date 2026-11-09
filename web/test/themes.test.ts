@@ -48,6 +48,7 @@ const TARGETS: [string, string, number, number?][] = [
   ["--ink", "--sel", 8],
   ["--ink", "--side-on", 8],
   ["--ink", "--wash", 8],
+  ["--wash", "--paper", 1.04], // a field or your words in the chat, on the paper
   ["--ink-2", "--sheet", 7],
   ["--pencil", "--sheet", 4.5], // 13px meta text
   ["--pencil", "--paper", 4.5],
