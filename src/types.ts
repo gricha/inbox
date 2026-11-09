@@ -288,7 +288,9 @@ export interface AgentStatus {
   mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
   // path: the installed SKILL.md; taken: another skill of the owner's has the desk's folder
   skill: { state: "installed" | "outdated" | "missing" | "taken"; path: string; command: string };
-  needs: "connect" | "update" | null; // what Settings asks of you: connect (tools or skill missing), update the skill, nothing
+  // What Settings asks of you: connect (tools or skill missing), update the skill, move what holds the name (taken), nothing.
+  needs: "connect" | "update" | "taken" | null;
+  taken: string | null; // what holds skills/inbox or the MCP server's name, and where it points, in Connect's 409's words
   connect: string[]; // what Connect runs: only what's missing, in its order
 }
 

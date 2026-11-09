@@ -70,10 +70,22 @@ function desks(entry: unknown, url: string): boolean {
 }
 
 // No config yet, or one that doesn't parse: none, and registering will say what's wrong.
-function server(d: Driver, home: string, name: string, url: string): "none" | "desk" | "other" {
+function listed(d: Driver, home: string): Record<string, unknown> {
   const servers = Result.getOrNull(Result.try({ try: () => d.servers(home), catch: () => null }));
-  if (typeof servers !== "object" || servers === null || !(name in servers)) return "none";
-  return desks((servers as Record<string, unknown>)[name], url) ? "desk" : "other";
+  return typeof servers === "object" && servers !== null ? (servers as Record<string, unknown>) : {};
+}
+
+function server(d: Driver, home: string, name: string, url: string): "none" | "desk" | "other" {
+  const servers = listed(d, home);
+  if (!(name in servers)) return "none";
+  return desks(servers[name], url) ? "desk" : "other";
+}
+
+// Where another server points or what it runs, so a desk's on another port reads as that.
+function shown(entry: unknown): string {
+  const { url, command, args } = (typeof entry === "object" ? (entry ?? {}) : {}) as { url?: unknown; command?: unknown; args?: unknown };
+  if (typeof url === "string") return ` (${url})`;
+  return typeof command === "string" ? ` (${[command, ...(Array.isArray(args) ? (args as unknown[]) : [])].map(String).join(" ")})` : "";
 }
 
 // The skill the desk ships: not reading it is a broken install (a defect), never the owner's to fix.
@@ -98,12 +110,13 @@ const skillState = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<A
   return "installed";
 });
 
-// What an agent's state asks of you, and what Connect runs for it, as connect below does: only what's missing. A folder
-// another skill holds is yours to move: Connect says so and copies nothing over it.
-export function plan(mcp: AgentStatus["mcp"], skill: AgentStatus["skill"]): Pick<AgentStatus, "needs" | "connect"> {
+// What an agent's state asks of you, and what Connect runs for it, as connect below does: only what's missing. A name
+// another skill or server holds is yours to move: Settings says so before you press, and Connect runs nothing.
+export function plan(mcp: AgentStatus["mcp"], skill: AgentStatus["skill"], taken: string | null): Pick<AgentStatus, "needs" | "connect"> {
+  if (taken) return { needs: "taken", connect: [] };
   const copies = skill.state === "missing" || skill.state === "outdated";
   return {
-    needs: !mcp.connected || skill.state === "missing" || skill.state === "taken" ? "connect" : copies ? "update" : null,
+    needs: !mcp.connected || skill.state === "missing" ? "connect" : copies ? "update" : null,
     connect: [...(mcp.connected ? [] : [mcp.command]), ...(copies ? [skill.command] : [])],
   };
 }
@@ -122,7 +135,14 @@ export const status = Effect.fn("agents.status")(function* (driver: DriverId, ur
     path: path.join(dir, "SKILL.md"),
     command: `mkdir -p ${sh(parent)} && cp -R ${sh(SKILL)} ${sh(parent)}/`,
   };
-  return { driver, mcp, skill, ...plan(mcp, skill) };
+  const held = [
+    ...(skill.state === "taken" ? [`${skill.path} is another skill named ${NAME}, not the desk's: move it`] : []),
+    ...(!connected && server(d, home, NAME, url) === "other"
+      ? [`${d.bin} has another MCP server named ${NAME}${shown(listed(d, home)[NAME])}, not this desk at ${url}: rename or remove it`]
+      : []),
+  ];
+  const taken = held.length ? `${held.join("; ")}, then connect again` : null;
+  return { driver, mcp, skill, taken, ...plan(mcp, skill, taken) };
 });
 
 type RunError = CommandNotFound | CommandFailed | CommandTimeout | UnsafeArgument | Conflict;
@@ -261,12 +281,7 @@ export const connect = Effect.fn("agents.connect")(function* (
 ): Effect.fn.Return<AgentStatus, FsError | RunError> {
   const d = DRIVERS[driver];
   const s = yield* status(driver, url);
-  if (s.skill.state === "taken")
-    return yield* new Conflict({ message: `${s.skill.path} is another skill named ${NAME}, not the desk's: move it, then connect again` });
-  if (!s.mcp.connected && server(d, os.homedir(), NAME, url) === "other")
-    return yield* new Conflict({
-      message: `${d.bin} has another MCP server named ${NAME}, not the desk's: rename or remove it, then connect again`,
-    });
+  if (s.taken) return yield* new Conflict({ message: s.taken });
   if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));
   if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command, timeout);
   yield* migrate(d, url, timeout, log);

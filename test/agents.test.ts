@@ -52,19 +52,22 @@ test("Claude Code: nothing connected yet, with the exact commands", () => {
   assert.match(s.skill.command, /^mkdir -p \S*\.claude.skills'? && cp -R \S*skills.inbox'? \S*\.claude.skills'?\/$/);
   assert.equal(s.needs, "connect");
   assert.deepEqual(s.connect, [s.mcp.command, s.skill.command]);
+  assert.equal(s.taken, null);
 });
 
 test("Settings asks you to connect or update only while it's needed, and Connect runs only what's missing", () => {
   const mcp = (connected: boolean) => ({ connected, command: "claude mcp add inbox" });
   const skill = (state: "installed" | "outdated" | "missing") => ({ state, path: "SKILL.md", command: "cp -R skills.inbox" });
-  assert.deepEqual(plan(mcp(true), skill("installed")), { needs: null, connect: [] });
-  assert.deepEqual(plan(mcp(true), skill("missing")), { needs: "connect", connect: ["cp -R skills.inbox"] });
-  assert.deepEqual(plan(mcp(false), skill("installed")), { needs: "connect", connect: ["claude mcp add inbox"] });
-  assert.deepEqual(plan(mcp(false), skill("outdated")), {
+  assert.deepEqual(plan(mcp(true), skill("installed"), null), { needs: null, connect: [] });
+  assert.deepEqual(plan(mcp(true), skill("missing"), null), { needs: "connect", connect: ["cp -R skills.inbox"] });
+  assert.deepEqual(plan(mcp(false), skill("installed"), null), { needs: "connect", connect: ["claude mcp add inbox"] });
+  assert.deepEqual(plan(mcp(false), skill("outdated"), null), {
     needs: "connect",
     connect: ["claude mcp add inbox", "cp -R skills.inbox"],
   });
-  assert.deepEqual(plan(mcp(true), skill("outdated")), { needs: "update", connect: ["cp -R skills.inbox"] });
+  assert.deepEqual(plan(mcp(true), skill("outdated"), null), { needs: "update", connect: ["cp -R skills.inbox"] });
+  // A name another skill or server holds: Settings says so, and Connect would only refuse.
+  assert.deepEqual(plan(mcp(false), skill("missing"), "inbox is taken"), { needs: "taken", connect: [] });
 });
 
 test("Claude Code: registered means user scope in ~/.claude.json", () => {
@@ -299,13 +302,11 @@ test("another skill named inbox is the owner's: the refresh, Connect and the ren
   assert.equal(readFileSync(claudeSkill(), "utf8"), SUPPORT);
   write(join(".claude", "skills", "inbox", "SKILL.md"), MAIL);
   const s = runSync(status("claude-code", MCP));
-  assert.deepEqual([s.skill.state, s.needs, s.connect], ["taken", "connect", []]);
+  const words = `${claudeSkill()} is another skill named inbox, not the desk's: move it, then connect again`;
+  assert.deepEqual([s.skill.state, s.needs, s.connect, s.taken], ["taken", "taken", [], words], "said before Connect is pressed");
   assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);
   const taken = await failure(connect("claude-code", MCP));
-  assert.deepEqual(
-    [taken._tag, taken.message],
-    ["Conflict", `${claudeSkill()} is another skill named inbox, not the desk's: move it, then connect again`],
-  );
+  assert.deepEqual([taken._tag, taken.message], ["Conflict", words]);
   // The copy from before the rename stays where it is, so the agent keeps the desk's skill.
   write(join(".claude", "skills", "review-desk", "SKILL.md"), OLD_SKILL);
   const old = join(home, ".claude", "skills", "review-desk");
@@ -314,6 +315,8 @@ test("another skill named inbox is the owner's: the refresh, Connect and the ren
   ]);
   assert.equal(readFileSync(claudeSkill(), "utf8"), MAIL);
   assert.equal(readFileSync(join(old, "SKILL.md"), "utf8"), OLD_SKILL);
+  const kept = runSync(status("claude-code", MCP));
+  assert.deepEqual([kept.mcp.connected, kept.needs, kept.taken], [true, "taken", words], "not 'isn't connected': yours holds the name");
 });
 
 test(
@@ -340,13 +343,19 @@ test(
     assert.deepEqual(servers(), ["review-desk", "inbox"]);
 
     write(".claude.json", JSON.stringify({ mcpServers: { inbox: mail } }));
-    assert.equal(runSync(status("claude-code", MCP)).mcp.connected, false, "a server named inbox isn't the desk's by its name");
+    const s = runSync(status("claude-code", MCP));
+    const words = `claude has another MCP server named inbox (npx -y gmail-mcp), not this desk at ${MCP}: rename or remove it, then connect again`;
+    assert.equal(s.mcp.connected, false, "a server named inbox isn't the desk's by its name");
+    assert.deepEqual([s.needs, s.connect, s.taken], ["taken", [], words], "said before Connect is pressed, with no add that would fail");
     const taken = await failure(connect("claude-code", MCP));
-    assert.deepEqual(
-      [taken._tag, taken.message],
-      ["Conflict", "claude has another MCP server named inbox, not the desk's: rename or remove it, then connect again"],
-    );
+    assert.deepEqual([taken._tag, taken.message], ["Conflict", words]);
     assert.equal(existsSync(join(home, "claude-calls")), false);
+    // The desk's own from before it moved port reads as where it points, not as a stranger's.
+    write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: "http://localhost:47823/mcp" } } }));
+    assert.equal(
+      (await failure(connect("claude-code", MCP))).message,
+      `claude has another MCP server named inbox (http://localhost:47823/mcp), not this desk at ${MCP}: rename or remove it, then connect again`,
+    );
     // The desk's own, by its URL on any loopback name, or as `desk mcp` over stdio (bin/desk, bin/desk.cmd, or node on this
     // desk's src/cli.ts) aimed at its port; another port, or another program's mcp, isn't this desk.
     const cli = join(import.meta.dirname, "..", "src", "cli.ts");

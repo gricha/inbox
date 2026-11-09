@@ -749,7 +749,10 @@ test("agents: Claude Code's status, and connect", async () => {
     fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { type: "stdio", command: "mail-mcp" } } }));
     const taken = await t.req("/api/agents/connect", { method: "POST" });
     assert.equal(taken.status, 409);
-    assert.match(((await taken.json()) as { error: string }).error, /^claude has another MCP server named inbox, not the desk's/);
+    assert.match(
+      ((await taken.json()) as { error: string }).error,
+      /^claude has another MCP server named inbox \(mail-mcp\), not this desk at http:\/\/localhost:47823\/mcp: rename or remove it/,
+    );
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];

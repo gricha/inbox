@@ -2420,6 +2420,30 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Another skill of yours holds skills/inbox: the row says what holds it before Connect is pressed, and nothing to run.
+    name: "settings-agent-taken",
+    go: async (page) => {
+      await page.route("**/api/agents", async (route) => {
+        const res = await route.fetch();
+        const a = (await res.json()) as AgentStatus;
+        const taken = `${a.skill.path} is another skill named inbox, not the desk's: move it, then connect again`;
+        Object.assign(a, { skill: { ...a.skill, state: "taken" }, taken, needs: "taken", connect: [] });
+        await route.fulfill({ response: res, json: a });
+      });
+      await at("#/")(page);
+      await at("#/settings/agent")(page);
+      const rows = await statusRows(page, "agent");
+      if (rows.join("|") !== "Claude Code has another skill or server named inbox")
+        failures.push(`settings-agent-taken: Claude's status rows read ${JSON.stringify(rows)}`);
+      const help = await page.locator("#s-agent .s-status .s-help").first().textContent();
+      if (!help?.includes("is another skill named inbox")) failures.push(`settings-agent-taken: its help reads ${JSON.stringify(help)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await at("#/")(page);
+    },
+  },
+  {
     // Your policy, a view of its own: the editor, the judge's status, then the hourly cap's row under it.
     name: "settings-policy",
     go: async (page) => {

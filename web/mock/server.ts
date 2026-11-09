@@ -3091,7 +3091,7 @@ function agentStatus(): AgentStatus {
     path: `${skills}/inbox/SKILL.md`,
     command: `mkdir -p ${skills} && cp -R skills/inbox ${skills}/`,
   };
-  return { driver, mcp, skill, ...plan(mcp, skill) };
+  return { driver, mcp, skill, taken: null, ...plan(mcp, skill, null) };
 }
 
 // ---------------------------------------------------------------------------

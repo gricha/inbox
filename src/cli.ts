@@ -452,9 +452,10 @@ const connect = Effect.fnUntraced(function* (x: Ctx) {
   }
   x.out(`# ${driver.label}${x.opts.apply ? "" : ` (desk connect ${x.args[0] ? `${x.args[0]} ` : ""}--apply does this)`}`);
   x.out(`# MCP tools: ${s.mcp.connected ? "connected" : "not connected"}`);
-  if (!s.mcp.connected) x.out(s.mcp.command);
+  if (s.connect.includes(s.mcp.command)) x.out(s.mcp.command);
   x.out(`# Skill: ${SKILL_STATE[s.skill.state]}`);
-  if (s.skill.state === "missing" || s.skill.state === "outdated") x.out(s.skill.command);
+  if (s.connect.includes(s.skill.command)) x.out(s.skill.command);
+  if (s.taken) x.out(`# ${s.taken}`);
   x.out(`# The tools work while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
   return 0;
 });

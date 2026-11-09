@@ -625,6 +625,15 @@ const NEED = {
     failed: "Couldn't update it",
     done: "Updated Claude Code's copy of the desk's skill.",
   },
+  // Its help is the status's own words: what holds the name, and where it points.
+  taken: {
+    label: "Claude Code has another skill or server named inbox",
+    help: "",
+    press: "Connect Claude Code",
+    busy: "Connecting…",
+    failed: "Couldn't connect",
+    done: "Connected Claude Code to the desk.",
+  },
 };
 
 // Claude's part starts with what needs you, and only then: Claude Code missing the desk's tools or skill, AI reviews paused.
@@ -692,7 +701,9 @@ function ClaudeStatus({
         <div className="setting s-status">
           <div className="s-label-col">
             <p className="s-label">{say.label}</p>
-            <p className={cls("s-help", error && "t-bad")}>{error ? `${say.failed}: ${error}` : say.help}</p>
+            <p className={cls("s-help", error && "t-bad")}>
+              {error ? `${say.failed}: ${error}` : status.taken ? `${status.taken}.` : say.help}
+            </p>
           </div>
           <div className="s-control">
             <button
