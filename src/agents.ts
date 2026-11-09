@@ -210,8 +210,9 @@ const migrate = Effect.fnUntraced(function* (
       said(`moved the Inbox skill from ${old} to ${dir}`);
     }
   }
-  // The old name was only ever the desk's; the new one may be another server's, and then the old one stays.
-  if (server(d, home, OLD, url) === "none") return;
+  // Only this desk's own: another tool's review-desk stays, and one at another desk's port is that desk's to rename (a
+  // scratch desk on the owner's home would point inbox at itself). The new name may be another server's, and then the old one stays.
+  if (server(d, home, OLD, url) !== "desk") return;
   const now = server(d, home, NAME, url);
   if (now === "other") {
     said(`kept ${d.bin}'s MCP server ${OLD}: ${NAME} is another server's name there`);

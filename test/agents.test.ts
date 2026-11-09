@@ -198,12 +198,13 @@ test("the owner's desk is its home as it is now: ~/.review-desk until it moves, 
 
 // What Connect installed before the rename to Inbox: the skill as review-desk, and the MCP server named review-desk.
 const OLD_SKILL = SKILL.replace(/^---\nname: inbox\n/, "---\nname: review-desk\n").replaceAll("Inbox", "Review Desk");
-const before = () => {
+const DESK = { type: "http", url: MCP };
+const before = (old: object = DESK) => {
   write(join(".claude", "skills", "review-desk", "SKILL.md"), OLD_SKILL);
-  write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": { type: "http", url: MCP }, other: {} } }));
+  write(".claude.json", JSON.stringify({ mcpServers: { "review-desk": old, other: {} } }));
   // A Claude Code whose ~/.claude.json gains inbox on `mcp add` and loses review-desk on `mcp remove`; it says what it was asked.
   const after = (add: boolean) =>
-    JSON.stringify({ mcpServers: { ...(add && { "review-desk": {} }), other: {}, inbox: { type: "http", url: MCP } } });
+    JSON.stringify({ mcpServers: { ...(add && { "review-desk": old }), other: {}, inbox: { type: "http", url: MCP } } });
   fake(
     "claude",
     `printf '%s\\n' "$*" >> "$HOME/claude-calls"
@@ -262,6 +263,27 @@ test("Connect does the same: it installs the new names, then removes the old", {
   fake("claude", "exit 1");
   assert.equal((await run(connect("claude-code", MCP))).mcp.connected, true, "nothing left to do: nothing runs");
 });
+
+test(
+  "a review-desk that isn't this desk's, another tool's or a desk's on another port, is never renamed: not by the refresh, nor by Connect",
+  { skip: process.platform === "win32" },
+  async () => {
+    for (const old of [
+      { type: "stdio", command: "npx", args: ["-y", "@acme/review-desk-mcp"] },
+      { type: "http", url: "http://localhost:47905/mcp" }, // a desk started on another port against this home renames its own
+    ]) {
+      before(old);
+      rmSync(join(home, "claude-calls"), { force: true });
+      const said = await run(refreshSkills(join(home, ".inbox"), MCP));
+      assert.ok(!said.some((l) => l.includes("MCP server")), JSON.stringify(said));
+      assert.equal(existsSync(join(home, "claude-calls")), false, JSON.stringify(old));
+      assert.equal(runSync(status("claude-code", MCP)).mcp.connected, false);
+      await run(connect("claude-code", MCP));
+      assert.deepEqual(calls(), [`mcp add --transport http --scope user inbox ${MCP}`], "only the add");
+      assert.deepEqual(servers(), ["review-desk", "other", "inbox"]);
+    }
+  },
+);
 
 // An email skill of the owner's, say: inbox is a common name, and the desk never writes over a skill that isn't its own.
 const MAIL = "---\nname: inbox\ndescription: Triage my email inbox with the gmail MCP\n---\nArchive newsletters.\n";
