@@ -3044,7 +3044,7 @@ function github(): GitHubStatus {
 }
 
 const settingsView = (): SettingsView => ({
-  path: `${homedir()}/.review-desk/settings.json (mock, in memory)`,
+  path: `${homedir()}/.inbox/settings.json (mock, in memory)`,
   sections: SECTIONS,
   defs: [...SETTINGS],
   values: { ...DEFAULTS, ...overrides },
@@ -3120,7 +3120,7 @@ function savePolicy(text: string): void {
 function policyDoc(): PolicyDoc {
   const off = judgeOff();
   return {
-    path: `${homedir()}/.review-desk/policy.md (mock, in memory)`,
+    path: `${homedir()}/.inbox/policy.md (mock, in memory)`,
     text: policyText,
     starter: DEFAULT_POLICY,
     hash: policyHash(),
@@ -3378,7 +3378,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
           : [],
       ),
     );
-    return { path: `${homedir()}/.review-desk/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard };
+    return { path: `${homedir()}/.inbox/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard };
   }
   if (route === "POST /api/config/preview") return preview(textOf(await readBody(req)));
   if (route === "PUT /api/config") {

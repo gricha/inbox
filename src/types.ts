@@ -187,7 +187,7 @@ export interface Signals {
 }
 
 // ---------------------------------------------------------------------------
-// Config (~/.review-desk/config.toml)
+// Config (~/.inbox/config.toml)
 
 // A rule's bucket, or "judge": no hint of its own, so the board default until Claude answers.
 export type RuleBucket = Bucket | "judge";
@@ -291,7 +291,7 @@ export interface AgentStatus {
   connect: string[]; // what Connect runs: only what's missing, in its order
 }
 
-// GET /api/policy: ~/.review-desk/policy.md, prose the judge follows. While it's empty it follows `starter`.
+// GET /api/policy: ~/.inbox/policy.md, prose the judge follows. While it's empty it follows `starter`.
 export interface PolicyDoc {
   path: string;
   text: string; // the file's; empty means the starter is in use

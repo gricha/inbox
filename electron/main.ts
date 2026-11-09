@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { Cause, Effect, Exit, Fiber, Result } from "effect";
 import { BadRequest, Forbidden, messageOf, type FsError } from "../src/errors.ts";
+import { deskHome, settleHome } from "../src/home.ts";
 import { report } from "../src/sentry.ts";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
@@ -75,7 +76,7 @@ import { reap, startSource, type Source } from "./source.ts";
 const mac = process.platform === "darwin";
 const linux = process.platform === "linux";
 const port = Number(envVar("DESK_PORT") ?? DEFAULT_PORT);
-const home = envVar("DESK_HOME") ?? path.join(os.homedir(), ".review-desk");
+let home = deskHome(); // where it is now; connect() moves ~/.review-desk to ~/.inbox before the first desk starts
 const api = `http://127.0.0.1:${port}`; // the main process's own calls; no IPv6 guess for "localhost"
 const deskUrl = `http://localhost:${port}`;
 let uiUrl = deskUrl;
@@ -331,6 +332,8 @@ function connect(): Effect.Effect<boolean> {
         app.quit();
         return false;
       }
+      const settled = yield* settleHome(port, log);
+      home = settled;
       // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
       if (plan.run === "wait") {
         if (plan.problem !== waitingOn) {
@@ -370,7 +373,7 @@ function connect(): Effect.Effect<boolean> {
       }
       log(`starting a desk on ${deskUrl}`);
       const started = yield* Effect.result(
-        Effect.tryPromise({ try: () => startServer({ port, home, notify, log }), catch: (cause) => new DeskFailed({ cause }) }),
+        Effect.tryPromise({ try: () => startServer({ port, home: settled, notify, log }), catch: (cause) => new DeskFailed({ cause }) }),
       );
       if (Result.isSuccess(started)) {
         server = started.success;

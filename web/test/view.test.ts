@@ -211,21 +211,21 @@ test("Settings is two tabs: Automations holds its rows and each automation's vie
 
 test("Copy resume command resumes a run's session in the automations folder beside settings.json", () => {
   const id = "8a2d0c4b-77e1-4f2a-b0c3-5d9e1f6a2b44";
-  assert.equal(resumeCommand("/Users/me/.review-desk/settings.json", id), `cd /Users/me/.review-desk/automations && claude --resume ${id}`);
+  assert.equal(resumeCommand("/Users/me/.inbox/settings.json", id), `cd /Users/me/.inbox/automations && claude --resume ${id}`);
   // The mock says it isn't a file; DESK_HOME can be anywhere, spaces and all.
   assert.equal(
-    resumeCommand("/Users/me/.review-desk/settings.json (mock, in memory)", id),
-    `cd /Users/me/.review-desk/automations && claude --resume ${id}`,
+    resumeCommand("/Users/me/.inbox/settings.json (mock, in memory)", id),
+    `cd /Users/me/.inbox/automations && claude --resume ${id}`,
   );
   assert.equal(resumeCommand("/tmp/my desk/settings.json", id), `cd '/tmp/my desk/automations' && claude --resume ${id}`);
   assert.equal(resumeCommand("/tmp/it's/settings.json", id), String.raw`cd '/tmp/it'\''s/automations' && claude --resume ${id}`);
   assert.equal(
-    resumeCommand(String.raw`C:\Users\me\.review-desk\settings.json`, id),
-    String.raw`cd C:\Users\me\.review-desk\automations && claude --resume ${id}`,
+    resumeCommand(String.raw`C:\Users\me\.inbox\settings.json`, id),
+    String.raw`cd C:\Users\me\.inbox\automations && claude --resume ${id}`,
   );
   assert.equal(
-    resumeCommand(String.raw`C:\Users\Jo Smith\.review-desk\settings.json`, id),
-    String.raw`cd "C:\Users\Jo Smith\.review-desk\automations" && claude --resume ${id}`,
+    resumeCommand(String.raw`C:\Users\Jo Smith\.inbox\settings.json`, id),
+    String.raw`cd "C:\Users\Jo Smith\.inbox\automations" && claude --resume ${id}`,
   );
 });
 
@@ -949,7 +949,7 @@ test("formatting", () => {
   assert.equal(age(new Date(now - 48.3 * 3_600_000).toISOString(), now), "2d");
   assert.equal(age(new Date(now - 47.4 * 3_600_000).toISOString(), now), "47h");
   assert.equal(ago(new Date(now - 47.6 * 3_600_000).toISOString(), now), "2d ago");
-  assert.equal(tilde("/Users/greg/.review-desk/config.toml"), "~/.review-desk/config.toml");
+  assert.equal(tilde("/Users/greg/.inbox/config.toml"), "~/.inbox/config.toml");
   assert.equal(ago("2026-10-27T11:59:20Z", now), "40s ago");
   assert.equal(ago("2026-10-27T12:00:05Z", now), "0s ago");
   assert.equal(shortRef({ repo: "getsentry/seer", number: 9085 }), "seer#9085");

@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import type { IncomingMessage, Server } from "node:http";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -30,6 +29,7 @@ import {
   type GitHubReadError,
   type Upstream,
 } from "./errors.ts";
+import { settleHome } from "./home.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
@@ -757,13 +757,13 @@ export const startDesk = Effect.fnUntraced(function* (
   opts: ServeOptions = {},
 ): Effect.fn.Return<Served, ListenFailed | GitHubReadError | Upstream | FsError> {
   const port = opts.port ?? Number((process.env.DESK_PORT ?? "") || DEFAULT_PORT);
-  const home = opts.home ?? ((process.env.DESK_HOME ?? "") || path.join(os.homedir(), ".review-desk")); // empty means unset, as in the CLI
   const log =
     opts.log ??
     ((m: string) => {
       console.error(`${new Date().toISOString()} ${m}`);
       logLine(m);
     });
+  const home = opts.home ?? (yield* settleHome(port, log));
   const desk = new Desk({
     home,
     github: createGitHub({ log }),

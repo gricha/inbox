@@ -167,11 +167,16 @@ test("the owner's desk refreshes an installed skill that's out of date, never in
   const codexSkill = join(home, ".agents", "skills", "review-desk", "SKILL.md");
 
   assert.deepEqual(runSync(refreshSkills(join(home, "scratch-desk"))), []);
-  assert.deepEqual(runSync(refreshSkills(join(tmpdir(), ".review-desk"))), [], "a .review-desk outside HOME isn't the owner's");
+  assert.deepEqual(runSync(refreshSkills(join(tmpdir(), ".inbox"))), [], "a .inbox outside HOME isn't the owner's");
+  assert.deepEqual(
+    runSync(refreshSkills(join(home, ".review-desk"))),
+    [],
+    "nor is the home's old folder, which a desk only runs from until it moves",
+  );
   assert.equal(readFileSync(claudeSkill(), "utf8"), old, "a scratch or test desk leaves it alone");
 
-  assert.deepEqual(runSync(refreshSkills(join(home, ".review-desk"))), [claudeSkill()]);
+  assert.deepEqual(runSync(refreshSkills(join(home, ".inbox"))), [claudeSkill()]);
   assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
   assert.equal(existsSync(codexSkill), false, "a missing one is Connect's to install");
-  assert.deepEqual(runSync(refreshSkills(join(home, ".review-desk") + "/")), [], "current: nothing to do");
+  assert.deepEqual(runSync(refreshSkills(join(home, ".inbox") + "/")), [], "current: nothing to do");
 });

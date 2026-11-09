@@ -54,7 +54,7 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
   }
 }
 
-// A scratch HOME (USERPROFILE on Windows) and desk home, so connect never reads or writes the real ~/.claude, ~/.codex or ~/.review-desk.
+// A scratch HOME (USERPROFILE on Windows) and desk home, so connect never reads or writes the real ~/.claude, ~/.codex or ~/.inbox.
 function scratchHome(settings: Record<string, unknown> = {}) {
   const home = mkdtempSync(join(tmp, "home-"));
   writeFileSync(join(home, "settings.json"), JSON.stringify(settings));
@@ -434,7 +434,7 @@ test("settings lists effective values by section and stars overrides", async () 
     r.out.split("\n").filter((l) => /^\S/.test(l) && !l.startsWith("*")),
     ["GitHub", "Claude", "Inbox and notifications", "This device"],
   );
-  assert.match(r.out, /\n\n\* set in \/home\/you\/\.review-desk\/settings\.json\n$/);
+  assert.match(r.out, /\n\n\* set in \/home\/you\/\.inbox\/settings\.json\n$/);
   assert.equal(lastCall().path, "/api/settings");
   assert.equal(JSON.parse((await run(["settings", "--json"])).out).values["github.poll_seconds"], 120);
 });

@@ -121,7 +121,7 @@ export function eventText(e: ActivityEvent, me = ""): string {
   return e.kind;
 }
 
-// "~/.review-desk/settings.json" rather than the full home path.
+// "~/.inbox/settings.json" rather than the full home path.
 export const tilde = (p: string) => p.replace(/^\/(?:Users|home)\/[^/]+(?=\/)|^[A-Za-z]:\\Users\\[^\\]+(?=\\)/, "~");
 
 export const BUCKET_LABEL: Record<Bucket, string> = {

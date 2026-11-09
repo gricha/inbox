@@ -1602,7 +1602,7 @@ const SHOTS: Shot[] = [
         const res = await route.fetch();
         const v = (await res.json()) as InflightView;
         v.coordinator.error =
-          "Workspace not trusted. Run `claude` in /Users/you/.review-desk/coordinator once and accept the trust prompt, then retry.";
+          "Workspace not trusted. Run `claude` in /Users/you/.inbox/coordinator once and accept the trust prompt, then retry.";
         await route.fulfill({ response: res, json: v });
       });
       await at("#/")(page); // from Merging itself the hash wouldn't change, so nothing would refetch
@@ -2586,7 +2586,7 @@ const SHOTS: Shot[] = [
         };
       })()`);
       if (seen.runs !== 2) failures.push(`settings-automations-runs: ${seen.runs} runs in the view`);
-      const tip = /^cd \S+\/\.review-desk\/automations && claude --resume [\da-f-]{36}$/;
+      const tip = /^cd \S+\/\.inbox\/automations && claude --resume [\da-f-]{36}$/;
       if (seen.tips.length !== 2 || !seen.tips.every((t) => tip.test(t)))
         failures.push(`settings-automations-runs: Copy resume command's tooltips read ${JSON.stringify(seen.tips)}`);
       if (seen.said) failures.push("settings-automations-runs: claude --resume is on the page, not only in a tooltip");

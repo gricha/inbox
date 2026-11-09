@@ -267,7 +267,7 @@ export interface FakeApi {
 // Real defs and validation, so CLI tests exercise the actual schema.
 function settingsView(overrides: Record<string, SettingValue>): SettingsView {
   return {
-    path: "/home/you/.review-desk/settings.json",
+    path: "/home/you/.inbox/settings.json",
     sections: SECTIONS,
     defs: [...SETTINGS],
     values: { ...DEFAULTS, ...overrides },
@@ -388,7 +388,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, { ok: true, errors: [] });
     case "GET /api/policy":
       return reply(200, {
-        path: "/home/you/.review-desk/policy.md",
+        path: "/home/you/.inbox/policy.md",
         text: api.policy,
         starter: "Less is more.",
         hash: api.policy ? "beef" : "e3b0",

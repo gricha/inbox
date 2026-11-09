@@ -1,4 +1,4 @@
-// Settings → Claude → Your policy: ~/.review-desk/policy.md, prose Claude sorts by. Saved with ⌘S, like the rules.
+// Settings → Claude → Your policy: ~/.inbox/policy.md, prose Claude sorts by. Saved with ⌘S, like the rules.
 // While the file is empty the starter is in effect, so the editor shows it: editing it and saving makes it yours.
 import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { CommandFailed, CommandNotFound, CommandTimeout, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
+import { defaultHome } from "./home.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
@@ -132,10 +133,10 @@ const copySkill = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<vo
   }
 });
 
-// Connect's copy goes stale whenever the skill changes. Only on ~/.review-desk: a scratch or test desk never writes to ~/.claude.
+// Connect's copy goes stale whenever the skill changes. Only on ~/.inbox: a scratch or test desk never writes to ~/.claude.
 export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string): Effect.fn.Return<string[], FsError> {
   const home = os.homedir();
-  if (path.resolve(deskHome) !== path.join(home, ".review-desk")) return [];
+  if (path.resolve(deskHome) !== defaultHome(home)) return [];
   const done: string[] = [];
   for (const d of Object.values(DRIVERS)) {
     const dir = path.join(d.skills(home), "review-desk");

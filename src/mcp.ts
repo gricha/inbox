@@ -401,7 +401,7 @@ export function createMcpServer(
     "desk_policy",
     {
       description:
-        "The owner's policy: prose in ~/.review-desk/policy.md (a starter while it's empty) that Claude follows to sort everything, above their hard rules' floors. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks.",
+        "The owner's policy: prose in ~/.inbox/policy.md (a starter while it's empty) that Claude follows to sort everything, above their hard rules' floors. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks.",
       inputSchema: {
         action: z.enum(["get", "set"]),
         text: z.string().optional().describe("set: the whole new policy"),

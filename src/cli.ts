@@ -2,7 +2,6 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, watchFile } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { Cause, Data, Effect, Exit, Option } from "effect";
@@ -10,6 +9,7 @@ import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { untilText } from "./client.ts";
 import { fsError, messageOf } from "./errors.ts";
+import { deskHome } from "./home.ts";
 import { judgeText } from "./judge.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
@@ -132,7 +132,6 @@ function ctxFor(io: IO, args: string[], opts: Record<string, unknown>) {
 }
 type Ctx = ReturnType<typeof ctxFor>;
 
-const deskHome = () => (process.env.DESK_HOME ?? "") || join(homedir(), ".review-desk");
 const shortRef = (card: Card) => `${card.repo.split("/")[1]}#${card.number}`;
 // GitHub titles are untrusted: strip control chars so they can't emit terminal escapes.
 const plain = (s: string) => s.replaceAll(/\p{Cc}+/gu, " ");
