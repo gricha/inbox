@@ -137,13 +137,15 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
 test("Searches and rules lists the final rules with the hard ones, in board order, their whys in plain words", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
-  const review = t.desk.getConfig().hard.filter((h) => h.board === "PRs to review (acme)");
+  const work = t.desk.getConfig().hard.filter((h) => h.board.endsWith("(acme)"));
   assert.deepEqual(
-    review.map((h) => [h.bucket, h.why, !!h.final]),
+    work.map((h) => [h.board, h.bucket, h.why, !!h.final]),
     [
-      ["blocked", "blocked by another PR, which waits on something", true],
-      ["now", "someone asked you directly", false],
-      ["today", "asked you by name (added by someone)", false],
+      ["PRs to review (acme)", "now", "someone asked you directly", false],
+      ["PRs to review (acme)", "today", "asked you by name (added by someone)", false],
+      ["My PRs (acme)", "blocked", "blocked by another PR, which waits on something", true],
+      ["My PRs (acme)", "today", "your draft: finish it", false],
+      ["My PRs (acme)", "blocked", "waits on something", true],
     ],
   );
 });
@@ -1002,40 +1004,12 @@ test("Blocked: sentry#129460 once your push changed the code under markstory's l
   );
 });
 
-test("A review asked of you by name that requires an open PR waits in Blocked; once that PR merges it's in Now, notified", async (c) => {
-  const ask = reviewAsk(9, { requires: ["acme/api#5"] });
-  const t = await setup([ask], { settings: QUIET });
-  c.after(t.cleanup);
-  // carol's own PR, on no board: kai has looked, nobody has approved.
-  const five = makeItem({ number: 5, author: "carol", reviews: [{ ...review("kai", "commented"), commit: "x" }] });
-  t.desk.store.putItems([five], NOW.toISOString(), true);
-  await run(t.desk.sync());
-  let q = runSync(t.desk.queue());
-  assert.deepEqual(
-    q.sections.now.map((x) => x.id),
-    [],
-  );
-  assert.deepEqual(
-    q.sections.blocked.map((x) => [x.id, x.why]),
-    [["acme/api#9", "needs api#5, which waits on a review"]],
-  );
-  const at = new Date(NOW.getTime() + 3_600_000).toISOString();
-  t.desk.store.putItems([{ ...five, state: "merged", closed_at: at, updated_at: at }], at, true);
-  t.setNow(new Date(at));
-  await run(t.desk.sync());
-  q = runSync(t.desk.queue());
-  assert.deepEqual(
-    q.sections.now.map((x) => [x.id, x.why]),
-    [["acme/api#9", "carol asked you directly"]],
-  );
-  assert.equal(t.notes.at(-1), "api#9 \u00b7 carol asked you directly");
-});
-
-test("A review asked of you whose chain waits on you isn't Blocked: srest2021's sentry#130284, stacked on #130283, which asks your team, is in Now; one whose chain waits on someone else still waits in Blocked", async (c) => {
+test("Blocked is for your own PRs: reviews asked of you by name on someone else's blocked PRs are in Now, yours to give, their stage saying they can't merge yet", async (c) => {
   const sofia = { repo: "getsentry/sentry", author: "srest2021" };
   const asked = [{ at: hoursAgo(5), actor: "srest2021", actor_bot: false, reviewer: "me", reviewer_type: "user" as const }];
   const t = await setup(
     [
+      // srest2021's sentry#130284, stacked on #130283, which asks your team; and api#9, which requires carol's open api#5.
       makeItem({
         ...sofia,
         number: 130283,
@@ -1053,15 +1027,12 @@ test("A review asked of you whose chain waits on you isn't Blocked: srest2021's 
   t.desk.store.putItems([five], NOW.toISOString(), true);
   await run(t.desk.sync());
   const q = runSync(t.desk.queue());
-  assert.deepEqual(
-    q.sections.blocked.map((x) => [x.id, x.why]),
-    [["acme/api#9", "needs api#5, which waits on a review"]],
-  );
-  assert.deepEqual(
-    q.sections.now.filter((x) => x.repo === "getsentry/sentry").map((x) => [x.id, x.stage]),
-    [["getsentry/sentry#130284", "blocked"]],
-    "a review you can give now, its stage still saying it can't merge yet",
-  );
+  assert.deepEqual(q.sections.blocked, [], "neither is yours, so neither is Blocked");
+  const byId = (a: (string | undefined)[], b: (string | undefined)[]) => a[0]!.localeCompare(b[0]!);
+  assert.deepEqual(q.sections.now.map((x) => [x.id, x.why, x.stage]).sort(byId), [
+    ["acme/api#9", "carol asked you directly", "blocked"],
+    ["getsentry/sentry#130284", "srest2021 asked you directly", "blocked"],
+  ]);
 });
 
 test("A review asked of you by name whose description names an open PR in another org stays in Now", async (c) => {

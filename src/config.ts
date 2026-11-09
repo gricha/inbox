@@ -236,8 +236,8 @@ export function migrateBotAsk(text: string): string | null {
 }
 
 const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true`;
-// Not when its chain waits on you: you can unblock it, so it's yours as any other (a review asked of you goes to the Inbox).
-const BLOCKED_BY = `{ when = "pr.blocked && !pr.blocker_mine", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
+// Blocked is for your own PRs: someone else's blocked PR goes where its board's other rules put it (a review asked of you is
+// yours to give whatever the PR waits on), and pr.blocked and pr.blocker_mine are there for a rule of yours that wants them.
 // Yours: a change request or a reply you owe is yours to do now, blocked or not.
 const MINE_BLOCKED = `{ when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
 // A conflict doesn't take it out: it still waits on its reviews, and your agent only rebases a PR that's approved.
@@ -341,7 +341,6 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "later"`,
       `default_why = "review requested"`,
       `rules = [`,
-      `  ${BLOCKED_BY},`,
       `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },`,
       `  ${BOT_ASK},`,
       `  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },`,
@@ -395,7 +394,6 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `default = "fyi"`,
       `default_why = "mentions you"`,
       `rules = [`,
-      `  ${BLOCKED_BY},`,
       `  { when = "me.new_activity", bucket = "today", why = "new replies since you last acted" },`,
       `  { when = "!me.commented && !me.author && item.activity_hours < 72", bucket = "today", why = "you were mentioned and haven't replied" },`,
       `  { when = "me.assignee", bucket = "later", why = "assigned to you" },`,
@@ -416,7 +414,6 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
         `default = "fyi"`,
         `default_why = "{author.login}: you engaged with {author.engaged_90d} of their PRs in 90 days"`,
         `rules = [`,
-        `  ${BLOCKED_BY},`,
         `  { when = "item.created_hours < 24", bucket = "later", why = "new from {author.login}" },`,
         `]`,
       );

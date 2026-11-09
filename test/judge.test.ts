@@ -45,7 +45,7 @@ const board = (o: Partial<BoardConfig>): BoardConfig => ({
 test('"judge" is a rule bucket, not a board default', () => {
   const text = defaultConfigText({ workOrgs: ["acme"] }).replace(`bucket = "hide", why = "bot PR"`, `bucket = "judge", why = "bot PR"`);
   assert.deepEqual(parseConfig(text).errors, []);
-  assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[8]!.bucket, "judge");
+  assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[7]!.bucket, "judge");
   const bad = parseConfig(text.replace(`default = "later"`, `default = "judge"`)).errors;
   assert.match(bad[0]?.message ?? "", /must be one of now, today, blocked, later, fyi, hide/);
   assert.match(parseConfig(text.replace(`bucket = "judge"`, `bucket = "maybe"`)).errors[0]?.message ?? "", /or judge/);
@@ -65,9 +65,9 @@ test("hard = true: the first-run template sets it on asks by name, a person's or
   ]);
   const errors = (t: string) => parseConfig(t).errors.map((e) => `${e.path}: ${e.message}`);
   const rule = `why = "{me.requested_by} asked you directly", hard = true`;
-  assert.deepEqual(errors(text.replace(rule, rule.replace("true", `"yes"`))), ["boards[0].rules[1].hard: must be true or false"]);
+  assert.deepEqual(errors(text.replace(rule, rule.replace("true", `"yes"`))), ["boards[0].rules[0].hard: must be true or false"]);
   assert.deepEqual(errors(text.replace(`bucket = "now", why = "{me.requested_by} asked you directly"`, `bucket = "judge"`)), [
-    "boards[0].rules[1].hard: a hard rule places the item itself; give it a bucket, not judge",
+    "boards[0].rules[0].hard: a hard rule places the item itself; give it a bucket, not judge",
   ]);
 });
 
@@ -863,7 +863,7 @@ test("a rule's placement reaches Claude as its hint, and hints in Now or Today g
   assert.match(asked, /- id: me\/api#2\n/, "the rules put it in Today, so it goes before a newer one they put in Later");
   assert.doesNotMatch(asked, /acme\/api#1/);
   assert.match(asked, /\n {2}hint: the rules would put it in today on the "PRs to review" board \(your repo\)\n/);
-  assert.deepEqual([t.placed(2).rule, t.placed(2).bucket, t.placed(2).why], [7, "today", "fake says today"]);
+  assert.deepEqual([t.placed(2).rule, t.placed(2).bucket, t.placed(2).why], [6, "today", "fake says today"]);
   assert.deepEqual(t.placed(2).hint?.bucket, "today");
   assert.deepEqual([t.placed(1).bucket, t.placed(1).judge], ["later", { bucket: null, why: "", pending: true }]);
 });

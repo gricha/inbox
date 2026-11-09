@@ -375,9 +375,9 @@ test("the PR below a stack's bottom is fetched; probes wait half an hour, then s
   assert.ok(t.gh.probeCalls.includes("acme/api up b1"));
   assert.equal(t.desk.store.itemsById([id(1)]).get(id(1))?.state, "open");
   assert.deepEqual(
-    runSync(t.desk.queue()).sections.blocked[0]?.stack,
+    runSync(t.desk.queue()).sections.now[0]?.stack,
     { id: id(1), pos: 2, size: 2, folded: [] },
-    "it waits on #1 to merge",
+    "stacked on #1: yours to review all the same",
   );
 
   const probed = t.gh.probeCalls.length;
@@ -483,7 +483,7 @@ test("a PR a probe finds that the desk stored before it kept branches is fetched
   t.desk.store.putItems([old], hoursAgo(1));
   t.gh.items.set(id(1), parent);
   await run(t.desk.sync());
-  assert.deepEqual(runSync(t.desk.queue()).sections.blocked[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
+  assert.deepEqual(runSync(t.desk.queue()).sections.now[0]?.stack, { id: id(1), pos: 2, size: 2, folded: [] });
 });
 
 test("a ref counts the PR's own line: forks over a merged bottom are two PRs, not one 1/1 stack", () => {

@@ -275,7 +275,7 @@ rules = [ ${rule} ]
   assert.deepEqual(one(`{ when = "pr.blocked", bucket = "blocked", hard = true }`).errors, []);
 });
 
-test("the template: blocked first on every PR board", () => {
+test("the template: Blocked is for your own PRs, first on My PRs, and no board of other people's PRs fills it", () => {
   const boards = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config.boards;
   const rule = (id: string, i: number) => {
     const r = boards.find((b) => b.id === id)!.rules[i]!;
@@ -290,10 +290,12 @@ test("the template: blocked first on every PR board", () => {
     assert.deepEqual(rule(mine, changes + 2), ["len(pr.blocks) > 0 && me.owes_reply", "today", false, false]);
     const threads = index(mine, "pr.unresolved_threads > 0");
     assert.deepEqual(rule(mine, threads - 1), ["len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", "blocked", true, false]);
-    for (const id of [`${space}-review`, `${space}-mentions`])
-      assert.deepEqual(rule(id, 0), ["pr.blocked && !pr.blocker_mine", "blocked", true, false], id);
-    assert.deepEqual(rule(`${space}-review`, 1).slice(0, 2), ["me.requested_direct && !me.requested_by_bot", "now"]);
-    assert.equal(rule(`${space}-review`, 1)[3], true, "the hard direct-ask rules follow");
+    assert.deepEqual(rule(`${space}-review`, 0), ["me.requested_direct && !me.requested_by_bot", "now", false, true], "a direct ask leads");
   }
-  assert.deepEqual(rule("acme-collaborators", 0), ["pr.blocked && !pr.blocker_mine", "blocked", true, false]);
+  const others = boards.filter((b) => !b.id.endsWith("-mine"));
+  assert.deepEqual(
+    others.flatMap((b) => b.rules.filter((r) => r.bucket === "blocked").map((r) => `${b.id}: ${r.when}`)),
+    [],
+    "someone else's blocked PR goes where its board's other rules put it",
+  );
 });
