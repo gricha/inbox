@@ -1911,8 +1911,13 @@ p {
   min-width: calc-size(max-content, min(size, 10ch));
 }
 
-.c-meta > .line-note:not(:last-child) ~ :last-child {
+.c-meta > :last-child {
   min-width: calc-size(max-content, min(size, 8ch));
+}
+
+/* A call to action says the row is yours: there "by you" goes, so its stage keeps its room. */
+.c-row:has(> .c-cta) .line-by.mine {
+  display: none;
 }
 
 .c-meta > * + *::before {

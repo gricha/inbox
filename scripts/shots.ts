@@ -3223,11 +3223,13 @@ try {
           return Math.max(over(head), ...items.map(over));
         })()`);
         if (spill > 0) failures.push(`${file}: the sidebar or the page head runs ${spill}px past its edge`);
-        // A table cuts a repo to 6 letters' room and a why to 10 at most: who it's from goes first (styles.css @container).
+        // A table cuts a repo to 6 letters' room and a why to 10 at most: who it's from goes first (styles.css @container). A
+        // row beside a review cuts its last fact to 8, its dot included.
         const squeezed = await page.evaluate<string[]>(`(() => {
           const out = [];
-          for (const [sel, n] of [[".line-ref", 6], [".line-note", 10]])
-            for (const el of document.querySelectorAll(".lines .line:not(.c-line, .lane-row, .blocked-row) " + sel)) {
+          const table = ".lines .line:not(.c-line, .lane-row, .blocked-row) ";
+          for (const [sel, n] of [[table + ".line-ref", 6], [table + ".line-note", 10], [".c-line .c-meta > :last-child", 8]])
+            for (const el of document.querySelectorAll(sel)) {
               if (!el.getClientRects().length || el.scrollWidth <= el.clientWidth + 1) continue;
               const room = document.createElement("span"), cs = getComputedStyle(el);
               room.style.cssText = "position:absolute;visibility:hidden;width:" + n + "ch";
