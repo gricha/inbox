@@ -1102,7 +1102,7 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
               </section>
             )
           )}
-          {(card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
+          {(card?.talk === true || card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
             <SkLines count={1} className="rv-convo sk-short" />
           )}
           {/* An open PR's comment box, empty, at its height. */}

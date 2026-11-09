@@ -1220,7 +1220,16 @@ const SHOTS: Shot[] = [
       if ((await page.locator(".rv-convo.sk-short").count()) && !inOrder(await tops(page, [".rv-ai", ".rv-convo.sk-short"])))
         failures.push("review-loading: the AI read isn't above the conversation's placeholder");
     },
-    after: release("**/api/review/**"),
+    // Then the rest lands: the comment box stays where it was drawn, its conversation's line kept for it.
+    after: async (page) => {
+      const [was] = await tops(page, [".rv-comment"]);
+      await page.unroute("**/api/review/**");
+      for (const r of held.splice(0)) await r.continue().catch(() => {});
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      const [now] = await tops(page, [".rv-comment"]);
+      if (Math.abs(now! - was!) > 2) failures.push(`review-loading: the comment box moved ${now! - was!}px when the review landed`);
+      await fresh(page);
+    },
   },
   {
     // An agent's hand-off: who sent it and what it needs from you, under the why and facts.

@@ -1749,6 +1749,7 @@ function cardOf(r: Rec, p: Placement): Card {
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
     ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
+    ...(!!TALK.get(r.id)?.length && { talk: true as const }),
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
     ...(stack && { stack }),

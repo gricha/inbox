@@ -234,6 +234,7 @@ interface Card {
   verdict: "look" | "skim" | "skip" | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged: at the top of the queue, its why says why
+  talk?: true; // a PR people said something on (a review thread, a person's comment, a review that commented or asked for changes): its review keeps the conversation's line while it loads
   cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: "ready" is Ready for review (a) on your own open draft, whatever its CI; "reviewers" is Add reviewers on your ready PR nobody's asked to review (a opens its review to pick them); "reply" on your own PR whose only action is answering someone (also on its review's card: its first reply box is focused)
   actions?: GitHubAction[]; // the More menu's GitHub writes the desk allows now ("close", "draft", "merge", "reopen", "request_changes"); absent when none
   resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"

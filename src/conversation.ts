@@ -157,6 +157,20 @@ export function parseTakes(raw: unknown, last: Map<string, string>, at: string):
   return out;
 }
 
+// Whether a PR's review will show a conversation, from what a sync knows: a review thread, a person's comment on it (more
+// than the last ten a sync counts are taken as one), or someone's review that commented or asked for changes (a bare approval
+// usually says nothing). Its review keeps the conversation's line while it loads.
+export function talked(it: Item, me: string): boolean {
+  const other = (author: string) => lc(author) !== lc(me);
+  return (
+    it.kind === "pr" &&
+    (it.threads_total > 0 ||
+      it.comments_total > it.comments.length ||
+      it.comments.some((c) => !c.author_bot && other(c.author)) ||
+      it.reviews.some((r) => (r.state === "commented" || r.state === "changes_requested") && other(r.author)))
+  );
+}
+
 // Fetches a PR's conversation (again once a sync sees it updated) and has Claude read what waits on you, one PR at a time.
 export class Conversations {
   desk: Desk;

@@ -106,7 +106,7 @@ import { inQuietHours, notify } from "./notify.ts";
 import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
-import { Conversations } from "./conversation.ts";
+import { Conversations, talked } from "./conversation.ts";
 import { askLine, Coordinator, NAME as COORDINATOR, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
@@ -1217,6 +1217,7 @@ export class Desk {
       // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
+      ...(talked(it, this.me()) && { talk: true as const }),
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
       ...(stack && { stack }),

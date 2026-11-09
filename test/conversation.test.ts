@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildTakePrompt, conversation, parseTakes } from "../src/conversation.ts";
+import { buildTakePrompt, conversation, parseTakes, talked } from "../src/conversation.ts";
 import { owesReply } from "../src/stage.ts";
 import type { PrContext } from "../src/github/index.ts";
 import type { Item, ReviewView } from "../src/types.ts";
@@ -590,4 +590,20 @@ test("answering a comment on your PR nobody's asked to review leaves Add reviewe
   assert.equal((await reply(4)).status, 200);
   assert.deepEqual([runSync(t.desk.item("web#3")).card.status, runSync(t.desk.item("web#3")).card.cta], ["active", "reviewers"]);
   assert.equal(runSync(t.desk.item("web#4")).card.status, "done", "dana's asked: answering was all it wanted");
+});
+
+test("a PR has a conversation to show when someone left a thread, a comment or a review that says something", () => {
+  const pr = (o: Partial<Item>) => talked(makeItem({ kind: "pr", ...o }), "me");
+  const by = (author: string, author_bot = false) => ({ author, author_bot, at: hoursAgo(1) });
+  assert.equal(pr({}), false, "nothing said");
+  assert.equal(pr({ threads_total: 1 }), true, "a review thread, even yours");
+  assert.equal(pr({ comments: [by("priya")], comments_total: 1 }), true);
+  assert.equal(pr({ comments: [by("me"), by("codecov[bot]", true)], comments_total: 2 }), false, "yours and a bot's report");
+  assert.equal(pr({ comments: [by("me")], comments_total: 11 }), true, "more than a sync counts");
+  const review = (state: "approved" | "commented" | "changes_requested", author = "priya") => ({ ...by(author), state, commit: "" });
+  assert.equal(pr({ reviews: [review("approved")] }), false, "a bare approval");
+  assert.equal(pr({ reviews: [review("commented")] }), true);
+  assert.equal(pr({ reviews: [review("changes_requested")] }), true);
+  assert.equal(pr({ reviews: [review("commented", "Me")] }), false, "your own");
+  assert.equal(talked(makeItem({ kind: "issue", comments: [by("priya")], comments_total: 1 }), "me"), false, "an issue has no review");
 });

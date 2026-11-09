@@ -482,6 +482,7 @@ export interface Card {
   preflight?: Preflight; // Now and Today cards only
   handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
   cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft, Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
+  talk?: true; // a PR people said something on (a thread, a comment, a review that commented): its review keeps the conversation's line while it loads
   actions?: GitHubAction[]; // the GitHub writes its More menu offers, as the desk allows them now; absent when none
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
