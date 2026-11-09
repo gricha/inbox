@@ -29,7 +29,7 @@ const ACCELERATOR =
 // The Settings tab's parts in order: GitHub, where sources go, then the core's. Automations has no keys: it's a tab of its own.
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
-  { id: "agent", title: "Claude" },
+  { id: "agent", title: "Agent" },
   { id: "queue", title: "Inbox and notifications" },
   { id: "app", title: "This device" },
 ];
@@ -129,6 +129,18 @@ export const SETTINGS = [
     type: "text",
     default: DEFAULT_ISSUE,
     required: true,
+  },
+  {
+    key: "agent.harness",
+    section: "agent",
+    label: "Agent",
+    type: "select",
+    default: "claude-code",
+    options: [
+      { value: "claude-code", label: "Claude Code" },
+      { value: "codex", label: "Codex", off: "can't sort or review yet" },
+    ],
+    help: "Sorts your desk, reviews PRs ahead of time and runs as your agent, on your own login.",
   },
   {
     key: "policy.judge",
@@ -254,8 +266,11 @@ export function checkSetting(key: string, value: unknown): string | null {
       const bad = re && value.find((v) => !re.test(v));
       return bad === undefined || bad === null ? null : `"${bad}" isn't ${d.pattern_hint ?? "valid"}`;
     }
-    case "select":
-      return d.options?.some((o) => o.value === value) ? null : `must be one of ${d.options?.map((o) => o.value).join(", ")}`;
+    case "select": {
+      const picked = d.options?.find((o) => o.value === value);
+      if (picked?.off) return `${picked.label} ${picked.off}`;
+      return picked ? null : `must be one of ${d.options?.map((o) => o.value).join(", ")}`;
+    }
     case "string":
     case "text":
     case "hotkey":

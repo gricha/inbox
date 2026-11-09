@@ -48,7 +48,7 @@ const USAGE = `usage: desk <command>
   settings reset <key>                back to the default
   fields                              the fields rules can use
   mcp                                 MCP server on stdio (the desk also serves MCP over HTTP at /mcp)
-  connect [claude|codex] [--apply]    connect your agent (Settings → Claude) to the desk: MCP tools and skill; --apply does it
+  connect [claude|codex] [--apply]    connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
   install | uninstall                 run the server at login (macOS launchd)
 
 <ref> is owner/repo#123, repo#123 when unique, a GitHub URL, or an item's link from the desk (inbox://item/owner/repo/123).

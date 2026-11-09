@@ -765,7 +765,7 @@ export class Desk {
 
   // A file it can't read fails it, in Node's words: a 500, as before.
   agentStatus(mcpUrl: string): Effect.Effect<AgentStatus, FsError> {
-    return agents.status("claude-code", mcpUrl);
+    return agents.status(agents.driverOf(this.settings["agent.harness"]), mcpUrl);
   }
 
   // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause; a
@@ -775,7 +775,7 @@ export class Desk {
       this.log(line);
     };
     return agents
-      .connect("claude-code", mcpUrl, { log })
+      .connect(agents.driverOf(this.settings["agent.harness"]), mcpUrl, { log })
       .pipe(Effect.mapError((e) => (e._tag === "Conflict" ? e : new Upstream({ message: e.message, cause: e }))));
   }
 
@@ -2361,7 +2361,7 @@ export class Desk {
   // there) as the cause.
   wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream | Unavailable> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Claude" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
       const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
       if (a) {
         if (a.item_id) yield* this.requireConfig(); // askAbout reads the snapshot
@@ -2629,7 +2629,7 @@ export class Desk {
     lines?: AskLines;
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings \u2192 Claude" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
       const ref = b.item_id ? yield* this.resolve(b.item_id) : null; // before the snapshot, which needs the config
       const item = ref ? this.snapshot().entries.get(ref)!.item : null;
       const bad = (message: string) => new BadRequest({ message });

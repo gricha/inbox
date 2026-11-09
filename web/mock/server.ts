@@ -2304,7 +2304,7 @@ const ASKS: Ask[] = [
 ];
 let askN = 0;
 function addAsk(b: Record<string, unknown>): Ask {
-  if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings \u2192 Claude");
+  if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings → Agent");
   const text = textOf(b).trim();
   if (!text) throw new HttpError(400, "the ask is empty");
   const str = (k: string) => (typeof b[k] === "string" && b[k] ? b[k] : null);
@@ -3188,7 +3188,7 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 }
 
 // ---------------------------------------------------------------------------
-// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Claude shows Connect.
+// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agent shows Connect.
 
 const linked = new Set(["claude-code mcp"]);
 function agentStatus(): AgentStatus {

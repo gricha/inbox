@@ -301,7 +301,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
     `# Inbox config. Edit it in Settings → GitHub → Searches and rules, or here; the desk reloads it on save.`,
     `# Each [[boards]] table feeds your desk: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.`,
-    `# Claude then sorts every item by your policy (Settings → Claude → Your policy), with the rule's bucket as its hint.`,
+    `# Claude then sorts every item by your policy (Settings → Agent → Your policy), with the rule's bucket as its hint.`,
     `# A rule with \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever`,
     `# Claude, quiet days or caps say.`,
     `# A rule with \`final = true\` isn't re-sorted by Claude: what it matches stays in its bucket (your pin still lifts it).`,

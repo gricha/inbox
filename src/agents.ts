@@ -1,4 +1,4 @@
-// The agent you work in (Settings → Claude): whether it has the desk's MCP tools and the Inbox skill, and connecting it.
+// The agent you work in (Settings → Agent): whether it has the desk's MCP tools and the Inbox skill, and connecting it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,6 +42,8 @@ const DRIVERS = {
   },
 } satisfies Record<string, Driver>;
 export type DriverId = keyof typeof DRIVERS;
+// agent.harness as a driver: a value this desk doesn't know is Claude Code's.
+export const driverOf = (id: string): DriverId => (Object.hasOwn(DRIVERS, id) ? (id as DriverId) : "claude-code");
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 const commandOf = (d: Driver, args: string[]) => [d.bin, ...args].map(sh).join(" ");

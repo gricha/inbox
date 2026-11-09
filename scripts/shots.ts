@@ -2496,9 +2496,33 @@ const SHOTS: Shot[] = [
       await at("#/settings/agent")(page);
       const rows = await statusRows(page, "agent");
       if (rows.join("|") !== "Claude Code isn't connected to the desk")
-        failures.push(`settings-agent: Claude's status rows read ${JSON.stringify(rows)}`);
+        failures.push(`settings-agent: the agent's status rows read ${JSON.stringify(rows)}`);
       const filled = await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Claude Code" }).isVisible();
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
+      // The part is the agent's: its name is the first row's choice, Codex listed and not yet to be picked; its status follows.
+      const head = (await page.locator("#s-agent h2, #s-agent .s-title").first().textContent())?.trim();
+      if (head !== "Agent") failures.push(`settings-agent: the part is headed ${JSON.stringify(head)}`);
+      const first = await page.evaluate<{ label: string; options: [string, boolean][]; status: boolean } | null>(`(() => {
+        const row = document.querySelector("#s-agent .setting");
+        const sel = row?.querySelector("select");
+        return row && sel
+          ? {
+              label: row.querySelector(".s-label")?.textContent.trim() + ": " + sel.selectedOptions[0]?.textContent,
+              options: [...sel.options].map((o) => [o.textContent, o.disabled]),
+              status: !!row.nextElementSibling?.classList.contains("s-status"),
+            }
+          : null;
+      })()`);
+      if (
+        first?.label !== "Agent: Claude Code" ||
+        JSON.stringify(first.options) !==
+          JSON.stringify([
+            ["Claude Code", false],
+            ["Codex (can't sort or review yet)", true],
+          ]) ||
+        !first.status
+      )
+        failures.push(`settings-agent: the part starts with ${JSON.stringify(first)}`);
     },
   },
   {
@@ -3104,8 +3128,8 @@ const SHOTS: Shot[] = [
       },
       after: systemTheme,
     },
-    // Settings' controls in the theme's colours: from GitHub's select on, a switch on and one off, the filled Connect and the
-    // Inbox's numbers.
+    // Settings' controls in the theme's colours: from GitHub's switch on, the agent's select, the filled Connect, a switch off
+    // and the Inbox's numbers.
     {
       name: `theme-${id}-settings`,
       go: async (page) => {
@@ -3115,9 +3139,7 @@ const SHOTS: Shot[] = [
         await pickTheme(id)(page);
         await at("#/settings/github")(page);
         await page.locator("#s-agent .s-status .act.primary").waitFor();
-        await page.evaluate(
-          `scrollTo(0, document.getElementById("row-github.resolve_on_others_approval").getBoundingClientRect().top + scrollY - 64)`,
-        );
+        await page.evaluate(`scrollTo(0, document.getElementById("row-review.auto_ai").getBoundingClientRect().top + scrollY - 64)`);
         const seen = await page.evaluate<{ off: boolean; select: boolean; number: boolean }>(`(() => {
           const shown = (el) => { const r = el?.getBoundingClientRect(); return !!r && r.top >= 52 && r.bottom <= innerHeight; };
           return {

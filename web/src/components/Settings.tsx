@@ -250,8 +250,8 @@ function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) 
       }}
     >
       {def.options?.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
+        <option key={o.value} value={o.value} disabled={!!o.off}>
+          {o.off ? `${o.label} (${o.off})` : o.label}
         </option>
       ))}
     </select>
@@ -636,7 +636,7 @@ const NEED = {
   },
 };
 
-// Claude's part starts with what needs you, and only then: Claude Code missing the desk's tools or skill, AI reviews paused.
+// Under the agent's name, what needs you, and only then: Claude Code missing the desk's tools or skill, AI reviews paused.
 function ClaudeStatus({
   active,
   loads,
@@ -832,16 +832,17 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
       />
     </>
   ),
-  agent: (p) => (
-    <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.policy?.judge} now={p.now} flash={p.flash} />
-  ),
   app: () => <ThemeRow />,
 };
 
 // Rows after a setting's own, by its key: your policy under the switch that sorts by it.
 const AFTER: Record<string, (p: PartProps) => ReactNode> = {
+  // The agent's own status under its name, and only while something needs you.
+  "agent.harness": (p) => (
+    <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.policy?.judge} now={p.now} flash={p.flash} />
+  ),
   "policy.judge": ({ policy, view, now }) => {
-    // Its failure, unless it's the one Claude's part already says for the AI reviews too.
+    // Its failure, unless it's the one the agent's status already says for the AI reviews too.
     const failed = policy?.judge.state === "error" && !onePause(view.paused.ai, policy.judge);
     return (
       <ViewRow

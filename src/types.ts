@@ -244,7 +244,7 @@ export interface SettingDef {
   help?: string;
   type: SettingType; // text = multi-line string, list = strings, hotkey = Electron accelerator ("" = off), select = one of options
   default: number | boolean | string | readonly string[];
-  options?: readonly { value: string; label: string }[]; // select only
+  options?: readonly { value: string; label: string; off?: string }[]; // select only; off: why it can't be picked yet
   min?: number;
   max?: number;
   unit?: string; // a number's, shown after its field ("days")
