@@ -476,20 +476,13 @@ const serve = Effect.fnUntraced(function* (x: Ctx) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) return yield* new UsageError({ message: `bad port: ${raw}` });
   // Before the server's modules load, so Sentry instruments them.
   yield* Effect.promise(() => startSentry());
-  const { startDesk } = yield* Effect.promise(() => import("./server.ts"));
+  const { startDesk, refreshAgents } = yield* Effect.promise(() => import("./server.ts"));
   const srv = yield* startDesk({ port, open: !!x.opts.open });
   const desk = srv.desk;
-  const refresh = Effect.flatMap(agents.refreshSkills(desk.home, `${srv.url}/mcp`), (done) =>
-    Effect.sync(() => {
-      for (const line of done) desk.log(line);
-    }),
-  );
-  const again = () => {
-    desk.runner.fork("skill refresh", refresh);
-  };
-  again();
   // The checkout's desk restarts on src/ changes only, so a skill-only merge would wait for an unrelated one.
-  watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, again);
+  watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, () => {
+    desk.runner.fork("skill refresh", refreshAgents(desk, srv.url));
+  });
   yield* Effect.callback<void>((resume) => {
     const stop = () => {
       resume(Effect.void);

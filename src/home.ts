@@ -10,8 +10,7 @@ import { fsError } from "./errors.ts";
 const HOME = ".inbox";
 const OLD = ".review-desk";
 
-// The owner's own desk lives here; a scratch or test desk (DESK_HOME) never does.
-export const defaultHome = (home = os.homedir()): string => path.join(home, HOME);
+const defaultHome = (home: string): string => path.join(home, HOME);
 
 const realDir = (p: string): boolean =>
   Result.getOrElse(
@@ -25,6 +24,13 @@ export function deskHome(env = process.env.DESK_HOME, home = os.homedir()): stri
   const to = defaultHome(home);
   return !fs.existsSync(to) && realDir(path.join(home, OLD)) ? path.join(home, OLD) : to;
 }
+
+const real = (p: string): string =>
+  Result.getOrElse(Result.try({ try: () => fs.realpathSync(p), catch: () => null }), () => path.resolve(p));
+
+// The owner's own desk runs from the home as it is now (~/.review-desk until it moves), or through a link to it; a scratch
+// or test desk (DESK_HOME elsewhere) never does.
+export const ownersHome = (dir: string, home = os.homedir()): boolean => real(dir) === real(deskHome("", home));
 
 // Something takes connections on the port; one that never accepts holds it too.
 export const held = (port: number): Effect.Effect<boolean> =>

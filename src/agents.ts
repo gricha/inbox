@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { CommandFailed, CommandNotFound, CommandTimeout, Conflict, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
-import { defaultHome } from "./home.ts";
+import { ownersHome } from "./home.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
@@ -211,12 +211,12 @@ const migrate = Effect.fnUntraced(function* (
   said(`renamed ${d.bin}'s MCP server ${OLD} to ${NAME}`);
 });
 
-// Connect's copy goes stale whenever the skill changes, and what Connect did before the rename is renamed. Only on
-// ~/.inbox: a scratch or test desk never writes to ~/.claude. What it did, in words, and what one agent's CLI or files
+// Connect's copy goes stale whenever the skill changes, and what Connect did before the rename is renamed. Only on the
+// owner's own desk, whatever its home is called yet: a scratch or test desk never writes to ~/.claude. What it did, in words, and what one agent's CLI or files
 // failed, which never holds up the other agent.
 export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string, url: string): Effect.fn.Return<string[]> {
   const home = os.homedir();
-  if (path.resolve(deskHome) !== defaultHome(home)) return [];
+  if (!ownersHome(deskHome, home)) return [];
   const done: string[] = [];
   const said = (line: string) => {
     done.push(line);

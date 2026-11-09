@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -168,17 +168,28 @@ test("the owner's desk refreshes an installed skill that's out of date, never in
 
   assert.deepEqual(runSync(refreshSkills(join(home, "scratch-desk"), MCP)), []);
   assert.deepEqual(runSync(refreshSkills(join(tmpdir(), ".inbox"), MCP)), [], "a .inbox outside HOME isn't the owner's");
-  assert.deepEqual(
-    runSync(refreshSkills(join(home, ".review-desk"), MCP)),
-    [],
-    "nor is the home's old folder, which a desk only runs from until it moves",
-  );
+  assert.deepEqual(runSync(refreshSkills(join(home, ".review-desk"), MCP)), [], "nor is a folder that isn't the home");
   assert.equal(readFileSync(claudeSkill(), "utf8"), old, "a scratch or test desk leaves it alone");
 
   assert.deepEqual(runSync(refreshSkills(join(home, ".inbox"), MCP)), [`refreshed the Inbox skill at ${claudeSkill()}`]);
   assert.equal(readFileSync(claudeSkill(), "utf8"), SKILL);
   assert.equal(existsSync(codexSkill), false, "a missing one is Connect's to install");
   assert.deepEqual(runSync(refreshSkills(join(home, ".inbox") + "/", MCP)), [], "current: nothing to do");
+});
+
+test("the owner's desk is its home as it is now: ~/.review-desk until it moves, and a link to it", () => {
+  const old = SKILL.replace("Inbox", "Old Desk");
+  write(join(".claude", "skills", "inbox", "SKILL.md"), old);
+  const before = join(home, ".review-desk");
+  mkdirSync(before);
+  assert.deepEqual(runSync(refreshSkills(join(home, ".inbox"), MCP)), [], "not yet the home");
+  assert.deepEqual(runSync(refreshSkills(before, MCP)), [`refreshed the Inbox skill at ${claudeSkill()}`]);
+  mkdirSync(join(home, ".inbox"));
+  writeFileSync(claudeSkill(), old);
+  assert.deepEqual(runSync(refreshSkills(before, MCP)), [], "moved, a folder left beside it isn't the home");
+  rmSync(before, { recursive: true });
+  symlinkSync(join(home, ".inbox"), before, "junction");
+  assert.deepEqual(runSync(refreshSkills(before, MCP)), [`refreshed the Inbox skill at ${claudeSkill()}`], "a desk through the link is");
 });
 
 // What Connect installed before the rename to Inbox: the skill as review-desk, and the MCP server named review-desk.

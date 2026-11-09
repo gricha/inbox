@@ -10,6 +10,7 @@ import { Hono, type Context, type Next } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serve, type ServerType } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { refreshSkills } from "./agents.ts";
 import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
@@ -751,6 +752,15 @@ const listen = (app: Hono, port: number, url: string) =>
     });
   });
 
+// What the desk installed in your agents, kept current and renamed from before Inbox, on every start of the owner's desk
+// (desk serve, the app's own): what it did, in the log.
+export const refreshAgents = (desk: Desk, url: string): Effect.Effect<void> =>
+  Effect.flatMap(refreshSkills(desk.home, `${url}/mcp`), (done) =>
+    Effect.sync(() => {
+      for (const line of done) desk.log(line);
+    }),
+  );
+
 // The desk on its port, its first config read and its loops started. Its port, GitHub's viewer or a file it can't read
 // or write fails it, and then it leaves nothing open: the desktop app retries.
 export const startDesk = Effect.fnUntraced(function* (
@@ -796,6 +806,7 @@ export const startDesk = Effect.fnUntraced(function* (
     ),
   );
   desk.start();
+  desk.runner.fork("skill refresh", refreshAgents(desk, url));
   if (opts.open) openUrl(url);
 
   // The desk stops at once; its agents may take a moment.
