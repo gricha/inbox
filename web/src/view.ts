@@ -25,6 +25,7 @@ export type Route =
   | { name: "queue" }
   | { name: "review"; id: string }
   | { name: "inquiry"; id: string } // an agent's question
+  | { name: "item"; id: string } // a permalink's (src/links.ts): a PR opens in its review, an issue in place on its page
   | { name: "later" }
   | { name: "blocked" } // what can't move until something else happens
   | { name: "inflight" }
@@ -148,10 +149,10 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/later") return { name: "later" };
   if (hash === "#/blocked" || hash === "#/waiting") return { name: "blocked" };
   if (hash === "#/archive") return { name: "archive" };
-  const page = /^#\/(review|inquiry)\/(.+)$/.exec(hash);
+  const page = /^#\/(review|inquiry|item)\/(.+)$/.exec(hash);
   if (page) {
     const id = Result.try({ try: () => decodeURIComponent(page[2]!), catch: () => "a mangled link" });
-    return Result.isSuccess(id) ? { name: page[1] as "review" | "inquiry", id: id.success } : { name: "queue" };
+    return Result.isSuccess(id) ? { name: page[1] as "review" | "inquiry" | "item", id: id.success } : { name: "queue" };
   }
   return { name: "queue" };
 }
@@ -159,7 +160,7 @@ export function parseRoute(hash: string): Route {
 // The page the sidebar marks current: a review is on the page it was opened from, a question on the Inbox; Settings is none.
 export function pageOf(route: Route, from: ListPage): ListPage | null {
   if (route.name === "review") return from;
-  if (route.name === "inquiry") return "queue";
+  if (route.name === "inquiry" || route.name === "item") return "queue";
   return route.name === "settings" ? null : route.name;
 }
 
@@ -184,7 +185,7 @@ export const inboxCount = (v: QueueView, leaving: ReadonlySet<string> = new Set(
 
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
-  if (r.name === "review" || r.name === "inquiry") return `#/${r.name}/${encodeURIComponent(r.id)}`;
+  if (r.name === "review" || r.name === "inquiry" || r.name === "item") return `#/${r.name}/${encodeURIComponent(r.id)}`;
   return r.name === "queue" ? "#/" : `#/${r.name}`;
 }
 
@@ -430,6 +431,13 @@ export function groupsOf(
     // What can't move yet, a chain's rows together, in the desk's order.
     group("blocked", s.blocked, "blocked"),
   ];
+}
+
+// The list page and group that show a card, folds open: where a permalink to an issue opens it in place.
+export function whereIs(view: QueueView, id: string): { page: keyof typeof PAGE_GROUPS; group: GroupKey } | null {
+  const group = groupsOf(view, DEFAULT_OPEN, "", { queue: true }).find((g) => g.cards.some((c) => c.id === id))?.key;
+  const page = group && (Object.keys(PAGE_GROUPS) as (keyof typeof PAGE_GROUPS)[]).find((p) => PAGE_GROUPS[p].includes(group));
+  return group && page ? { page, group } : null;
 }
 
 // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".

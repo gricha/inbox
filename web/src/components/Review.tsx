@@ -824,6 +824,12 @@ export function Review({
                       run("o");
                     },
                   },
+                  {
+                    label: "Copy link",
+                    run: () => {
+                      onCard(card, "link");
+                    },
+                  },
                 ]}
                 pick={(a) => {
                   if (a === "request_changes") setWriting(true);

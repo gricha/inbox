@@ -37,7 +37,7 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
   const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
   const muted = card.status === "muted";
   const groups: Entry[][] = [
-    [go(card.kind === "pr" ? "Review" : "Open", "enter"), go("Open on GitHub", "o")],
+    [go(card.kind === "pr" ? "Review" : "Open", "enter"), go("Open on GitHub", "o"), go("Copy link", "link")],
     [
       ...(card.cta === "ready" ? [go("Ready for review", "a")] : []),
       ...(card.cta === "reviewers" ? [go("Add reviewers", "a")] : []),

@@ -72,8 +72,10 @@ import {
   stops,
   threadsOn,
   valueOf,
+  whereIs,
   type KeyLike,
 } from "../src/view.ts";
+import { hashOf } from "../../src/links.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {
@@ -207,6 +209,20 @@ test("Settings is two tabs: Automations holds its rows and each automation's vie
   assert.equal(tab("#/settings/automations/warden-issues"), "automations");
   assert.equal(settingsBack("automations"), null); // a tab, not a view: Esc goes to the Inbox
   assert.equal(settingsTab(settingsBack("automations/warden-issues")!), "automations");
+});
+
+test("a permalink's route names its item, and an issue opens in place on the page and group that list it", () => {
+  // The route the desktop app sends a link to, as src/links.ts writes it.
+  assert.deepEqual(parseRoute(hashOf({ item: "acme/api#7" })), { name: "item", id: "acme/api#7" });
+  assert.equal(routeHash({ name: "item", id: "acme/api#7" }), "#/item/acme%2Fapi%237");
+  assert.equal(pageOf({ name: "item", id: "acme/api#7" }, "later"), "queue");
+  const q = queue();
+  q.sections.today.push(...Array.from({ length: 12 }, (_, i) => card(`acme/web#${30 + i}`, { kind: "issue" })));
+  assert.deepEqual(whereIs(q, "acme/web#41"), { page: "queue", group: "queue" }, "past the queue's fold");
+  assert.deepEqual(whereIs(q, "acme/api#4"), { page: "later", group: "hidden" });
+  assert.deepEqual(whereIs(q, "acme/api#5"), { page: "later", group: "cleared" });
+  assert.deepEqual(whereIs(q, "acme/api#6"), { page: "archive", group: "archive" });
+  assert.equal(whereIs(q, "acme/api#99"), null);
 });
 
 test("Copy resume command resumes a run's session in the automations folder beside settings.json", () => {

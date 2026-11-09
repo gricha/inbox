@@ -14,6 +14,7 @@ import type {
   Reviewer,
   SettingsView,
 } from "../../src/types.ts";
+import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
@@ -40,6 +41,7 @@ import {
   stops,
   type GroupKey,
   type Route,
+  whereIs,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
@@ -336,7 +338,7 @@ export function App() {
       if (was !== null && was !== route.id) setReviewQuestion(null);
       return;
     }
-    setReviewFrom(route.name === "settings" || route.name === "inquiry" ? "queue" : route.name);
+    setReviewFrom(route.name === "settings" || route.name === "inquiry" || route.name === "item" ? "queue" : route.name);
     setReviewQuestion(route.name === "inquiry" ? route.id : null);
   }, [route]);
   useEffect(() => {
@@ -454,6 +456,28 @@ export function App() {
   }, [view, laneRows]);
   const knownRef = useRef(known);
   knownRef.current = known;
+
+  // A permalink (#/item/<id>) once the lists are in: a PR, or what no list has, opens its review; an issue opens in place on
+  // the page that lists it, its group open, in place of the link in the history.
+  const opening = useRef<string | null>(null);
+  const toggleRef = useRef(toggle);
+  toggleRef.current = toggle;
+  useEffect(() => {
+    if (route.name !== "item" || !view) return;
+    const at = known.get(route.id)?.kind === "issue" ? whereIs(view, route.id) : null;
+    if (at) {
+      opening.current = route.id;
+      setOpen((o) => ({ ...o, [at.group]: true }));
+      setUnfolded((u) => ({ ...u, [at.group]: true }));
+    }
+    location.replace(routeHash(at ? { name: at.page } : { name: "review", id: route.id }));
+  }, [route, view, known]);
+  useEffect(() => {
+    if (route.name === "item" || opening.current === null) return;
+    const c = knownRef.current.get(opening.current);
+    opening.current = null;
+    if (c) toggleRef.current(c);
+  }, [route]);
 
   // The cards of the rows on screen: Merging's on its page or beside a review from it, else the list's, so a stale Merging
   // card never stands in.
@@ -965,8 +989,21 @@ export function App() {
     return step.pipe(Effect.catch(failed));
   }
 
+  // Copy link: the item's inbox:// link, which the desktop app opens it at, and which an agent reads as its ref.
+  function copyLink(c: Card): Effect.Effect<void> {
+    return copyText(permalink({ item: c.id })).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          flash(`Copied the link to ${shortRef(c)}`);
+        }),
+      ),
+      Effect.catch(failed),
+    );
+  }
+
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
+    else if (k === "link") runUi(copyLink(c));
     else if (k === "close") setExpanded(null);
     else if (k === "t") openAsk(c.id);
     else if (k === "why") {

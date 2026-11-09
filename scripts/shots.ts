@@ -2877,9 +2877,30 @@ const SHOTS: Shot[] = [
       if (back !== "Inbox") failures.push(`more-review: the review's way back reads ${JSON.stringify(back)}`);
       const items = await moreItems(page);
       const head = items.indexOf("#On GitHub");
-      if (items[0] !== "Done" || head < 1 || head === items.length - 1 || items[head - 1] !== "Open on GitHub")
+      if (
+        items[0] !== "Done" ||
+        head < 2 ||
+        head === items.length - 1 ||
+        items[head - 2] !== "Open on GitHub" ||
+        items[head - 1] !== "Copy link"
+      )
         failures.push(`more-review: the More menu reads ${JSON.stringify(items)}`);
     },
+  },
+  {
+    // Copy link in a review's More: the PR's inbox:// link on the clipboard (stubbed, never yours), and a quiet toast.
+    name: "more-copy-link",
+    go: async (page) => {
+      await review("acme/worker#875", [MORE])(page);
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      await page.locator(".more-pop .pop-item", { hasText: "Copy link" }).click();
+      await page.locator(".toast").waitFor();
+      const said = [await page.evaluate<unknown>("window.__copied"), await page.locator(".toast").textContent()];
+      if (said[0] !== "inbox://item/acme/worker/875" || said[1] !== "Copied the link to worker#875")
+        failures.push(`more-copy-link: copied and said ${JSON.stringify(said)}`);
+      await page.waitForTimeout(300); // the toast in, not fading in
+    },
+    after: fresh, // its toast gone, so the next shot doesn't show it
   },
   {
     // A PR that's done: More puts it back, as its row's menu does.
@@ -3076,10 +3097,65 @@ const SHOTS: Shot[] = [
       await page.locator(".ctx-sub").waitFor();
       await page.waitForTimeout(200);
       if (!(await page.locator(".ctx-item", { hasText: "Why it's here" }).count())) failures.push("row-menu: no Why it's here");
+      const first = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".ctx > .ctx-group:first-child .ctx-item")].map((b) => b.textContent)`,
+      );
+      if (first.join(" · ") !== "Review · Open on GitHub · Copy link")
+        failures.push(`row-menu: its first part reads ${JSON.stringify(first)}`);
     },
     after: async (page) => {
       await page.keyboard.press("Escape");
     },
+  },
+  {
+    // Copy link in a row's menu: the item's inbox:// link on the clipboard (stubbed), and a quiet toast.
+    name: "row-menu-copy-link",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      await rowMenuPick(page, '.line:has-text("Drop the legacy v1 auth")', "Copy link");
+      await page.locator(".toast").waitFor();
+      const said = [await page.evaluate<unknown>("window.__copied"), await page.locator(".toast").textContent()];
+      if (said[0] !== "inbox://item/acme/api/4099" || said[1] !== "Copied the link to api#4099")
+        failures.push(`row-menu-copy-link: copied and said ${JSON.stringify(said)}`);
+      await page.waitForTimeout(300); // the toast in, not fading in
+    },
+    after: fresh, // its toast gone, so the next shot doesn't show it
+  },
+  {
+    // A permalink to a PR (the desktop app routes inbox://item/… to #/item/…): its review, the link gone from the history.
+    name: "link-pr",
+    go: async (page) => {
+      await at("#/blocked")(page);
+      await at(`#/item/${encodeURIComponent("acme/api#4127")}`)(page);
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(600);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== `#/review/${encodeURIComponent("acme/api#4127")}`) failures.push(`link-pr: the link went to ${hash}`);
+    },
+    after: async (page) => {
+      await page.goBack();
+      await page.waitForTimeout(300);
+      const back = await page.evaluate<string>("location.hash");
+      if (back !== "#/blocked") failures.push(`link-pr: Back from it goes to ${back}`);
+    },
+  },
+  {
+    // A permalink to an issue: on the page that lists it, past the queue's fold, opened in place and in view.
+    name: "link-issue",
+    go: async (page) => {
+      await at("#/blocked")(page);
+      await at(`#/item/${encodeURIComponent("acme/worker#860")}`)(page);
+      await page.waitForTimeout(600);
+      const seen = await page.evaluate<{ hash: string; open: string | null; inView: boolean }>(`(() => {
+        const row = document.querySelector(".line.open");
+        const r = row?.getBoundingClientRect();
+        return { hash: location.hash, open: row?.dataset.id ?? null, inView: !!r && r.top >= 0 && r.top < innerHeight };
+      })()`);
+      if (seen.hash !== "#/" || seen.open !== "acme/worker#860" || !seen.inView)
+        failures.push(`link-issue: the link opened ${JSON.stringify(seen)}`);
+    },
+    after: refold,
   },
   {
     // Done in a row's menu: the row leaves and takes its fill with it; no neighbour is filled in its place. Held, so the mock
