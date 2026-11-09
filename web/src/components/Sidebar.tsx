@@ -1,26 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { ago, cls } from "../format.ts";
+import { cls, syncTrouble } from "../format.ts";
 import { pageOf, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
-function syncText(o: Overview | null, now: number, offline: boolean): string {
-  if (offline) return "Offline";
-  if (!o) return "Connecting…";
-  if (o.syncing) return "Syncing…";
-  if (o.sync_error) return "Sync failed";
-  return o.synced_at ? `Synced ${ago(o.synced_at, now)}` : "Not synced yet";
-}
-
 // The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, FYI, then Merging and the Archive under
-// a hairline; in the footer, bottom up, Settings, the sync line and Ask your agent.
+// a hairline; in the footer, bottom up, Settings, the sync line (only when something's wrong) and Ask your agent.
 export function Sidebar({
   route,
   from,
   count,
   overview,
   offline,
-  now,
   onSync,
   ask,
   waiting,
@@ -31,7 +22,6 @@ export function Sidebar({
   count: number | null; // what the Inbox counts, less what's leaving it; null until the queue loads
   overview: Overview | null;
   offline: boolean;
-  now: number;
   onSync: () => void;
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
@@ -62,7 +52,7 @@ export function Sidebar({
       el?.removeEventListener("scroll", check);
     };
   }, []);
-  const rate = overview?.rate_limit ? `GitHub API: ${overview.rate_limit.remaining} requests left` : undefined;
+  const trouble = syncTrouble(overview, offline);
   return (
     <aside ref={side} className={cls("side", more && "more")}>
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
@@ -140,17 +130,19 @@ export function Sidebar({
             <span className="side-name side-ask-short">{waiting ? "Asked" : "Ask"}</span>
           </button>
         )}
-        <button
-          type="button"
-          className={cls("side-item", "side-sync", ((!!overview?.sync_error && !overview.syncing) || offline) && "err")}
-          onClick={onSync}
-          title={overview?.sync_error ?? rate ?? "Sync now"}
-        >
-          <svg className={cls("i", overview?.syncing && "spin")} viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
-          </svg>
-          <span className="side-name">{syncText(overview, now, offline)}</span>
-        </button>
+        {trouble && (
+          <button
+            type="button"
+            className={cls("side-item", "side-sync", !trouble.busy && "err")}
+            onClick={onSync}
+            title={overview?.sync_error ?? "Sync now"}
+          >
+            <svg className={cls("i", trouble.busy && "spin")} viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
+            </svg>
+            <span className="side-name">{trouble.text}</span>
+          </button>
+        )}
         <a href="#/settings" className={cls("side-item", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />

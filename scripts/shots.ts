@@ -452,6 +452,12 @@ const resetStep = (page: Page, key: string, want: unknown, still?: false) =>
 // The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
 const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
+// The sidebar's sync line, null while there's nothing wrong: its words, red, spinning, its tooltip.
+const syncLine = (page: Page) =>
+  page.evaluate<{ text: string; red: boolean; spin: boolean; tip: string | null } | null>(`(() => {
+    const b = document.querySelector(".side-sync");
+    return b && { text: b.textContent.trim(), red: b.classList.contains("err"), spin: !!b.querySelector(".spin"), tip: b.getAttribute("title") };
+  })()`);
 // The page head's words: a list's filter, a review's way back, or the page's name.
 const headSays = (page: Page) =>
   page.evaluate<string | null>(
@@ -534,6 +540,7 @@ const SHOTS: Shot[] = [
       if (on !== "Inbox") failures.push(`queue: the sidebar marks ${JSON.stringify(on)}`);
       const head = await headSays(page);
       if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
+      if (await page.locator(".side-sync").count()) failures.push("queue: the sidebar has a sync line while the sync is fine");
     },
   },
   {
@@ -558,6 +565,61 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       const mac = SIZES.find((s) => s.name === "mac")!;
       await page.setViewportSize({ width: mac.width, height: mac.height });
+    },
+  },
+  {
+    // GitHub's rate limit: the sidebar's sync line, there only when something's wrong, says so in red with the error in its
+    // tooltip; a retry under way after it spins, not red.
+    name: "sync-limited",
+    go: async (page) => {
+      const error = "GitHub rate limited until 2026-11-09T00:00:00Z (HTTP 403)";
+      const as = async (syncing: boolean) => {
+        await unroute(page);
+        await overviewAs((o) => {
+          o.syncing = syncing;
+          o.sync_error = error;
+          o.connectors = o.connectors.map((c) => ({ ...c, status: syncing ? "syncing" : "paused", error }));
+        })(page);
+        await page.reload();
+        await page.locator(READY).first().waitFor({ timeout: 15_000 });
+        await page.locator(".side-sync").waitFor();
+        return syncLine(page);
+      };
+      const retry = await as(true);
+      if (retry?.text !== "Syncing…" || retry.red || !retry.spin)
+        failures.push(`sync-limited: a retry after the rate limit reads ${JSON.stringify(retry)}`);
+      const line = await as(false);
+      if (line?.text !== "Rate limited" || !line.red || line.spin || line.tip !== error)
+        failures.push(`sync-limited: the rate-limited sync line reads ${JSON.stringify(line)}`);
+    },
+    after: unsettle,
+  },
+  {
+    // The desk gone: the list stays under the red line with Retry, and the sync line says Offline in red.
+    name: "sync-offline",
+    go: async (page) => {
+      await at("#/")(page);
+      // A 200 that isn't JSON is what the window takes for no desk, without a console error; the event stream stays.
+      await page.route("**/api/**", (route) =>
+        route.request().url().endsWith("/api/events") ? route.fallback() : route.fulfill({ contentType: "text/plain", body: "" }),
+      );
+      await page.evaluate(`document.dispatchEvent(new Event("visibilitychange"))`);
+      await page.locator(".side-sync", { hasText: "Offline" }).waitFor();
+      const line = await syncLine(page);
+      if (!line?.red || line.spin) failures.push(`sync-offline: the sync line reads ${JSON.stringify(line)}`);
+      if (!(await page.locator(".notice.err").isVisible()) || !(await page.locator(".queue .line").count()))
+        failures.push("sync-offline: the list isn't kept under the red line");
+    },
+    // Then the desk back: the red line and the sync line both go.
+    after: async (page) => {
+      await unroute(page);
+      await page.evaluate(`document.dispatchEvent(new Event("visibilitychange"))`);
+      for (const sel of [".side-sync", ".notice.err"])
+        await page
+          .locator(sel)
+          .waitFor({ state: "detached", timeout: 5000 })
+          .catch(() => failures.push(`sync-offline: ${sel} stays once the desk is back`));
+      await fresh(page);
     },
   },
   // A browser at 200 % zoom (1280×820 at 640×410): the sidebar is one row across the top, scrolling inside itself; the page
@@ -1588,9 +1650,11 @@ const SHOTS: Shot[] = [
         q.inquiries = q.inquiries.filter((x) => x.id !== "q1c0ffee");
         await route.fulfill({ response: res, json: q });
       });
+      // The overview says whether your agent is on: Ask your agent's absence means something once it's in.
+      const overview = page.waitForResponse((r) => r.url().endsWith("/api/overview"));
       await page.reload();
       await page.locator(".inquiry .inq-options").waitFor();
-      await page.locator(".side-sync span", { hasText: "Synced" }).waitFor({ state: "attached" });
+      await overview;
       await page.waitForTimeout(300);
       if (await page.locator(".side-ask").count())
         failures.push("inquiry-answered: the sidebar offers Ask your agent once the queue drops the answered question");
@@ -2010,6 +2074,11 @@ const SHOTS: Shot[] = [
       })()`);
       if (!help?.red || !help.text.includes("Run gh auth login in a terminal, then sync."))
         failures.push(`settings-github-error: the status row's help reads ${JSON.stringify(help)}`);
+      // The sync line that help means: there with the error, red, the error in its tooltip.
+      await page.locator(".side-sync").waitFor({ timeout: 5000 });
+      const line = await syncLine(page);
+      if (line?.text !== "Sync failed" || !line.red || line.tip !== "GitHub rejected the token (HTTP 401)")
+        failures.push(`settings-github-error: the sidebar's sync line reads ${JSON.stringify(line)}`);
     },
     after: unsettle,
   },

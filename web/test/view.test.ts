@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder, SettingValue } from "../../src/types.ts";
+import type {
+  ActivityEvent,
+  Card,
+  ConnectorStatus,
+  Conversation,
+  JudgeStatus,
+  QueueView,
+  ReviewHunk,
+  ReviewOrder,
+  SettingValue,
+} from "../../src/types.ts";
 import {
   age,
   ago,
@@ -14,6 +24,7 @@ import {
   shortId,
   shortRef,
   snoozeOptions,
+  syncTrouble,
   tilde,
   when,
 } from "../src/format.ts";
@@ -239,6 +250,36 @@ test("GitHub's status row's tooltip has your teams and the rate limit, only what
     githubTip({ teams: ["backend"], rate_limit: { remaining: 12, reset_at } }),
     `Your teams: @backend. 12 GitHub requests left until ${when(reset_at)}.`,
   );
+});
+
+test("the sidebar's sync line says only what's wrong: offline, a failed sync, the rate limit, and the retry after one", () => {
+  const gh = (status: ConnectorStatus["status"], error: string | null): ConnectorStatus => ({
+    id: "github",
+    name: "GitHub",
+    status,
+    synced_at: "2026-10-27T12:00:00Z",
+    error,
+  });
+  const o = (syncing: boolean, sync_error: string | null, status: ConnectorStatus["status"] = "ok") => ({
+    syncing,
+    sync_error,
+    connectors: [gh(status, sync_error)],
+  });
+  // Nothing while it connects, syncs or has synced, the first time included.
+  assert.equal(syncTrouble(null, false), null);
+  assert.equal(syncTrouble(o(false, null), false), null);
+  assert.equal(syncTrouble(o(true, null, "syncing"), false), null);
+  assert.equal(syncTrouble({ ...o(false, null), connectors: [{ ...gh("ok", null), synced_at: null }] }, false), null);
+  assert.deepEqual(syncTrouble(o(false, "GitHub rejected the token (HTTP 401)", "error"), false), { text: "Sync failed", busy: false });
+  assert.deepEqual(syncTrouble(o(false, "GitHub rate limited until 2026-10-27T13:00:00Z (HTTP 403)", "paused"), false), {
+    text: "Rate limited",
+    busy: false,
+  });
+  // A sync under way after one failed keeps the line, so the press that retries it shows it running.
+  assert.deepEqual(syncTrouble(o(true, "GitHub rejected the token (HTTP 401)", "syncing"), false), { text: "Syncing…", busy: true });
+  // Offline whatever the last overview said.
+  assert.deepEqual(syncTrouble(o(true, null, "syncing"), true), { text: "Offline", busy: false });
+  assert.deepEqual(syncTrouble(null, true), { text: "Offline", busy: false });
 });
 
 test("Settings draws a row only where it does something, and greys quiet hours while notifications are off", () => {

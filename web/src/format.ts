@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { COORDINATOR_NAME, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff } from "../../src/types.ts";
+import { COORDINATOR_NAME, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff, type Overview } from "../../src/types.ts";
 import { ClipboardUnavailable } from "./api.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -185,6 +185,18 @@ export function orgsLine(orgs: readonly { org: string; space: string | null }[],
   if (nowhere.length) said.push(`${andList(nowhere)} ${nowhere.length > 1 ? "are" : "is"} in no space`);
   if (rest) said.push(`everything else to ${catchAll}`);
   return `${said.join(", ")}.`;
+}
+
+// The sidebar's sync line, only when something's wrong: the desk offline, or the last sync failed or hit GitHub's rate
+// limit; busy while one runs after it, the press that retries it. null while syncs succeed or run: nothing to say.
+export function syncTrouble(
+  o: Pick<Overview, "syncing" | "sync_error" | "connectors"> | null,
+  offline: boolean,
+): { text: string; busy: boolean } | null {
+  if (offline) return { text: "Offline", busy: false };
+  if (!o?.sync_error) return null;
+  if (o.syncing) return { text: "Syncing…", busy: true };
+  return { text: o.connectors.some((c) => c.status === "paused") ? "Rate limited" : "Sync failed", busy: false };
 }
 
 // GitHub's status row's tooltip, what's known of "Your teams: @a, @b. 4,870 GitHub requests left until Sun 0:23."

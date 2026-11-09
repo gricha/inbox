@@ -1184,7 +1184,6 @@ export function App() {
         count={inbox}
         overview={overview}
         offline={offline}
-        now={now}
         onSync={() => {
           runUi(sync());
         }}

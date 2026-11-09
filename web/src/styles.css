@@ -528,7 +528,8 @@ p {
   color: var(--pencil);
 }
 
-/* The footer, bottom up: Settings, the sync line, Ask your agent, quieter than the pages. Always there, never in the way. */
+/* The footer, bottom up: Settings, the sync line when something's wrong, Ask your agent, quieter than the pages. Never in
+   the way. */
 .side-foot {
   display: grid;
   gap: 1px;
@@ -570,7 +571,7 @@ p {
   flex: 1;
 }
 
-/* The sync line is a status, a step quieter than the pages; red when it failed or the desk is offline. */
+/* The sync line, there only when something's wrong, a step quieter than the pages; red but while a retry runs. */
 .side-sync {
   font-size: 12.5px;
 }
