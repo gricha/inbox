@@ -9,4 +9,4 @@ claude plugin marketplace add ~/code/review-desk
 claude plugin install inbox@inbox
 ```
 
-Then type `/desk` in a session.
+Then type `/desk` in a session. Installed it as `review-desk` before the rename to Inbox? Its marketplace and plugin keep that name, so remove them first: `claude plugin uninstall review-desk@review-desk` and `claude plugin marketplace remove review-desk`.
