@@ -629,6 +629,46 @@ test(
   },
 );
 
+test(
+  "install with a desk still running from ~/.review-desk installs nothing: its job's desk would move the folder its log is in",
+  { skip: process.platform !== "darwin", timeout: 20_000 },
+  async (c) => {
+    const saved = { HOME: process.env.HOME, PATH: process.env.PATH };
+    const bin = mkdtempSync(join(tmpdir(), "desk-launchctl-"));
+    const home = mkdtempSync(join(tmpdir(), "desk-launchd-home-"));
+    // A desk from the old home (Review Desk.app, say) that booting out the jobs doesn't stop.
+    const desk = createServer(() => {});
+    await new Promise<void>((r) => {
+      desk.listen(0, "127.0.0.1", r);
+    });
+    c.after(() => {
+      desk.close();
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      for (const dir of [bin, home]) rmSync(dir, { recursive: true, force: true });
+    });
+    writeFileSync(join(bin, "launchctl"), `#!/bin/sh\necho "$*" >> "$HOME/calls"\nexit 0\n`);
+    chmodSync(join(bin, "launchctl"), 0o755);
+    process.env.HOME = home;
+    process.env.PATH = bin;
+    const old = join(home, ".review-desk");
+    mkdirSync(old);
+    const e = await failure(install("/x/cli.ts", (desk.address() as AddressInfo).port));
+    assert.deepEqual(
+      [e._tag, e.message],
+      [
+        "Conflict",
+        `desk install needs the port free: quit the desk running from ${old} (Review Desk.app, or that desk serve), then run it again`,
+      ],
+    );
+    assert.ok(!existsSync(join(home, "Library", "LaunchAgents", "dev.inbox.desk.plist")), "no plist naming a log in the old folder");
+    assert.ok(!readFileSync(join(home, "calls"), "utf8").includes("bootstrap"));
+    assert.ok(lstatSync(old).isDirectory() && !existsSync(join(home, ".inbox")));
+  },
+);
+
 // oxlint-disable-next-line typescript/strict-void-return -- promisify picks execFile's util.promisify.custom form, so no return value is discarded
 const execBin = promisify(execFile);
 

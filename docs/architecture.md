@@ -193,7 +193,7 @@ desk connect [claude|codex] [--apply]   your agent (Settings → Claude): its MC
 desk install | uninstall           launchd LaunchAgent for the headless server (macOS); the app has "Open at login"
 ```
 
-`desk install` writes `~/Library/LaunchAgents/dev.inbox.desk.plist`, its job's log in `~/.inbox/desk.log`. Both commands boot out and remove `dev.review-desk.desk`, the label before the rename to Inbox, too; install first waits for the job it booted out to let go of the port and moves `~/.review-desk` to `~/.inbox` (`settleHome()`), since the folder it makes for the log would keep the home from moving. With a desk still running from `~/.review-desk` on the port, the home and the log stay there, and install says why.
+`desk install` writes `~/Library/LaunchAgents/dev.inbox.desk.plist`, its job's log in `~/.inbox/desk.log`. Both commands boot out and remove `dev.review-desk.desk`, the label before the rename to Inbox, too; install first waits for the job it booted out to let go of the port and moves `~/.review-desk` to `~/.inbox` (`settleHome()`), since the folder it makes for the log would keep the home from moving. With a desk still running from `~/.review-desk` on the port (Review Desk.app, say), install writes nothing and says to quit that desk and run it again: a plist naming a log in `~/.review-desk` would point into the folder its own desk moves.
 
 ## MCP (`src/mcp.ts`)
 

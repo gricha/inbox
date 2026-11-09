@@ -5,8 +5,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect, Schedule } from "effect";
-import { CommandFailed, fsError, type FsError } from "./errors.ts";
-import { held, settleHome } from "./home.ts";
+import { CommandFailed, Conflict, fsError, type FsError } from "./errors.ts";
+import { defaultHome, held, settleHome } from "./home.ts";
 
 const LABEL = "dev.inbox.desk";
 const OLD_LABEL = "dev.review-desk.desk"; // its label before the rename to Inbox
@@ -101,17 +101,21 @@ const bootstrap = (file: string) =>
 
 // The job's desk runs without DESK_HOME, on the owner's home: ~/.review-desk moves to ~/.inbox here first, once the job
 // booted out has let go of the port, since an ~/.inbox made for the log would keep it from moving. Where it couldn't (a
-// desk still runs from it), the log stays there too, and `log` says why.
+// desk still runs from it), nothing is installed: the job's own desk would move the folder its log is in.
 export const install = Effect.fn("launchd.install")(function* (
   cliPath: string,
   port: number = Number((process.env.DESK_PORT ?? "") || 47823),
   log: (m: string) => void = () => {},
-): Effect.fn.Return<{ file: string; log: string }, FsError | CommandFailed> {
+): Effect.fn.Return<{ file: string; log: string }, FsError | CommandFailed | Conflict> {
   const home = homedir();
   const file = plistPath(home);
   yield* bootoutAll(home);
   for (let i = 0; i < 50 && (yield* held(port)); i++) yield* Effect.sleep(100);
   const deskHome = yield* settleHome(port, log, "", home);
+  if (deskHome !== defaultHome(home))
+    return yield* new Conflict({
+      message: `desk install needs the port free: quit the desk running from ${deskHome} (Review Desk.app, or that desk serve), then run it again`,
+    });
   yield* mkdir(deskHome);
   yield* mkdir(dirname(file));
   const plist = plistFor({ nodePath: process.execPath, cliPath, home, deskHome, port });
