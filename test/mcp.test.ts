@@ -91,6 +91,19 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     "only what the desk lets an automation do",
   );
   assert.equal((await call("desk_automations", { action: "set", id: "warden" })).isError, true);
+  const onEvents = await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look", events: ["ci", "pushed"] });
+  assert.equal(onEvents.text, "saved warden (on ci, pushed); it's off until the owner turns it on in Settings → Automations");
+  assert.deepEqual([lastCall().body.events, lastCall().body.schedule], [["ci", "pushed"], undefined]);
+  assert.equal(
+    (await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look" })).isError,
+    true,
+    "a schedule or events",
+  );
+  assert.equal(
+    (await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look", events: ["deployed"] })).isError,
+    true,
+    "only the event log's kinds",
+  );
   assert.equal(
     (await call("desk_automations", { action: "run", id: "warden" })).text,
     "running warden; its result shows in Settings → Automations",

@@ -3,18 +3,20 @@
 // shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { outcomeText, VERB, type AutomationBody, type AutomationView as Auto, type Verb } from "../../../src/types.ts";
+import { outcomeText, VERB, type ActivityKind, type AutomationBody, type AutomationView as Auto, type Verb } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
 type Run = Auto["runs"][number];
+const RAN: Record<Run["trigger"], string> = { schedule: "on schedule", now: "run now", event: "on an event" };
 
 interface Draft {
   id: string | null; // null: a new one, its id from its name
   name: string;
-  schedule: string;
+  schedule: string; // "" with events
+  events: ActivityKind[];
   prompt: string;
   when: string;
   can: Verb[];
@@ -161,6 +163,7 @@ const editing = (a: Auto): Draft => ({
   id: a.id,
   name: a.name,
   schedule: a.schedule,
+  events: a.events ?? [],
   prompt: a.prompt,
   when: a.when ?? "",
   can: a.can ?? ["add"],
@@ -190,7 +193,7 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
       type="button"
       className="s-edit"
       onClick={() => {
-        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", prompt: "", when: "", can: ["add"], on: true });
+        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", events: [], prompt: "", when: "", can: ["add"], on: true });
       }}
     >
       New automation
@@ -265,7 +268,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
               // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
               role="switch"
               checked={a.on}
-              aria-label={`Run ${a.name} on its schedule`}
+              aria-label={`Run ${a.name} ${a.events ? "when its events land" : "on its schedule"}`}
               onChange={() => {
                 runUi(au.turn(a, !a.on));
               }}
@@ -478,7 +481,7 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
         <section key={r.id} className="au-run" aria-label={`Run ${when(r.at)}`}>
           <div className="au-run-top">
             <h3 className="au-run-head">
-              {when(r.at)} · {r.trigger === "now" ? "run now" : "on schedule"}
+              {when(r.at)} · {RAN[r.trigger]}
               {r.did && ` · ${r.did}`}
               {r.didnt && <span className="t-bad"> · {r.didnt}</span>}
               {!r.done_at && <span className="busy" aria-label="running" />}
@@ -532,7 +535,7 @@ function Editor({
     setDraft(next);
     onChange?.(next);
   };
-  const ready = !!d.name.trim() && !!d.schedule.trim() && !!d.prompt.trim();
+  const ready = !!d.name.trim() && (!!d.schedule.trim() || d.events.length > 0) && !!d.prompt.trim();
   // ⌘S or ⌘↵ saves from any field, Esc leaves it as it was.
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") onCancel();

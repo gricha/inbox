@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { plan } from "../../src/agents.ts";
-import { didntText, didText, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
@@ -2300,7 +2300,7 @@ function automationsView(): AutomationView[] {
     const s = parseSchedule(a.schedule);
     return {
       ...a,
-      trigger: scheduleWords(a.schedule),
+      trigger: a.events ? eventsWords(a.events) : scheduleWords(a.schedule),
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
       next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
       running: false,
@@ -3514,7 +3514,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       const a: Automation = {
         id,
         name: String(b.name),
-        schedule: String(b.schedule),
+        schedule: Array.isArray(b.events) && b.events.length ? "" : String(b.schedule),
+        ...(Array.isArray(b.events) && b.events.length > 0 && { events: b.events as ActivityKind[] }),
         prompt: String(b.prompt),
         ...(typeof b.when === "string" && b.when.trim() && { when: b.when.trim() }),
         ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can as Verb[] }),

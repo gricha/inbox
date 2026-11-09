@@ -443,7 +443,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case "GET /api/automations":
       return reply(200, [AUTO]);
     case "PUT /api/automations/warden":
-      return reply(200, { ok: true, automation: { ...AUTO, ...(body as object), on: false, by: "an agent" } });
+      return reply(200, { ok: true, automation: { ...AUTO, schedule: "", ...(body as object), on: false, by: "an agent" } });
     case "POST /api/automations/warden/run":
       return reply(200, { ok: true, running: "warden" });
     case "GET /api/asks/a1b2c3d4":

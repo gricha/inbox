@@ -823,6 +823,7 @@ export class Desk {
     this.trackBlocked();
     this.notifyNew();
     this.pumpAi();
+    this.automations.pump(); // after trackBlocked: its events are this pass's too
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
     this.store.pruneKv("pr:", kept);

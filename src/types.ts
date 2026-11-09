@@ -814,24 +814,46 @@ export interface Take {
 // ---------------------------------------------------------------------------
 // The event log (GET /api/activity, the desk_events MCP tool)
 
-export type ActivityKind =
-  | "new" // first seen on the desk
-  | "review_requested" // from you or your team; data: reviewer, type, codeowner
-  | "request_removed" // data: reviewer, type
-  | "reviewed" // by someone else; data: state (approved, changes_requested, commented)
-  | "pushed" // a new head commit; data: oid
-  | "ci" // data: from, to (green, red, pending)
-  | "commented" // by someone else
-  | "merged"
-  | "closed"
-  | "reopened"
-  | "mentioned" // data: reason (mention, team_mention)
-  | "assigned" // to you
-  | "conflict" // your PR started conflicting with its base; data: base
-  | "resolved" // data: reason
-  | "unresolved" // data: was (the reason that stopped holding)
-  | "blocked" // your PR, blocked by another PR; data: by
-  | "unblocked"; // no longer; data: was, merged (the PR that merged, "" if none), closed (pr.requires_closed, joined)
+export const ACTIVITY_KINDS = [
+  "new", // first seen on the desk
+  "review_requested", // from you or your team; data: reviewer, type, codeowner
+  "request_removed", // data: reviewer, type
+  "reviewed", // by someone else; data: state (approved, changes_requested, commented)
+  "pushed", // a new head commit; data: oid
+  "ci", // data: from, to (green, red, pending)
+  "commented", // by someone else
+  "merged",
+  "closed",
+  "reopened",
+  "mentioned", // data: reason (mention, team_mention)
+  "assigned", // to you
+  "conflict", // your PR started conflicting with its base; data: base
+  "resolved", // data: reason
+  "unresolved", // data: was (the reason that stopped holding)
+  "blocked", // your PR, blocked by another PR; data: by
+  "unblocked", // no longer; data: was, merged (the PR that merged, "" if none), closed (pr.requires_closed, joined)
+] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+// Each kind as what an automation reacts to, after "When": "a review is asked of you", "CI changes".
+export const EVENT: Record<ActivityKind, string> = {
+  new: "it first reaches the desk",
+  review_requested: "a review is asked of you or your team",
+  request_removed: "a review request is removed",
+  reviewed: "someone reviews it",
+  pushed: "new commits are pushed",
+  ci: "CI changes",
+  commented: "someone comments",
+  merged: "it's merged",
+  closed: "it's closed",
+  reopened: "it's reopened",
+  mentioned: "you're mentioned",
+  assigned: "it's assigned to you",
+  conflict: "your PR conflicts with its base",
+  resolved: "it needs nobody any more",
+  unresolved: "it needs someone again",
+  blocked: "another PR blocks yours",
+  unblocked: "your PR is unblocked",
+};
 
 export interface ActivityEvent {
   seq: number; // increasing; pass the last one you saw as `after`
@@ -1003,12 +1025,14 @@ export const VERB: Record<Verb, string> = {
   mute: "mute",
 };
 
-// An automation (Settings → Automations): your instruction, run on its schedule by your own Claude Code, read only. What a
-// run lists, the desk acts on: only the verbs you allow it (`can`). An agent may draft or edit one; it's off until you turn it on.
+// An automation (Settings → Automations): your instruction, run on its schedule or when something happens on an item, by
+// your own Claude Code, read only. What a run lists, the desk acts on: only the verbs you allow it (`can`). An agent may
+// draft or edit one; it's off until you turn it on.
 export interface Automation {
   id: string; // a slug: "warden-issues"
   name: string;
-  schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time
+  schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time; "" for one with events
+  events?: ActivityKind[]; // instead of a schedule: it runs when one of these lands on an item, for the items of a sync pass at once
   prompt: string; // the instruction, in your words
   when?: string; // its check, in the rules' language (FIELDS): the desk asks it of each item first, and only what passes is handed on
   can?: Verb[]; // what it may do with an item; absent: add only
@@ -1048,7 +1072,7 @@ export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">)
 export interface AutomationRun {
   id: string;
   automation: string;
-  trigger: "schedule" | "now";
+  trigger: "schedule" | "now" | "event";
   at: string;
   done_at: string | null; // null while it runs
   error: string | null;
@@ -1071,12 +1095,14 @@ export interface AutomationItem {
 }
 
 // PUT /api/automations/:id: the whole automation; what's left out is its default.
-export type AutomationBody = Pick<Automation, "name" | "schedule" | "prompt" | "when" | "can"> & { on?: boolean };
+export type AutomationBody = Pick<Automation, "name" | "prompt" | "events" | "when" | "can"> & { schedule?: string; on?: boolean };
 
 // GET /api/automations
 export interface AutomationView extends Automation {
-  trigger: string; // what starts it, in words: its schedule ("Mon and Thu at 17:30"), or as written when it can't be read
-  next_at: string | null; // while it's on
+  // What starts it, in words: its schedule ("Mon and Thu at 17:30"; as written when it can't be read), or its events
+  // ("When CI changes or someone comments")
+  trigger: string;
+  next_at: string | null; // a schedule's, while it's on
   running: boolean;
   // Newest first, the last 10. did: what it did, by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"); didnt: what it couldn't
   // ("couldn't add 1, refused 2"); each "" when there's nothing to say.
