@@ -3232,6 +3232,61 @@ const SHOTS: Shot[] = [
   },
   // The More menu open in a review.
   { name: "more-menu", go: review("acme/worker#875", [MORE]) },
+  // The platform's keys: ⌘1 to ⌘5 are the sidebar's pages, top to bottom; ⌘] and ⌘[ open the item after and before the
+  // open one in its list (a question, then the rows), each as a click on its row would.
+  {
+    name: "keys",
+    go: async (page) => {
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      const hash = () => page.evaluate<string>("location.hash");
+      await at("#/")(page);
+      const pages: string[] = [];
+      for (const n of [2, 3, 4, 5, 1]) {
+        await page.keyboard.press(`${mod}+Digit${n}`);
+        await page.waitForTimeout(150);
+        pages.push(await hash());
+      }
+      if (pages.join(" ") !== "#/blocked #/later #/inflight #/archive #/")
+        failures.push(`keys: ${mod}+2,3,4,5,1 went to ${JSON.stringify(pages)}`);
+      // From the Inbox with nothing open: the first item, the next two, then back one.
+      const ids = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".queue .line")].slice(0, 4).map((l) => l.dataset.id ?? "q:" + l.querySelector(".row-main")?.textContent?.slice(0, 20))`,
+      );
+      const seen: string[] = [];
+      for (const key of ["BracketRight", "BracketRight", "BracketRight", "BracketLeft"]) {
+        await page.keyboard.press(`${mod}+${key}`);
+        await page.waitForTimeout(250);
+        seen.push(decodeURIComponent(await hash()));
+      }
+      const step = (h: string) => (h.startsWith("#/inquiry/") ? "question" : h.replace("#/review/", ""));
+      const went = seen.map(step);
+      if (went[0] !== "question" || went[1] !== "question" || went[2] !== ids[2] || went[3] !== "question" || seen[3] !== seen[1])
+        failures.push(`keys: ${mod}+] x3 then ${mod}+[ went to ${JSON.stringify(seen)}, the list starting ${JSON.stringify(ids)}`);
+      // An issue opens in place on its list, so the review before it gives way to the list; Merging steps through its PRs.
+      await at("#/")(page);
+      await unfold(page);
+      const before = await page.evaluate<string | null>(
+        `[...document.querySelectorAll(".queue .line")].find((l, i, all) => all[i + 1]?.querySelector(".line-kind")?.textContent === "Issue")?.dataset.id ?? null`,
+      );
+      await at(`#/review/${encodeURIComponent(before ?? "")}`)(page);
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.keyboard.press(`${mod}+BracketRight`);
+      await page.waitForTimeout(400);
+      const opened = await page.evaluate<string | null>(`document.querySelector(".queue .line.open")?.dataset.id ?? null`);
+      if ((await hash()) !== "#/" || !opened)
+        failures.push(`keys: ${mod}+] from ${before} is at ${await hash()} with ${opened} open in place`);
+      await at("#/inflight")(page);
+      await page.keyboard.press(`${mod}+BracketRight`);
+      await page.waitForTimeout(250);
+      const lane = decodeURIComponent(await hash());
+      if (lane !== "#/review/acme/api#4122") failures.push(`keys: ${mod}+] on Merging went to ${lane}`);
+      const tip = await page.locator(".side-nav .side-item").nth(1).getAttribute("title");
+      if (!tip?.endsWith(process.platform === "darwin" ? "(⌘2)" : "(Ctrl+2)"))
+        failures.push(`keys: Blocked's tooltip is ${JSON.stringify(tip)}`);
+    },
+    after: fresh,
+    sizes: ["mac"],
+  },
   // Right-click a row: its actions at the pointer, Snooze open to the side with what this PR can wait on.
   {
     name: "row-menu",

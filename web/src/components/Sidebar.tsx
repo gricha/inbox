@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { cls, syncTrouble } from "../format.ts";
+import { cls, MOD, syncTrouble } from "../format.ts";
 import { pageOf, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
@@ -65,7 +65,7 @@ export function Sidebar({
           href="#/"
           className={cls("side-item", onQueue && "on")}
           aria-current={onQueue ? "page" : undefined}
-          title={count === null ? undefined : `${count} need you`}
+          title={count === null ? `${MOD}1` : `${count} need you (${MOD}1)`}
           onClick={(e) => {
             // Already here: the hash wouldn't change, so go back to the top instead.
             if (route.name === "queue") {
@@ -82,7 +82,7 @@ export function Sidebar({
           href="#/blocked"
           className={cls("side-item", onBlocked && "on")}
           aria-current={onBlocked ? "page" : undefined}
-          title="What can't move yet: another PR to merge first, or a review"
+          title={`Your PRs that can't move yet: another PR to merge first, or their reviewers (${MOD}2)`}
         >
           <span className="side-name">Blocked</span>
         </a>
@@ -91,7 +91,7 @@ export function Sidebar({
           href="#/later"
           className={cls("side-item", onLater && "on")}
           aria-current={onLater ? "page" : undefined}
-          title="What was sorted away, snoozed or muted"
+          title={`What was sorted away, snoozed or muted (${MOD}3)`}
         >
           <span className="side-name">FYI</span>
         </a>
@@ -101,7 +101,7 @@ export function Sidebar({
           href="#/inflight"
           className={cls("side-item", onLane && "on")}
           aria-current={onLane ? "page" : undefined}
-          title={flight?.total ? `${flight.total} merging` : "Your agent and what it merged"}
+          title={`${flight?.total ? `${flight.total} merging` : "Your agent and what it merged"} (${MOD}4)`}
         >
           <span className="side-name">Merging</span>
         </a>
@@ -110,7 +110,7 @@ export function Sidebar({
           href="#/archive"
           className={cls("side-item", onArchive && "on")}
           aria-current={onArchive ? "page" : undefined}
-          title="What's done: what you acted on and what resolved"
+          title={`What's done: what you acted on and what resolved (${MOD}5)`}
         >
           <span className="side-name">Archive</span>
         </a>

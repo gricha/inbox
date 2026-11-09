@@ -1,4 +1,4 @@
-import { cls } from "../format.ts";
+import { cls, MOD } from "../format.ts";
 import { routeHash, settingsBack, settingsTab, type ListPage, type Route } from "../view.ts";
 
 const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
@@ -59,7 +59,7 @@ export function PageHead({
         <a
           className="back"
           href={routeHash(question ? { name: "inquiry", id: question } : { name: from })}
-          title={`Back to ${question ? "the question" : BACK[from]} (Esc)`}
+          title={`Back to ${question ? "the question" : BACK[from]} (Esc); ${MOD}[ and ${MOD}] open the item before and after this one`}
         >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />

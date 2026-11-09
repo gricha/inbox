@@ -18,7 +18,7 @@ import type {
 import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
-import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
+import { cls, copyText, fromName, MAC, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
@@ -93,6 +93,8 @@ type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API is
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
 const LIST_PAGES = new Set<Route["name"]>(["queue", "later", "blocked", "archive"]);
+// The sidebar's pages, top to bottom: ⌘1 to ⌘5 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
+const SIDE_PAGES = ["queue", "blocked", "later", "inflight", "archive"] as const;
 // What FYI, Blocked and the Archive say with nothing on them.
 const EMPTY = {
   later: "Nothing sorted away.",
@@ -1093,6 +1095,40 @@ export function App() {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
 
+  // ⌘[ and ⌘]: the item before or after the one that's open in its list (else the selected one), opened as a click on its
+  // row would; with neither, the list's first or last. Merging steps through its PRs.
+  const stepAt = useRef<string | null>(null);
+  function stepTo(by: 1 | -1) {
+    const shown = route.name === "review" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
+    if (laneList) {
+      const at = laneRows.findIndex((r) => r.card.id === (shown ?? laneSel));
+      const to = laneRows[at < 0 ? (by > 0 ? 0 : laneRows.length - 1) : at + by];
+      if (to) go({ name: "review", id: to.card.id });
+      return;
+    }
+    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...flat.map((c) => c.id)];
+    // An issue it opened in place beside a review is where it is, not the review still drawn.
+    const last = stepAt.current;
+    const here = last !== null && (last === expanded || last === shown) ? last : (shown ?? expanded ?? selected);
+    const at = here === null ? -1 : order.indexOf(here);
+    const id = order[at < 0 ? (by > 0 ? 0 : order.length - 1) : at + by];
+    if (id === undefined) return;
+    stepAt.current = id;
+    const q = inquiries.find((x) => inquiryOf(x.id) === id);
+    const c = flat.find((x) => x.id === id);
+    if (q) {
+      setExpanded(null);
+      openInquiry(q);
+    } else if (c?.kind === "pr") {
+      setExpanded(null);
+      openCard(c);
+    } else if (c) {
+      // An issue opens in place on its list, so a review or a question gives way to the list.
+      if (route.name === "review" || route.name === "inquiry") go({ name: listPage ?? "queue" });
+      if (expanded !== c.id) toggle(c);
+    }
+  }
+
   // Esc is the one key: on a list it closes the item opened in place, then clears the filter; a Settings view goes back to its
   // part; then it goes back to the Inbox.
   const onKey = (e: KeyboardEvent) => {
@@ -1116,6 +1152,24 @@ export function App() {
       return;
     }
     if (menuAt) return; // a row's menu has the keyboard, Esc included
+    // The platform's own: ⌘1-5 are the sidebar's pages, ⌘[ and ⌘] the item before and after, where there's a list (a list
+    // page, Merging, a review or a question). The shortcut recorder reads its own keys.
+    const mod = (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey && !e.isComposing;
+    const digit = /^Digit([1-5])$/.exec(e.code)?.[1];
+    const bracket = e.code === "BracketLeft" ? -1 : e.code === "BracketRight" ? 1 : 0;
+    const listed = LIST_PAGES.has(route.name) || route.name === "inflight" || route.name === "review" || route.name === "inquiry";
+    if (mod && digit && !(e.target instanceof HTMLElement && e.target.closest(".hotkey"))) {
+      if (!e.repeat) go({ name: SIDE_PAGES[Number(digit) - 1]! });
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    if (mod && bracket && listed) {
+      if (!e.repeat) stepTo(bracket);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     // Esc closes the chat from anywhere but a text box (its own box closes it only when empty, else leaves it), and the
     // comment bar from anywhere, before a review or a page reads it as "go back"; a More menu over it closes first.
     const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
