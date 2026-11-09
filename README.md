@@ -21,6 +21,8 @@ npm run dist
 
 That builds for the current OS into `release/`: a `.dmg` on macOS, an AppImage on Linux, an installer on Windows. `dist:mac`, `dist:linux` and `dist:win` build for a specific one; the macOS build is ad-hoc signed and not notarized.
 
+Had it as Review Desk, before the rename to Inbox? Quit Review Desk.app and delete it before you next log in: its login item starts it (on macOS and Windows; Inbox removes the old Linux autostart entry itself), and nothing deletes it for you. Inbox carries over its window, theme and settings, and moves `~/.review-desk` to `~/.inbox` on its first start, leaving a link at the old path for anything that still looks there.
+
 The app runs the desk server itself. If one is already running on port 47823 (`desk serve`), the app attaches to it.
 
 ## Use it
