@@ -226,6 +226,7 @@ test(
     write(join(".agents", "skills", "review-desk", "SKILL.md"), OLD_SKILL);
     write(join(".agents", "skills", "review-desk", "notes.md"), "mine");
     const old = join(home, ".claude", "skills", "review-desk");
+    write(join(".claude", "skills", "review-desk", ".DS_Store"), ""); // Finder's, from opening the folder: still the desk's copy
     assert.deepEqual(await run(refreshSkills(join(home, "scratch-desk"), MCP)), [], "a scratch desk leaves them alone");
     assert.ok(existsSync(old));
     assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [

@@ -199,7 +199,9 @@ const oldCopy = Effect.fnUntraced(function* (parent: string): Effect.fn.Return<s
   const dir = path.join(parent, OLD);
   const files = Result.getOrNull(Result.try({ try: () => fs.readdirSync(dir), catch: () => null }));
   const shipped = yield* bundled;
-  if (!files?.includes("SKILL.md") || files.some((f) => !shipped.includes(f))) return null;
+  // What Finder, Explorer or an editor leaves beside the desk's files doesn't make the folder the owner's.
+  const junk = (f: string) => f.startsWith(".") || f.endsWith("~") || f === "Thumbs.db" || f === "desktop.ini";
+  if (!files?.includes("SKILL.md") || files.some((f) => !junk(f) && !shipped.includes(f))) return null;
   const text = Result.getOrElse(Result.try({ try: () => fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"), catch: () => "" }), () => "");
   return desksSkill(text, OLD) ? dir : null;
 });
