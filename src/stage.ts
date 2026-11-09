@@ -96,14 +96,17 @@ export function askedAt(it: Item, me: string): string {
   return it.request_events.filter((r) => still.has(lc(r.reviewer))).reduce((a, r) => (r.at > a ? r.at : a), it.created_at);
 }
 
-// What an open PR waits on next, in words: the first that applies of draft, CI, conflict, changes, a reply you owe, reviews.
+// What an open PR waits on next, in words: the first that applies of draft, CI, conflict, changes, a reply you owe, reviews;
+// your PR's conflict before its review is said with the review.
 export function waitsOf(it: Item, me: string, o: { mine: boolean; unasked: boolean; askedYou: boolean; waitingOn: string[] }): string {
   if (it.kind !== "pr" || it.state !== "open") return "";
   const self = o.mine ? me : it.author;
   if (it.draft) return o.mine ? "is your draft" : "is a draft";
   if (it.ci === "red") return o.mine ? "waits on a CI fix" : "has CI failing";
-  if (it.mergeable === "conflict") return "waits on a merge conflict fix";
   const changes = verdicts(it, self).changes_by;
+  // Yours, short of its review with a conflict: the review is what holds it, so both are said (your agent rebases an approved one).
+  const conflict = it.mergeable === "conflict";
+  if (conflict && !(o.mine && !changes.length && !approved(it, self) && o.waitingOn.length)) return "waits on a merge conflict fix";
   if (changes.length) return `has changes requested by ${andMore(changes)}`;
   const review = approved(it, self)
     ? ""
@@ -115,7 +118,7 @@ export function waitsOf(it: Item, me: string, o: { mine: boolean; unasked: boole
   const owed = o.mine ? owedTo(it, me) : [];
   if (owed.length) return `waits on your reply to ${andMore(owed)}${review ? `, then ${review}` : ""}`;
   if (o.unasked) return "has nobody asked to review it";
-  if (review) return `waits on ${review}`;
+  if (review) return `waits on ${review}${conflict ? ", and a merge conflict fix" : ""}`;
   if (it.ci === "pending") return "waits on CI";
   return o.mine ? "is ready to merge" : `is approved, for ${it.author} to merge`;
 }

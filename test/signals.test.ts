@@ -251,6 +251,13 @@ test("pr.waits, pr.waiting_on and me.owes_reply", () => {
     ["your red CI", mine({ ci: "red" }), "waits on a CI fix"],
     ["their red CI", makeItem({ ci: "red" }), "has CI failing"],
     ["a conflict", mine({ mergeable: "conflict" }), "waits on a merge conflict fix"],
+    ["a conflict, approved", mine({ mergeable: "conflict", ...approved }), "waits on a merge conflict fix"],
+    [
+      "a conflict before its review",
+      mine({ mergeable: "conflict", review_requests: [user("sam")] }),
+      "waits on a review from sam, and a merge conflict fix",
+    ],
+    ["their conflict", makeItem({ mergeable: "conflict", review_requests: [user("sam")] }), "waits on a merge conflict fix"],
     ["changes", mine({ reviews: [review("kofi", "changes_requested")] }), "has changes requested by kofi"],
     [
       "asked, hidden too",

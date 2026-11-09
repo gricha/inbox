@@ -97,6 +97,7 @@ import {
   catchAllOf,
   migrateBotAsk,
   migrateConflict,
+  migrateWaitsConflict,
   migrateDrafts,
   migrateHard,
   parseConfig,
@@ -669,7 +670,8 @@ export class Desk {
 
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
   // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
-  // on the desk (migrateDrafts), and the rule putting a merge conflict on the desk goes (migrateConflict).
+  // on the desk (migrateDrafts), the rule putting a merge conflict on the desk goes (migrateConflict), and your PR waiting on
+  // reviewers stays in Blocked with a conflict (migrateWaitsConflict).
   migrateRules(): Effect.Effect<void, FsError> {
     return Effect.gen({ self: this }, function* () {
       const due = [
@@ -677,6 +679,11 @@ export class Desk {
         { key: "bot_ask_migrated", migrate: migrateBotAsk, did: "added a hard rule for reviews a bot asked of you by name" },
         { key: "drafts_migrated", migrate: migrateDrafts, did: "put your drafts touched in the last 14 days on the desk" },
         { key: "conflict_migrated", migrate: migrateConflict, did: "removed the rule putting a merge conflict on your desk" },
+        {
+          key: "waits_conflict_migrated",
+          migrate: migrateWaitsConflict,
+          did: "kept your PRs waiting on reviewers in Blocked when they have a merge conflict",
+        },
       ].filter((m) => !this.store.get(m.key));
       if (!due.length) return;
       const before = yield* this.readConfig();

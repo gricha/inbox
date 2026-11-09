@@ -240,7 +240,16 @@ const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket =
 const BLOCKED_BY = `{ when = "pr.blocked && !pr.blocker_mine", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
 // Yours: a change request or a reply you owe is yours to do now, blocked or not.
 const MINE_BLOCKED = `{ when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
-const WAITS_REVIEW = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked", why = "{pr.waits}", final = true }`;
+// A conflict doesn't take it out: it still waits on its reviews, and your agent only rebases a PR that's approved.
+const WAITS_REVIEW = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", bucket = "blocked", why = "{pr.waits}", final = true }`;
+const WAITS_NO_CONFLICT = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked", why = "{pr.waits}", final = true }`;
+
+// The first-run rule for your PRs waiting on reviewers left one with a merge conflict to whatever rule came next (unresolved
+// threads: Later, away from the PRs it blocks); only as written, it becomes today's. Null if absent.
+export function migrateWaitsConflict(text: string): string | null {
+  const next = text.replaceAll(WAITS_NO_CONFLICT, WAITS_REVIEW);
+  return next === text ? null : next;
+}
 
 // The old first-run rule sending all your drafts to later, only as written, becomes today's two draft rules; null if absent.
 export function migrateDrafts(text: string): string | null {

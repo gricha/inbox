@@ -114,7 +114,7 @@ const W = {
   blocked: "pr.blocked && !pr.blocker_mine",
   mineBlocked: "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply",
   root: "len(pr.blocks) > 0 && me.owes_reply",
-  waitsrev: "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'",
+  waitsrev: "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'",
 };
 type Key = keyof typeof W;
 

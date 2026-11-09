@@ -711,10 +711,8 @@ test("a desk started on the oldest config migrates its rules once, with one back
       `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
       `  { when = "item.draft", bucket = "later", why = "draft" },`,
     )
-    .replaceAll(
-      /^.*why = "CI failing" \},\n/gm,
-      `$&  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },\n`,
-    );
+    .replaceAll(/^.*why = "CI failing" \},\n/gm, `$&  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },\n`)
+    .replaceAll(`pr.ci != 'red'", bucket = "blocked"`, `pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked"`);
   fs.writeFileSync(config, old);
   const logs: string[] = [];
   const opts = { home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: (m: string) => void logs.push(m) };
@@ -723,7 +721,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
   assert.equal(fs.readFileSync(config, "utf8"), now);
   assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
   assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
-  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "conflict_migrated"]) {
+  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "conflict_migrated", "waits_conflict_migrated"]) {
     assert.ok(desk.store.get(k), k);
     desk.store.set(k, null);
   }
@@ -1206,6 +1204,7 @@ test("Blocked by the template: your PRs waiting on reviews, the latest ask as th
       myPr(7, { ci: "green", ...asked("eve", 10) }),
       myPr(8, { ci: "green", head_ref: "planner-a", ...asked("dana", 40) }),
       myPr(9, { ci: "green", head_ref: "planner-b", base: "planner-a", ...asked("sam", 2) }),
+      myPr(10, { ci: "green", mergeable: "conflict", ...asked("cvxluo", 20) }), // sentry#129460 once master moved under it
     ],
     { settings: QUIET },
   );
@@ -1225,8 +1224,9 @@ test("Blocked by the template: your PRs waiting on reviews, the latest ask as th
       ["acme/web#2", "waits on a review from sam, @backend and 1 more", hoursAgo(48)],
       ["acme/web#8", "waits on a review from dana", hoursAgo(40)],
       ["acme/web#1", "waits on a review from dana", hoursAgo(30)],
+      ["acme/web#10", "waits on a review from cvxluo, and a merge conflict fix", hoursAgo(20)],
     ],
-    "a reply owed (web#3), changes requested (web#5), red CI (web#6) and Merging's web#7 waiting on a review stay out",
+    "a reply owed (web#3), changes requested (web#5), red CI (web#6) and Merging's web#7 waiting on a review stay out; a conflict (web#10) doesn't take one out",
   );
   assert.deepEqual([b[1]!.stack?.folded, b[1]!.blocks], [["acme/web#9"], ["web#9"]], "web#8 stands for its stack");
 });

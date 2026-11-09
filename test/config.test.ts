@@ -7,6 +7,7 @@ import {
   migrateConflict,
   migrateDrafts,
   migrateHard,
+  migrateWaitsConflict,
   parseConfig,
   spaceOf,
 } from "../src/config.ts";
@@ -218,6 +219,21 @@ test("a merge conflict alone leaves the desk: the old rule goes from every My PR
   assert.deepEqual(parseConfig(migrateConflict(last)!).errors, [], "the last one, without its trailing comma");
 });
 
+const WAITS = `"len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", bucket = "blocked"`;
+const WAITS_NO_CONFLICT = WAITS.replace(`'red'"`, `'red' && pr.mergeable != 'conflict'"`);
+
+test("your PR waiting on reviewers stays in Blocked with a merge conflict: the old rule that left it out becomes today's, unless the owner changed it", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const old = now.replaceAll(WAITS, WAITS_NO_CONFLICT);
+  assert.equal(old.split(WAITS_NO_CONFLICT).length - 1, 2, "both My PRs boards, as in the owner's config");
+  assert.equal(migrateWaitsConflict(old), now);
+  assert.equal(migrateWaitsConflict(now), null, "already today's");
+  const edited = old.replace(`${WAITS_NO_CONFLICT}, why = "{pr.waits}"`, `${WAITS_NO_CONFLICT}, why = "reviewers have it"`);
+  const kept = migrateWaitsConflict(edited)!;
+  assert.ok(kept.includes(`${WAITS_NO_CONFLICT}, why = "reviewers have it"`), "a rule the owner changed is theirs");
+  assert.equal(kept.split(WAITS_NO_CONFLICT).length - 1, 1, "the other board's is today's");
+});
+
 test("the oldest first-run config reaches today's through the migrations, and today's is left alone", () => {
   const now = defaultConfigText({ workOrgs: ["acme"] });
   const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
@@ -226,9 +242,10 @@ test("the oldest first-run config reaches today's through the migrations, and to
     .replaceAll(`  ${bot}\n`, "")
     .replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`)
     .replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`)
-    .replaceAll(RED, RED + CONFLICT);
-  assert.equal(migrateConflict(migrateDrafts(migrateBotAsk(migrateHard(old)!)!)!), now);
-  for (const m of [migrateHard, migrateBotAsk, migrateDrafts, migrateConflict]) assert.equal(m(now), null, m.name);
+    .replaceAll(RED, RED + CONFLICT)
+    .replaceAll(WAITS, WAITS_NO_CONFLICT);
+  assert.equal(migrateWaitsConflict(migrateConflict(migrateDrafts(migrateBotAsk(migrateHard(old)!)!)!)!), now);
+  for (const m of [migrateHard, migrateBotAsk, migrateDrafts, migrateConflict, migrateWaitsConflict]) assert.equal(m(now), null, m.name);
 });
 
 test("final parses on any bucket; final with judge is an error", () => {
@@ -272,12 +289,7 @@ test("the template: blocked first on every PR board", () => {
     assert.deepEqual(rule(mine, changes + 1), ["len(pr.requires_closed) > 0", "today", false, false]);
     assert.deepEqual(rule(mine, changes + 2), ["len(pr.blocks) > 0 && me.owes_reply", "today", false, false]);
     const threads = index(mine, "pr.unresolved_threads > 0");
-    assert.deepEqual(rule(mine, threads - 1), [
-      "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'",
-      "blocked",
-      true,
-      false,
-    ]);
+    assert.deepEqual(rule(mine, threads - 1), ["len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", "blocked", true, false]);
     for (const id of [`${space}-review`, `${space}-mentions`])
       assert.deepEqual(rule(id, 0), ["pr.blocked && !pr.blocker_mine", "blocked", true, false], id);
     assert.deepEqual(rule(`${space}-review`, 1).slice(0, 2), ["me.requested_direct && !me.requested_by_bot", "now"]);
