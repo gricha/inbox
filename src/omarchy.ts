@@ -120,7 +120,7 @@ export function tokensFrom(colors: Record<string, string>, scheme: "light" | "da
     "--ink-2": reach(fg, [sheet], 7.2),
     "--pencil": reach(mix(fg, sheet, 0.3), [sheet, paper, side, sel], 4.7),
     "--faint": away(fg, 2.6),
-    "--rule": away(fg, 1.15),
+    "--rule": first(sheet, fg, (x) => contrast(x, sheet) >= 1.15 && contrast(x, side) >= 1.1), // it parts the sidebar too
     "--rule-strong": away(fg, 1.35),
     "--control": away(fg, 2.6),
     "--sel": sel,

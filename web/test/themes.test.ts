@@ -66,6 +66,7 @@ const TARGETS: [string, string, number, number?][] = [
   ["--amber", "--amber-wash", 4.5],
   ["--green", "--sheet", 4.5],
   ["--rule", "--sheet", 1.08, 1.6], // a hairline: visible, never loud
+  ["--rule", "--side", 1.1], // the sidebar's, over Merging and the Archive
   ["--rule-strong", "--sheet", 1.2, 2.3],
   ["--control", "--sheet", 2.4],
   ["--sel", "--sheet", 1.06], // a selected row reads
