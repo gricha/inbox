@@ -4,5 +4,5 @@ release
 research
 package-lock.json
 assets
-integrations/claude-desktop/review-desk/.claude-plugin/types
+integrations/claude-desktop/inbox/.claude-plugin/types
 .shots

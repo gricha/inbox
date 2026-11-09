@@ -38,7 +38,7 @@ const ALLOW = [
     "release view",
     "repo view",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...["list", "item", "overview", "events", "brief", "merging"].map((t) => `mcp__review-desk__desk_${t}`),
+  ...["list", "item", "overview", "events", "brief", "merging"].map((t) => `mcp__inbox__desk_${t}`),
 ];
 // Even where your settings allow more: nothing that writes as you, pushes, merges or edits files, and none of the desk's writes.
 const DENY = [
@@ -71,7 +71,7 @@ const DENY = [
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
   ...["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "automations"].map(
-    (t) => `mcp__review-desk__desk_${t}`,
+    (t) => `mcp__inbox__desk_${t}`,
   ),
 ];
 // What a run the desk stopped in the middle of says; it doesn't count as the last run, so the next look runs it again.
@@ -441,7 +441,7 @@ function prompt(a: Automation, at: string, last: AutomationRun | null): string {
     ? `Its last run was ${last.at}${listed.length ? `; it listed ${listed.join(", ")}` : ", and listed nothing the desk could add"}. Look at what changed since.`
     : "This is its first run.";
   return [
-    `You're running my Review Desk automation "${a.name}" (${a.schedule}), on your own: nobody is watching this run. Its instruction, in my words:`,
+    `You're running my Inbox automation "${a.name}" (${a.schedule}), on your own: nobody is watching this run. Its instruction, in my words:`,
     "",
     a.prompt,
     "",

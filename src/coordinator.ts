@@ -41,7 +41,7 @@ export const DENY = [
 ];
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
-  "You are my Review Desk coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the review-desk skill.";
+  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the inbox skill.";
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 const PERMISSION = { bypass: "bypassPermissions", default: "default" } as const;
 type Mode = keyof typeof PERMISSION;

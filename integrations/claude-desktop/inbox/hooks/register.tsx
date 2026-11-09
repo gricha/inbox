@@ -3,9 +3,9 @@ import type { Register } from "claude-code";
 
 import type { DeskCard, DeskView } from "../types";
 
-const PANE = "review-desk";
+const PANE = "inbox";
 const API = "http://localhost:47823";
-const view = atom({ plugin: "review-desk", key: "view" } as const, { cards: [], status: "", error: null, busy: null } as DeskView);
+const view = atom({ plugin: "inbox", key: "view" } as const, { cards: [], status: "", error: null, busy: null } as DeskView);
 
 type Fetch = (
   url: string,
@@ -40,7 +40,7 @@ async function refresh(fetch: Fetch, set: (fn: (v: DeskView) => DeskView) => Pro
 
 export const register: Register = (on) => {
   on("session.start", async ($, e, next) => {
-    await $.command.register({ name: "desk", description: "Open Review Desk: what needs you now and today" });
+    await $.command.register({ name: "desk", description: "Open Inbox: what needs you now and today" });
     const tick = async () => {
       const text = await refresh(
         (u, i) => $.http.fetch(u, i),
@@ -58,8 +58,8 @@ export const register: Register = (on) => {
       (u, i) => $.http.fetch(u, i),
       (fn) => update($, view, fn),
     );
-    const opened = await $.ui.open({ id: PANE, title: "Review Desk" });
-    return { text: opened.isPlaced ? "Review Desk opened." : `Review Desk: ${API}` };
+    const opened = await $.ui.open({ id: PANE, title: "Inbox" });
+    return { text: opened.isPlaced ? "Inbox opened." : `Inbox: ${API}` };
   });
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {

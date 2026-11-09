@@ -476,13 +476,13 @@ const serve = Effect.fnUntraced(function* (x: Ctx) {
   const { startDesk } = yield* Effect.promise(() => import("./server.ts"));
   const srv = yield* startDesk({ port, open: !!x.opts.open });
   const desk = srv.desk;
-  const refresh = agents.refreshSkills(desk.home).pipe(
+  const refresh = agents.refreshSkills(desk.home, `${srv.url}/mcp`).pipe(
     Effect.match({
       onSuccess: (done) => {
-        for (const f of done) desk.log(`refreshed the Review Desk skill at ${f}`);
+        for (const line of done) desk.log(line);
       },
       onFailure: (e) => {
-        desk.log(`couldn't refresh the Review Desk skill: ${e.message}`);
+        desk.log(`couldn't refresh the Inbox skill: ${e.message}`);
       },
     }),
   );

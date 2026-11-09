@@ -1,6 +1,0 @@
-{
-  "name": "review-desk",
-  "version": "0.1.0",
-  "description": "Review Desk in Claude: a /desk pane with your Focus queue and a status-line count. Needs `desk serve` running.",
-  "types": "./types/index.d.ts"
-}

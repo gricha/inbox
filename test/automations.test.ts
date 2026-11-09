@@ -215,7 +215,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
   const args = fake.args(1);
   assert.equal(args[args.indexOf("--permission-mode") + 1], "dontAsk");
   const allowed = args[args.indexOf("--allowedTools") + 1]!.split(",");
-  for (const r of ["Read", "Bash(gh issue list:*)", "Bash(gh search:*)", "mcp__review-desk__desk_list"]) assert.ok(allowed.includes(r), r);
+  for (const r of ["Read", "Bash(gh issue list:*)", "Bash(gh search:*)", "mcp__inbox__desk_list"]) assert.ok(allowed.includes(r), r);
   assert.ok(!allowed.some((r) => /merge|comment|desk_add|Write|Edit/.test(r)), allowed.join());
   assert.ok(args.includes("--json-schema") && !args.includes("bypassPermissions"));
   assert.ok(!args.includes("--strict-mcp-config") && !args.includes("--tools"), "your MCP servers, as your settings allow them");
@@ -230,7 +230,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
     "Bash(git push:*)",
     "Write",
     "Edit",
-    "mcp__review-desk__desk_add",
+    "mcp__inbox__desk_add",
   ])
     assert.ok(deny.includes(r), r);
   assert.match(fake.stdin(1), /Look at getsentry\/warden's new issues/);

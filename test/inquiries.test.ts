@@ -17,7 +17,7 @@ const CONTEXT =
 // A question with all it needs; a test overrides what it checks.
 const full = (o: Record<string, unknown> = {}) => ({
   question: "Ship it?",
-  from: "review-desk session",
+  from: "inbox session",
   context: CONTEXT,
   links: [{ label: "The row", url: "https://github.com/acme/web/pull/1#discussion_r1" }],
   ...o,
@@ -40,7 +40,7 @@ test("an agent's question is a row on the main page and a notification until the
   const req = http(t);
   const asked = await req("POST", "/api/inquiries", {
     question: "Keep the label as text,\nor icons?",
-    from: "review-desk session",
+    from: "inbox session",
     context: `${CONTEXT}\n\nSecond paragraph.`,
     options: [
       { answer: "Text", next: "Nothing changes." },
@@ -55,7 +55,7 @@ test("an agent's question is a row on the main page and a notification until the
     [inquiry.question, inquiry.from, inquiry.context, inquiry.options, inquiry.links, inquiry.item_id, inquiry.answer],
     [
       "Keep the label as text, or icons?",
-      "review-desk session",
+      "inbox session",
       `${CONTEXT}\n\nSecond paragraph.`,
       [
         { answer: "Text", next: "Nothing changes." },
@@ -154,10 +154,10 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
   await run(t.desk.sync());
   const told: string[] = [];
   t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
-  const mine = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3 onto main?" })));
+  const mine = runSync(t.desk.inquire(full({ from: "Inbox coordinator", question: "Rebase #3 onto main?" })));
   runSync(t.desk.answerInquiry(mine.id, "Yes,\nthen merge"));
   assert.deepEqual(told, [`My answer to your question ${mine.id} ("Rebase #3 onto main?"): "Yes, then merge"`]);
-  const again = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Close #3?" })));
+  const again = runSync(t.desk.inquire(full({ from: "Inbox coordinator", question: "Close #3?" })));
   runSync(t.desk.answerInquiry(again.id, "", true));
   assert.equal(told[1], `I dismissed your question ${again.id} ("Close #3?"): decide yourself.`);
   runSync(t.desk.answerInquiry(runSync(t.desk.inquire(full())).id, "Text"));

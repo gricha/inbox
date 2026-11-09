@@ -282,7 +282,7 @@ export interface SettingsView {
   paused: { ai: { why: string; until: string } | null };
 }
 
-// GET /api/agents: whether Claude Code has the desk's MCP tools and the Review Desk skill.
+// GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.
 export interface AgentStatus {
   driver: string;
   mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
@@ -830,7 +830,7 @@ export interface InflightView {
 }
 
 // The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".
-export const COORDINATOR_NAME = "Review Desk coordinator";
+export const COORDINATOR_NAME = "Inbox coordinator";
 
 // The background Claude Code session the desk starts and wakes (README → Coordinator).
 export interface CoordinatorView {

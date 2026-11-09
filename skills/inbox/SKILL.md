@@ -1,11 +1,11 @@
 ---
-name: review-desk
-description: Use when the user mentions Review Desk or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to add a PR or issue to their review or desk, snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Also use it to ask the user something in their desk (desk_inquire) when they asked you to, or about work that goes on while they're elsewhere: the desk is a channel beside the chat, not instead of it, so a session they're talking to asks in its chat as usual. Review Desk is the user's local GitHub review queue (the Inbox, Blocked, FYI for what's sorted away, Merging and the Archive), reached through the review-desk MCP tools (desk_*) or the desk CLI.
+name: inbox
+description: Use when the user mentions Inbox (their GitHub review desk app) or their desk, asks what needs them on GitHub, what to review next, why a PR or issue is in their queue (or isn't), or wants to add a PR or issue to their review or desk, snooze, mute, clear or re-sort their review work, hand off a review, get a quick brief on a PR, or run as their coordinator getting the PRs they handed off merged. Also use it to ask the user something in their desk (desk_inquire) when they asked you to, or about work that goes on while they're elsewhere: the desk is a channel beside the chat, not instead of it, so a session they're talking to asks in its chat as usual. Inbox is the user's local GitHub review queue (its pages: the Inbox, Blocked, FYI for what's sorted away, Merging and the Archive), reached through the inbox MCP tools (desk_*) or the desk CLI.
 ---
 
-# Review Desk
+# Inbox
 
-Review Desk is a desktop app on the user's machine that turns their GitHub review load (PRs to review, their own PRs, issues) into one queue:
+Inbox is a desktop app on the user's machine that turns their GitHub review load (PRs to review, their own PRs, issues) into one queue:
 
 - **The queue** (the Inbox in their window): one list, urgent items (the `now` bucket, kept short on purpose) first, then the rest worth doing today (the `today` bucket).
 - **Sorted away**: later, FYI, resolved (merged, closed, the user approved it, approved by someone else, no longer requested: it comes back if that changes, e.g. they're asked again), hidden by a rule, and cleared (done, snoozed, muted). In their window: FYI, and the Archive for what's done or resolved.
@@ -16,9 +16,9 @@ Rules decide where each item lands. A board is one or more GitHub searches plus 
 
 A rule with `hard = true` is a floor (asked to review by name, by default): what it matches never sorts below its bucket (Today for a Now rule). Everything else is sorted by Claude with the **policy**: prose the user writes in `~/.inbox/policy.md` (a built-in starter while it's empty), which their own Claude Code applies to each item (the "judge"), with where the rules put it as the hint. Until it has, the item sits where the rules put it. The rule trace shows the judge's step. A rule with `final = true` isn't sorted by Claude at all: what it matches stays in its bucket (a pin still lifts it).
 
-The **coordinator** is a background Claude Code session named "Review Desk coordinator" that the desk starts on the first hand-off or ask and wakes with a message when something changes on a PR in Merging, and wakes at once with what the user asks it from the desk, where the window calls it their agent (see "Coordinator" below). Any session can message it by name; Claude Code delivers it only when both sessions skip permission prompts or neither does.
+The **coordinator** is a background Claude Code session named "Inbox coordinator" that the desk starts on the first hand-off or ask and wakes with a message when something changes on a PR in Merging, and wakes at once with what the user asks it from the desk, where the window calls it their agent (see "Coordinator" below). Any session can message it by name; Claude Code delivers it only when both sessions skip permission prompts or neither does.
 
-All triage state is local: done, snooze, mute, pin and Merging live in `~/.inbox/desk.db`. Review Desk reads GitHub; it writes only when the user clicks a button in the desk (approve a PR, comment on one or on an issue, Reply under a conversation in a PR's review, Ready for review on their own draft with the reviewers they pick, Ask reviewers on their ready PR nobody's asked to review, and the More menu's close, draft, merge, reopen and request changes).
+All triage state is local: done, snooze, mute, pin and Merging live in `~/.inbox/desk.db`. Inbox reads GitHub; it writes only when the user clicks a button in the desk (approve a PR, comment on one or on an issue, Reply under a conversation in a PR's review, Ready for review on their own draft with the reviewers they pick, Ask reviewers on their ready PR nobody's asked to review, and the More menu's close, draft, merge, reopen and request changes).
 
 ## How to reach it
 
@@ -51,9 +51,9 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 
 `until`: `1h`, `3h`, `2d`, `tomorrow` (09:00), `monday` (09:00), `activity` (until someone else acts), `YYYY-MM-DD`, or an ISO time. `done` also lasts until someone else acts.
 
-**CLI** when the MCP tools aren't connected: `desk ls [--all]`, `desk show <ref>`, `desk add <ref> "<why>" --from "<your task>"`, `desk done|mute|unmute|pin|unpin|restore <ref>`, `desk snooze <ref> [until]`, `desk undo <seq>`, `desk prompt <ref>`, `desk brief <ref>`, `desk fields`, `desk config check`. `desk` is `bin/desk` in the Review Desk repo; it may not be on PATH.
+**CLI** when the MCP tools aren't connected: `desk ls [--all]`, `desk show <ref>`, `desk add <ref> "<why>" --from "<your task>"`, `desk done|mute|unmute|pin|unpin|restore <ref>`, `desk snooze <ref> [until]`, `desk undo <seq>`, `desk prompt <ref>`, `desk brief <ref>`, `desk fields`, `desk config check`. `desk` is `bin/desk` in the Inbox repo; it may not be on PATH.
 
-**HTTP API** for everything else, notably rules: `GET /api/config`, `POST /api/config/preview`, `PUT /api/config`, `GET /api/fields`. JSON in and out, no auth, localhost only. Full reference: `docs/api.md` in the Review Desk repo (https://github.com/gricha/review-desk/blob/main/docs/api.md).
+**HTTP API** for everything else, notably rules: `GET /api/config`, `POST /api/config/preview`, `PUT /api/config`, `GET /api/fields`. JSON in and out, no auth, localhost only. Full reference: `docs/api.md` in the Inbox repo (https://github.com/gricha/inbox/blob/main/docs/api.md).
 
 ## Rules of engagement
 
@@ -123,7 +123,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 ### "Is my PR moving?" (Merging)
 
 1. `desk_merging`: each PR the user handed off, its state and the coordinator's last note. `desk_list` never shows them (only what was handed back, in Now with the reason as the why).
-2. Handing a PR off for merge and bringing it back are the user's, in the desk (Hand off for merge, Back to desk). To ask the coordinator about one, message it by name ("Review Desk coordinator"). In the desk the user calls it "your agent".
+2. Handing a PR off for merge and bringing it back are the user's, in the desk (Hand off for merge, Back to desk). To ask the coordinator about one, message it by name ("Inbox coordinator"). In the desk the user calls it "your agent".
 
 ### AI reviews
 
@@ -143,7 +143,7 @@ When the user wants something checked on a schedule ("every morning, look at the
 
 ## Coordinator
 
-When the desk started you as the user's Review Desk coordinator (a background session named "Review Desk coordinator"), your job is to get the PRs they hand off for merge (Hand off for merge in the desk) merged, and to do what they ask you from the desk (below). The desk wakes you with one short message per batch of news: the PRs (ids and URLs) and what changed ("handed off", "CI failed", "new comment", "approved", "merge conflict", "ready to merge but conflicts: rebase it …", "unblocked: sentry#129460 merged", "needs sentry#129460, closed without merging"), never PR text. You keep your context between wakes; nothing runs between them. On each wake:
+When the desk started you as the user's Inbox coordinator (a background session named "Inbox coordinator"), your job is to get the PRs they hand off for merge (Hand off for merge in the desk) merged, and to do what they ask you from the desk (below). The desk wakes you with one short message per batch of news: the PRs (ids and URLs) and what changed ("handed off", "CI failed", "new comment", "approved", "merge conflict", "ready to merge but conflicts: rebase it …", "unblocked: sentry#129460 merged", "needs sentry#129460, closed without merging"), never PR text. You keep your context between wakes; nothing runs between them. On each wake:
 
 1. **Read.** `desk_merging` for the handed-off PRs and their state (all of them, not only the ones the message names), and `desk_events` with `after` = the `last_seq` you kept from your last wake (the first time, `after` 0 and `limit` small) for the details: who commented or reviewed, which push, which checks.
 2. **One subagent per PR, or per stack.** You don't work PRs yourself: you hand each to a subagent, keep track of who has what, and stay free for the next wake and the user's asks.
@@ -174,9 +174,9 @@ Their words are the user's own: do what they say, and work out how, within the f
   - _Someone else's PR:_ read only, whatever the ask says. Never commit or push to its branch; never comment, review, approve or request changes; and never run its code (tests, scripts, installs) unless their words ask you to run it. Answer with the change itself: a ```suggestion block for those lines, with `path:line` named, for them to post with Comment from the `+` by that line (the chat's Copy keeps the fence).
   - _An issue:_ answer with what you'd change; open no PR and push nothing.
 
-Always answer with `desk_answer`: the ask's id and your answer, which they read in their chat with you beside what they asked about (it notifies them too). Lead with the answer in one sentence (yes, no, done, or what you found), then, if it helps, short paragraphs or a list of what you checked or did; `code` for identifiers, files and commands, a ``` block for a few lines of code, bare https URLs for links; no headings or tables, and a few short paragraphs at most. A follow-up about the same item may lean on what you answered before: if you no longer have that, look again rather than guess. When you need their decision instead (a product call, a trade-off, something only they know), ask with `desk_inquire` and everything it needs (see "Asking in the desk"), with `from` exactly "Review Desk coordinator": never a bare question, in `desk_answer` or anywhere else. Then end your turn without polling `desk_inquiry`: the desk wakes you with `My answer to your question <id> ("…"): "…"` or that they dismissed it (decide yourself). Answering an ask that way, `desk_answer` it with one line ("I asked you in the desk: …"). A wake can carry an ask and Merging news together: answer the ask, then go on as above.
+Always answer with `desk_answer`: the ask's id and your answer, which they read in their chat with you beside what they asked about (it notifies them too). Lead with the answer in one sentence (yes, no, done, or what you found), then, if it helps, short paragraphs or a list of what you checked or did; `code` for identifiers, files and commands, a ``` block for a few lines of code, bare https URLs for links; no headings or tables, and a few short paragraphs at most. A follow-up about the same item may lean on what you answered before: if you no longer have that, look again rather than guess. When you need their decision instead (a product call, a trade-off, something only they know), ask with `desk_inquire` and everything it needs (see "Asking in the desk"), with `from` exactly "Inbox coordinator": never a bare question, in `desk_answer` or anywhere else. Then end your turn without polling `desk_inquiry`: the desk wakes you with `My answer to your question <id> ("…"): "…"` or that they dismissed it (decide yourself). Answering an ask that way, `desk_answer` it with one line ("I asked you in the desk: …"). A wake can carry an ask and Merging news together: answer the ask, then go on as above.
 
-**Putting a PR on their desk.** `desk_add` with `from` exactly "Review Desk coordinator", as `desk_inquire`. It's your opinion that the user should look; Claude sorts it by their policy.
+**Putting a PR on their desk.** `desk_add` with `from` exactly "Inbox coordinator", as `desk_inquire`. It's your opinion that the user should look; Claude sorts it by their policy.
 
 The user (from claude.ai, their phone or `claude attach`) and their other sessions can message you too: answer them, and when they ask, help them shape the policy and the rules as above: draft, show, and save only on their yes. Leave their own triage choices alone unless they ask.
 

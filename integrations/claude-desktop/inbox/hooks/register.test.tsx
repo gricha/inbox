@@ -1,10 +1,10 @@
 import { expect, test } from "claude-code/testing";
 
 const PANE = {
-  plugin: "review-desk",
+  plugin: "inbox",
   component: "Pane",
-  requestId: "review-desk",
-  props: { title: "Review Desk", isFocused: false, bodyColumns: 80, placement: "dock", scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  requestId: "inbox",
+  props: { title: "Inbox", isFocused: false, bodyColumns: 80, placement: "dock", scroll: { offset: 0, bodyRows: 30 }, view: {} },
 } as const;
 
 const card = (id: string, title: string, why: string) => ({

@@ -731,17 +731,17 @@ test("agents: Claude Code's status, and connect", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
   Object.assign(process.env, { HOME: home, USERPROFILE: home, PATH: path.join(home, "empty") });
   try {
-    fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { "review-desk": { type: "http" } } }));
+    fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { type: "http" } } }));
     const before = await t.json("/api/agents");
     assert.equal(before.driver, "claude-code");
     assert.deepEqual(before.mcp, {
       connected: true,
-      command: "claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp",
+      command: "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp",
     });
     assert.equal(before.skill.state, "missing");
     const after = await t.json("/api/agents/connect", { method: "POST" });
     assert.equal(after.skill.state, "installed");
-    assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "review-desk", "SKILL.md")));
+    assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "inbox", "SKILL.md")));
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
@@ -1183,13 +1183,12 @@ test(
         [
           502,
           {
-            error:
-              "claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp",
+            error: "claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user inbox http://localhost:47823/mcp",
             tag: "Upstream",
           },
         ],
       );
-      const skill = path.join(home, ".claude", "skills", "review-desk", "SKILL.md");
+      const skill = path.join(home, ".claude", "skills", "inbox", "SKILL.md");
       fs.rmSync(skill);
       fs.mkdirSync(skill);
       const broken = await t.req("/api/agents");

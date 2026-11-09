@@ -1,5 +1,5 @@
 {
-  "name": "review-desk",
+  "name": "inbox",
   "owner": { "name": "Greg Pstrucha" },
-  "plugins": [{ "name": "review-desk", "source": "./integrations/claude-desktop/review-desk" }]
+  "plugins": [{ "name": "inbox", "source": "./integrations/claude-desktop/inbox" }]
 }

@@ -3083,13 +3083,13 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 const linked = new Set(["claude-code mcp"]);
 function agentStatus(): AgentStatus {
   const driver = "claude-code";
-  const command = "claude mcp add --transport http --scope user review-desk http://localhost:47823/mcp";
+  const command = "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp";
   const skills = `${homedir()}/.claude/skills`;
   const mcp = { connected: linked.has(`${driver} mcp`), command };
   const skill: AgentStatus["skill"] = {
     state: linked.has(`${driver} skill`) ? "installed" : "missing",
-    path: `${skills}/review-desk/SKILL.md`,
-    command: `mkdir -p ${skills} && cp -R skills/review-desk ${skills}/`,
+    path: `${skills}/inbox/SKILL.md`,
+    command: `mkdir -p ${skills} && cp -R skills/inbox ${skills}/`,
   };
   return { driver, mcp, skill, ...plan(mcp, skill) };
 }

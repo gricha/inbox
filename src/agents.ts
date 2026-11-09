@@ -1,4 +1,4 @@
-// The agent you work in (Settings → Claude): whether it has the desk's MCP tools and the Review Desk skill, and connecting it.
+// The agent you work in (Settings → Claude): whether it has the desk's MCP tools and the Inbox skill, and connecting it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,12 +10,15 @@ import { defaultHome } from "./home.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
-const SKILL = fileURLToPath(new URL("../skills/review-desk", import.meta.url));
+const SKILL = fileURLToPath(new URL("../skills/inbox", import.meta.url));
 export const SKILL_MD = path.join(SKILL, "SKILL.md");
+const NAME = "inbox"; // the MCP server's name, and the skill's folder
+const OLD = "review-desk"; // both, before the rename to Inbox
 
 interface Driver {
   bin: string;
   add: (url: string) => string[]; // registers the desk's MCP server for every project
+  remove: (name: string) => string[]; // and unregisters one
   servers: (home: string) => unknown; // the agent's user-level MCP servers, by name
   skills: (home: string) => string;
 }
@@ -24,14 +27,16 @@ const DRIVERS = {
   // ~/.claude.json's top-level mcpServers is Claude Code's user scope.
   "claude-code": {
     bin: "claude",
-    add: (url) => ["mcp", "add", "--transport", "http", "--scope", "user", "review-desk", url],
+    add: (url) => ["mcp", "add", "--transport", "http", "--scope", "user", NAME, url],
+    remove: (name) => ["mcp", "remove", "--scope", "user", name],
     servers: (home) => (JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")) as { mcpServers?: unknown }).mcpServers,
     skills: (home) => path.join(home, ".claude", "skills"),
   },
   // Codex reads user skills from ~/.agents/skills (developers.openai.com/codex/skills).
   codex: {
     bin: "codex",
-    add: (url) => ["mcp", "add", "review-desk", "--url", url],
+    add: (url) => ["mcp", "add", NAME, "--url", url],
+    remove: (name) => ["mcp", "remove", name],
     servers: (home) => parse(fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8")).mcp_servers,
     skills: (home) => path.join(home, ".agents", "skills"),
   },
@@ -39,11 +44,12 @@ const DRIVERS = {
 export type DriverId = keyof typeof DRIVERS;
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
+const commandOf = (d: Driver, args: string[]) => [d.bin, ...args].map(sh).join(" ");
 
 // No config yet, or one that doesn't parse: not registered, and registering will say what's wrong.
-function registered(d: Driver, home: string): boolean {
+function registered(d: Driver, home: string, name = NAME): boolean {
   const servers = Result.getOrNull(Result.try({ try: () => d.servers(home), catch: () => null }));
-  return typeof servers === "object" && servers !== null && "review-desk" in servers;
+  return typeof servers === "object" && servers !== null && name in servers;
 }
 
 // The skill the desk ships: not reading it is a broken install (a defect), never the owner's to fix.
@@ -74,8 +80,8 @@ export const status = Effect.fn("agents.status")(function* (driver: DriverId, ur
   const d = DRIVERS[driver];
   const home = os.homedir();
   const parent = d.skills(home);
-  const dir = path.join(parent, "review-desk");
-  const mcp = { connected: registered(d, home), command: [d.bin, ...d.add(url)].map(sh).join(" ") };
+  const dir = path.join(parent, NAME);
+  const mcp = { connected: registered(d, home), command: commandOf(d, d.add(url)) };
   const skill = {
     state: yield* skillState(dir),
     path: path.join(dir, "SKILL.md"),
@@ -133,21 +139,62 @@ const copySkill = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<vo
   }
 });
 
-// Connect's copy goes stale whenever the skill changes. Only on ~/.inbox: a scratch or test desk never writes to ~/.claude.
-export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string): Effect.fn.Return<string[], FsError> {
+// The copy Connect made before the rename: the skill's own files alone, named review-desk. Anything else there is the owner's.
+const oldCopy = Effect.fnUntraced(function* (parent: string): Effect.fn.Return<string | null> {
+  const dir = path.join(parent, OLD);
+  const files = Result.getOrNull(Result.try({ try: () => fs.readdirSync(dir), catch: () => null }));
+  const shipped = yield* bundled;
+  if (!files?.includes("SKILL.md") || files.some((f) => !shipped.includes(f))) return null;
+  const text = Result.getOrElse(Result.try({ try: () => fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"), catch: () => "" }), () => "");
+  return /^---\r?\nname: review-desk\r?\n/.test(text) ? dir : null;
+});
+
+// What the desk installed before the rename, under the new names: the skill's copy in <skills>/inbox and the MCP server as
+// inbox at `url`, the old ones gone. What it did, in words; nothing for an agent it never connected.
+const migrate = Effect.fnUntraced(function* (d: Driver, url: string, timeout: number): Effect.fn.Return<string[], FsError | RunError> {
   const home = os.homedir();
-  if (path.resolve(deskHome) !== defaultHome(home)) return [];
+  const parent = d.skills(home);
   const done: string[] = [];
-  for (const d of Object.values(DRIVERS)) {
-    const dir = path.join(d.skills(home), "review-desk");
-    if ((yield* skillState(dir)) !== "outdated") continue; // missing: an agent you didn't connect
-    yield* copySkill(dir);
-    done.push(path.join(dir, "SKILL.md"));
+  const old = yield* oldCopy(parent);
+  if (old) {
+    const dir = path.join(parent, NAME);
+    if ((yield* skillState(dir)) !== "installed") yield* copySkill(dir);
+    yield* Effect.try({
+      try: () => {
+        fs.rmSync(old, { recursive: true, force: true });
+      },
+      catch: fsError("remove", old),
+    });
+    done.push(`moved the Inbox skill from ${old} to ${dir}`);
+  }
+  if (registered(d, home, OLD)) {
+    if (!registered(d, home)) yield* run(d.bin, d.add(url), commandOf(d, d.add(url)), timeout);
+    yield* run(d.bin, d.remove(OLD), commandOf(d, d.remove(OLD)), timeout);
+    done.push(`renamed ${d.bin}'s MCP server ${OLD} to ${NAME}`);
   }
   return done;
 });
 
-// Installs or refreshes the skill, then registers the MCP server if it isn't yet.
+// Connect's copy goes stale whenever the skill changes, and what Connect did before the rename is renamed. Only on
+// ~/.inbox: a scratch or test desk never writes to ~/.claude. What it did, in words.
+export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (
+  deskHome: string,
+  url: string,
+): Effect.fn.Return<string[], FsError | RunError> {
+  const home = os.homedir();
+  if (path.resolve(deskHome) !== defaultHome(home)) return [];
+  const done: string[] = [];
+  for (const d of Object.values(DRIVERS)) {
+    done.push(...(yield* migrate(d, url, TIMEOUT)));
+    const dir = path.join(d.skills(home), NAME);
+    if ((yield* skillState(dir)) !== "outdated") continue; // missing: an agent you didn't connect
+    yield* copySkill(dir);
+    done.push(`refreshed the Inbox skill at ${path.join(dir, "SKILL.md")}`);
+  }
+  return done;
+});
+
+// Installs or refreshes the skill, registers the MCP server if it isn't yet, then lets go of the names from before the rename.
 export const connect = Effect.fn("agents.connect")(function* (
   driver: DriverId,
   url: string,
@@ -157,5 +204,6 @@ export const connect = Effect.fn("agents.connect")(function* (
   const s = yield* status(driver, url);
   if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));
   if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command, timeout);
+  yield* migrate(d, url, timeout);
   return yield* status(driver, url);
 });

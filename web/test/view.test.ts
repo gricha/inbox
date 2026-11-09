@@ -977,8 +977,8 @@ test("lineName and linesLabel name lines as the chat shows them; fromName shows 
   assert.equal(linesLabel({ path, line: 18, side: "old", start: { line: 17, side: "old" }, head }), "plan.ts:17\u201318, removed");
   assert.equal(linesLabel({ path, line: 23, side: "new", start: { line: 17, side: "old" }, head }), "plan.ts:17\u201323");
   assert.equal(linesLabel({ path, line: 23, side: "new", head, note: true }), "Claude's note on plan.ts:23");
-  assert.equal(fromName("Review Desk coordinator"), "Your agent");
-  assert.equal(fromName("Review Desk coordinator", false), "your agent");
+  assert.equal(fromName("Inbox coordinator"), "Your agent");
+  assert.equal(fromName("Inbox coordinator", false), "your agent");
   assert.equal(fromName("sentry: rollout"), "sentry: rollout");
 });
 

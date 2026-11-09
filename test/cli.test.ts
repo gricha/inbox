@@ -497,10 +497,10 @@ test("connect claude prints what's missing and the commands that fix it", async 
   assert.deepEqual(lines.slice(0, 3), [
     "# Claude Code (desk connect claude --apply does this)",
     "# MCP tools: not connected",
-    "claude mcp add --transport http --scope user review-desk http://localhost:47960/mcp",
+    "claude mcp add --transport http --scope user inbox http://localhost:47960/mcp",
   ]);
   assert.equal(lines[3], "# Skill: not installed");
-  assert.match(lines[4]!, /^mkdir -p .*\.claude.skills'? && cp -R .*review-desk'? .*\.claude.skills'?\/$/);
+  assert.match(lines[4]!, /^mkdir -p .*\.claude.skills'? && cp -R .*inbox'? .*\.claude.skills'?\/$/);
 });
 
 test("connect without an argument connects Claude Code; codex connects Codex", async () => {
@@ -509,7 +509,7 @@ test("connect without an argument connects Claude Code; codex connects Codex", a
   const codex = await withEnv(scratchHome(), () => run(["connect", "codex"]));
   assert.equal(codex.code, 0, codex.err);
   assert.match(codex.out, /^# Codex \(desk connect codex --apply does this\)\n/);
-  assert.match(codex.out, /^codex mcp add review-desk --url http:\/\/localhost:47960\/mcp$/m);
+  assert.match(codex.out, /^codex mcp add inbox --url http:\/\/localhost:47960\/mcp$/m);
   assert.equal((await withEnv(scratchHome(), () => run(["connect", "vim"]))).code, 2);
 });
 
@@ -520,24 +520,24 @@ test("connect --apply registers the desk and installs the skill", { skip: proces
   mkdirSync(bin);
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/claude-args"\nprintf '{"mcpServers":{"review-desk":{}}}' > "$HOME/.claude.json"\n`,
+    `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/claude-args"\nprintf '{"mcpServers":{"inbox":{}}}' > "$HOME/.claude.json"\n`,
   );
   chmodSync(join(bin, "claude"), 0o755);
   const missing = await withEnv({ ...env, PATH: tmp }, () => run(["connect", "--apply"]));
   assert.equal(missing.code, 1);
   assert.equal(
     missing.err,
-    "desk: claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user review-desk http://localhost:47960/mcp\n",
+    "desk: claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user inbox http://localhost:47960/mcp\n",
   );
   const r = await withEnv({ ...env, PATH: bin }, () => run(["connect", "--apply"]));
   assert.equal(r.code, 0, r.err);
   assert.equal(
     readFileSync(join(env.HOME, "claude-args"), "utf8"),
-    "mcp\nadd\n--transport\nhttp\n--scope\nuser\nreview-desk\nhttp://localhost:47960/mcp\n",
+    "mcp\nadd\n--transport\nhttp\n--scope\nuser\ninbox\nhttp://localhost:47960/mcp\n",
   );
-  const skill = join(env.HOME, ".claude", "skills", "review-desk", "SKILL.md");
+  const skill = join(env.HOME, ".claude", "skills", "inbox", "SKILL.md");
   assert.equal(r.out, `✓ Claude Code: MCP tools connected, skill installed (${skill})\n`);
-  assert.equal(readFileSync(skill, "utf8"), readFileSync(join(ROOT, "skills", "review-desk", "SKILL.md"), "utf8"));
+  assert.equal(readFileSync(skill, "utf8"), readFileSync(join(ROOT, "skills", "inbox", "SKILL.md"), "utf8"));
 });
 
 test("install and uninstall are macOS-only", async () => {

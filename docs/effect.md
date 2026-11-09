@@ -267,7 +267,7 @@ Each runs an Effect whose failures it answers for, and nothing gets past it unha
   "The operation was aborted due to timeout". `ls` lists the boards on a `NotFound` and `config` works offline on
   `DeskDown`, both by tag. `status --short` ends in `Effect.catchCause`: whatever happens it prints a status word, exit
   0, and tells a config error from starting by the 503's `reason`. `serve` yields `startDesk`, and refreshes the skill
-  through the desk's runner: a file it can't write is logged in its words ("couldn't refresh the Review Desk skill: …"),
+  through the desk's runner: a file it can't write is logged in its words ("couldn't refresh the Inbox skill: …"),
   and a bug in it is the runner's, logged and reported.
 - **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged (the desk's log at `/mcp`,
   stderr for `desk mcp`). Tools take no signal: `desk_inquiry`'s wait is an `Effect.sleep` loop of at most a minute.

@@ -1265,7 +1265,7 @@ test("the coordinator's desk_add is its opinion: no Today floor; on no other boa
   const t = await setup([myPr(100, { ci: "green" }), needs(1), needs(2)], { settings: QUIET });
   c.after(t.cleanup);
   await run(t.desk.sync());
-  const coordinator = "Review Desk coordinator";
+  const coordinator = "Inbox coordinator";
   await run(t.desk.add("acme/web#1", "waits on web#100: no review in 3 days", coordinator));
   let q = runSync(t.desk.queue());
   assert.equal(
@@ -1296,7 +1296,7 @@ test("a coordinator's desk_add on no other board stays on Added after you act on
   c.after(t.cleanup);
   t.gh.items.set("acme/api#77", makeItem({ number: 77, author: "carol" }));
   await run(t.desk.sync());
-  await run(t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Review Desk coordinator"));
+  await run(t.desk.add("acme/api#77", "carol's fix for the flaky retry", "Inbox coordinator"));
   runSync(t.desk.act("api#77", "done"));
   let q = runSync(t.desk.queue());
   assert.deepEqual(
