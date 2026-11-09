@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
+import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
@@ -113,6 +113,7 @@ import { agentDir, agentDown, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type Fe
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
+import { checksView } from "./checks.ts";
 import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
@@ -134,6 +135,7 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
 const AI_AT_ONCE = 2;
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
+const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
@@ -313,6 +315,14 @@ export class Desk {
   aiLastFailed: string | null = null; // the PR of the latest: its retries aren't more in a row
   aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Deferred.Deferred<PrText, FetchPrError>>(); // the diffs on their way
+  // PRs' checks one by one, by `<id> <node id> <detail_at>`: kept until a sync next refreshes the PR, so a review's list
+  // is no older than its "CI passing"; a failed fetch isn't kept, and callers asking at once share one.
+  checkRuns = Effect.runSync(
+    Cache.makeWith((key: string) => this.gh.api.checks(key.split(" ")[1]!), {
+      capacity: CHECKS_KEPT,
+      timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity),
+    }),
+  );
   warming = false;
   warmAgain = false; // a sync landed while warming: go round once more
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
@@ -1656,7 +1666,9 @@ export class Desk {
           onSuccess: (t) => Effect.succeed({ files: t.files, head: t.head ?? null, error: null }),
         }),
       );
-      const [talk, got] = yield* Effect.all([this.convos.view(id, !ahead), diff], { concurrency: "unbounded" });
+      const [talk, got, checks] = yield* Effect.all([this.convos.view(id, !ahead), diff, this.checksOf(id)], {
+        concurrency: "unbounded",
+      });
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       if (!ahead && this.autoAi() && this.wantsAi(e, snap)) this.startAi(id);
@@ -1683,8 +1695,21 @@ export class Desk {
         activity: d.activity,
         stack: d.stack,
         asks: this.asks(id),
+        ...checks,
         ...talk,
       };
+    });
+  }
+
+  // A PR's checks for its review, asked of GitHub only when one is opened or fetched ahead: a sync asks for none. What
+  // fails the fetch is checks_error, in GitHub's words.
+  checksOf(id: string): Effect.Effect<Pick<ReviewView, "checks" | "checks_error">> {
+    return Effect.suspend(() => {
+      const it = this.snapshot().entries.get(id)!.item;
+      return Effect.match(Cache.get(this.checkRuns, `${id} ${it.node_id} ${it.detail_at}`), {
+        onFailure: (e) => ({ checks: null, checks_error: e.message }),
+        onSuccess: (list) => ({ checks: checksView(list), checks_error: null }),
+      });
     });
   }
 

@@ -3,9 +3,9 @@
 import { Effect, Result } from "effect";
 import { buildAreas, type AreaPr } from "../areas.ts";
 import type { GitHubRateLimited, GitHubReadError } from "../errors.ts";
-import type { Areas, Context, Item, Reviewer, ReviewState } from "../types.ts";
+import type { Areas, Check, Context, Item, Reviewer, ReviewState } from "../types.ts";
 import { createClient, decode } from "./client.ts";
-import { isBot, login, normalize, toHit, type Actor, type RawHit, type RawNode } from "./normalize.ts";
+import { isBot, login, normalize, toChecks, toHit, type Actor, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
 import {
   branchPrs as branchPrsQuery,
   DETAILS_REVIEW,
@@ -13,6 +13,7 @@ import {
   FILES_SEARCH,
   LIGHT_SEARCH,
   LOOKUP,
+  PR_CHECKS,
   PR_CONTEXT,
   REVIEWERS,
   TEAMS,
@@ -77,6 +78,7 @@ export interface GitHub {
   // Threads updated since `since`, read or not. Read only: nothing is marked read.
   notifications(opts: { since: string | null; last_modified: string | null }): Effect.Effect<NotificationPage, GitHubReadError>;
   prContext(nodeId: string): Effect.Effect<PrContext, GitHubReadError>; // a PR's threads, reviews, comments and recent commits
+  checks(nodeId: string): Effect.Effect<Check[], GitHubReadError>; // a PR's head commit's checks one by one, in GitHub's order
   // For stacks, PRs by exact branch in one repo: up, the PR whose head is the branch (the repo's own, not a fork's); down,
   // open PRs based on it. pr: the PR whose number `branch` holds, any state; none for an issue or a number not there.
   branchPrs(repo: string, probes: { dir: "up" | "down" | "pr"; branch: string }[]): Effect.Effect<SearchHit[], GitHubReadError>;
@@ -146,6 +148,19 @@ function parsePrContext(data: RawPrContext): PrContext {
     })),
   };
 }
+interface RawChecks {
+  node: {
+    commits?: {
+      nodes: {
+        commit: {
+          statusCheckRollup: {
+            contexts: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawCheck | null)[] };
+          } | null;
+        };
+      }[];
+    };
+  } | null;
+}
 interface RawThread {
   id: string;
   reason: string;
@@ -181,6 +196,7 @@ interface TeamsData {
 
 const RECENT = 20; // your latest PRs' titles, for the judge
 const PROBES = 40; // stack probes (aliases) a query
+const CHECK_PAGES = 5; // 100 checks a page: more than 500 on one commit aren't listed
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
@@ -388,6 +404,22 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     });
   });
 
+  const checks = Effect.fn("GitHub.checks")(function* (id: string) {
+    const raw: RawCheck[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < CHECK_PAGES; page++) {
+      const data: RawChecks = yield* client.query<RawChecks>(PR_CHECKS, { id, after });
+      const next = yield* decode(() => {
+        const got = data.node?.commits?.nodes[0]?.commit.statusCheckRollup?.contexts;
+        for (const c of got?.nodes ?? []) if (c) raw.push(c);
+        return got?.pageInfo.hasNextPage ? got.pageInfo.endCursor : null;
+      });
+      if (!next) break;
+      after = next;
+    }
+    return yield* decode(() => toChecks(raw));
+  });
+
   const notifications = Effect.fn("GitHub.notifications")(function* (feed: { since: string | null; last_modified: string | null }) {
     const threads: NotificationThread[] = [];
     const head = (h: Headers, modified: boolean): NotificationPage => ({
@@ -423,6 +455,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     areas,
     notifications,
     prContext: (id) => client.query<RawPrContext>(PR_CONTEXT, { id }).pipe(Effect.flatMap((d) => decode(() => parsePrContext(d)))),
+    checks,
     branchPrs,
     lookup,
     reviewers,

@@ -1,7 +1,7 @@
 // GraphQL nodes -> Item / SearchHit.
 
 import { requiresOf } from "../deps.ts";
-import type { Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
+import type { Check, Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
 export interface Actor {
@@ -102,7 +102,9 @@ export interface RawCheck {
   context?: string;
   state?: string;
   status?: string; // a check run's: QUEUED, IN_PROGRESS, COMPLETED, …
-  isRequired?: boolean; // for this PR's base branch; only asked of your own PRs
+  isRequired?: boolean; // for this PR's base branch; only asked of your own PRs, and of the PR whose review lists its checks
+  permalink?: string; // a check run's page on GitHub; only asked for a review's list
+  targetUrl?: string | null; // where a commit status points, which is its sender's to choose; only asked for a review's list
 }
 // Cancelled and skipped runs aren't the code's fault, so they don't count.
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]);
@@ -110,6 +112,34 @@ const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c
 const checkName = (c: RawCheck) => (c.__typename === "CheckRun" ? c.name : c.context) ?? "";
 const checkRunning = (c: RawCheck) =>
   c.__typename === "CheckRun" ? c.status !== undefined && c.status !== "COMPLETED" : c.state === "PENDING" || c.state === "EXPECTED";
+
+// Only an https link is one, as its parsed href and with no userinfo: a status's target is whatever its sender set.
+function httpsOnly(url: string | null | undefined): string {
+  const u = URL.parse(url ?? "");
+  return u?.protocol === "https:" && !u.username && !u.password ? u.href : "";
+}
+
+// A PR's checks as its review lists them, in GitHub's order. Cancelled says so: it didn't fail, and it didn't pass either.
+export function toChecks(checks: RawCheck[]): Check[] {
+  const some = checks.some((c) => c.isRequired);
+  return checks.map((c) => {
+    const said = (c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "";
+    return {
+      name: checkName(c),
+      state: checkFailed(c)
+        ? "failing"
+        : checkRunning(c)
+          ? "running"
+          : said === "SUCCESS"
+            ? "passing"
+            : said === "CANCELLED"
+              ? "cancelled"
+              : "skipped",
+      optional: some && !c.isRequired,
+      url: httpsOnly(c.__typename === "CheckRun" ? c.permalink : c.targetUrl),
+    };
+  });
+}
 
 // CI as the merge sees it: in a repo that marks some checks required, failing checks that aren't don't make it red.
 function ciOf(rollup: string | undefined, checks: RawCheck[] | null): { ci: Ci; optional: string[] } {

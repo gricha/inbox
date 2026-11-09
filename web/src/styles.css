@@ -4475,6 +4475,68 @@ button.s-edit:hover:not(:disabled) {
   font-size: 13px;
 }
 
+/* The PR's checks: one line saying where CI stands, its chevron at the panel's edge so its words start where the other
+   headings do; open, each check's name and, in words, its state. */
+.rv-checks.shut .rv-side-head {
+  margin-bottom: 0;
+}
+
+.rv-checks-lead {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rv-checks-lead:hover,
+.rv-checks-lead:hover .rv-chev {
+  color: var(--ink);
+}
+
+.rv-check {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+a.rv-check:hover {
+  background: var(--side-hover);
+  text-decoration: none;
+}
+
+.rv-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rv-check-state {
+  flex: none;
+}
+
+.rv-check-state:not(.t-bad) {
+  color: var(--pencil);
+}
+
+.rv-checks-err {
+  padding: 0 8px;
+}
+
 .back {
   display: inline-flex;
   align-items: center;
@@ -4732,6 +4794,21 @@ button.s-edit:hover:not(:disabled) {
 /* A long why wraps without leaving one word on a line of its own. */
 .rv-meta > .why {
   text-wrap: pretty;
+}
+
+/* "CI failing" opens the sidebar at its checks: the fact's own words and colour, underlined under the pointer. */
+.rv-fact-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rv-fact-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .rv-meta > span::before,

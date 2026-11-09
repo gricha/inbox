@@ -25,6 +25,8 @@ import type {
 } from "../../src/types.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview } from "../../src/review.ts";
 
+const ORDER = ["failing", "cancelled", "running", "passing", "skipped"];
+
 const child = spawn(
   process.execPath,
   ["--disable-warning=ExperimentalWarning", fileURLToPath(new URL("../mock/server.ts", import.meta.url))],
@@ -310,6 +312,42 @@ test("resolved items sit apart from the queue's groups and boards; items carry t
   assert.deepEqual(
     o.connectors.map((c) => [c.id, c.name]),
     [["github", "GitHub"]],
+  );
+});
+
+test("a review's checks agree with its PR's CI: failing first on a red one, with one running and the rest passing", async () => {
+  const checks = async (id: string) => (await call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}?ahead=1`)).data.checks;
+  const red = (await checks("oss/tinyhttp#205"))!;
+  assert.deepEqual([red.line, red.failing], ["3 failing, 1 running of 11 checks", true]);
+  const states = red.list.map((c) => c.state);
+  assert.deepEqual(
+    states,
+    states.toSorted((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b)),
+    "what's wrong first",
+  );
+  for (const state of ["failing", "running", "passing", "skipped"]) assert.ok(states.includes(state as (typeof states)[number]), state);
+  assert.ok(
+    red.list.every((c) => c.url.startsWith("https://")),
+    "each links to its page",
+  );
+  assert.deepEqual(
+    red.list.find((c) => c.name === "visual diff"),
+    {
+      name: "visual diff",
+      state: "failing",
+      optional: true,
+      url: "https://github.com/oss/tinyhttp/runs/20521",
+    },
+  );
+  assert.equal((await checks("acme/api#4127"))?.line, "CI passing · 11 checks");
+  assert.equal((await checks("acme/web#2301"))?.line, "3 running of 11 checks");
+  // Merging's failing check is the review's.
+  const { data: lane } = await call<InflightView>("GET", "/api/inflight");
+  const flying = lane.rows.find((r) => r.failing.length)!;
+  const listed = (await checks(flying.card.id))!.list.filter((c) => c.state === "failing" && !c.optional);
+  assert.deepEqual(
+    listed.map((c) => c.name),
+    flying.failing,
   );
 });
 

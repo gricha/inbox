@@ -746,11 +746,28 @@ export interface ReviewView {
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
   stack: Stack | null; // its stack, with it current
+  checks: Checks | null; // its head commit's checks, one by one; null: none ran, or they couldn't be fetched
+  checks_error: string | null; // they couldn't be fetched
   conversation: Conversation[]; // what reviewers said, those waiting on you first
   conversation_error: string | null; // it couldn't be fetched
   reading: boolean; // Claude is reading the ones waiting on you
   reading_error: string | null; // its last try on this PR failed
   asks: Ask[]; // yours to the coordinator about it, oldest first
+}
+
+// One check on a PR's head commit: a check run (an Actions job, an app's) or a commit status. Its name is untrusted GitHub text.
+export interface Check {
+  name: string;
+  state: "failing" | "cancelled" | "running" | "passing" | "skipped";
+  optional: boolean; // the base branch requires other checks and not this one: failing, it doesn't hold the merge back
+  url: string; // its page: a check run's on GitHub, a status's wherever it points; https only, "" for none
+}
+
+// A PR's checks as its review lists them, in the sidebar with its files.
+export interface Checks {
+  line: string; // all of them in one line: "CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"
+  failing: boolean; // a check that counts is failing: the line is red, as "CI failing" is
+  list: Check[]; // failing first, then cancelled, running, passing and skipped, each by name
 }
 
 // One conversation on a PR: a review thread, a comment on the PR, or a review's body. Every text is untrusted GitHub text.

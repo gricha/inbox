@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { GitHubRateLimited, GitHubReadError } from "../../src/errors.ts";
-import type { Areas, Context, Item, Reviewer } from "../../src/types.ts";
+import type { Areas, Check, Context, Item, Reviewer } from "../../src/types.ts";
 import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
@@ -167,6 +167,17 @@ export class FakeGitHub implements GitHub {
     return Effect.sync(() => {
       this.contextCalls.push(nodeId);
       return this.contexts.get(nodeId) ?? { threads: [], reviews: [], comments: [], commits: [] };
+    });
+  }
+
+  // A PR's checks, by node id; none unless a test sets them.
+  checkLists = new Map<string, Check[]>();
+  checkCalls: string[] = [];
+
+  checks(nodeId: string): Effect.Effect<Check[], GitHubReadError> {
+    return Effect.sync(() => {
+      this.checkCalls.push(nodeId);
+      return this.checkLists.get(nodeId) ?? [];
     });
   }
 

@@ -7,6 +7,7 @@ import {
   type ActivityEvent,
   type AiReview,
   type Card,
+  type Checks,
   type Conversation as Convo,
   type GitHubAction,
   type InflightRow,
@@ -22,7 +23,7 @@ import {
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
-import { blocks, inline, lead, unlinked } from "../prose.ts";
+import { blocks, inline, lead, unlinked, urlPlace } from "../prose.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -95,7 +96,11 @@ interface Sent {
 interface Fact {
   text: string;
   tone: string; // t-bad, t-warn, or "" for pencil
+  go?: (() => void) | undefined; // a click on it: CI's shows its checks
 }
+
+// Sorted away, resolved or calm in Merging, a PR's problems go grey: its header's facts, and its checks in the sidebar.
+const calm = (c: Card) => cls(`b-${c.bucket}`, (c.status !== "active" || c.resolved !== null || c.bucket === "hide") && "dim");
 
 const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
@@ -198,6 +203,7 @@ export function Review({
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu
+  const [checksOpen, setChecksOpen] = useState(false); // the sidebar's checks, listed: every PR opens with them in one line
   const [writing, setWriting] = useState(false); // Request changes, being written
   // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it.
   const [comment, setComment] = useState("");
@@ -495,6 +501,15 @@ export function Review({
     setStored(SIDE, show ? "open" : "folded");
   }
 
+  // The facts' "CI failing": the sidebar, opened if it's folded, with the checks listed.
+  function showChecks() {
+    if (!showSide) toggleSide();
+    setChecksOpen(true);
+    requestAnimationFrame(() => {
+      document.querySelector(".rv-checks")?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   function askAi() {
     if (!v || busy === "ai") return;
     if (v.generating) {
@@ -585,7 +600,7 @@ export function Review({
   const approvals = approvers.length;
   // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
   const facts: Fact[] = [
-    { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "" },
+    { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "", go: view.checks ? showChecks : undefined },
     {
       text:
         item.review_decision === "approved" && approvals
@@ -903,11 +918,12 @@ export function Review({
         )}
       </div>
       {showSide && (
-        <aside className="rv-side" aria-label="Stack, files and recent activity">
+        <aside className="rv-side" aria-label="Stack, checks, files and recent activity">
           <button type="button" className="act rv-side-toggle" title="Hide the sidebar" onClick={toggleSide}>
             Hide
           </button>
           {view.stack && <StackList stack={view.stack} />}
+          <ChecksList checks={view.checks} error={view.checks_error} tone={calm(card)} open={checksOpen} setOpen={setChecksOpen} />
           {list.length > 0 && (
             <nav className="rv-files" aria-label="Files in reading order">
               <h2 className="rv-side-head">
@@ -976,14 +992,7 @@ function Head({
   // What it waits on and the coordinator's latest note, as Merging says it.
   const lane = row?.state === "open" && (row.waits_on || row.note) ? row : null;
   return (
-    // Sorted away, resolved or calm in Merging, its problems go grey; waiting on you in Merging, they keep their colour.
-    <header
-      className={cls(
-        "rv-head",
-        `b-${card.bucket}`,
-        (card.status !== "active" || card.resolved !== null || card.bucket === "hide") && "dim",
-      )}
-    >
+    <header className={cls("rv-head", calm(card))}>
       <p className="rv-ref">
         <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
           <span className="ref-ink">
@@ -1005,7 +1014,13 @@ function Head({
         {why && (owed ? <Owed why={why} /> : <span className="why">{why}</span>)}
         {shownFacts.map((f) => (
           <span key={f.text} className={cls("fact-word", f.tone)}>
-            {f.text}
+            {f.go ? (
+              <button type="button" className="rv-fact-btn" title="Show its checks" onClick={f.go}>
+                {f.text}
+              </button>
+            ) : (
+              f.text
+            )}
           </span>
         ))}
       </p>
@@ -1150,6 +1165,7 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
       </div>
       {side && (
         <aside className="rv-side" aria-hidden="true">
+          {card && card.ci !== "none" && <SkLines count={1} className="sk-files" />}
           <nav className="rv-files">
             <h2 className="rv-side-head">Files</h2>
             <SkLines count={5} className="sk-files" />
@@ -1157,6 +1173,81 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
         </aside>
       )}
     </div>
+  );
+}
+
+// The PR's checks: one line that says where CI stands, opening to each check by name, its state in words and its page.
+function ChecksList({
+  checks,
+  error,
+  tone,
+  open,
+  setOpen,
+}: {
+  checks: Checks | null;
+  error: string | null;
+  tone: string; // calm(): a sorted-away PR's failing checks are grey, as its "CI failing" is
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) {
+  if (error)
+    return (
+      <section className="rv-checks" aria-label="Checks">
+        <p className="rv-checks-err t-bad">Couldn't load the checks: {error}</p>
+      </section>
+    );
+  if (!checks) return null;
+  return (
+    <section className={cls("rv-checks", tone, !open && "shut")} aria-label="Checks">
+      <h2 className="rv-side-head">
+        <button
+          type="button"
+          className="rv-checks-lead"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          <span className={cls("fact-word", checks.failing && "t-bad")}>{checks.line}</span>
+          <span className="rv-chev" aria-hidden="true">
+            ›
+          </span>
+        </button>
+      </h2>
+      {open && (
+        <ol>
+          {checks.list.map((c, i) => {
+            const words = c.state === "failing" && c.optional ? "failing, not required" : c.state;
+            const row = (
+              <>
+                <span className="rv-check-name">{c.name}</span>
+                <span className={cls("rv-check-state", "fact-word", c.state === "failing" && !c.optional && "t-bad")}>{words}</span>
+              </>
+            );
+            return (
+              // oxlint-disable-next-line react/no-array-index-key -- two checks can share a name, and the list never reorders in place
+              <li key={i}>
+                {c.url ? (
+                  <a
+                    className="rv-check"
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`${c.name}: ${words}\n${urlPlace(c.url)}`}
+                  >
+                    {row}
+                  </a>
+                ) : (
+                  <span className="rv-check" title={`${c.name}: ${words}`}>
+                    {row}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 

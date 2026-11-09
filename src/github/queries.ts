@@ -148,6 +148,24 @@ export const PR_CONTEXT = `query($id: ID!) {
   }
 }`;
 
+// A PR's checks one by one, for its review: each check run and commit status on its head commit, whether the base branch
+// requires it, and its page. 100 a page.
+export const PR_CHECKS = `query($id: ID!, $after: String) {
+  ${RATE}
+  node(id: $id) {
+    ... on PullRequest {
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          __typename
+          ... on CheckRun { name status conclusion permalink isRequired(pullRequestId: $id) }
+          ... on StatusContext { context state targetUrl isRequired(pullRequestId: $id) }
+        }
+      } } } } }
+    }
+  }
+}`;
+
 // Who you can ask to review your PR: GitHub's suggestions, then people and the owner org's teams matching what you typed.
 // A user's repo has no org: that part comes back null.
 export const REVIEWERS = `query($owner: String!, $name: String!, $number: Int!, $q: String) {

@@ -1531,6 +1531,92 @@ const SHOTS: Shot[] = [
   },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
   { name: "review-stack", go: review("acme/api#4154") },
+  // A PR's checks, in the sidebar with its files: one line that says where CI stands, red while one that counts is failing;
+  // open, each check by name with its state in words and a link to its page, what's wrong first. A click on the facts' "CI
+  // failing" opens the sidebar at them.
+  {
+    name: "review-checks",
+    go: async (page) => {
+      await review("oss/tinyhttp#205")(page);
+      const side = page.locator(".rv-side");
+      if (!(await side.isVisible())) await page.locator(".rv-side-show").click(); // folded where the column is narrow
+      const lead = page.locator(".rv-checks-lead");
+      if (!(await lead.count())) {
+        failures.push("review-checks: the sidebar has no checks");
+        return;
+      }
+      const closed = await page.evaluate<{
+        open: string | null;
+        line: string;
+        lines: number;
+        red: boolean;
+        rows: number;
+        above: boolean;
+      }>(`(() => {
+        const lead = document.querySelector(".rv-checks-lead"), words = lead.querySelector(".fact-word");
+        const probe = document.createElement("span");
+        probe.style.color = "var(--red)";
+        document.body.append(probe);
+        const red = getComputedStyle(probe).color;
+        probe.remove();
+        const part = document.querySelector(".rv-checks").getBoundingClientRect();
+        return {
+          open: lead.getAttribute("aria-expanded"),
+          line: words.textContent,
+          lines: Math.round(words.getBoundingClientRect().height / parseFloat(getComputedStyle(words).lineHeight)),
+          red: getComputedStyle(words).color === red,
+          rows: document.querySelectorAll(".rv-check").length,
+          above: !!document.querySelector(".rv-side .rv-checks") && part.bottom <= document.querySelector(".rv-files").getBoundingClientRect().top,
+        };
+      })()`);
+      if (closed.open !== "false" || closed.rows) failures.push(`review-checks: the checks don't open closed: ${JSON.stringify(closed)}`);
+      if (closed.line !== "3 failing, 1 running of 11 checks" || closed.lines !== 1 || !closed.red)
+        failures.push(`review-checks: closed, the checks read ${JSON.stringify(closed)}`);
+      if (!closed.above) failures.push("review-checks: the checks aren't in the sidebar above its files");
+      // With the sidebar hidden, the facts' "CI failing" opens it with the checks listed.
+      await side.locator(".rv-side-toggle").click();
+      const fact = page.locator(".rv-meta .rv-fact-btn");
+      if ((await fact.textContent()) !== "CI failing")
+        failures.push(`review-checks: the fact reads ${JSON.stringify(await fact.textContent())}`);
+      await fact.click();
+      await page.waitForTimeout(250);
+      if (!(await side.isVisible()) || (await lead.getAttribute("aria-expanded")) !== "true")
+        failures.push("review-checks: a click on CI failing doesn't open the sidebar at its checks");
+      const rows = await page.evaluate<{ name: string; state: string; href: string | null; red: boolean; seen: boolean }[]>(`(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--red)";
+        document.body.append(probe);
+        const red = getComputedStyle(probe).color;
+        probe.remove();
+        return [...document.querySelectorAll(".rv-check")].map((el) => {
+          const state = el.querySelector(".rv-check-state"), r = state.getBoundingClientRect();
+          return {
+            name: el.querySelector(".rv-check-name").textContent,
+            state: state.textContent,
+            href: el.getAttribute("href"),
+            red: getComputedStyle(state).color === red,
+            seen: r.width > 0 && r.right <= innerWidth,
+          };
+        });
+      })()`);
+      const said = rows.map((r) => `${r.name}: ${r.state}`).join(" | ");
+      const WORDS = ["failing", "failing, not required", "cancelled", "running", "passing", "skipped"];
+      const ranks = rows.map((r) => WORDS.indexOf(r.state));
+      if (rows.length !== 11 || ranks.includes(-1) || ranks.some((n, i) => i > 0 && n < ranks[i - 1]!))
+        failures.push(`review-checks: the list isn't every check in words, what's wrong first: ${said}`);
+      if (
+        !said.startsWith(
+          "e2e (chromium): failing | unit tests (2/3): failing | visual diff: failing, not required | e2e (firefox): running",
+        )
+      )
+        failures.push(`review-checks: the list starts ${said}`);
+      if (rows.some((r) => !r.href?.startsWith("https://") || !r.seen))
+        failures.push(`review-checks: a check has no link, or its state is cut: ${JSON.stringify(rows)}`);
+      if (rows.some((r) => r.red !== (r.state === "failing")))
+        failures.push(`review-checks: red isn't exactly the failing checks that count: ${JSON.stringify(rows)}`);
+    },
+    after: sideDefault,
+  },
   // Past the last change: the folded rest's line where the review has one (the mock's doesn't), and a click opens it in place.
   ...(["review-fold", "review-rest"] as const).map((name): Shot => ({
     name,

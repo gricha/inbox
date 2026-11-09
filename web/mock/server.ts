@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { plan } from "../../src/agents.ts";
 import { nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
@@ -48,6 +49,7 @@ import type {
   InflightRow,
   CoordinatorView,
   InflightView,
+  Check,
   Item,
   QueueView,
   ItemDetail,
@@ -2798,6 +2800,30 @@ function pauseAi(on: boolean) {
   bump();
 }
 
+// A PR's checks as GitHub would list them, agreeing with its seed's `ci`: red has failing ones (Merging's names where the
+// seed has them; one the branch doesn't require) and one still running, pending some running, none none.
+function cannedChecks(s: Seed): Check[] {
+  const ci = s.ci ?? "green";
+  if (ci === "none") return [];
+  const failed = ci === "red" ? (s.fly?.failing ?? ["unit tests (2/3)", "e2e (chromium)"]) : [];
+  const required = ["build", "lint", "typecheck", "unit tests (1/3)", "unit tests (2/3)", "unit tests (3/3)", "e2e (chromium)"];
+  const check = (name: string, state: Check["state"], optional = false, n = 0): Check => ({
+    name,
+    state,
+    optional,
+    url: name.includes("/") ? `https://app.codecov.io/gh/${s.repo}/pull/${s.n}` : `https://github.com/${s.repo}/runs/${s.n}${n}`,
+  });
+  return [
+    ...[...new Set([...required, ...failed])].map((name, i) =>
+      check(name, failed.includes(name) ? "failing" : ci === "pending" && name.startsWith("e2e") ? "running" : "passing", false, i),
+    ),
+    check("e2e (firefox)", ci === "green" ? "passing" : "running", true, 20),
+    check("visual diff", ci === "red" ? "failing" : "passing", true, 21),
+    check("codecov/patch", ci === "pending" ? "running" : "passing", true),
+    check("deploy preview", "skipped", true, 22),
+  ];
+}
+
 // Like the desk, opening an open PR with no AI review asks for one; a merged or closed one can't be approved.
 // ahead: fetched before it's opened, so no AI review starts, as on the desk.
 function reviewView(r: Rec, ahead = false): ReviewView {
@@ -2835,6 +2861,8 @@ function reviewView(r: Rec, ahead = false): ReviewView {
           : { ok: true, reason: null },
     activity: d.activity,
     stack: d.stack,
+    checks: checksView(cannedChecks(r.seed)),
+    checks_error: null,
     conversation: TALK.get(r.id) ?? [],
     conversation_error: null,
     reading: false,

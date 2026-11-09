@@ -162,7 +162,7 @@ middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound`
   and released by its `Effect.ensuring` at the end, so nothing can interrupt between taking the lock and the write; a
   held lock fails at once with `Busy`, never queues.
 - Caches and singleflight: never `Effect.cached` where a failure must be retried (it caches failures). A keyed cache
-  (`prContext` by the PR's id, node and `updated_at`, the GitHub token) is
+  (`prContext` by the PR's id, node and `updated_at`, a PR's checks by its id, node and `detail_at`, the GitHub token) is
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
   with `Cache.invalidate` on a 401 (the token) or after your reply (`prContext`). Work shared by callers who may leave
   (an AI review, `fetching`) is forked through the runner and completes a `Deferred` kept in its Map, so
