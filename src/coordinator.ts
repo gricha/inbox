@@ -509,9 +509,10 @@ export class Coordinator {
           .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
           .at(-1) ??
         null;
-      // claude resumes a session only from its own folder: one from another (the old home's, before it moved to ~/.inbox,
-      // which the link left there still opens) is let go.
-      if (a?.cwd && !here.has(a.cwd)) {
+      // claude resumes a session only from its own folder: one from the old home's (before it moved to ~/.inbox, a folder
+      // gone or the link the move left, which opens this one) is let go; one working in another folder, a worktree, isn't.
+      const its = (cwd: string) => Result.getOrElse(Result.try({ try: () => fs.realpathSync(cwd), catch: () => null }), () => null);
+      if (a?.cwd && !here.has(a.cwd) && [null, real].includes(its(a.cwd))) {
         this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, not ${dir}, so the next wake starts a fresh one here`);
         yield* this.halt(a);
         a = null;

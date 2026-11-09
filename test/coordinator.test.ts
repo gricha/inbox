@@ -173,6 +173,13 @@ if (args[0] !== "agents" && args[0] !== "logs") {
       fs.writeFileSync(path.join(dir, "state.tmp"), JSON.stringify(st));
       fs.renameSync(path.join(dir, "state.tmp"), path.join(dir, "state.json"));
     },
+    // Where a session says it is, as when it works in a worktree.
+    cwd: (id: string, cwd: string) => {
+      const st = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8")) as { sessions: Session[] };
+      st.sessions.find((x) => x.id === id)!.cwd = cwd;
+      fs.writeFileSync(path.join(dir, "state.tmp"), JSON.stringify(st));
+      fs.renameSync(path.join(dir, "state.tmp"), path.join(dir, "state.json"));
+    },
     // The owner's own claude stop or rm, or a crash, which the desk doesn't see.
     owner: (cmd: "stop" | "rm", id: string) => {
       const st = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8")) as { sessions: Session[] };
@@ -395,6 +402,26 @@ test("a desk restart picks up the running coordinator: it only looks, and the ne
   assert.equal(t.said()[1], "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): merge conflict.");
   assert.equal(t.fake.sessions().length, 1);
   assert.equal(starts(t.fake.calls()).length, 1);
+});
+
+test("a coordinator working in another folder (a worktree) is kept: a desk restart only looks", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.start();
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
+  await settle();
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "desk-worktree-"));
+  c.after(() => {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  });
+  t.fake.cwd("c0ffee01", worktree);
+  await run(t.desk.close());
+  const before = t.fake.calls().length;
+  const desk = await t.restart();
+  await until(() => t.fake.calls().length > before);
+  await settle();
+  assert.deepEqual(t.fake.calls().slice(before), [["agents", "--json", "--all"]], "no stop");
+  assert.equal(desk.coordinator.saved()?.id, "c0ffee01");
 });
 
 test(
