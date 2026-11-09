@@ -193,3 +193,21 @@ test("every theme's diff draws its code at 4.5:1 on the sheet and every colour a
   }
   assert.deepEqual(misses, []);
 });
+
+test("where a theme sets its changed words' boxes, the code on them reads: its text at 4.5:1, its keywords at 2.8:1", async () => {
+  const misses: string[] = [];
+  for (const t of THEMES) {
+    const boxes = block(`:root[data-theme="${t.id}"] .rv-diff`);
+    if (!boxes) continue;
+    const theme = await resolveTheme(t.diff);
+    const scopes = (scope: string | string[] = []) => [scope].flat().flatMap((x) => x.split(",").map((y) => y.trim()));
+    const keyword = theme.textmate?.settings?.find((s) => scopes(s.scope).includes("keyword"))?.settings?.foreground?.slice(0, 7);
+    for (const side of ["addition", "deletion"]) {
+      const box = boxes.get(`--diffs-bg-${side}-emphasis-override`);
+      if (!box || !/^#[0-9a-f]{6}$/i.test(box)) continue;
+      if (contrast(theme.fg.slice(0, 7), box) < 4.5) misses.push(`${t.id}: its text on the ${side} box ${box}`);
+      if (keyword && contrast(keyword, box) < 2.8) misses.push(`${t.id}: its keywords ${keyword} on the ${side} box ${box}`);
+    }
+  }
+  assert.deepEqual(misses, []);
+});

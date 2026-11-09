@@ -5282,6 +5282,23 @@ button.s-edit:hover:not(:disabled) {
   --diffs-bg-deletion-emphasis-override: #57454a;
 }
 
+/* Everforest, Kanagawa and Nord: the same, their red and green at 6% over the line's band where Pierre's are 20%, on which
+   their keywords came out at 2.3:1 to 2.5:1, the code that changed the hardest on the page to read. */
+:root[data-theme="everforest"] .rv-diff {
+  --diffs-bg-addition-emphasis-override: #4a554c;
+  --diffs-bg-deletion-emphasis-override: #5a4d52;
+}
+
+:root[data-theme="kanagawa"] .rv-diff {
+  --diffs-bg-addition-emphasis-override: #3c4239;
+  --diffs-bg-deletion-emphasis-override: #4d363f;
+}
+
+:root[data-theme="nord"] .rv-diff {
+  --diffs-bg-addition-emphasis-override: #4a5453;
+  --diffs-bg-deletion-emphasis-override: #594b55;
+}
+
 /* Sentry Dusk: its removed code in md-pink, as the theme has it, where its lt-pink text came out louder than the green. */
 :root[data-theme="sentry"] .rv-diff {
   --diffs-bg-deletion-override: #e1567c;
