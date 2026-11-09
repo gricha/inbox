@@ -1612,10 +1612,12 @@ const SHOTS: Shot[] = [
     // A row Tab reached: its whole phrase under it, and no buttons (a click opens it, a right-click has the rest).
     name: "inflight-selected",
     go: async (page) => {
+      await at("#/")(page); // from Merging itself the hash wouldn't change, so the shot before's view would stay
       await at("#/inflight")(page);
       await page.locator(".lane [data-id]").nth(1).locator(".row-main").focus();
       await page.waitForTimeout(200);
       if (await page.locator(".lane-more .act").count()) failures.push("inflight-selected: the selected row has buttons");
+      if (await page.locator(".lane-coord-error").count()) failures.push("inflight-selected: your agent's line shows an error");
     },
   },
   {
