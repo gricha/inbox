@@ -88,6 +88,13 @@ export class Jobs {
     else this.fail(kind, key, error);
   }
 
+  // A try the agent's own failure took (its login, its limit): not the job's, so it isn't counted, and it's owed again at `until`.
+  held(kind: Job["kind"], key: string, error: string, until: number): void {
+    const was = this.get(kind, key);
+    if (!was) return;
+    this.change(kind, key, { state: "queued", attempts: Math.max(0, was.attempts - 1), retry_at: new Date(until).toISOString(), error });
+  }
+
   fail(kind: Job["kind"], key: string, error: string): void {
     this.change(kind, key, { state: "failed", finished_at: this.iso(), retry_at: null, error });
   }

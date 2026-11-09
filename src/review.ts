@@ -514,6 +514,12 @@ export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | C
   return new ClaudeNotLoggedIn({ detail: why });
 }
 
+// The agent itself can't work now (its login, its usage limit, not installed): no PR's fault, so no PR's try is spent on it.
+export const agentDown = (e: unknown): boolean =>
+  e instanceof ClaudeNotLoggedIn ||
+  e instanceof CommandNotFound ||
+  (e instanceof ClaudeApiError && (e.status === 429 || /\blimit\b.*\bresets?\b|usage limit|rate.?limit/i.test(e.message)));
+
 export interface ClaudeAnswer {
   answer: unknown;
   model: string; // the first model in claude's modelUsage, else "claude-code"

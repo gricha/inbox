@@ -109,7 +109,7 @@ import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } 
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
+import { agentDir, agentDown, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
@@ -1833,15 +1833,17 @@ export class Desk {
     if (this.stopped) return; // killed with the desk
     const message = messageOf(err);
     report(err, "ai_review", id);
-    this.jobs.tried("ai_review", id, message);
     const detail = err instanceof ClaudeNotLoggedIn ? ` (${err.detail})` : ""; // the login's own words, for the log
     this.log(`AI review of ${id} failed: ${message}${detail}`);
     if (id !== this.aiLastFailed) this.aiFailures++; // one PR timing out again doesn't pause the rest
     this.aiLastFailed = id;
-    if (this.aiFailures >= AI_PAUSE_AFTER) {
+    const down = agentDown(err); // the agent's failure, not this PR's: every review waits with it, and none spends a try
+    if (down || this.aiFailures >= AI_PAUSE_AFTER) {
       if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
       this.aiPaused = { why: message, until: Date.now() + AI_RETRY };
     }
+    if (down) this.jobs.held("ai_review", id, message, this.now().getTime() + AI_RETRY);
+    else this.jobs.tried("ai_review", id, message);
   }
 
   aiPausedNow(): boolean {

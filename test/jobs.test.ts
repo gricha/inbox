@@ -180,3 +180,35 @@ test("a review past its time is stopped and tried again after its backoff; after
   assert.deepEqual(job(), { state: "done", attempts: 1, error: null });
   await same(t.desk);
 });
+
+test("the agent at its usage limit: a review's tries aren't spent on it; it waits out each pause, however many, and runs once the agent works again", async (c) => {
+  const t = await reviewing(c);
+  const limit = "You've hit your weekly limit \u00b7 resets 7am (America/Los_Angeles)";
+  let at = NOW.getTime();
+  const later = async (minutes: number) => {
+    at += minutes * 60_000;
+    t.setNow(new Date(at));
+    t.desk.aiPaused = null; // the pause, on the wall clock, ran out
+    t.desk.jobs.tick();
+    await flush();
+  };
+  const job = () => pick(t.desk.jobs.get("ai_review", ID), ["state", "attempts", "error"]);
+  t.f.fail(limit);
+  for (let n = 1; n <= 4; n++) {
+    await t.f.release(ID);
+    assert.deepEqual(job(), { state: "queued", attempts: 0, error: limit }, `try ${n} was the agent's failure, not the PR's`);
+    assert.equal(t.desk.aiPausedNow(), true, "one such failure pauses the rest: no other PR would fare better");
+    await later(29);
+    assert.equal(t.f.started.length, n, "it waits out the pause");
+    await later(1);
+    assert.equal(t.f.started.length, n + 1, "then tries again");
+  }
+  assert.deepEqual(
+    runSync(t.desk.inflight()).work.map((w) => pick(w, ["kind", "key", "state"])),
+    [{ kind: "ai_review", key: ID, state: "running" }],
+    "four failures on, Claude's work still has it, not failed",
+  );
+  t.f.fail(null);
+  await t.f.release(ID);
+  assert.deepEqual(job(), { state: "done", attempts: 1, error: null }, "the limit lifted: reviewed, with nobody's Try again");
+});
