@@ -7,7 +7,15 @@ import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
 import { ClaudeBadOutput, CommandBadOutput, fsError, messageOf, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
-import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
+import {
+  COORDINATOR_NAME,
+  isCoordinator,
+  type ActivityEvent,
+  type Ask,
+  type AskAbout,
+  type AskLines,
+  type CoordinatorView,
+} from "./types.ts";
 import { report } from "./sentry.ts";
 
 const NAME = COORDINATOR_NAME;
@@ -382,7 +390,7 @@ export class Coordinator {
       // A resumed session keeps the mode it started with; passing one makes claude start a copy with its history, so only to change it.
       const changing = !!a && (this.saved()?.mode ?? "default") !== mode;
       // One started under its name from before the rename to Inbox goes on as a copy under the new one, as a switch does.
-      const switching = changing || (!!a?.name && a.name !== NAME);
+      const switching = changing || (!!a?.name && a.name !== NAME && isCoordinator(a.name));
       // A copy may not keep its original's name and Remote Control, so the switch passes them again.
       const resume = a ? ["--resume", a.sessionId, "--bg", ...(switching ? ["--name", NAME, "--remote-control", NAME, ...flags] : [])] : [];
       // Stuck on a permission prompt is why bypass gets turned on: it switches now, and the copy gets a turn to carry on.

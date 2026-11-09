@@ -721,6 +721,8 @@ test("a coordinator started before the rename to Inbox goes on as one copy under
     ],
   );
   await until(() => t.desk.coordinator.saved()?.id === "c0ffee02");
+  // A name of the owner's own choosing stays: only the old name is the desk's to change.
+  t.fake.name("c0ffee02", "my merger");
   t.event(3, "reviewed");
   await until(() => t.said().length === 3);
   assert.deepEqual(resumes(t.fake.calls()).at(-1), [
@@ -729,6 +731,7 @@ test("a coordinator started before the rename to Inbox goes on as one copy under
     "--bg",
     "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new review.",
   ]);
+  assert.equal(t.fake.sessions().length, 2);
 });
 
 test("claude rm of the coordinator after bypass changes starts a fresh one, not a copy a change left stopped", posix, async (c) => {
