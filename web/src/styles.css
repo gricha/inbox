@@ -821,6 +821,9 @@ p {
 .head-tabs {
   display: flex;
   align-self: stretch;
+
+  /* The first one's words on the Settings parts' headings and labels: 5px more than a tab's 12px makes their 17px. */
+  margin-left: 5px;
 }
 
 .head-tab {
@@ -3725,7 +3728,7 @@ button.s-edit:hover:not(:disabled) {
 /* A view inside Settings: its name and one line where a part's heading starts, then its editor. */
 .s-view-name {
   margin: 0;
-  padding: 0 12px;
+  padding: 0 17px;
   color: var(--ink);
   font-size: 18px;
   font-weight: 650;
@@ -3735,7 +3738,7 @@ button.s-edit:hover:not(:disabled) {
 .s-view-line {
   max-width: 72ch;
   margin-top: 4px;
-  padding: 0 12px;
+  padding: 0 17px;
   color: var(--pencil);
   font-size: 13px;
 }
@@ -3904,7 +3907,7 @@ button.s-edit:hover:not(:disabled) {
   display: grid;
   gap: 12px;
   margin-top: 18px;
-  padding: 0 12px;
+  padding: 0 17px;
 }
 
 .au-note {
@@ -3915,6 +3918,7 @@ button.s-edit:hover:not(:disabled) {
 
 .au-runs-head {
   margin-top: 28px;
+  padding: 0 17px;
 }
 
 .au-run-top {
