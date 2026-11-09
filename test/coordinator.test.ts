@@ -424,6 +424,50 @@ test("a coordinator working in another folder (a worktree) is kept: a desk resta
   assert.equal(desk.coordinator.saved()?.id, "c0ffee01");
 });
 
+test("a coordinator listed in a worktree that's since been removed is kept too: a desk restart only looks", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.start();
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
+  await settle();
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "desk-worktree-"));
+  t.fake.cwd("c0ffee01", worktree);
+  fs.rmSync(worktree, { recursive: true }); // git worktree remove, once its PR merged
+  await run(t.desk.close());
+  const before = t.fake.calls().length;
+  const desk = await t.restart();
+  await until(() => t.fake.calls().length > before);
+  await settle();
+  assert.deepEqual(t.fake.calls().slice(before), [["agents", "--json", "--all"]], "no stop");
+  assert.equal(desk.coordinator.saved()?.id, "c0ffee01");
+});
+
+test("a coordinator from the old home's folder, gone when the move left no link, is let go", posix, async (c) => {
+  const t = await coordinated(c);
+  t.desk.start();
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
+  await settle();
+  const was = process.env.HOME;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-owner-"));
+  process.env.HOME = home;
+  c.after(() => {
+    if (was === undefined) delete process.env.HOME;
+    else process.env.HOME = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  t.fake.cwd("c0ffee01", path.join(home, ".review-desk", "coordinator"));
+  await run(t.desk.close());
+  const before = t.fake.calls().length;
+  const desk = await t.restart();
+  await until(() => !t.fake.sessions()[0]!.running);
+  await desk.coordinator.flushing;
+  assert.deepEqual(t.fake.calls().slice(before), [
+    ["agents", "--json", "--all"],
+    ["stop", "c0ffee01"],
+  ]);
+});
+
 test(
   "after the desk's home moves (~/.review-desk to ~/.inbox), the session from the old folder is stopped and the next wake starts a fresh one",
   posix,

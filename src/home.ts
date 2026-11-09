@@ -12,6 +12,7 @@ const HOME = ".inbox";
 const OLD = ".review-desk";
 
 export const defaultHome = (home = os.homedir()): string => path.join(home, HOME);
+export const oldHome = (home = os.homedir()): string => path.join(home, OLD);
 
 // A folder, or a link to one (a dotfiles home, say), which a rename moves as the link.
 const isDir = (p: string): boolean =>

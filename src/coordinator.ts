@@ -6,6 +6,7 @@ import path from "node:path";
 import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
 import { ClaudeBadOutput, CommandBadOutput, fsError, messageOf, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
+import { oldHome } from "./home.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import {
   COORDINATOR_NAME,
@@ -509,10 +510,11 @@ export class Coordinator {
           .sort((x, y) => (x.startedAt ?? 0) - (y.startedAt ?? 0))
           .at(-1) ??
         null;
-      // claude resumes a session only from its own folder: one from the old home's (before it moved to ~/.inbox, a folder
-      // gone or the link the move left, which opens this one) is let go; one working in another folder, a worktree, isn't.
+      // claude resumes a session only from its own folder: one from the old home's (before it moved to ~/.inbox, by its
+      // name, or the link the move left, which opens this one) is let go; one working in another folder, a worktree, isn't,
+      // even once that's removed.
       const its = (cwd: string) => Result.getOrElse(Result.try({ try: () => fs.realpathSync(cwd), catch: () => null }), () => null);
-      if (a?.cwd && !here.has(a.cwd) && [null, real].includes(its(a.cwd))) {
+      if (a?.cwd && !here.has(a.cwd) && (a.cwd === path.join(oldHome(), "coordinator") || its(a.cwd) === real)) {
         this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, not ${dir}, so the next wake starts a fresh one here`);
         yield* this.halt(a);
         a = null;
