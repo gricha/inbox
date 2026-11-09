@@ -162,6 +162,10 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
   assert.equal(told[1], `I dismissed your question ${again.id} ("Close #3?"): decide yourself.`);
   runSync(t.desk.answerInquiry(runSync(t.desk.inquire(full())).id, "Text"));
   assert.equal(told.length, 2, "another session reads its own answer with desk_inquiry");
+  // Its name before the rename to Inbox: a question it asked then, or one from a session that follows the old skill.
+  const old = runSync(t.desk.inquire(full({ from: "Review Desk coordinator", question: "Rebase #3?" })));
+  runSync(t.desk.answerInquiry(old.id, "No"));
+  assert.equal(told[2], `My answer to your question ${old.id} ("Rebase #3?"): "No"`);
 });
 
 test("a dismissed question tells the agent so", async (c) => {

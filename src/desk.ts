@@ -85,7 +85,7 @@ import type {
   Status,
   Until,
 } from "./types.ts";
-import { byPart, RANK, UNTIL } from "./types.ts";
+import { byPart, isCoordinator, RANK, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
 import {
@@ -107,7 +107,7 @@ import { agentDir, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError,
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
-import { askLine, Coordinator, NAME as COORDINATOR, REBASE, wakeFor } from "./coordinator.ts";
+import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -2108,7 +2108,7 @@ export class Desk {
       const before = this.store.state(id);
       this.store.putState({ ...before, ...ACTIVE, pinned: true });
       // The coordinator's desk_add is its opinion, which Claude weighs: no floor, as the old desk-run coordinator's pins.
-      const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), who === COORDINATOR ? "coordinator" : undefined);
+      const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), isCoordinator(who) ? "coordinator" : undefined);
       if (note !== null)
         this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
       this.changed();
@@ -2633,7 +2633,7 @@ export class Desk {
       );
       this.log(`${q.from} asks: ${q.question}`);
       this.changed();
-      if (this.mayNotify()) this.notify(q.from === COORDINATOR ? "Your agent asks" : `${q.from} asks`, q.question);
+      if (this.mayNotify()) this.notify(isCoordinator(q.from) ? "Your agent asks" : `${q.from} asks`, q.question);
       return q;
     });
   }
@@ -2653,7 +2653,7 @@ export class Desk {
       );
       this.changed();
       // Your answer is what wakes the coordinator (it ends its turn once it asks); what cmd.exe can't pass is only logged.
-      if (q.from === COORDINATOR && this.settings["agent.coordinator"]) {
+      if (isCoordinator(q.from) && this.settings["agent.coordinator"]) {
         const asked = `your question ${q.id} ("${q.question}")`;
         const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
         // tell() keeps the line and wakes it; nothing here waits for that run.

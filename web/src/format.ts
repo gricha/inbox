@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { COORDINATOR_NAME, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff, type Overview } from "../../src/types.ts";
+import { isCoordinator, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff, type Overview } from "../../src/types.ts";
 import { ClipboardUnavailable } from "./api.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -9,7 +9,7 @@ export const MOD = MAC ? "⌘" : "Ctrl+";
 export const handoffLabel = (h: Handoff) => (h.from ? `From ${h.from}:` : "Handed to you:");
 
 // Who asks, as the window says it: the coordinator is "your agent"; every other session goes by the name it gave itself.
-export const fromName = (from: string, start = true) => (from === COORDINATOR_NAME ? (start ? "Your agent" : "your agent") : from);
+export const fromName = (from: string, start = true) => (isCoordinator(from) ? (start ? "Your agent" : "your agent") : from);
 
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");

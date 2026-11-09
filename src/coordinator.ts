@@ -10,7 +10,7 @@ import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.
 import { COORDINATOR_NAME, type ActivityEvent, type Ask, type AskAbout, type AskLines, type CoordinatorView } from "./types.ts";
 import { report } from "./sentry.ts";
 
-export const NAME = COORDINATOR_NAME;
+const NAME = COORDINATOR_NAME;
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
 const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
 const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines
@@ -77,6 +77,7 @@ interface Agent {
   sessionId: string;
   cwd: string;
   kind: string;
+  name?: string;
   status?: string; // only while it runs: idle, busy, shell, waiting
   pid?: number; // only while it runs
   startedAt?: number;
@@ -379,11 +380,13 @@ export class Coordinator {
       const mode: Mode = this.desk.settings["agent.coordinator_bypass"] ? "bypass" : "default";
       const flags = ["--permission-mode", PERMISSION[mode]];
       // A resumed session keeps the mode it started with; passing one makes claude start a copy with its history, so only to change it.
-      const switching = !!a && (this.saved()?.mode ?? "default") !== mode;
+      const changing = !!a && (this.saved()?.mode ?? "default") !== mode;
+      // One started under its name from before the rename to Inbox goes on as a copy under the new one, as a switch does.
+      const switching = changing || (!!a?.name && a.name !== NAME);
       // A copy may not keep its original's name and Remote Control, so the switch passes them again.
       const resume = a ? ["--resume", a.sessionId, "--bg", ...(switching ? ["--name", NAME, "--remote-control", NAME, ...flags] : [])] : [];
       // Stuck on a permission prompt is why bypass gets turned on: it switches now, and the copy gets a turn to carry on.
-      const stuck = switching && a?.status === "waiting";
+      const stuck = changing && a?.status === "waiting";
       // Busy, in a shell or waiting on a permission: it stays queued.
       if ((waiting && idle) || stuck) {
         const text = this.message(news, asks);

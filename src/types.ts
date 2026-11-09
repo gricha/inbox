@@ -832,6 +832,9 @@ export interface InflightView {
 
 // The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".
 export const COORDINATOR_NAME = "Inbox coordinator";
+// Its name before the rename to Inbox, which its questions from then, and a session that follows the old skill, still give.
+const OLD_COORDINATOR_NAME = "Review Desk coordinator";
+export const isCoordinator = (from: string): boolean => from === COORDINATOR_NAME || from === OLD_COORDINATOR_NAME;
 
 // The background Claude Code session the desk starts and wakes (README → Coordinator).
 export interface CoordinatorView {

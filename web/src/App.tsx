@@ -14,7 +14,7 @@ import type {
   Reviewer,
   SettingsView,
 } from "../../src/types.ts";
-import { COORDINATOR_NAME } from "../../src/types.ts";
+import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
@@ -1192,7 +1192,7 @@ export function App() {
         onSync={() => {
           runUi(sync());
         }}
-        ask={!asking && !!overview?.agent && !(route.name === "inquiry" && questionOf(route.id)?.from === COORDINATOR_NAME)}
+        ask={!asking && !!overview?.agent && !(route.name === "inquiry" && isCoordinator(questionOf(route.id)?.from ?? ""))}
         waiting={route.name === "review" && askWaiting}
         onAsk={() => {
           openAsk();
@@ -1392,7 +1392,7 @@ export function App() {
           key={asking.item ?? ""} // a new spot keeps your draft; the line above the box follows it
           about={asking}
           review={route.name === "review"}
-          questions={(view?.inquiries ?? []).filter((q) => q.from === COORDINATOR_NAME && q.item_id === asking.item && !answered.has(q.id))}
+          questions={(view?.inquiries ?? []).filter((q) => isCoordinator(q.from) && q.item_id === asking.item && !answered.has(q.id))}
           loads={loads}
           now={now}
           onWiden={widen}

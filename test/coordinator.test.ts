@@ -101,7 +101,7 @@ if (args[0] === "agents") {
   const s = st.sessions.find((x) => x.sessionId === args[1]);
   const o = parse(2);
   if (Object.keys(o.flags).length) {
-    const copy = start(s.name, o.flags["--permission-mode"] ?? s.mode, s.said);
+    const copy = start(o.flags["--name"] ?? s.name, o.flags["--permission-mode"] ?? s.mode, s.said);
     console.log("note: background session " + s.id + " keeps its own saved options, so the flags you passed started a copy as " + copy.id + ". Without flags, the same command continues " + s.id + " itself.");
     bg(copy, o.prompt);
   } else if (s.running || alive(s.pid)) {
@@ -165,6 +165,13 @@ if (args[0] !== "agents" && args[0] !== "logs") {
     nobypass: (on: boolean) => {
       if (on) fs.writeFileSync(path.join(dir, "nobypass"), "");
       else fs.rmSync(path.join(dir, "nobypass"), { force: true });
+    },
+    // A session started under another name (the coordinator's before the rename to Inbox).
+    name: (id: string, name: string) => {
+      const st = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8")) as { sessions: Session[] };
+      st.sessions.find((x) => x.id === id)!.name = name;
+      fs.writeFileSync(path.join(dir, "state.tmp"), JSON.stringify(st));
+      fs.renameSync(path.join(dir, "state.tmp"), path.join(dir, "state.json"));
     },
     // The owner's own claude stop or rm, or a crash, which the desk doesn't see.
     owner: (cmd: "stop" | "rm", id: string) => {
@@ -693,6 +700,34 @@ test("bypass turned on: a busy coordinator is left to work; one waiting on a per
   assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "bypassPermissions", nudge]]);
   assert.equal(t.desk.coordinator.saved()?.id, "c0ffee02");
   assert.deepEqual(t.said().slice(1), [nudge], "the copy picks its cut-off work back up");
+});
+
+test("a coordinator started before the rename to Inbox goes on as one copy under the new name, at its next wake", posix, async (c) => {
+  const t = await coordinated(c);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1 && runSync(t.desk.inflight()).coordinator.url !== null);
+  await t.desk.coordinator.flushing;
+  t.fake.name("c0ffee01", "Review Desk coordinator");
+  t.event(3, "commented");
+  await until(() => t.said().length === 2);
+  const news = "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new comment.";
+  assert.deepEqual(resumes(t.fake.calls()), [[...copying("c0ffee01"), "default", news]]);
+  assert.deepEqual(
+    t.fake.sessions().map((s) => [s.id, s.name]),
+    [
+      ["c0ffee01", "Review Desk coordinator"],
+      ["c0ffee02", NAME],
+    ],
+  );
+  await until(() => t.desk.coordinator.saved()?.id === "c0ffee02");
+  t.event(3, "reviewed");
+  await until(() => t.said().length === 3);
+  assert.deepEqual(resumes(t.fake.calls()).at(-1), [
+    "--resume",
+    "c0ffee02-1111-2222",
+    "--bg",
+    "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): new review.",
+  ]);
 });
 
 test("claude rm of the coordinator after bypass changes starts a fresh one, not a copy a change left stopped", posix, async (c) => {
