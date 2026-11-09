@@ -751,12 +751,15 @@ export class Desk {
     return agents.status("claude-code", mcpUrl);
   }
 
-  // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause.
-  connectAgent(mcpUrl: string): Effect.Effect<AgentStatus, Upstream> {
+  // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause; a
+  // name another skill or server of yours has is a 409 that says what to move.
+  connectAgent(mcpUrl: string): Effect.Effect<AgentStatus, Upstream | Conflict> {
     const log = (line: string) => {
       this.log(line);
     };
-    return agents.connect("claude-code", mcpUrl, { log }).pipe(Effect.mapError((e) => new Upstream({ message: e.message, cause: e })));
+    return agents
+      .connect("claude-code", mcpUrl, { log })
+      .pipe(Effect.mapError((e) => (e._tag === "Conflict" ? e : new Upstream({ message: e.message, cause: e }))));
   }
 
   // ---------------------------------------------------------------- sync and the event log

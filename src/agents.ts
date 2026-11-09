@@ -212,8 +212,8 @@ const migrate = Effect.fnUntraced(function* (
 });
 
 // Connect's copy goes stale whenever the skill changes, and what Connect did before the rename is renamed. Only on the
-// owner's own desk, whatever its home is called yet: a scratch or test desk never writes to ~/.claude. What it did, in words, and what one agent's CLI or files
-// failed, which never holds up the other agent.
+// owner's own desk, whatever its home is called yet: a scratch or test desk never writes to ~/.claude. What it did, in
+// words, and what one agent's CLI or files failed, which never holds up the other agent.
 export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string, url: string): Effect.fn.Return<string[]> {
   const home = os.homedir();
   if (!ownersHome(deskHome, home)) return [];

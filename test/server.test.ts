@@ -745,6 +745,11 @@ test("agents: Claude Code's status, and connect", async () => {
     const after = await t.json("/api/agents/connect", { method: "POST" });
     assert.equal(after.skill.state, "installed");
     assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "inbox", "SKILL.md")));
+    // Another server named inbox: a refusal that says what to move, not the agent's CLI failing.
+    fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { type: "stdio", command: "mail-mcp" } } }));
+    const taken = await t.req("/api/agents/connect", { method: "POST" });
+    assert.equal(taken.status, 409);
+    assert.match(((await taken.json()) as { error: string }).error, /^claude has another MCP server named inbox, not the desk's/);
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
