@@ -781,6 +781,17 @@ p {
   color: var(--red);
 }
 
+/* Rate limited says so and waits: nothing to press. */
+p.side-sync {
+  margin: 0;
+  cursor: default;
+}
+
+.side-foot p.side-sync:hover {
+  background: none;
+  color: var(--red);
+}
+
 .side-ask-short {
   display: none;
 }

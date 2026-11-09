@@ -188,15 +188,17 @@ export function orgsLine(orgs: readonly { org: string; space: string | null }[],
 }
 
 // The sidebar's sync line, only when something's wrong: the desk offline, or the last sync failed or hit GitHub's rate
-// limit; busy while one runs after it, the press that retries it. null while syncs succeed or run: nothing to say.
+// limit; busy while one runs after it, the press that retries it. Rate limited has no press: the desk skips every sync until
+// the limit resets (its tooltip says when), so a retry would only seem to run. null while syncs succeed or run.
 export function syncTrouble(
   o: Pick<Overview, "syncing" | "sync_error" | "connectors"> | null,
   offline: boolean,
-): { text: string; busy: boolean } | null {
-  if (offline) return { text: "Offline", busy: false };
+): { text: string; busy: boolean; retry: boolean } | null {
+  if (offline) return { text: "Offline", busy: false, retry: true };
   if (!o?.sync_error) return null;
-  if (o.syncing) return { text: "Syncing…", busy: true };
-  return { text: o.connectors.some((c) => c.status === "paused") ? "Rate limited" : "Sync failed", busy: false };
+  if (o.connectors.some((c) => c.status === "paused")) return { text: "Rate limited", busy: false, retry: false };
+  if (o.syncing) return { text: "Syncing…", busy: true, retry: true };
+  return { text: "Sync failed", busy: false, retry: true };
 }
 
 // GitHub's status row's tooltip, what's known of "Your teams: @a, @b. 4,870 GitHub requests left until Sun 0:23."

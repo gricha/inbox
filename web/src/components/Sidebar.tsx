@@ -130,7 +130,7 @@ export function Sidebar({
             <span className="side-name side-ask-short">{waiting ? "Asked" : "Ask"}</span>
           </button>
         )}
-        {trouble && (
+        {trouble?.retry && (
           <button
             type="button"
             className={cls("side-item", "side-sync", !trouble.busy && "err")}
@@ -142,6 +142,15 @@ export function Sidebar({
             </svg>
             <span className="side-name">{trouble.text}</span>
           </button>
+        )}
+        {trouble && !trouble.retry && (
+          <p className="side-item side-sync err" title={overview?.sync_error ?? undefined}>
+            <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 4.5V8l2.5 1.5" />
+              <circle cx="8" cy="8" r="5.5" />
+            </svg>
+            <span className="side-name">{trouble.text}</span>
+          </p>
         )}
         <a href="#/settings" className={cls("side-item", onSettings && "on")} aria-current={onSettings ? "page" : undefined}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

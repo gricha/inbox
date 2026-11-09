@@ -492,9 +492,9 @@ const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
 // The sidebar's sync line, null while there's nothing wrong: its words, red, spinning, its tooltip.
 const syncLine = (page: Page) =>
-  page.evaluate<{ text: string; red: boolean; spin: boolean; tip: string | null } | null>(`(() => {
+  page.evaluate<{ text: string; red: boolean; spin: boolean; tip: string | null; press: boolean } | null>(`(() => {
     const b = document.querySelector(".side-sync");
-    return b && { text: b.textContent.trim(), red: b.classList.contains("err"), spin: !!b.querySelector(".spin"), tip: b.getAttribute("title") };
+    return b && { text: b.textContent.trim(), red: b.classList.contains("err"), spin: !!b.querySelector(".spin"), tip: b.getAttribute("title"), press: b.tagName === "BUTTON" };
   })()`);
 // The page head's words: a list's filter, a review's way back, or the page's name.
 const headSays = (page: Page) =>
@@ -607,28 +607,24 @@ const SHOTS: Shot[] = [
   },
   {
     // GitHub's rate limit: the sidebar's sync line, there only when something's wrong, says so in red with the error in its
-    // tooltip; a retry under way after it spins, not red.
+    // tooltip; nothing to press, since the desk skips a sync until the limit resets, so a click shows no retry.
     name: "sync-limited",
     go: async (page) => {
       const error = "GitHub rate limited until 2026-11-09T00:00:00Z (HTTP 403)";
-      const as = async (syncing: boolean) => {
-        await unroute(page);
-        await overviewAs((o) => {
-          o.syncing = syncing;
-          o.sync_error = error;
-          o.connectors = o.connectors.map((c) => ({ ...c, status: syncing ? "syncing" : "paused", error }));
-        })(page);
-        await page.reload();
-        await page.locator(READY).first().waitFor({ timeout: 15_000 });
-        await page.locator(".side-sync").waitFor();
-        return syncLine(page);
-      };
-      const retry = await as(true);
-      if (retry?.text !== "Syncing…" || retry.red || !retry.spin)
-        failures.push(`sync-limited: a retry after the rate limit reads ${JSON.stringify(retry)}`);
-      const line = await as(false);
-      if (line?.text !== "Rate limited" || !line.red || line.spin || line.tip !== error)
+      await overviewAs((o) => {
+        o.sync_error = error;
+        o.connectors = o.connectors.map((c) => ({ ...c, status: "paused", error }));
+      })(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await page.locator(".side-sync").waitFor();
+      const line = await syncLine(page);
+      if (line?.text !== "Rate limited" || !line.red || line.spin || line.tip !== error || line.press)
         failures.push(`sync-limited: the rate-limited sync line reads ${JSON.stringify(line)}`);
+      await page.locator(".side-sync").click();
+      await page.waitForTimeout(150);
+      const after = await syncLine(page);
+      if (after?.text !== "Rate limited") failures.push(`sync-limited: a click on the line reads ${JSON.stringify(after)}`);
     },
     after: unsettle,
   },

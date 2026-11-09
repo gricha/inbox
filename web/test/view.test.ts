@@ -270,16 +270,25 @@ test("the sidebar's sync line says only what's wrong: offline, a failed sync, th
   assert.equal(syncTrouble(o(false, null), false), null);
   assert.equal(syncTrouble(o(true, null, "syncing"), false), null);
   assert.equal(syncTrouble({ ...o(false, null), connectors: [{ ...gh("ok", null), synced_at: null }] }, false), null);
-  assert.deepEqual(syncTrouble(o(false, "GitHub rejected the token (HTTP 401)", "error"), false), { text: "Sync failed", busy: false });
+  assert.deepEqual(syncTrouble(o(false, "GitHub rejected the token (HTTP 401)", "error"), false), {
+    text: "Sync failed",
+    busy: false,
+    retry: true,
+  });
   assert.deepEqual(syncTrouble(o(false, "GitHub rate limited until 2026-10-27T13:00:00Z (HTTP 403)", "paused"), false), {
     text: "Rate limited",
     busy: false,
+    retry: false, // the desk skips every sync until the limit resets: nothing to press
   });
   // A sync under way after one failed keeps the line, so the press that retries it shows it running.
-  assert.deepEqual(syncTrouble(o(true, "GitHub rejected the token (HTTP 401)", "syncing"), false), { text: "Syncing…", busy: true });
+  assert.deepEqual(syncTrouble(o(true, "GitHub rejected the token (HTTP 401)", "syncing"), false), {
+    text: "Syncing…",
+    busy: true,
+    retry: true,
+  });
   // Offline whatever the last overview said.
-  assert.deepEqual(syncTrouble(o(true, null, "syncing"), true), { text: "Offline", busy: false });
-  assert.deepEqual(syncTrouble(null, true), { text: "Offline", busy: false });
+  assert.deepEqual(syncTrouble(o(true, null, "syncing"), true), { text: "Offline", busy: false, retry: true });
+  assert.deepEqual(syncTrouble(null, true), { text: "Offline", busy: false, retry: true });
 });
 
 test("Settings draws a row only where it does something, and greys quiet hours while notifications are off", () => {
