@@ -2671,7 +2671,7 @@ p {
 .composer .act:not(.primary),
 .chat .act:not(.primary),
 .rv-inline .act:not(.primary),
-.inq-write .act:not(.primary),
+.rv-changes .act:not(.primary),
 .cv .actions .act:not(.primary) {
   border-color: transparent;
   background: none;
@@ -2681,7 +2681,7 @@ p {
 .composer .act:not(.primary):hover:not(:disabled),
 .chat .act:not(.primary):hover:not(:disabled),
 .rv-inline .act:not(.primary):hover:not(:disabled),
-.inq-write .act:not(.primary):hover:not(:disabled),
+.rv-changes .act:not(.primary):hover:not(:disabled),
 .cv .actions .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
