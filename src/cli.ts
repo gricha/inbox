@@ -442,7 +442,10 @@ const connect = Effect.fnUntraced(function* (x: Ctx) {
   const driver = HARNESSES[x.args[0] ?? "claude"];
   if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[0]} (try: desk connect claude, or codex)` });
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
-  const s = x.opts.apply ? yield* agents.connect(driver.id, url) : yield* agents.status(driver.id, url);
+  const log = (line: string) => {
+    x.out(`# ${line}`);
+  };
+  const s = x.opts.apply ? yield* agents.connect(driver.id, url, { log }) : yield* agents.status(driver.id, url);
   if (s.mcp.connected && s.skill.state === "installed") {
     x.out(`${x.c.green("✓")} ${driver.label}: MCP tools connected, skill installed (${s.skill.path})`);
     return 0;
@@ -476,14 +479,9 @@ const serve = Effect.fnUntraced(function* (x: Ctx) {
   const { startDesk } = yield* Effect.promise(() => import("./server.ts"));
   const srv = yield* startDesk({ port, open: !!x.opts.open });
   const desk = srv.desk;
-  const refresh = agents.refreshSkills(desk.home, `${srv.url}/mcp`).pipe(
-    Effect.match({
-      onSuccess: (done) => {
-        for (const line of done) desk.log(line);
-      },
-      onFailure: (e) => {
-        desk.log(`couldn't refresh the Inbox skill: ${e.message}`);
-      },
+  const refresh = Effect.flatMap(agents.refreshSkills(desk.home, `${srv.url}/mcp`), (done) =>
+    Effect.sync(() => {
+      for (const line of done) desk.log(line);
     }),
   );
   const again = () => {

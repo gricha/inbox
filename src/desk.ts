@@ -753,7 +753,10 @@ export class Desk {
 
   // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause.
   connectAgent(mcpUrl: string): Effect.Effect<AgentStatus, Upstream> {
-    return agents.connect("claude-code", mcpUrl).pipe(Effect.mapError((e) => new Upstream({ message: e.message, cause: e })));
+    const log = (line: string) => {
+      this.log(line);
+    };
+    return agents.connect("claude-code", mcpUrl, { log }).pipe(Effect.mapError((e) => new Upstream({ message: e.message, cause: e })));
   }
 
   // ---------------------------------------------------------------- sync and the event log

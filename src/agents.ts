@@ -174,16 +174,20 @@ const oldCopy = Effect.fnUntraced(function* (parent: string): Effect.fn.Return<s
 });
 
 // What the desk installed before the rename, under the new names: the skill's copy in <skills>/inbox and the MCP server as
-// inbox at `url`, the old ones gone. What it did, in words; nothing for an agent it never connected.
-const migrate = Effect.fnUntraced(function* (d: Driver, url: string, timeout: number): Effect.fn.Return<string[], FsError | RunError> {
+// inbox at `url`, the old ones gone. Each thing it did is said as it's done; nothing for an agent it never connected.
+const migrate = Effect.fnUntraced(function* (
+  d: Driver,
+  url: string,
+  timeout: number,
+  said: (line: string) => void,
+): Effect.fn.Return<void, FsError | RunError> {
   const home = os.homedir();
   const parent = d.skills(home);
-  const done: string[] = [];
   const old = yield* oldCopy(parent);
   if (old) {
     const dir = path.join(parent, NAME);
     const state = yield* skillState(dir);
-    if (state === "taken") done.push(`kept the Inbox skill in ${old}: ${dir} is another skill named ${NAME}`);
+    if (state === "taken") said(`kept the Inbox skill in ${old}: ${dir} is another skill named ${NAME}`);
     else {
       if (state !== "installed") yield* copySkill(dir);
       yield* Effect.try({
@@ -192,46 +196,56 @@ const migrate = Effect.fnUntraced(function* (d: Driver, url: string, timeout: nu
         },
         catch: fsError("remove", old),
       });
-      done.push(`moved the Inbox skill from ${old} to ${dir}`);
+      said(`moved the Inbox skill from ${old} to ${dir}`);
     }
   }
   // The old name was only ever the desk's; the new one may be another server's, and then the old one stays.
-  if (server(d, home, OLD, url) === "none") return done;
+  if (server(d, home, OLD, url) === "none") return;
   const now = server(d, home, NAME, url);
   if (now === "other") {
-    done.push(`kept ${d.bin}'s MCP server ${OLD}: ${NAME} is another server's name there`);
-    return done;
+    said(`kept ${d.bin}'s MCP server ${OLD}: ${NAME} is another server's name there`);
+    return;
   }
   if (now === "none") yield* run(d.bin, d.add(url), commandOf(d, d.add(url)), timeout);
   yield* run(d.bin, d.remove(OLD), commandOf(d, d.remove(OLD)), timeout);
-  done.push(`renamed ${d.bin}'s MCP server ${OLD} to ${NAME}`);
-  return done;
+  said(`renamed ${d.bin}'s MCP server ${OLD} to ${NAME}`);
 });
 
 // Connect's copy goes stale whenever the skill changes, and what Connect did before the rename is renamed. Only on
-// ~/.inbox: a scratch or test desk never writes to ~/.claude. What it did, in words.
-export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (
-  deskHome: string,
-  url: string,
-): Effect.fn.Return<string[], FsError | RunError> {
+// ~/.inbox: a scratch or test desk never writes to ~/.claude. What it did, in words, and what one agent's CLI or files
+// failed, which never holds up the other agent.
+export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHome: string, url: string): Effect.fn.Return<string[]> {
   const home = os.homedir();
   if (path.resolve(deskHome) !== defaultHome(home)) return [];
   const done: string[] = [];
+  const said = (line: string) => {
+    done.push(line);
+  };
   for (const d of Object.values(DRIVERS)) {
-    done.push(...(yield* migrate(d, url, TIMEOUT)));
     const dir = path.join(d.skills(home), NAME);
-    if ((yield* skillState(dir)) !== "outdated") continue; // missing: an agent you didn't connect; taken: another skill
-    yield* copySkill(dir);
-    done.push(`refreshed the Inbox skill at ${path.join(dir, "SKILL.md")}`);
+    const one = Effect.gen(function* () {
+      yield* migrate(d, url, TIMEOUT, said);
+      if ((yield* skillState(dir)) !== "outdated") return; // missing: an agent you didn't connect; taken: another skill
+      yield* copySkill(dir);
+      said(`refreshed the Inbox skill at ${path.join(dir, "SKILL.md")}`);
+    });
+    yield* one.pipe(
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          said(`couldn't bring ${d.bin}'s Inbox skill and MCP server up to date: ${e.message}`);
+        }),
+      ),
+    );
   }
   return done;
 });
 
-// Installs or refreshes the skill, registers the MCP server if it isn't yet, then lets go of the names from before the rename.
+// Installs or refreshes the skill, registers the MCP server if it isn't yet, then lets go of the names from before the
+// rename, saying each in `log`.
 export const connect = Effect.fn("agents.connect")(function* (
   driver: DriverId,
   url: string,
-  timeout: number = TIMEOUT,
+  { timeout = TIMEOUT, log = () => {} }: { timeout?: number; log?: (line: string) => void } = {},
 ): Effect.fn.Return<AgentStatus, FsError | RunError> {
   const d = DRIVERS[driver];
   const s = yield* status(driver, url);
@@ -243,6 +257,6 @@ export const connect = Effect.fn("agents.connect")(function* (
     });
   if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));
   if (!s.mcp.connected) yield* run(d.bin, d.add(url), s.mcp.command, timeout);
-  yield* migrate(d, url, timeout);
+  yield* migrate(d, url, timeout, log);
   return yield* status(driver, url);
 });

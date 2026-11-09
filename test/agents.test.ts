@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -124,7 +124,7 @@ test("connect says what to run when the CLI is missing or fails", { skip: proces
   assert.equal(failed.message, `codex failed: config.toml: bad TOML. Run it yourself: codex mcp add inbox --url ${MCP}`);
   assert.deepEqual(failed._tag === "CommandFailed" && [failed.code, failed.stderr], [1, "config.toml: bad TOML\n"]);
   fake("claude", "exec /bin/sleep 30");
-  const slow = await failure(connect("claude-code", MCP, 200));
+  const slow = await failure(connect("claude-code", MCP, { timeout: 200 }));
   const add = `claude mcp add --transport http --scope user inbox ${MCP}`;
   assert.deepEqual([slow._tag, slow.message], ["CommandTimeout", `claude failed: Command failed: ${add}. Run it yourself: ${add}`]);
 });
@@ -228,8 +228,19 @@ test("Connect does the same: it installs the new names, then removes the old", {
   before();
   const was = runSync(status("claude-code", MCP));
   assert.deepEqual([was.mcp.connected, was.skill.state], [true, "missing"], "its tools work under the old name until it's renamed");
-  const s = await run(connect("claude-code", MCP));
+  const said: string[] = [];
+  const s = await run(
+    connect("claude-code", MCP, {
+      log: (line) => {
+        said.push(line);
+      },
+    }),
+  );
   assert.deepEqual([s.mcp.connected, s.skill.state, s.needs], [true, "installed", null]);
+  assert.deepEqual(said, [
+    `moved the Inbox skill from ${join(home, ".claude", "skills", "review-desk")} to ${join(home, ".claude", "skills", "inbox")}`,
+    "renamed claude's MCP server review-desk to inbox",
+  ]);
   assert.deepEqual(calls(), [`mcp add --transport http --scope user inbox ${MCP}`, "mcp remove --scope user review-desk"]);
   assert.deepEqual(servers(), ["other", "inbox"]);
   assert.equal(existsSync(join(home, ".claude", "skills", "review-desk")), false);
@@ -296,3 +307,26 @@ test(
     assert.equal(runSync(status("claude-code", MCP)).mcp.connected, false, "another desk's port isn't this desk");
   },
 );
+
+test("one agent's CLI failing doesn't hold up the other's renaming", { skip: process.platform === "win32" }, async () => {
+  before();
+  rmSync(join(bin, "claude"));
+  write(join(".agents", "skills", "review-desk", "SKILL.md"), OLD_SKILL);
+  write(join(".codex", "config.toml"), `[mcp_servers.review-desk]\nurl = "${MCP}"\n`);
+  // A Codex whose config gains inbox on `mcp add` and loses review-desk on `mcp remove`.
+  const toml = (...names: string[]) => names.map((n) => `[mcp_servers.${n}]\nurl = "${MCP}"\n`).join("");
+  write("codex-add.toml", toml("review-desk", "inbox"));
+  write("codex-remove.toml", toml("inbox"));
+  fake("codex", `/bin/cp "$HOME/codex-$2.toml" "$HOME/.codex/config.toml"`);
+  const skills = (agent: string) => join(home, agent, "skills");
+  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [
+    `moved the Inbox skill from ${join(skills(".claude"), "review-desk")} to ${join(skills(".claude"), "inbox")}`,
+    `couldn't bring claude's Inbox skill and MCP server up to date: claude isn't on PATH. Run it yourself: claude mcp add --transport http --scope user inbox ${MCP}`,
+    `moved the Inbox skill from ${join(skills(".agents"), "review-desk")} to ${join(skills(".agents"), "inbox")}`,
+    "renamed codex's MCP server review-desk to inbox",
+  ]);
+  const codex = runSync(status("codex", MCP));
+  assert.deepEqual([codex.mcp.connected, codex.skill.state], [true, "installed"]);
+  assert.equal(readFileSync(join(home, ".codex", "config.toml"), "utf8"), toml("inbox"));
+  assert.equal(runSync(status("claude-code", MCP)).mcp.connected, true, "claude keeps the old name's tools until the next try");
+});
