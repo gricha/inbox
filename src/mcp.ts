@@ -565,7 +565,7 @@ export function createMcpServer(
     "desk_inquire",
     {
       description:
-        "Ask the user to decide or tell you something, in their Review Desk instead of in chat. It opens as its own page, and they decide from that page alone, without opening anything else or asking you back: so give them everything. " +
+        "Ask the user to decide or tell you something in their Review Desk: a channel beside the chat, not instead of it. While they're talking to you, ask in your chat as usual; ask here when they asked you to ask or update them in the desk, or about work that goes on while they're elsewhere, which they answer when it suits them. The coordinator always asks here. It opens as its own page, and they decide from that page alone, without opening anything else or asking you back: so give them everything. " +
         "`question`: the decision, in one line. " +
         "`context`: what you're working on and how this came up; what you found, concretely (the facts, numbers, names, file paths, what the code or the thread says now, what you already tried); what the choice turns on; and your pick and why. A few short paragraphs is normal; one sentence is refused. " +
         "`options`: the answers they'd likely give, your pick first, each with `next`: what you'll do if they pick it and what it costs or risks. They can always write their own. " +
