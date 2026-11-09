@@ -2088,8 +2088,8 @@ function inflight(): InflightView {
   return { rows: lane, stacks: stacksOf(lane.map((x) => x.card)), coordinator, work: work() };
 }
 
-// Claude's work, as the desk's ledger keeps it: the two reviews being written, your ask your agent has, and a review that
-// timed out three times.
+// Claude's work, as the desk's ledger keeps it: the two reviews being written, your ask your agent has, a review that
+// timed out three times, and your answer nobody picked up.
 const jobs = new Map<string, Job>();
 const FAILED = "acme/worker#890";
 
@@ -2118,17 +2118,13 @@ function work(): Work[] {
   const rank = { running: 0, queued: 1, failed: 2, done: 3 };
   return [...jobs.values()]
     .filter((j) => j.state !== "done")
-    .map((j) =>
-      Object.assign(
-        {
-          title:
-            j.kind === "ask"
-              ? (ASKS.find((a) => a.id === j.key)?.text.replaceAll(/\s+/g, " ") ?? j.key)
-              : (recs.find((r) => r.id === j.key)?.seed.title ?? j.key),
-        },
-        j,
-      ),
-    )
+    .map((j): Work => {
+      const q = j.kind === "answer" ? INQUIRIES.find((x) => x.id === j.key) : undefined;
+      if (q) return Object.assign({ title: q.question, from: q.from }, j);
+      const title =
+        j.kind === "ask" ? ASKS.find((a) => a.id === j.key)?.text.replaceAll(/\s+/g, " ") : recs.find((r) => r.id === j.key)?.seed.title;
+      return Object.assign({ title: title ?? j.key }, j);
+    })
     .sort((a, b) => rank[a.state] - rank[b.state]);
 }
 
@@ -2142,7 +2138,8 @@ const coordinator: CoordinatorView = {
   queued: [],
 };
 
-// Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page.
+// Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
+// you answered: one its session never came back for, one it picked up two minutes later.
 const INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
@@ -2192,6 +2189,38 @@ const INQUIRIES: Inquiry[] = [
     item_id: null,
     answer: null,
   },
+  {
+    id: "q3ab5e17",
+    at: iso(1.2),
+    from: "seer: code mode research",
+    question: "Rerun the baseline arm, or compare against last week's numbers?",
+    context:
+      "The treatment arm finished: 41 of 60 tasks pass. Last week's baseline was 37 of 60, but that run was on the harness before " +
+      "the false-failure fix, which turned three of its failures into passes when I replayed them.\n\n" +
+      "Rerunning the baseline takes about two hours and gives a like-for-like number. Comparing against last week's is free, and " +
+      "overstates the gain by up to three tasks. I'd rerun it.",
+    options: [
+      { answer: "Rerun it", next: "I start the baseline arm now on the fixed harness and report both numbers together. About two hours." },
+      { answer: "Use last week's", next: "I report 41 against 37 today, with a note that up to three of the four are the harness." },
+    ],
+    links: [{ label: "The harness fix", url: "https://github.com/getsentry/seer/pull/7122" }],
+    item_id: null,
+    answer: { text: "Rerun it", at: iso(40 / 60), dismissed: false, read_at: null },
+  },
+  {
+    id: "q4f00d42",
+    at: iso(50 / 60),
+    from: "docs: sync guide",
+    question: "Document the tombstone limit now, or after #12 lands?",
+    context:
+      "The sync guide says deletes are kept forever. #12 changes that once it compacts tombstones, and until then the guide is right. " +
+      "Writing the new section now means it ships with the change; writing it after means one more PR.\n\n" +
+      "I'd write it now, on #12's branch, so the two land together.",
+    options: [],
+    links: [{ label: "The sync guide", url: "https://github.com/me/notes-app/blob/main/docs/sync.md" }],
+    item_id: null,
+    answer: { text: "Now, on #12's branch", at: iso(6 / 60), dismissed: false, read_at: iso(4 / 60) },
+  },
 ];
 function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   const q = INQUIRIES.find((x) => x.id === id);
@@ -2200,7 +2229,8 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   const dismissed = b.dismiss === true;
   const text = typeof b.text === "string" ? b.text.trim() : "";
   if (!dismissed && !text) throw new HttpError(400, "the answer is empty");
-  q.answer = { text: dismissed ? "" : text, at: new Date().toISOString(), dismissed };
+  q.answer = { text: dismissed ? "" : text, at: new Date().toISOString(), dismissed, ...(!dismissed && { read_at: null }) };
+  if (!dismissed) setJob("answer", q.id, { item: q.item_id });
   bump();
   return q;
 }
@@ -3588,6 +3618,13 @@ aiErrors.set(FAILED, LATE);
 setJob("ai_review", FAILED, { state: "failed", attempts: 3, queued_at: iso(1.6), started_at: iso(1.1), finished_at: iso(1), error: LATE });
 for (const a of ASKS.filter((x) => !x.answer))
   setJob("ask", a.id, { item: a.item_id, state: "running", attempts: 1, queued_at: a.at, started_at: a.at });
+// And your answer its session never read: the desk told you after half an hour.
+setJob("answer", "q3ab5e17", {
+  state: "failed",
+  queued_at: iso(40 / 60),
+  finished_at: iso(10 / 60),
+  error: "that session has probably ended",
+});
 
 const server = createServer((req, res) => {
   void handle(req, res);

@@ -1335,11 +1335,15 @@ p.side-sync {
 }
 
 .inquiry .inq-answered {
+  flex-wrap: wrap;
+  row-gap: 2px;
   margin: 0;
   padding: 0 12px;
 }
 
-.inq-answered .quiet {
+/* Whether whoever asked has read it: its own line under your answer. */
+.inq-pickup {
+  flex-basis: 100%;
   font-weight: 500;
 }
 

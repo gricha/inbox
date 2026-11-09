@@ -13,6 +13,7 @@ import type {
   FieldDoc,
   FocusView,
   InflightView,
+  InquiryView,
   ItemDetail,
   Overview,
   PolicyDoc,
@@ -584,4 +585,32 @@ test("the More menu's GitHub writes: the cards say which, and the mock takes the
   assert.deepEqual((await card("acme/worker#875")).actions, ["reopen"]);
   assert.equal((await gh("acme/worker#875", "reopen")).status, 200);
   assert.deepEqual((await card("acme/worker#875")).actions, ["close", "draft", "merge"]);
+});
+
+test("an answer nobody picked up: Claude's work lists it with who asked, its question says so, one that was read says when, and a new answer is owed", async () => {
+  const work = async () => (await call<InflightView>("GET", "/api/inflight")).data.work.filter((w) => w.kind === "answer");
+  assert.deepEqual(
+    (await work()).map((w) => [w.key, w.state, w.from, w.title, w.error]),
+    [
+      [
+        "q3ab5e17",
+        "failed",
+        "seer: code mode research",
+        "Rerun the baseline arm, or compare against last week's numbers?",
+        "that session has probably ended",
+      ],
+    ],
+  );
+  const read = async (id: string) => (await call<InquiryView>("GET", `/api/inquiries/${id}`)).data.answer?.read_at;
+  assert.equal(await read("q3ab5e17"), null);
+  assert.equal(typeof (await read("q4f00d42")), "string");
+  assert.equal((await call("POST", "/api/inquiries/q2bead00/answer", { text: "The core one first" })).status, 200);
+  assert.equal(await read("q2bead00"), null);
+  assert.deepEqual(
+    (await work()).map((w) => [w.key, w.state]),
+    [
+      ["q2bead00", "queued"],
+      ["q3ab5e17", "failed"],
+    ],
+  );
 });

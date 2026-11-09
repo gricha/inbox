@@ -185,6 +185,8 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
       call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
     inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
+    unreadAnswers: () => call<Inquiry[]>("GET", "/api/inquiries/unread"),
+    answerRead: (id: string) => call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${q(id)}/read`),
     automations: () => call<AutomationView[]>("GET", "/api/automations"),
     setAutomation: (id: string, b: { name: string; schedule: string; prompt: string }) =>
       call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${q(id)}`, b),

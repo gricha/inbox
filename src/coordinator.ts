@@ -7,7 +7,7 @@ import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
 import { ClaudeBadOutput, CommandBadOutput, fsError, messageOf, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { oldHome } from "./home.ts";
-import { askOf } from "./jobs.ts";
+import { answerOf, askOf } from "./jobs.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import {
   COORDINATOR_NAME,
@@ -422,6 +422,8 @@ export class Coordinator {
         for (const l of asks) {
           const id = askOf(l);
           if (id) this.desk.jobs.begin("ask", id); // it has your ask now: its job runs until it answers
+          const answered = answerOf(l);
+          if (answered) yield* Effect.ignore(this.desk.answerRead(answered)); // this wake is how it reads your answer
         }
         this.saw("busy"); // it has a turn now; the next look says how it goes
       } else if (a && (!a.pid || (switching && idle))) {

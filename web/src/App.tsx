@@ -1489,6 +1489,7 @@ export function App() {
               onWork={(w, k) => {
                 if (k === "retry") runUi(retryWork(w));
                 else if (w.kind === "ai_review") go({ name: "review", id: w.key });
+                else if (w.kind === "answer") go({ name: "inquiry", id: w.key });
                 else openAsk(w.item ?? undefined);
               }}
             />

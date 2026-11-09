@@ -522,7 +522,16 @@ export function createApp(desk: Desk, port: number): Hono {
     });
     return respond(c, inquire, { log });
   });
+  app.get("/api/inquiries/unread", (c) => total(c, () => desk.unreadAnswers())); // before :id, which would take it
   app.get("/api/inquiries/:id", (c) => respond(c, desk.inquiryView(c.req.param("id")), { log, read: true }));
+  // desk_inquiry gave whoever asked your answer: the desk notes when, so you can see it was picked up.
+  app.post("/api/inquiries/:id/read", (c) =>
+    respond(
+      c,
+      Effect.map(desk.answerRead(c.req.param("id")), (inquiry) => ({ ok: true, inquiry })),
+      { log },
+    ),
+  );
   // Your answer, from the desk's own window only: an agent can't answer its own question.
   app.post("/api/inquiries/:id/answer", (c) => {
     const answer = Effect.gen(function* () {

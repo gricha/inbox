@@ -840,10 +840,11 @@ export interface InflightView {
   work: Work[]; // Claude's work: what's running, then queued, then failed
 }
 
-// One piece of work Claude owes the owner, in the desk's ledger (src/jobs.ts): an AI review of a PR, or an ask to their agent.
+// One piece of work owed, in the desk's ledger (src/jobs.ts): an AI review of a PR, an ask to their agent, or their answer
+// to an agent's question, owed to whoever asked until it reads it.
 export interface Job {
-  kind: "ai_review" | "ask";
-  key: string; // the PR's id for a review, the ask's id for an ask
+  kind: "ai_review" | "ask" | "answer";
+  key: string; // the PR's id for a review, the ask's id for an ask, the question's id for an answer
   item: string | null; // what it's about
   head: string | null; // the commit a review is of
   state: "queued" | "running" | "done" | "failed";
@@ -857,9 +858,10 @@ export interface Job {
 
 export const JOB_ATTEMPTS = 3; // a job's tries before it's failed
 
-// A job in Merging's Claude's work: the PR's title or the ask's words.
+// A job in Merging's Claude's work: the PR's title, the ask's words, or the question you answered and who asked it.
 export interface Work extends Job {
   title: string;
+  from?: string; // an answer's: the session that asked
 }
 
 // The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".
@@ -926,7 +928,9 @@ export interface Inquiry {
   options: InquiryOption[]; // its pick first; you can always write your own
   links: InquiryLink[]; // what it's about and what it read: comments, files, runs, docs
   item_id: string | null; // the PR or issue it's about
-  answer: { text: string; at: string; dismissed: boolean } | null;
+  // read_at: when whoever asked first read your answer (desk_inquiry, or the wake that gives your agent its own); null
+  // until then; absent on a dismissal, which owes nothing, and on an answer from before the desk kept it.
+  answer: { text: string; at: string; dismissed: boolean; read_at?: string | null } | null;
 }
 
 // GET /api/inquiries/:id: with the card of the PR or issue it's about, when the desk holds it.

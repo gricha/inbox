@@ -2348,12 +2348,17 @@ export class Desk {
   // Claude's work, in Merging: what's running, then queued, then failed, as the ledger has it; what's done isn't listed.
   work(snap: Snapshot): Work[] {
     const asks = new Map(this.asks().map((a) => [a.id, a.text.replaceAll(/\s+/g, " ")]));
+    const questions = new Map(this.inquiries().map((q) => [q.id, q]));
     const rank = { running: 0, queued: 1, failed: 2, done: 3 };
     return this.jobs
       .list()
       .filter((j) => j.state !== "done")
       .map((j) => (j.kind === "ai_review" && this.autoAiOn() ? this.aiWaits(j)! : j))
-      .map((j) => Object.assign({ title: (j.kind === "ask" ? asks.get(j.key) : snap.entries.get(j.key)?.item.title) ?? j.key }, j))
+      .map((j): Work => {
+        const q = j.kind === "answer" ? questions.get(j.key) : undefined;
+        if (q) return Object.assign({ title: q.question, from: q.from }, j);
+        return Object.assign({ title: (j.kind === "ask" ? asks.get(j.key) : snap.entries.get(j.key)?.item.title) ?? j.key }, j);
+      })
       .sort((a, b) => rank[a.state] - rank[b.state]);
   }
 
@@ -2792,11 +2797,14 @@ export class Desk {
       const answer = dismissed ? "" : text.trim();
       if (!dismissed && !answer) return yield* new BadRequest({ message: "the answer is empty" });
       if (answer.length > MAX_ASK) return yield* new BadRequest({ message: `keep an answer under ${MAX_ASK} characters` });
-      const done: Inquiry = { ...q, answer: { text: answer, at: this.now().toISOString(), dismissed } };
+      const at = this.now().toISOString();
+      const done: Inquiry = { ...q, answer: { text: answer, at, dismissed, ...(!dismissed && { read_at: null }) } };
       this.store.set(
         "inquiries",
         this.inquiries().map((x) => (x.id === id ? done : x)),
       );
+      // Nothing pushes it to a session that stopped waiting: it's owed until whoever asked reads it. A dismissal owes nothing.
+      if (!dismissed) this.jobs.queue("answer", id, q.item_id);
       this.changed();
       // Your answer is what wakes the coordinator (it ends its turn once it asks); what cmd.exe can't pass is only logged.
       if (isCoordinator(q.from) && this.settings["agent.coordinator"]) {
@@ -2815,6 +2823,36 @@ export class Desk {
       }
       return done;
     });
+  }
+
+  // GET /api/inquiries/unread (desk_inquiry with no id): your answers nobody has picked up yet, in the order they were asked.
+  unreadAnswers(): Inquiry[] {
+    return this.inquiries().filter((q) => q.answer?.read_at === null);
+  }
+
+  // POST /api/inquiries/:id/read (desk_inquiry gave whoever asked your answer) and the wake that gives your agent its own:
+  // when it was first read, which ends its job in Claude's work.
+  answerRead(id: string): Effect.Effect<Inquiry, NotFound> {
+    return Effect.map(this.inquiry(id), (q) => {
+      if (q.answer?.read_at !== null) return q;
+      const read: Inquiry = { ...q, answer: { ...q.answer, read_at: this.now().toISOString() } };
+      this.store.set(
+        "inquiries",
+        this.inquiries().map((x) => (x.id === id ? read : x)),
+      );
+      this.jobs.done("answer", id);
+      this.changed();
+      return read;
+    });
+  }
+
+  // The loop's: your answer sat unread past its wait, so you're told, once; Merging keeps saying so for a day.
+  answerUnread(q: Inquiry): void {
+    const who = isCoordinator(q.from) ? "your agent" : q.from;
+    this.jobs.fail("answer", q.id, "that session has probably ended");
+    this.log(`your answer to ${q.from} (question ${q.id}) hasn't been picked up`);
+    if (this.mayNotify())
+      this.notify("Answer not picked up", `Your answer to ${who} hasn't been picked up, so that session has probably ended.`);
   }
 
   // desk_answer: the coordinator's answer to one of your asks, in your chat with it in the desk, and a notification.

@@ -14,6 +14,7 @@ import type {
   ConfigError,
   FocusView,
   InflightView,
+  Inquiry,
   ItemDetail,
   ItemState,
   Overview,
@@ -314,6 +315,20 @@ const askPlace = (id: string, path: string): AskPlace => ({
   push: null,
 });
 
+// An agent's question, as the owner left it: answered and not picked up yet, still open, or dismissed.
+const inquiry = (id: string, answer: Inquiry["answer"]): Inquiry => ({
+  id,
+  at: ago(2),
+  from: "docs\nresearch",
+  question: "Document the limit now,\nor after #12?",
+  context: "",
+  options: [],
+  links: [],
+  item_id: null,
+  answer,
+});
+const ANSWERED = inquiry("a1c0ffee", { text: "Now, on #12's branch", at: ago(1), dismissed: false, read_at: null });
+
 type Reply = { status: number; data: unknown };
 const reply = (status: number, data: unknown): Reply => ({ status, data });
 
@@ -436,6 +451,16 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(404, { error: 'no ask "nope"' });
     case "POST /api/asks/a1b2c3d4/answer":
       return reply(200, { ok: true, ask: { id: "a1b2c3d4", answer: { text: body.text, at: ago(0) } } });
+    case "GET /api/inquiries/unread":
+      return reply(200, [ANSWERED]);
+    case "GET /api/inquiries/a1c0ffee":
+      return reply(200, ANSWERED);
+    case "POST /api/inquiries/a1c0ffee/read":
+      return reply(200, { ok: true, inquiry: { ...ANSWERED, answer: { ...ANSWERED.answer, read_at: ago(0) } } });
+    case "GET /api/inquiries/0pe00000":
+      return reply(200, inquiry("0pe00000", null));
+    case "GET /api/inquiries/d15015ed":
+      return reply(200, inquiry("d15015ed", { text: "", at: ago(1), dismissed: true }));
     case "GET /api/fields":
       return reply(200, [{ path: "me.requested_direct", type: "boolean", doc: "asked by name" }]);
     case "GET /api/settings":

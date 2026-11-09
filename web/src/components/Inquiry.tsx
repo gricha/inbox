@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { age, cls, fromName, issueUrl, MOD } from "../format.ts";
+import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { shownUrl, urlPlace } from "../prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
@@ -268,7 +268,11 @@ export function InquiryPage({
         <p className="rv-acted inq-answered">
           <span className="rv-acted-what">{answer.dismissed ? "✓ Dismissed: it decides itself" : `✓ Answered: ${answer.text}`}</span>
           {!q.answer && <span className="busy" aria-label="sending" />}
-          {q.answer && <span className="quiet">{fromName(q.from)} has it</span>}
+          {q.answer?.read_at !== undefined && (
+            <span className="quiet inq-pickup" title={q.answer.read_at ? new Date(q.answer.read_at).toLocaleString() : undefined}>
+              {q.answer.read_at ? `Picked up ${ago(q.answer.read_at, now)}` : "Not picked up yet"}
+            </span>
+          )}
         </p>
       ) : (
         <section className="inq-answer" aria-label="Your answer">

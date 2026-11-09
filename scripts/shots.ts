@@ -1631,8 +1631,8 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Claude's work under the rows, in their columns: two reviews being written (one on its second try), your ask your agent has, and a review
-    // that failed three times, with its reason and Try again; nothing in red.
+    // Claude's work under the rows, in their columns: two reviews being written (one on its second try), your ask your agent has, a review
+    // that failed three times, with its reason and Try again, and your answer nobody picked up, with no Try again; nothing in red.
     name: "inflight-work",
     go: async (page) => {
       await at("#/")(page); // from Merging itself the hash wouldn't change, so the shot before's view would stay
@@ -1662,6 +1662,9 @@ const SHOTS: Shot[] = [
       const failed = rows.find((r) => r.note.startsWith("Failed 3 times: "));
       if (failed?.retry !== "Try again") failures.push(`inflight-work: the failed review reads ${JSON.stringify(failed)}`);
       if (rows.filter((r) => r.retry).length !== 1) failures.push("inflight-work: Try again on a row that hasn't failed");
+      const unread = rows.find((r) => r.note.startsWith("Your answer to seer: code mode research hasn't been picked up"));
+      if (!unread?.note.endsWith("that session has probably ended") || unread.retry)
+        failures.push(`inflight-work: your unread answer reads ${JSON.stringify(unread)}`);
       const red = await page.evaluate<string>(`(() => {
         const probe = document.body.appendChild(document.createElement("span"));
         probe.style.color = "var(--red)";
@@ -1678,11 +1681,27 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await at("#/inflight")(page);
-      await page.locator(".work-failed .row-main").click();
+      await page.locator('.work-failed[data-id^="ai_review"] .row-main').click();
       await page.waitForTimeout(300);
       const hash = await page.evaluate<string>("location.hash");
       if (hash !== `#/review/${encodeURIComponent("acme/worker#890")}`) failures.push(`inflight-work-click: a click went to ${hash}`);
     },
+  },
+  {
+    // A click on your answer nobody picked up opens its question, which says so under your answer.
+    name: "inflight-work-answer",
+    go: async (page) => {
+      await at("#/")(page);
+      await at("#/inflight")(page);
+      await page.locator('.work-row[data-id^="answer"] .row-main').click();
+      await page.locator(".inq-answered").waitFor();
+      await page.waitForTimeout(200);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/inquiry/q3ab5e17") failures.push(`inflight-work-answer: a click went to ${hash}`);
+      const said = await page.locator(".inq-pickup").textContent();
+      if (said !== "Not picked up yet") failures.push(`inflight-work-answer: under your answer it reads ${JSON.stringify(said)}`);
+    },
+    after: at("#/"),
   },
   {
     // One click on a row opens its review.
@@ -1793,6 +1812,18 @@ const SHOTS: Shot[] = [
       await at("#/inquiry/q2bead00")(page);
       await page.locator(".inquiry .inq-write textarea").waitFor();
       await page.waitForTimeout(200);
+    },
+    after: at("#/"),
+  },
+  {
+    // A question you answered, once its session read your answer: when, under it.
+    name: "inquiry-picked-up",
+    go: async (page) => {
+      await at("#/inquiry/q4f00d42")(page);
+      await page.locator(".inq-answered").waitFor();
+      await page.waitForTimeout(200);
+      const said = (await page.locator(".inq-pickup").textContent()) ?? "";
+      if (!/^Picked up \d+m ago$/.test(said)) failures.push(`inquiry-picked-up: under your answer it reads ${JSON.stringify(said)}`);
     },
     after: at("#/"),
   },

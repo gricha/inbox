@@ -1,5 +1,5 @@
 import { JOB_ATTEMPTS, type CoordinatorView, type InflightRow, type InflightView, type Work } from "../../../src/types.ts";
-import { age, cls } from "../format.ts";
+import { age, cls, fromName } from "../format.ts";
 import { Dots } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
@@ -84,7 +84,7 @@ export function Inflight({
 }
 
 // What Claude owes you, as the desk's ledger has it: what it's running and since when, what waits its turn, what failed and
-// why, with Try again. Nothing while there's nothing.
+// why, with Try again; and an answer of yours whoever asked hasn't read. Nothing while there's nothing.
 function ClaudesWork({ work, now, onWork }: { work: Work[]; now: number; onWork: (w: Work, k: "open" | "retry") => void }) {
   return (
     <section className="group" aria-labelledby="h-work">
@@ -101,15 +101,17 @@ function ClaudesWork({ work, now, onWork }: { work: Work[]; now: number; onWork:
   );
 }
 
-// One line in Merging's columns: the PR's title or your ask's words, its ref, where it stands, Try again once it's failed, and
-// since when.
+// One line in Merging's columns: the PR's title, your ask's words or the question you answered, its ref, where it stands,
+// Try again once it's failed, and since when. An answer has no Try again: only the session that asked can read it.
 function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k: "open" | "retry") => void }) {
   const review = w.kind === "ai_review";
-  const since = (w.state === "running" ? w.started_at : w.state === "failed" ? w.finished_at : null) ?? w.queued_at;
+  const answer = w.kind === "answer";
+  const since = (answer ? null : w.state === "running" ? w.started_at : w.state === "failed" ? w.finished_at : null) ?? w.queued_at;
   const tries = w.attempts > 1 ? [`try ${w.attempts} of ${JOB_ATTEMPTS}`] : [];
   const error = withCode(w.error ?? "");
-  const phrase =
-    w.state === "running"
+  const phrase = answer
+    ? [`Your answer to ${fromName(w.from ?? "", false)} hasn't been picked up`, ...(w.error ? [error] : [])]
+    : w.state === "running"
       ? [review ? "Claude is reviewing it" : "Your agent has it", ...tries]
       : w.state === "failed"
         ? [
@@ -139,14 +141,14 @@ function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k
       )}
     </span>
   );
-  const state = w.state === "running" ? "running since" : w.state === "failed" ? "failed" : "queued";
+  const state = answer ? "answered" : w.state === "running" ? "running since" : w.state === "failed" ? "failed" : "queued";
   return (
     <div className={cls("line", "lane-row", "work-row", w.state === "failed" && "work-failed")} data-id={`${w.kind} ${w.key}`}>
       <div className="line-main line-row">
         <button
           type="button"
           className="row-main line-btn"
-          title={review ? "Open its review" : "Open your chat with your agent"}
+          title={review ? "Open its review" : answer ? "Open the question" : "Open your chat with your agent"}
           onMouseDown={(e) => {
             e.preventDefault(); // a click opens without selecting first, as the main page's rows do
           }}
@@ -155,13 +157,13 @@ function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k
           }}
         >
           {/* Your words, quoted, so an ask reads as yours beside the PRs' titles. */}
-          <span className="line-title">{review ? w.title : `\u201c${w.title}\u201d`}</span>
+          <span className="line-title">{review || answer ? w.title : `\u201c${w.title}\u201d`}</span>
           {ref}
           <span className="line-note">
             <Dots parts={phrase} />
           </span>
         </button>
-        {w.state === "failed" && (
+        {w.state === "failed" && !answer && (
           <button
             type="button"
             className="act line-cta"

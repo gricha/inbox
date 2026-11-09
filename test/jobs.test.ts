@@ -1,5 +1,6 @@
 // The ledger of work Claude owes the owner (src/jobs.ts) and its loop: an AI review survives a desk restart, a run past its
-// time is retried with backoff and then failed with its reason, and the review page says what the ledger says.
+// time is retried with backoff and then failed with its reason, and the review page says what the ledger says; an answer
+// nobody picked up is said so once.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";
@@ -211,4 +212,81 @@ test("the agent at its usage limit: a review's tries aren't spent on it; it wait
   t.f.fail(null);
   await t.f.release(ID);
   assert.deepEqual(job(), { state: "done", attempts: 1, error: null }, "the limit lifted: reviewed, with nobody's Try again");
+});
+
+const CONTEXT = "The guide says deletes are kept forever, and #12 changes that. ".repeat(4);
+// The owner's answer to an agent's question, on a desk whose clock the test moves a minute's pass at a time.
+async function answered(c: TestContext, settings: Record<string, unknown>, from = "docs research") {
+  const t = await setup([], { settings: { ...SETTINGS, ...settings } });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const q = runSync(t.desk.inquire({ question: "Document it now?", from, context: CONTEXT, item: "acme/elsewhere#9" }));
+  t.notes.length = 0; // the question's own notification
+  runSync(t.desk.answerInquiry(q.id, "Now"));
+  let at = NOW.getTime();
+  const later = (minutes: number) => {
+    at += minutes * 60_000;
+    t.setNow(new Date(at));
+    t.desk.jobs.tick();
+  };
+  const job = () => pick(t.desk.jobs.get("answer", q.id), ["state", "error"]);
+  return { ...t, q, later, job };
+}
+
+test("an answer nobody picked up in 30 minutes: the owner is told once, Merging says so for a day, and a late read still ends it", async (c) => {
+  const t = await answered(c, { "notify.quiet": "" });
+  const gone = "that session has probably ended";
+  t.later(29);
+  assert.deepEqual([t.job(), t.notes], [{ state: "queued", error: null }, []], "within its wait");
+  const rev = t.desk.rev;
+  t.later(1);
+  assert.deepEqual(t.job(), { state: "failed", error: gone });
+  assert.deepEqual(t.notes, ["Your answer to docs research hasn't been picked up, so that session has probably ended."]);
+  assert.ok(t.desk.rev > rev, "the window hears of it");
+  assert.deepEqual(
+    runSync(t.desk.inflight()).work.map((w) => [w.kind, w.state, w.title, w.from, w.error]),
+    [["answer", "failed", "Document it now?", "docs research", gone]],
+    "Claude's work says whose answer, and why",
+  );
+  t.later(600);
+  assert.equal(t.notes.length, 1, "it doesn't nag");
+  assert.deepEqual(
+    t.desk.unreadAnswers().map((x) => x.id),
+    [t.q.id],
+    "still there for the session that asked",
+  );
+  runSync(t.desk.answerRead(t.q.id));
+  assert.deepEqual([t.job(), runSync(t.desk.inflight()).work], [{ state: "done", error: null }, []], "read late: done");
+  t.later(25 * 60);
+  assert.equal(t.desk.jobs.get("answer", t.q.id), null, "a done job goes after a day");
+});
+
+test("an answer read within its wait is done, and nobody is told; unread, it goes from Merging a day after you were told", async (c) => {
+  const t = await answered(c, { "notify.quiet": "" });
+  t.later(5);
+  runSync(t.desk.answerRead(t.q.id));
+  t.later(60);
+  assert.deepEqual([t.job(), t.notes], [{ state: "done", error: null }, []]);
+
+  const u = await answered(c, { "notify.quiet": "", "agent.coordinator": false }, "Inbox coordinator");
+  u.later(30);
+  assert.deepEqual(u.notes, ["Your answer to your agent hasn't been picked up, so that session has probably ended."]);
+  u.later(24 * 60 + 1);
+  assert.deepEqual([u.job(), runSync(u.desk.inflight()).work], [null, []]);
+  assert.equal(runSync(u.desk.inquiry(u.q.id)).answer?.read_at, null, "its page still says it wasn't picked up");
+});
+
+test("an unread answer waits out quiet hours to tell you; with notifications off, Merging alone says so", async (c) => {
+  const h = NOW.getHours();
+  const t = await answered(c, { "notify.quiet": `${h}:00-${h + 1}:00` });
+  t.later(30);
+  assert.deepEqual([t.job(), t.notes], [{ state: "queued", error: null }, []], "quiet hours");
+  t.later(29);
+  assert.deepEqual(t.notes, []);
+  t.later(1);
+  assert.deepEqual([t.job()?.state, t.notes.length], ["failed", 1], "told when they end");
+
+  const off = await answered(c, { "notify.enabled": false });
+  off.later(30);
+  assert.deepEqual([off.job()?.state, off.notes], ["failed", []]);
 });

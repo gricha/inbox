@@ -1048,6 +1048,29 @@ test(
   },
 );
 
+test("your answer to your agent's own question is picked up when the wake hands it over, not while it's busy", posix, async (c) => {
+  const t = await coordinated(c);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.said().length === 1);
+  await settle();
+  t.fake.busy(true);
+  const q = runSync(
+    t.desk.inquire({ question: "Rebase #3 onto main?", from: "Inbox coordinator", context: "x ".repeat(120), item: "web#3" }),
+  );
+  runSync(t.desk.answerInquiry(q.id, "Yes"));
+  await settle();
+  assert.equal(runSync(t.desk.inquiry(q.id)).answer?.read_at, null, "it's on something else: your answer waits");
+  assert.deepEqual(
+    runSync(t.desk.inflight()).work.map((w) => [w.kind, w.state, w.from]),
+    [["answer", "queued", "Inbox coordinator"]],
+  );
+  t.fake.busy(false);
+  await until(() => !!runSync(t.desk.inquiry(q.id)).answer?.read_at);
+  assert.equal(t.said().at(-1), `My answer to your question ${q.id} ("Rebase #3 onto main?"): "Yes"`);
+  assert.equal(t.desk.jobs.get("answer", q.id)?.state, "done");
+  assert.deepEqual(runSync(t.desk.inflight()).work, []);
+});
+
 test("coordinator settings that don't parse fail its folder as their read, in the parser's words", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-deny-"));
   const file = path.join(home, "coordinator", ".claude", "settings.json");

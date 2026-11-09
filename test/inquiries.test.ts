@@ -2,10 +2,15 @@
 // window; and a write the owner makes in the desk takes its item off the desk at once.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createClient } from "../src/client.ts";
+import { createMcpServer } from "../src/mcp.ts";
 import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import type { Inquiry } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
+import { NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
 import { run, runSync } from "./helpers/run.ts";
@@ -178,6 +183,87 @@ test("a dismissed question tells the agent so", async (c) => {
   assert.deepEqual(runSync(t.desk.inquiry(q.id)).answer?.dismissed, true);
   assert.deepEqual(runSync(t.desk.queue()).inquiries, []);
   assert.equal((await req("GET", "/api/inquiries/nope")).status, 404);
+});
+
+test("an answer is owed to the agent that asked until it reads it: Claude's work lists it, desk_inquiry finds it, and its first read is kept", async (c) => {
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const req = http(t);
+  const json = async <T>(r: Response | Promise<Response>) => (await r).json() as Promise<T>;
+  const work = () => runSync(t.desk.inflight()).work.map((w) => [w.kind, w.key, w.state, w.title, w.from, w.item]);
+  const q = runSync(t.desk.inquire(full({ from: "docs research", item: "api#1" })));
+  assert.deepEqual(work(), [], "nothing is owed while it waits on you");
+  assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { text: "Yes" }, DESK)).status, 200);
+  const rev = t.desk.rev;
+  assert.equal((await json<Inquiry>(req("GET", `/api/inquiries/${q.id}`))).answer?.read_at, null, "the window's look isn't a read");
+  assert.deepEqual(work(), [["answer", q.id, "queued", "Ship it?", "docs research", "acme/api#1"]]);
+  const waiting = await json<Inquiry[]>(req("GET", "/api/inquiries/unread"));
+  assert.deepEqual(
+    waiting.map((x) => [x.id, x.from, x.question]),
+    [[q.id, "docs research", "Ship it?"]],
+  );
+  assert.equal(runSync(t.desk.inquiry(q.id)).answer?.read_at, null, "listing what waits doesn't read it");
+
+  t.setNow(new Date(NOW.getTime() + 2 * 60_000));
+  const read = await req("POST", `/api/inquiries/${q.id}/read`);
+  assert.equal(read.status, 200, "any local client: the asking session, through desk_inquiry");
+  const at = new Date(NOW.getTime() + 2 * 60_000).toISOString();
+  assert.equal(((await read.json()) as { inquiry: Inquiry }).inquiry.answer?.read_at, at);
+  assert.ok(t.desk.rev > rev, "the window hears of it");
+  assert.deepEqual(work(), [], "read: nothing is owed");
+  assert.deepEqual(await json<Inquiry[]>(req("GET", "/api/inquiries/unread")), []);
+  assert.equal(t.desk.jobs.get("answer", q.id)?.state, "done");
+  t.setNow(new Date(NOW.getTime() + 9 * 60_000));
+  assert.equal((await req("POST", `/api/inquiries/${q.id}/read`)).status, 200);
+  assert.equal(runSync(t.desk.inquiry(q.id)).answer?.read_at, at, "its first read is the one kept");
+  assert.equal((await req("POST", "/api/inquiries/nope/read")).status, 404);
+});
+
+test("the whole way round: an agent asks through MCP, you answer in the window, its desk_inquiry finds your answer and then picks it up", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const app = createApp(t.desk, 47823);
+  const [server, client] = InMemoryTransport.createLinkedPair();
+  // The desk's own tools over its own routes, as its /mcp serves them.
+  await createMcpServer(
+    createClient((p, init) => app.request(`http://127.0.0.1:47823${p}`, init)),
+    () => {},
+  ).connect(server);
+  const agent = new Client({ name: "test", version: "0" });
+  await agent.connect(client);
+  c.after(() => agent.close());
+  const call = async (name: string, args: Record<string, unknown> = {}) =>
+    ((await agent.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text;
+  const id = /^asked as inquiry (\w+)/.exec(await call("desk_inquire", full({ from: "docs research" })))![1]!;
+  assert.equal(await call("desk_inquiry"), "no answers waiting to be picked up");
+  assert.equal(await call("desk_inquiry", { id }), 'no answer yet to "Ship it?"');
+  assert.equal((await http(t)("POST", `/api/inquiries/${id}/answer`, { text: "Yes" }, DESK)).status, 200);
+  assert.ok((await call("desk_inquiry")).includes(`\n${id}  docs research asked "Ship it?"\n`), "who asked, the question, its id");
+  assert.equal(runSync(t.desk.inquiry(id)).answer?.read_at, null, "finding it isn't picking it up");
+  assert.equal(await call("desk_inquiry", { id }), "the user answered: Yes");
+  assert.equal(runSync(t.desk.inquiry(id)).answer?.read_at, NOW.toISOString(), "its page says when");
+  assert.equal(await call("desk_inquiry"), "no answers waiting to be picked up");
+  assert.deepEqual(runSync(t.desk.inflight()).work, []);
+});
+
+test("a dismissal owes nothing, and neither does a question still open or an answer from before the desk kept reads", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const dismissed = runSync(t.desk.inquire(full({ question: "Drop it?" })));
+  runSync(t.desk.answerInquiry(dismissed.id, "", true));
+  const open = runSync(t.desk.inquire(full({ question: "Still open?" })));
+  const old = { ...open, id: "0ld0ld00", question: "Before?", answer: { text: "Yes", at: NOW.toISOString(), dismissed: false } };
+  t.desk.store.set("inquiries", [...t.desk.inquiries(), old]);
+  assert.deepEqual(t.desk.unreadAnswers(), []);
+  assert.deepEqual(runSync(t.desk.inflight()).work, []);
+  for (const id of [dismissed.id, open.id, old.id]) {
+    const before = runSync(t.desk.inquiry(id)).answer;
+    assert.deepEqual(runSync(t.desk.answerRead(id)).answer, before, "a read of it changes nothing");
+    assert.ok(!before || !("read_at" in before), "the page says nothing about a pickup the desk never tracked");
+  }
 });
 
 function writer() {

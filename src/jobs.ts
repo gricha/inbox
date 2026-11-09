@@ -1,6 +1,7 @@
-// The work Claude owes the owner, kept in the store so a desk restart forgets none of it: each AI review of a PR and each
-// of their asks to their agent. What the desk tracks in memory (Desk.generating, the coordinator's asks) writes through
-// it, so "Claude is reviewing it" is true exactly while its job runs, and a loop on the desk's runner sees each one through.
+// The work Claude owes the owner, kept in the store so a desk restart forgets none of it: each AI review of a PR, each
+// of their asks to their agent, and each answer of theirs to an agent's question until whoever asked reads it. What the
+// desk tracks in memory (Desk.generating, the coordinator's asks) writes through it, so "Claude is reviewing it" is true
+// exactly while its job runs, and a loop on the desk's runner sees each one through.
 import { Effect } from "effect";
 import type { Desk } from "./desk.ts";
 import { CommandTimeout } from "./errors.ts";
@@ -10,9 +11,12 @@ const MINUTE = 60_000;
 const BACKOFF = [2 * MINUTE, 10 * MINUTE]; // after a review's first and second failed try
 const REVIEW_TIMEOUT = 15 * MINUTE; // its two claude calls stop at 5 minutes each, its diff's three reads at 30 s
 const ASK_WAIT = [5 * MINUTE, 15 * MINUTE, 30 * MINUTE]; // unanswered this long after it went to your agent, which is idle
-const KEPT = 24 * 60 * MINUTE; // a done job, and a failed ask
+const ANSWER_WAIT = 30 * MINUTE; // your answer unread this long: the session that asked has probably ended
+const KEPT = 24 * 60 * MINUTE; // a done job, a failed ask, and an answer you were told is unread
 export const GONE = "its run ended without an answer";
 export const askOf = (line: string): string | undefined => /^My ask (\w+)/.exec(line)?.[1];
+// Your answer to your agent's own question, as answerInquiry() words its wake line.
+export const answerOf = (line: string): string | undefined => /^My answer to your question (\w+)/.exec(line)?.[1];
 
 export class Jobs {
   private desk: Desk;
@@ -122,8 +126,8 @@ export class Jobs {
   }
 
   // The loop's pass, every minute: a review past its time, or whose run is gone, is a failed try; an ask your agent stopped
-  // without answering goes to it again, once per wait; what's owed for nothing on the desk now goes. Then the AI reviews'
-  // retries whose wait is over start, before anything new.
+  // without answering goes to it again, once per wait; an answer of yours nobody read in half an hour, you're told once;
+  // what's owed for nothing on the desk now goes. Then the AI reviews' retries whose wait is over start, before anything new.
   tick(): void {
     const desk = this.desk;
     if (desk.stopped) return;
@@ -131,6 +135,7 @@ export class Jobs {
     let moved = false;
     for (const j of this.list()) {
       if (j.kind === "ask") this.ask(j, now);
+      else if (j.kind === "answer") this.answer(j, now);
       else this.review(j, now);
       if (this.get(j.kind, j.key) !== j) moved = true;
     }
@@ -167,6 +172,19 @@ export class Jobs {
       if (desk.coordinator.on) this.again(j, a, now);
       else this.fail(j.kind, j.key, "your agent is off: Settings → Agent");
     }
+  }
+
+  // Your answer to an agent's question: done once whoever asked reads it. Nothing pushes it there, so unread past its wait
+  // it's failed and you're told, once; in quiet hours, when they end.
+  private answer(j: Job, now: number): void {
+    const desk = this.desk;
+    const q = desk.inquiries().find((x) => x.id === j.key);
+    const over = j.state !== "queued" && now - Date.parse(j.finished_at!) > KEPT;
+    const late = j.state === "queued" && now - Date.parse(j.queued_at) >= ANSWER_WAIT;
+    if (!q?.answer || over) this.drop(j.kind, j.key);
+    else if (q.answer.read_at) {
+      if (j.state !== "done") this.done(j.kind, j.key);
+    } else if (late && (desk.mayNotify() || !desk.settings["notify.enabled"])) desk.answerUnread(q);
   }
 
   // Handed over and unanswered: once its wait is over with your agent idle, it goes again, or it's failed after ATTEMPTS.

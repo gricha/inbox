@@ -205,7 +205,7 @@ export const SETTINGS = [
     label: "Notify me when something needs me",
     type: "boolean",
     default: true,
-    help: "New Inbox items, agents' questions, your agent's answers and automations' results.",
+    help: "New Inbox items, agents' questions, your agent's answers, automations' results, an answer of yours nobody picked up.",
   },
   {
     key: "notify.quiet",
