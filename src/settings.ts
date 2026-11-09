@@ -225,7 +225,7 @@ export const SETTINGS = [
     label: "Run from a checkout",
     type: "string",
     default: "",
-    help: "A Review Desk clone, npm install done; changing it restarts the app.",
+    help: "An Inbox clone, npm install done; changing it restarts the app.",
   },
 ] as const satisfies readonly SettingDef[];
 

@@ -1,4 +1,4 @@
-# Review Desk
+# Inbox
 
 A desktop app (Electron, macOS/Linux/Windows) that turns a GitHub review load into one queue. It is early: the owner is still working out what they want, so keep changes small and easy to undo. Prefer plain code over new abstractions.
 

@@ -174,7 +174,7 @@ export function createClient(opts: ClientOptions = {}): Client {
       try: async (signal) => {
         const answer = await doFetch(url, {
           method: init.method,
-          headers: { authorization, "user-agent": "review-desk", ...init.headers },
+          headers: { authorization, "user-agent": "inbox", ...init.headers },
           body: init.body,
           signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         });
@@ -215,7 +215,7 @@ export function createClient(opts: ClientOptions = {}): Client {
   });
 
   function query<T>(doc: string, variables: Record<string, unknown> = {}): Effect.Effect<T, GitHubReadError> {
-    if (/\bmutation\b/i.test(doc)) return Effect.die(new Error("review-desk is read-only: refusing to send a mutation"));
+    if (/\bmutation\b/i.test(doc)) return Effect.die(new Error("Inbox is read-only: refusing to send a mutation"));
     const body = JSON.stringify({ query: doc, variables });
     return Effect.suspend((): Effect.Effect<T, GitHubReadError> => {
       const budget = last;
@@ -233,7 +233,7 @@ export function createClient(opts: ClientOptions = {}): Client {
     init: { method?: string; headers?: Record<string, string> } = {},
   ): Effect.Effect<RestResponse, GitHubReadError> {
     const method = init.method ?? "GET";
-    if (method.toUpperCase() !== "GET") return Effect.die(new Error(`review-desk is read-only: refusing to send ${method}`));
+    if (method.toUpperCase() !== "GET") return Effect.die(new Error(`Inbox is read-only: refusing to send ${method}`));
     if (!path.startsWith("/") || path.startsWith("//")) return Effect.die(new Error(`not a GitHub API path: ${path}`));
     const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...init.headers };
     return retrying(

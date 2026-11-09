@@ -58,7 +58,7 @@ export function Sidebar({
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
       <div className="wordmark side-brand">
         <Mark />
-        <span>Review Desk</span>
+        <span>Inbox</span>
       </div>
       <nav className="side-nav" aria-label="Pages">
         <a

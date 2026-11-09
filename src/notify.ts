@@ -13,7 +13,7 @@ export function notifyCommand(title: string, body: string, platform: NodeJS.Plat
     ];
   }
   if (platform === "win32") return null;
-  return ["notify-send", ["--app-name=Review Desk", "--", title, body]];
+  return ["notify-send", ["--app-name=Inbox", "--", title, body]];
 }
 
 export function openCommand(url: string, platform: NodeJS.Platform = process.platform): Command {

@@ -1,4 +1,4 @@
-# Review Desk: evidence
+# Inbox: evidence
 
 Everything [design.md](design.md) relies on, with a source for each fact. "Verified locally" means it was checked on your Mac on 2026-10-26, read-only. "Research" means the 2026-10-26 research run (6 reports, a critique, 3 verifications). Nothing was posted to GitHub or changed anywhere while gathering this.
 

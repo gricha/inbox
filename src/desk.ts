@@ -966,7 +966,7 @@ export class Desk {
     const [only] = fresh;
     const body =
       fresh.length === 1 && only ? `${only.ref} · ${only.why}` : `${fresh.length} need you: ${fresh.map((x) => x.ref).join(", ")}`;
-    this.notify("Review Desk", body);
+    this.notify("Inbox", body);
   }
 
   // ---------------------------------------------------------------- classification

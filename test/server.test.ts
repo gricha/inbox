@@ -596,13 +596,13 @@ test("an app attached with /api/events?notify=1 gets the desk's notifications", 
   };
   const open = async (p: string) => (await t.req(p)).body!.pipeThrough(new TextDecoderStream()).getReader();
   const ui = await open("/api/events");
-  t.desk.notify("Review Desk", "with only the UI's stream");
+  t.desk.notify("Inbox", "with only the UI's stream");
   const app = await open("/api/events?notify=1");
   let text = "";
   while (!text.includes("event: update")) text += (await app.read()).value ?? "";
-  t.desk.notify("Review Desk", "acme/api#7 · asks you");
+  t.desk.notify("Inbox", "acme/api#7 · asks you");
   while (!text.includes("event: notify")) text += (await app.read()).value ?? "";
-  assert.match(text, /event: notify\ndata: {"title":"Review Desk","body":"acme\/api#7 · asks you"}\n/);
+  assert.match(text, /event: notify\ndata: {"title":"Inbox","body":"acme\/api#7 · asks you"}\n/);
   assert.deepEqual(own, ["with only the UI's stream"], "the desk notifies itself only while no app listens");
   await Promise.all([ui.cancel(), app.cancel()]);
   t.cleanup();
@@ -716,12 +716,12 @@ test("opening a URL and notifying per platform, all as argv", () => {
   assert.deepEqual(openCommand(url, "darwin"), ["open", [url]]);
   assert.deepEqual(openCommand(url, "linux"), ["xdg-open", [url]]);
   assert.deepEqual(openCommand(url, "win32"), ["rundll32", ["url.dll,FileProtocolHandler", url]]);
-  assert.deepEqual(notifyCommand("Review Desk", '-u critical; "x"', "linux"), [
+  assert.deepEqual(notifyCommand("Inbox", '-u critical; "x"', "linux"), [
     "notify-send",
-    ["--app-name=Review Desk", "--", "Review Desk", '-u critical; "x"'],
+    ["--app-name=Inbox", "--", "Inbox", '-u critical; "x"'],
   ]);
-  assert.deepEqual(notifyCommand("Review Desk", "body", "darwin")?.[1].slice(-2), ["body", "Review Desk"]);
-  assert.equal(notifyCommand("Review Desk", "body", "win32"), null);
+  assert.deepEqual(notifyCommand("Inbox", "body", "darwin")?.[1].slice(-2), ["body", "Inbox"]);
+  assert.equal(notifyCommand("Inbox", "body", "win32"), null);
 });
 
 // A scratch HOME (USERPROFILE on Windows) and an empty PATH: the real ~/.claude, ~/.claude.json and ~/.codex are never touched.

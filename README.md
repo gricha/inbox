@@ -1,4 +1,4 @@
-# Review Desk
+# Inbox
 
 A desktop app that turns your GitHub review load into one queue: only what you need to act on, one line each, in order, and everything else sorted away by rules and your policy. A click on a PR opens its review in the desk: the diff, an AI summary with concerns and notes on the changes, and one click to approve (it's off your desk at once). When you're done with a PR of your own, **Hand off for merge** hands it off: the coordinator, a background Claude Code session the desk starts, fixes CI, addresses review comments and merges it once it's approved and green, and hands it back to your Inbox only when it can't. Approving someone's PR, commenting on one, sending your reply to a reviewer, marking your own draft ready for review (asking the reviewers you pick) and the More menu's typical PR and issue actions (close, convert to draft, merge, reopen, request changes) are the only things the desk writes to GitHub.
 

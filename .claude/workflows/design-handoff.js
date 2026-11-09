@@ -87,7 +87,7 @@ const mapped = await parallel(
     if (!recs.length) return Promise.resolve({ area: area.key, items: [] });
     return agent(
       `${RULES}
-You map one area of a design handoff (${area.what}) onto Review Desk. The handoff is unpacked at ${intake.root}: ${intake.summary}
+You map one area of a design handoff (${area.what}) onto Inbox. The handoff is unpacked at ${intake.root}: ${intake.summary}
 For each recommendation below, read the code it would touch (web/src, src/, assets/, electron/) and say: already (the desk does it), adopt (as written), adapt (the desk's version of it; say how), conflict (it contradicts AGENTS.md, docs/visual.md, docs/ui.md or the desk's real states and actions; say which line), or skip (it doesn't apply, e.g. a state or integration the desk doesn't have: never invent one). For a conflict, write the one question the owner must answer, with its options and what each costs. Name the files the change would go in.
 Recommendations: ${JSON.stringify(recs)}`,
       { label: `map:${area.key}`, phase: "Map", schema: MAPPED },
@@ -98,7 +98,7 @@ Recommendations: ${JSON.stringify(recs)}`,
 phase("Brief");
 const brief = await agent(
   `${RULES}
-Write the brief for building this design handoff in Review Desk, as docs/visual.md's "Taking in a design handoff" says, from the mapping below. The builders follow it: first the decisions (each conflict as an open question for the owner, its recommended answer first); then, per area, what to build and in which files, with the starting values (colours, sizes) taken from the handoff and mapped onto the desk's tokens and components; then a table of how the handoff's ideas that don't apply map onto the desk; then the checks (docs/visual.md's "Checking a design change", plus anything this handoff adds). Plain and short, in the repo's voice. Return it as markdown.
+Write the brief for building this design handoff in Inbox, as docs/visual.md's "Taking in a design handoff" says, from the mapping below. The builders follow it: first the decisions (each conflict as an open question for the owner, its recommended answer first); then, per area, what to build and in which files, with the starting values (colours, sizes) taken from the handoff and mapped onto the desk's tokens and components; then a table of how the handoff's ideas that don't apply map onto the desk; then the checks (docs/visual.md's "Checking a design change", plus anything this handoff adds). Plain and short, in the repo's voice. Return it as markdown.
 Handoff: ${JSON.stringify({ summary: intake.summary, assets: intake.assets, injected: intake.injected })}
 Mapping: ${JSON.stringify(mapped.filter(Boolean))}`,
   { label: "brief", phase: "Brief" },

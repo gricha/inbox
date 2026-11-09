@@ -250,7 +250,7 @@ test("desktopSettings falls back to the defaults", () => {
 });
 
 test("parseNotice reads a desk's notify event and ignores anything else", () => {
-  assert.deepEqual(parseNotice('{"title":"Review Desk","body":"api#7 · asks you"}'), { title: "Review Desk", body: "api#7 · asks you" });
+  assert.deepEqual(parseNotice('{"title":"Inbox","body":"api#7 · asks you"}'), { title: "Inbox", body: "api#7 · asks you" });
   for (const bad of ["", "null", '{"title":1,"body":"x"}', '{"title":"t"}', "{"]) assert.equal(parseNotice(bad), null, bad);
 });
 
@@ -331,7 +331,7 @@ test("watchEvent reads node --watch's own lines", () => {
   assert.equal(watchEvent("Restarting 'src/cli.ts'"), "restart");
   assert.equal(watchEvent("Failed running 'src/cli.ts'. Waiting for file changes before restarting..."), "exit");
   assert.equal(watchEvent("Completed running 'src/cli.ts'. Waiting for file changes before restarting..."), "exit");
-  assert.equal(watchEvent("2026-11-02T20:32:52.577Z Review Desk on http://localhost:48601"), null);
+  assert.equal(watchEvent("2026-11-02T20:32:52.577Z Inbox on http://localhost:48601"), null);
   assert.equal(watchEvent("  Restarting 'src/cli.ts'"), null, "the desk's own output doesn't count");
 });
 
@@ -625,7 +625,7 @@ test("followEvents: each event until the stream ends; no answer, an HTTP error o
       return;
     }
     r.writeHead(200, { "content-type": "text/event-stream" });
-    r.write(`event: update\ndata: {"rev":1}\n\nevent: notify\ndata: {"title":"Review Desk","body":"api#7"}\n\n`);
+    r.write(`event: update\ndata: {"rev":1}\n\nevent: notify\ndata: {"title":"Inbox","body":"api#7"}\n\n`);
     r.write("event: upd");
     setTimeout(() => {
       if (drop) r.destroy();
@@ -647,7 +647,7 @@ test("followEvents: each event until the stream ends; no answer, an HTTP error o
     assert.equal(connected, 1);
     assert.deepEqual(seen, [
       { event: "update", data: `{"rev":1}` },
-      { event: "notify", data: `{"title":"Review Desk","body":"api#7"}` },
+      { event: "notify", data: `{"title":"Inbox","body":"api#7"}` },
       { event: "update", data: "2" },
     ]);
 

@@ -281,7 +281,7 @@ export function buildJudgePrompt(
   tag = randomBytes(6).toString("hex"),
 ): string {
   return [
-    `You triage what reaches ${me}'s review desk: for each GitHub item below, decide what ${me} should do with it.`,
+    `You triage what reaches ${me}'s desk: for each GitHub item below, decide what ${me} should do with it.`,
     `- now: a person is blocked on them today: asked by name and waiting, changes requested on their PR, a question to them. One or two at most; CI on their own PR is never now.`,
     `- today: a person is waiting on them, or it's theirs to finish (approved and green and ready to merge, or their own draft touched in the last two weeks).`,
     `- later: theirs, but nobody is blocked: their PRs waiting on others, reviews they'll likely end up doing.`,

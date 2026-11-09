@@ -1,6 +1,6 @@
-# Where Review Desk is going
+# Where Inbox is going
 
-Review Desk is the owner's control center for mundane engineering work, and a partner for Claude Code, Codex or whatever agent harness they use. Most of what reaches an engineer is noise; the desk's job is to show only what needs them, sorted by priority, and to let agents handle the rest.
+Inbox is the owner's control center for mundane engineering work, and a partner for Claude Code, Codex or whatever agent harness they use. Most of what reaches an engineer is noise; the desk's job is to show only what needs them, sorted by priority, and to let agents handle the rest.
 
 ## The model
 

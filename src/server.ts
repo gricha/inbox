@@ -72,7 +72,7 @@ function originsOf(port: number): Set<string> {
 // Per connection, not per request; and fetch undoes the encoding it asked for.
 const HOP = ["host", "connection", "keep-alive", "transfer-encoding", "upgrade", "accept-encoding", "content-encoding", "content-length"];
 const UI_STARTING =
-  '<!doctype html><meta http-equiv="refresh" content="2"><title>Review Desk</title><p>The UI from your checkout is starting; this page tries again every 2 seconds.</p>';
+  '<!doctype html><meta http-equiv="refresh" content="2"><title>Inbox</title><p>The UI from your checkout is starting; this page tries again every 2 seconds.</p>';
 
 // The app's Vite UI, passed through so this address always shows the checkout's current UI.
 function fromUi(req: Request, ui: string): Effect.Effect<Response, Forbidden | NotFound> {
@@ -785,7 +785,7 @@ export const startDesk = Effect.fnUntraced(function* (
   );
   const ui = process.env.DESK_UI_ORIGIN;
   const dropUpgrades = ui ? proxyUpgrades(server as Server, port, ui) : () => {};
-  log(`Review Desk on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
+  log(`Inbox on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
 
   yield* desk.init().pipe(
     Effect.onError(() =>

@@ -2738,7 +2738,7 @@ const tomlArr = (xs: string[]) => `[${xs.map(tomlStr).join(", ")}]`;
 
 function toToml(c: Config): string {
   const out = [
-    "# Review Desk config. Edit it in Settings → GitHub → Searches and rules, or here; the desk reloads it on save.",
+    "# Inbox config. Edit it in Settings → GitHub → Searches and rules, or here; the desk reloads it on save.",
     "# Sync interval, bots, notifications and agents' prompts are in Settings (settings.json).",
   ];
   for (const s of c.spaces) out.push("", "[[spaces]]", `id = ${tomlStr(s.id)}`, `name = ${tomlStr(s.name)}`, `scope = ${tomlStr(s.scope)}`);

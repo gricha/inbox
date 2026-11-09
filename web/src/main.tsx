@@ -27,7 +27,7 @@ class Reload extends Component<{ children: ReactNode }, { error: Error | null }>
     if (!this.state.error) return this.props.children;
     return (
       <div className="crashed">
-        <p>Review Desk hit an error: {this.state.error.message}</p>
+        <p>Inbox hit an error: {this.state.error.message}</p>
         <button
           type="button"
           onClick={() => {

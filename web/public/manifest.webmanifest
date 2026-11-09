@@ -1,6 +1,6 @@
 {
-  "name": "Review Desk",
-  "short_name": "Review Desk",
+  "name": "Inbox",
+  "short_name": "Inbox",
   "description": "Your GitHub review load, sorted into what needs you now.",
   "start_url": "/#/focus",
   "scope": "/",

@@ -1,5 +1,6 @@
-// The desk's errors, logs and traces go to Sentry (greg-pstrucha-test: review-desk, and review-desk-web for the UI). Only
-// `desk serve` starts it, so tests and the CLI's other commands send nothing; DESK_SENTRY=0 turns it off.
+// The desk's errors, logs and traces go to Sentry (greg-pstrucha-test: review-desk, and review-desk-web for the UI; the projects
+// keep their names from before the rename to Inbox). Only `desk serve` starts it, so tests and the CLI's other commands send
+// nothing; DESK_SENTRY=0 turns it off.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
 import type * as SentrySdk from "@sentry/hono/node";

@@ -238,9 +238,9 @@ test("a desktop app attached to the desk takes its notifications over while it's
   const off = t.desk.onNotify((_title, body) => {
     app.push(body);
   });
-  t.desk.notify("Review Desk", "one");
+  t.desk.notify("Inbox", "one");
   off();
-  t.desk.notify("Review Desk", "two");
+  t.desk.notify("Inbox", "two");
   assert.deepEqual([app, t.notes], [["one"], ["two"]]);
   t.cleanup();
 });

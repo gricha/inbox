@@ -193,7 +193,7 @@ test("the prompt is triage: it fences item text, carries the policy, and gives e
     null,
     "TAG",
   );
-  assert.match(p, /^You triage what reaches me's review desk: for each GitHub item below, decide what me should do with it\./);
+  assert.match(p, /^You triage what reaches me's desk: for each GitHub item below, decide what me should do with it\./);
   assert.match(p, /- fyi: someone else has it, or nobody needs them\. It's kept off their page\./);
   assert.match(p, /- now: a person is blocked on them today: .* CI on their own PR is never now\./);
   assert.match(p, /- today: .*their own draft touched in the last two weeks\)\./);

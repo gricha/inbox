@@ -99,7 +99,7 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
       try: async () => {
         const answer = await doFetch(ENDPOINT, {
           method: "POST",
-          headers: { authorization, "content-type": "application/json", "user-agent": "review-desk" },
+          headers: { authorization, "content-type": "application/json", "user-agent": "inbox" },
           body: JSON.stringify({ query: ALLOWED[name], variables }),
           signal: AbortSignal.timeout(30_000),
         });

@@ -38,7 +38,7 @@ try {
   step("window open; waiting for the desk (a fresh home reads your GitHub context first, ~30 s)");
   await page.waitForURL((u) => u.href.startsWith(deskUrl), { timeout: 120_000 });
   await page.locator('.side a.side-item[aria-current="page"]', { hasText: "Inbox" }).waitFor({ timeout: 30_000 });
-  assert.equal(await page.title(), "Review Desk");
+  assert.equal(await page.title(), "Inbox");
   step("Inbox rendered");
 
   const tray = await app.evaluate(({ app: electronApp, nativeImage }) => {
@@ -80,11 +80,11 @@ try {
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]!.focus(); // page is this window
     });
-    const copied = await page.evaluate(`navigator.clipboard.writeText("review-desk smoke").then(() => "ok", (e) => e.message)`);
+    const copied = await page.evaluate(`navigator.clipboard.writeText("inbox smoke").then(() => "ok", (e) => e.message)`);
     const read = await app.evaluate(({ clipboard }) => clipboard.readText());
     await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), before);
     assert.equal(copied, "ok");
-    assert.equal(read, "review-desk smoke");
+    assert.equal(read, "inbox smoke");
     step("navigator.clipboard.writeText works");
   }
 

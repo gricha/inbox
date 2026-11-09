@@ -3287,7 +3287,7 @@ try {
           r.selectNodeContents(words);
           return r.getClientRects().length > 1;
         })()`);
-        if (wraps) failures.push(`${file}: the sidebar's "Review Desk" wraps`);
+        if (wraps) failures.push(`${file}: the sidebar's "Inbox" wraps`);
         // The macOS app's traffic lights (electron/main.ts: at 18,19) sit over no control.
         if (size.mac) {
           const under = await page.evaluate<string[]>(`[...document.querySelectorAll("a, button, input, select, textarea")]
@@ -3305,7 +3305,7 @@ try {
   const sheet = files.map((f) => `<figure><img src="${f}" loading="lazy"><figcaption>${f}</figcaption></figure>`).join("\n");
   fs.writeFileSync(
     path.join(out, "index.html"),
-    `<!doctype html><meta charset="utf-8"><title>Review Desk shots</title><style>body{font:13px system-ui;margin:24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:24px}img{width:100%;border:1px solid #ccc}figure{margin:0}</style>${sheet}`,
+    `<!doctype html><meta charset="utf-8"><title>Inbox shots</title><style>body{font:13px system-ui;margin:24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:24px}img{width:100%;border:1px solid #ccc}figure{margin:0}</style>${sheet}`,
   );
   console.log(`${files.length} shots in ${out} (open index.html)`);
 } finally {
