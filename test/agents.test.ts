@@ -261,10 +261,17 @@ test("Connect does the same: it installs the new names, then removes the old", {
 
 // An email skill of the owner's, say: inbox is a common name, and the desk never writes over a skill that isn't its own.
 const MAIL = "---\nname: inbox\ndescription: Triage my email inbox with the gmail MCP\n---\nArchive newsletters.\n";
+// A support inbox whose tools end in desk_ (zendesk_search) isn't the desk's either.
+const SUPPORT =
+  "---\nname: inbox\ndescription: Work my support inbox\n---\nFind the ticket with zendesk_search, then helpdesk_escalate it.\n";
 
 test("another skill named inbox is the owner's: the refresh, Connect and the rename leave it as it is", async () => {
-  write(join(".claude", "skills", "inbox", "SKILL.md"), MAIL);
   write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: MCP } } }));
+  write(join(".claude", "skills", "inbox", "SKILL.md"), SUPPORT);
+  assert.equal(runSync(status("claude-code", MCP)).skill.state, "taken");
+  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);
+  assert.equal(readFileSync(claudeSkill(), "utf8"), SUPPORT);
+  write(join(".claude", "skills", "inbox", "SKILL.md"), MAIL);
   const s = runSync(status("claude-code", MCP));
   assert.deepEqual([s.skill.state, s.needs, s.connect], ["taken", "connect", []]);
   assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);

@@ -73,8 +73,10 @@ const bundledFile = (f: string) => Effect.sync(() => fs.readFileSync(path.join(S
 
 const readFile = (file: string) => Effect.try({ try: () => fs.readFileSync(file), catch: fsError("read", file) });
 
-// The desk's skill names itself and its tools; a skill of the owner's may have the same name.
-const desksSkill = (text: string, name: string) => new RegExp(String.raw`^---\r?\nname: ${name}\r?\n`).test(text) && text.includes("desk_");
+// The desk's skill names itself and its tools, as every version has (a zendesk_search isn't one); a skill of the owner's
+// may have the same name.
+const desksSkill = (text: string, name: string) =>
+  new RegExp(String.raw`^---\r?\nname: ${name}\r?\n`).test(text) && /\bdesk_list\b/.test(text) && /\bdesk_item\b/.test(text);
 
 const skillState = Effect.fnUntraced(function* (dir: string): Effect.fn.Return<AgentStatus["skill"]["state"], FsError> {
   const file = path.join(dir, "SKILL.md");
