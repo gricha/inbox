@@ -321,6 +321,12 @@ function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
 function connect(): Effect.Effect<boolean> {
   return Effect.gen(function* () {
     let waitingOn = "";
+    // This loop comes round every 15 seconds while it waits: a line the move said last time isn't said again.
+    let settleSaid = "";
+    const settleLog = (m: string) => {
+      if (m !== settleSaid) log(m);
+      settleSaid = m;
+    };
     for (;;) {
       const probe = yield* probeHealth(api);
       if (probe.kind === "desk") {
@@ -335,7 +341,7 @@ function connect(): Effect.Effect<boolean> {
         app.quit();
         return false;
       }
-      const settled = yield* settleHome(port, log);
+      const settled = yield* settleHome(port, settleLog);
       home = settled;
       // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
       if (plan.run === "wait") {
