@@ -1,12 +1,12 @@
 {
-  "name": "review-desk",
-  "productName": "Review Desk",
+  "name": "inbox",
+  "productName": "Inbox",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "A local desk that sorts your GitHub review load into boards and a priority queue.",
   "main": "electron/main.ts",
-  "desktopName": "review-desk.desktop",
+  "desktopName": "inbox.desktop",
   "bin": {
     "desk": "bin/desk"
   },
@@ -71,8 +71,8 @@
     "vite": "^8.3.5"
   },
   "build": {
-    "appId": "dev.review-desk.app",
-    "productName": "Review Desk",
+    "appId": "dev.inbox.app",
+    "productName": "Inbox",
     "directories": {
       "buildResources": "assets",
       "output": "release"

@@ -118,6 +118,32 @@ export const makeDir = (dir: string): Effect.Effect<void, FsError> =>
     catch: fsError("mkdir", dir),
   });
 
+// ---------------------------------------------------------------- the app's own files from before the rename to Inbox
+
+// Electron keeps userData in a folder named for the app; this is the one it had.
+export const OLD_APP_NAME = "Review Desk";
+// What the app keeps there itself: the window's place and size, and this device's theme. The rest is Chromium's.
+export const APP_FILES = ["window.json", "theme.json"];
+
+// Copies each file `from` has and `to` lacks, and says which it copied; one already in `to` is the new app's own.
+export const carryOver = (from: string, to: string, files: readonly string[] = APP_FILES): Effect.Effect<string[], FsError> =>
+  Effect.gen(function* () {
+    const copied: string[] = [];
+    for (const f of files) {
+      const [src, dst] = [path.join(from, f), path.join(to, f)];
+      if (fs.existsSync(dst) || !fs.existsSync(src)) continue;
+      yield* makeDir(to);
+      yield* Effect.try({
+        try: () => {
+          fs.copyFileSync(src, dst, fs.constants.COPYFILE_EXCL);
+        },
+        catch: fsError("copy", src),
+      });
+      copied.push(f);
+    }
+    return copied;
+  });
+
 // ---------------------------------------------------------------- PATH
 
 const MARK = "__DESK_PATH__";
@@ -434,7 +460,7 @@ export function deskPlan(
 ): DeskPlan {
   if (!dir) return { run: "in-process" };
   if (!exists(path.join(dir, "src", "cli.ts")) || !exists(path.join(dir, "web", "vite.config.ts")))
-    return { run: "wait", need: "checkout", problem: `${dir} isn't a Review Desk checkout` };
+    return { run: "wait", need: "checkout", problem: `${dir} isn't an Inbox checkout` };
   if (!exists(path.join(dir, "node_modules", "vite", "bin", "vite.js")))
     return { run: "wait", need: "modules", problem: `${dir} has no node_modules yet; run npm install there` };
   if (!node)
@@ -510,8 +536,7 @@ export function themeColors(theme: string | null, osDark: boolean): { paper: str
 // "desk 7 +3" -> "7 +3"
 export const trayTitle = (statusText: string): string => statusText.replace(/^desk\s*/, "");
 
-export const trayTooltip = (s: { now: number; today: number } | null): string =>
-  s ? `Review Desk: ${s.now + s.today} in the Inbox` : "Review Desk";
+export const trayTooltip = (s: { now: number; today: number } | null): string => (s ? `Inbox: ${s.now + s.today}` : "Inbox");
 
 // Menus read a single & as a mnemonic marker; cut first so && is never split.
 export function menuLabel(text: string, max = 60): string {
@@ -577,7 +602,7 @@ export function desktopEntry(exec: string, args: string[]): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=Review Desk",
+    "Name=Inbox",
     "Comment=Your GitHub review queue",
     `Exec=${cmd}`,
     "Terminal=false",

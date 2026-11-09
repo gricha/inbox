@@ -13,7 +13,9 @@ import { failure, run } from "./helpers/run.ts";
 import {
   appRunner,
   backoff,
+  APP_FILES,
   cardLabel,
+  carryOver,
   commandOutput,
   DESK_ARGS,
   DeskCallFailed,
@@ -38,6 +40,7 @@ import {
   menuLabel,
   mergePath,
   NoFreePort,
+  OLD_APP_NAME,
   parseJson,
   parseNotice,
   parseShellPath,
@@ -268,7 +271,7 @@ test("deskPlan: a chosen checkout runs from source or waits for what it lacks, n
   try {
     assert.match(
       waits(deskPlan(dir, node("v22.22.0\n"))),
-      /^checkout: .* isn't a Review Desk checkout/,
+      /^checkout: .* isn't an Inbox checkout/,
       "a wrong folder waits too, never the app's own desk",
     );
     for (const f of ["src/cli.ts", "web/vite.config.ts"]) {
@@ -362,9 +365,9 @@ test("the window's colours before the UI paints follow this device's theme, else
 test("tray title and tooltip", () => {
   assert.equal(trayTitle("desk 7 +3"), "7 +3");
   assert.equal(trayTitle(""), "");
-  assert.equal(trayTooltip({ now: 2, today: 5 }), "Review Desk: 7 in the Inbox");
-  assert.equal(trayTooltip({ now: 0, today: 5 }), "Review Desk: 5 in the Inbox");
-  assert.equal(trayTooltip(null), "Review Desk");
+  assert.equal(trayTooltip({ now: 2, today: 5 }), "Inbox: 7");
+  assert.equal(trayTooltip({ now: 0, today: 5 }), "Inbox: 5");
+  assert.equal(trayTooltip(null), "Inbox");
 });
 
 test("menu labels escape & and are cut to 60 chars", () => {
@@ -430,12 +433,42 @@ test("saveBounds writes where the window is, and nothing for one destroyed befor
   }
 });
 
+test("carryOver: Inbox's first start copies the window's place and the theme from Review Desk's folder, never over its own", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-carry-"));
+  try {
+    const old = path.join(dir, "Review Desk");
+    const mine = path.join(dir, "Inbox");
+    fs.mkdirSync(path.join(old, "Local Storage"), { recursive: true });
+    fs.writeFileSync(path.join(old, "window.json"), '{"width":900}');
+    fs.writeFileSync(path.join(old, "theme.json"), '{"theme":"slate"}');
+    fs.writeFileSync(path.join(old, "Local Storage", "000003.log"), "chromium's");
+    assert.deepEqual(APP_FILES, ["window.json", "theme.json"]);
+    assert.equal(OLD_APP_NAME, "Review Desk");
+    assert.deepEqual(await run(carryOver(old, mine)), ["window.json", "theme.json"]);
+    assert.equal(fs.readFileSync(path.join(mine, "theme.json"), "utf8"), '{"theme":"slate"}');
+    assert.deepEqual(fs.readdirSync(mine).toSorted(), ["theme.json", "window.json"], "Chromium's own files stay behind");
+    assert.ok(fs.existsSync(path.join(old, "window.json")), "copied, not moved");
+    fs.writeFileSync(path.join(mine, "theme.json"), '{"theme":"dark"}');
+    fs.rmSync(path.join(mine, "window.json"));
+    assert.deepEqual(await run(carryOver(old, mine)), ["window.json"], "only what it lacks");
+    assert.equal(fs.readFileSync(path.join(mine, "theme.json"), "utf8"), '{"theme":"dark"}', "the new app's own choice stays");
+    assert.deepEqual(await run(carryOver(path.join(dir, "never"), path.join(dir, "fresh"))), []);
+    assert.equal(fs.existsSync(path.join(dir, "fresh")), false, "nothing to carry: nothing made");
+    fs.rmSync(mine, { recursive: true });
+    fs.writeFileSync(mine, "a file where the folder goes");
+    const e = await failure(carryOver(old, mine));
+    assert.deepEqual([e._tag, e.op], ["FsError", "mkdir"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("desktopEntry quotes Exec arguments", () => {
-  const text = desktopEntry("/home/me/Apps/Review Desk.AppImage", ["--hidden"]);
-  assert.match(text, /^\[Desktop Entry\]\n/);
-  assert.match(text, /\nExec="\/home\/me\/Apps\/Review Desk.AppImage" --hidden\n/);
+  const text = desktopEntry("/home/me/My Apps/Inbox.AppImage", ["--hidden"]);
+  assert.match(text, /^\[Desktop Entry\]\nType=Application\nName=Inbox\n/);
+  assert.match(text, /\nExec="\/home\/me\/My Apps\/Inbox.AppImage" --hidden\n/);
   assert.match(desktopEntry("/opt/a$b/100%", []), /\nExec="\/opt\/a\\\\\$b\/100%%"\n/);
-  assert.match(desktopEntry("/usr/bin/review-desk", ["--hidden"]), /\nExec=\/usr\/bin\/review-desk --hidden\n/);
+  assert.match(desktopEntry("/usr/bin/inbox", ["--hidden"]), /\nExec=\/usr\/bin\/inbox --hidden\n/);
 });
 
 test("commandOutput: one spawn refuses before it starts gives no output, like one that fails to start", async () => {

@@ -30,6 +30,7 @@ import {
   appRunner,
   backoff,
   cardLabel,
+  carryOver,
   commandOutput,
   DeskFailed,
   deskPlan,
@@ -52,6 +53,7 @@ import {
   makeDir,
   menuLabel,
   mergePath,
+  OLD_APP_NAME,
   parseNotice,
   probeHealth,
   quietly,
@@ -139,7 +141,7 @@ if (!app.requestSingleInstanceLock()) {
 
 function main(): Effect.Effect<void> {
   return Effect.gen(function* () {
-    app.setAppUserModelId("dev.review-desk.app");
+    app.setAppUserModelId("dev.inbox.app");
     app.on("before-quit", () => {
       quitting = true;
     });
@@ -159,7 +161,8 @@ function main(): Effect.Effect<void> {
 
     const pathReady = yield* Effect.forkChild(fixPath());
     yield* Effect.promise(() => app.whenReady());
-    log(`Review Desk ${app.getVersion()} (Electron ${process.versions.electron}), desk ${deskUrl}, home ${home}`);
+    log(`Inbox ${app.getVersion()} (Electron ${process.versions.electron}), desk ${deskUrl}, home ${home}`);
+    if (!process.env.DESK_HOME) yield* carryOverFiles();
     if (mac && !app.isPackaged) app.dock?.setIcon(asset("icon.png")); // from the repo the Dock would show Electron's icon
     secureSession();
     handle("desktop:status", (e) =>
@@ -310,8 +313,8 @@ function waitText(p: Extract<DeskPlan, { run: "wait" }>): string {
     return `${p.problem}. The desk starts from ${fromSource} once you quit the app and open it again.`;
   if (p.need !== "checkout")
     return `${p.problem}. The desk starts from ${fromSource} once that's fixed; the app looks again every 15 seconds.`;
-  if (envSource !== undefined) return `${p.problem}. Point DESK_SOURCE at a Review Desk clone, or unset it, and start the app again.`;
-  return `${p.problem}. Point app.source in ${settingsPath(home)} at a Review Desk clone, or clear it to run the app's own desk; the app restarts when you save it.`;
+  if (envSource !== undefined) return `${p.problem}. Point DESK_SOURCE at an Inbox clone, or unset it, and start the app again.`;
+  return `${p.problem}. Point app.source in ${settingsPath(home)} at an Inbox clone, or clear it to run the app's own desk; the app restarts when you save it.`;
 }
 
 // Attach to the desk on the port, or start one here. False when the user chose Quit.
@@ -326,8 +329,8 @@ function connect(): Effect.Effect<boolean> {
       }
       if (probe.kind === "other") {
         dialog.showErrorBox(
-          "Review Desk",
-          `Something other than Review Desk is using port ${port} (${probe.detail}).\n\nStop it, or set DESK_PORT to another port.`,
+          "Inbox",
+          `Something other than Inbox is using port ${port} (${probe.detail}).\n\nStop it, or set DESK_PORT to another port.`,
         );
         app.quit();
         return false;
@@ -363,7 +366,7 @@ function connect(): Effect.Effect<boolean> {
           if (quitting || relaunching) return false;
           continue;
         }
-        if (waitingOn) showPage("Starting Review Desk\u2026");
+        if (waitingOn) showPage("Starting Inbox\u2026");
         const s = started.success;
         source = s;
         uiUrl = s.ui;
@@ -384,7 +387,7 @@ function connect(): Effect.Effect<boolean> {
       const { response } = yield* Effect.promise(() =>
         dialog.showMessageBox({
           type: "error",
-          message: "Review Desk couldn't start",
+          message: "Inbox couldn't start",
           detail: `${message}\n\nIf GitHub isn't logged in, run gh auth login in a terminal, then Retry.`,
           buttons: ["Retry", "Quit"],
           defaultId: 0,
@@ -537,7 +540,8 @@ function registerHotkey(accelerator: string): void {
   log(hotkey.ok ? `hotkey ${accelerator}` : `hotkey ${accelerator} failed: ${hotkey.error}`);
 }
 
-const autostartFile = () => path.join(envVar("XDG_CONFIG_HOME") ?? path.join(os.homedir(), ".config"), "autostart", "review-desk.desktop");
+const autostartFile = (name = "inbox") =>
+  path.join(envVar("XDG_CONFIG_HOME") ?? path.join(os.homedir(), ".config"), "autostart", `${name}.desktop`);
 
 // Only the packaged app registers itself; from the repo the login item would launch a bare Electron.
 function loginItemEnabled(): boolean {
@@ -566,6 +570,7 @@ function setLoginItem(on: boolean): Effect.Effect<void, FsError | ElectronRefuse
     }
     yield* makeDir(path.dirname(file));
     yield* writeFile(file, desktopEntry(envVar("APPIMAGE") ?? process.execPath, ["--hidden"]));
+    yield* removeFile(autostartFile("review-desk")); // the app's own entry from before the rename, which starts the old one
   });
 }
 
@@ -573,6 +578,21 @@ function setLoginItem(on: boolean): Effect.Effect<void, FsError | ElectronRefuse
 
 const stateFile = () => path.join(app.getPath("userData"), "window.json");
 const themeFile = () => path.join(app.getPath("userData"), "theme.json");
+
+// Inbox's first start: the window's place and the theme from the app's folder before the rename, as the user left them.
+function carryOverFiles(): Effect.Effect<void> {
+  const from = path.join(app.getPath("appData"), OLD_APP_NAME);
+  return carryOver(from, app.getPath("userData")).pipe(
+    Effect.match({
+      onSuccess: (copied) => {
+        if (copied.length) log(`carried ${copied.join(" and ")} over from ${from}`);
+      },
+      onFailure: (e) => {
+        log(`carrying the window and theme over from ${from}: ${e.message}`);
+      },
+    }),
+  );
+}
 
 function readTheme(): string | null {
   const t = (readJson(themeFile()) as { theme?: unknown } | null)?.theme;
@@ -585,7 +605,7 @@ const paper = () => themeColors(theme, nativeTheme.shouldUseDarkColors).paper;
 const startPage = (text: string) => {
   const ink = themeColors(theme, nativeTheme.shouldUseDarkColors).pencil;
   const body = text.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
-  const page = `<title>Review Desk</title><body style="margin:0;display:grid;place-items:center;height:100vh;background:${paper()};color:${ink};font:14px system-ui;-webkit-app-region:drag"><p style="max-width:32em;text-align:center">${body}</p></body>`;
+  const page = `<title>Inbox</title><body style="margin:0;display:grid;place-items:center;height:100vh;background:${paper()};color:${ink};font:14px system-ui;-webkit-app-region:drag"><p style="max-width:32em;text-align:center">${body}</p></body>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(page)}`;
 };
 
@@ -625,7 +645,7 @@ function createWindow(): void {
     ),
     minWidth: 760,
     minHeight: 500,
-    title: "Review Desk",
+    title: "Inbox",
     show: false,
     backgroundColor: bg,
     // On macOS the UI's title bar holds the traffic lights (web/src/styles.css pads it for them).
@@ -675,7 +695,7 @@ function createWindow(): void {
     if (isHttpsUrl(url)) openLink(url);
     return { action: "deny" };
   });
-  showPage("Starting Review Desk…");
+  showPage("Starting Inbox…");
 }
 
 function showWindow(): void {
@@ -779,7 +799,7 @@ function updateTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: "Open Review Desk",
+        label: "Open Inbox",
         accelerator: hotkey.ok && hotkey.accelerator ? hotkey.accelerator : undefined,
         registerAccelerator: false,
         click: showWindow,
