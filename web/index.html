@@ -13,8 +13,15 @@
     <script>
       try {
         const app = window.desktop && window.desktop.theme;
-        const t = typeof app === "string" ? app : localStorage.getItem("desk.theme");
+        let t = typeof app === "string" ? app : localStorage.getItem("desk.theme");
+        // Omarchy: its theme as last shown, a theme of ours or tokens made from its colours, until the desk answers.
+        if (t === "omarchy") {
+          const o = JSON.parse(localStorage.getItem("desk.omarchy"));
+          for (const k in o.tokens) document.documentElement.style.setProperty(k, o.tokens[k]);
+          t = o.tokens ? "omarchy" : o.theme;
+        }
         if (
+          t === "omarchy" ||
           [
             "light",
             "dark",

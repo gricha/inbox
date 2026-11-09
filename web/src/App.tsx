@@ -8,6 +8,7 @@ import type {
   InflightView,
   Inquiry,
   ItemDetail,
+  OmarchyTheme,
   Overview,
   QueueView,
   Reviewer,
@@ -18,7 +19,7 @@ import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, 
 import { cls, copyText, fromName, shortId, shortRef, snoozeOptions } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
-import { adoptTheme, desktop } from "./theme.ts";
+import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
 import {
   beside,
@@ -360,6 +361,10 @@ export function App() {
       });
       es.addEventListener("open", () => {
         refresh();
+        runUi(loadOmarchy());
+      });
+      es.addEventListener("omarchy", (e) => {
+        omarchyIs(JSON.parse((e as MessageEvent<string>).data) as OmarchyTheme | null);
       });
       es.addEventListener("error", () => {
         // While the browser retries, the stream sits in CONNECTING; a fetch tells us whether the server is gone.

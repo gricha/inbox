@@ -312,6 +312,15 @@ export interface JudgeStatus {
   retry_at: string | null; // after a failure, or with the hour's limit reached and items waiting: no call before this
 }
 
+// The theme Omarchy has on, on the desk's machine (GET /api/omarchy, and the event stream's `omarchy` when it switches);
+// null off Omarchy. One of the desk's themes, or its tokens made from the theme's colours (src/omarchy.ts).
+export interface OmarchyTheme {
+  name: string; // Omarchy's own, e.g. "tokyo-night"
+  scheme: "light" | "dark";
+  theme: string | null; // the desk's theme of that name; Light or Dark when it has no colours to read
+  tokens: Record<string, string> | null; // otherwise: every token, and color-scheme
+}
+
 // window.desktop: set by the desktop app's preload; undefined in a browser.
 export interface DesktopBridge {
   platform: string; // process.platform

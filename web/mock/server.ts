@@ -3398,6 +3398,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/agents") return agentStatus();
   if (route === "GET /api/policy") return policyDoc();
+  if (route === "GET /api/omarchy") return null; // not an Omarchy machine: the shots answer for one
   if (route === "PUT /api/policy") {
     const body = await readBody(req);
     if (body.base !== policyHash())

@@ -1,6 +1,16 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
 import { Effect } from "effect";
-import { Fragment, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+  type ComponentType,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import type {
   AgentStatus,
   DesktopBridge,
@@ -35,7 +45,7 @@ import {
   SHOWN,
   valueOf,
 } from "../view.ts";
-import { applyTheme, desktop, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
+import { applyTheme, desktop, omarchyName, omarchyTheme, onOmarchy, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // The value the server saved, or null when it was rejected (the row shows why): it never fails.
@@ -708,16 +718,22 @@ function ClaudeStatus({
   );
 }
 
-// This device's first row, not from the schema: the theme is this device's, so it's kept here, not on the desk.
+// This device's first row, not from the schema: the theme is this device's, so it's kept here, not on the desk. Omarchy
+// is offered where the desk reads an Omarchy theme, or once picked.
 function ThemeRow() {
   const [theme, setTheme] = useState<ThemeId>(savedTheme);
+  const omarchy = useSyncExternalStore(onOmarchy, omarchyTheme);
+  const offer = omarchy !== null || theme === "omarchy";
   return (
     <div className="setting st-select">
       <div className="s-label-col">
         <label className="s-label" htmlFor="s-theme">
           Theme
         </label>
-        <p className="s-help">Only this device. System follows your computer's light or dark.</p>
+        <p className="s-help">
+          Only this device. System follows your computer's light or dark
+          {offer && `; Omarchy, the theme Omarchy has on${omarchy ? ` (now ${omarchyName(omarchy.name)})` : ""}`}.
+        </p>
       </div>
       <div className="s-control">
         <select
@@ -731,6 +747,7 @@ function ThemeRow() {
           }}
         >
           <option value="system">System</option>
+          {offer && <option value="omarchy">Omarchy</option>}
           {THEME_GROUPS.map((g) => (
             <optgroup key={g.label} label={g.label}>
               {g.themes.map((t) => (

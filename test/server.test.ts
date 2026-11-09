@@ -608,6 +608,37 @@ test("an app attached with /api/events?notify=1 gets the desk's notifications", 
   t.cleanup();
 });
 
+test("on Omarchy the desk answers its theme and tells the window when it switches", async (c) => {
+  const t = await setup();
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-omarchy-"));
+  const current = path.join(home, ".local/state/omarchy/current");
+  const wear = (name: string, colors: string) => {
+    fs.rmSync(path.join(current, "theme"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(current, "theme"), { recursive: true });
+    fs.writeFileSync(path.join(current, "theme", "colors.toml"), colors);
+    fs.writeFileSync(path.join(current, "theme.name"), name);
+  };
+  assert.equal(await t.json("/api/omarchy"), null, "off Omarchy");
+  // os.homedir() is HOME, or USERPROFILE on Windows.
+  process.env.HOME = process.env.USERPROFILE = home;
+  wear("nord", `mode = "dark"\nbackground = "#2e3440"\nforeground = "#d8dee9"\n`);
+  assert.deepEqual(await t.json("/api/omarchy"), { name: "nord", scheme: "dark", theme: "nord", tokens: null });
+  c.mock.timers.enable({ apis: ["setTimeout"] }); // the stream's 25 s keepalive must not hold the test open
+  const events = (await t.req("/api/events")).body!.pipeThrough(new TextDecoderStream()).getReader();
+  let text = "";
+  while (!text.includes("event: update")) text += (await events.read()).value ?? "";
+  wear("rose-pine", `mode = "light"\nbackground = "#faf4ed"\nforeground = "#575279"\n`);
+  while (!text.includes("event: omarchy")) text += (await events.read()).value ?? "";
+  assert.match(text, /event: omarchy\ndata: {"name":"rose-pine","scheme":"light","theme":"rose-pine","tokens":null}\n/);
+  await events.cancel();
+  for (const [k, v] of Object.entries(saved))
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  fs.rmSync(home, { recursive: true });
+  t.cleanup();
+});
+
 test("errors: unknown board/item, bad action", async () => {
   const t = await setup();
   assert.equal((await t.req("/api/boards/nope")).status, 404);

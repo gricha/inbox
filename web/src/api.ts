@@ -22,6 +22,7 @@ import type {
   InquiryView,
   ItemDetail,
   ItemState,
+  OmarchyTheme,
   Overview,
   PolicyDoc,
   PreviewResult,
@@ -220,6 +221,7 @@ export const api = {
   agents: () => call<AgentStatus>("GET", "/api/agents"),
   connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
   policy: () => call<PolicyDoc>("GET", "/api/policy"),
+  omarchy: () => call<OmarchyTheme | null>("GET", "/api/omarchy"),
   // A stale `base` (the hash it was read at) fails with DeskConflict "Stale".
   savePolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
 };

@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
+import { colorsOf, tokensFrom } from "../src/omarchy.ts";
 import { THEMES } from "../src/themes.ts";
 import type {
   AgentStatus,
@@ -14,6 +15,7 @@ import type {
   AsksView,
   AutomationView,
   InflightView,
+  OmarchyTheme,
   Overview,
   QueueView,
   ReviewView,
@@ -333,6 +335,37 @@ const systemTheme = async (page: Page) => {
   await page.evaluate(`localStorage.removeItem("desk.theme"); location.hash = "#/"`);
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+// Omarchy picked on a machine running it (the mock isn't one: its GET /api/omarchy is answered here). Hackerman and Lupine
+// aren't the desk's, so each is the tokens made from its colors.toml as Omarchy 4.5 ships it.
+const omarchyOf = (name: string, scheme: "light" | "dark", colors: string): OmarchyTheme => ({
+  name,
+  scheme,
+  theme: null,
+  tokens: tokensFrom(colorsOf(colors), scheme),
+});
+const HACKERMAN = omarchyOf(
+  "hackerman",
+  "dark",
+  `accent = "#82FB9C"\nbackground = "#0B0C16"\nforeground = "#ddf7ff"\nred = "#50f872"\nyellow = "#50f7d4"\ngreen = "#4fe88f"`,
+);
+const LUPINE = omarchyOf(
+  "lupine",
+  "light",
+  `accent = "#3264eb"\nbackground = "#fafafa"\nforeground = "#212121"\nbright_foreground = "#000000"\nred = "#c900c4"\ngreen = "#4a2fd0"`,
+);
+const omarchyAs = (o: OmarchyTheme) => async (page: Page) => {
+  await page.route("**/api/omarchy", (route) => route.fulfill({ json: o }));
+  await pickTheme("omarchy")(page);
+  const on = await page.evaluate<[string?, string?]>(
+    `[document.documentElement.dataset.theme, document.documentElement.style.getPropertyValue("--sheet")]`,
+  );
+  if (on[0] !== "omarchy" || on[1] !== o.tokens?.["--sheet"]) failures.push(`omarchy: ${o.name} shows as ${JSON.stringify(on)}`);
+};
+const leaveOmarchy = async (page: Page) => {
+  await unroute(page);
+  await page.evaluate(`localStorage.removeItem("desk.omarchy")`);
+  await systemTheme(page);
 };
 // A Settings part's status rows, by their labels, top to bottom.
 const statusRows = (page: Page, part: string) =>
@@ -2913,6 +2946,58 @@ const SHOTS: Shot[] = [
       sizes: ["wide"],
     },
   ]),
+  // Omarchy as this device's theme, with one the desk hasn't got: the queue and a review in Hackerman's colours, the queue
+  // in Lupine's, and This device offering Omarchy with the theme it has on.
+  {
+    name: "theme-omarchy",
+    go: async (page) => {
+      await omarchyAs(HACKERMAN)(page);
+      await page.locator(".queue [data-id]").nth(1).locator(".row-main").focus();
+    },
+    after: leaveOmarchy,
+  },
+  {
+    name: "theme-omarchy-review",
+    go: async (page) => {
+      await omarchyAs(HACKERMAN)(page);
+      await review("acme/api#4127")(page);
+    },
+    after: leaveOmarchy,
+  },
+  {
+    // Omarchy switching while the window's open, as the event stream hands the window a switch: to Nord, which is the
+    // desk's own, then to Lupine.
+    name: "theme-omarchy-light",
+    go: async (page) => {
+      await omarchyAs(HACKERMAN)(page);
+      const switchTo = (o: OmarchyTheme) =>
+        page.evaluate<[string?, string?]>(`(async () => {
+          (await import("/src/theme.ts")).omarchyIs(${JSON.stringify(o)});
+          return [document.documentElement.dataset.theme, document.documentElement.style.getPropertyValue("--sheet")];
+        })()`);
+      const nord = await switchTo({ name: "nord", scheme: "dark", theme: "nord", tokens: null });
+      if (nord[0] !== "nord" || nord[1]) failures.push(`theme-omarchy-light: a switch to Nord shows ${JSON.stringify(nord)}`);
+      const lupine = await switchTo(LUPINE);
+      if (lupine[0] !== "omarchy" || lupine[1] !== LUPINE.tokens?.["--sheet"])
+        failures.push(`theme-omarchy-light: a switch to Lupine shows ${JSON.stringify(lupine)}`);
+      await page.locator(".queue [data-id]").nth(1).locator(".row-main").focus();
+    },
+    after: leaveOmarchy,
+  },
+  {
+    name: "theme-omarchy-settings",
+    go: async (page) => {
+      await omarchyAs(HACKERMAN)(page);
+      await at("#/settings/app")(page);
+      const row = await page.evaluate<[string, string]>(
+        `[document.getElementById("s-theme").value, document.querySelector("#s-app .setting .s-help").textContent]`,
+      );
+      if (row[0] !== "omarchy" || !row[1].includes("(now Hackerman)"))
+        failures.push(`theme-omarchy-settings: the row reads ${JSON.stringify(row)}`);
+    },
+    after: leaveOmarchy,
+    sizes: ["wide"],
+  },
   // The More menu open in a review.
   { name: "more-menu", go: review("acme/worker#875", [MORE]) },
   // Right-click a row: its actions at the pointer, Snooze open to the side with what this PR can wait on.

@@ -33,6 +33,7 @@ import {
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
+import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt } from "./types.ts";
@@ -658,6 +659,9 @@ export function createApp(desk: Desk, port: number): Hono {
     return respond(c, activity, { log, read: true });
   });
 
+  // The theme Omarchy has on, here; null off Omarchy.
+  app.get("/api/omarchy", (c) => respond(c, readOmarchy(), { log, read: true }));
+
   app.get("/api/events", (c) =>
     total(c, () =>
       streamSSE(c, async (stream) => {
@@ -667,9 +671,17 @@ export function createApp(desk: Desk, port: number): Hono {
           c.req.query("notify") === "1"
             ? desk.onNotify((title, body) => void stream.writeSSE({ event: "notify", data: JSON.stringify({ title, body }) }))
             : () => {};
+        // Omarchy switching theme, read again: a window with Omarchy as its theme follows it.
+        const offOmarchy = watchOmarchy(() => {
+          desk.runner.fork(
+            "omarchy",
+            Effect.map(readOmarchy(), (t) => void stream.writeSSE({ event: "omarchy", data: JSON.stringify(t) })),
+          );
+        });
         stream.onAbort(() => {
           off();
           offNotify();
+          offOmarchy();
         });
         await stream.writeSSE({ event: "update", data: JSON.stringify({ rev: desk.rev }) });
         while (!stream.aborted) {

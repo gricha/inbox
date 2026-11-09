@@ -498,9 +498,10 @@ export function sourceEnv(env: NodeJS.ProcessEnv, o: { port: number; home: strin
 
 // ---------------------------------------------------------------- tray text
 
-export const isTheme = (t: unknown): t is string => t === "system" || themeOf(t) !== undefined;
+export const isTheme = (t: unknown): t is string => t === "system" || t === "omarchy" || themeOf(t) !== undefined;
 
-// This device's theme's --paper and --pencil, for the window before the UI paints; System (or none picked yet) follows the OS.
+// This device's theme's --paper and --pencil, for the window before the UI paints; System (or none picked yet) and Omarchy
+// (which the desk reads) follow the OS, which Omarchy sets to its light or dark.
 export function themeColors(theme: string | null, osDark: boolean): { paper: string; pencil: string } {
   const { paper, pencil } = themeOf(theme) ?? themeOf(osDark ? "dark" : "light")!;
   return { paper, pencil };

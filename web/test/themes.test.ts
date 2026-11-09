@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { resolveTheme } from "@pierre/diffs";
 import { themeColors } from "../../electron/lib.ts";
+import { colorsOf, tokensFrom } from "../../src/omarchy.ts";
 import { THEMES } from "../../src/themes.ts";
 import "../src/diffThemes.ts";
 
@@ -103,6 +104,43 @@ test("every theme meets the contrast targets", () => {
     }
   }
   assert.deepEqual(misses, []);
+});
+
+// Omarchy's own themes the desk hasn't got (their colors.toml as Omarchy 4.5 ships them, cut to what the desk reads), and
+// a 3.x one in the terminal's color0–15.
+const OMARCHY: Record<string, string> = {
+  catppuccin: `mode = "dark"\naccent = "#89b4fa"\nbackground = "#1e1e2e"\nforeground = "#cdd6f4"\nred = "#f38ba8"\nyellow = "#f9e2af"\ngreen = "#a6e3a1"`,
+  ethereal: `mode = "dark"\naccent = "#7d82d9"\nbackground = "#060B1E"\nforeground = "#ffcead"\nred = "#ED5B5A"\nyellow = "#E9BB4F"\ngreen = "#92a593"`,
+  hackerman: `mode = "dark"\naccent = "#82FB9C"\nbackground = "#0B0C16"\nforeground = "#ddf7ff"\nred = "#50f872"\nyellow = "#50f7d4"\ngreen = "#4fe88f"`,
+  "matte-black": `mode = "dark"\naccent = "#e68e0d"\nbackground = "#121212"\nforeground = "#bebebe"\nred = "#D35F5F"\nyellow = "#b91c1c"\ngreen = "#FFC107"`,
+  "retro-82": `mode = "dark"\naccent = "#faa968"\nbackground = "#05182e"\nforeground = "#f6dcac"\nred = "#f85525"\nyellow = "#e97b3c"\ngreen = "#028391"`,
+  vantablack: `mode = "dark"\naccent = "#8d8d8d"\nbackground = "#000000"\nforeground = "#ffffff"\nred = "#a4a4a4"\nyellow = "#cecece"\ngreen = "#b6b6b6"`,
+  lupine: `mode = "light"\naccent = "#3264eb"\nbackground = "#fafafa"\nforeground = "#212121"\nbright_foreground = "#000000"\nred = "#c900c4"\nyellow = "#026fde"\ngreen = "#4a2fd0"`,
+  white: `mode = "light"\naccent = "#6e6e6e"\nbackground = "#ffffff"\nforeground = "#000000"\nred = "#2a2a2a"\nyellow = "#4a4a4a"\ngreen = "#3a3a3a"`,
+  "nord (3.x)": `accent = "#81a1c1"\nforeground = "#d8dee9"\nbackground = "#2e3440"\ncolor1 = "#bf616a"\ncolor2 = "#a3be8c"\ncolor3 = "#ebcb8b"\ncolor15 = "#eceff4"`,
+};
+
+test("an Omarchy theme the desk hasn't got, made into tokens, sets every token and meets the contrast targets", () => {
+  const misses: string[] = [];
+  for (const [name, text] of Object.entries(OMARCHY)) {
+    const colors = colorsOf(text);
+    const tokens = tokensFrom(colors, colors.mode === "light" ? "light" : "dark");
+    assert.deepEqual(Object.keys(tokens).sort(), [...BASE.keys()].filter((k) => k === "color-scheme" || !SHARED.has(k)).sort(), name);
+    for (const [fg, bg, min, max] of TARGETS) {
+      const ratio = contrast(tokens[fg]!, tokens[bg]!);
+      if (ratio < min || (max !== undefined && ratio > max))
+        misses.push(`${name}: ${fg} on ${bg} is ${ratio.toFixed(2)}, wants ${min}${max ? ` to ${max}` : "+"}`);
+    }
+  }
+  assert.deepEqual(misses, []);
+});
+
+test("a theme's red, yellow or green that isn't one gives way to the desk's: they carry information", () => {
+  const hackerman = tokensFrom(colorsOf(OMARCHY.hackerman!), "dark");
+  assert.equal(hackerman["--red"], tokensOf("dark")!.get("--red"), "Hackerman's red is green");
+  assert.equal(hackerman["--go"], "#4fe88f", "its green is one");
+  assert.equal(tokensFrom(colorsOf(OMARCHY.white!), "light")["--go"], tokensOf("light")!.get("--go"), "White's green is grey");
+  assert.equal(tokensFrom(colorsOf(OMARCHY.catppuccin!), "dark")["--accent"], "#89b4fa");
 });
 
 test("the system's dark is the Dark theme", () => {
