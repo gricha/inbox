@@ -53,6 +53,7 @@ import {
   says,
   sections,
   settingsBack,
+  settingsTab,
   SETTINGS_VIEWS,
   SHOWN,
   stops,
@@ -175,6 +176,24 @@ test("an automation opens as a view inside Settings, from its own link, and goes
   for (const section of ["automations", "github", "rules", "github/warden-issues"]) assert.equal(automationOf(section), null);
   assert.equal(settingsBack("github/warden-issues"), null);
   assert.deepEqual(parseRoute("#/settings/automations/a/b"), { name: "queue" });
+});
+
+test("Settings is two tabs: Automations holds its rows and each automation's view, the settings tab the rest", () => {
+  const tab = (hash: string) => {
+    const r = parseRoute(hash);
+    return r.name === "settings" ? settingsTab(r.section) : null;
+  };
+  assert.equal(tab("#/settings"), "settings");
+  for (const hash of ["#/settings/github", "#/settings/agent", "#/settings/queue", "#/settings/app", "#/settings/notify"])
+    assert.equal(tab(hash), "settings");
+  // Rules and the policy open from the settings tab's rows, and go back to them.
+  assert.equal(tab("#/settings/rules"), "settings");
+  assert.equal(tab("#/rules"), "settings");
+  assert.equal(tab("#/settings/policy"), "settings");
+  assert.equal(tab("#/settings/automations"), "automations");
+  assert.equal(tab("#/settings/automations/warden-issues"), "automations");
+  assert.equal(settingsBack("automations"), null); // a tab, not a view: Esc goes to the Inbox
+  assert.equal(settingsTab(settingsBack("automations/warden-issues")!), "automations");
 });
 
 test("Copy resume command resumes a run's session in the automations folder beside settings.json", () => {

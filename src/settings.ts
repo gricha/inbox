@@ -26,12 +26,11 @@ const ACCELERATOR =
   "^((Command|Cmd|Control|Ctrl|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta)\\+)+" +
   "([A-Za-z0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|Esc|Plus|[-=\\[\\];',./`\\\\])$";
 
-// The Settings page's parts in order: GitHub, where sources go, then the core's; Automations has no keys, so the page draws its part.
+// The Settings tab's parts in order: GitHub, where sources go, then the core's. Automations has no keys: it's a tab of its own.
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
   { id: "agent", title: "Claude" },
   { id: "queue", title: "Inbox and notifications" },
-  { id: "automations", title: "Automations" },
   { id: "app", title: "This device" },
 ];
 

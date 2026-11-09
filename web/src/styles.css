@@ -614,6 +614,46 @@ p {
   -webkit-app-region: no-drag;
 }
 
+/* Settings' tabs: plain words on the page's text, as its name would be; the one you're on in ink over a mark on the head's
+   hairline, neutral as the sidebar's pill: it says where you are, not what to press. One weight, so nothing moves. */
+.head-tabs {
+  display: flex;
+  align-self: stretch;
+}
+
+.head-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--pencil);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.head-tab:hover,
+.head-tab.on {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.head-tab.on::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+
+/* Inside the head's height, its corners the usual 6px: an outline's radius shrinks by its inset. */
+.head-tab:focus-visible {
+  border-radius: 14px;
+  outline-offset: -8px;
+}
+
 /* On the page's text, as its group heads are, not on its table's edge as the filter is. */
 .head-name {
   margin: 0;
@@ -3644,8 +3684,8 @@ button.s-edit:hover:not(:disabled) {
   color: var(--pencil);
 }
 
-/* Automations: a row each on the part's sheet, its switch on the sheet's right edge like a setting's; it stays beside the
-   words on a narrow sheet. A new one's editor goes under the sheet, lined up with the part's heading as in a view. */
+/* Automations, Settings' second tab: a row each on its sheet, its switch on the sheet's right edge like a setting's; it stays
+   beside the words on a narrow sheet. A new one's editor goes under the sheet, lined up with the rows' labels. */
 .au-new {
   margin-top: 14px;
   padding: 0 17px;

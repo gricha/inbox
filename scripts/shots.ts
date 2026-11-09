@@ -291,7 +291,8 @@ const linesInChat = async (page: Page) => {
   await page.locator(".chat-input").waitFor();
 };
 const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
-// A Settings view: the head is its way back to Settings' part `part`, the view names itself, and the column is `col` at most.
+// A Settings view: the head is its way back to Settings' part `part` (or the Automations tab, named so), the view names
+// itself, and the column is `col` at most.
 const settingsView = async (page: Page, name: string, title: string, part: string, col: string) => {
   const seen = await page.evaluate<{ back: string | null; href: string | null; h1: string | null; col: string }>(`(() => {
     const back = document.querySelector(".page-head a.back");
@@ -302,11 +303,12 @@ const settingsView = async (page: Page, name: string, title: string, part: strin
       col: getComputedStyle(document.querySelector(".main")).maxWidth,
     };
   })()`);
-  if (seen.back !== "Settings") failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}`);
+  const to = part === "automations" ? "Automations" : "Settings";
+  if (seen.back !== to) failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}, not ${to}`);
   if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
   if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
   if (seen.col !== col) failures.push(`${name}: the column is ${seen.col}, not ${col}`);
-  if (await page.locator(".s-page").isVisible()) failures.push(`${name}: Settings' parts show beside the view`);
+  if (await page.locator(".s-page:visible").count()) failures.push(`${name}: a Settings tab shows beside the view`);
 };
 // The policy view's hourly cap: its row, on screen once scrolled to, under the judge's status line.
 const capUnderStatus = async (page: Page, name: string) => {
@@ -455,6 +457,12 @@ const headSays = (page: Page) =>
   page.evaluate<string | null>(
     `(() => { const h = document.querySelector(".page-head"); return h && (h.querySelector("input")?.placeholder ?? h.textContent.trim()); })()`,
   );
+// Settings' tabs in the page head, the one it marks current in brackets: "[Settings] Automations"; null with none.
+const tabsSay = (page: Page) =>
+  page.evaluate<string | null>(`(() => {
+    const tabs = [...document.querySelectorAll(".page-head .head-tabs a")];
+    return tabs.length ? tabs.map((a) => (a.getAttribute("aria-current") === "page" ? "[" + a.textContent + "]" : a.textContent)).join(" ") : null;
+  })()`);
 // The sidebar's pages in order, "|" for its hairline; null where it's hidden.
 const sidePages = (page: Page) =>
   page.evaluate<string | null>(`(() => {
@@ -2301,11 +2309,17 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A row each: its name, when it runs and its last run, Run now and its switch on the sheet's right edge in line with the
-    // other parts'; the agent's draft has a tinted Review instead and no switch; New automation last.
+    // Settings' Automations tab, on its own: a row each, its name, when it runs and its last run, Run now and its switch on the
+    // sheet's right edge in line with the settings tab's; the agent's draft has a tinted Review instead and no switch; New
+    // automation last.
     name: "settings-automations",
     go: async (page) => {
+      await at("#/settings/queue")(page);
+      const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
+      const tabs = await tabsSay(page);
+      if (tabs !== "Settings [Automations]") failures.push(`settings-automations: the page head's tabs read ${JSON.stringify(tabs)}`);
+      if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: the settings tab's parts show on Automations");
       const [mine, draft, ...more] = await automationRows(page);
       if (
         !mine ||
@@ -2335,11 +2349,9 @@ const SHOTS: Shot[] = [
         return fills;
       })()`);
       if (tinted !== wash) failures.push(`settings-automations: Review's fill is ${tinted}, not the accent's wash ${wash}`);
-      const edges = await page.evaluate<number[]>(
-        `["#s-automations .switch", '[id="setting-notify.enabled"]'].map((s) => document.querySelector(s).getBoundingClientRect().right)`,
-      );
-      if (Math.abs(edges[0]! - edges[1]!) > 0.5)
-        failures.push(`settings-automations: an automation's switch ends at ${edges[0]}px, a setting's at ${edges[1]}px`);
+      const edge = await page.evaluate<number>(`document.querySelector("#s-automations .switch").getBoundingClientRect().right`);
+      if (Math.abs(edge - setting) > 0.5)
+        failures.push(`settings-automations: an automation's switch ends at ${edge}px, a setting's at ${setting}px`);
       const last = await page.evaluate<string | null>(
         `document.querySelector("#s-automations .s-sheet > :last-child")?.textContent ?? null`,
       );
@@ -2483,6 +2495,71 @@ const SHOTS: Shot[] = [
     after: at("#/"),
   },
   {
+    // Settings' tabs are links Tab reaches: Enter on Automations opens it, and the sidebar's Settings the settings tab. A new
+    // automation half written survives a trip to the settings tab, and an edit in an automation's view one to Settings and
+    // back; Esc on the Automations tab goes to the Inbox, as from any part. Shot on the settings tab, Automations focused.
+    name: "settings-tabs",
+    go: async (page) => {
+      const hash = () => page.evaluate<string>("location.hash");
+      const tab = (name: string) => page.locator(".page-head .head-tab", { hasText: name });
+      await at("#/settings/github")(page);
+      const links = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".page-head .head-tabs a")].map((a) => a.getAttribute("href") + (a.tabIndex < 0 ? " (no Tab)" : ""))`,
+      );
+      if (links.join() !== "#/settings,#/settings/automations") failures.push(`settings-tabs: the tabs link to ${JSON.stringify(links)}`);
+      await tab("Settings").focus();
+      await page.keyboard.press("Tab");
+      const focused = await page.evaluate<string | null>("document.activeElement?.textContent ?? null");
+      if (focused !== "Automations") failures.push(`settings-tabs: Tab from the Settings tab goes to ${JSON.stringify(focused)}`);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(400);
+      if ((await hash()) !== "#/settings/automations" || (await tabsSay(page)) !== "Settings [Automations]")
+        failures.push(`settings-tabs: Enter on Automations goes to ${await hash()}, the tabs reading ${await tabsSay(page)}`);
+      // A new one half written, then the settings tab and back.
+      await page.locator("#s-automations").getByRole("button", { name: "New automation" }).click();
+      await page.locator("#s-automations .au-editor input").first().fill("Half written");
+      await tab("Settings").click();
+      await page.waitForTimeout(300);
+      if (await page.locator("#s-automations").isVisible()) failures.push("settings-tabs: Automations shows on the settings tab");
+      await tab("Automations").click();
+      await page.waitForTimeout(300);
+      const kept = await page
+        .locator("#s-automations .au-editor input")
+        .first()
+        .inputValue({ timeout: 2000 })
+        .catch(() => null);
+      if (kept !== "Half written") failures.push(`settings-tabs: back on Automations, the new one's name reads ${JSON.stringify(kept)}`);
+      await page.locator("#s-automations .au-editor").getByRole("button", { name: "Cancel" }).click();
+      // An edit in a view, then the sidebar's Settings, the Automations tab and its name again.
+      const name = "Warden and dotagents issues";
+      await page.locator("#s-automations .s-name", { hasText: name }).click();
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+      await page.locator(".s-view .au-editor input").first().fill("Warden, edited");
+      await page.locator(".side-item", { hasText: "Settings" }).click();
+      await page.waitForTimeout(400);
+      if ((await hash()) !== "#/settings" || (await tabsSay(page)) !== "[Settings] Automations")
+        failures.push(`settings-tabs: the sidebar's Settings goes to ${await hash()}, the tabs reading ${await tabsSay(page)}`);
+      await tab("Automations").click();
+      await page.locator("#s-automations .s-name", { hasText: name }).click();
+      await page.waitForTimeout(300);
+      const edited = await page
+        .locator(".s-view .au-editor input")
+        .first()
+        .inputValue({ timeout: 2000 })
+        .catch(() => null);
+      if (edited !== "Warden, edited") failures.push(`settings-tabs: back in its view, the edit's name reads ${JSON.stringify(edited)}`);
+      await page.locator(".s-view .au-editor").getByRole("button", { name: "Cancel" }).click();
+      await at("#/settings/automations")(page);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
+      if ((await hash()) !== "#/") failures.push(`settings-tabs: Esc on the Automations tab goes to ${await hash()}, not the Inbox`);
+      await at("#/settings")(page);
+      await tab("Settings").focus();
+      await page.keyboard.press("Tab");
+    },
+    after: at("#/"),
+  },
+  {
     // policy.md empty: the editor holds the starter, and says so.
     name: "settings-policy-starter",
     writes: true,
@@ -2521,9 +2598,10 @@ const SHOTS: Shot[] = [
         failures.push(`settings-app: This device in a browser has ${JSON.stringify(rows)}, not the theme alone`);
       const on = await sideOn(page);
       if (on !== "Settings") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
-      const head = await headSays(page);
-      if (head !== "Settings") failures.push(`settings-app: the page head reads ${JSON.stringify(head)}`);
+      const tabs = await tabsSay(page);
+      if (tabs !== "[Settings] Automations") failures.push(`settings-app: the page head's tabs read ${JSON.stringify(tabs)}`);
       if (await page.locator(".page-head a.back").count()) failures.push("settings-app: the page head is a way back");
+      if (await page.locator("#s-automations").isVisible()) failures.push("settings-app: Automations shows on the settings tab");
       const col = await page.evaluate<string>(`getComputedStyle(document.querySelector(".main")).maxWidth`);
       if (col !== "760px") failures.push(`settings-app: the column is ${col}, not 760px`);
     },

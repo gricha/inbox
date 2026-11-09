@@ -1,4 +1,4 @@
-// Settings → Automations: your instructions on a schedule. The part lists them (turn one on, run it now, write a new one);
+// Settings → Automations: your instructions on a schedule. The tab lists them (turn one on, run it now, write a new one);
 // each opens a view of its own with its instruction, its editor and its runs. A run's summary and whys are an agent's words:
 // shown as text, never markup.
 import { Effect } from "effect";
@@ -48,14 +48,14 @@ function lastLine(r: AutomationRun | undefined, now: number): { text: string; ba
   return { text: `${ran}${added ? `put ${added} on your desk` : "nothing new needed you"}`, bad: "" };
 }
 
-export type Automations = ReturnType<typeof useAutomations>;
+type Automations = ReturnType<typeof useAutomations>;
 
-// The list and its writes, once for Settings: the part's rows and an automation's view read the same list.
+// The list and its writes, once for Settings: the tab's rows and an automation's view read the same list.
 export function useAutomations(active: boolean, refresh: number, flash: (text: string, error?: boolean) => void) {
   const [list, setList] = useState<Auto[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  // A new one being written: the part's last row opens it, and its editor sits under the part's sheet.
+  // A new one being written: the tab's last row opens it, and its editor sits under the tab's sheet.
   const [writing, setWriting] = useState<Draft | null>(null);
   // An edit open in an automation's view, by its id: kept across a trip to another automation's view, or anywhere, and back.
   const [edits, setEdits] = useState<Record<string, Draft | undefined>>({});
@@ -155,7 +155,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
 
 const editing = (a: Auto): Draft => ({ id: a.id, name: a.name, schedule: a.schedule, prompt: a.prompt, on: a.on });
 
-// The Automations part's rows on its sheet: each its name (its view), when it runs and its last run, Run now while it's on
+// The Automations tab's rows on its sheet: each its name (its view), when it runs and its last run, Run now while it's on
 // and its switch; an agent's draft has Review instead, so it can't run before its instruction has been on screen.
 export function AutomationRows({ au, now }: { au: Automations; now: number }) {
   if (au.error && !au.list)
@@ -265,7 +265,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
   );
 }
 
-// A new automation's editor, under the part's sheet once its last row's New automation opens it.
+// A new automation's editor, under the tab's sheet once its last row's New automation opens it.
 export function NewAutomation({ au }: { au: Automations }) {
   if (!au.writing) return null;
   return (

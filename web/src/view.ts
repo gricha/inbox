@@ -79,9 +79,13 @@ export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | und
 // An automation's own view in Settings ("automations/warden-issues"): its id, or null.
 export const automationOf = (section: string): string | null => /^automations\/([\w-]+)$/.exec(section)?.[1] ?? null;
 
-// Where a Settings view's back link and Esc go: the part it opened from; null on the page itself.
+// Where a Settings view's back link and Esc go: the part it opened from, or the Automations tab; null on a tab itself.
 export const settingsBack = (section: string): string | null =>
   SETTINGS_VIEWS[section]?.part ?? (automationOf(section) === null ? null : "automations");
+
+// Settings' tab a section is on: Automations (its rows and each one's view), or the settings themselves.
+export const settingsTab = (section: string): "settings" | "automations" =>
+  section === "automations" || automationOf(section) !== null ? "automations" : "settings";
 
 // What shows an automation run's Claude Code session: resumed in the automations folder, beside settings.json in the desk's home.
 export function resumeCommand(settingsPath: string, session: string): string {

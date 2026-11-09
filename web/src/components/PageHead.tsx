@@ -1,4 +1,5 @@
-import { routeHash, settingsBack, type ListPage, type Route } from "../view.ts";
+import { cls } from "../format.ts";
+import { routeHash, settingsBack, settingsTab, type ListPage, type Route } from "../view.ts";
 
 const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
 export const PAGE_NAME: Record<ListPage, string> = {
@@ -9,8 +10,14 @@ export const PAGE_NAME: Record<ListPage, string> = {
   archive: "Archive",
 };
 
-// The page's own head, at the top of its column: a list's filter, a review's, a question's or a Settings view's way back, or
-// the page's name.
+// Settings' two tabs, links like the sidebar's pages: the one you're on in ink over a mark on the head's hairline.
+const TABS = [
+  { id: "settings", name: "Settings", href: "#/settings" },
+  { id: "automations", name: "Automations", href: "#/settings/automations" },
+] as const;
+
+// The page's own head, at the top of its column: a list's filter, a review's, a question's or a Settings view's way back,
+// Settings' tabs, or the page's name.
 // In the desktop app it's the window's drag handle, its controls excepted.
 export function PageHead({
   route,
@@ -27,17 +34,27 @@ export function PageHead({
 }) {
   const inSettings = route.name === "settings";
   const part = inSettings ? settingsBack(route.section) : null;
+  const tab = inSettings ? settingsTab(route.section) : null;
+  const backTo = tab === "automations" ? "Automations" : "Settings";
   return (
     <header className="page-head">
       {part ? (
-        <a className="back" href={routeHash({ name: "settings", section: part })} title="Back to Settings (Esc)">
+        <a className="back" href={routeHash({ name: "settings", section: part })} title={`Back to ${backTo} (Esc)`}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>Settings</span>
+          <span>{backTo}</span>
         </a>
-      ) : inSettings || route.name === "inflight" ? (
-        <h1 className="head-name">{inSettings ? "Settings" : "Merging"}</h1>
+      ) : tab ? (
+        <nav className="head-tabs" aria-label="Settings">
+          {TABS.map((t) => (
+            <a key={t.id} className={cls("head-tab", t.id === tab && "on")} href={t.href} aria-current={t.id === tab ? "page" : undefined}>
+              {t.name}
+            </a>
+          ))}
+        </nav>
+      ) : route.name === "inflight" ? (
+        <h1 className="head-name">Merging</h1>
       ) : route.name === "review" || route.name === "inquiry" ? (
         <a
           className="back"

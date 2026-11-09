@@ -13,7 +13,7 @@ import type {
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls, githubTip, MAC, orgsLine } from "../format.ts";
-import { AutomationRows, AutomationView, NewAutomation, useAutomations, type Automations } from "./Automations.tsx";
+import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -31,6 +31,7 @@ import {
   routeHash,
   SETTINGS_VIEWS,
   settingsBack,
+  settingsTab,
   SHOWN,
   valueOf,
 } from "../view.ts";
@@ -775,7 +776,6 @@ interface PartProps {
   loads: number;
   configErrors: number;
   policy: PolicyDoc | null;
-  au: Automations;
   flash: (text: string) => void;
 }
 
@@ -796,7 +796,6 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
     </>
   ),
   agent: (p) => <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} now={p.now} flash={p.flash} />,
-  automations: (p) => <AutomationRows au={p.au} now={p.now} />,
   app: () => <ThemeRow />,
 };
 
@@ -859,7 +858,7 @@ export function Settings({
   onRulesDirty,
 }: {
   active: boolean;
-  section: string; // a part's id, or a view's (rules, policy, automations/<id>)
+  section: string; // a part's id, automations (its tab), or a view's (rules, policy, automations/<id>)
   view: SettingsView | null;
   now: number;
   loads: number;
@@ -873,8 +872,9 @@ export function Settings({
   const [more, setMore] = useState<Record<string, boolean>>({});
   const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const inView = settingsBack(section) !== null;
+  const tab = settingsTab(section);
   const au = useAutomations(active, loads, flash);
-  // The automation last opened stays mounted, so an edit in its view survives a trip to its part and back.
+  // The automation last opened stays mounted, so an edit in its view survives a trip to its tab, or anywhere, and back.
   const automation = automationOf(section);
   const [lastAutomation, setLastAutomation] = useState(automation);
   if (automation !== null && automation !== lastAutomation) setLastAutomation(automation);
@@ -907,19 +907,19 @@ export function Settings({
     };
   }, [view, hotkey]);
 
-  // One page of parts; a link to a part scrolls to it, each time you come to it, and a view opens at its top.
+  // A tab of parts; a link to a part scrolls to it, each time you come to it, and a view or the Automations tab opens at its top.
   const ready = view !== null;
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const top = section === "github" || inView;
+    const top = section === "github" || tab === "automations" || inView;
     // escaped: a mistyped #/settings/github/x mustn't throw
     const jump = () => {
       if (top) window.scrollTo({ top: 0 });
       else document.querySelector(`#${CSS.escape(`s-${section}`)}`)?.scrollIntoView({ block: "start" });
     };
     if (active && ready) jump();
-    // The parts above load their own rows after the page (Claude's status, the automations): it jumps again as they grow, until
-    // you scroll or a moment has passed.
+    // The parts above load their own rows after the page (Claude's status): it jumps again as they grow, until you scroll or a
+    // moment has passed.
     const ro = new ResizeObserver(jump);
     if (active && ready && !top && page.current) ro.observe(page.current);
     const stop = () => {
@@ -933,7 +933,7 @@ export function Settings({
       clearTimeout(t);
       for (const e of input) window.removeEventListener(e, stop);
     };
-  }, [active, section, ready, inView]);
+  }, [active, section, ready, inView, tab]);
 
   // Back from a view to its part, focus goes to what opened it (its row's Edit, an automation's name or Review), so Tab goes on
   // from there; after App's route change, which blurs whatever had it.
@@ -973,7 +973,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div ref={page} className="s-page" hidden={inView}>
+      <div ref={page} className="s-page" hidden={inView || tab !== "settings"}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
             <h2 className="group-head">
@@ -1015,7 +1015,7 @@ export function Settings({
           </div>
         )}
         {view?.sections.map((x) => {
-          const p: PartProps = { view, active, now, loads, configErrors, policy, au, flash };
+          const p: PartProps = { view, active, now, loads, configErrors, policy, flash };
           const defs = view.defs.filter(
             (d) => d.section === x.id && !ELSEWHERE.has(d.key) && (SHOWN[d.key]?.(view.values, desktop) ?? true),
           );
@@ -1052,12 +1052,19 @@ export function Settings({
                   {folded.map((d) => row(d, !open))}
                 </div>
               )}
-              {x.id === "automations" && <NewAutomation au={au} />}
             </section>
           );
         })}
       </div>
-      {/* The views stay mounted with the page, so an unsaved draft in either survives leaving it and coming back. */}
+      {/* The tabs and the views stay mounted, so an unsaved draft in any survives leaving it and coming back. */}
+      <div className="s-page" hidden={inView || tab !== "automations"}>
+        <section id="s-automations" className="s-part" aria-label="Automations">
+          <div className="lines s-sheet">
+            <AutomationRows au={au} now={now} />
+          </div>
+          <NewAutomation au={au} />
+        </section>
+      </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">
         <ViewHead id="rules" line="Which GitHub searches feed your desk, and where each item starts before Claude sorts it." />
         <Rules
