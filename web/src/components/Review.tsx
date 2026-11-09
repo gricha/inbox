@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import type {
@@ -56,7 +56,7 @@ import {
 } from "../view.ts";
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
-import { diffTheme } from "../theme.ts";
+import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
@@ -1556,6 +1556,7 @@ function SectionView({
     const at = inlineAt(x.path, x.hunks, r);
     if (at) onDraft(at, null);
   };
+  useSyncExternalStore(onOmarchy, omarchyTheme); // a live switch of Omarchy's theme draws the diff in its colours
   const base = diffOptions();
   const options = useMemo(
     (): FileDiffOptions<Meta, undefined> =>

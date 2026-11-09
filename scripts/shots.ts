@@ -3006,6 +3006,27 @@ const SHOTS: Shot[] = [
     after: leaveOmarchy,
   },
   {
+    // Omarchy switching from a dark theme to a light one with a review open: the diff's code takes the light colours at
+    // once, as the sheet does, rather than at the window's next tick.
+    name: "theme-omarchy-review-switch",
+    go: async (page) => {
+      await omarchyAs(HACKERMAN)(page);
+      await review("acme/api#4127")(page);
+      const token = () =>
+        page.evaluate<string | null>(`(() => {
+          const s = [...(document.querySelector(".rv-diff")?.shadowRoot?.querySelectorAll("[data-line] span") ?? [])].find((el) => !el.children.length && el.textContent.trim() === "return");
+          return s ? getComputedStyle(s).color : null;
+        })()`);
+      const dark = await token();
+      await page.evaluate(`(async () => (await import("/src/theme.ts")).omarchyIs(${JSON.stringify(LUPINE)}))()`);
+      await page.waitForTimeout(400);
+      const light = await token();
+      if (!dark || dark === light)
+        failures.push(`theme-omarchy-review-switch: the diff's keyword stays ${String(light)} on Lupine's sheet`);
+    },
+    after: leaveOmarchy,
+  },
+  {
     name: "theme-omarchy-settings",
     go: async (page) => {
       await omarchyAs(HACKERMAN)(page);
