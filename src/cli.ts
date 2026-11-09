@@ -429,7 +429,7 @@ const settings = Effect.fnUntraced(function* (x: Ctx) {
   return 0;
 });
 
-const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed" };
+const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed", taken: "another skill has its folder" };
 
 // The harness you work in, given the desk's tools: Claude Code unless you name Codex. Works with the desk down too: it
 // reads the agent's own config files.
@@ -451,7 +451,7 @@ const connect = Effect.fnUntraced(function* (x: Ctx) {
   x.out(`# MCP tools: ${s.mcp.connected ? "connected" : "not connected"}`);
   if (!s.mcp.connected) x.out(s.mcp.command);
   x.out(`# Skill: ${SKILL_STATE[s.skill.state]}`);
-  if (s.skill.state !== "installed") x.out(s.skill.command);
+  if (s.skill.state === "missing" || s.skill.state === "outdated") x.out(s.skill.command);
   x.out(`# The tools work while the desk runs (the app or desk serve). Clients that only speak stdio: desk mcp`);
   return 0;
 });

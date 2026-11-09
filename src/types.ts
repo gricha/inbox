@@ -286,7 +286,8 @@ export interface SettingsView {
 export interface AgentStatus {
   driver: string;
   mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
-  skill: { state: "installed" | "outdated" | "missing"; path: string; command: string }; // path: the installed SKILL.md
+  // path: the installed SKILL.md; taken: another skill of the owner's has the desk's folder
+  skill: { state: "installed" | "outdated" | "missing" | "taken"; path: string; command: string };
   needs: "connect" | "update" | null; // what Settings asks of you: connect (tools or skill missing), update the skill, nothing
   connect: string[]; // what Connect runs: only what's missing, in its order
 }

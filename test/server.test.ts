@@ -731,7 +731,10 @@ test("agents: Claude Code's status, and connect", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
   Object.assign(process.env, { HOME: home, USERPROFILE: home, PATH: path.join(home, "empty") });
   try {
-    fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { type: "http" } } }));
+    fs.writeFileSync(
+      path.join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { inbox: { type: "http", url: "http://localhost:47823/mcp" } } }),
+    );
     const before = await t.json("/api/agents");
     assert.equal(before.driver, "claude-code");
     assert.deepEqual(before.mcp, {

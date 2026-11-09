@@ -520,7 +520,7 @@ test("connect --apply registers the desk and installs the skill", { skip: proces
   mkdirSync(bin);
   writeFileSync(
     join(bin, "claude"),
-    `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/claude-args"\nprintf '{"mcpServers":{"inbox":{}}}' > "$HOME/.claude.json"\n`,
+    `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/claude-args"\nprintf '{"mcpServers":{"inbox":{"type":"http","url":"%s"}}}' "$8" > "$HOME/.claude.json"\n`,
   );
   chmodSync(join(bin, "claude"), 0o755);
   const missing = await withEnv({ ...env, PATH: tmp }, () => run(["connect", "--apply"]));
