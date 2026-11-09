@@ -2416,6 +2416,20 @@ p.side-sync {
   font-size: var(--meta-size);
 }
 
+/* Claude's work, in Merging's columns: a long reason wraps rather than lose why it failed, two lines at most. */
+.work-row .line-note {
+  display: -webkit-box;
+  white-space: normal;
+  text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Failed: in ink, not red; it's about the agent, not the PR. */
+.work-failed .line-note {
+  color: var(--ink-2);
+}
+
 /* Expanded item ------------------------------------------------------------ */
 
 .detail {

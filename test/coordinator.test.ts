@@ -1239,6 +1239,56 @@ test(
   },
 );
 
+test(
+  "an ask your agent stopped without answering goes to it again, once per wait and never while it works; after three it's failed, with why",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    const api = asking(t);
+    const { ask } = (await (await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" })).json()) as { ask: Ask };
+    const line = `My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off: "is dana's comment addressed?" Answer it with desk_answer.`;
+    await until(() => t.said().length === 1 && !t.desk.coordinator.flushing);
+    const job = () => {
+      const j = t.desk.jobs.get("ask", ask.id);
+      return j && { state: j.state, attempts: j.attempts, error: j.error };
+    };
+    assert.deepEqual(job(), { state: "running", attempts: 1, error: null }, "your agent has it");
+    let at = NOW.getTime();
+    // Time passes, the loop looks, and so does the desk: your agent idle, it stopped without answering; or working.
+    const later = async (minutes: number, status: "idle" | "busy" = "idle") => {
+      t.fake.busy(status === "busy");
+      await run(t.desk.coordinator.find());
+      at += minutes * 60_000;
+      t.setNow(new Date(at));
+      t.desk.jobs.tick();
+      await settle();
+      await until(() => !t.desk.coordinator.flushing);
+    };
+    await later(4);
+    assert.equal(t.said().length, 1, "not before its wait");
+    await later(1);
+    assert.deepEqual(t.said(), [`${ROLE} ${line}`, line], "asked again in its own words");
+    assert.deepEqual(job(), { state: "running", attempts: 2, error: null });
+    await later(14);
+    assert.equal(t.said().length, 2, "once per wait: the next is 15 minutes after it went again");
+    await later(30, "busy");
+    assert.equal(t.said().length, 2, "never while it's working");
+    await later(1);
+    assert.deepEqual(t.said().slice(1), [line, line]);
+    await later(29);
+    assert.equal(t.said().length, 3);
+    await later(1);
+    assert.deepEqual(job(), { state: "failed", attempts: 3, error: "your agent stopped without answering it, 3 times" });
+    assert.equal(t.said().length, 3, "then it's failed, and nothing goes again");
+    const work = runSync(t.desk.inflight()).work.map((w) => [w.kind, w.title, w.state]);
+    assert.deepEqual(work, [["ask", "is dana's comment addressed?", "failed"]], "Claude's work lists it, with why");
+
+    assert.equal((await api.answer(ask.id, "Yes.")).status, 200);
+    assert.equal(job()?.state, "done", "an answer is the job done");
+    assert.deepEqual(runSync(t.desk.inflight()).work, []);
+  },
+);
+
 test("an ask that can't start the coordinator says so and isn't kept", posix, async (c) => {
   const t = await coordinated(c);
   const api = asking(t);

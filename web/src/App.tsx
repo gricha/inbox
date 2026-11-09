@@ -13,6 +13,7 @@ import type {
   QueueView,
   Reviewer,
   SettingsView,
+  Work,
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
@@ -1001,6 +1002,32 @@ export function App() {
     );
   }
 
+  // Try again on a failed job in Claude's work: the AI review runs again (its verdict in a toast once it's in), or your ask goes to your agent again.
+  function retryWork(w: Work): Effect.Effect<void> {
+    if (w.kind === "ask")
+      return api.wakeCoordinator(w.key).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            flash("Asked your agent again.");
+            refresh(0);
+          }),
+        ),
+        Effect.catch(failed),
+      );
+    const ref = shortId(w.key);
+    flash(`Claude is reviewing ${ref} again.`);
+    return api.aiReview(w.key).pipe(
+      Effect.match({
+        onSuccess: (r) => {
+          flash(`AI review of ${ref}: ${r.ai.verdict}`);
+        },
+        onFailure: (e) => {
+          flash(e.message, true);
+        },
+      }),
+    );
+  }
+
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "link") runUi(copyLink(c));
@@ -1204,6 +1231,7 @@ export function App() {
           setLaneSel(r.card.id);
           go({ name: "review", id: r.card.id });
         }}
+        onWork={ignore}
         compact
       />
     ) : (
@@ -1400,6 +1428,11 @@ export function App() {
               open={(r) => {
                 setLaneSel(r.card.id);
                 go({ name: "review", id: r.card.id });
+              }}
+              onWork={(w, k) => {
+                if (k === "retry") runUi(retryWork(w));
+                else if (w.kind === "ai_review") go({ name: "review", id: w.key });
+                else openAsk(w.item ?? undefined);
               }}
             />
           )}

@@ -1,11 +1,11 @@
-import type { CoordinatorView, InflightRow, InflightView } from "../../../src/types.ts";
+import { JOB_ATTEMPTS, type CoordinatorView, type InflightRow, type InflightView, type Work } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
 import { Dots } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-// Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note.
-// Beside a review (compact), its rows alone, two lines each.
+// Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note;
+// then Claude's work. Beside a review (compact), its rows alone, two lines each.
 export function Inflight({
   view,
   now,
@@ -13,6 +13,7 @@ export function Inflight({
   select,
   act,
   open,
+  onWork,
   compact = false,
 }: {
   view: InflightView | null;
@@ -21,6 +22,7 @@ export function Inflight({
   select: (id: string) => void;
   act: (k: "copy" | "wake") => void; // your agent's line: Copy attach command, Wake it
   open: (row: InflightRow) => void; // its review
+  onWork: (w: Work, k: "open" | "retry") => void; // a row of Claude's work: what it's about, Try again
   compact?: boolean;
 }) {
   if (!view)
@@ -67,6 +69,7 @@ export function Inflight({
       ) : (
         <p className="queue-empty">Nothing in Merging yet: hand off one of your PRs for merge when you're done with it.</p>
       )}
+      {!compact && view.work.length > 0 && <ClaudesWork work={view.work} now={now} onWork={onWork} />}
       {landed.length > 0 && (
         <section className="group" aria-labelledby="h-landed">
           <h3 id="h-landed" className="group-head">
@@ -76,6 +79,103 @@ export function Inflight({
           {rows(landed)}
         </section>
       )}
+    </div>
+  );
+}
+
+// What Claude owes you, as the desk's ledger has it: what it's running and since when, what waits its turn, what failed and
+// why, with Try again. Nothing while there's nothing.
+function ClaudesWork({ work, now, onWork }: { work: Work[]; now: number; onWork: (w: Work, k: "open" | "retry") => void }) {
+  return (
+    <section className="group" aria-labelledby="h-work">
+      <h3 id="h-work" className="group-head">
+        <span>Claude's work</span>
+        <span className="count">{work.length}</span>
+      </h3>
+      <div className="lines">
+        {work.map((w) => (
+          <WorkRow key={`${w.kind} ${w.key}`} w={w} now={now} onWork={onWork} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// One line in Merging's columns: the PR's title or your ask's words, its ref, where it stands, Try again once it's failed, and
+// since when.
+function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k: "open" | "retry") => void }) {
+  const review = w.kind === "ai_review";
+  const since = (w.state === "running" ? w.started_at : w.state === "failed" ? w.finished_at : null) ?? w.queued_at;
+  const tries = w.attempts > 1 ? [`try ${w.attempts} of ${JOB_ATTEMPTS}`] : [];
+  const error = withCode(w.error ?? "");
+  const phrase =
+    w.state === "running"
+      ? [review ? "Claude is reviewing it" : "Your agent has it", ...tries]
+      : w.state === "failed"
+        ? [
+            <>
+              {review && w.attempts > 1 ? `Failed ${w.attempts} times: ` : "Failed: "}
+              {error}
+            </>,
+          ]
+        : w.retry_at
+          ? [
+              Date.parse(w.retry_at) > now
+                ? `Tries again in ${age(new Date(now).toISOString(), Date.parse(w.retry_at))}`
+                : "Tries again shortly",
+              error,
+            ]
+          : [review ? "Waiting its turn" : "Waiting for your agent"];
+  const [repo, num] = (w.item ?? "").split("#");
+  const ref = (
+    <span className="lane-ref">
+      {w.item && (
+        <>
+          <span className="line-ref" title={w.item}>
+            {repo!.split("/")[1]}
+          </span>
+          <span className="line-num">#{num}</span>
+        </>
+      )}
+    </span>
+  );
+  const state = w.state === "running" ? "running since" : w.state === "failed" ? "failed" : "queued";
+  return (
+    <div className={cls("line", "lane-row", "work-row", w.state === "failed" && "work-failed")} data-id={`${w.kind} ${w.key}`}>
+      <div className="line-main line-row">
+        <button
+          type="button"
+          className="row-main line-btn"
+          title={review ? "Open its review" : "Open your chat with your agent"}
+          onMouseDown={(e) => {
+            e.preventDefault(); // a click opens without selecting first, as the main page's rows do
+          }}
+          onClick={() => {
+            onWork(w, "open");
+          }}
+        >
+          {/* Your words, quoted, so an ask reads as yours beside the PRs' titles. */}
+          <span className="line-title">{review ? w.title : `\u201c${w.title}\u201d`}</span>
+          {ref}
+          <span className="line-note">
+            <Dots parts={phrase} />
+          </span>
+        </button>
+        {w.state === "failed" && (
+          <button
+            type="button"
+            className="act line-cta"
+            onClick={() => {
+              onWork(w, "retry");
+            }}
+          >
+            Try again
+          </button>
+        )}
+        <span className="line-age" title={`${state} ${new Date(since).toLocaleString()}`}>
+          {age(since, now)}
+        </span>
+      </div>
     </div>
   );
 }

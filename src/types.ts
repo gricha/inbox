@@ -546,7 +546,7 @@ export interface Stack {
 // The AI review of a card's current head, for skimming in the queue. The other fields come from the latest review, which is
 // for an older head unless state is ready. stale: a new one is coming; off: review.auto_ai is off; none: an issue, or your PR.
 export interface Preflight {
-  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "none";
+  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "failed" | "none"; // failed: a try on its head, nothing running
   verdict?: "look" | "skim" | "skip";
   risk?: "low" | "medium" | "high";
   summary?: string;
@@ -732,7 +732,8 @@ export interface ReviewView {
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
-  generating: boolean;
+  generating: boolean; // its job is running
+  ai_job: Job | null; // its AI review's job: running, or for this commit
   approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
   stack: Stack | null; // its stack, with it current
@@ -833,6 +834,29 @@ export interface InflightView {
   rows: InflightRow[]; // open ones first, then those that merged or closed in the last 3 days; a stack's rows together, bottom first
   stacks: Record<string, Stack>; // by id: each stack with a row here (current: its first row)
   coordinator: CoordinatorView;
+  work: Work[]; // Claude's work: what's running, then queued, then failed
+}
+
+// One piece of work Claude owes the owner, in the desk's ledger (src/jobs.ts): an AI review of a PR, or an ask to their agent.
+export interface Job {
+  kind: "ai_review" | "ask";
+  key: string; // the PR's id for a review, the ask's id for an ask
+  item: string | null; // what it's about
+  head: string | null; // the commit a review is of
+  state: "queued" | "running" | "done" | "failed";
+  attempts: number; // tries started, of JOB_ATTEMPTS
+  queued_at: string;
+  started_at: string | null; // the latest try's
+  finished_at: string | null;
+  retry_at: string | null; // a failed try's next one, queued
+  error: string | null; // the last try's, in the owner's words
+}
+
+export const JOB_ATTEMPTS = 3; // a job's tries before it's failed
+
+// A job in Merging's Claude's work: the PR's title or the ask's words.
+export interface Work extends Job {
+  title: string;
 }
 
 // The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".

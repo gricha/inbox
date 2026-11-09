@@ -2,20 +2,22 @@ import { Effect } from "effect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
-import type {
-  ActivityEvent,
-  AiReview,
-  Card,
-  Conversation as Convo,
-  GitHubAction,
-  InflightRow,
-  InlineAt,
-  ReviewFile,
-  ReviewNote,
-  Reviewer,
-  ReviewView,
-  Stack,
-  StackMember,
+import {
+  JOB_ATTEMPTS,
+  type ActivityEvent,
+  type AiReview,
+  type Card,
+  type Conversation as Convo,
+  type GitHubAction,
+  type InflightRow,
+  type InlineAt,
+  type Job,
+  type ReviewFile,
+  type ReviewNote,
+  type Reviewer,
+  type ReviewView,
+  type Stack,
+  type StackMember,
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
@@ -707,6 +709,8 @@ export function Review({
               stale={view.ai_stale}
               busy={view.generating || busy === "ai"}
               error={view.ai_error}
+              job={view.ai_job}
+              now={now}
               open={open}
               notes={notes.length}
               onAsk={
@@ -1065,7 +1069,7 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
       : null;
   // Opening it starts the review unless AI reviews are off or paused.
   const writing = pf?.state === "running" || pf?.state === "queued" || pf?.state === "stale";
-  const none = !ai && (pf?.state === "off" || pf?.state === "paused");
+  const none = !ai && (pf?.state === "off" || pf?.state === "paused" || pf?.state === "failed");
   return (
     <div className={cls("review", side && "side-open")} aria-busy="true">
       <div className="rv-main">
@@ -1099,7 +1103,17 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
             </header>
           )}
           {ai || writing || none ? (
-            <AiSection ai={ai} stale={pf?.state !== "ready"} busy={writing} error={null} open notes={pf?.notes ?? 0} onAsk={undefined} />
+            <AiSection
+              ai={ai}
+              stale={pf?.state !== "ready"}
+              busy={writing}
+              error={null}
+              job={null}
+              now={now}
+              open
+              notes={pf?.notes ?? 0}
+              onAsk={undefined}
+            />
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
@@ -1227,6 +1241,8 @@ function AiSection({
   stale,
   busy,
   error,
+  job,
+  now,
   open,
   notes,
   onAsk,
@@ -1235,6 +1251,8 @@ function AiSection({
   stale: boolean;
   busy: boolean; // being written
   error: string | null;
+  job: Job | null; // its job in the desk's ledger: how long it's run, its tries, when it tries again
+  now: number;
   open: boolean;
   notes: number;
   onAsk: (() => void) | undefined; // none for a PR in Merging: it's your agent's
@@ -1257,12 +1275,39 @@ function AiSection({
       {stale && <span className="quiet">on an earlier commit</span>}
     </>
   );
+  const minutes = (at: string) => Math.max(1, Math.round(Math.abs(Date.parse(at) - now) / 60_000));
+  const plural = (n: number) => `${n} minute${n === 1 ? "" : "s"}`;
+  // Past its first couple of minutes, or on another try, the line says so rather than promise the notes soon.
+  const run = job?.state === "running" ? job : null;
+  const tries = run && run.attempts > 1 ? `, try ${run.attempts} of ${JOB_ATTEMPTS}` : "";
+  const so = run?.started_at && now - Date.parse(run.started_at) >= 2 * 60_000 ? `, ${plural(minutes(run.started_at))} so far` : "";
+  // A try that failed says so and when Claude tries again; the paused line is the desk's own words.
+  const failed = !!job?.error && error === job.error;
+  const said = error?.replace(/\.$/, "") ?? "";
   return (
     <section className="rv-ai" aria-label="AI review">
-      {busy && <p className="quiet">Claude is reviewing it. The notes land in the code below in a minute or two.</p>}
+      {busy && (
+        <p className="quiet">
+          {so || tries
+            ? `Claude is reviewing it${so}${tries}.`
+            : "Claude is reviewing it. The notes land in the code below in a minute or two."}
+        </p>
+      )}
       {!busy && error && (
         <p>
-          {withCode(error)}{" "}
+          {failed ? (
+            <>
+              {job.attempts > 1 && job.state === "failed" ? `The AI review failed ${job.attempts} times: ` : "The AI review failed: "}
+              {withCode(said)}.
+              {job.state === "queued" &&
+                job.retry_at &&
+                (Date.parse(job.retry_at) > now
+                  ? ` Claude tries again in ${plural(minutes(job.retry_at))}.`
+                  : " Claude tries again shortly.")}
+            </>
+          ) : (
+            withCode(error)
+          )}{" "}
           <button type="button" className="link-btn" disabled={!onAsk} onClick={onAsk}>
             Try again
           </button>

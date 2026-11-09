@@ -20,12 +20,14 @@ import {
   Upstream,
   type ClaudeError,
   type CommandError,
+  type CommandTimeout,
   type FsError,
   type GitHubError,
   type GitHubReadError,
   type GitHubWriteError,
 } from "./errors.ts";
 import { Automations } from "./automations.ts";
+import { GONE, Jobs } from "./jobs.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
@@ -67,6 +69,7 @@ import type {
   Item,
   ItemDetail,
   ItemState,
+  Job,
   JudgeAnswer,
   JudgeStep,
   Overview,
@@ -85,6 +88,7 @@ import type {
   Stack,
   Status,
   Until,
+  Work,
 } from "./types.ts";
 import { byPart, isCoordinator, RANK, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
@@ -129,7 +133,7 @@ const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, org
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
 const AI_AT_ONCE = 2;
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
-const AI_RETRY = 30 * 60_000; // a failed AI review isn't retried on the same commit before this, unless you ask
+const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
@@ -291,6 +295,7 @@ export class Desk {
   convos: Conversations;
   coordinator: Coordinator;
   automations: Automations;
+  jobs: Jobs; // the work Claude owes the owner
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -302,9 +307,9 @@ export class Desk {
   waiters = new Set<() => void>(); // long-polls on the event log
   snap: Snapshot | null = null;
   stopped = false;
-  generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared())
-  aiErrors = new Map<string, { head_oid: string; message: string; at: number }>();
+  generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared()), each a running job
   aiFailures = 0; // in a row, across PRs
+  aiLastFailed: string | null = null; // the PR of the latest: its retries aren't more in a row
   aiPaused: { why: string; until: number } | null = null;
   fetching = new Map<string, Deferred.Deferred<PrText, FetchPrError>>(); // the diffs on their way
   warming = false;
@@ -312,6 +317,7 @@ export class Desk {
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   wrote = new Map<string, string>(); // a More menu write's item → its updated_at then: nothing more till a read shows the change
   sending = new Set<string>(); // conversations a reply is on its way to
+  private readonly fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>(); // shared work's, by its Deferred
   private readonly storeClosed = Deferred.makeUnsafe<void>(); // by stop(), or the last write in flight then (closeIfIdle)
   readonly runner: Runner; // the work nobody waits on: see runner.ts
 
@@ -339,6 +345,7 @@ export class Desk {
     this.settingsPath = settingsPath(this.home);
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
+    this.jobs = new Jobs(this);
     this.gh = new GitHubConnector(this, opts.github);
     this.connectors = [this.gh];
     this.judge = new Judge(this);
@@ -422,6 +429,7 @@ export class Desk {
     for (const c of this.connectors) c.start();
     this.coordinator.start();
     this.automations.start();
+    this.jobs.start();
   }
 
   // Kills a judge call in progress.
@@ -434,6 +442,7 @@ export class Desk {
     this.convos.stop();
     this.coordinator.close();
     this.automations.stop();
+    this.jobs.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -608,9 +617,9 @@ export class Desk {
   retryAgents(only?: string): void {
     const hit = (m: string | null | undefined) => !only || !!m?.endsWith(only);
     let any = false;
-    for (const [id, e] of this.aiErrors)
-      if (hit(e.message)) {
-        this.aiErrors.delete(id);
+    for (const j of this.jobs.list())
+      if (j.kind === "ai_review" && j.error && j.state !== "running" && j.state !== "done" && hit(j.error)) {
+        this.jobs.queue(j.kind, j.key, j.item, true);
         any = true;
       }
     if (this.aiPaused && hit(this.aiPaused.why)) {
@@ -1369,9 +1378,12 @@ export class Desk {
       : {};
     const state = (): Preflight["state"] => {
       if (ai?.head_oid === it.head_oid) return "ready";
-      if (this.generating.has(it.id)) return ai ? "stale" : "running";
+      if (this.aiRunning(it.id)) return ai ? "stale" : "running";
+      const tried = this.aiFailedOn(it); // opening it doesn't start one: its review says why
+      if (tried && this.jobs.get("ai_review", it.id)?.state === "failed") return "failed";
       if (!this.autoAiOn()) return "off";
-      if (this.aiPausedNow()) return "paused";
+      if (this.aiPausedNow()) return "paused"; // a try to come waits out the pause too
+      if (tried) return "failed";
       return ai ? "stale" : "queued";
     };
     return { state: state(), ...got };
@@ -1414,7 +1426,7 @@ export class Desk {
     const it = e.item;
     if (!this.autoAi() || it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return false;
     if (snap.reviews.has(it.id) || this.store.get(`shown:${it.id}`)) return false;
-    return this.aiErrors.get(it.id)?.head_oid !== it.head_oid;
+    return !this.aiFailedOn(it);
   }
 
   // How many would be in Now or Today but for Claude's review.
@@ -1597,7 +1609,7 @@ export class Desk {
         ),
         ai: snap.reviews.get(id) ?? null,
         ai_stale: (snap.reviews.get(id)?.head_oid ?? e.item.head_oid) !== e.item.head_oid,
-        generating: this.generating.has(id),
+        generating: this.aiRunning(id),
         held: this.awaitsAi(e, snap) && ["now", "today"].includes(snap.best.get(id)?.bucket ?? ""),
         activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
         stack: this.stack(id, snap),
@@ -1639,8 +1651,9 @@ export class Desk {
       const e = snap.entries.get(id)!;
       if (!ahead && this.autoAi() && this.wantsAi(e, snap)) this.startAi(id);
       const d = yield* this.item(id);
-      const err = this.aiErrors.get(id);
-      const own = err?.head_oid === e.item.head_oid ? err.message : null;
+      const job = this.jobs.get("ai_review", id);
+      const running = job?.state === "running";
+      const own = !running && job?.head === e.item.head_oid ? job.error : null;
       // A PR the desk would have reviewed on its own says why it didn't.
       const paused = this.autoAiOn() && this.aiPausedNow() && this.wantsAi(e, snap) ? `AI reviews are paused: ${this.aiPaused!.why}` : null;
       return {
@@ -1653,8 +1666,9 @@ export class Desk {
         order: reviewOrder(got.files, d.ai, d.ai_stale),
         ai: d.ai,
         ai_stale: d.ai_stale,
-        ai_error: this.generating.has(id) ? null : (own ?? paused),
-        generating: this.generating.has(id),
+        ai_error: running ? null : (own ?? paused),
+        generating: running,
+        ai_job: running || job?.head === e.item.head_oid ? (this.autoAiOn() ? this.aiWaits(job) : job) : null,
         approve: this.canApprove(e),
         activity: d.activity,
         stack: d.stack,
@@ -1707,11 +1721,13 @@ export class Desk {
     return Effect.suspend(() => Deferred.await(this.startAi(id)));
   }
 
-  // The PR's AI review, started unless one is on its way. Once it's done, a PR that waited on it is on your desk; after a
-  // success the pump starts the next, after a failure it waits for the next sync.
-  startAi(id: string): Deferred.Deferred<AiReview, AiError> {
+  // The PR's AI review, started unless one is on its way: its job runs from now. `fresh` (yours, the queue's) starts its
+  // tries over, the loop's retry of a failed one doesn't. Once it's done, a PR that waited on it is on your desk; after a
+  // success the pump starts the next, after a failure the job waits out its backoff.
+  startAi(id: string, fresh = true): Deferred.Deferred<AiReview, AiError> {
     const running = this.generating.get(id);
     if (running) return running;
+    if (!this.stopped) this.jobs.begin("ai_review", id, { item: id, head: this.snapshot().entries.get(id)!.item.head_oid, fresh });
     const d = this.shared(this.generating, "ai_review", id, this.runAi(id), (ok) => {
       if (this.stopped) return;
       this.changed();
@@ -1754,11 +1770,21 @@ export class Desk {
         }),
       ),
     );
-    if (!this.runner.fork(what, run, id)) {
+    const fiber = this.runner.fork(what, run, id);
+    if (fiber) this.fibers.set(d, fiber);
+    else {
       runs.delete(id);
       Deferred.doneUnsafe(d, Exit.interrupt());
     }
     return d;
+  }
+
+  // Stops shared work on its way (an AI review past its time): its callers end with `err`, and it records nothing itself.
+  private stopShared<A, E>(runs: Map<string, Deferred.Deferred<A, E>>, id: string, err: E): void {
+    const d = runs.get(id);
+    if (!d) return;
+    Deferred.doneUnsafe(d, Exit.fail(err));
+    this.fibers.get(d)?.interruptUnsafe();
   }
 
   // What fails it, a bug too, is its ai_error for this commit (reported, and logged with the login's own words), and
@@ -1772,8 +1798,9 @@ export class Desk {
         const pr = yield* this.prText(id);
         const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
         this.store.set(`review:${id}`, ai);
-        this.aiErrors.delete(id);
+        this.jobs.done("ai_review", id);
         this.aiFailures = 0;
+        this.aiLastFailed = null;
         if (this.aiPaused) this.log("AI reviews resume");
         this.aiPaused = null;
         this.log(
@@ -1787,21 +1814,24 @@ export class Desk {
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
             : Effect.sync(() => {
-                this.aiFailed(id, e.item.head_oid, Cause.squash(cause));
+                this.aiFailed(id, Cause.squash(cause));
               }),
         ),
       );
     });
   }
 
-  private aiFailed(id: string, head: string, err: unknown): void {
+  // A failed try: its job retries after its backoff, or fails for good with these words.
+  private aiFailed(id: string, err: unknown): void {
     if (this.stopped) return; // killed with the desk
     const message = messageOf(err);
     report(err, "ai_review", id);
-    this.aiErrors.set(id, { head_oid: head, message, at: Date.now() });
+    this.jobs.tried("ai_review", id, message);
     const detail = err instanceof ClaudeNotLoggedIn ? ` (${err.detail})` : ""; // the login's own words, for the log
     this.log(`AI review of ${id} failed: ${message}${detail}`);
-    if (++this.aiFailures >= AI_PAUSE_AFTER) {
+    if (id !== this.aiLastFailed) this.aiFailures++; // one PR timing out again doesn't pause the rest
+    this.aiLastFailed = id;
+    if (this.aiFailures >= AI_PAUSE_AFTER) {
       if (!this.aiPausedNow()) this.log(`AI reviews nobody asked for are paused for ${AI_RETRY / 60_000} min`);
       this.aiPaused = { why: message, until: Date.now() + AI_RETRY };
     }
@@ -1811,13 +1841,44 @@ export class Desk {
     return !!this.aiPaused && Date.now() < this.aiPaused.until;
   }
 
-  // Someone else's open PR with no AI review of its head yet, and no recent failure on it.
+  // Someone else's open PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
   wantsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
     if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author || this.generating.has(it.id)) return false;
     if (snap.reviews.get(it.id)?.head_oid === it.head_oid) return false;
-    const err = this.aiErrors.get(it.id);
-    return !(err && err.head_oid === it.head_oid && Date.now() - err.at < AI_RETRY);
+    const j = this.jobs.get("ai_review", it.id);
+    return !(j && j.head === it.head_oid && j.state !== "done");
+  }
+
+  // A try to come doesn't start while AI reviews are paused: its retry_at is no sooner than the pause's end.
+  private aiWaits(job: Job | null): Job | null {
+    if (!job || job.state !== "queued" || !job.retry_at || !this.aiPausedNow()) return job;
+    const until = new Date(this.aiPaused!.until).toISOString();
+    return until > job.retry_at ? { ...job, retry_at: until } : job;
+  }
+
+  // Its AI review's job is running: "Claude is reviewing it".
+  aiRunning(id: string): boolean {
+    return this.jobs.get("ai_review", id)?.state === "running";
+  }
+
+  // A try on its head failed: it's on your desk without one, its error said in its review.
+  aiFailedOn(it: Item): boolean {
+    const j = this.jobs.get("ai_review", it.id);
+    return !!j?.error && j.head === it.head_oid;
+  }
+
+  // The loop's: a review past its time is stopped and counts as a failed try; its callers get the same words.
+  aiStop(id: string, err: CommandTimeout): void {
+    this.aiFailed(id, err);
+    this.stopShared(this.generating, id, err);
+    this.changed();
+  }
+
+  // The loop's: a running job with no run in this desk (a bug, or a diff the desk stopped) is a failed try.
+  aiGone(id: string): void {
+    this.log(`AI review of ${id}: ${GONE}`);
+    this.jobs.tried("ai_review", id, GONE);
   }
 
   // AI reviews nobody asked for: on unless review.auto_ai is off...
@@ -1830,13 +1891,23 @@ export class Desk {
     return this.autoAiOn() && !this.aiPausedNow();
   }
 
-  // Background AI reviews, a couple at a time, in the queue's order: Now, then Today from the top, so the cards on screen
-  // are ready first. After a failure it waits for the next sync.
+  // Background AI reviews, a couple at a time: first the failed tries whose backoff is over, then in the queue's order, Now,
+  // then Today from the top, so the cards on screen are ready first.
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi()) return;
     let room = AI_AT_ONCE - this.generating.size; // counted here: a run that fails at once frees its slot before startAi returns
     if (room <= 0) return;
     const snap = this.snapshot();
+    for (const j of this.jobs.due("ai_review")) {
+      if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
+      const e = snap.entries.get(j.key);
+      if (e?.item.kind !== "pr" || e.item.state !== "open") this.jobs.drop(j.kind, j.key);
+      else if (snap.reviews.get(j.key)?.head_oid === e.item.head_oid) this.jobs.done(j.kind, j.key);
+      else if (!this.generating.has(j.key)) {
+        this.startAi(j.key, false);
+        room--;
+      }
+    }
     const top = this.top(snap, new Set(), true);
     for (const c of [...top.now, ...top.today]) {
       if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
@@ -2260,8 +2331,21 @@ export class Desk {
           snap,
         ),
         coordinator: this.coordinator.view(),
+        work: this.work(snap),
       };
     });
+  }
+
+  // Claude's work, in Merging: what's running, then queued, then failed, as the ledger has it; what's done isn't listed.
+  work(snap: Snapshot): Work[] {
+    const asks = new Map(this.asks().map((a) => [a.id, a.text.replaceAll(/\s+/g, " ")]));
+    const rank = { running: 0, queued: 1, failed: 2, done: 3 };
+    return this.jobs
+      .list()
+      .filter((j) => j.state !== "done")
+      .map((j) => (j.kind === "ai_review" && this.autoAiOn() ? this.aiWaits(j)! : j))
+      .map((j) => Object.assign({ title: (j.kind === "ask" ? asks.get(j.key) : snap.entries.get(j.key)?.item.title) ?? j.key }, j))
+      .sort((a, b) => rank[a.state] - rank[b.state]);
   }
 
   // POST /api/coordinator/wake: Wake it (or Start it now) in Merging has it look now (and starts it, if it isn't running).
@@ -2277,10 +2361,25 @@ export class Desk {
         const told = yield* this.coordinator
           .tell(askLine(a, this.askAbout(a.item_id)))
           .pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
+        this.jobs.queue("ask", a.id, a.item_id, true);
         yield* told;
       } else yield* this.coordinator.ran(this.coordinator.now());
       return yield* this.coordinator.saved() ? Effect.void : this.didntStart();
     });
+  }
+
+  // The loop's: an ask your agent stopped without answering goes to it again, as Wake it sends it, its tries counted.
+  resendAsk(a: Ask): void {
+    this.log(`your agent didn't answer ask ${a.id}: asking it again`);
+    const tell = Effect.flatten(this.coordinator.tell(askLine(a, this.askAbout(a.item_id)))).pipe(
+      Effect.catchTag("UnsafeArgument", (e) =>
+        Effect.sync(() => {
+          this.jobs.fail("ask", a.id, e.message);
+        }),
+      ),
+    );
+    this.jobs.queue("ask", a.id, a.item_id);
+    this.runner.fork("coordinator", tell);
   }
 
   private didntStart(): Effect.Effect<never, Upstream> {
@@ -2564,6 +2663,7 @@ export class Desk {
       const send = Effect.gen({ self: this }, function* () {
         const told = yield* this.coordinator.tell(line).pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
         this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
+        this.jobs.queue("ask", a.id, a.item_id, true);
         this.changed();
         // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
         if (started) return a;
@@ -2574,6 +2674,7 @@ export class Desk {
           "asks",
           this.asks().filter((x) => x.id !== a.id),
         );
+        this.jobs.drop("ask", a.id);
         this.changed();
         return yield* this.didntStart();
       });
@@ -2718,6 +2819,8 @@ export class Desk {
         "asks",
         all.map((x) => (x === a ? done : x)),
       );
+      this.jobs.done("ask", id);
+      this.coordinator.answered(id);
       this.changed();
       const said = lead(done.answer!.text);
       if (!a.answer && this.mayNotify()) {

@@ -181,6 +181,7 @@ const inflightView: InflightView = {
   ],
   stacks: {},
   coordinator: { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fake", error: null, status: "idle", queued: [] },
+  work: [],
 };
 
 // A review asked of you that needs another PR merged first.

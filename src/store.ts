@@ -1,6 +1,6 @@
 // SQLite cache of every source's items (GitHub's today), your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Head, Item, ItemState } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Head, Item, ItemState, Job } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -56,6 +56,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS state (id TEXT PRIMARY KEY, done_at TEXT, snooze_until TEXT, snooze_on_activity INTEGER NOT NULL DEFAULT 0, snoozed_at TEXT, muted INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, seen_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, item_id TEXT NOT NULL, action TEXT NOT NULL, before TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS jobs (kind TEXT NOT NULL, key TEXT NOT NULL, item TEXT, head TEXT, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, queued_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, retry_at TEXT, error TEXT, PRIMARY KEY (kind, key));
       CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
       -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
@@ -360,6 +361,41 @@ export class Store {
 
   lastSeq(): number {
     return (this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq as number | null) ?? 0;
+  }
+
+  // --- jobs (the work Claude owes the owner: src/jobs.ts)
+
+  jobs(): Job[] {
+    return this.db
+      .prepare("SELECT * FROM jobs ORDER BY rowid")
+      .all()
+      .map((r) => ({
+        kind: r.kind as Job["kind"],
+        key: r.key as string,
+        item: (r.item as string | null) ?? null,
+        head: (r.head as string | null) ?? null,
+        state: r.state as Job["state"],
+        attempts: r.attempts as number,
+        queued_at: r.queued_at as string,
+        started_at: (r.started_at as string | null) ?? null,
+        finished_at: (r.finished_at as string | null) ?? null,
+        retry_at: (r.retry_at as string | null) ?? null,
+        error: (r.error as string | null) ?? null,
+      }));
+  }
+
+  putJob(j: Job): void {
+    this.db
+      .prepare(
+        `INSERT INTO jobs (kind, key, item, head, state, attempts, queued_at, started_at, finished_at, retry_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(kind, key) DO UPDATE SET item = excluded.item, head = excluded.head, state = excluded.state, attempts = excluded.attempts,
+           queued_at = excluded.queued_at, started_at = excluded.started_at, finished_at = excluded.finished_at, retry_at = excluded.retry_at, error = excluded.error`,
+      )
+      .run(j.kind, j.key, j.item, j.head, j.state, j.attempts, j.queued_at, j.started_at, j.finished_at, j.retry_at, j.error);
+  }
+
+  dropJob(kind: Job["kind"], key: string): void {
+    this.db.prepare("DELETE FROM jobs WHERE kind = ? AND key = ?").run(kind, key);
   }
 
   // --- key/value

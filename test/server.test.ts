@@ -1163,7 +1163,7 @@ test("the desk's reviews, AI, asks, wakes, agents and event log answer through r
     no("BadRequest", "acme/api#9 is an issue; reviews are for pull requests"),
   ]);
   assert.deepEqual(await call("POST", review("acme/api#1", "ai"), {}), [502, no("Upstream", "AI review isn't available in this desk")]);
-  assert.equal(t.desk.aiErrors.get("acme/api#1")?.message, "AI review isn't available in this desk", "kept as its error");
+  assert.equal(t.desk.jobs.get("ai_review", "acme/api#1")?.error, "AI review isn't available in this desk", "kept as its error");
 
   const off = no("Conflict", "your agent is off: Settings → Claude");
   assert.deepEqual(await call("POST", "/api/coordinator/wake", {}), [409, off]);

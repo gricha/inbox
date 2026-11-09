@@ -1513,7 +1513,7 @@ test("a PR that waited for Claude's review notifies once it's on the queue; one 
   t.f.setFail("model overloaded");
   await t.f.release("acme/api#3");
   t.f.setFail(null);
-  assert.equal(card("acme/api#3")?.preflight?.state, "queued", "Claude couldn't review this commit: on the queue without one");
+  assert.equal(card("acme/api#3")?.preflight?.state, "failed", "Claude couldn't review this commit: on the queue without one");
 
   runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
   t.gh.items.set("acme/api#5", ask(5));
@@ -1538,7 +1538,7 @@ test("once on the queue, a PR stays: a pause ending, a lost failure or a push do
   assert.deepEqual(t.notes, [], "they were there before you looked");
 
   t.desk.aiPaused = null; // the pause is over
-  t.desk.aiErrors.clear(); // as after a restart
+  for (const j of t.desk.jobs.list()) t.desk.jobs.drop(j.kind, j.key); // the failures lost
   t.gh.items.set("acme/api#3", { ...ask(3), head_oid: "h3b", updated_at: hoursAgo(0) });
   await t.sync();
   assert.deepEqual(ids(), ["acme/api#1", "acme/api#2", "acme/api#3"], "none held again");
@@ -1595,18 +1595,19 @@ test("an AI review runs to the end when the one asking leaves; a bug in it is it
   t.f.deps.generate = () => Effect.die(new TypeError("x is undefined"));
   const bug = await failure(t.desk.aiReview("api#1", true));
   assert.deepEqual([bug._tag, bug.message], ["Upstream", "x is undefined"]);
-  assert.equal(t.desk.aiErrors.get("acme/api#1")?.message, "x is undefined", "its ai_error, as a failure's is");
+  assert.equal(t.desk.jobs.get("ai_review", "acme/api#1")?.error, "x is undefined", "its ai_error, as a failure's is");
   t.f.deps.generate = generate;
 
   const forced = Effect.runPromiseExit(t.desk.aiReview("api#1", true));
   await flush();
   assert.equal(t.f.started.length, 2);
-  t.desk.aiErrors.clear();
+  const job = t.desk.jobs.get("ai_review", "acme/api#1");
   const failures = t.desk.aiFailures;
   t.cleanup();
   const stopped = await forced;
   assert.ok(Exit.isFailure(stopped) && Cause.hasInterruptsOnly(stopped.cause), "its caller ends with it");
-  assert.deepEqual([t.desk.generating.size, t.desk.aiErrors.size, t.desk.aiFailures], [0, 0, failures], "nothing kept");
+  assert.deepEqual([t.desk.generating.size, t.desk.aiFailures], [0, failures], "nothing kept");
+  assert.deepEqual(t.desk.jobs.get("ai_review", "acme/api#1"), job, "its job still running, for the next start to queue again");
   const after = await Effect.runPromiseExit(t.desk.generate("acme/api#1"));
   assert.ok(Exit.isFailure(after) && Cause.hasInterruptsOnly(after.cause));
   assert.equal(t.f.started.length, 2, "a stopped desk starts no claude");

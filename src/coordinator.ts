@@ -7,6 +7,7 @@ import { Effect, Result } from "effect";
 import type { Desk } from "./desk.ts";
 import { ClaudeBadOutput, CommandBadOutput, fsError, messageOf, type CommandError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { oldHome } from "./home.ts";
+import { askOf } from "./jobs.ts";
 import { claudeCommand, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import {
   COORDINATOR_NAME,
@@ -226,7 +227,7 @@ export class Coordinator {
       url: s?.url ?? null,
       error: this.on ? this.error() : null,
       status: this.on ? this.status : null,
-      queued: this.asks().flatMap((l) => /^My ask (\w+)/.exec(l)?.[1] ?? []),
+      queued: this.asks().flatMap((l) => askOf(l) ?? []),
     };
   }
 
@@ -280,6 +281,12 @@ export class Coordinator {
       if (!this.flushing) this.desk.runner.fork("coordinator", Effect.ignore(this.find())); // a look that fails: the next run says why
     }, this.watchEvery);
     this.watching.unref();
+  }
+
+  // Answered while it waited to go again (the desk asked again while your agent was on it): it never goes.
+  answered(id: string): void {
+    const left = this.asks().filter((l) => askOf(l) !== id);
+    if (left.length !== this.asks().length) this.desk.store.set(ASKS, left);
   }
 
   untell(line: string): void {
@@ -412,6 +419,10 @@ export class Coordinator {
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
+        for (const l of asks) {
+          const id = askOf(l);
+          if (id) this.desk.jobs.begin("ask", id); // it has your ask now: its job runs until it answers
+        }
         this.saw("busy"); // it has a turn now; the next look says how it goes
       } else if (a && (!a.pid || (switching && idle))) {
         yield* this.halt(a);

@@ -72,6 +72,8 @@ import type {
   Status,
   TraceStep,
   Until,
+  Job,
+  Work,
 } from "../../src/types.ts";
 import { COORDINATOR_NAME, RANK, UNTIL } from "../../src/types.ts";
 
@@ -1990,6 +1992,7 @@ function preflightOf(r: Rec): Preflight {
   const state = (): Preflight["state"] => {
     if (ai?.head_oid === itemOf(r).head_oid) return "ready";
     if (generating.has(r.id)) return ai ? "stale" : "running";
+    if (jobs.get(`ai_review ${r.id}`)?.state === "failed") return "failed";
     if (!autoAiOn()) return "off";
     if (aiPaused) return "paused";
     return ai ? "stale" : "queued";
@@ -2077,7 +2080,51 @@ function inflight(): InflightView {
     (x) => x.card.id,
     stacks(),
   );
-  return { rows: lane, stacks: stacksOf(lane.map((x) => x.card)), coordinator };
+  return { rows: lane, stacks: stacksOf(lane.map((x) => x.card)), coordinator, work: work() };
+}
+
+// Claude's work, as the desk's ledger keeps it: the two reviews being written, your ask your agent has, and a review that
+// timed out three times.
+const jobs = new Map<string, Job>();
+const FAILED = "acme/worker#890";
+
+function setJob(kind: Job["kind"], key: string, o: Partial<Job>): Job {
+  const r = recs.find((x) => x.id === key);
+  const j: Job = {
+    kind,
+    key,
+    item: kind === "ai_review" ? key : null,
+    head: r ? itemOf(r).head_oid : null,
+    state: "queued",
+    attempts: 0,
+    queued_at: new Date().toISOString(),
+    started_at: null,
+    finished_at: null,
+    retry_at: null,
+    error: null,
+    ...jobs.get(`${kind} ${key}`),
+    ...o,
+  };
+  jobs.set(`${kind} ${key}`, j);
+  return j;
+}
+
+function work(): Work[] {
+  const rank = { running: 0, queued: 1, failed: 2, done: 3 };
+  return [...jobs.values()]
+    .filter((j) => j.state !== "done")
+    .map((j) =>
+      Object.assign(
+        {
+          title:
+            j.kind === "ask"
+              ? (ASKS.find((a) => a.id === j.key)?.text.replaceAll(/\s+/g, " ") ?? j.key)
+              : (recs.find((r) => r.id === j.key)?.seed.title ?? j.key),
+        },
+        j,
+      ),
+    )
+    .sort((a, b) => rank[a.state] - rank[b.state]);
 }
 
 // The coordinator session, with its claude.ai link; w has it look now.
@@ -2659,6 +2706,14 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
   if (generating.has(r.id)) throw new HttpError(409, `already reviewing ${r.id}`);
   generating.add(r.id);
   aiErrors.delete(r.id);
+  const was = jobs.get(`ai_review ${r.id}`);
+  setJob("ai_review", r.id, {
+    state: "running",
+    attempts: was?.state === "queued" ? was.attempts + 1 : 1,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    retry_at: null,
+  });
   bump();
   try {
     await new Promise((ok, fail) => {
@@ -2672,9 +2727,15 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
       throw new HttpError(502, 'claude command "claude" not found: install Claude Code, or put it on your PATH');
     const ai = written(r, itemOf(r).head_oid);
     reviews.set(r.id, ai);
+    jobs.delete(`ai_review ${r.id}`);
     return ai;
   } catch (e) {
-    aiErrors.set(r.id, (e as Error).message);
+    const why = (e as Error).message;
+    aiErrors.set(r.id, why);
+    // Like the desk, a run the pause stopped is a try to come, not a review Claude gave up on.
+    if (why === LOGGED_OUT)
+      setJob("ai_review", r.id, { state: "queued", retry_at: new Date(Date.now() + 120_000).toISOString(), error: why });
+    else setJob("ai_review", r.id, { state: "failed", finished_at: new Date().toISOString(), error: why });
     throw e;
   } finally {
     generating.delete(r.id);
@@ -2723,6 +2784,7 @@ function reviewView(r: Rec, ahead = false): ReviewView {
       ? null
       : (aiErrors.get(r.id) ?? (wants && autoAiOn() && aiPaused ? `AI reviews are paused: ${aiPaused}` : null)),
     generating: d.generating,
+    ai_job: jobs.get(`ai_review ${r.id}`) ?? null,
     approve: mine
       ? { ok: false, reason: "it's your PR" }
       : ended
@@ -3504,13 +3566,23 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 // What you snoozed this morning, so Later → Cleared has something in it.
 for (const id of ["acme/infra#540", "acme/api#4101", "acme/web#2288", "acme/ml-pipeline#311"]) act(resolve(id), "snooze", "tomorrow");
 
-// Two reviews being written, for longer than a test run or a round of shots.
+// Two reviews being written, for longer than a test run or a round of shots: one a first try 40 seconds in, one its second
+// try four minutes in, after the first ran out of time.
+const LATE = "no answer in 5 minutes, so it was stopped";
+setJob("ai_review", RUNNING, { state: "queued", attempts: 1, error: LATE });
 if (!aiPaused)
   for (const id of [STALE, RUNNING])
     void generate(
       recs.find((r) => r.id === id)!,
-      10 * 60_000,
+      60 * 60_000,
     ).catch(() => {});
+setJob("ai_review", STALE, { started_at: iso(40 / 3600) });
+setJob("ai_review", RUNNING, { started_at: iso(4 / 60) });
+// One that ran out of time three times, its last an hour ago; and the ask your agent is on.
+aiErrors.set(FAILED, LATE);
+setJob("ai_review", FAILED, { state: "failed", attempts: 3, queued_at: iso(1.6), started_at: iso(1.1), finished_at: iso(1), error: LATE });
+for (const a of ASKS.filter((x) => !x.answer))
+  setJob("ask", a.id, { item: a.item_id, state: "running", attempts: 1, queued_at: a.at, started_at: a.at });
 
 const server = createServer((req, res) => {
   void handle(req, res);

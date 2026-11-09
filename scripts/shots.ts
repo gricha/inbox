@@ -1278,6 +1278,59 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A review that ran out of time three times: why, and Try again, never a spinner for a review nobody runs.
+    name: "review-ai-failed",
+    go: async (page) => {
+      await review("acme/worker#890")(page);
+      const ai = await page.locator(".rv-ai").textContent();
+      if (!ai?.startsWith("The AI review failed 3 times: no answer in 5 minutes, so it was stopped. Try again"))
+        failures.push(`review-ai-failed: the AI section reads ${JSON.stringify(ai)}`);
+      if (ai?.includes("Claude is reviewing it")) failures.push("review-ai-failed: it says Claude is reviewing it");
+    },
+  },
+  {
+    // A try that failed, the next one waiting out its backoff: why, and when Claude tries again.
+    name: "review-ai-retrying",
+    go: async (page) => {
+      const retry = new Date(Date.now() + 2 * 60_000).toISOString();
+      await reviewAs((v) => {
+        const error = "no answer in 5 minutes, so it was stopped";
+        Object.assign(v, { ai: null, generating: false, ai_error: error });
+        v.ai_job = {
+          kind: "ai_review",
+          key: v.card.id,
+          item: v.card.id,
+          head: v.item.head_oid,
+          state: "queued",
+          attempts: 1,
+          queued_at: retry,
+          started_at: retry,
+          finished_at: null,
+          retry_at: retry,
+          error,
+        };
+      })(page);
+      await review("acme/api#4127")(page);
+      const ai = await page.locator(".rv-ai").textContent();
+      if (ai !== "The AI review failed: no answer in 5 minutes, so it was stopped. Claude tries again in 2 minutes. Try again")
+        failures.push(`review-ai-retrying: the AI section reads ${JSON.stringify(ai)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
+    // On its second try, minutes in: it says so, not that the notes land in a minute or two.
+    name: "review-ai-running",
+    go: async (page) => {
+      await review("acme/web#2301")(page);
+      const ai = await page.locator(".rv-ai").textContent();
+      if (!/^Claude is reviewing it, \d+ minutes so far, try 2 of 3\.$/.test(ai ?? ""))
+        failures.push(`review-ai-running: the AI section reads ${JSON.stringify(ai)}`);
+    },
+  },
+  {
     // The last file ends at the window's bottom: no empty room below it to scroll into.
     name: "review-bottom",
     go: async (page) => {
@@ -1564,6 +1617,60 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Claude's work under the rows, in their columns: two reviews being written (one on its second try), your ask your agent has, and a review
+    // that failed three times, with its reason and Try again; nothing in red.
+    name: "inflight-work",
+    go: async (page) => {
+      await at("#/")(page); // from Merging itself the hash wouldn't change, so the shot before's view would stay
+      await at("#/inflight")(page);
+      const work = page.locator(".lane .group", { has: page.locator("#h-work") });
+      await work.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+      const head = (await page.locator("#h-work").textContent())?.replace(/\d+$/, "");
+      if (head !== "Claude's work") failures.push(`inflight-work: its heading reads ${JSON.stringify(head)}`);
+      const rows = await page.evaluate<
+        { note: string; retry: string | null; color: string; x: number }[]
+      >(`[...document.querySelectorAll(".work-row")].map((e) => ({
+        note: e.querySelector(".line-note")?.textContent ?? "",
+        retry: e.querySelector(".line-cta")?.textContent ?? null,
+        color: getComputedStyle(e.querySelector(".line-note")).color,
+        x: e.querySelector(".line-note").getBoundingClientRect().left,
+      }))`);
+      // Merging's columns: where each stands starts where a merging PR's phrase does.
+      const x = await page.evaluate<number | null>(
+        `document.querySelector(".lane-row:not(.work-row):not(.dim) .line-note")?.getBoundingClientRect().left ?? null`,
+      );
+      if (x !== null && rows.some((r) => Math.abs(r.x - x) > 1))
+        failures.push(`inflight-work: its column starts at ${rows.map((r) => r.x).join(", ")}, Merging's at ${x}`);
+      if (!rows.some((r) => r.note.startsWith("Claude is reviewing it")))
+        failures.push(`inflight-work: no running review in ${JSON.stringify(rows)}`);
+      if (!rows.some((r) => r.note.includes("try 2 of 3"))) failures.push("inflight-work: the second try doesn't say so");
+      const failed = rows.find((r) => r.note.startsWith("Failed 3 times: "));
+      if (failed?.retry !== "Try again") failures.push(`inflight-work: the failed review reads ${JSON.stringify(failed)}`);
+      if (rows.filter((r) => r.retry).length !== 1) failures.push("inflight-work: Try again on a row that hasn't failed");
+      const red = await page.evaluate<string>(`(() => {
+        const probe = document.body.appendChild(document.createElement("span"));
+        probe.style.color = "var(--red)";
+        const c = getComputedStyle(probe).color;
+        probe.remove();
+        return c;
+      })()`);
+      if (rows.some((r) => r.color === red)) failures.push("inflight-work: a reason in red: it's about the agent, not the PR");
+    },
+  },
+  {
+    // A click on Claude's work's review row opens that PR's review.
+    name: "inflight-work-click",
+    go: async (page) => {
+      await at("#/")(page);
+      await at("#/inflight")(page);
+      await page.locator(".work-failed .row-main").click();
+      await page.waitForTimeout(300);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== `#/review/${encodeURIComponent("acme/worker#890")}`) failures.push(`inflight-work-click: a click went to ${hash}`);
+    },
+  },
+  {
     // One click on a row opens its review.
     name: "inflight-click",
     go: async (page) => {
@@ -1582,6 +1689,7 @@ const SHOTS: Shot[] = [
         const res = await route.fetch();
         const v = (await res.json()) as InflightView;
         v.rows = [];
+        v.work = [];
         v.coordinator = { ...v.coordinator, id: null, url: null };
         await route.fulfill({ response: res, json: v });
       });
