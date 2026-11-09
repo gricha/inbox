@@ -75,6 +75,7 @@ import {
   valueOf,
   whereIs,
   type KeyLike,
+  handsOff,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
@@ -1106,4 +1107,15 @@ test("treeGuides draws Blocked's tree from its depths: a branch with more under 
   // web#1; web#2 and web#3 under it, web#4 under web#3 and web#5 under web#2; then a chain of its own.
   assert.deepEqual(treeGuides([0, 1, 2, 1, 2, 0, 1]), [[], ["tee"], ["rail", "end"], ["end"], ["gap", "end"], [], ["end"]]);
   assert.deepEqual(treeGuides([0, 0]), [[], []], "rows of their own draw nothing");
+});
+
+test("Hand off for merge waits for the review: not a PR whose review is required or asks for changes, a draft, or one nobody's asked", () => {
+  const pr = (o: Partial<Pick<Card, "draft" | "cta" | "review">>) => ({ draft: false, review: "approved" as const, ...o });
+  assert.equal(handsOff(pr({})), true, "approved");
+  assert.equal(handsOff(pr({ review: "none" })), true, "its repo asks for no review");
+  assert.equal(handsOff(pr({ cta: "reply" })), true, "approved, with a reply owed");
+  assert.equal(handsOff(pr({ review: "required" })), false, "getsentry/sentry#129460: still waits on its review");
+  assert.equal(handsOff(pr({ review: "changes_requested" })), false);
+  assert.equal(handsOff(pr({ draft: true })), false);
+  assert.equal(handsOff(pr({ review: "none", cta: "reviewers" })), false);
 });

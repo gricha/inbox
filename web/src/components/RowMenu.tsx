@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Action, Card, GitHubAction } from "../../../src/types.ts";
 import { cls, snoozeOptions } from "../format.ts";
+import { handsOff } from "../view.ts";
 import { MORE, rowActions } from "./More.tsx";
 
 // What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
@@ -41,7 +42,7 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
     [
       ...(card.cta === "ready" ? [go("Ready for review", "a")] : []),
       ...(card.cta === "reviewers" ? [go("Add reviewers", "a")] : []),
-      ...(mine && !card.resolved && !card.draft && !card.inflight && card.cta !== "reviewers" ? [go("Hand off for merge", "m")] : []),
+      ...(mine && !card.resolved && !card.inflight && handsOff(card) ? [go("Hand off for merge", "m")] : []),
       ...(card.inflight ? [go("Back to the desk", "b")] : []),
       ...(card.inflight
         ? []

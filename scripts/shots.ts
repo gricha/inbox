@@ -1436,7 +1436,21 @@ const SHOTS: Shot[] = [
     },
     after: fresh,
   },
-  { name: "review-mine", go: review("oss/tinyhttp#205") },
+  {
+    // Your own PR still waiting on its review: no Hand off for merge in its review or its row's menu, since it isn't approved.
+    name: "review-mine",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').click({ button: "right" });
+      await page.locator(".ctx-item").first().waitFor();
+      if (await page.locator(".ctx-item", { hasText: "Hand off for merge" }).count())
+        failures.push("review-mine: the row menu of a PR waiting on its review has Hand off for merge");
+      await page.keyboard.press("Escape");
+      await review("oss/tinyhttp#205")(page);
+      if (await page.locator("button", { hasText: "Hand off for merge" }).count())
+        failures.push("review-mine: the review of a PR waiting on its review has Hand off for merge");
+    },
+  },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
   {
     name: "review-conversation",
@@ -1743,14 +1757,15 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Hand off for merge, in your own PR's row menu: the row leaves at once, a spinner in the toast while the desk (here never) answers.
+    // Hand off for merge, in your own approved PR's row menu: the row leaves at once, a spinner in the toast while the desk (here never) answers.
     name: "handoff-sent",
     go: async (page) => {
       await page.route("**/api/act", async (route) => {
         if ((route.request().postDataJSON() as { action?: string }).action !== "inflight") await route.continue();
       });
       await at("#/")(page);
-      await rowMenuPick(page, '.line[data-id="oss/tinyhttp#205"]', "Hand off for merge");
+      await unfold(page); // yours come after the reviews asked of you
+      await rowMenuPick(page, '.line[data-id="acme/worker#875"]', "Hand off for merge");
       await page.waitForTimeout(300);
     },
     after: fresh,

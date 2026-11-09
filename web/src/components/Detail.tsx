@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText, handoffLabel } from "../format.ts";
-import { cardFacts, judgeStepText, says } from "../view.ts";
+import { cardFacts, handsOff, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -276,18 +276,17 @@ export function HandButton({
   run,
   primary,
 }: {
-  card: Pick<Card, "inflight" | "draft" | "cta">;
+  card: Pick<Card, "inflight" | "draft" | "cta" | "review">;
   run: (k: string) => void;
   primary?: boolean;
 }) {
   if (card.inflight) return <ActButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
-  if (card.draft) return null; // Ready for review first: the desk won't hand off a draft
-  if (card.cta === "reviewers") return null; // nor one nobody's asked to review: Ask reviewers first
+  if (!handsOff(card)) return null; // a draft, one nobody's asked to review, one that isn't approved yet
   return (
     <ActButton
       k="m"
       label="Hand off for merge"
-      title="Your agent gets it merged: it fixes CI, addresses comments and merges it once it's approved"
+      title="Your agent gets it merged: it fixes CI, addresses comments and merges it"
       className={cls(primary && "primary go")}
       run={run}
     />

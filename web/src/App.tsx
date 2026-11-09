@@ -25,6 +25,7 @@ import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
 import {
   beside,
+  awaitsReview,
   DEFAULT_OPEN,
   groupsOf,
   inboxCount,
@@ -1045,8 +1046,10 @@ export function App() {
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
-    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) handOff(c);
-    else if (k === "o") {
+    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {
+      if (awaitsReview(c)) flash(`${shortRef(c)} isn't approved yet`);
+      else handOff(c);
+    } else if (k === "o") {
       window.open(c.url, "_blank", "noopener,noreferrer");
       runUi(seen(c));
     } else if (k === "e" || k === "d") runUi(act(c, c.status === "active" ? "done" : "restore"));
