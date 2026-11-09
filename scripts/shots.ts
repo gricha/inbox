@@ -78,10 +78,15 @@ const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
   await page.waitForTimeout(400);
 };
-// A PR's review, once Pierre has drawn and highlighted its diffs; then each selector clicked in order.
+// A PR's review, opened from `from` (the Inbox), once Pierre has drawn and highlighted its diffs; then each selector clicked
+// in order. Always from that page, so every size shows the same way back and list beside it, and the review opens afresh
+// rather than keep what the shot before left in it.
 const review =
-  (id: string, clicks: string[] = []) =>
+  (id: string, clicks: string[] = [], from = "#/") =>
   async (page: Page) => {
+    // Already there, it may be by an Esc whose hashchange hasn't landed yet: a review opened before it would skip the page.
+    if ((await page.evaluate<string>("location.hash")) !== from) await at(from)(page);
+    else await page.waitForTimeout(100);
     // The list beside it from its top, whatever the shot before scrolled: it brings the review's row into view itself.
     await page.evaluate(`document.querySelector(".beside-list")?.scrollTo(0, 0)`);
     await at(`#/review/${encodeURIComponent(id)}`)(page);
@@ -713,17 +718,13 @@ const SHOTS: Shot[] = [
   // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
   {
     name: "review-blocker",
-    go: async (page) => {
-      await at("#/")(page);
-      await review("acme/api#1294")(page);
-    },
+    go: review("acme/api#1294"),
   },
   // A PR another one blocks: its header says what, greyed like Later's.
   {
     name: "review-blocked",
     go: async (page) => {
-      await at("#/blocked")(page);
-      await review("acme/billing#2298")(page);
+      await review("acme/billing#2298", [], "#/blocked")(page);
     },
   },
   {
@@ -2826,7 +2827,6 @@ const SHOTS: Shot[] = [
     // Done first, then what isn't a write, then the writes under "On GitHub".
     name: "more-review",
     go: async (page) => {
-      await at("#/")(page); // opened from the Inbox at every size, so they're one screen
       await review("acme/worker#875", [MORE])(page);
       const back = (await page.locator(".page-head .back").textContent())?.trim();
       if (back !== "Inbox") failures.push(`more-review: the review's way back reads ${JSON.stringify(back)}`);
