@@ -431,14 +431,18 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
   const focus = runSync(t.desk.focus());
   assert.deepEqual(
     focus.sections.now.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
-    [],
-    "#2 and #3 are both asked of you, and both wait on #1 to merge",
+    [[id(2), [id(3)]]],
+    "#2 and #3 are both asked of you, and #1 they wait on asks your team: you can unblock them, so they're in Now",
   );
   const q = runSync(t.desk.queue());
   assert.deepEqual(
-    q.sections.blocked.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
+    q.sections.blocked.filter((c) => c.repo === "acme/api"),
+    [],
+  );
+  assert.deepEqual(
+    q.sections.now.filter((c) => c.repo === "acme/api").map((c) => [c.id, c.stack?.folded]),
     [[id(2), [id(1), id(3)]]],
-    "the lower one stands for the stack, #1 in FYI too",
+    "the lower one asked of you stands for the stack, #1 in FYI too",
   );
   assert.equal(
     q.sections.fyi.find((c) => c.id === id(1)),
@@ -448,8 +452,8 @@ test("focus lists a stack once too, and Merging keeps a stack's PRs together wit
     q.stacks[id(1)]?.line.map((m) => [m.number, m.bucket, m.current]),
     [
       [1, "fyi", false],
-      [2, "blocked", true],
-      [3, "blocked", false],
+      [2, "now", true],
+      [3, "now", false],
     ],
   );
 
@@ -511,13 +515,13 @@ test("a ref counts the PR's own line: forks over a merged bottom are two PRs, no
   );
 });
 
-test("desktop notifications go per PR: a member asked while the one below is open waits in Blocked; once that merges it's news, once", async (tc) => {
+test("desktop notifications go per PR: a member asked while the one below waits on your review too is news at once, and once", async (tc) => {
   const t = await setup([reviewAsk(2, { head_ref: "b2" }), theirs(3, 2)], { settings: { "notify.quiet": "" } });
   tc.after(t.cleanup);
   await run(t.desk.sync());
   t.gh.items.set(id(3), reviewAsk(3, { head_ref: "b3", base: "b2", updated_at: at(1) }));
   await run(t.desk.sync());
-  assert.deepEqual(t.notes, [], "the line in Now stands for it");
+  assert.deepEqual(t.notes, ["api#3 \u00b7 carol asked you directly"], "its chain waits on you, so it isn't blocked for you");
   assert.deepEqual(
     runSync(t.desk.queue()).sections.now.map((c) => [c.id, c.stack?.folded]),
     [[id(2), [id(3)]]],

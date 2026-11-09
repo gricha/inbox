@@ -1033,6 +1033,39 @@ test("A review asked of you by name that requires an open PR waits in Blocked; o
   assert.equal(t.notes.at(-1), "api#9 \u00b7 carol asked you directly");
 });
 
+test("A review asked of you whose chain waits on you isn't Blocked: srest2021's sentry#130284, stacked on #130283, which asks your team, is in Now; one whose chain waits on someone else still waits in Blocked", async (c) => {
+  const sofia = { repo: "getsentry/sentry", author: "srest2021" };
+  const asked = [{ at: hoursAgo(5), actor: "srest2021", actor_bot: false, reviewer: "me", reviewer_type: "user" as const }];
+  const t = await setup(
+    [
+      makeItem({
+        ...sofia,
+        number: 130283,
+        head_ref: "sofia/a",
+        review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }],
+      }),
+      reviewAsk(130284, { ...sofia, head_ref: "sofia/b", base: "sofia/a", request_events: asked }),
+      reviewAsk(9, { requires: ["acme/api#5"] }),
+    ],
+    { settings: QUIET },
+  );
+  c.after(t.cleanup);
+  // carol's api#5, on no board: kai has looked, it waits on reviews, not on you.
+  const five = makeItem({ number: 5, author: "carol", reviews: [{ ...review("kai", "commented"), commit: "x" }] });
+  t.desk.store.putItems([five], NOW.toISOString(), true);
+  await run(t.desk.sync());
+  const q = runSync(t.desk.queue());
+  assert.deepEqual(
+    q.sections.blocked.map((x) => [x.id, x.why]),
+    [["acme/api#9", "needs api#5, which waits on a review"]],
+  );
+  assert.deepEqual(
+    q.sections.now.filter((x) => x.repo === "getsentry/sentry").map((x) => [x.id, x.stage]),
+    [["getsentry/sentry#130284", "blocked"]],
+    "a review you can give now, its stage still saying it can't merge yet",
+  );
+});
+
 test("A review asked of you by name whose description names an open PR in another org stays in Now", async (c) => {
   const t = await setup([reviewAsk(9, { requires: ["evilcorp/api#5"] })], { settings: QUIET });
   c.after(t.cleanup);

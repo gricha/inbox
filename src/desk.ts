@@ -1012,6 +1012,23 @@ export class Desk {
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
       entries.set(item.id, { item, analysis, state, status: statusOf(state, activityAt, now), isNew, resolved, inflight, activityAt });
     }
+    // An open PR waits on you: asked of you or your team, your reply, or your own outside Merging with its next step yours.
+    const onYou = (e: Entry) => {
+      const s = e.analysis.signals;
+      const yours = s.me.author && !e.inflight;
+      const next = s.item.draft || s.pr.ci === "red" || s.pr.mergeable === "conflict" || s.pr.review === "changes_requested";
+      return s.me.requested || s.me.owes_reply || (yours && (next || (s.pr.review === "approved" && s.pr.ci === "green")));
+    };
+    const chain = (id: string): string[] => {
+      const seen = new Set<string>();
+      const todo = [...deps.get(id)!.needs];
+      for (let y = todo.pop(); y !== undefined; y = todo.pop()) {
+        if (seen.has(y)) continue;
+        seen.add(y);
+        todo.push(...deps.get(y)!.needs);
+      }
+      return [...seen];
+    };
     for (const [id, f] of deps) {
       const pr = entries.get(id)!.analysis.signals.pr;
       const root = f.root ? entries.get(f.root) : undefined;
@@ -1020,6 +1037,7 @@ export class Desk {
         pr.blocked = true;
         pr.blocker = `${shortRef(root.item)}${f.through ? ` (through ${f.through})` : ""}`;
         pr.blocker_waits = root.inflight ? "is in Merging" : root.analysis.signals.pr.waits;
+        pr.blocker_mine = chain(id).some((y) => onYou(entries.get(y)!));
       }
     }
 

@@ -236,7 +236,8 @@ export function migrateBotAsk(text: string): string | null {
 }
 
 const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true`;
-const BLOCKED_BY = `{ when = "pr.blocked", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
+// Not when its chain waits on you: you can unblock it, so it's yours as any other (a review asked of you goes to the Inbox).
+const BLOCKED_BY = `{ when = "pr.blocked && !pr.blocker_mine", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
 // Yours: a change request or a reply you owe is yours to do now, blocked or not.
 const MINE_BLOCKED = `{ when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
 const WAITS_REVIEW = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked", why = "{pr.waits}", final = true }`;

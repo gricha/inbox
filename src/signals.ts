@@ -52,6 +52,11 @@ export const FIELDS: FieldDoc[] = [
     type: "string",
     doc: 'what that PR waits on, as its pr.waits says it, or "is in Merging"; "" when not blocked',
   },
+  {
+    path: "pr.blocker_mine",
+    type: "boolean",
+    doc: "blocked, and an open PR in its chain waits on you: a review asked of you or your team, your reply, or your own PR's next step (a draft, red CI, a conflict, changes requested, ready to merge) outside Merging; you can unblock it",
+  },
   { path: "pr.blocks", type: "string[]", doc: "open PRs that need this one merged first, directly or through others, as repo#number" },
   { path: "pr.requires_closed", type: "string[]", doc: "PRs it needs that were closed without merging" },
   {
@@ -260,6 +265,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       blocked_by: [],
       blocker: "",
       blocker_waits: "",
+      blocker_mine: false,
       blocks: [],
       requires_closed: [],
       waiting_on: waitingOn,

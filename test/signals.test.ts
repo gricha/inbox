@@ -278,8 +278,8 @@ test("pr.waits, pr.waiting_on and me.owes_reply", () => {
   );
   const deps = of(mine({ requires: ["acme/api#9"] })).pr;
   assert.deepEqual(
-    [deps.requires, deps.blocked, deps.blocked_by, deps.blocker, deps.blocker_waits, deps.blocks, deps.requires_closed],
-    [[], false, [], "", "", [], []],
+    [deps.requires, deps.blocked, deps.blocked_by, deps.blocker, deps.blocker_waits, deps.blocker_mine, deps.blocks, deps.requires_closed],
+    [[], false, [], "", "", false, [], []],
     "Desk.compute() fills the dependency fields",
   );
 });

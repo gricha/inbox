@@ -142,6 +142,7 @@ export interface Signals {
     blocked_by: string[]; // the open PRs it needs directly, as repo#number
     blocker: string; // the open PR at the end of the chain, as repo#number, "(through repo#number)" when it isn't a direct need; "" when not blocked
     blocker_waits: string; // what that PR waits on, as its pr.waits says it, or "is in Merging"; "" when not blocked
+    blocker_mine: boolean; // a PR in its chain waits on you: your review, your reply, or your own PR's next step
     blocks: string[]; // open PRs that need this one merged first, directly or through others, as repo#number
     requires_closed: string[]; // PRs it needs that were closed without merging
     waiting_on: string[]; // who is asked to review it and hasn't approved: logins and @teams, you and bots left out; empty once approved
