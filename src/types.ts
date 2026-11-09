@@ -147,6 +147,9 @@ export interface Signals {
     requires_closed: string[]; // PRs it needs that were closed without merging
     waiting_on: string[]; // who is asked to review it and hasn't approved: logins and @teams, you and bots left out; empty once approved
     waits: string; // what it waits on next, in words ("waits on a review from sam", "is ready to merge"); "" once merged or closed
+    reviewers: string[]; // who has reviewed it (approved, asked for changes or commented): you, its author and bots left out
+    people_requested: string[]; // people asked to review it by name, you and bots left out
+    teams_requested: string[]; // teams asked to review it, as slugs, yours included
     unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
     pushed_hours: number;
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown

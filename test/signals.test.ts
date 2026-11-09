@@ -199,6 +199,40 @@ test("stacked: a PR whose base isn't its repo's default branch; unknown until th
   assert.equal(s({ base: "ref/sa-narrow", default_branch: undefined }), false, "stored before the default branch was fetched");
 });
 
+test("pr.reviewers, pr.people_requested and pr.teams_requested: who's on a PR besides you, for rules that sort a team ask away", () => {
+  const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
+  const team = (reviewer: string) => ({ reviewer, type: "team" as const, codeowner: true });
+  const review = (author: string, state: "approved" | "commented" | "pending", bot = false) => ({
+    author,
+    author_bot: bot,
+    trusted: true,
+    state,
+    at: hoursAgo(30),
+    commit: "abc",
+  });
+  const of = (o: Partial<Item>) => analyze(makeItem({ author: "carol", ...o }), ctx, cfg, NOW).signals;
+  const ping = of({
+    review_requests: [user("me"), user("sam"), { ...user("copilot"), bot: true }, team("ml-team"), team("backend")],
+    reviews: [
+      review("kai", "commented"),
+      review("kai", "approved"),
+      review("carol", "commented"), // the author answering a thread
+      review("me", "commented"),
+      review("sentry-warden", "commented", true),
+      review("dana", "pending"),
+    ],
+  }).pr;
+  assert.deepEqual(ping.reviewers, ["kai"], "you, the author, bots and a review not sent yet aren't someone on it");
+  assert.deepEqual(ping.people_requested, ["sam"], "you and a bot aside");
+  assert.deepEqual(ping.teams_requested, ["ml-team", "backend"]);
+  const quiet = of({ review_requests: [team("ml-team")] });
+  assert.deepEqual([quiet.pr.reviewers, quiet.pr.people_requested, quiet.pr.teams_requested], [[], [], ["ml-team"]]);
+  // As a rule reads them: a wide ping, someone named, someone on it.
+  const hit = (when: string, o: Partial<Item>) => Result.getOrThrow(Result.getOrThrow(compile(when)).eval(of(o)));
+  assert.equal(hit("len(pr.teams_requested) >= 2", { review_requests: [team("a"), team("b")] }), true);
+  assert.equal(hit("len(pr.people_requested) > 0 || len(pr.reviewers) > 0", { review_requests: [team("a")] }), false);
+});
+
 test("pr.waits, pr.waiting_on and me.owes_reply", () => {
   const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
   const review = (author: string, state: "approved" | "changes_requested" | "commented") => ({

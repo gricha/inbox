@@ -1528,6 +1528,11 @@ function signals(r: Rec): Signals {
       blocks: s.blocks ?? [],
       requires_closed: [],
       waiting_on: s.asked2 ?? [],
+      reviewers: (s.reviews ?? []).map(([who]) => who).filter((who, i, all) => who !== ME && who !== s.author && all.indexOf(who) === i),
+      people_requested: (s.asked2 ?? []).filter((a) => !a.startsWith("@")),
+      teams_requested: [
+        ...new Set([...(s.team ? [s.team] : []), ...(s.asked2 ?? []).filter((a) => a.startsWith("@")).map((a) => a.slice(1))]),
+      ],
       waits: s.waits ?? "",
     },
     me: {

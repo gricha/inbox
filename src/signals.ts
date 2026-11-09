@@ -65,6 +65,13 @@ export const FIELDS: FieldDoc[] = [
     doc: "who is asked to review it and hasn't approved: logins and @teams, you and bots left out; empty once it's approved",
   },
   {
+    path: "pr.reviewers",
+    type: "string[]",
+    doc: 'who has reviewed it (approved, asked for changes or commented): you, its author and bots left out; len(pr.reviewers) > 0 is "someone\'s on it"',
+  },
+  { path: "pr.people_requested", type: "string[]", doc: "people asked to review it by name, you and bots left out" },
+  { path: "pr.teams_requested", type: "string[]", doc: "teams asked to review it, as slugs, yours included; many at once is a wide ping" },
+  {
     path: "pr.waits",
     type: "string",
     doc: 'what it waits on next, in words: "is your draft", "waits on a CI fix", "has changes requested by kofi", "waits on your reply to markstory, then a review from sam", "waits on a review from sam, @backend and 1 more", "waits on CI", "is ready to merge"; "" once merged or closed',
@@ -219,6 +226,17 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
           .filter((r) => !isBot(r.reviewer, r.bot) && (r.type === "team" || !isMe(r.reviewer)))
           .map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer));
 
+  const someoneElse = (login: string, bot?: boolean) => !isBot(login, bot) && !isMe(login);
+  const reviewers = [
+    ...new Set(
+      item.reviews
+        .filter((r) => r.state !== "pending" && someoneElse(r.author, r.author_bot) && lc(r.author) !== lc(author))
+        .map((r) => r.author),
+    ),
+  ];
+  const peopleRequested = item.review_requests.filter((r) => r.type === "user" && someoneElse(r.reviewer, r.bot)).map((r) => r.reviewer);
+  const teamsRequested = item.review_requests.filter((r) => r.type === "team").map((r) => r.reviewer);
+
   const signals: Signals = {
     item: {
       kind: item.kind,
@@ -270,6 +288,9 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       requires_closed: [],
       waiting_on: waitingOn,
       waits: "",
+      reviewers,
+      people_requested: peopleRequested,
+      teams_requested: teamsRequested,
     },
     me: {
       login: ctx.me,
