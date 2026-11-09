@@ -248,36 +248,70 @@
   color-scheme: light;
 }
 
-/* Sentry: the brand's aubergine black and Blurple, with its product dark theme's text. */
+/* Sentry Dusk: gricha/sentry-codex-theme's dark, from Sentry's site: its rich black softened to a charcoal plum, gray-2
+   text and gray-3 under it, Blurple for the call to action, lt-pink, md-yellow calmed and the theme's muted green. */
 :root[data-theme="sentry"] {
-  --paper: #181225;
-  --sheet: #1f1633;
-  --wash: #291f40;
-  --ink: #e7e5ea;
-  --ink-2: #c4c0cb;
-  --pencil: #9d95b0;
-  --faint: #726889;
-  --rule: #2c2347;
-  --rule-strong: #362d59;
-  --control: #74698d;
-  --sel: #2a2042;
-  --side: #130e1e;
-  --side-on: #2a2142;
-  --side-hover: #1d162c;
-  --red: #f78c95;
-  --red-wash: #3a1c33;
-  --amber: #e8b660;
-  --amber-wash: #35282f;
-  --green: #9cd88a;
-  --go: #24835e;
+  --paper: #1c1925;
+  --sheet: #211d2b;
+  --wash: #2b2735;
+  --ink: #ececf1;
+  --ink-2: #cfcfdb;
+  --pencil: #abaab2;
+  --faint: #66636e;
+  --rule: #302c39;
+  --rule-strong: #3d3a46;
+  --control: #6e6c76;
+  --sel: #2d2937;
+  --side: #181520;
+  --side-on: #2b2833;
+  --side-hover: #221f29;
+  --red: #fa7faa;
+  --red-wash: #402638;
+  --amber: #e3bb5f;
+  --amber-wash: #3a2f28;
+  --green: #7db6a0;
+  --go: #31765f;
   --on-go: #fff;
-  --accent: #7553ff;
-  --accent-ink: #b4a4ff;
-  --accent-wash: #342670;
+  --accent: #6a5fc1;
+  --accent-ink: #9d96d6;
+  --accent-wash: #332d4f;
   --on-accent: #fff;
-  --shadow: 0 1px 2px rgb(10 6 20 / 40%), 0 12px 32px rgb(10 6 20 / 55%);
+  --shadow: 0 1px 2px rgb(12 10 18 / 40%), 0 12px 32px rgb(12 10 18 / 55%);
 
   color-scheme: dark;
+}
+
+/* Sentry Dawn: the same theme's light: a lavender white, Sentry's dk-violet text and md-violet under it, Blurple, dk-pink
+   and the theme's deep green. */
+:root[data-theme="sentry-dawn"] {
+  --paper: #f6f5f8;
+  --sheet: #fcfbfd;
+  --wash: #f0eff3;
+  --ink: #362d59;
+  --ink-2: #584674;
+  --pencil: #6a6383;
+  --faint: #a9a5b8;
+  --rule: #e8e6ed;
+  --rule-strong: #dad8e1;
+  --control: #9994ab;
+  --sel: #efeef2;
+  --side: #efeef3;
+  --side-on: #e0dfe7;
+  --side-hover: #e8e6ed;
+  --red: #c73852;
+  --red-wash: #f9eff3;
+  --amber: #8f5a00;
+  --amber-wash: #faf0d7;
+  --green: #31765f;
+  --go: #31765f;
+  --on-go: #fff;
+  --accent: #6a5fc1;
+  --accent-ink: #5f54b8;
+  --accent-wash: #eae8f6;
+  --on-accent: #fff;
+  --shadow: 0 1px 2px rgb(54 45 89 / 7%), 0 10px 30px rgb(54 45 89 / 13%);
+
+  color-scheme: light;
 }
 
 /* Gruvbox: morhetz's warm retro dark, its bg0 sheet on a warm near-black with bg1 and bg2 rules, its bright red and blue
@@ -5076,12 +5110,10 @@ button.s-edit:hover:not(:disabled) {
   --diffs-bg-deletion-emphasis-override: #57454a;
 }
 
-/* Sentry: a deep teal (#1b302c, its numbers #1c2c29) beside a calm plum (#41283b), not a grey on the aubergine. */
+/* Sentry Dusk: its removed code in md-pink, as the theme has it, where its lt-pink text came out louder than the green. */
 :root[data-theme="sentry"] .rv-diff {
-  --diffs-bg-addition-override: lab(51.4% -91.7 70);
-  --diffs-bg-addition-number-override: lab(55.3% -112.1 98.8);
-  --diffs-bg-deletion-override: #cd7f57;
-  --diffs-bg-deletion-number-override: #cd7f57;
+  --diffs-bg-deletion-override: #e1567c;
+  --diffs-bg-deletion-number-override: #e1567c;
 }
 
 /* Gruvbox: gruvbox-material's olive and a dark rust (#34371f, #3a2423), calm enough that the syntax colours, its red

@@ -14,7 +14,7 @@
       try {
         const app = window.desktop && window.desktop.theme;
         const t = typeof app === "string" ? app : localStorage.getItem("desk.theme");
-        if (["light", "dark", "sand", "slate", "solarized", "catppuccin", "sentry", "gruvbox", "tokyo-night"].includes(t))
+        if (["light", "dark", "sand", "slate", "solarized", "catppuccin", "sentry", "sentry-dawn", "gruvbox", "tokyo-night"].includes(t))
           document.documentElement.dataset.theme = t;
       } catch {}
     </script>

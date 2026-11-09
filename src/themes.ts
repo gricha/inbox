@@ -17,7 +17,8 @@ export const THEMES = [
   { id: "slate", label: "Slate", scheme: "dark", paper: "#1b2028", pencil: "#8e98a5", diff: "pierre-dark-desk" },
   { id: "solarized", label: "Solarized", scheme: "light", paper: "#f6efdc", pencil: "#4f646b", diff: "solarized-light-desk" },
   { id: "catppuccin", label: "Catppuccin Latte", scheme: "light", paper: "#e6e9ef", pencil: "#5c5f77", diff: "catppuccin-latte-desk" },
-  { id: "sentry", label: "Sentry", scheme: "dark", paper: "#181225", pencil: "#9d95b0", diff: "pierre-dark-soft-desk" },
+  { id: "sentry", label: "Sentry Dusk", scheme: "dark", paper: "#1c1925", pencil: "#abaab2", diff: "sentry-dusk-desk" },
+  { id: "sentry-dawn", label: "Sentry Dawn", scheme: "light", paper: "#f6f5f8", pencil: "#6a6383", diff: "github-light-default-desk" },
   { id: "gruvbox", label: "Gruvbox", scheme: "dark", paper: "#1f1d1c", pencil: "#a89984", diff: "gruvbox-dark-medium-desk" },
   { id: "tokyo-night", label: "Tokyo Night", scheme: "dark", paper: "#15161f", pencil: "#838cb4", diff: "tokyo-night-desk" },
 ] as const satisfies readonly Theme[];

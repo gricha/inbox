@@ -11,8 +11,10 @@ import { registerCustomTheme, resolveTheme, type DiffsTheme } from "@pierre/diff
 // - Pierre's dark, Dark's and Slate's, draws punctuation and operators in a grey at 2.4:1 to 2.8:1 on the sheet and 1.2:1 in a
 //   changed word's box, and comments, functions and types not far above: lighter, punctuation in Dark's pencil and comments
 //   in Slate's.
-// - Pierre's soft dark, Sentry's, draws punctuation, parameters and comments in neutral greys that vanish on its changed lines
-//   and the changed words' boxes: lighter, in Sentry's lavender.
+// - Sentry Dusk's is Pierre's dark in the Sentry syntax colours of gricha/sentry-codex-theme (text, punctuation, functions,
+//   strings), its keywords a lighter Blurple to read on the sheet, and the rest from Sentry's site palette.
+// - Shiki's GitHub Light Default, Sentry Dawn's as in that theme, draws a stray carriage return and ignored files' names in
+//   near-white: its text colour.
 // - Shiki's Gruvbox draws broken code in its dark red at 2.9:1: its bright red.
 // - Shiki's Tokyo Night draws comments, doc comments and markdown punctuation at 2.4:1 to 3.5:1: lighter, comments in folke's
 //   dark5 (4.1:1 on the sheet, about 3:1 on a changed line).
@@ -76,13 +78,32 @@ const COPIES: Record<string, { of: string; colours: Record<string, string> }> = 
       "#e64553": "#4c4f69", // maroon, parameters: text
     },
   },
-  "pierre-dark-soft-desk": {
-    of: "pierre-dark-soft",
+  "sentry-dusk-desk": {
+    of: "pierre-dark",
     colours: {
-      "#737373": "#9a92ad", // punctuation and operators
-      "#8a8a8a": "#a8a1bb", // parameters
-      "#636363": "#857d99", // comments
+      "#fafafa": "#e6dff9", // text
+      "#ffa359": "#e6dff9", // variables: text, as the theme draws them
+      "#636363": "#c8bedf", // punctuation and operators
+      "#08c0ef": "#c8bedf", // logical and arithmetic operators
+      "#737373": "#9a93ad", // comments
+      "#ff678d": "#9585fb", // keywords: Blurple, lighter
+      "#9d6afb": "#a58cff", // functions
+      "#5ecc71": "#8ee6d7", // strings
+      "#64d1db": "#8ee6d7", // regular expressions
+      "#d568ea": "#e2abe0", // types: v-lt-purple
+      "#a3a3a3": "#cfcfdb", // parameters: gray-3
+      "#68cdf2": "#fa7faa", // numbers, booleans: lt-pink
+      "#69b1ff": "#fa7faa", // decorators
+      "#ff855e": "#f4834f", // md-orange
+      "#ffab16": "#ffb287", // namespaces, constants: lt-orange
+      "#ffd452": "#ffdb4a", // constants: lt-yellow
+      "#60d199": "#7db6a0", // attributes: the theme's green
+      "#61d5c0": "#7db6a0", // escapes
     },
+  },
+  "github-light-default-desk": {
+    of: "github-light-default",
+    colours: { "#f6f8fa": "#1f2328", "#eaeef2": "#1f2328" },
   },
   "gruvbox-dark-medium-desk": {
     of: "gruvbox-dark-medium",
