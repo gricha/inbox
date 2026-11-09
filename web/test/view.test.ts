@@ -46,6 +46,7 @@ import {
   inboxCount,
   inlineAt,
   judgeStatusText,
+  onePause,
   judgeStepText,
   lineName,
   lineOf,
@@ -1047,4 +1048,26 @@ test("the Archive is what you did that took it off your desk and what resolved, 
     groups.find((g) => g.key === "cleared")?.cards.map((c) => c.id),
     ["acme/api#8"],
   );
+});
+
+test("a lapsed login that pauses the AI reviews and fails the sorting is one pause, its next try the sooner", () => {
+  const why = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+  const ai = { why, until: "2026-11-09T12:30:00.000Z" };
+  const judge: JudgeStatus = {
+    state: "error",
+    off_reason: null,
+    waiting: 3,
+    judged: 10,
+    spent: 2,
+    max_per_hour: 60,
+    last_at: null,
+    error: why,
+    retry_at: "2026-11-09T12:26:00.000Z",
+  };
+  assert.deepEqual(onePause(ai, judge), { why, next: "2026-11-09T12:26:00.000Z" });
+  assert.deepEqual(onePause(ai, { ...judge, retry_at: null }), { why, next: ai.until });
+  assert.equal(onePause(ai, { ...judge, error: "Claude's API answered 529: overloaded." }), null, "two failures: each says its own");
+  assert.equal(onePause(ai, { ...judge, state: "idle", error: null }), null, "the sorting is fine");
+  assert.equal(onePause(null, judge), null, "the AI reviews aren't paused");
+  assert.equal(onePause(ai), null, "the policy not loaded yet");
 });

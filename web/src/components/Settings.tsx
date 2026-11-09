@@ -15,6 +15,7 @@ import type {
   AgentStatus,
   DesktopBridge,
   GitHubStatus,
+  JudgeStatus,
   PolicyDoc,
   SettingDef,
   SettingsView,
@@ -37,6 +38,7 @@ import {
   draftOf,
   hotkeyHelp,
   judgeStatusText,
+  onePause,
   quietTimes,
   routeHash,
   SETTINGS_VIEWS,
@@ -629,15 +631,18 @@ function ClaudeStatus({
   active,
   loads,
   paused,
+  judge,
   now,
   flash,
 }: {
   active: boolean;
   loads: number;
   paused: SettingsView["paused"]["ai"];
+  judge: JudgeStatus | undefined;
   now: number;
   flash: (text: string) => void;
 }) {
+  const both = onePause(paused, judge);
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -703,13 +708,16 @@ function ClaudeStatus({
           </div>
         </div>
       )}
-      {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR. */}
+      {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR; when
+          the sorting fails for the same reason, this says it for both, and Your policy doesn't again. */}
       {paused && (
         <div className="setting s-status">
           <div className="s-label-col">
-            <p className="s-label">AI reviews are paused</p>
+            <p className="s-label">{both ? "Claude is paused" : "AI reviews are paused"}</p>
             <p className="s-help s-ink">
-              {withCode(paused.why.replace(/\.?$/, "."))} Next try in {Math.max(1, Math.round((Date.parse(paused.until) - now) / 60_000))}m.
+              {withCode(paused.why.replace(/\.?$/, "."))}
+              {both && " Nothing is sorted or reviewed until then."} Next try in{" "}
+              {Math.max(1, Math.round((Date.parse(both?.next ?? paused.until) - now) / 60_000))}m.
             </p>
           </div>
         </div>
@@ -812,25 +820,31 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
       />
     </>
   ),
-  agent: (p) => <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} now={p.now} flash={p.flash} />,
+  agent: (p) => (
+    <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.policy?.judge} now={p.now} flash={p.flash} />
+  ),
   app: () => <ThemeRow />,
 };
 
 // Rows after a setting's own, by its key: your policy under the switch that sorts by it.
 const AFTER: Record<string, (p: PartProps) => ReactNode> = {
-  "policy.judge": ({ policy, now }) => (
-    <ViewRow
-      id="policy"
-      tone={policy?.judge.state === "error" ? "ink" : undefined}
-      help={
-        policy?.judge.state === "error"
-          ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
-          : policy && !policy.text.trim()
-            ? "The starter policy, until you change it."
-            : "How Claude sorts, in your words."
-      }
-    />
-  ),
+  "policy.judge": ({ policy, view, now }) => {
+    // Its failure, unless it's the one Claude's part already says for the AI reviews too.
+    const failed = policy?.judge.state === "error" && !onePause(view.paused.ai, policy.judge);
+    return (
+      <ViewRow
+        id="policy"
+        tone={failed ? "ink" : undefined}
+        help={
+          failed
+            ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
+            : policy && !policy.text.trim()
+              ? "The starter policy, until you change it."
+              : "How Claude sorts, in your words."
+        }
+      />
+    );
+  },
 };
 
 // Settings a view draws, not their part: the hourly cap sits in Your policy, next to how much of it this hour took.

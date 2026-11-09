@@ -14,6 +14,7 @@ import type {
   ReviewOrder,
   SettingDef,
   SettingValue,
+  SettingsView,
 } from "../../src/types.ts";
 import { byPart } from "../../src/types.ts";
 import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
@@ -631,6 +632,13 @@ export function judgeStepText(j: JudgeStep): string {
   if (j.bucket === null) return j.pending ? "not sorted yet, so where the rules put it" : "no answer, so where the rules put it";
   const why = j.why || "keeps the rule's why";
   return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
+}
+
+// AI reviews paused and Claude's sorting failing for the one reason (a lapsed login): Settings says it once, in Claude's
+// part, with the sooner of their next tries; null when they differ, or either is fine.
+export function onePause(ai: SettingsView["paused"]["ai"], judge?: JudgeStatus): { why: string; next: string } | null {
+  if (!ai || judge?.state !== "error" || judge.error !== ai.why) return null;
+  return { why: ai.why, next: judge.retry_at && judge.retry_at < ai.until ? judge.retry_at : ai.until };
 }
 
 export function judgeStatusText(j: JudgeStatus, now: number): string {

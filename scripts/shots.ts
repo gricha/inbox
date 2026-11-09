@@ -2812,15 +2812,16 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await pauseAi(true)(page);
       await at("#/settings/agent")(page);
+      // The login lapsed, which stops the sorting too: said once, in Claude's part, and not again in Your policy.
       const said = await page.evaluate<number>(
-        `[...document.querySelectorAll(".settings *")].filter((el) => !el.children.length && el.textContent.includes("AI reviews are paused")).length`,
+        `[...document.querySelectorAll(".settings .s-help")].filter((el) => el.textContent.includes("isn't logged in")).length`,
       );
-      if (said !== 1) failures.push(`settings-agent-paused: Settings says AI reviews are paused ${said} times`);
+      if (said !== 1) failures.push(`settings-agent-paused: Settings says Claude Code isn't logged in ${said} times`);
       const rows = await statusRows(page, "agent");
-      if (rows.filter((r) => r === "AI reviews are paused").length !== 1)
+      if (rows.filter((r) => r === "Claude is paused").length !== 1)
         failures.push(`settings-agent-paused: Claude's status rows read ${JSON.stringify(rows)}`);
       const ink = await page.evaluate<boolean>(`(() => {
-        const row = [...document.querySelectorAll("#s-agent .s-status")].find((r) => r.querySelector(".s-label")?.textContent === "AI reviews are paused");
+        const row = [...document.querySelectorAll("#s-agent .s-status")].find((r) => r.querySelector(".s-label")?.textContent === "Claude is paused");
         const help = row && getComputedStyle(row.querySelector(".s-help")).color;
         return !!help && help === getComputedStyle(row.querySelector(".s-label")).color;
       })()`);
