@@ -870,10 +870,10 @@ p.side-sync {
   outline-offset: -8px;
 }
 
-/* On the page's text, as its group heads are, not on its table's edge as the filter is. */
+/* On the rows' text, as its group heads are. */
 .head-name {
   margin: 0;
-  padding: 0 12px;
+  padding: 0;
   color: var(--ink);
   font-size: 15px;
   font-weight: 600;
@@ -1028,14 +1028,26 @@ p.side-sync {
 
 /* Queue -------------------------------------------------------------------- */
 
-.queue {
-  display: grid;
-  gap: 10px;
-}
-
-/* The queue, Later and Merging use the window's width. */
+/* A list page is one sheet from the sidebar's divider to the window's edge, as the list beside a review is: no card round its
+   table, its rows and headings on the page head's padding. */
 .col:has(.queue) {
   --col-w: 100%;
+  --pad: 24px;
+}
+
+.col:has(.queue) .main {
+  padding: 0 0 84px;
+  background: var(--sheet);
+}
+
+.col:has(.queue) .main > .notice {
+  margin: 20px var(--pad) 0;
+}
+
+.queue {
+  --lines-r: 0;
+
+  display: grid;
 }
 
 /* minmax(0, 1fr): a long unwrapped row truncates instead of widening the page. */
@@ -1047,7 +1059,7 @@ p.side-sync {
 }
 
 .queue-empty {
-  padding: 8px 15px;
+  padding: 24px var(--pad) 10px;
   color: var(--pencil);
   font-size: 16px;
 }
@@ -1083,6 +1095,22 @@ p.side-sync {
 
 .lines > * + * {
   border-top: 1px solid var(--rule);
+}
+
+/* In a list it runs edge to edge: a hairline above and below, none at its sides, and none on top under the page's head. */
+.queue .lines {
+  border-width: 1px 0;
+  border-radius: 0;
+}
+
+.queue > .lines:first-child {
+  border-top: 0;
+}
+
+/* A section heading on the rows' text, clearly further from the table above than from its own. */
+.queue .group-head {
+  margin: 0;
+  padding: 24px var(--pad) 8px;
 }
 
 /* A tight table drops the stage column and a question's sender first, then who it's from, before a repo or a why is cut
@@ -1346,7 +1374,7 @@ p.side-sync {
   gap: 14px;
   width: 100%;
   min-width: 0;
-  padding: 10px 14px;
+  padding: 10px var(--pad, 14px);
   border: 0;
   border-radius: 0;
   background: none;
@@ -1553,7 +1581,7 @@ p.side-sync {
 /* Opened in place (an issue, or Why it's here): under the title's edge. */
 .line .more.opened,
 .line .detail {
-  padding: 4px 12px 18px;
+  padding: 4px var(--pad, 12px) 18px;
 }
 
 .more-wrap {
@@ -1571,8 +1599,9 @@ p.side-sync {
 }
 
 .queue .fold {
-  padding: 10px 14px;
-  border-radius: 8px;
+  margin: 0;
+  padding: 10px var(--pad);
+  border-radius: 0;
   font-size: 14px;
 }
 
@@ -1583,7 +1612,7 @@ p.side-sync {
 /* PRs held back until Claude has reviewed them: said once, under the queue, as quiet as its "n more". */
 .queue-reviewing {
   margin: 0;
-  padding: 0 15px;
+  padding: 14px var(--pad) 0;
   color: var(--pencil);
   font-size: 14px;
 }
@@ -1618,30 +1647,14 @@ p.side-sync {
 
 .later .group {
   display: grid;
-  gap: 4px;
-}
-
-/* Clearly more space before a heading than after it, so each sits with its own rows. */
-.later.queue {
-  gap: 20px;
-}
-
-.later .group-head {
-  margin-bottom: 0;
 }
 
 /* The main page's parts: a quiet heading each; people waiting on your review lead, in amber. */
 .part {
   display: grid;
-  gap: 4px;
-}
-
-.part + .part {
-  margin-top: 10px;
 }
 
 .part .group-head {
-  margin-bottom: 0;
   font-size: 14px;
 }
 
@@ -1653,7 +1666,7 @@ p.side-sync {
 }
 
 .quiet-note {
-  padding: 40px 12px;
+  padding: 40px var(--pad);
   color: var(--pencil);
 }
 
@@ -1676,6 +1689,8 @@ p.side-sync {
 
 /* Full height beside the page, scrolling on its own; over the page's column, so its fold button can reach across the divider. */
 .beside {
+  --pad: 16px;
+
   position: sticky;
   top: 0;
   z-index: 12;
@@ -1801,39 +1816,14 @@ p.side-sync {
   outline-offset: 1px;
 }
 
-/* Its rows on the column's own sheet, edge to edge: a hairline under each heading, between the rows and under the last. */
-.beside .queue,
-.beside .later.queue,
-.beside .later .group,
-.beside .lane .group,
-.beside .part {
-  gap: 0;
-  margin-top: 0;
-}
-
-.beside .lines {
-  --lines-r: 0;
-
-  border-width: 1px 0;
-  border-radius: 0;
-  background: none;
-}
-
-.beside .lines .lines {
-  border: 0;
-}
-
+/* Its rows as a list page's (its --pad narrower), a step smaller. */
 .beside .group-head,
 .beside .part .group-head {
-  margin: 0;
-  padding: 18px 16px 8px;
+  padding-top: 18px;
   font-size: 13.5px;
 }
 
 .beside .queue .fold {
-  margin: 0;
-  padding: 10px 16px;
-  border-radius: 0;
   font-size: 13px;
 }
 
@@ -1845,8 +1835,7 @@ p.side-sync {
 
 .beside .ai-paused,
 .beside .queue-reviewing {
-  margin: 0;
-  padding: 14px 16px 0;
+  padding-top: 14px;
   font-size: 13px;
 }
 
@@ -2073,7 +2062,7 @@ p.side-sync {
   align-items: center;
   gap: 14px;
   height: calc(21px + 1.5 * var(--title-size));
-  padding: 0 14px;
+  padding: 0 var(--pad, 14px);
 }
 
 .sk-row .sk {
@@ -2121,8 +2110,8 @@ p.side-sync {
 
 /* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
 .ai-paused {
-  margin: 0 0 6px;
-  padding: 0 15px;
+  margin: 0;
+  padding: 20px var(--pad) 0;
   color: var(--ink-2);
   font-size: 14px;
 }
@@ -2306,8 +2295,8 @@ p.side-sync {
 
 /* Your agent's state, where to watch it and its buttons, above the rows. */
 .lane-coord {
-  margin: 0 0 12px;
-  padding: 0 15px;
+  margin: 0;
+  padding: 20px var(--pad) 14px;
   color: var(--pencil);
   font-size: 13px;
 }
@@ -2361,15 +2350,13 @@ p.side-sync {
 
 .lane-stack-head {
   margin: 0;
-  padding: 8px 14px 0;
+  padding: 8px var(--pad) 0;
   color: var(--pencil);
   font-size: 13px;
 }
 
 .lane .group {
   display: grid;
-  gap: 4px;
-  margin-top: 20px;
 }
 
 /* The selected row's whole phrase, under its title, on the row's fill. */
@@ -2378,7 +2365,7 @@ p.side-sync {
 }
 
 .lane-more {
-  padding: 2px 14px 10px;
+  padding: 2px var(--pad) 10px;
 }
 
 .lane-why {
@@ -3092,9 +3079,8 @@ p.side-sync {
   cursor: pointer;
 }
 
-/* Your comment on an issue opened in place, over the page's bottom: across the page's column from edge to edge, as its table
-   is, so it covers whole rows rather than show them cut either side; clear of the sidebar, the list beside a review and the
-   chat beside the page. */
+/* Your comment on an issue opened in place, over the page's bottom: across the page's column on its padding, from the rows'
+   text edge; clear of the sidebar, the list beside a review and the chat beside the page. */
 .composer {
   position: fixed;
   right: var(--composer-right, 24px);
@@ -3113,7 +3099,7 @@ p.side-sync {
   /* The page's text under its top edge fades out rather than being sliced through a line. */
   box-shadow:
     var(--shadow),
-    0 -20px 20px -4px var(--paper);
+    0 -20px 20px -4px var(--sheet);
   animation: rise-in 160ms ease-out;
 }
 
@@ -5592,6 +5578,10 @@ button.s-edit:hover:not(:disabled) {
 
   .main {
     padding: 18px 12px 84px;
+  }
+
+  .col:has(.queue) {
+    --pad: 12px;
   }
 
   .composer {
