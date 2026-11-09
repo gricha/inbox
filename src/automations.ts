@@ -16,6 +16,8 @@ const ITEMS_MAX = 20; // a run that lists more is told so, and the rest are drop
 const TIMEOUT = 20 * 60_000;
 const TICK = 60_000;
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+// The desk's MCP server, and its name before the rename to Inbox, which an agent connected then keeps until the desk renames it.
+const desks = (tools: string[]) => ["inbox", "review-desk"].flatMap((s) => tools.map((t) => `mcp__${s}__desk_${t}`));
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
 // allowed, say). The desk adds what it lists, so it reads the desk too.
 const ALLOW = [
@@ -38,7 +40,7 @@ const ALLOW = [
     "release view",
     "repo view",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...["list", "item", "overview", "events", "brief", "merging"].map((t) => `mcp__inbox__desk_${t}`),
+  ...desks(["list", "item", "overview", "events", "brief", "merging"]),
 ];
 // Even where your settings allow more: nothing that writes as you, pushes, merges or edits files, and none of the desk's writes.
 const DENY = [
@@ -70,9 +72,7 @@ const DENY = [
     "secret",
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "automations"].map(
-    (t) => `mcp__inbox__desk_${t}`,
-  ),
+  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "automations"]),
 ];
 // What a run the desk stopped in the middle of says; it doesn't count as the last run, so the next look runs it again.
 const CUT = "the desk stopped during this run, so it ran again";
