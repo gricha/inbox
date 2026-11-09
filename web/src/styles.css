@@ -2658,6 +2658,11 @@ p {
   color: var(--on-accent);
 }
 
+/* A selected row's fill can be as dark as the wash: an edge of the accent keeps the button's shape on it. */
+.line.sel .line-cta:not(.primary, :hover) {
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--row-sel));
+}
+
 .act.primary:disabled {
   border-color: var(--rule-strong);
   background: var(--sheet);
