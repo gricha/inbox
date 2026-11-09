@@ -1086,16 +1086,31 @@ p.side-sync {
 }
 
 /* A tight table drops the stage column and a question's sender first, then who it's from, before a repo or a why is cut
-   to a few letters; a review still shows both, and so do the two-line rows beside it. */
+   to a few letters; a review still shows both, and so do the two-line rows beside it. On your own row "by you" says nothing
+   its part's heading doesn't, so there the stage takes its place, as wide; changes requested stays to the last. */
 @container (width < 760px) {
   .line-row:not(.c-row) .line-stage,
   .line:not(.c-line) .inq-from {
     display: none;
   }
+
+  .line-row:not(.c-row) .line-by {
+    width: 9em;
+  }
+
+  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-by {
+    display: none;
+  }
+
+  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage {
+    display: block;
+    width: 9em;
+  }
 }
 
 @container (width < 620px) {
-  .line-row:not(.c-row) .line-by {
+  .line-row:not(.c-row) .line-by,
+  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage:not(.t-warn) {
     display: none;
   }
 }
