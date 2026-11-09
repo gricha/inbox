@@ -27,7 +27,7 @@ export function deskHome(env = process.env.DESK_HOME, home = os.homedir()): stri
 }
 
 // Something takes connections on the port; one that never accepts holds it too.
-const held = (port: number): Effect.Effect<boolean> =>
+export const held = (port: number): Effect.Effect<boolean> =>
   Effect.callback<boolean>((resume) => {
     const s = net.connect({ port, host: "127.0.0.1" });
     const answer = (v: boolean) => {

@@ -562,7 +562,7 @@ test("install and uninstall are macOS-only", async () => {
 });
 
 test(
-  "install retries launchctl bootstrap 5 times, 500 ms apart, then says its words; uninstall removes the plist",
+  "install boots out the job from before the rename, moves ~/.review-desk to ~/.inbox, retries launchctl bootstrap 5 times, 500 ms apart, then says its words; uninstall removes the plists",
   { skip: process.platform !== "darwin" },
   async (c) => {
     const saved = { HOME: process.env.HOME, PATH: process.env.PATH };
@@ -582,22 +582,48 @@ test(
       `#!/bin/sh\necho "$*" >> "$HOME/calls"\n[ "$1" = bootstrap ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 1; }\nexit 0\n`,
     );
     chmodSync(join(bin, "launchctl"), 0o755);
-    // The fake alone on PATH: the real launchctl, and the owner's own dev.review-desk.desk job, are out of reach.
+    // The fake alone on PATH: the real launchctl, and the owner's own dev.inbox.desk job, are out of reach.
     process.env.HOME = home;
     process.env.PATH = bin;
-    const e = await failure(install("/x/cli.ts", 47999));
+    const agents = join(home, "Library", "LaunchAgents");
+    const old = join(agents, "dev.review-desk.desk.plist");
+    mkdirSync(agents, { recursive: true });
+    writeFileSync(old, "<plist/>");
+    mkdirSync(join(home, ".review-desk"));
+    writeFileSync(join(home, ".review-desk", "config.toml"), "# mine\n");
+    const said: string[] = [];
+    const e = await failure(
+      install("/x/cli.ts", await unusedPort(), (m) => {
+        said.push(m);
+      }),
+    );
     assert.deepEqual([e._tag, e.message], ["CommandFailed", "launchctl bootstrap failed: Bootstrap failed: 5: Input/output error"]);
     const uid = process.getuid!();
-    const plist = join(home, "Library", "LaunchAgents", "dev.review-desk.desk.plist");
+    const plist = join(agents, "dev.inbox.desk.plist");
     const calls = () => readFileSync(join(home, "calls"), "utf8").trim().split("\n");
     assert.deepEqual(calls(), [
       `bootout gui/${uid}/dev.review-desk.desk`,
+      `bootout gui/${uid}/dev.inbox.desk`,
       ...Array.from({ length: 5 }, () => `bootstrap gui/${uid} ${plist}`),
     ]);
+    assert.ok(!existsSync(old), "the old label's plist is gone");
     assert.ok(existsSync(plist));
-    assert.equal(await runFx(uninstall()), plist);
-    assert.ok(!existsSync(plist));
-    assert.equal(calls().at(-1), `bootout gui/${uid}/dev.review-desk.desk`);
+    assert.equal(
+      readFileSync(join(home, ".inbox", "config.toml"), "utf8"),
+      "# mine\n",
+      "the home moved before ~/.inbox was made for the log",
+    );
+    assert.ok(!existsSync(join(home, ".review-desk")));
+    assert.deepEqual(said, [`moved the desk's home from ${join(home, ".review-desk")} to ${join(home, ".inbox")}`]);
+    assert.match(
+      readFileSync(plist, "utf8"),
+      new RegExp(`<key>StandardOutPath</key>\\s*<string>${join(home, ".inbox", "desk.log")}</string>`),
+    );
+    writeFileSync(old, "<plist/>");
+    assert.deepEqual(await runFx(uninstall()), [old, plist]);
+    assert.ok(!existsSync(plist) && !existsSync(old));
+    assert.deepEqual(calls().slice(-2), [`bootout gui/${uid}/dev.review-desk.desk`, `bootout gui/${uid}/dev.inbox.desk`]);
+    assert.deepEqual(await runFx(uninstall()), [], "nothing left to remove");
   },
 );
 
@@ -626,16 +652,22 @@ test("bin/desk resolves through a symlink", { skip: process.platform === "win32"
 
 // launchd is macOS-only, and Windows would join these paths with backslashes.
 test("plistFor builds a LaunchAgent plist", { skip: process.platform === "win32" }, () => {
-  const xml = plistFor({ nodePath: "/opt/node/bin/node", cliPath: "/Users/a&b/review-desk/src/cli.ts", home: "/Users/a&b", port: 47823 });
-  assert.match(xml, /<key>Label<\/key>\s*<string>dev\.review-desk\.desk<\/string>/);
+  const xml = plistFor({
+    nodePath: "/opt/node/bin/node",
+    cliPath: "/Users/a&b/review-desk/src/cli.ts",
+    home: "/Users/a&b",
+    deskHome: "/Users/a&b/.inbox",
+    port: 47823,
+  });
+  assert.match(xml, /<key>Label<\/key>\s*<string>dev\.inbox\.desk<\/string>/);
   assert.match(
     xml,
     /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/opt\/node\/bin\/node<\/string>\s*<string>--disable-warning=ExperimentalWarning<\/string>\s*<string>\/Users\/a&amp;b\/review-desk\/src\/cli\.ts<\/string>\s*<string>serve<\/string>\s*<\/array>/,
   );
   assert.match(xml, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.match(xml, /<key>KeepAlive<\/key>\s*<true\/>/);
-  assert.match(xml, /<key>StandardOutPath<\/key>\s*<string>\/Users\/a&amp;b\/\.review-desk\/desk\.log<\/string>/);
-  assert.match(xml, /<key>StandardErrorPath<\/key>\s*<string>\/Users\/a&amp;b\/\.review-desk\/desk\.log<\/string>/);
+  assert.match(xml, /<key>StandardOutPath<\/key>\s*<string>\/Users\/a&amp;b\/\.inbox\/desk\.log<\/string>/);
+  assert.match(xml, /<key>StandardErrorPath<\/key>\s*<string>\/Users\/a&amp;b\/\.inbox\/desk\.log<\/string>/);
   assert.match(
     xml,
     /<key>PATH<\/key>\s*<string>\/opt\/node\/bin:\/Users\/a&amp;b\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,

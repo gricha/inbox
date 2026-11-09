@@ -576,13 +576,16 @@ const COMMANDS: Record<string, Command> = {
     }),
   install: Effect.fnUntraced(function* (x: Ctx) {
     yield* macOnly("install");
-    const file = yield* install(yield* cliPath());
-    x.out(`${x.c.green("✓")} installed ${file}\n  desk serve now runs at login; log: ~/.review-desk/desk.log`);
+    const { file, log } = yield* install(yield* cliPath(), undefined, (m) => {
+      x.out(m);
+    });
+    x.out(`${x.c.green("✓")} installed ${file}\n  desk serve now runs at login; log: ${log}`);
     return 0;
   }),
   uninstall: Effect.fnUntraced(function* (x: Ctx) {
     yield* macOnly("uninstall");
-    x.out(`${x.c.green("✓")} removed ${yield* uninstall()}`);
+    const gone = yield* uninstall();
+    x.out(gone.length ? `${x.c.green("✓")} removed ${gone.join(" and ")}` : "nothing to remove: desk install wasn't run");
     return 0;
   }),
 };
