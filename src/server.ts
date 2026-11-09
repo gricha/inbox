@@ -553,17 +553,20 @@ export function createApp(desk: Desk, port: number): Hono {
       const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
       if (
         typeof b.name !== "string" ||
-        typeof b.prompt !== "string" ||
+        (b.prompt !== undefined && typeof b.prompt !== "string") ||
+        (b.decide !== undefined && typeof b.decide !== "string") ||
+        (b.rule !== undefined && (typeof b.rule !== "object" || b.rule === null || Array.isArray(b.rule))) ||
         (b.schedule !== undefined && typeof b.schedule !== "string") ||
         (b.events !== undefined && !strings(b.events)) ||
         (b.when !== undefined && typeof b.when !== "string") ||
         (b.can !== undefined && !strings(b.can)) ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
-        return yield* new BadRequest({ message: "need { name, prompt, schedule or events, when?, can?, on? }" });
+        return yield* new BadRequest({ message: "need { name, prompt, schedule or events, when?, decide?, rule?, can?, on? }" });
+      const { name, schedule, events, prompt, when, decide, rule, can, on } = b;
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name: b.name, schedule: b.schedule, events: b.events, prompt: b.prompt, when: b.when, can: b.can, on: b.on },
+        { name, schedule, events, prompt, when, decide, rule, can, on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

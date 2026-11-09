@@ -131,6 +131,7 @@ const AUTO: AutomationView = {
   trigger: "Weekdays at 9:00",
   next_at: ago(-20),
   running: false,
+  waiting: null,
   runs: [
     {
       id: "r1",

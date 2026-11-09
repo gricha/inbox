@@ -16,6 +16,7 @@ import {
   UNTIL,
   VERB,
   VERBS,
+  WAYS,
   type ActivityEvent,
   type AskLines,
   type AskPlace,
@@ -708,11 +709,12 @@ export function createMcpServer(
       description:
         "The owner's automations: their instructions that the desk runs on a schedule, or when something happens on an item, with their own Claude Code, read only, putting what needs them on their desk with a line on why. " +
         "list: each one with its schedule, what it may do, whether it's on and its last runs (what each found and did). " +
-        "set: draft a new one or change one (id, name, schedule or events, prompt, when, can): the whole automation each time. It stays off until the owner turns it on in Settings → Automations, so say so. Draft one only when the owner asks for it. " +
+        "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can): the whole automation each time. It stays off until the owner turns it on in Settings → Automations, so say so. Draft one only when the owner asks for it. " +
         "Write `prompt` as their instruction, in their words: what to read (repos, searches, other tools), what counts as needing them, and that nothing needing them is a fine run; a run lists PRs and issues (owner/repo#123) with a why, and the desk adds them. " +
         '`schedule` is local time: "daily 09:00", "weekdays 09:00,13:00", "mon 09:00", "mon,thu 17:30" or "weekdays hourly" (every hour on the hour). ' +
         "`events`, in place of a schedule, are desk_events' kinds (review_requested, pushed, ci, commented, reviewed, merged, mentioned, assigned and the rest): it runs when one lands on an item, once per sync for the items they landed on, each handed to the run with what happened; never twice at once, and what lands during a run waits for the next. " +
         "`when` is an optional check in the rules' language (desk_config's fields: \"me.requested_direct && pr.ci == 'red'\"): the desk asks it first, of its events' items or, on a schedule, of each open item on the owner's desk, and hands the run only those that pass, and with none it runs nothing and calls no model. " +
+        "`decide` is how it decides what to do with those items, and the cheapest that can is the right one: rule (no model: each gets its fixed action, `rule`: { do, why, until? }; no prompt needed), ask (one model call without tools reads the items and says, per item, what to do or leaves it alone: for what the item's own facts settle), or agent (the default: a Claude Code run with read-only tools that may look further). A rule or an ask on a schedule needs `when`. " +
         "`can` is what the desk may do with what a run lists, and it refuses the rest: add (the default: on their desk, pinned to Today), today, later, fyi or hide (sorted there until the item changes or they act on it; their hard rules still win), snooze, done, mute (as desk_act does them; they can undo each). Ask for no more than the instruction needs. " +
         "run: run one that's on now; it takes a few minutes, and its result shows in Settings → Automations.",
       inputSchema: {
@@ -723,19 +725,24 @@ export function createMcpServer(
         events: z.array(z.enum(ACTIVITY_KINDS)).optional().describe("set, in place of schedule: the kinds of event it runs on"),
         prompt: z.string().max(8000).optional().describe("set: the instruction, in the owner's words"),
         when: z.string().optional().describe("set: its check, an expression over the rules' fields; left out: none"),
+        decide: z.enum(WAYS).optional().describe("set: how it decides; left out: agent"),
+        rule: z
+          .object({ do: z.enum(VERBS), why: z.string().max(300), until: z.string().optional() })
+          .optional()
+          .describe("set, with decide rule: what each item gets; do must be in can, until is a snooze's (tomorrow when left out)"),
         can: z.array(z.enum(VERBS)).optional().describe('set: what it may do with an item; left out: ["add"]'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ action, id, name, schedule, events, prompt, when, can }) =>
+    ({ action, id, name, schedule, events, prompt, when, decide, rule, can }) =>
       run(
         Effect.gen(function* () {
           if (action === "list") return automationsText(yield* api.automations());
           if (!id) return yield* new ToolInputError({ message: `${action} needs id` });
           if (action === "run") return (yield* api.runAutomation(id), `running ${id}; its result shows in Settings → Automations`);
-          if (name === undefined || prompt === undefined || (schedule === undefined && !events?.length))
-            return yield* new ToolInputError({ message: "set needs id, name, prompt and a schedule or events" });
-          const { automation: a } = yield* api.setAutomation(id, { name, schedule, events, prompt, when, can });
+          if (name === undefined || (prompt === undefined && decide !== "rule") || (schedule === undefined && !events?.length))
+            return yield* new ToolInputError({ message: "set needs id, name, prompt (but for a rule) and a schedule or events" });
+          const { automation: a } = yield* api.setAutomation(id, { name, schedule, events, prompt, when, decide, rule, can });
           const starts = startsOn(a);
           return a.on
             ? `saved ${a.id}; it's on, ${starts}`
@@ -844,6 +851,12 @@ function automationsText(all: AutomationView[]): string {
     all.flatMap((a) => [
       `${a.id}: ${a.name} [${startsOn(a)} · ${a.on ? "on" : `off${a.by === "an agent" ? ", an agent's draft" : ""}`}${a.running ? " · running" : ""}${a.next_at ? ` · next ${a.next_at}` : ""}]`,
       ...(a.when ? [`  only when: ${oneLine(a.when)}`] : []),
+      ...(a.decide === "rule" && a.rule
+        ? [`  a rule: ${VERB[a.rule.do]}${a.rule.until ? ` (until ${oneLine(a.rule.until)})` : ""}, saying "${oneLine(a.rule.why)}"`]
+        : a.decide === "ask"
+          ? ["  a question: one model call without tools"]
+          : []),
+      ...(a.waiting ? [`  waiting: ${oneLine(a.waiting.why)} (asks again ${a.waiting.until})`] : []),
       ...(a.can ? [`  may: ${a.can.map((v) => VERB[v]).join(", ")}`] : []),
       ...a.runs.slice(0, 3).map((r) => {
         // What came of its items, less those it left as they were: "Added: a, b. Snoozed until CI passes: c."

@@ -104,6 +104,15 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     true,
     "only the event log's kinds",
   );
+  const rule = { decide: "rule", when: "author.bot", can: ["hide"], rule: { do: "hide", why: "a bot's" } };
+  await call("desk_automations", { action: "set", id: "warden", name: "Bots", events: ["new"], ...rule });
+  const sent = lastCall().body;
+  assert.deepEqual([sent.decide, sent.rule, sent.prompt], ["rule", { do: "hide", why: "a bot's" }, undefined], "a rule needs no prompt");
+  assert.equal(
+    (await call("desk_automations", { action: "set", id: "warden", name: "W", events: ["new"], decide: "ask" })).isError,
+    true,
+    "a question needs its instruction",
+  );
   assert.equal(
     (await call("desk_automations", { action: "run", id: "warden" })).text,
     "running warden; its result shows in Settings → Automations",

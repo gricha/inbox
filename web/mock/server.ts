@@ -33,6 +33,7 @@ import type {
   Automation,
   AutomationRun,
   AutomationView,
+  RuleAction,
   Verb,
   BoardConfig,
   BoardSummary,
@@ -2304,6 +2305,7 @@ function automationsView(): AutomationView[] {
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
       next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
       running: false,
+      waiting: null,
       runs: RUNS.filter((r) => r.automation === a.id)
         .toReversed()
         .map((r) => Object.assign({}, r, { did: didText(r.items), didnt: didntText(r.items) })),
@@ -3516,8 +3518,10 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         name: String(b.name),
         schedule: Array.isArray(b.events) && b.events.length ? "" : String(b.schedule),
         ...(Array.isArray(b.events) && b.events.length > 0 && { events: b.events as ActivityKind[] }),
-        prompt: String(b.prompt),
+        prompt: typeof b.prompt === "string" ? b.prompt : "",
         ...(typeof b.when === "string" && b.when.trim() && { when: b.when.trim() }),
+        ...((b.decide === "rule" || b.decide === "ask") && { decide: b.decide }),
+        ...(b.decide === "rule" && !!b.rule && { rule: b.rule as RuleAction }),
         ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can as Verb[] }),
         on: b.on !== false,
         by: "you",

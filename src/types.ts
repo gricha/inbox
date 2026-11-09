@@ -1025,6 +1025,12 @@ export const VERB: Record<Verb, string> = {
   mute: "mute",
 };
 
+// How an automation decides what to do with the items its check passed, cheapest first. rule: no model; each gets its fixed
+// action (`rule`). ask: one model call without tools says, per item, what to do or leaves it alone. agent: a Claude Code
+// run with read-only tools, which may look further.
+export const WAYS = ["rule", "ask", "agent"] as const;
+export type Way = (typeof WAYS)[number];
+
 // An automation (Settings → Automations): your instruction, run on its schedule or when something happens on an item, by
 // your own Claude Code, read only. What a run lists, the desk acts on: only the verbs you allow it (`can`). An agent may
 // draft or edit one; it's off until you turn it on.
@@ -1033,8 +1039,10 @@ export interface Automation {
   name: string;
   schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time; "" for one with events
   events?: ActivityKind[]; // instead of a schedule: it runs when one of these lands on an item, for the items of a sync pass at once
-  prompt: string; // the instruction, in your words
+  prompt: string; // the instruction, in your words; "" for a rule, which has none
   when?: string; // its check, in the rules' language (FIELDS): the desk asks it of each item first, and only what passes is handed on
+  decide?: "rule" | "ask"; // how it decides (WAYS); absent: agent
+  rule?: RuleAction; // with decide rule: its fixed action, for every item its check passes
   can?: Verb[]; // what it may do with an item; absent: add only
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
@@ -1058,6 +1066,7 @@ export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">)
   const until = Object.hasOwn(UNTIL, u) ? `until ${UNTIL[u as Until]}` : /^\d+[hd]$/.test(u) ? `for ${u}` : `until ${u}`;
   if (x.outcome === "did") return verb === "snooze" ? `Snoozed ${u === "activity" ? "until new activity" : until}` : DID[verb];
   if (x.outcome === "failed") return verb === "add" ? "Couldn't add" : `Couldn't ${VERB[verb]}`;
+  if (x.outcome === "kept" && verb !== "add") return "Already there";
   const said = {
     added: "Added",
     kept: "Already on your desk",
@@ -1067,6 +1076,13 @@ export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">)
     refused: "Not allowed",
   };
   return said[x.outcome];
+}
+
+// A rule's action: the verb (one of its `can`), a snooze's `until` (tomorrow when absent) and the why the item shows.
+export interface RuleAction {
+  do: Verb;
+  until?: string;
+  why: string;
 }
 
 export interface AutomationRun {
@@ -1095,7 +1111,12 @@ export interface AutomationItem {
 }
 
 // PUT /api/automations/:id: the whole automation; what's left out is its default.
-export type AutomationBody = Pick<Automation, "name" | "prompt" | "events" | "when" | "can"> & { schedule?: string; on?: boolean };
+export type AutomationBody = Pick<Automation, "name" | "events" | "when" | "rule" | "can"> & {
+  schedule?: string;
+  prompt?: string;
+  decide?: Way;
+  on?: boolean;
+};
 
 // GET /api/automations
 export interface AutomationView extends Automation {
@@ -1104,6 +1125,9 @@ export interface AutomationView extends Automation {
   trigger: string;
   next_at: string | null; // a schedule's, while it's on
   running: boolean;
+  // Its question's model can't answer now (not logged in, out of credits, rate limited): why, and when it tries again. Its
+  // run isn't spent: the same items are asked about then.
+  waiting: { why: string; until: string } | null;
   // Newest first, the last 10. did: what it did, by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"); didnt: what it couldn't
   // ("couldn't add 1, refused 2"); each "" when there's nothing to say.
   runs: (AutomationRun & { did: string; didnt: string })[];

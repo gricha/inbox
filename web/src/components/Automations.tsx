@@ -3,7 +3,16 @@
 // shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { outcomeText, VERB, type ActivityKind, type AutomationBody, type AutomationView as Auto, type Verb } from "../../../src/types.ts";
+import {
+  outcomeText,
+  VERB,
+  type ActivityKind,
+  type AutomationBody,
+  type AutomationView as Auto,
+  type RuleAction,
+  type Verb,
+  type Way,
+} from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
@@ -19,6 +28,8 @@ interface Draft {
   events: ActivityKind[];
   prompt: string;
   when: string;
+  decide: Way;
+  rule?: RuleAction; // with decide rule
   can: Verb[];
   on: boolean;
 }
@@ -166,6 +177,8 @@ const editing = (a: Auto): Draft => ({
   events: a.events ?? [],
   prompt: a.prompt,
   when: a.when ?? "",
+  decide: a.decide ?? "agent",
+  ...(a.rule && { rule: a.rule }),
   can: a.can ?? ["add"],
   on: a.on,
 });
@@ -193,7 +206,17 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
       type="button"
       className="s-edit"
       onClick={() => {
-        au.setWriting({ id: null, name: "", schedule: "weekdays 09:00", events: [], prompt: "", when: "", can: ["add"], on: true });
+        au.setWriting({
+          id: null,
+          name: "",
+          schedule: "weekdays 09:00",
+          events: [],
+          prompt: "",
+          when: "",
+          decide: "agent",
+          can: ["add"],
+          on: true,
+        });
       }}
     >
       New automation
