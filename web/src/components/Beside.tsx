@@ -26,7 +26,8 @@ export function Beside({
 }) {
   const body = useRef<HTMLDivElement>(null);
   const shown = useRef<string | null>(null); // the open item whose row was last brought into view
-  // The open item's row in view, once per item and each time the list opens; scrolling it away yourself stays put.
+  // The open item's row in view, once per item and each time the list opens; scrolling it away yourself stays put. Out of
+  // sight, it comes to about the list's middle, the list's top on the start of a row or a heading, never half of one.
   useEffect(() => {
     const box = body.current;
     if (!open) shown.current = null;
@@ -36,8 +37,10 @@ export function Beside({
     shown.current = selected;
     const r = row.getBoundingClientRect();
     const b = box.getBoundingClientRect();
-    if (r.top < b.top) box.scrollTop -= b.top - r.top + 8;
-    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 8;
+    if (r.top >= b.top && r.bottom <= b.bottom) return;
+    const top = (el: Element) => el.getBoundingClientRect().top - b.top + box.scrollTop;
+    const mid = Math.min(top(row) - Math.max(0, (b.height - r.height) / 2), box.scrollHeight - box.clientHeight);
+    box.scrollTop = Math.max(0, ...[...box.querySelectorAll(".line, .group-head")].map(top).filter((y) => y <= mid + 1));
   });
   const label = open ? "Hide the list" : "Show the list";
   return (
