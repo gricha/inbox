@@ -152,6 +152,7 @@ export interface Signals {
     teams_requested: string[]; // teams asked to review it, as slugs, yours included
     unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
     pushed_hours: number;
+    paths: string[]; // its changed files' paths, the first 50; empty while they aren't fetched
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
     my_area: boolean; // my_area_files >= 1
   };

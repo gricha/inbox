@@ -83,6 +83,11 @@ export const FIELDS: FieldDoc[] = [
   },
   { path: "pr.pushed_hours", type: "number", doc: "hours since the latest commit (-1 if unknown)" },
   {
+    path: "pr.paths",
+    type: "string[]",
+    doc: "its changed files' paths, the first 50 (empty if not known yet): any(pr.paths, 'src/sentry/seer/*') is a PR that touches that directory, at any depth",
+  },
+  {
     path: "pr.my_area_files",
     type: "number",
     doc: "how many of its changed files (the first 50) are in directories you work in, from your PRs and reviews there in 90 days (-1 if not known yet)",
@@ -276,6 +281,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
         !item.review_requests.some((r) => !isBot(r.reviewer, r.bot)) &&
         !item.reviews.some((r) => lc(r.author) !== lc(item.author) && !isMe(r.author) && !isBot(r.author, r.author_bot)),
       pushed_hours: hours(headAt),
+      paths: item.paths ?? [],
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
       requires: [],

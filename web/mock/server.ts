@@ -1517,6 +1517,7 @@ function signals(r: Rec): Signals {
       stacked: pr && (s.base ?? "main") !== "main",
       unasked: false, // the shots show it with queueAs and reviewAs
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
+      paths: r.paths ?? [],
       my_area_files: myAreaFiles,
       my_area: myAreaFiles >= 1,
       requires: needs,

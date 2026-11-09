@@ -163,6 +163,8 @@ test("item detail resolves short refs and explains placement", async () => {
     ],
   );
   assert.match(d.handoff_prompt, /acme\/web#2301/);
+  assert.ok(d.item.paths?.length, "a PR carries its changed files");
+  assert.deepEqual(d.signals.pr.paths, d.item.paths, "and rules read them as pr.paths");
   assert.equal((await call("GET", "/api/item?id=nope%231")).status, 404);
 });
 

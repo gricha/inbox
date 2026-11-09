@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Result } from "effect";
 import { compile } from "../src/expr.ts";
-import { analyze } from "../src/signals.ts";
+import { analyze, FIELDS } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import type { Item } from "../src/types.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
@@ -231,6 +231,28 @@ test("pr.reviewers, pr.people_requested and pr.teams_requested: who's on a PR be
   const hit = (when: string, o: Partial<Item>) => Result.getOrThrow(Result.getOrThrow(compile(when)).eval(of(o)));
   assert.equal(hit("len(pr.teams_requested) >= 2", { review_requests: [team("a"), team("b")] }), true);
   assert.equal(hit("len(pr.people_requested) > 0 || len(pr.reviewers) > 0", { review_requests: [team("a")] }), false);
+});
+
+test("pr.paths: the files a PR changes, for a rule that says it touches an area whatever its title says", () => {
+  const of = (o: Partial<Item>) => analyze(makeItem({ author: "carol", ...o }), ctx, cfg, NOW).signals;
+  const paths = ["src/sentry/seer/code_mode/tools.py", "tests/sentry/seer/test_tools.py", "README.md"];
+  assert.deepEqual(of({ paths }).pr.paths, paths);
+  assert.deepEqual(of({ paths: undefined }).pr.paths, [], "stored before its files were fetched: no path matches");
+  assert.ok(
+    FIELDS.some((f) => f.path === "pr.paths" && f.type === "string[]"),
+    "listed with the rest",
+  );
+  // As a rule reads them: * is any run of characters, / included, so a directory covers what's under it.
+  const hit = (when: string, changed: string[] | undefined = paths) =>
+    Result.getOrThrow(Result.getOrThrow(compile(when)).eval(of({ paths: changed })));
+  assert.equal(hit("any(pr.paths, 'src/sentry/seer/*')"), true, "at any depth");
+  assert.equal(hit("any(pr.paths, 'src/sentry/warden/*')"), false);
+  assert.equal(hit("any(pr.paths, '*/seer/*')"), true, "anywhere in the tree");
+  assert.equal(hit("any(pr.paths, 'src/sentry/seer')"), false, "a glob is the whole path");
+  assert.equal(hit("any(pr.paths, '*.md')"), true);
+  assert.equal(hit("any(pr.paths, 'src/sentry/seer/*') || any(pr.paths, 'src/sentry/warden/*')"), true);
+  assert.equal(hit("any(pr.paths, 'src/sentry/seer/*')", []), false);
+  assert.equal(hit("len(pr.paths)"), 3);
 });
 
 test("pr.waits, pr.waiting_on and me.owes_reply", () => {
