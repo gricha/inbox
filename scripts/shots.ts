@@ -2740,6 +2740,8 @@ const SHOTS: Shot[] = [
       if (missing.length) failures.push(`settings-app-desktop: no ${missing.join(", ")} row`);
       const says = await hotkeySays(page, "Works from any app.");
       if (says !== "Works from any app.") failures.push(`settings-app-desktop: the shortcut's line reads ${JSON.stringify(says)}`);
+      const field = await page.locator('[id="setting-app.hotkey"]').inputValue();
+      if (field !== "Control+Option+D") failures.push(`settings-app-desktop: the shortcut's field reads ${JSON.stringify(field)}`);
       const row = page.locator('[id="row-app.hotkey"]');
       const tip = await row.getByRole("button", { name: "Record a shortcut" }).getAttribute("title");
       if (tip !== "Press ⌃, ⌥ or ⌘ with a key; Esc cancels")
@@ -2767,9 +2769,10 @@ const SHOTS: Shot[] = [
       await at("#/settings/queue")(page); // the app is asked again when Settings reads the desk's settings again
       await at("#/settings/app")(page);
       await page.evaluate(`document.getElementById("s-app").scrollIntoView({ block: "start" })`);
-      const says = await hotkeySays(page, "Couldn't use Control+Alt+D: another app has this shortcut.");
+      // In the Mac's words, as the field has it.
+      const says = await hotkeySays(page, "Couldn't use Control+Option+D: another app has this shortcut.");
       const red = await page.evaluate<boolean>(`!!document.querySelector('[id="row-app.hotkey"] .s-help.t-bad')`);
-      if (says !== "Couldn't use Control+Alt+D: another app has this shortcut." || !red)
+      if (says !== "Couldn't use Control+Option+D: another app has this shortcut." || !red)
         failures.push(`settings-app-desktop-taken: the shortcut's line reads ${JSON.stringify(says)}${red ? "" : ", not in red"}`);
     },
     after: async (page) => {

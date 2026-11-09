@@ -43,6 +43,7 @@ import {
   foldOf,
   groupsOf,
   hotkeyHelp,
+  macKeys,
   inboxCount,
   inlineAt,
   judgeStatusText,
@@ -391,6 +392,15 @@ test("the shortcut's line: off, working from any app, or why the app couldn't ta
     text: "Couldn't use Control+Alt+D: another app has it.",
     bad: true,
   });
+  // On a Mac, in its words.
+  assert.deepEqual(hotkeyHelp("Control+Alt+D", { ...ok, ok: false }, true), {
+    text: "Couldn't use Control+Option+D: another app has it.",
+    bad: true,
+  });
+  assert.equal(macKeys("Control+Alt+D"), "Control+Option+D");
+  assert.equal(macKeys("CommandOrControl+Shift+K"), "Command+Shift+K");
+  assert.equal(macKeys("CmdOrCtrl+Ctrl+Alt+Space"), "Command+Control+Option+Space");
+  assert.equal(macKeys(""), "");
 });
 
 test("a key combo becomes an Electron accelerator", () => {
@@ -402,14 +412,16 @@ test("a key combo becomes an Electron accelerator", () => {
     shiftKey: false,
     ...mods,
   });
-  assert.equal(acceleratorOf(k("KeyD", { ctrlKey: true, altKey: true }), true), "Control+Alt+D");
-  assert.equal(acceleratorOf(k("KeyK", { metaKey: true, shiftKey: true }), true), "CommandOrControl+Shift+K");
+  // On a Mac in its words, which Electron takes too; elsewhere Alt and Super.
+  assert.equal(acceleratorOf(k("KeyD", { ctrlKey: true, altKey: true }), true), "Control+Option+D");
+  assert.equal(acceleratorOf(k("KeyD", { ctrlKey: true, altKey: true }), false), "Control+Alt+D");
+  assert.equal(acceleratorOf(k("KeyK", { metaKey: true, shiftKey: true }), true), "Command+Shift+K");
   assert.equal(acceleratorOf(k("KeyK", { metaKey: true }), false), "Super+K");
-  assert.equal(acceleratorOf(k("Digit1", { altKey: true }), true), "Alt+1");
+  assert.equal(acceleratorOf(k("Digit1", { altKey: true }), true), "Option+1");
   assert.equal(acceleratorOf(k("F12", { ctrlKey: true }), true), "Control+F12");
   assert.equal(acceleratorOf(k("Space", { ctrlKey: true, shiftKey: true }), true), "Control+Shift+Space");
-  assert.equal(acceleratorOf(k("ArrowUp", { altKey: true }), true), "Alt+Up");
-  assert.equal(acceleratorOf(k("Slash", { metaKey: true }), true), "CommandOrControl+/");
+  assert.equal(acceleratorOf(k("ArrowUp", { altKey: true }), false), "Alt+Up");
+  assert.equal(acceleratorOf(k("Slash", { metaKey: true }), true), "Command+/");
   // Not yet a combo: only modifiers, no modifier, Shift alone, or a key Electron can't take.
   assert.equal(acceleratorOf(k("ControlLeft", { ctrlKey: true }), true), null);
   assert.equal(acceleratorOf(k("KeyD"), true), null);
@@ -418,7 +430,7 @@ test("a key combo becomes an Electron accelerator", () => {
   assert.equal(acceleratorOf(k("Numpad1", { ctrlKey: true }), true), null);
   // Whatever it builds, the server's pattern accepts.
   const re = new RegExp(settingDef("app.hotkey")!.pattern!);
-  for (const a of ["Control+Alt+D", "CommandOrControl+Shift+K", "Control+Shift+Space", "Alt+Up", "CommandOrControl+/", "Control+F12"])
+  for (const a of ["Control+Option+D", "Control+Alt+D", "Command+Shift+K", "Control+Shift+Space", "Alt+Up", "Command+/", "Control+F12"])
     assert.ok(re.test(a), a);
 });
 

@@ -37,6 +37,7 @@ import {
   DISABLED,
   draftOf,
   hotkeyHelp,
+  macKeys,
   judgeStatusText,
   onePause,
   quietTimes,
@@ -258,7 +259,7 @@ function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) 
 }
 
 function HotkeyField(p: FieldProps) {
-  const d = useDraft(p);
+  const d = useDraft(MAC ? { ...p, value: macKeys(String(p.value)) } : p); // the field in the Mac's words there
   const [recording, setRecording] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -997,7 +998,7 @@ export function Settings({
         onView={onView}
         hidden={folded}
         disabled={DISABLED[d.key]?.(view.values) ?? false}
-        help={d.type === "hotkey" ? hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null) : undefined}
+        help={d.type === "hotkey" ? hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null, MAC) : undefined}
         extra={d.key === "app.source" && live && <SourceLine s={live.source ?? null} />}
       />
     );

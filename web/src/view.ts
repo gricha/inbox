@@ -121,15 +121,23 @@ export function quietTimes(v: string): [string, string] | null {
   return m ? [`${m[1]!.padStart(2, "0")}:${m[2]!}`, `${m[3]!.padStart(2, "0")}:${m[4]!}`] : null;
 }
 
+// A shortcut in the Mac's words: Electron's Alt is Option there, and CommandOrControl is Command. The app takes either.
+export const macKeys = (acc: string) =>
+  acc
+    .split("+")
+    .map((k) => ({ Alt: "Option", CommandOrControl: "Command", CmdOrCtrl: "Command", Cmd: "Command", Ctrl: "Control" })[k] ?? k)
+    .join("+");
+
 // The shortcut row's help from the desktop app's status(); null until the app answers for the shortcut that's saved.
 export function hotkeyHelp(
   saved: string,
   s: { accelerator: string; ok: boolean; error?: string } | null,
+  mac = false,
 ): { text: string; bad: boolean } | null {
   if (!saved) return { text: "Off.", bad: false };
   if (!s || s.accelerator !== saved) return null;
   if (s.ok) return { text: "Works from any app.", bad: false };
-  return { text: `Couldn't use ${saved}: ${(s.error ?? "another app has it").replace(/\.?$/, ".")}`, bad: true };
+  return { text: `Couldn't use ${mac ? macKeys(saved) : saved}: ${(s.error ?? "another app has it").replace(/\.?$/, ".")}`, bad: true };
 }
 
 export function parseRoute(hash: string): Route {
@@ -613,7 +621,12 @@ export function acceleratorOf(e: KeyLike, mac: boolean): string | null {
   const m = e.code.match(/^(?:Key([A-Z])|Digit(\d)|(F(?:[1-9]|1\d|2[0-4])))$/);
   const key = m ? (m[1] ?? m[2] ?? m[3]) : KEY_NAMES[e.code];
   if (!key || !(e.ctrlKey || e.altKey || e.metaKey)) return null;
-  const mods = [e.metaKey && (mac ? "CommandOrControl" : "Super"), e.ctrlKey && "Control", e.altKey && "Alt", e.shiftKey && "Shift"];
+  const mods = [
+    e.metaKey && (mac ? "Command" : "Super"),
+    e.ctrlKey && "Control",
+    e.altKey && (mac ? "Option" : "Alt"),
+    e.shiftKey && "Shift",
+  ];
   return [...mods.filter(Boolean), key].join("+");
 }
 
