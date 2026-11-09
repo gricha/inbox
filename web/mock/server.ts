@@ -15,7 +15,7 @@ import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/revie
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
-import { FIELDS, plainWhy, waitable } from "../../src/signals.ts";
+import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { stage } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import type { ErrorBody } from "../../src/errors.ts";
@@ -1484,6 +1484,9 @@ function signals(r: Rec): Signals {
   const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
   const myAreaFiles = areaFiles({ repo: s.repo, paths: r.paths }, { areas: AREAS });
   const needs = needsOf(s);
+  const named = (s.asked2 ?? []).filter((a) => !a.startsWith("@"));
+  // The seeds don't say when it went ready or who was asked when: both since it opened.
+  const ready = pr && !s.draft ? weekdayHours(iso(s.age), new Date()) : -1;
   return {
     item: {
       kind,
@@ -1530,10 +1533,12 @@ function signals(r: Rec): Signals {
       requires_closed: [],
       waiting_on: s.asked2 ?? [],
       reviewers: (s.reviews ?? []).map(([who]) => who).filter((who, i, all) => who !== ME && who !== s.author && all.indexOf(who) === i),
-      people_requested: (s.asked2 ?? []).filter((a) => !a.startsWith("@")),
+      people_requested: named,
       teams_requested: [
         ...new Set([...(s.team ? [s.team] : []), ...(s.asked2 ?? []).filter((a) => a.startsWith("@")).map((a) => a.slice(1))]),
       ],
+      ready_weekday_hours: ready,
+      asked_weekday_hours: named.length ? ready : -1,
       waits: s.waits ?? "",
     },
     me: {

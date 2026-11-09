@@ -33,6 +33,7 @@ export function makeItem(o: Partial<Item> & { repo?: string; number?: number } =
     head_ref: `change-${number}`,
     head_repo: repo,
     retargeted: null,
+    ready_at: null,
     ci: "green",
     review_decision: "required",
     mergeable: "unknown",

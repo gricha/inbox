@@ -53,6 +53,7 @@ const PR = `${COMMON}
       ... on AutomaticBaseChangeSucceededEvent { oldBase createdAt }
     }
   }
+  readied: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT], last: 1) { nodes { ... on ReadyForReviewEvent { createdAt } } }
   latestReviews(first: 20) { nodes { ${REVIEW} } }
   latestOpinionatedReviews(first: 20) { nodes { ${REVIEW} } }
   reviews(last: 20) { nodes { ${REVIEW} } }

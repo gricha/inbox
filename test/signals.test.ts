@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Result } from "effect";
 import { compile } from "../src/expr.ts";
-import { analyze, FIELDS } from "../src/signals.ts";
+import { analyze, FIELDS, weekdayHours } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import type { Item } from "../src/types.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
@@ -345,4 +345,108 @@ test("pr.waits, pr.waiting_on and me.owes_reply", () => {
     [[], false, [], "", "", false, [], []],
     "Desk.compute() fills the dependency fields",
   );
+});
+
+// Local times in the week of Monday 2 November 2026, which has no clock change: the counts don't depend on the machine's time zone.
+const L = (day: number, hour: number, min = 0) => new Date(2026, 10, day, hour, min);
+
+test("weekdayHours counts every hour of Monday to Friday, local time, and none of Saturday's or Sunday's", () => {
+  const h = (from: Date, to: Date) => weekdayHours(from.toISOString(), to);
+  assert.equal(h(L(6, 15), L(9, 15)), 24, "Friday 15:00 to Monday 15:00");
+  assert.equal(h(L(5, 10), L(9, 10)), 48, "Thursday 10:00 to Monday 10:00");
+  assert.equal(h(L(6, 17), L(9, 8)), 15, "Friday 17:00 to Monday 08:00: Friday's last 7 hours and Monday's first 8, nights too");
+  assert.equal(h(L(7, 10), L(8, 10)), 0, "Saturday to Sunday");
+  assert.equal(h(L(7, 10), L(9, 1)), 1, "from a Saturday: Monday's hour alone");
+  assert.equal(h(L(3, 9), L(3, 9, 30)), 0.5, "part of an hour");
+  assert.equal(h(L(2, 0), L(9, 0)), 120, "a week is five days");
+  assert.equal(h(L(9, 0), L(2, 0)), 0, "from the future");
+});
+
+test("pr.ready_weekday_hours and pr.asked_weekday_hours: how long a PR has been ready, and those asked by name asked", () => {
+  const user = (reviewer: string, bot = false) => ({ reviewer, type: "user" as const, codeowner: false, bot });
+  const team = { reviewer: "backend", type: "team" as const, codeowner: true };
+  const ask = (reviewer: string, h: number, type: "user" | "team" = "user") => ({
+    at: hoursAgo(h),
+    actor: "me",
+    actor_bot: false,
+    reviewer,
+    reviewer_type: type,
+  });
+  const pr = (o: Partial<Item>) => analyze(makeItem({ author: "me", ...o }), ctx, cfg, NOW).signals.pr;
+  assert.equal(pr({ ready_at: hoursAgo(6), created_at: hoursAgo(20) }).ready_weekday_hours, 6, "since its latest Ready for review");
+  assert.equal(pr({ ready_at: null, created_at: hoursAgo(5) }).ready_weekday_hours, 5, "never a draft: since it opened");
+  assert.equal(pr({ ready_at: hoursAgo(6), draft: true }).ready_weekday_hours, -1, "a draft again");
+  assert.equal(pr({ state: "merged" }).ready_weekday_hours, -1);
+  assert.equal(pr({ kind: "issue" }).ready_weekday_hours, -1);
+  const { ready_at: _, ...stored } = makeItem({ author: "me" });
+  assert.equal(analyze(stored, ctx, cfg, NOW).signals.pr.ready_weekday_hours, -1, "stored before the desk read when");
+
+  const asked = { ready_at: hoursAgo(20), review_requests: [user("sam"), user("kai")], request_events: [ask("sam", 9), ask("kai", 4)] };
+  assert.equal(pr(asked).asked_weekday_hours, 4, "the latest request to someone still asked");
+  assert.equal(pr({ ...asked, review_requests: [user("sam")] }).asked_weekday_hours, 9, "kai reviewed, so GitHub asks kai no more");
+  assert.equal(pr({ ...asked, ready_at: hoursAgo(2) }).asked_weekday_hours, 2, "asked while it was a draft: since it went ready");
+  assert.equal(pr({ ...asked, request_events: [] }).asked_weekday_hours, 20, "no request the desk has read: since it went ready");
+  const others = {
+    review_requests: [team, user("copilot", true), user("me")],
+    request_events: [ask("backend", 3, "team"), ask("copilot", 3), ask("me", 3)],
+  };
+  assert.equal(pr({ ...asked, ...others }).asked_weekday_hours, -1, "a team, a bot and you aren't someone asked by name");
+  assert.equal(pr({ ...asked, draft: true }).asked_weekday_hours, -1);
+  const docs = FIELDS.filter((f) => f.path.endsWith("_weekday_hours")).map((f) => [f.path, f.type]);
+  assert.deepEqual(docs, [
+    ["pr.ready_weekday_hours", "number"],
+    ["pr.asked_weekday_hours", "number"],
+  ]);
+});
+
+test("the owner's two nudges as rules: a workday ready with nobody asked by name, two since someone was, weekends aside", () => {
+  const PICK = "me.author && !item.draft && pr.ready_weekday_hours >= 24 && len(pr.people_requested) == 0 && len(pr.reviewers) == 0";
+  const FOLLOW_UP = "me.author && !item.draft && pr.asked_weekday_hours >= 48 && len(pr.reviewers) == 0";
+  const hit = (when: string, it: Item, now: Date) =>
+    Result.getOrThrow(Result.getOrThrow(compile(when)).eval(analyze(it, ctx, cfg, now).signals));
+  const both = (it: Item, now: Date) => [hit(PICK, it, now), hit(FOLLOW_UP, it, now)];
+  const mine = (o: Partial<Item>) => makeItem({ author: "me", created_at: L(2, 9).toISOString(), ...o });
+  const codeowners = { reviewer: "backend", type: "team" as const, codeowner: true };
+  const review = (author: string, bot = false) => ({
+    author,
+    author_bot: bot,
+    state: "commented" as const,
+    at: L(6, 16).toISOString(),
+    commit: "abc",
+  });
+
+  // A CODEOWNERS repo: a team is asked as it goes ready, Friday 15:00, and nobody by name.
+  const team = mine({ ready_at: L(6, 15).toISOString(), review_requests: [codeowners] });
+  assert.deepEqual(both(team, L(9, 14)), [false, false], "Monday 14:00: 71 hours on the clock, 23 of them on weekdays");
+  assert.deepEqual(both(team, L(9, 15)), [true, false], "Monday 15:00: a workday, the team's ask or not");
+  const opened = mine({ ready_at: null, created_at: L(2, 12).toISOString() });
+  assert.deepEqual(
+    [both(opened, L(3, 11)), both(opened, L(3, 12))],
+    [
+      [false, false],
+      [true, false],
+    ],
+    "never a draft, nobody asked at all",
+  );
+  assert.deepEqual(
+    both({ ...team, reviews: [review("sentry-warden", true)] }, L(9, 15)),
+    [true, false],
+    "a bot's review isn't someone on it",
+  );
+  assert.deepEqual(both({ ...team, reviews: [review("kai")] }, L(9, 15)), [false, false], "kai's on it");
+  assert.deepEqual(both({ ...team, draft: true }, L(9, 15)), [false, false], "a draft again");
+  assert.deepEqual(both({ ...team, state: "merged" }, L(9, 15)), [false, false], "merged with no review: nothing to chase");
+  assert.deepEqual(both({ ...team, author: "carol" }, L(9, 15)), [false, false], "someone else's");
+
+  // Asked by name: sam, Thursday 10:00, beside the team.
+  const sam = { reviewer: "sam", type: "user" as const, codeowner: false };
+  const asked = mine({
+    ready_at: null,
+    review_requests: [codeowners, sam],
+    request_events: [{ at: L(5, 10).toISOString(), actor: "me", actor_bot: false, reviewer: "sam", reviewer_type: "user" }],
+  });
+  assert.deepEqual(both(asked, L(9, 9)), [false, false], "Monday 09:00: 47 weekday hours since sam was asked");
+  assert.deepEqual(both(asked, L(9, 10)), [false, true], "Monday 10:00: two workdays; follow up, not pick a reviewer");
+  const reviewed = { ...asked, review_requests: [codeowners], reviews: [review("sam")] };
+  assert.deepEqual(both(reviewed, L(9, 10)), [false, false], "sam reviewed: GitHub asks sam no more, and someone's on it");
 });

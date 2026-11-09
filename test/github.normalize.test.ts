@@ -296,6 +296,14 @@ test("a PR's latest base change says the branch it was on before: by hand, or Gi
   assert.equal(normalize(fixture("issue"), NOW).retargeted, undefined, "an issue has no base");
 });
 
+test("ready_at is the latest Ready for review, null if it never was a draft, absent when not asked", () => {
+  const ready = (nodes: object[]) => normalize({ ...fixture("pr-review"), readied: { nodes } } as RawNode, NOW).ready_at;
+  assert.equal(ready([{ createdAt: "2026-11-02T12:00:00Z" }]), "2026-11-02T12:00:00Z");
+  assert.equal(ready([]), null);
+  assert.equal(normalize(fixture("pr-review"), NOW).ready_at, undefined, "an answer from before the desk asked");
+  assert.equal(normalize(fixture("issue"), NOW).ready_at, undefined, "an issue is never a draft");
+});
+
 test("a failing check the base branch doesn't require doesn't make CI red", () => {
   const withChecks = (state: string, nodes: RawCheck[]): RawNode => {
     const raw = fixture("pr-mine");

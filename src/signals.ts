@@ -72,6 +72,16 @@ export const FIELDS: FieldDoc[] = [
   { path: "pr.people_requested", type: "string[]", doc: "people asked to review it by name, you and bots left out" },
   { path: "pr.teams_requested", type: "string[]", doc: "teams asked to review it, as slugs, yours included; many at once is a wide ping" },
   {
+    path: "pr.ready_weekday_hours",
+    type: "number",
+    doc: "hours it has been ready for review, weekdays only: since its latest Ready for review, or since it was opened if it never was a draft, counting every hour of Monday to Friday in the desk's time zone and none of Saturday's or Sunday's (24 is one workday; holidays count); -1 for a draft, an issue, once it's merged or closed, or until the desk has read when",
+  },
+  {
+    path: "pr.asked_weekday_hours",
+    type: "number",
+    doc: "hours, weekdays only as pr.ready_weekday_hours counts them, since the latest request to someone in pr.people_requested (asked by name and still asked: GitHub stops asking once they review), or since it went ready for review if that's later; -1 when nobody is asked by name, and whenever pr.ready_weekday_hours is",
+  },
+  {
     path: "pr.waits",
     type: "string",
     doc: 'what it waits on next, in words: "is your draft", "waits on a CI fix", "has changes requested by kofi", "waits on your reply to markstory, then a review from sam", "waits on a review from sam, @backend and 1 more", "waits on CI", "is ready to merge"; "" once merged or closed',
@@ -150,6 +160,20 @@ export const botCheck = (listed: string[]) => {
   const set = new Set(listed.map(lc));
   return (login: string, flagged = false) => flagged || set.has(lc(login)) || login.endsWith("[bot]");
 };
+
+// Hours from `from` to now that fall on Monday to Friday, local time; one step a local day, so a clock change's 23 or 25 count as that.
+export function weekdayHours(from: string, now: Date): number {
+  const end = now.getTime();
+  let t = Date.parse(from);
+  let ms = 0;
+  while (t < end) {
+    const d = new Date(t);
+    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    if (d.getDay() !== 0 && d.getDay() !== 6) ms += Math.min(next, end) - t;
+    t = next;
+  }
+  return ms / 3_600_000;
+}
 
 // A why in plain words for Searches and rules: a field reads as "someone" or "some", and the blocked rules' as what they stand for.
 const WORDS: Record<string, string> = {
@@ -241,6 +265,15 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   ];
   const peopleRequested = item.review_requests.filter((r) => r.type === "user" && someoneElse(r.reviewer, r.bot)).map((r) => r.reviewer);
   const teamsRequested = item.review_requests.filter((r) => r.type === "team").map((r) => r.reviewer);
+  // Ready since its latest Ready for review, else since it opened; unknown until the desk has read which.
+  const readyAt =
+    item.kind === "pr" && item.state === "open" && !item.draft && item.ready_at !== undefined ? (item.ready_at ?? item.created_at) : null;
+  // A request made while it was a draft waits from when it went ready, as does one older than the events the desk reads.
+  const named = new Set(peopleRequested.map(lc));
+  const askedAt =
+    readyAt && named.size
+      ? latest([readyAt, ...item.request_events.filter((e) => e.reviewer_type === "user" && named.has(lc(e.reviewer))).map((e) => e.at)])
+      : null;
 
   const signals: Signals = {
     item: {
@@ -297,6 +330,8 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       reviewers,
       people_requested: peopleRequested,
       teams_requested: teamsRequested,
+      ready_weekday_hours: readyAt ? weekdayHours(readyAt, now) : -1,
+      asked_weekday_hours: askedAt ? weekdayHours(askedAt, now) : -1,
     },
     me: {
       login: ctx.me,

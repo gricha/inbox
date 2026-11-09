@@ -150,6 +150,8 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
     [5, 2],
   );
   assert.match(mine[0]!.query, /n4: node\(id: \$id4\)[\s\S]*isRequired\(pullRequestId: \$id4\)/);
+  // Both ask when a PR last went ready for review, as normalize reads it (ready_at).
+  for (const c of calls) assert.match(c.query, /readied: timelineItems\(itemTypes: \[READY_FOR_REVIEW_EVENT\], last: 1\)/);
   assert.deepEqual(idsOf(mine[1]!.variables), ["mine5", "mine6"]);
   assert.deepEqual(
     review.map((c) => c.variables.ids.length),

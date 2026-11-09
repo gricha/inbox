@@ -76,6 +76,7 @@ export interface RawNode extends RawHit {
   reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
   timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
   baseChanges?: Conn<{ previousRefName?: string; oldBase?: string; createdAt: string }>;
+  readied?: Conn<{ createdAt: string }>;
   latestReviews?: Conn<RawReview>;
   latestOpinionatedReviews?: Conn<RawReview>;
   reviews?: Conn<RawReview>;
@@ -201,6 +202,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     head_ref: n.headRefName ?? "",
     head_repo: n.headRepository?.nameWithOwner ?? "",
     ...(n.baseChanges && { retargeted: moved ? { from: moved.previousRefName ?? moved.oldBase ?? "", at: moved.createdAt } : null }),
+    ...(n.readied && { ready_at: n.readied.nodes[0]?.createdAt ?? null }),
     ...(n.files && { paths: n.files.nodes.map((f) => f.path) }),
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),

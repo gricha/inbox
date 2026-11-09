@@ -58,6 +58,7 @@ export interface Item extends Head {
   // Its latest base change: the branch it was based on before (GitHub moves a stacked PR to main when the one below merges),
   // and when; null if it never changed; absent on items stored before it was fetched
   retargeted?: { from: string; at: string } | null;
+  ready_at?: string | null; // PR only: when it last became ready for review (its latest ReadyForReviewEvent); null if it never was a draft; absent on items stored before it was fetched
   paths?: string[]; // PR only: its changed files' paths, the first 50 (changed_files counts all); absent on items stored before it was fetched
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
@@ -150,6 +151,8 @@ export interface Signals {
     reviewers: string[]; // who has reviewed it (approved, asked for changes or commented): you, its author and bots left out
     people_requested: string[]; // people asked to review it by name, you and bots left out
     teams_requested: string[]; // teams asked to review it, as slugs, yours included
+    ready_weekday_hours: number; // hours it has been ready for review, Monday to Friday's only; -1 for a draft, an issue, once merged or closed, or while unknown
+    asked_weekday_hours: number; // the same since the latest request to someone in people_requested, or since it went ready if later; -1 if nobody is, or as ready_weekday_hours
     unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
     pushed_hours: number;
     paths: string[]; // its changed files' paths, the first 50; empty while they aren't fetched
