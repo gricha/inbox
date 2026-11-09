@@ -30,6 +30,7 @@ import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector } from "./connectors/github.ts";
+import { linkRef } from "./links.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
 import { askedAt, owesReply, stage, verdicts } from "./stage.ts";
@@ -935,9 +936,11 @@ export class Desk {
 
   // A ref on the desk, or an exact id the desk no longer holds (its events outlive it).
   itemId(ref: string): Effect.Effect<string, RefError> {
-    return Effect.catchTag(this.resolve(ref), "NotFound", (e) =>
-      this.connectors.some((c) => c.refOf(ref, [])?.id === ref) ? Effect.succeed(ref) : Effect.fail(e),
-    );
+    return Effect.catchTag(this.resolve(ref), "NotFound", (e) => {
+      const link = linkRef(ref);
+      const id = link && "id" in link ? link.id : ref;
+      return this.connectors.some((c) => c.refOf(id, [])?.id === id) ? Effect.succeed(id) : Effect.fail(e);
+    });
   }
 
   // New on the queue once placed (not while Claude hasn't sorted it, nor what you pinned or added, nor your own draft: you just
@@ -1527,13 +1530,18 @@ export class Desk {
     });
   }
 
-  resolve(ref: string): Effect.Effect<string, RefError> {
+  resolve(text: string): Effect.Effect<string, RefError> {
     return Effect.gen({ self: this }, function* () {
       yield* this.requireConfig();
       const ids = [...this.snapshot().entries.keys()];
+      if (ids.includes(text)) return text;
+      const link = linkRef(text);
+      if (link && "refused" in link) return yield* new NotFound({ message: link.refused });
+      const ref = link?.id ?? text;
       if (ids.includes(ref)) return ref;
       const refs = this.connectors.flatMap((c) => c.refOf(ref, ids) ?? []);
-      if (!refs.length) return yield* new NotFound({ message: `can't read "${ref}"; use owner/repo#123, repo#123 or a GitHub URL` });
+      if (!refs.length)
+        return yield* new NotFound({ message: `can't read "${ref}"; use owner/repo#123, repo#123, a GitHub URL or an inbox:// link` });
       const found = refs.flatMap((r) => r.held);
       const [first] = found;
       if (found.length === 1 && first !== undefined) return first;
@@ -2156,14 +2164,18 @@ export class Desk {
   }
 
   // The item's id, fetched read only if the desk doesn't hold it; an ambiguous ref and what its source fails with are passed on.
-  hold(ref: string): Effect.Effect<string, RefError | BadRequest | Upstream> {
+  hold(text: string): Effect.Effect<string, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       yield* this.requireConfig();
+      const link = linkRef(text);
+      if (link && "refused" in link) return yield* new BadRequest({ message: link.refused });
+      const ref = link?.id ?? text;
       const refs = this.connectors.flatMap((c) => {
         const r = c.refOf(ref, []);
         return r ? [{ id: r.id, from: c }] : [];
       });
-      if (!refs.length) return yield* new BadRequest({ message: `can't read "${ref}"; use owner/repo#123 or a GitHub URL` });
+      if (!refs.length)
+        return yield* new BadRequest({ message: `can't read "${ref}"; use owner/repo#123, a GitHub URL or an inbox:// link` });
       const exact = refs.find((r) => r.id !== undefined);
       // What it names exactly, or the ref trimmed, is what an ambiguous ref's words quote.
       const held = yield* Effect.catchTag(this.resolve(exact?.id ?? ref.trim()), "NotFound", () => Effect.succeed(null));

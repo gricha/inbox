@@ -227,7 +227,8 @@ test("show prints facts and the rule trace", async () => {
   const lines = r.out.split("\n");
   assert.equal(lines[0], "getsentry/seer#8949  Flag provider client calls in unchecked paths");
   assert.equal(lines[1], "https://github.com/getsentry/seer/pull/8949");
-  assert.match(lines[2] ?? "", /^pr by octo · CI red · \+120 −30 · updated 2h ago · active$/);
+  assert.equal(lines[2], "inbox://item/getsentry/seer/8949");
+  assert.match(lines[3] ?? "", /^pr by octo · CI red · \+120 −30 · updated 2h ago · active$/);
   assert.match(r.out, /reviews {2}● now {2}octo asked you · 6d/);
   assert.match(r.out, / {2}✓ filter !author\.bot\n {2}✗ #0 {5}pr\.ci == 'red' && me\.author\n {2}✓ #1 {5}me\.requested_direct\n/);
   assert.equal(JSON.parse((await run(["show", "seer#8949", "--json"])).out).card.id, "getsentry/seer#8949");

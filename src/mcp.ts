@@ -9,6 +9,7 @@ import { z } from "zod";
 import { createClient, untilText, type AddResult, type DeskClient } from "./client.ts";
 import { linesText } from "./coordinator.ts";
 import { judgeText } from "./judge.ts";
+import { permalink } from "./links.ts";
 import {
   UNTIL,
   type ActivityEvent,
@@ -26,6 +27,8 @@ import {
 } from "./types.ts";
 
 const LIST_BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide", "cleared"] as const;
+// The owner may paste an item's link from the desk (Copy link) in place of its ref.
+const REF = "owner/repo#123, repo#123 if unique, a GitHub URL, or the item's link from the desk (inbox://item/owner/repo/123)";
 const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
 
 const json = (v: unknown) => "```json\n" + JSON.stringify(v) + "\n```";
@@ -210,7 +213,7 @@ function itemText(d: ItemDetail): string {
   // Merging: the user's own PR, which the coordinator has; desk_act's done, snooze and mute don't apply.
   const flight = c.inflight ? " · merging: the user's PR, handed off for merge (desk_merging)" : "";
   const held = d.held ? " · off the queue until Claude has reviewed it" : "";
-  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_when ? ` · snoozed until ${UNTIL[c.snooze_when]}` : c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}${held}\n${c.url}`;
+  const head = `${c.id} · ${c.kind} by ${c.author}${c.author_bot ? " (bot)" : ""} · status ${c.status}${c.pinned ? " · pinned" : ""}${c.snooze_when ? ` · snoozed until ${UNTIL[c.snooze_when]}` : c.snooze_until ? ` · snoozed until ${c.snooze_until}` : ""}${flight}${held}\n${c.url}\nin the desk: ${permalink({ item: c.id })}`;
   return (
     head +
     "\n" +
@@ -349,8 +352,9 @@ export function createMcpServer(
   server.registerTool(
     "desk_item",
     {
-      description: "One item: facts, its bucket and why on each board, the rule trace, and the review hand-off prompt.",
-      inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
+      description:
+        "One item: facts, its bucket and why on each board, the rule trace, the review hand-off prompt, and its link in the desk (inbox://…) to give the owner, which opens it there.",
+      inputSchema: { ref: z.string().describe(REF) },
       annotations: readOnly,
     },
     ({ ref }) => run(Effect.map(api.item(ref), itemText)),
@@ -362,7 +366,7 @@ export function createMcpServer(
       description:
         "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore.",
       inputSchema: {
-        ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
+        ref: z.string().describe(REF),
         action: z.enum(ACTIONS),
         until: z
           .string()
@@ -382,7 +386,7 @@ export function createMcpServer(
       description:
         "Add a PR or issue to the user's desk (\"add X to my review\"), or hand them one from your work: fetched read only if the desk doesn't hold it, and pinned so it stays on their main page. `why` and `from` are what the desk shows on it as why it's there, so they know what it wants from them before opening it. For a PR it also starts the pre-review, as opening it in the desk would: its diff and conversations fetched, its AI review and Claude's read of what waits on the user. Local only; nothing is sent to GitHub. Returns the item and an undo seq.",
       inputSchema: {
-        ref: z.string().describe("owner/repo#123 or a GitHub URL; repo#123 only for an item already on the desk"),
+        ref: z.string().describe("owner/repo#123, a GitHub URL or the item's inbox:// link; repo#123 only for an item already on the desk"),
         why: z
           .string()
           .min(1)
@@ -452,7 +456,7 @@ export function createMcpServer(
       description:
         'A status line on one of the user\'s PRs in Merging, shown on its row there with its age: what you did or what it waits on, in a few words ("fixed lint, CI running", "waits on alice\'s review"). Only the latest shows.',
       inputSchema: {
-        ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
+        ref: z.string().describe(REF),
         text: z.string().min(1).max(300),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -465,7 +469,7 @@ export function createMcpServer(
     {
       description:
         "A PR's AI review, written by the user's own Claude Code (no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
-      inputSchema: { ref: z.string().describe("owner/repo#123, or repo#123 if unique") },
+      inputSchema: { ref: z.string().describe(REF) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ ref }) =>
@@ -504,7 +508,7 @@ export function createMcpServer(
         after: z.number().int().min(0).optional().describe("Only events with a higher seq; default 0 (from the start)"),
         wait: z.number().int().min(0).max(60).optional().describe("Seconds to wait for an event when there is none yet; default 0"),
         limit: z.number().int().min(1).max(500).optional().describe("Default 100"),
-        item: z.string().optional().describe("Only this item: owner/repo#123, or repo#123 if unique"),
+        item: z.string().optional().describe(`Only this item: ${REF}`),
       },
       annotations: readOnly,
     },
@@ -527,7 +531,7 @@ export function createMcpServer(
       description:
         "Give a PR in Merging back to the user: it leaves Merging for the top of their desk with `why` as its reason. Use it when you can't realistically get it merged (a redesign, a product decision, CI you can't fix, a reviewer who needs an answer from them), then stop working on it. Never because another PR blocks it (desk_merging's \"blocked by\"): leave it in Merging; the desk wakes you with \"unblocked: \u2026 merged\" once that one merges. A reviewer's question only the user can answer: hand it back as usual (a reply owed keeps it on their desk). A decision only they can make: desk_inquire. Nothing is posted to GitHub.",
       inputSchema: {
-        ref: z.string().describe("owner/repo#123, or repo#123 if unique"),
+        ref: z.string().describe(REF),
         why: z.string().min(1).max(300).describe("One line: what the user needs to do or decide"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

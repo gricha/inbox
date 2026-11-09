@@ -11,6 +11,7 @@ import { untilText } from "./client.ts";
 import { fsError, messageOf } from "./errors.ts";
 import { deskHome } from "./home.ts";
 import { judgeText } from "./judge.ts";
+import { permalink } from "./links.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
 import { openCommand } from "./notify.ts";
@@ -50,7 +51,7 @@ const USAGE = `usage: desk <command>
   connect [claude|codex] [--apply]    connect your agent (Settings → Claude) to the desk: MCP tools and skill; --apply does it
   install | uninstall                 run the server at login (macOS launchd)
 
-<ref> is owner/repo#123, or repo#123 when unique.
+<ref> is owner/repo#123, repo#123 when unique, a GitHub URL, or an item's link from the desk (inbox://item/owner/repo/123).
 `;
 
 // What you typed isn't a command the CLI knows how to run: exit 2, with the usage hint.
@@ -230,6 +231,7 @@ const show = Effect.fnUntraced(function* (x: Ctx) {
         : k.status;
   x.out(`${x.c.bold(k.id)}  ${plain(k.title)}`);
   x.out(x.c.dim(k.url));
+  x.out(x.c.dim(permalink({ item: k.id })));
   x.out(
     [
       `${k.kind} by ${k.author}${k.author_bot ? " (bot)" : ""}`,

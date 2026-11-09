@@ -319,7 +319,7 @@ test("what fails an item is its error and the run goes on; a bug putting one on 
   assert.deepEqual(
     ok.items.map((x) => [x.item_id, x.outcome, x.error ?? null]),
     [
-      ["what", "failed", `can't read "what"; use owner/repo#123 or a GitHub URL`],
+      ["what", "failed", `can't read "what"; use owner/repo#123, a GitHub URL or an inbox:// link`],
       ["acme/api#1", "kept", null],
     ],
   );

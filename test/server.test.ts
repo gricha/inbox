@@ -284,6 +284,20 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
     const missing = await call("desk_item", { ref: "api#99" });
     assert.equal(missing.isError, true);
     assert.match(missing.text, /no item "api#99"/);
+    // The link the owner pastes from Copy link, or the desk's own http one, is a ref; desk_item gives its link back.
+    const linked = await call("desk_item", { ref: "inbox://item/acme/api/7" });
+    assert.match(
+      linked.text,
+      /^acme\/api#7 · pr by alice .*\nhttps:\/\/github\.com\/acme\/api\/pull\/7\nin the desk: inbox:\/\/item\/acme\/api\/7\n/,
+    );
+    assert.match(
+      (await call("desk_act", { ref: "http://localhost:47823/#/review/acme%2Fapi%237", action: "pin" })).text,
+      /^pin acme\/api#7\./,
+    );
+    assert.deepEqual(await call("desk_brief", { ref: "inbox://archive" }), {
+      text: `"inbox://archive" is the Archive page's link, not an item's: give a PR's or an issue's`,
+      isError: true,
+    });
     assert.equal((await t.req("/mcp")).status, 405);
   } finally {
     await client.close();
@@ -820,7 +834,7 @@ test("the desk's refusals answer through respond with their tag, words and statu
   assert.deepEqual(await call("GET", "/api/item?id=nope%2399"), [404, no("NotFound", 'no item "nope#99" on the desk')]);
   assert.deepEqual(await call("GET", "/api/item?id=what"), [
     404,
-    no("NotFound", `can't read "what"; use owner/repo#123, repo#123 or a GitHub URL`),
+    no("NotFound", `can't read "what"; use owner/repo#123, repo#123, a GitHub URL or an inbox:// link`),
   ]);
   const [status, ambiguous] = (await call("GET", "/api/item?id=%231")) as [number, { candidates: string[] }];
   assert.deepEqual(
@@ -1035,7 +1049,7 @@ test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstr
   assert.deepEqual(await call("POST", "/api/add", { id: "acme/api#1", why: 5 }), [400, no("BadRequest", "why and from are lines of text")]);
   assert.deepEqual(await call("POST", "/api/add", { id: "what" }), [
     400,
-    no("BadRequest", `can't read "what"; use owner/repo#123 or a GitHub URL`),
+    no("BadRequest", `can't read "what"; use owner/repo#123, a GitHub URL or an inbox:// link`),
   ]);
 
   const first = call("POST", review("acme/api#1", "approve"), { head_oid: "h1" });

@@ -24,7 +24,7 @@ All triage state is local: done, snooze, mute, pin and Merging live in `~/.inbox
 
 The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` (`DESK_PORT` changes the port). If a tool says `desk is not running`, ask the user to open the app.
 
-**MCP tools** (preferred). `ref` is `owner/repo#123`, `repo#123` when unique, or a GitHub URL.
+**MCP tools** (preferred). `ref` is `owner/repo#123`, `repo#123` when unique, or a GitHub URL. The owner may paste an item's link from the desk (`inbox://item/owner/repo/123`, or `http://localhost:47823/#/review/…`): pass it as the item's `ref`; `desk_item` prints the link to give back.
 
 | Tool               | Use it to                                                                                                                                                                                                                                                                                                                              |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -350,6 +350,51 @@ test("refs fail with tagged errors: an ambiguous one has its candidates, one the
   assert.equal(failureSync(t.desk.board("nope")).message, 'no board "nope"');
 });
 
+test("a ref can be the item's inbox:// link or the desk's own http link to it; a link naming no item is refused in words", async (c) => {
+  const t = await setup([reviewAsk(1), myPr(1)]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  for (const ref of [
+    "acme/api#1",
+    "api#1",
+    "https://github.com/acme/api/pull/1",
+    "inbox://item/acme/api/1",
+    " inbox://item/Acme/API/1/ ",
+    "http://localhost:47823/#/review/acme%2Fapi%231",
+    "http://127.0.0.1:5173/#/item/acme%2Fapi%231",
+  ])
+    assert.equal(runSync(t.desk.resolve(ref)), "acme/api#1", ref);
+  assert.equal(runSync(t.desk.item("inbox://item/acme/web/1")).card.id, "acme/web#1");
+  assert.equal(runSync(t.desk.act("http://localhost:47823/#/review/acme%2Fapi%231", "pin")).state.pinned, true);
+  // Gone from the desk, a link still names its events, and hold fetches what it names, as its id.
+  assert.equal(runSync(t.desk.itemId("inbox://item/acme/gone/5")), "acme/gone#5");
+  assert.equal((await failure(t.desk.hold("inbox://item/acme/gone/5"))).message, "GitHub has no PR or issue acme/gone#5");
+  assert.equal(failureSync(t.desk.item("inbox://item/acme/gone/5")).message, 'no item "acme/gone#5" on the desk');
+
+  const refused = (e: { _tag: string; message: string }) => [e._tag, e.message];
+  assert.deepEqual(refused(failureSync(t.desk.resolve("inbox://blocked"))), [
+    "NotFound",
+    `"inbox://blocked" is the Blocked page's link, not an item's: give a PR's or an issue's`,
+  ]);
+  assert.deepEqual(refused(failureSync(t.desk.item("http://localhost:47823/#/settings/github"))), [
+    "NotFound",
+    `can't read "http://localhost:47823/#/settings/github"; an item's link is inbox://item/owner/repo/123`,
+  ]);
+  assert.deepEqual(refused(failureSync(t.desk.itemId("inbox://item/acme/api"))), [
+    "NotFound",
+    `can't read "inbox://item/acme/api"; an item's link is inbox://item/owner/repo/123`,
+  ]);
+  assert.deepEqual(refused(await failure(t.desk.hold("inbox://item/acme"))), [
+    "BadRequest",
+    `can't read "inbox://item/acme"; an item's link is inbox://item/owner/repo/123`,
+  ]);
+  assert.deepEqual(refused(await failure(t.desk.hold("inbox://fyi"))), [
+    "BadRequest",
+    `"inbox://fyi" is the FYI page's link, not an item's: give a PR's or an issue's`,
+  ]);
+  assert.deepEqual(t.gh.lookupCalls, ["acme/gone#5"], "a refused link fetches nothing");
+});
+
 test("policy.md that can't be written fails putPolicy with FsError, in Node's words", (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   fs.mkdirSync(path.join(home, "policy.md"));

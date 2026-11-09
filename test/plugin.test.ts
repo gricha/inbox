@@ -131,7 +131,10 @@ test("a note's ref is its source's: the desk holds one by fetching it from there
   const note = notes.write("Call Ann about the release");
   assert.equal(runSync(t.desk.resolve("api#1")), "acme/api#1", "GitHub's refs are still GitHub's");
   assert.equal(failureSync(t.desk.resolve(note.id)).message, 'no item "notes:1" on the desk', "read by its source, not held");
-  assert.equal(failureSync(t.desk.resolve("nope:1")).message, `can't read "nope:1"; use owner/repo#123, repo#123 or a GitHub URL`);
+  assert.equal(
+    failureSync(t.desk.resolve("nope:1")).message,
+    `can't read "nope:1"; use owner/repo#123, repo#123, a GitHub URL or an inbox:// link`,
+  );
   assert.equal(runSync(t.desk.itemId(note.id)), note.id, "an exact id: its events outlive it");
   // Another source's id with a "/" and a "#" in it is still not GitHub's.
   assert.deepEqual(t.desk.gh.refOf("api#7", ["acme/api#1", "notes:acme/api#7"]), { held: [] });
