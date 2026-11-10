@@ -2407,11 +2407,12 @@ p.side-sync {
   width: 44cqi;
 }
 
+/* One width, so a long repo name is cut (its title has it whole) rather than push the phrase out of its column. */
 .lane-row .lane-ref {
   display: flex;
   flex: none;
   gap: 14px;
-  min-width: 7.5em;
+  width: 7.5em;
   font-size: var(--meta-size);
 }
 

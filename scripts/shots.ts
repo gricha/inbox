@@ -2261,19 +2261,20 @@ const SHOTS: Shot[] = [
       const head = (await page.locator("#h-work").textContent())?.replace(/\d+$/, "");
       if (head !== "Claude's work") failures.push(`inflight-work: its heading reads ${JSON.stringify(head)}`);
       const rows = await page.evaluate<
-        { note: string; retry: string | null; color: string; x: number }[]
+        { note: string; retry: string | null; color: string; x: number; id: string }[]
       >(`[...document.querySelectorAll(".work-row")].map((e) => ({
         note: e.querySelector(".line-note")?.textContent ?? "",
         retry: e.querySelector(".line-cta")?.textContent ?? null,
         color: getComputedStyle(e.querySelector(".line-note")).color,
         x: e.querySelector(".line-note").getBoundingClientRect().left,
+        id: e.dataset.id,
       }))`);
       // Merging's columns: where each stands starts where a merging PR's phrase does.
       const x = await page.evaluate<number | null>(
         `document.querySelector(".lane-row:not(.work-row):not(.dim) .line-note")?.getBoundingClientRect().left ?? null`,
       );
       if (x !== null && rows.some((r) => Math.abs(r.x - x) > 1))
-        failures.push(`inflight-work: its column starts at ${rows.map((r) => r.x).join(", ")}, Merging's at ${x}`);
+        failures.push(`inflight-work: its column starts at ${rows.map((r) => r.id + " " + r.x).join(", ")}, Merging's at ${x}`);
       if (!rows.some((r) => r.note.startsWith("Claude is reviewing it")))
         failures.push(`inflight-work: no running review in ${JSON.stringify(rows)}`);
       if (!rows.some((r) => r.note.includes("try 2 of 3"))) failures.push("inflight-work: the second try doesn't say so");
