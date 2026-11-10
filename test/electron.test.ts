@@ -404,6 +404,7 @@ test("an inbox:// link, at launch or handed to a second instance, routes the win
   assert.equal(linkHash("inbox://merging"), "#/inflight");
   assert.equal(linkHash("inbox://fyi/"), "#/later");
   assert.equal(linkHash("inbox://inbox"), "#/");
+  assert.equal(linkHash("inbox://question/1c0ffee2"), "#/inquiry/1c0ffee2");
   // What names nothing just brings the window forward; an http link isn't the app's to route.
   for (const link of ["inbox://item/acme", "inbox://settings", "http://localhost:47823/#/review/acme%2Fapi%237"])
     assert.equal(linkHash(link), null, link);

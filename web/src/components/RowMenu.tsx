@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Action, Card, GitHubAction } from "../../../src/types.ts";
-import { cls, snoozeOptions } from "../format.ts";
+import type { Action, Card, GitHubAction, Inquiry } from "../../../src/types.ts";
+import { cls, fromName, snoozeOptions } from "../format.ts";
 import { handsOff } from "../view.ts";
 import { MORE, rowActions } from "./More.tsx";
 
@@ -28,10 +28,6 @@ export interface RowMenuProps {
 
 // A row's right-click menu: every write a row has. Snooze opens to the side with the times and what this item can wait on.
 export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reopen, onClose }: RowMenuProps) {
-  const menu = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y, flip: false });
-  const [sub, setSub] = useState(!!snooze);
-  const leave = useRef<number | undefined>(undefined);
   const mine = card.kind === "pr" && card.author.toLowerCase() === me.toLowerCase();
   const snoozes = card.inflight ? [] : snoozeOptions(card);
 
@@ -63,14 +59,91 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
       .filter((a) => !(a === "ready" && card.cta === "ready"))
       .map((a) => ({ label: `${MORE[a]} on GitHub`, do: { github: a } })),
   ];
-  const entries = groups.flat();
-
-  function choose(d: Do) {
-    onClose();
+  function pick(d: Do) {
     if ("key" in d) run(card, d.key);
     else if ("act" in d) act(card, d.act);
     else if ("github" in d) github(card, d.github);
     else act(card, "snooze", d.snooze);
+  }
+  return (
+    <Menu
+      label={`${card.kind === "pr" ? "PR" : "Issue"} ${card.repo}#${card.number}`}
+      groups={groups}
+      snoozes={snoozes}
+      x={x}
+      y={y}
+      snooze={snooze}
+      pick={pick}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// An agent's question's menu: what its page offers. `run` takes answer, link or dismiss.
+export function QuestionMenu({
+  q,
+  x,
+  y,
+  run,
+  reopen,
+  onClose,
+}: {
+  q: Inquiry;
+  x: number;
+  y: number;
+  run: (q: Inquiry, key: string) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
+  return (
+    <Menu
+      label={`Question by ${fromName(q.from, false)}`}
+      groups={[[go("Answer", "answer"), go("Copy link", "link")], [go("Dismiss", "dismiss")]]}
+      snoozes={[]}
+      x={x}
+      y={y}
+      pick={(d) => {
+        if ("key" in d) run(q, d.key);
+      }}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// The menu itself, at the pointer: its entries in groups, Snooze's side menu after the second, and the keyboard while it's open.
+function Menu({
+  label,
+  groups,
+  snoozes,
+  x,
+  y,
+  snooze,
+  pick,
+  reopen,
+  onClose,
+}: {
+  label: string; // whose menu it is, for a screen reader
+  groups: Entry[][];
+  snoozes: ReturnType<typeof snoozeOptions>;
+  x: number;
+  y: number;
+  snooze?: boolean | undefined;
+  pick: (d: Do) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  const menu = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y, flip: false });
+  const [sub, setSub] = useState(!!snooze);
+  const leave = useRef<number | undefined>(undefined);
+  const entries = groups.flat();
+
+  function choose(d: Do) {
+    onClose();
+    pick(d);
   }
 
   // Inside the window, opening up or left where it would run off; the side menu goes left when there's no room right.
@@ -137,7 +210,7 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
       setSub(false);
       menu.current?.querySelector<HTMLElement>(".ctx-has-sub")?.focus();
     } else if (e.key === "Enter" || e.key === " ") {
-      // Nothing picked yet: Enter is the row's own, Review.
+      // Nothing picked yet: Enter is the row's own, its first entry.
       if (at >= 0) items[at]?.click();
       else if (e.key === "Enter") choose(entries[0]!.do);
     }
@@ -205,7 +278,7 @@ export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reope
         className={cls("ctx", pos.flip && "flip")}
         role="menu"
         tabIndex={-1}
-        aria-label={`${card.kind === "pr" ? "PR" : "Issue"} ${card.repo}#${card.number}`}
+        aria-label={label}
         style={{ left: pos.left, top: pos.top }}
         onContextMenu={(e) => {
           e.preventDefault();

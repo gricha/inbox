@@ -1073,6 +1073,14 @@ const SHOTS: Shot[] = [
       await page.locator(".inquiry .inq-write textarea").waitFor();
       await page.waitForTimeout(200);
       await besideOpen(page, "beside-inquiry", "ask:q2bead00");
+      // The other question's row beside it has its menu too, its row marked while it's open, then the open question's again.
+      await page.locator('.beside .line[data-id="ask:q1c0ffee"] .row-main').click({ button: "right" });
+      const marked = (await page.locator(".ctx").count()) ? (await besideSays(page))?.sel : null;
+      if (marked !== "ask:q1c0ffee") failures.push(`beside-inquiry: a right-click on a question beside it marks ${JSON.stringify(marked)}`);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      const after = (await besideSays(page))?.sel;
+      if (after !== "ask:q2bead00") failures.push(`beside-inquiry: with the menu closed, the list marks ${JSON.stringify(after)}`);
     },
     after: async (page) => {
       // From the question, a review and then another from the list: the way back is the list's page, the Inbox.
@@ -1843,8 +1851,22 @@ const SHOTS: Shot[] = [
       await at("#/inquiry/q2bead00")(page);
       await page.locator(".inquiry .inq-write textarea").waitFor();
       await page.waitForTimeout(200);
+      const acts = await page.evaluate<string[]>(`[...document.querySelectorAll(".inq-write .actions .act")].map((b) => b.textContent)`);
+      if (acts.join(" · ") !== "Send · Dismiss · Copy link") failures.push(`inquiry-open: its actions read ${JSON.stringify(acts)}`);
     },
-    after: at("#/"),
+    // Copy link, where its page has its actions: the question's inbox:// link on the clipboard (stubbed), and a quiet toast.
+    after: async (page) => {
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      const copy = page.locator(".inq-write .act", { hasText: "Copy link" });
+      if (await copy.count()) {
+        await copy.click();
+        await page.locator(".toast").waitFor();
+        const said = [await page.evaluate<unknown>("window.__copied"), await page.locator(".toast").textContent()];
+        if (said[0] !== "inbox://question/q2bead00" || said[1] !== "Copied the link to sentry: ViewerContext rollout's question")
+          failures.push(`inquiry-open: Copy link copied and said ${JSON.stringify(said)}`);
+      }
+      await fresh(page); // its toast gone
+    },
   },
   {
     // A question you answered, once its session read your answer: when, under it.
@@ -3383,6 +3405,57 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300); // the toast in, not fading in
     },
     after: fresh, // its toast gone, so the next shot doesn't show it
+  },
+  {
+    // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss. Then each: Copy link copies its
+    // inbox:// link (the clipboard stubbed); Dismiss takes its row off the list at once (held, so the mock keeps the
+    // question for the next size); Answer opens its page.
+    name: "row-menu-question",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".queue .line.inq .row-main").first().click({ button: "right" });
+      await page.waitForTimeout(200);
+      const items = await page.evaluate<string[][]>(
+        `[...document.querySelectorAll(".ctx > .ctx-group")].map((g) => [...g.querySelectorAll(".ctx-item")].map((b) => b.textContent))`,
+      );
+      if (JSON.stringify(items) !== JSON.stringify([["Answer", "Copy link"], ["Dismiss"]]))
+        failures.push(`row-menu-question: a question's menu reads ${JSON.stringify(items)}`);
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      // Its entry that reads `item`, from a fresh right-click; false where a question has no menu.
+      const pick = async (item: string) => {
+        await page.locator(".queue .line.inq .row-main").first().click({ button: "right" });
+        const entry = page.locator(".ctx-item", { hasText: item });
+        if (!(await entry.count())) return false;
+        await entry.click();
+        return true;
+      };
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      if (await pick("Copy link")) {
+        await page.locator(".toast").waitFor();
+        const said = [await page.evaluate<unknown>("window.__copied"), await page.locator(".toast").textContent()];
+        if (said[0] !== "inbox://question/q1c0ffee" || said[1] !== "Copied the link to your agent's question")
+          failures.push(`row-menu-question: Copy link copied and said ${JSON.stringify(said)}`);
+      }
+      await page.route("**/api/inquiries/*/answer", () => {});
+      const rows = () => page.locator(".queue .line.inq").count();
+      const before = await rows();
+      if (await pick("Dismiss")) {
+        await page.waitForTimeout(200);
+        if ((await rows()) !== before - 1)
+          failures.push(`row-menu-question: after Dismiss, ${await rows()} of ${before} questions are listed`);
+      }
+      // The reload drops the held write first: unrouting while it's held would let it through to the mock.
+      await fresh(page);
+      await unroute(page);
+      if (await pick("Answer")) {
+        await page.waitForTimeout(200);
+        const hash = await page.evaluate<string>("location.hash");
+        if (hash !== "#/inquiry/q1c0ffee") failures.push(`row-menu-question: Answer went to ${hash}`);
+      }
+      await fresh(page);
+    },
   },
   {
     // A permalink to a PR (the desktop app routes inbox://item/… to #/item/…): its review, the link gone from the history.

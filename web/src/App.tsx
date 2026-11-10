@@ -52,7 +52,7 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { RowMenu } from "./components/RowMenu.tsx";
+import { QuestionMenu, RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
@@ -489,22 +489,22 @@ export function App() {
     () => (laneList ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
     [laneList, laneRows, page],
   );
-  // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu; beside a
-  // review it only marks the row while its menu is open, so the page's own selection is the one you left it with.
+  // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu, an
+  // agent's question's too; beside a review it only marks the row while its menu is open, so the page's own selection is
+  // the one you left it with.
   function rowMenu(x: number, y: number, target: Element | null): boolean {
     const id = target?.closest<HTMLElement>(".line[data-id]")?.dataset.id;
-    const c = onScreen.find((card) => card.id === id);
-    if (!c) {
+    if (!id || !(onScreen.some((c) => c.id === id) || inquiries.some((q) => inquiryOf(q.id) === id))) {
       stay.current = null;
       setMenuAt(null);
       return false;
     }
-    stay.current = c.id;
+    stay.current = id;
     if (!target?.closest(".beside")) {
-      if (laneList) setLaneSel(c.id);
-      else setSelected(c.id);
+      if (laneList) setLaneSel(id);
+      else setSelected(id);
     }
-    setMenuAt({ id: c.id, x, y });
+    setMenuAt({ id, x, y });
     return true;
   }
   const rowMenuRef = useRef(rowMenu);
@@ -520,15 +520,21 @@ export function App() {
       window.removeEventListener("contextmenu", h);
     };
   }, []);
+  // A right-click outside the open menu: the menu of the row there, if any.
+  const reopenMenu = (x: number, y: number) => {
+    const under = document.elementsFromPoint(x, y).find((n) => !n.closest(".ctx, .scrim-clear"));
+    rowMenu(x, y, under ?? null);
+  };
   const menuCard = menuAt ? onScreen.find((c) => c.id === menuAt.id) : undefined;
+  const menuQuestion = menuAt ? inquiries.find((q) => inquiryOf(q.id) === menuAt.id) : undefined;
   const closeMenu = useCallback(() => {
     stay.current = null;
     setMenuAt(null);
   }, []);
   // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
   useEffect(() => {
-    if (menuAt && !menuCard) closeMenu();
-  }, [menuAt, menuCard, closeMenu]);
+    if (menuAt && !menuCard && !menuQuestion) closeMenu();
+  }, [menuAt, menuCard, menuQuestion, closeMenu]);
 
   // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
@@ -1011,6 +1017,25 @@ export function App() {
     );
   }
 
+  // A question's link, inbox://question/<id>: the desktop app opens its page, and an agent reads it with desk_inquiry.
+  function copyQuestionLink(q: Inquiry): Effect.Effect<void> {
+    return copyText(permalink({ question: q.id })).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          flash(`Copied the link to ${fromName(q.from, false)}'s question`);
+        }),
+      ),
+      Effect.catch(failed),
+    );
+  }
+
+  // A question's menu: what its page offers.
+  function runQuestion(q: Inquiry, k: string) {
+    if (k === "answer") openInquiry(q);
+    else if (k === "link") runUi(copyQuestionLink(q));
+    else if (k === "dismiss") runUi(answerInquiry(q, "", true));
+  }
+
   // Try again on a failed job in Claude's work: the AI review runs again (its verdict in a toast once it's in), or your ask goes to your agent again.
   function retryWork(w: Work): Effect.Effect<void> {
     if (w.kind === "ask")
@@ -1476,6 +1501,9 @@ export function App() {
               onBack={() => {
                 go({ name: "queue" });
               }}
+              onLink={(q) => {
+                runUi(copyQuestionLink(q));
+              }}
               onLoad={setPageQuestion}
             />
           )}
@@ -1584,10 +1612,18 @@ export function App() {
           github={(c, a) => {
             runUi(github(c, a));
           }}
-          reopen={(x, y) => {
-            const under = document.elementsFromPoint(x, y).find((n) => !n.closest(".ctx, .scrim-clear"));
-            rowMenu(x, y, under ?? null);
-          }}
+          reopen={reopenMenu}
+          onClose={closeMenu}
+        />
+      )}
+      {menuAt && menuQuestion && (
+        <QuestionMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          q={menuQuestion}
+          x={menuAt.x}
+          y={menuAt.y}
+          run={runQuestion}
+          reopen={reopenMenu}
           onClose={closeMenu}
         />
       )}

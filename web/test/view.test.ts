@@ -218,6 +218,8 @@ test("a permalink's route names its item, and an issue opens in place on the pag
   assert.deepEqual(parseRoute(hashOf({ item: "acme/api#7" })), { name: "item", id: "acme/api#7" });
   assert.equal(routeHash({ name: "item", id: "acme/api#7" }), "#/item/acme%2Fapi%237");
   assert.equal(pageOf({ name: "item", id: "acme/api#7" }, "later"), "queue");
+  // A question's link goes straight to its page.
+  assert.deepEqual(parseRoute(hashOf({ question: "1c0ffee2" })), { name: "inquiry", id: "1c0ffee2" });
   const q = queue();
   q.sections.today.push(...Array.from({ length: 12 }, (_, i) => card(`acme/web#${30 + i}`, { kind: "issue" })));
   assert.deepEqual(whereIs(q, "acme/web#41"), { page: "queue", group: "queue" }, "past the queue's fold");

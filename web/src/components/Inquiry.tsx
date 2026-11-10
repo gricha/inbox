@@ -116,6 +116,7 @@ export function InquiryPage({
   flash,
   onAnswer,
   onBack,
+  onLink,
   onLoad,
 }: {
   id: string;
@@ -124,6 +125,7 @@ export function InquiryPage({
   flash: (text: string, error?: boolean) => void;
   onAnswer: (q: Inquiry, text: string, dismiss?: boolean) => Effect.Effect<boolean>; // true once the desk has it
   onBack: () => void;
+  onLink: (q: Inquiry) => void; // Copy link
   onLoad: (q: Inquiry) => void; // the queue's view drops a question once it's answered; this page's copy stays
 }) {
   const [q, setQ] = useState<InquiryView | string | null>(null); // string: why it couldn't load
@@ -345,6 +347,16 @@ export function InquiryPage({
                 }}
               >
                 Dismiss
+              </button>
+              <button
+                type="button"
+                className="act"
+                title="Copy this question's link, to paste to an agent or open it here again"
+                onClick={() => {
+                  onLink(q);
+                }}
+              >
+                Copy link
               </button>
             </div>
           </div>

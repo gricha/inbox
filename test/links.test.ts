@@ -25,6 +25,15 @@ test("each page has a permalink and a route in the window", () => {
   assert.equal(hashOf({ item: "acme/api#7" }), "#/item/acme%2Fapi%237");
 });
 
+test("an agent's question has a permalink that reads back as its id and routes to its page", () => {
+  assert.equal(permalink({ question: "1c0ffee2" }), "inbox://question/1c0ffee2");
+  assert.deepEqual(placeOf("inbox://question/1c0ffee2"), { question: "1c0ffee2" });
+  assert.deepEqual(placeOf(" inbox://Question/1c0ffee2/ "), { question: "1c0ffee2" }, "trimmed, a trailing slash");
+  assert.equal(hashOf({ question: "1c0ffee2" }), "#/inquiry/1c0ffee2");
+  assert.deepEqual(placeOf("http://localhost:47823/#/inquiry/1c0ffee2"), { question: "1c0ffee2" });
+  for (const s of ["inbox://question/", "inbox://question/a/b", "inbox://question/a%20b"]) assert.equal(placeOf(s), null, s);
+});
+
 test("the desk's own http links name the same places, on any local port", () => {
   assert.deepEqual(placeOf("http://localhost:47823/#/review/acme%2Fapi%237"), { item: "acme/api#7" });
   assert.deepEqual(placeOf("http://127.0.0.1:5173/#/item/acme%2Fapi%237"), { item: "acme/api#7" });
@@ -63,6 +72,9 @@ test("a ref that's a desk link is its item's id; one naming no item is refused i
   });
   assert.deepEqual(linkRef("http://localhost:3000/foo"), {
     refused: `can't read "http://localhost:3000/foo"; an item's link is inbox://item/owner/repo/123`,
+  });
+  assert.deepEqual(linkRef("inbox://question/1c0ffee2"), {
+    refused: `"inbox://question/1c0ffee2" is a question's link, not an item's: desk_inquiry reads it`,
   });
   for (const ref of ["acme/api#7", "api#7", "#7", "https://github.com/acme/api/pull/7", "http://localhostile.example/#/review/x"])
     assert.equal(linkRef(ref), null, ref);
