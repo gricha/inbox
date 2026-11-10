@@ -99,6 +99,7 @@ import {
   catchAllOf,
   migrateBotAsk,
   migrateConflict,
+  migrateOnBehalf,
   migrateWaitsConflict,
   migrateDrafts,
   migrateHard,
@@ -802,7 +803,7 @@ export class Desk {
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
   // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
   // on the desk (migrateDrafts), the rule putting a merge conflict on the desk goes (migrateConflict), and your PR waiting on
-  // reviewers stays in Blocked with a conflict (migrateWaitsConflict).
+  // reviewers stays in Blocked with a conflict (migrateWaitsConflict), and My PRs lists a bot's PR opened for you (migrateOnBehalf).
   migrateRules(): Effect.Effect<void, FsError> {
     return Effect.gen({ self: this }, function* () {
       const due = [
@@ -815,6 +816,7 @@ export class Desk {
           migrate: migrateWaitsConflict,
           did: "kept your PRs waiting on reviewers in Blocked when they have a merge conflict",
         },
+        { key: "on_behalf_migrated", migrate: migrateOnBehalf, did: "listed bots' PRs opened for you under My PRs" },
       ].filter((m) => !this.store.get(m.key));
       if (!due.length) return;
       const before = yield* this.readConfig();
@@ -1631,7 +1633,7 @@ export class Desk {
         }
       }
     }
-    return { now: byPart(queueOrder(sections.now, this.me())), today: byPart(queueOrder(sections.today, this.me())) };
+    return { now: byPart(queueOrder(sections.now)), today: byPart(queueOrder(sections.today)) };
   }
 
   // The single surface: every item once, at its best placement across boards.
@@ -2186,11 +2188,8 @@ export class Desk {
     const it = e.item;
     const me = e.analysis.signals.me;
     if (!this.writer || e.inflight || this.wrote.get(it.id) === it.updated_at) return [];
-    // The real author: a bot's "via" line is anyone's to edit, so it never unlocks a write.
-    const mine = it.author.toLowerCase() === this.me().toLowerCase();
-    if (it.kind === "issue") return it.state === "open" && (mine || me.assignee) ? ["close"] : [];
+    if (it.kind === "issue") return it.state === "open" && (me.author || me.assignee) ? ["close"] : [];
     if (!me.author) return it.state === "open" ? ["request_changes"] : [];
-    if (!mine) return [];
     if (it.state === "closed") return ["reopen"];
     if (it.state !== "open") return [];
     return [
@@ -2969,9 +2968,7 @@ export class Desk {
     const e = id ? this.snapshot().entries.get(id) : undefined;
     if (!e) return null;
     const it = e.item;
-    const me = this.me().toLowerCase();
-    // Only your own hand-off puts a PR in Merging, a bot's opened for you included; elsewhere it's the real author, never a bot's via.
-    const whose = it.kind === "issue" ? "issue" : e.inflight || (me && it.author.toLowerCase() === me) ? "mine" : "theirs";
+    const whose = it.kind === "issue" ? "issue" : e.inflight || e.analysis.signals.me.author ? "mine" : "theirs";
     return { url: it.url, whose, merging: e.inflight, state: it.state };
   }
 

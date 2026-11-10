@@ -119,10 +119,10 @@ export function placedBy(p: Placement): Card["placed_by"] {
 }
 
 // Weightiest first: handed back, close looks (current commit first), capped, yours approved and green, the rest, others' red, skips.
-export function queueOrder(cards: Card[], me: string): Card[] {
+export function queueOrder(cards: Card[]): Card[] {
   const weight = (c: Card) => {
     const p = c.preflight;
-    const mine = c.kind === "pr" && !c.resolved && !!me && c.author.toLowerCase() === me.toLowerCase();
+    const mine = c.kind === "pr" && !c.resolved && c.by === "you";
     if (c.handed_back) return 0;
     if (p?.verdict === "skip") return 7;
     if (!mine && c.kind === "pr" && c.ci === "red") return 6;

@@ -50,7 +50,7 @@ test("each card says who it's from, you for yours or a bot's for you, and a PR's
     reviewAsk(1),
     myPr(2, { draft: true }),
     reviewAsk(3, { ...junior, via: "@dana" }),
-    reviewAsk(4, { ...junior, via: "@me" }),
+    reviewAsk(4, { ...junior, via: "@me", requester: "@me", assignees: ["me"] }),
     reviewAsk(5, { kind: "issue" }),
   ]);
   c.after(t.cleanup);

@@ -164,6 +164,22 @@ test("details: your PRs get the mine fragment in 5s, the rest the review fragmen
   assert.ok(items.every((i) => i.detail_at === items[0]?.detail_at));
 });
 
+test("details: a bot's PR the desk knows was opened for you gets the mine fragment, as yours do", async () => {
+  const { gh, calls } = fakeGitHub((b) => {
+    const list = Array.isArray(b.variables.ids);
+    const node = { ...base, id: list ? (b.variables.ids as string[])[0] : (b.variables.id0 as string) };
+    return list ? { data: { rateLimit: RL, nodes: [node] } } : { data: { rateLimit: RL, n0: node } };
+  });
+  await run(gh.details([{ ...hit("junior1", "sentry-junior"), mine: true }, hit("junior2", "sentry-junior")], "octo-dev"));
+  assert.deepEqual(
+    calls.map((c) => [c.query.includes("mergeable"), c.variables.id0 ?? c.variables.ids]),
+    [
+      [true, "junior1"],
+      [false, ["junior2"]],
+    ],
+  );
+});
+
 test("details with no hits makes no calls", async () => {
   const { gh, calls } = fakeGitHub(() => ({}));
   assert.deepEqual(await run(gh.details([], "octo-dev")), []);

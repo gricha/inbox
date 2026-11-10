@@ -96,7 +96,14 @@ export class FakeGitHub implements GitHub {
       const hits: SearchHit[] = this.route(query)
         .map((id) => this.items.get(id))
         .filter((it): it is Item => it !== undefined)
-        .map((it) => ({ node_id: it.node_id, id: it.id, kind: it.kind, updated_at: it.updated_at, author: it.author }));
+        .map((it) => ({
+          node_id: it.node_id,
+          id: it.id,
+          kind: it.kind,
+          updated_at: it.updated_at,
+          author: it.author,
+          author_bot: it.author_bot,
+        }));
       return { hits, total: hits.length };
     });
   }

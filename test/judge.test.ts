@@ -340,7 +340,7 @@ test("each item says who it's really from and what state it's in: via a bot, sta
   });
   const junior = { author: "sentry-junior", author_bot: true };
   const forThem = makeItem({ number: 1, ...junior, via: "Michelle Tran" });
-  const forYou = makeItem({ number: 2, ...junior, via: "me.myself" });
+  const forYou = makeItem({ number: 2, ...junior, via: "@me", requester: "@me", assignees: ["me"] });
   const stacked = makeItem({
     number: 3,
     author: "me",

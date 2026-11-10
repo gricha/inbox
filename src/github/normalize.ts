@@ -1,6 +1,7 @@
 // GraphQL nodes -> Item / SearchHit.
 
 import { requiresOf } from "../deps.ts";
+import { requesterOf } from "./behalf.ts";
 import type { Check, Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
@@ -213,7 +214,10 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
       .replaceAll(/[^\S\n]+/g, " ")
       .trim()
       .slice(0, 600),
-    ...(n.__typename === "PullRequest" && { requires: requiresOf(n.body ?? "", n.repository.nameWithOwner, n.number) }),
+    ...(n.__typename === "PullRequest" && {
+      requires: requiresOf(n.body ?? "", n.repository.nameWithOwner, n.number),
+      requester: requesterOf(n.body ?? ""),
+    }),
     merged_by: n.mergedBy?.login ?? "",
     additions: n.additions ?? 0,
     deletions: n.deletions ?? 0,

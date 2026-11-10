@@ -33,6 +33,7 @@ export interface Item extends Head {
   author: string; // login, "ghost" if deleted
   author_bot: boolean;
   via?: string; // who a bot's PR says it was opened for (its last "via …" line: "@login" or a name), "" if none; absent on items stored before it was fetched
+  requester?: string; // a PR's: who an agent's line says it was opened for, "@login" or a name, "" if none (requesterOf()); absent on items stored before
   state: "open" | "closed" | "merged";
   draft: boolean;
   labels: string[];
@@ -233,7 +234,7 @@ export interface SpaceConfig {
 
 export interface Config {
   poll_seconds: number;
-  signals: { close_collaborator_min: number; bots: string[]; my_repos: string[] };
+  signals: { close_collaborator_min: number; bots: string[]; my_repos: string[]; my_names: string[] };
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
   spaces: SpaceConfig[];
   boards: BoardConfig[];
@@ -1008,7 +1009,7 @@ export interface AskLines extends InlineAt {
 // What an ask is about, in the desk's words: never PR text.
 export interface AskAbout {
   url: string;
-  whose: "mine" | "theirs" | "issue"; // the real author, or in Merging (your own m put it there): a bot's "via" alone never makes it yours
+  whose: "mine" | "theirs" | "issue"; // `me.author` (yours, or a bot's opened for you: onBehalf()), or in Merging
   merging: boolean;
   state: "open" | "closed" | "merged";
 }

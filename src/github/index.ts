@@ -28,6 +28,7 @@ export interface SearchHit {
   author: string;
   author_bot?: boolean;
   title?: string; // untrusted
+  mine?: boolean; // a bot's PR opened for you (onBehalf()), read as deeply as your own
 }
 export interface NotificationThread {
   thread: string; // thread id
@@ -267,7 +268,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
 
   const details = Effect.fn("GitHub.details")(function* (hits: SearchHit[], me: string) {
     const unique = [...new Map(hits.map((h) => [h.node_id, h])).values()];
-    const isMine = (h: SearchHit) => h.kind === "pr" && h.author.toLowerCase() === me.toLowerCase();
+    const isMine = (h: SearchHit) => h.kind === "pr" && (!!h.mine || h.author.toLowerCase() === me.toLowerCase());
     const batches = [
       ...chunk(unique.filter(isMine), 5).map((b) => ({ mine: true, ids: b.map((h) => h.node_id) })),
       ...chunk(

@@ -620,10 +620,14 @@ test("Blocked as a tree: api#1294's chain, 3 deep under billing#2300, saying onc
 
 test("your own draft carries one call to action, Ready for review, and the mock takes it", async () => {
   const { data: q } = await call<QueueView>("GET", "/api/queue");
-  const drafts = [...q.sections.now, ...q.sections.today, ...q.sections.later].filter((c) => c.draft && c.author === "me");
+  const drafts = [...q.sections.now, ...q.sections.today, ...q.sections.later].filter((c) => c.draft && c.by === "you");
   assert.ok(drafts.length > 0);
   assert.ok(drafts.every((c) => c.cta === "ready"));
-  assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta === "ready" && (!c.draft || c.author !== "me")));
+  assert.ok(
+    drafts.some((c) => c.author === "acme-junior[bot]"),
+    "a bot's draft opened for you is yours too",
+  );
+  assert.ok(![...q.sections.now, ...q.sections.today].some((c) => c.cta === "ready" && (!c.draft || c.by !== "you")));
   const id = encodeURIComponent(drafts[0]!.id);
   const ready = await call<{ done: boolean }>("POST", `/api/review/${id}/ready`);
   assert.deepEqual([ready.status, ready.data.done], [200, false], "nobody's asked to review it: it stays on your desk");

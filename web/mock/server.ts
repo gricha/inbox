@@ -6,6 +6,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
+import { onBehalf } from "../../src/github/behalf.ts";
 import { plan } from "../../src/agents.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
@@ -144,7 +145,12 @@ function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "handoff"> {
   const s = { ...DEFAULTS, ...overrides };
   return {
     poll_seconds: s["github.poll_seconds"],
-    signals: { close_collaborator_min: s["github.close_collaborator_min"], bots: s["github.bots"], my_repos: s["github.my_repos"] },
+    signals: {
+      close_collaborator_min: s["github.close_collaborator_min"],
+      bots: s["github.bots"],
+      my_repos: s["github.my_repos"],
+      my_names: s["github.my_names"],
+    },
     handoff: { prompt: s["handoff.prompt"], mine: s["handoff.mine"], issue: s["handoff.issue"] },
   };
 }
@@ -273,6 +279,7 @@ interface Seed {
   asked?: string[]; // logins and team slugs asked with Ready for review
   owner?: boolean;
   assignee?: boolean;
+  requester?: string; // a bot's PR: who its description says it was opened for, as Item.requester
   ci?: Ci;
   review?: ReviewDecision;
   mergeable?: Mergeable;
@@ -764,6 +771,24 @@ const SEEDS: Seed[] = [
     size: [96, 12, 4],
     on: { "work-mine": [] },
     judge: ["today", "your draft, touched today: yours to finish"],
+  },
+  {
+    // A draft Junior opened for you: yours, with its Ready for review, from its attribution block and its assignee.
+    repo: "acme/api",
+    n: 4131,
+    title: "Retry the billing webhook on a 502",
+    author: "acme-junior[bot]",
+    assignee: true,
+    requester: "@me",
+    body: "The billing webhook now retries a 502 from the gateway three times with backoff before it gives up.\nvia @me.",
+    age: 5,
+    upd: 2,
+    ci: "green",
+    draft: true,
+    mergeable: "clean",
+    size: [48, 6, 3],
+    on: { "work-mine": [] },
+    judge: ["today", "your draft, opened through acme-junior: yours to finish"],
   },
   {
     repo: "acme/api",
@@ -1474,6 +1499,15 @@ const recs: Rec[] = SEEDS.map((s) => {
 // Signals, items, placements
 
 const isBot = (login: string) => login.endsWith("[bot]") || config.signals.bots.includes(login);
+// As signals.ts: yours, or a bot's opened for you.
+const mineOf = (s: Seed) =>
+  s.author === ME ||
+  onBehalf(
+    { kind: s.kind ?? "pr", author: s.author, author_bot: isBot(s.author), assignees: s.assignee ? [ME] : [], requester: s.requester },
+    ME,
+    config.signals.my_names,
+    isBot,
+  );
 
 // The PRs it needs directly: its own list, else the one its blocker's chain goes through, else its blocker.
 const needsOf = (s: Seed) => s.needs ?? (s.blocker ? [/\(through (\S+)\)/.exec(s.blocker[0])?.[1] ?? s.blocker[0]] : []);
@@ -1483,7 +1517,7 @@ function signals(r: Rec): Signals {
   const [owner = "", name = ""] = s.repo.split("/");
   const kind = s.kind ?? "pr";
   const pr = kind === "pr";
-  const mine = s.author === ME;
+  const mine = mineOf(s);
   const [add, del, files] = pr ? (s.size ?? [0, 0, 0]) : [0, 0, 0];
   const reviews = s.reviews ?? [];
   const myReview = reviews.findLast(([a]) => a === ME);
@@ -1603,6 +1637,7 @@ function itemOf(r: Rec): Item {
     draft: !!s.draft,
     labels: s.labels ?? [],
     assignees: s.assignee ? [ME] : [],
+    ...(s.requester !== undefined && { requester: s.requester }),
     created_at: iso(s.age),
     updated_at: r.activity_at,
     body: s.body ?? "",
@@ -1810,7 +1845,7 @@ function cardOf(r: Rec, p: Placement): Card {
     resolved_at: s.resolved ? iso(s.upd ?? 1) : null, // the story's "resolved" event
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
-    ...(s.author === ME && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
+    ...(me.author && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
     ...(!!TALK.get(r.id)?.length && { talk: true as const }),
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
@@ -1828,8 +1863,8 @@ function actionsOf(r: Rec): GitHubAction[] {
   const s = r.seed;
   const it = itemOf(r);
   if (inFlight(r)) return [];
-  if (it.kind === "issue") return it.state === "open" && (s.author === ME || !!s.assignee) ? ["close"] : [];
-  if (s.author !== ME) return it.state === "open" ? ["request_changes"] : [];
+  if (it.kind === "issue") return it.state === "open" && (mineOf(s) || !!s.assignee) ? ["close"] : [];
+  if (!mineOf(s)) return it.state === "open" ? ["request_changes"] : [];
   if (it.state === "closed") return ["reopen"];
   if (it.state !== "open") return [];
   const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
@@ -1898,8 +1933,8 @@ function focus(): FocusView {
   }
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const sections = {
-    now: queueOrder([...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top), ME),
-    today: queueOrder(cards.filter((c) => c.bucket === "today").map(top), ME),
+    now: queueOrder([...needsCards(), ...cards.filter((c) => c.bucket === "now")].map(top)),
+    today: queueOrder(cards.filter((c) => c.bucket === "today").map(top)),
   };
   oneLinePerStack(sections, ["now", "today"], stacks());
   return {
@@ -1940,8 +1975,8 @@ function queue(): QueueView {
   const cards = [...best.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.waiting_since.localeCompare(b.waiting_since));
   const of = (k: Bucket) => cards.filter((c) => c.bucket === k);
   const sections = {
-    now: queueOrder([...needsCards(), ...of("now")].map(top), ME),
-    today: queueOrder(of("today").map(top), ME),
+    now: queueOrder([...needsCards(), ...of("now")].map(top)),
+    today: queueOrder(of("today").map(top)),
     blocked: of("blocked"),
     later: of("later"),
     fyi: of("fyi"),
@@ -1979,7 +2014,7 @@ function queue(): QueueView {
 function replyOnly(r: Rec): boolean {
   const sig = signals(r);
   const only = sig.pr.ci !== "red" && sig.pr.mergeable !== "conflict" && sig.pr.review !== "changes_requested" && !sig.item.draft;
-  return r.seed.author === ME && only && !laneOwned(r) && !!TALK.get(r.id)?.some((x) => x.waiting_on_you);
+  return mineOf(r.seed) && only && !laneOwned(r) && !!TALK.get(r.id)?.some((x) => x.waiting_on_you);
 }
 
 // As Desk.queueCard(): a Now or Today card, with its AI review.
@@ -1989,15 +2024,15 @@ function top(c: Card): Card {
   // The part, as Desk.queueCard() says it.
   const kind = s.kind ?? "pr";
   const asked = kind === "pr" && !c.draft && signals(r).me.requested;
-  const group = c.handed_back ? "back" : kind === "pr" && s.author === ME ? "mine" : asked ? "review" : "other";
+  const group = c.handed_back ? "back" : kind === "pr" && mineOf(s) ? "mine" : asked ? "review" : "other";
   const out: Card = { ...c, preflight: preflightOf(r), group };
-  if (s.author === ME && kind === "pr" && replyOnly(r)) out.cta = "reply";
+  if (mineOf(s) && kind === "pr" && replyOnly(r)) out.cta = "reply";
   return out;
 }
 
 // As Desk.preflight().
 function preflightOf(r: Rec): Preflight {
-  if ((r.seed.kind ?? "pr") !== "pr" || r.seed.author === ME || r.seed.resolved) return { state: "none" };
+  if ((r.seed.kind ?? "pr") !== "pr" || mineOf(r.seed) || r.seed.resolved) return { state: "none" };
   const ai = reviews.get(r.id);
   const got = ai
     ? {
@@ -2027,7 +2062,7 @@ function preflightOf(r: Rec): Preflight {
 const laneNotes = new Map<string, { text: string; at: string }>();
 for (const r of recs) if (r.seed.fly?.note) laneNotes.set(r.id, { text: r.seed.fly.note[0], at: iso(r.seed.fly.note[1]) });
 
-const inFlight = (r: Rec) => !!r.state.inflight_at && r.seed.author === ME && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
+const inFlight = (r: Rec) => !!r.state.inflight_at && mineOf(r.seed) && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
 const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
 // Another PR blocks it and the rules keep it in Blocked: the hand-back waits there until that PR merges.
 const handedBack = (r: Rec) =>
@@ -2093,7 +2128,7 @@ function laneRow(r: Rec): InflightRow {
 }
 
 function inflight(): InflightView {
-  const rows = recs.filter((r) => r.state.inflight_at && r.seed.author === ME).map(laneRow);
+  const rows = recs.filter((r) => r.state.inflight_at && mineOf(r.seed)).map(laneRow);
   const rank = (x: InflightRow) => Number(x.state !== "open");
   const lane = grouped(
     rows.sort((a, b) => rank(a) - rank(b) || b.card.updated_at.localeCompare(a.card.updated_at)),
@@ -2652,7 +2687,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
   else if (action === "seen") st.seen_at = now;
   else if (action === "inflight") {
-    if (r.seed.author !== ME || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
+    if (!mineOf(r.seed) || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
       throw new HttpError(409, `only your own open PRs are handed off for merge; ${r.id} isn't one`);
     if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
     if (r.seed.draft) throw new HttpError(409, `${r.id} is a draft: mark it ready first (a a)`);
@@ -3012,12 +3047,12 @@ function reviewView(r: Rec, ahead = false): ReviewView {
   const d = detail(r);
   if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
   const ended = r.seed.resolved === "merged" || r.seed.resolved === "closed";
-  const wants = (!d.ai || d.ai_stale) && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.author !== ME && !ended;
+  const wants = (!d.ai || d.ai_stale) && !generating.has(r.id) && !aiErrors.has(r.id) && d.card.by !== "you" && !ended;
   if (wants && autoAiOn() && !aiPaused && !ahead) {
     void generate(r).catch(() => {});
     d.generating = true;
   }
-  const mine = d.card.author === ME;
+  const mine = d.card.by === "you";
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
   return {
     card: replyOnly(r) ? { ...d.card, cta: "reply" } : d.card,
@@ -3616,7 +3651,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   const ready = /^\/api\/review\/(.+)\/ready$/.exec(url.pathname);
   if (ready && req.method === "POST") {
     const r = resolve(decodeURIComponent(ready[1]!));
-    if (r.seed.author !== ME || !r.seed.draft || r.seed.resolved) throw new HttpError(409, `${r.id} isn't an open draft of yours`);
+    if (!mineOf(r.seed) || !r.seed.draft || r.seed.resolved) throw new HttpError(409, `${r.id} isn't an open draft of yours`);
     const body = await readBody(req);
     const ids = [...((body.users as string[] | undefined) ?? []), ...((body.teams as string[] | undefined) ?? [])];
     r.seed.draft = false;
@@ -3645,7 +3680,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (askingFor && req.method === "POST") {
     const r = resolve(decodeURIComponent(askingFor[1]!));
     const { users, teams } = await readBody(req);
-    if (r.seed.author !== ME) throw new HttpError(409, `${r.id} isn't your PR`);
+    if (!mineOf(r.seed)) throw new HttpError(409, `${r.id} isn't your PR`);
     if (![users, teams].flat().filter(Boolean).length) throw new HttpError(400, "pick someone to ask");
     bump();
     return { ok: true };
@@ -3663,7 +3698,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   const asking = /^\/api\/reviewers\/(.+)$/.exec(url.pathname);
   if (asking && req.method === "GET") {
     const r = resolve(decodeURIComponent(asking[1]!));
-    if (r.seed.author !== ME) throw new HttpError(409, `${r.id} isn't your PR`);
+    if (!mineOf(r.seed)) throw new HttpError(409, `${r.id} isn't your PR`);
     const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
     return ROSTER.filter((x) => (q ? x.login.includes(q) || x.name.toLowerCase().includes(q) : x.suggested));
   }

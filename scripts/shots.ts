@@ -1025,6 +1025,17 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A draft Junior opened for you is yours: by you, Ready for review, among your PRs.
+    name: "queue-on-behalf",
+    go: async (page) => {
+      await at("#/")(page);
+      await unfold(page);
+      await page.evaluate(`document.querySelector('.queue [data-id="acme/api#4131"]').scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+    after: refold,
+  },
+  {
     // The end of the queue: its last rows and the fold line, then the window's edge.
     name: "queue-bottom",
     go: async (page) => {

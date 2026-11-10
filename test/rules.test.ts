@@ -9,8 +9,8 @@ import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
 const ctx = makeContext();
 
-const entry = (item: Item, o: Partial<Entry> = {}, c = ctx): Entry => {
-  const a = analyze(item, c, cfg, NOW);
+const entry = (item: Item, o: Partial<Entry> = {}, c = ctx, conf = cfg): Entry => {
+  const a = analyze(item, c, conf, NOW);
   return {
     id: item.id,
     signals: a.signals,
@@ -174,19 +174,19 @@ test("default review rules: an ask by name is hard whoever added it; close colla
   assert.deepEqual([b(5).bucket, b(5).why], ["later", "close collaborator: you engaged with 12 of their PRs in 90 days"]);
 });
 
-test("default review rules: a bot's PR is hidden, but one it opened for a person isn't, and one it opened for you is yours", () => {
+test("default review rules: a bot's PR is hidden, but one it opened for a person isn't, and one it opened for you (by a name you gave, or your login and assigned) is yours", () => {
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const asked = { review_requests: [{ reviewer: "ml-team", type: "team" as const, codeowner: false }] };
   const bot = { author: "sentry-junior", author_bot: true, ...asked };
   const items = [
     makeItem({ number: 1, author: "dependabot", author_bot: true, ...asked }),
     makeItem({ number: 2, ...bot, via: "Michelle Tran" }),
-    makeItem({ number: 3, ...bot, via: "Me Myself" }),
-    makeItem({ number: 4, ...bot, via: "@me" }),
+    makeItem({ number: 3, ...bot, via: "Me Myself", requester: "Me Myself" }),
+    makeItem({ number: 4, ...bot, via: "@me", requester: "@me", assignees: ["me"] }),
   ];
   const r = classify(
     review,
-    items.map((it) => entry(it, {}, makeContext({ name: "Me Myself" }))),
+    items.map((it) => entry(it, {}, makeContext({ name: "Me Myself" }), { ...cfg, signals: { ...cfg.signals, my_names: ["Me Myself"] } })),
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
   assert.deepEqual([b(1).bucket, b(1).why], ["hide", "bot PR"]);
@@ -350,7 +350,7 @@ test("the queue's order within Now or Today: handed back, close looks, then the 
     card(2, { preflight: { state: "ready", verdict: "skim" } }),
     card(3, { preflight: { state: "stale", verdict: "look" } }),
     card(4, { preflight: look }),
-    card(5, { author: "me", ci: "green", chips: ["approved"] }),
+    card(5, { author: "me", by: "you", ci: "green", chips: ["approved"] }),
     card(6, { ci: "red", chips: ["CI red"], preflight: look }),
     card(7, { demoted: "3 from PRs to review are urgent already" }),
     card(8, { preflight: { state: "ready", verdict: "skim", risk: "high" } }),
@@ -359,7 +359,7 @@ test("the queue's order within Now or Today: handed back, close looks, then the 
     card(10, { author: "me", handed_back: true, preflight: { state: "ready", verdict: "skip" } }),
   ];
   assert.deepEqual(
-    queueOrder(cards, "me").map((c) => c.id.split("#")[1]),
+    queueOrder(cards).map((c) => c.id.split("#")[1]),
     ["9", "10", "4", "8", "3", "7", "5", "2", "6", "1"],
   );
 });

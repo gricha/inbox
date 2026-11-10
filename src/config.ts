@@ -205,6 +205,7 @@ export function parseConfig(
       close_collaborator_min: settings["github.close_collaborator_min"],
       bots: settings["github.bots"],
       my_repos: settings["github.my_repos"],
+      my_names: settings["github.my_names"],
     },
     handoff: { prompt: settings["handoff.prompt"], mine: settings["handoff.mine"], issue: settings["handoff.issue"] },
     spaces,
@@ -232,6 +233,27 @@ export function migrateBotAsk(text: string): string | null {
   if (text.includes(BOT_ASK)) return null;
   const rule = /^([ \t]*)(\{ when = "me\.requested_direct && !me\.requested_by_bot", bucket = "now", why = "[^"\n]*", hard = true \}),?$/gm;
   const next = text.replaceAll(rule, (_, indent: string, head: string) => `${indent}${head},\n${indent}${BOT_ASK},`);
+  return next === text ? null : next;
+}
+
+// A bot's PR opened for you assigns you (docs/api.md → Opened for you): the Mentions board's search, so no extra one.
+const MY_PRS = [
+  `queries = ["is:pr is:open archived:false author:@me", "is:open archived:false assignee:@me -author:@me"]`,
+  `filter = "me.author"`,
+];
+
+// The first-run My PRs board lists a bot's PR opened for you too, only as written and with no filter of yours. Null if absent.
+export function migrateOnBehalf(text: string): string | null {
+  const next = text
+    .split(/(?=^\[\[boards\]\])/m)
+    .map((table) =>
+      /^filter\s*=/m.test(table)
+        ? table
+        : table.replace(/^([ \t]*)queries = \["is:pr is:open archived:false author:@me"\][ \t]*$/m, (_, indent: string) =>
+            MY_PRS.map((l) => indent + l).join("\n"),
+          ),
+    )
+    .join("");
   return next === text ? null : next;
 }
 
@@ -358,7 +380,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `id = ${toml(`${s.id}-mine`)}`,
       `space = ${toml(s.id)}`,
       `name = "My PRs"`,
-      `queries = ["is:pr is:open archived:false author:@me"]`,
+      ...MY_PRS,
       `sort = "updated"`,
       `caps = { now = 3, today = 6 }`,
       `default = "later"`,

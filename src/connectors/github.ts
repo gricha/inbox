@@ -19,6 +19,7 @@ import type { BuiltInAutomation, ConnectorStatus, Context, Item } from "../types
 import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
 import { botCheck } from "../signals.ts";
+import { onBehalf } from "../github/behalf.ts";
 import { report } from "../sentry.ts";
 
 const HOUR = 3_600_000;
@@ -46,12 +47,16 @@ interface Feed {
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
 
-const hitOf = (id: string, m: { node_id: string; kind: Item["kind"]; updated_at: string; author: string }): SearchHit => ({
+const hitOf = (
+  id: string,
+  m: { node_id: string; kind: Item["kind"]; updated_at: string; author: string; author_bot: boolean },
+): SearchHit => ({
   node_id: m.node_id,
   id,
   kind: m.kind,
   updated_at: m.updated_at,
   author: m.author,
+  author_bot: m.author_bot,
 });
 
 // A pass's boundary: a failure or a bug goes to `handle`; the desk stopping never gets here, an inner interrupt records nothing.
@@ -240,6 +245,24 @@ export class GitHubConnector implements Connector {
     });
   }
 
+  // A bot's PR opened for you is read as deeply and as often as your own: what the desk stored of it says whose it is.
+  private mine(hits: SearchHit[]): SearchHit[] {
+    const me = this.me().toLowerCase();
+    const signals = this.desk.loaded?.config.signals;
+    if (!signals) return hits;
+    const isBot = botCheck(signals.bots);
+    const bots = hits.filter((h) => h.kind === "pr" && h.author.toLowerCase() !== me && isBot(h.author, h.author_bot)).map((h) => h.id);
+    const stored = bots.length ? this.desk.store.itemsById(bots) : new Map<string, Item>();
+    return hits.map((h) => {
+      const it = stored.get(h.id);
+      return it && onBehalf(it, me, signals.my_names, isBot) ? { ...h, mine: true } : h;
+    });
+  }
+
+  private details(hits: SearchHit[]): Effect.Effect<Item[], GitHubRateLimited> {
+    return this.api.details(this.mine(hits), this.me());
+  }
+
   // Board query → expanded GitHub search string (null when it can't run, e.g. no collaborators yet).
   expandQuery(q: string, scope: string, loaded: LoadedConfig): string | null {
     const me = this.me();
@@ -360,13 +383,13 @@ export class GitHubConnector implements Connector {
         .filter((s) => s.pinned && !s.id.includes(":") && !hits.has(s.id) && meta.has(s.id))
         .map((s) => s.id);
       const pinned = [...desk.store.itemsById(off).values()].filter((i) => i.state === "open").map((i) => hitOf(i.id, meta.get(i.id)!));
-      const need = [...hits.values(), ...pinned].filter((h) => {
+      const need = this.mine([...hits.values(), ...pinned]).filter((h) => {
         const m = meta.get(h.id);
         if (!m || m.quiet || m.updated_at !== h.updated_at) return true;
-        const ttl = h.author.toLowerCase() === me || pinned.includes(h) ? 3 * 60_000 : 30 * 60_000;
+        const ttl = h.mine || h.author.toLowerCase() === me || pinned.some((x) => x.id === h.id) ? 3 * 60_000 : 30 * 60_000;
         return now.getTime() - Date.parse(m.detail_at) > ttl;
       });
-      const backfill = [...hits.values()].filter((h) => meta.get(h.id)?.lacks && !need.includes(h)).slice(0, BACKFILL);
+      const backfill = [...hits.values()].filter((h) => meta.get(h.id)?.lacks && !need.some((x) => x.id === h.id)).slice(0, BACKFILL);
       need.push(...backfill);
       // An item that left every search gets one refresh, so the desk learns it merged, closed or stopped asking you.
       // A failed search keeps what it had.
@@ -379,7 +402,7 @@ export class GitHubConnector implements Connector {
         // Only on the pass it left: an item kept to show as resolved was last listed before that.
         return m && (last === null || m.last_hit_at >= last) ? [hitOf(id, m)] : [];
       });
-      const items = need.length || drops.length ? yield* this.api.details([...need, ...drops], this.me()) : [];
+      const items = need.length || drops.length ? yield* this.details([...need, ...drops]) : [];
       desk.ingest(this, items);
       const keep = (id: string) => {
         const m = meta.get(id);
@@ -479,7 +502,7 @@ export class GitHubConnector implements Connector {
         }
         for (const it of old) want.set(it.id, hitOf(it.id, it));
         if (!want.size) continue;
-        const items = yield* this.api.details([...want.values()], this.me());
+        const items = yield* this.details([...want.values()]);
         desk.ingest(this, items, true);
         fetched += items.length;
       }
@@ -512,7 +535,7 @@ export class GitHubConnector implements Connector {
       const at = id.lastIndexOf("#");
       const hit = yield* this.api.lookup(id.slice(0, at), Number(id.slice(at + 1))).pipe(Effect.mapError(upstream));
       if (!hit) return yield* new NotFound({ message: `GitHub has no PR or issue ${id}` });
-      const [item] = yield* this.api.details([hit], this.me()).pipe(Effect.mapError(upstream));
+      const [item] = yield* this.details([hit]).pipe(Effect.mapError(upstream));
       if (!item) return yield* upstream(new GitHubNotFetched({ id: hit.id })); // details skips a batch that failed
       this.desk.ingest(this, [item]);
       return item.id;
@@ -527,7 +550,7 @@ export class GitHubConnector implements Connector {
       const m = desk.store.itemMeta().get(id);
       if (!m || this.stopped || Date.now() < this.pausedUntil) return Effect.void;
       return Effect.gen({ self: this }, function* () {
-        const items = yield* this.api.details([hitOf(id, m)], this.me());
+        const items = yield* this.details([hitOf(id, m)]);
         if (this.stopped) return;
         desk.ingest(this, items);
         desk.synced();
@@ -582,7 +605,7 @@ export class GitHubConnector implements Connector {
           }
         }
         // Before the cursor moves: if this fails, the next poll sees these threads again.
-        const items = refresh.size ? yield* this.api.details([...refresh.values()], this.me()) : [];
+        const items = refresh.size ? yield* this.details([...refresh.values()]) : [];
         // A minute before GitHub's clock: threads updated meanwhile come back, and `seen` skips them.
         const now = Date.parse(page.date ?? "") || started;
         this.feed.since = new Date(now - 60_000).toISOString();

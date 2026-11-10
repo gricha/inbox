@@ -697,7 +697,16 @@ test("on a bot's PR opened for you, your own review doesn't count as anyone revi
   const mine = { author: "me", author_bot: false, state: "commented" as const, at: hoursAgo(1), commit: "c1" };
   t.gh.items.set(
     "acme/web#8",
-    makeItem({ number: 8, repo: "acme/web", author: "junior[bot]", author_bot: true, via: "@me", ci: "green", reviews: [mine] }),
+    makeItem({
+      number: 8,
+      repo: "acme/web",
+      author: "junior[bot]",
+      author_bot: true,
+      requester: "@me",
+      assignees: ["me"],
+      ci: "green",
+      reviews: [mine],
+    }),
   );
   await run(t.desk.add("acme/web#8"));
   const s = runSync(t.desk.item("web#8")).signals;

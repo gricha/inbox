@@ -1,5 +1,6 @@
 // Turns a GitHub item plus facts about you into the signals rules can test.
 import { areaFiles } from "./areas.ts";
+import { onBehalf } from "./github/behalf.ts";
 import { approved, owesReply, waitsOf } from "./stage.ts";
 import type { Config, Context, FieldDoc, Item, ReviewState, Signals, Until } from "./types.ts";
 
@@ -104,7 +105,7 @@ export const FIELDS: FieldDoc[] = [
   },
   { path: "pr.my_area", type: "boolean", doc: "it changes code you work in (my_area_files >= 1)" },
   { path: "me.login", type: "string", doc: "your login" },
-  { path: "me.author", type: "boolean", doc: "you opened it, or a bot opened it for you (author.via)" },
+  { path: "me.author", type: "boolean", doc: "you opened it, or an agent's bot opened it for you (docs/api.md → Opened for you)" },
   { path: "me.assignee", type: "boolean", doc: "you are assigned" },
   { path: "me.requested", type: "boolean", doc: "a review is requested from you or one of your teams" },
   { path: "me.requested_direct", type: "boolean", doc: "a review is requested from you by name" },
@@ -152,8 +153,6 @@ export interface Analysis {
 }
 
 const lc = (s: string) => s.toLowerCase();
-// "greg.pstrucha", "@gricha" and "Greg Pstrucha" compare by their letters.
-const letters = (s: string) => lc(s).replaceAll(/[^\p{L}]/gu, "");
 const latest = (times: (string | null | undefined)[]): string | null =>
   times.reduce<string | null>((a, t) => (t && (!a || t > a) ? t : a), null);
 export const botCheck = (listed: string[]) => {
@@ -244,8 +243,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
   const via = authorBot ? (item.via ?? "") : "";
-  const viaMe = !!letters(via) && [ctx.me, ctx.name ?? ""].some((n) => letters(n) === letters(via));
-  const yours = isMe(author) || viaMe;
+  const yours = isMe(author) || onBehalf(item, ctx.me, cfg.signals.my_names, isBot);
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
   const myAreaFiles = areaFiles(item, ctx);
   const waitingOn =

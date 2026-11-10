@@ -6,6 +6,7 @@ export interface ItemMeta {
   node_id: string;
   kind: Item["kind"];
   author: string;
+  author_bot: boolean;
   updated_at: string;
   detail_at: string;
   last_hit_at: string; // the last time a search returned it
@@ -124,7 +125,7 @@ export class Store {
   itemMeta(): Map<string, ItemMeta> {
     const rows = this.db
       .prepare(
-        `SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, updated_at, detail_at, last_hit_at,
+        `SELECT id, node_id, json_extract(data, '$.kind') AS kind, json_extract(data, '$.author') AS author, json_extract(data, '$.author_bot') AS author_bot, updated_at, detail_at, last_hit_at,
           json_extract(data, '$.kind') = 'pr' AND (json_type(data, '$.head_ref') IS NULL OR json_type(data, '$.default_branch') IS NULL
             OR json_type(data, '$.retargeted') IS NULL OR json_type(data, '$.requires') IS NULL) AS lacks, said IS NOT NULL AS quiet FROM items`,
       )
@@ -135,6 +136,7 @@ export class Store {
           node_id: r.node_id as string,
           kind: r.kind as Item["kind"],
           author: r.author as string,
+          author_bot: r.author_bot === 1,
           updated_at: r.updated_at as string,
           detail_at: r.detail_at as string,
           last_hit_at: r.last_hit_at as string,

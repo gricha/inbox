@@ -181,3 +181,33 @@ test("a desk that couldn't read your GitHub context writes no first config: init
   );
   assert.equal(fs.existsSync(path.join(home, "config.toml")), false);
 });
+
+test("a bot's PR opened for you is read as deeply and as often as your own, once the desk knows whose it is", async (c) => {
+  const junior = { author: "sentry-junior", author_bot: true, requester: "@me" };
+  const t = await setup([
+    makeItem({ number: 1, ...junior, assignees: ["me"] }),
+    makeItem({ number: 2, ...junior, requester: "@dana", assignees: ["dana"] }),
+  ]);
+  c.after(t.cleanup);
+  t.gh.route = (q) => (q.includes("assignee:@me") ? ["acme/api#1", "acme/api#2"] : []);
+  const seen: [string, boolean][] = [];
+  const details = t.gh.details.bind(t.gh);
+  t.gh.details = (hits) => {
+    seen.push(...hits.map((h): [string, boolean] => [h.id, !!h.mine]));
+    return details(hits);
+  };
+  await run(t.desk.sync());
+  assert.deepEqual(
+    seen,
+    [
+      ["acme/api#1", false],
+      ["acme/api#2", false],
+    ],
+    "the first read can't know yet",
+  );
+  assert.equal(runSync(t.desk.item("api#1")).card.by, "you");
+  seen.length = 0;
+  t.setNow(new Date(NOW.getTime() + 4 * 60_000));
+  await run(t.desk.sync());
+  assert.deepEqual(seen, [["acme/api#1", true]], "yours again after 3 minutes, deeply; someone else's waits 30");
+});

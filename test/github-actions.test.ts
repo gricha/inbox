@@ -206,12 +206,20 @@ test("request changes needs what you wrote, is pinned to the commit you read, an
   assert.deepEqual(writes(t, "acme/api#1"), ["request_changes"]);
 });
 
-test("a bot's PR whose untrusted via line names you gets no close, draft or merge", async (c) => {
-  const { t, w } = await withWriter(c, [reviewAsk(9, { author: "junior[bot]", author_bot: true, via: "@me", ...READY })]);
-  assert.equal(runSync(t.desk.item("api#9")).signals.me.author, true, "the rules still call it yours");
-  assert.equal(runSync(t.desk.item("api#9")).card.actions, undefined);
-  await assert.rejects(run(t.desk.githubAct("api#9", "merge")), (e: Error & { status: number }) => e.status === 409);
+test("a bot's PR opened for you gets your PR's writes; one whose via line alone names you, or that doesn't assign you, gets none", async (c) => {
+  const junior = { author: "junior[bot]", author_bot: true, ...READY };
+  const { t, w } = await withWriter(c, [
+    reviewAsk(9, { ...junior, requester: "@me", assignees: ["me"] }),
+    reviewAsk(10, { ...junior, via: "@me" }),
+    reviewAsk(11, { ...junior, requester: "@me" }),
+  ]);
+  const card = (id: string) => runSync(t.desk.item(id)).card;
+  assert.deepEqual([card("api#9").by, card("api#9").actions], ["you", ["close", "draft", "merge"]]);
+  for (const id of ["api#10", "api#11"]) assert.deepEqual(card(id).actions, ["request_changes"], id);
+  await assert.rejects(run(t.desk.githubAct("api#10", "merge")), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(w.calls, []);
+  await run(t.desk.githubAct("api#9", "merge"));
+  assert.deepEqual(w.calls[0]?.[0], "merge");
 });
 
 test("a second write while the first's refresh still reads GitHub is refused, not sent twice", async (c) => {

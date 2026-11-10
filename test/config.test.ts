@@ -7,6 +7,7 @@ import {
   migrateConflict,
   migrateDrafts,
   migrateHard,
+  migrateOnBehalf,
   migrateWaitsConflict,
   parseConfig,
   spaceOf,
@@ -298,4 +299,19 @@ test("the template: Blocked is for your own PRs, first on My PRs, and no board o
     [],
     "someone else's blocked PR goes where its board's other rules put it",
   );
+});
+
+const MINE_NOW = `queries = ["is:pr is:open archived:false author:@me", "is:open archived:false assignee:@me -author:@me"]\nfilter = "me.author"`;
+const MINE_OLD = `queries = ["is:pr is:open archived:false author:@me"]`;
+
+test("My PRs lists a bot's PR opened for you: the board as first written gets the search and the filter, one with your filter or queries stays", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"] });
+  assert.equal(now.split(MINE_NOW).length - 1, 2, "both My PRs boards");
+  const old = now.replaceAll(MINE_NOW, MINE_OLD);
+  assert.equal(migrateOnBehalf(old), now);
+  assert.equal(migrateOnBehalf(now), null, "already there");
+  const filtered = old.replace(`${MINE_OLD}\nsort = "updated"`, `${MINE_OLD}\nfilter = "!item.draft"\nsort = "updated"`);
+  assert.notEqual(filtered, old);
+  assert.equal(migrateOnBehalf(filtered)!.split(MINE_NOW).length - 1, 1, "a board with a filter of yours is yours");
+  assert.ok(parseConfig(migrateOnBehalf(filtered)!).loaded);
 });

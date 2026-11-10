@@ -178,18 +178,19 @@ test("a CODEOWNERS ping that changes code you work in, one that doesn't, and one
   );
 });
 
-test("a bot's PR opened for you is yours: by your login or your name, whatever the punctuation", () => {
+test("a bot's PR opened for you is yours: its line names your login and it assigns you, or it names a name you gave", () => {
   const c = makeContext({ name: "Greg Pstrucha" });
-  const by = (via: string, author = "sentry-junior") => analyze(makeItem({ author, author_bot: true, via }), c, cfg, NOW).signals;
-  for (const via of ["greg.pstrucha", "@me", "Greg Pstrucha"]) {
-    const s = by(via);
-    assert.deepEqual([s.me.author, s.author.me, s.author.via, s.author.bot], [true, true, via, true], via);
-  }
-  assert.deepEqual([by("Michelle Tran").me.author, by("Michelle Tran").author.via], [false, "Michelle Tran"]);
-  assert.equal(by("").me.author, false);
-  assert.equal(by("...").me.author, false, "no letters is nobody");
-  const human = analyze(makeItem({ author: "carol", via: "greg.pstrucha" }), c, cfg, NOW).signals;
-  assert.deepEqual([human.me.author, human.author.via], [false, ""], "only a bot opens PRs for people");
+  const named = { ...cfg, signals: { ...cfg.signals, my_names: ["greg.pstrucha"] } };
+  const by = (o: Partial<Item>, conf = cfg) => analyze(makeItem({ author: "sentry-junior", author_bot: true, ...o }), c, conf, NOW).signals;
+  const s = by({ requester: "@me", assignees: ["me"], via: "@me" });
+  assert.deepEqual([s.me.author, s.author.me, s.author.via, s.author.bot], [true, true, "@me", true]);
+  assert.equal(by({ requester: "greg.pstrucha" }, named).me.author, true, "a name you gave");
+  assert.equal(by({ requester: "greg.pstrucha" }).me.author, false, "your GitHub name alone isn't yours: anyone may share it");
+  assert.equal(by({ via: "Greg Pstrucha" }).me.author, false, "a via line alone");
+  assert.equal(by({ requester: "@me" }).me.author, false, "not assigned to you");
+  assert.equal(by({ requester: "@dana", assignees: ["me"] }).me.author, false, "opened for someone else");
+  const human = analyze(makeItem({ author: "carol", requester: "@me", assignees: ["me"] }), c, cfg, NOW).signals;
+  assert.equal(human.me.author, false, "only a bot opens PRs for people");
 });
 
 test("stacked: a PR whose base isn't its repo's default branch; unknown until the default branch is", () => {

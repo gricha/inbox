@@ -1370,9 +1370,10 @@ async function telling(c: TestContext, items = [myPr(3), myPr(4), reviewAsk(7, {
   return { ...t, told, merged };
 }
 
-test("an ask says whose it is in the desk's words: my PR not handed off or in Merging, someone else's (read only), the issue, a bot's PR for me (someone else's until I hand it off, mine in Merging), a merged one says so", async (c) => {
+test("an ask says whose it is in the desk's words: my PR not handed off or in Merging, someone else's (read only), the issue, a bot's PR opened for me (mine), one whose via line alone names me (someone else's), a merged one says so", async (c) => {
   const bot = myPr(8, { author: "dependabot[bot]", author_bot: true, via: "@me", head_author: "dependabot[bot]" });
-  const t = await telling(c, [myPr(3), myPr(4), reviewAsk(7, { repo: "acme/web" }), bot, myPr(5)]);
+  const junior = myPr(6, { author: "sentry-junior", author_bot: true, requester: "@me", assignees: ["me"], head_author: "sentry-junior" });
+  const t = await telling(c, [myPr(3), myPr(4), reviewAsk(7, { repo: "acme/web" }), bot, myPr(5), junior]);
   t.gh.items.set(
     "acme/api#9",
     makeItem({ number: 9, kind: "issue", author: "carol", assignees: ["me"], url: "https://github.com/acme/api/issues/9" }),
@@ -1394,10 +1395,12 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
   assert.equal(
     await about("web#8"),
     "about someone else's PR acme/web#8 (https://github.com/acme/web/pull/8), read only: don't push to it or post on it",
-    "a bot's via alone never makes it mine",
+    "a bot's via line alone never makes it mine",
   );
-  runSync(t.desk.act("web#8", "inflight"));
-  assert.equal(await about("web#8"), "about my PR acme/web#8 (https://github.com/acme/web/pull/8), in Merging", "only my m put it there");
+  assert.throws(() => runSync(t.desk.act("web#8", "inflight")), /only your own open PRs/);
+  assert.equal(await about("web#6"), "about my PR acme/web#6 (https://github.com/acme/web/pull/6), not handed off", "opened for me");
+  runSync(t.desk.act("web#6", "inflight"));
+  assert.equal(await about("web#6"), "about my PR acme/web#6 (https://github.com/acme/web/pull/6), in Merging");
   assert.equal(await about("web#5"), "about my PR acme/web#5 (https://github.com/acme/web/pull/5), merged");
 });
 
