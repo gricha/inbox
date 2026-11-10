@@ -15,7 +15,7 @@ export const GITHUB_AUTOMATIONS: readonly BuiltInAutomation[] = [
     on: true,
     schedule: "weekdays hourly",
     prompt: "",
-    when: "me.author && !item.draft && !pr.blocked && pr.ready_weekday_hours >= 24 && len(pr.people_requested) == 0 && len(pr.reviewers) == 0",
+    when: "me.author && !item.draft && !pr.blocked && !pr.review_optional && pr.ready_weekday_hours >= 24 && len(pr.people_requested) == 0 && len(pr.reviewers) == 0",
     decide: "rule",
     rule: { do: "add", why: "nobody asked by name for a workday" },
   },

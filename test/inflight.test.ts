@@ -636,7 +636,7 @@ test("a PR in Merging nobody's asked to review any more comes back to you on the
 });
 
 test("in a repo that needs no review, your ready PR nobody's asked is handed off beside Add reviewers; where review is required it isn't", async (c) => {
-  const free = { ci: "pending" as const, review_requests: [], review_decision: "none" as const };
+  const free: Partial<Item> = { ci: "pending" as const, review_requests: [], review_decision: "none" as const };
   const t = await setup(
     [
       myPr(3, free), // terraform-sandboxes: GitHub gives no review decision
@@ -831,4 +831,30 @@ test("a Merging PR whose required PR closed without merging says so, and the coo
   const row = runSync(t.desk.inflight()).rows.find((r) => r.card.id === "acme/web#9")!;
   assert.deepEqual([row.waits_on, row.requires_closed], ["needs api#5, closed without merging", ["api#5"]]);
   assert.deepEqual(woke, [["acme/web#9", "needs api#5, closed without merging"]]);
+});
+
+test("in a repo that needs no review, your green PR is ready to merge, and one that conflicts goes to the coordinator to rebase as an approved one does", async (c) => {
+  const free: Partial<Item> = {
+    ci: "green",
+    review_decision: "none",
+    mergeable: "clean",
+    base: "main",
+    default_branch: "main",
+    review_requests: [],
+  };
+  const t = await setup([myPr(6, free)], { settings: { "policy.judge": false, "notify.quiet": "" } });
+  c.after(t.cleanup);
+  t.desk.store.set("coordinator_bg", SAVED);
+  const woke: [string, string][] = [];
+  t.desk.coordinator.wake = (id, what) => {
+    woke.push([id, what]);
+  };
+  t.desk.coordinator.stop = () => {};
+  await run(t.desk.sync());
+  const card = runSync(t.desk.item("acme/web#6")).card;
+  assert.deepEqual([card.bucket, card.why], ["today", "green, and its repo needs no review: ready to merge"]);
+  const it = t.gh.items.get("acme/web#6")!;
+  t.gh.items.set(it.id, { ...it, mergeable: "conflict", updated_at: hoursAgo(0.5) });
+  await run(t.desk.sync());
+  assert.deepEqual(woke, [["acme/web#6", REBASE]]);
 });

@@ -313,17 +313,17 @@ test("a config shaped as the owner's migrates losslessly", () => {
     boards.map((b) => [b.id, b.builtin ?? null, b.off ?? [], b.rules.filter((r) => r.own !== undefined).length]),
     [
       ["acme-review", "review", [], 0],
-      ["acme-mine", "mine", [], 0],
+      ["acme-mine", "mine", ["no-review-ready"], 0], // a rule added since the copy: off, so nothing moves
       ["acme-mentions", "mentions", [], 0],
       ["acme-collaborators", "collaborators", [], 0],
       ["acme-watching", null, [], 0],
       ["personal-review", "review", [], 0],
-      ["personal-mine", "mine", [], 0],
+      ["personal-mine", "mine", ["no-review-ready"], 0],
       ["personal-mentions", "issues", [], 0],
     ],
   );
   // Only the rules lists change: every other line is as it was.
-  const kept = (t: string) => t.replaceAll(/^rules = \[\n[\s\S]*?^\]\n|^builtin = .*\n/gm, "");
+  const kept = (t: string) => t.replaceAll(/^rules = \[\n[\s\S]*?^\]\n|^builtin = .*\n|^off = .*\n/gm, "");
   assert.equal(kept(next), kept(text));
   assert.ok(samePlacements(text, next) > 10000);
 });

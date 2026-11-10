@@ -94,6 +94,12 @@ export const GITHUB_RULES: Readonly<Record<string, BuiltInRules>> = {
         bucket: "today",
         why: "approved and green: ready to merge",
       },
+      {
+        id: "no-review-ready",
+        when: "pr.review_optional && pr.review != 'changes_requested' && pr.ci == 'green'",
+        bucket: "today",
+        why: "green, and its repo needs no review: ready to merge",
+      },
       // A conflict doesn't take it out: it still waits on its reviews, and your agent only rebases a PR that's approved.
       {
         id: "waits-on-review",

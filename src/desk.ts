@@ -2907,7 +2907,7 @@ export class Desk {
         e.analysis.signals.me.author &&
         !e.analysis.signals.pr.blocked && // a blocked PR isn't ready to merge
         !it.draft &&
-        it.review_decision === "approved" &&
+        (it.review_decision === "approved" || e.analysis.signals.pr.review_optional) && // a repo that needs no review never approves
         it.ci !== "red" && // GitHub runs no pull_request CI on a conflicting PR
         it.mergeable === "conflict"
       ) {
@@ -3037,7 +3037,7 @@ export class Desk {
   // Your PR nobody's asked to review, past the moments a workflow or CODEOWNERS takes to ask someone.
   stuckUnasked(e: Entry): boolean {
     const sig = e.analysis.signals;
-    return sig.me.author && sig.pr.unasked && sig.item.updated_hours >= UNASKED_AFTER;
+    return sig.me.author && sig.pr.unasked && !sig.pr.review_optional && sig.item.updated_hours >= UNASKED_AFTER; // no review needed: nothing's stuck
   }
 
   // pr.unasked as your draft will read once it's ready: nobody was asked while it was a draft either. Ready for review
