@@ -11,7 +11,18 @@ import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
 import { describe, sortKey, textHash } from "./judge.ts";
 import { BadRequest, ClaudeBadOutput, DecisionModelDown, messageOf, NotFound, type FsError } from "./errors.ts";
-import { agentDown, askAgent, claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, makeAgentDir, runCommand } from "./review.ts";
+import {
+  agentDown,
+  askAgent,
+  claudeCommand,
+  claudeEnvelope,
+  claudeMissing,
+  claudeSpawn,
+  codexRun,
+  deskMcp,
+  makeAgentDir,
+  runCommand,
+} from "./review.ts";
 import {
   ACTIVITY_KINDS,
   EVENT,
@@ -47,6 +58,10 @@ const AT_ONCE = 4; // decision requests in flight: one per item
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 // The desk's MCP server, and its name before the rename to Inbox, which an agent connected then keeps until the desk renames it.
 const desks = (tools: string[]) => ["inbox", "review-desk"].flatMap((s) => tools.map((t) => `mcp__${s}__desk_${t}`));
+const READ_TOOLS = ["list", "item", "overview", "events", "brief", "merging"];
+// Codex's run has only these: no shell, no web, no MCP server but the desk's.
+const CODEX_TOOLS =
+  "- On this run you have the desk's read tools (desk_list, desk_item, desk_overview, desk_events, desk_brief, desk_merging) and nothing else: no shell, no gh, no web.";
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
 // allowed, say). The desk adds what it lists, so it reads the desk too.
 const ALLOW = [
@@ -69,7 +84,7 @@ const ALLOW = [
     "release view",
     "repo view",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(["list", "item", "overview", "events", "brief", "merging"]),
+  ...desks(READ_TOOLS),
 ];
 // Even where your settings allow more: nothing that writes as you, pushes, merges or edits files, and none of the desk's writes.
 const DENY = [
@@ -812,6 +827,7 @@ export class Automations {
   // An agent: your own Claude Code with read-only tools, handed the items when there are any; it may look further.
   byAgent(a: Automation, run: AutomationRun, last: AutomationRun | null, passed: string[] | null, batch?: Batch) {
     return Effect.gen({ self: this }, function* () {
+      if (this.desk.agent() === "codex") return yield* this.byCodex(a, run, last, passed, batch);
       const handed = passed?.slice(0, ITEMS_MAX) ?? null;
       const spawnAs = yield* claudeSpawn(claudeCommand(), [
         "-p",
@@ -836,7 +852,33 @@ export class Automations {
       if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
       run.session = sessionOf(out);
       const env = yield* claudeEnvelope(out);
-      const answer = (env.answer ?? {}) as { summary?: unknown; items?: unknown };
+      return yield* this.took(a, run, env.answer, out, passed);
+    });
+  }
+
+  // On Codex: no shell, since Codex can't hold one to gh's reads, so only the desk's read tools, in a read-only sandbox.
+  byCodex(a: Automation, run: AutomationRun, last: AutomationRun | null, passed: string[] | null, batch?: Batch) {
+    return Effect.gen({ self: this }, function* () {
+      const url = yield* deskMcp(this.desk.mcpUrl);
+      const handed = passed?.slice(0, ITEMS_MAX) ?? null;
+      const said = [prompt(a, run.at, last, handed && this.fence(handed, batch?.happened)), CODEX_TOOLS].join("\n");
+      const got = yield* codexRun(said, {
+        dir: yield* this.dir(),
+        schema: schemaFor(canOf(a)),
+        desk: { url, tools: READ_TOOLS.map((t) => `desk_${t}`) },
+        timeout: TIMEOUT,
+      });
+      if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
+      run.session = got.session;
+      run.agent = "codex";
+      return yield* this.took(a, run, got.answer, JSON.stringify(got.answer), passed);
+    });
+  }
+
+  // What an agent's run answered: its summary, and each item it listed through apply().
+  took(a: Automation, run: AutomationRun, said: unknown, out: string, passed: string[] | null) {
+    return Effect.gen({ self: this }, function* () {
+      const answer = (said ?? {}) as { summary?: unknown; items?: unknown };
       if (typeof answer.summary !== "string")
         return yield* new ClaudeBadOutput({ message: "the run gave no answer: no summary and no list", excerpt: out.slice(0, 500) });
       run.summary = answer.summary.trim();

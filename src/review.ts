@@ -561,19 +561,19 @@ const CODEX_OFF = [
   "memories",
 ];
 const codexOff = CODEX_OFF.flatMap((f) => ["--disable", f]);
-const codexArgs = (dir: string, schema: string, out: string, servers: string[]): string[] => [
+const codexArgs = (dir: string, schema: string, out: string, mcp: string[], persist: boolean): string[] => [
   "exec",
   "--json",
   "--sandbox",
   "read-only",
-  "--ephemeral",
+  ...(persist ? [] : ["--ephemeral"]),
   "--skip-git-repo-check",
   "-C",
   dir,
   ...codexOff,
   "-c",
   'web_search="disabled"',
-  ...servers.flatMap((name) => ["-c", `mcp_servers.${tomlKey(name)}.enabled=false`]),
+  ...mcp,
   "-c",
   'approval_policy="never"',
   "--output-schema",
@@ -587,7 +587,7 @@ const codexArgs = (dir: string, schema: string, out: string, servers: string[]):
 export const tomlKey = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name));
 
 const SERVERS_TTL = 5 * 60_000;
-let servers: { command: string; at: number; names: string[] } | null = null;
+let servers: { command: string; at: number; listed: Listed[] } | null = null;
 // Another agent chosen (Settings → Agent): the next Codex call lists its servers afresh.
 export function forgetCodexServers(): void {
   servers = null;
@@ -596,7 +596,7 @@ export function forgetCodexServers(): void {
 // The MCP servers codex would load with the features above off (plugins' own servers go with plugins): each to turn off.
 // A list that fails or can't be read refuses the call, so a Codex call never runs with a server reachable.
 const codexServers = Effect.fnUntraced(function* (command: string, dir: string) {
-  if (servers?.command === command && Date.now() - servers.at < SERVERS_TTL) return servers.names;
+  if (servers?.command === command && Date.now() - servers.at < SERVERS_TTL) return servers.listed;
   const spawnAs = yield* claudeSpawn(command, [...codexOff, "mcp", "list", "--json"]);
   const out = yield* runCommand(spawnAs, { cwd: dir, timeout: 30_000, missing: codexMissing(command) }).pipe(
     Effect.catchTags({
@@ -605,47 +605,92 @@ const codexServers = Effect.fnUntraced(function* (command: string, dir: string) 
       CommandOutputTooLarge: (e) => Effect.fail(new CodexServersUnknown({ reason: e.message, cause: e })),
     }),
   );
-  const listed = Result.try({ try: (): unknown => JSON.parse(out), catch: (cause) => cause });
-  if (Result.isFailure(listed) || !enabledOf(listed.success))
+  const parsed = Result.try({ try: (): unknown => JSON.parse(out), catch: (cause) => cause });
+  const listed = Result.isFailure(parsed) ? null : listedOf(parsed.success);
+  if (!listed)
     return yield* new CodexServersUnknown({ reason: `\`codex mcp list --json\` printed ${JSON.stringify(out.trim().slice(0, 200))}` });
-  servers = { command, at: Date.now(), names: enabledOf(listed.success)! };
-  return servers.names;
+  servers = { command, at: Date.now(), listed };
+  return listed;
 });
 
-// `codex mcp list --json`: a list of servers ({ name, enabled }), or one keyed by name; anything else is unreadable.
-function enabledOf(list: unknown): string[] | null {
+interface Listed {
+  name: string;
+  enabled: boolean;
+  url: string | null; // a streamable HTTP server's
+}
+
+// `codex mcp list --json`: a list of servers ({ name, enabled, transport }), or one keyed by name; anything else is unreadable.
+function listedOf(list: unknown): Listed[] | null {
   const entries = Array.isArray(list)
     ? list.map((e) => [(e as { name?: unknown } | null)?.name, e] as const)
     : list && typeof list === "object"
       ? Object.entries(list)
       : null;
   if (!entries) return null;
-  const names: string[] = [];
+  const listed: Listed[] = [];
   for (const [name, e] of entries) {
     if (typeof name !== "string" || !name || !e || typeof e !== "object") return null;
-    if ((e as { enabled?: unknown }).enabled !== false) names.push(name);
+    const x = e as { enabled?: unknown; url?: unknown; transport?: { url?: unknown } };
+    const url = x.transport?.url ?? x.url;
+    listed.push({ name, enabled: x.enabled !== false, url: typeof url === "string" ? url : null });
   }
-  return names;
+  return listed;
 }
 
+// The desk's own MCP server, for a Codex run that may use it: its address and, to keep a run read only, the tools it may call.
+export interface DeskMcp {
+  url: string;
+  tools?: string[];
+}
+
+// A desk with no server has no MCP address to give Codex: a bug, since only a served desk runs agents.
+export const deskMcp = (url: string | null): Effect.Effect<string> =>
+  url ? Effect.succeed(url) : Effect.die(new Error("the desk's MCP address isn't known, so Codex can't be given its tools"));
+
+// The -c overrides that leave a Codex run only the desk's MCP server, if any: every other one turned off by name. Yours
+// named inbox is used when it is the desk's (the same address), else turned off with the rest and the desk's added as
+// inbox_desk, since a url merged into another transport's entry wouldn't parse.
+const codexMcp = Effect.fnUntraced(function* (command: string, dir: string, desk?: DeskMcp) {
+  const listed = yield* codexServers(command, dir);
+  const theirs = listed.find((s) => s.name === "inbox");
+  const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
+  const off = listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => s.name);
+  return [
+    ...off.flatMap((n) => ["-c", `mcp_servers.${tomlKey(n)}.enabled=false`]),
+    ...(desk
+      ? [
+          "-c",
+          `mcp_servers.${name}.url=${JSON.stringify(desk.url)}`,
+          "-c",
+          `mcp_servers.${name}.enabled=true`,
+          ...(desk.tools ? ["-c", `mcp_servers.${name}.enabled_tools=${JSON.stringify(desk.tools)}`] : []),
+        ]
+      : []),
+  ];
+});
+
 // The schema and the final message go through two files in the agent's directory, removed after the run however it ends.
-const askCodex = Effect.fn("askCodex")(function* (
+const askCodex = (prompt: string, opts: { command?: string } & AskOpts): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError> =>
+  Effect.map(codexRun(prompt, opts), ({ answer, model }) => ({ answer, model }));
+
+// A Codex run with the desk's MCP server (`desk`) keeps its session, as Claude Code's agent runs do, so it can be resumed.
+export const codexRun = Effect.fn("codexRun")(function* (
   prompt: string,
-  opts: { command?: string } & AskOpts,
-): Effect.fn.Return<ClaudeAnswer, CommandError | ClaudeError> {
+  opts: { command?: string; desk?: DeskMcp; timeout?: number } & AskOpts,
+): Effect.fn.Return<ClaudeAnswer & { session: string | null }, CommandError | ClaudeError> {
   const command = opts.command ?? codexCommand();
   const stem = path.join(opts.dir, `.codex-${randomBytes(6).toString("hex")}`);
   const schema = `${stem}.schema.json`;
   const out = `${stem}.answer.json`;
   const run = Effect.gen(function* () {
     // The agent's own directory, made by the desk: failing to write in it is a defect.
-    const off = yield* codexServers(command, opts.dir);
+    const mcp = yield* codexMcp(command, opts.dir, opts.desk);
     fs.writeFileSync(schema, JSON.stringify(opts.schema ?? SCHEMA));
-    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, off));
+    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, mcp, !!opts.desk));
     const events = yield* runCommand(spawnAs, {
       input: prompt,
       cwd: opts.dir,
-      timeout: TIMEOUT,
+      timeout: opts.timeout ?? TIMEOUT,
       stdoutOnError: true,
       missing: codexMissing(command),
     }).pipe(
@@ -655,7 +700,7 @@ const askCodex = Effect.fn("askCodex")(function* (
       ),
     );
     const last = fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "";
-    return yield* codexAnswer(events, last);
+    return { ...(yield* codexAnswer(events, last)), session: codexThread(events) };
   });
   return yield* run.pipe(
     Effect.ensuring(
@@ -666,6 +711,15 @@ const askCodex = Effect.fn("askCodex")(function* (
     ),
   );
 });
+
+// The thread `codex exec --json` says it started: its first event.
+function codexThread(events: string): string | null {
+  for (const line of events.split("\n")) {
+    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as { thread_id?: unknown } | null;
+    if (typeof e?.thread_id === "string" && e.thread_id) return e.thread_id;
+  }
+  return null;
+}
 
 const CODEX_LOGIN = /not logged in|\b401\b|unauthori[sz]ed|codex login|log ?in again|sign in again/i;
 const CODEX_LIMIT = /\b429\b|too many requests|usage limit|rate.?limit/i;

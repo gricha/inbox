@@ -1136,6 +1136,7 @@ export interface AutomationRun {
   summary: string; // the agent's: untrusted
   items: AutomationItem[];
   session: string | null; // the run's Claude Code session: claude --resume <id> shows what it did
+  agent?: "codex"; // run on Codex: codex resume <id> shows it
 }
 
 export interface AutomationItem {

@@ -255,6 +255,7 @@ export interface DeskOptions {
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
   writer?: GitHubWriter; // the desk's GitHub writes; without it they're off
   decisions?: string; // the Decisions API's URL, in place of OpenRouter's: tests point it at a local server
+  mcpUrl?: string; // its /mcp, which a Codex run is given as the desk's own MCP server
 }
 
 // Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
@@ -327,6 +328,7 @@ export class Desk {
   gh: GitHubConnector;
   connectors: Connector[];
   home: string;
+  mcpUrl: string | null;
   configPath: string;
   settingsPath: string;
   settings: Settings;
@@ -383,6 +385,7 @@ export class Desk {
 
   constructor(opts: DeskOptions) {
     this.home = opts.home;
+    this.mcpUrl = opts.mcpUrl ?? null;
     this.now = opts.now ?? (() => new Date());
     this.notifyFn = opts.notify ?? notify;
     this.log =

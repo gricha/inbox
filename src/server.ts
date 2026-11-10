@@ -1026,6 +1026,7 @@ export const startDesk = Effect.fnUntraced(function* (
     notify: opts.notify,
     review: { fetchPr, generate: generateReview },
     writer: opts.writer ?? createWriter({ log }),
+    mcpUrl: `http://localhost:${port}/mcp`,
   });
   const remote = new Remote(desk.store);
   const app = createApp(desk, port, remote);
