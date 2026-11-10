@@ -2077,7 +2077,7 @@ export class Desk {
       const e = snap.entries.get(id)!;
       const review = Effect.gen({ self: this }, function* () {
         if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
-        const pr = yield* this.prText(id);
+        const pr = { ...(yield* this.prText(id)), stack: this.stackLines(snap, id) };
         const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent());
         this.store.set(`review:${id}`, ai);
         this.jobs.done("ai_review", id);
@@ -2126,11 +2126,21 @@ export class Desk {
   }
 
   // Someone else's open PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
-  // An open PR Claude reviews ahead of time: someone else's, or yours once it's out of draft and not handed off for merge.
+  // An open PR Claude reviews ahead of time: someone else's, or yours, a draft too, while it's on your desk, not handed off.
   reviewable(e: Entry): boolean {
     const it = e.item;
     if (it.kind !== "pr" || it.state !== "open") return false;
-    return !e.analysis.signals.me.author || (!it.draft && !e.state.inflight_at);
+    return !e.analysis.signals.me.author || !e.state.inflight_at;
+  }
+
+  // Its stack, bottom first, for its review to say where it sits and what it adds; none when it's on its own.
+  stackLines(snap: Snapshot, id: string): string[] {
+    const st = this.stack(id, snap);
+    if (!st || st.line.length < 2) return [];
+    return [
+      `bottom first, on ${st.base}:`,
+      ...st.line.map((m) => `${m.current ? "-> this PR" : "-"} ${m.id} (${m.draft ? "draft" : m.state}): ${m.title}`),
+    ];
   }
 
   wantsAi(e: Entry, snap: Snapshot): boolean {

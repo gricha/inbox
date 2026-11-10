@@ -1514,16 +1514,15 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
   };
 }
 
-test("after a sync, other people's PRs in Now and Today get AI reviews two at a time; yours don't while a draft", async () => {
+test("after a sync, PRs in Now and Today get AI reviews two at a time, yours too, a draft included", async () => {
   const t = await setup([ask(1), ask(2), ask(3), { ...mine(4), draft: true }]);
   await t.sync();
   assert.equal(t.f.started.length, 2, "two at a time");
   assert.equal(t.desk.generating.size, 2);
   await t.f.release(t.f.started[0]!);
   assert.equal(t.f.started.length, 3, "a finished one makes room for the next");
-  for (const id of t.f.started.slice(1)) await t.f.release(id);
-  assert.equal(t.desk.generating.size, 0);
-  assert.ok(!t.f.started.includes("acme/web#4"), "never your own draft");
+  while (t.desk.generating.size) await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
+  assert.ok(t.f.started.includes("acme/web#4"), "your own draft too: it's on your desk");
   assert.equal(t.f.fetched.length, 4, "one diff fetch per PR on the main page, yours too");
 
   assert.equal(runSync(t.desk.queue()).sections.now.find((c) => c.id === "acme/api#1")?.verdict, "skim");
@@ -1531,7 +1530,7 @@ test("after a sync, other people's PRs in Now and Today get AI reviews two at a 
   assert.deepEqual(runSync(t.desk.item("api#1")).ai?.notes, [{ path: FILE.path, side: "new", line: 11, body: "Caps the rows." }]);
 
   await t.sync();
-  assert.equal(t.f.started.length, 3, "kept per commit: another sync asks for nothing");
+  assert.equal(t.f.started.length, 4, "kept per commit: another sync asks for nothing");
   t.gh.items.set("acme/api#1", { ...ask(1), head_oid: "h1b", updated_at: hoursAgo(0) });
   await t.sync();
   assert.equal(runSync(t.desk.item("api#1")).ai_stale, true);
@@ -1540,7 +1539,7 @@ test("after a sync, other people's PRs in Now and Today get AI reviews two at a 
     null,
     "the verdict was for the old commit",
   );
-  assert.equal(t.f.started.length, 4, "a new commit gets a new review");
+  assert.equal(t.f.started.length, 5, "a new commit gets a new review");
   assert.deepEqual(t.f.fetched.slice(-1), ["acme/api#1@h1b"], "and a fresh diff");
   await t.f.release("acme/api#1");
   t.cleanup();
@@ -1806,7 +1805,7 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
     author: "carol",
     review_requests: [{ reviewer: "me", type: "user", codeowner: false }],
   });
-  const t = await setup([ask(1), ask(2), ask(3), { ...mine(4), draft: true }, issue]);
+  const t = await setup([ask(1), ask(2), ask(3), issue]);
   await t.sync();
   const card = (id: string) => {
     const q = runSync(t.desk.queue());
@@ -1818,7 +1817,6 @@ test("someone else's PR reaches the queue once Claude has reviewed it; then its 
   assert.equal(card("acme/api#1"), undefined, "waiting its turn");
   assert.equal(runSync(t.desk.queue()).reviewing, 3);
   assert.equal(runSync(t.desk.focus()).reviewing, 3);
-  assert.deepEqual(pf("acme/web#4"), { state: "none" }, "your draft");
   assert.deepEqual(pf("acme/api#9"), { state: "none" }, "an issue");
 
   await t.f.release("acme/api#3");
@@ -2370,14 +2368,34 @@ test("a desk started inside a Claude Code session drops that session's variables
   assert.equal(own.ANTHROPIC_BASE_URL, "https://proxy.example");
 });
 
-test("your own PR gets an AI review once it's out of draft, and waits off the desk for it as others' do; not once it's handed off for merge", async () => {
-  const t = await setup([{ ...mine(4), ci: "green" }]);
+test("your own PR gets an AI review while it's on your desk, a draft too, and waits off the desk for it as others' do", async () => {
+  const t = await setup([{ ...mine(4), ci: "green", draft: true }]);
   await t.sync();
-  assert.deepEqual(t.f.started, ["acme/web#4"], "ready for review: reviewed");
+  assert.deepEqual(t.f.started, ["acme/web#4"], "your draft: reviewed");
   const on = () => [...runSync(t.desk.queue()).sections.now, ...runSync(t.desk.queue()).sections.today].some((c) => c.id === "acme/web#4");
   assert.equal(on(), false, "held until it's written");
   await t.f.release("acme/web#4");
   assert.equal(on(), true);
   assert.equal(runSync(t.desk.item("web#4")).ai?.summary, "Review of acme/web#4");
   t.cleanup();
+});
+
+test("a PR in a stack is reviewed in its context: the stack is in the prompt, fenced, and the summary says where it sits; yours is explained to you", () => {
+  const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
+  const theirs = makeItem({});
+  const s = analyze(theirs, makeContext(), cfg, NOW).signals;
+  const stack = ["bottom first, on main:", "- acme/api#1 (open): Add the leases table", "-> this PR acme/api#2 (draft): Use the leases"];
+  const p = buildPrompt(theirs, s, "", { body: "", files: [FILE], stack }, "TAG");
+  assert.match(p, /add one sentence on where it sits and what it adds over the PR below it/);
+  assert.ok(p.indexOf("stack, bottom first, on main:") > p.indexOf("<pr-TAG>"), "fenced: titles are GitHub text");
+  assert.ok(p.indexOf("-> this PR acme/api#2 (draft): Use the leases") < p.lastIndexOf("</pr-TAG>"));
+  assert.doesNotMatch(
+    buildPrompt(theirs, s, "", { body: "", files: [FILE] }, "TAG"),
+    /stack, bottom first|where it sits/,
+    "no stack, no line",
+  );
+  assert.match(p, /^You prepare a GitHub pull request for me to review/);
+  const mineItem = makeItem({ author: "me" });
+  const ms = analyze(mineItem, makeContext(), cfg, NOW).signals;
+  assert.match(buildPrompt(mineItem, ms, "", { body: "", files: [FILE], stack }, "TAG"), /^You explain a GitHub pull request me wrote/);
 });
