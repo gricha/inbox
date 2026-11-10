@@ -29,6 +29,7 @@ import type {
   PreviewResult,
   QueueView,
   Reviewer,
+  RemoteView,
   ReviewView,
   SettingsView,
   SettingValue,
@@ -222,6 +223,8 @@ export const api = {
   saveSettings: (patch: { set?: Record<string, SettingValue>; reset?: string[] }) =>
     call<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }>("PUT", "/api/settings", patch),
   agents: () => call<AgentStatus>("GET", "/api/agents"),
+  remote: () => call<RemoteView>("GET", "/api/remote"),
+  revokeDevice: (id: string) => call<{ ok: true }>("DELETE", `/api/devices/${encodeURIComponent(id)}`),
   connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
   policy: () => call<PolicyDoc>("GET", "/api/policy"),
   omarchy: () => call<OmarchyTheme | null>("GET", "/api/omarchy"),

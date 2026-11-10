@@ -113,6 +113,8 @@ export const SHOWN: Record<string, ((values: Values, app: Shell) => boolean) | u
   "app.open_at_login": inApp,
   "app.menu_bar_count": (_, app) => app?.platform === "darwin", // only macOS's tray draws a title beside the icon
   "app.source": inApp,
+  "app.tailscale": inApp, // the desk's own computer: a browser elsewhere is reached through it
+  "app.tailscale_login": inApp,
 };
 
 // Rows greyed while another setting leaves them nothing to do, by key.

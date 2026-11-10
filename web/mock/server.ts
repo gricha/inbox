@@ -78,6 +78,7 @@ import type {
   Until,
   Job,
   Work,
+  RemoteView,
 } from "../../src/types.ts";
 import { COORDINATOR_NAME, RANK, SECRET_SET, UNTIL } from "../../src/types.ts";
 
@@ -3336,6 +3337,30 @@ const settingsView = (): SettingsView => ({
   },
 });
 
+// Settings → This device's Tailscale rows: on with the setting, two devices paired, one used in the last hour.
+const PAIRED: RemoteView["devices"] = [
+  {
+    id: "a1",
+    name: "Browser on iPhone",
+    kind: "browser",
+    created_at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+    last_used_at: new Date(Date.now() - 40 * 60_000).toISOString(),
+  },
+  { id: "b2", name: "work-laptop", kind: "device", created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(), last_used_at: null },
+];
+const DEVICES = [...PAIRED];
+function remoteView(): RemoteView {
+  const on = settingsView().values["app.tailscale"] === true;
+  const url = on ? "https://desk.tail1234.ts.net" : null;
+  return {
+    on,
+    text: on ? `On at ${url}/, for you@example.com's paired devices.` : "Off.",
+    url,
+    login: on ? "you@example.com" : null,
+    devices: DEVICES,
+  };
+}
+
 // Same contract as Desk.putSettings: nothing is written if any value is invalid.
 function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boolean; errors: ConfigError[]; settings: SettingsView } {
   const errors: ConfigError[] = [];
@@ -3688,6 +3713,18 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return putSettings((body.set ?? {}) as Record<string, unknown>, (body.reset ?? []) as string[]);
   }
   if (route === "GET /api/agents") return agentStatus();
+  if (route === "GET /api/remote") return remoteView();
+  const device = /^\/api\/devices\/([^/]+)$/.exec(url.pathname);
+  if (device && req.method === "DELETE") {
+    const i = DEVICES.findIndex((d) => d.id === device[1]);
+    if (i < 0) throw new HttpError(404, `no paired device ${device[1]!}`);
+    DEVICES.splice(i, 1);
+    return { ok: true };
+  }
+  if (route === "POST /api/mock/devices") {
+    DEVICES.splice(0, DEVICES.length, ...PAIRED);
+    return { ok: true };
+  }
   if (route === "GET /api/policy") return policyDoc();
   if (route === "GET /api/omarchy") return null; // not an Omarchy machine: the shots answer for one
   if (route === "PUT /api/policy") {

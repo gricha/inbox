@@ -17,13 +17,14 @@ import type {
   GitHubStatus,
   JudgeStatus,
   PolicyDoc,
+  RemoteView,
   SettingDef,
   SettingsView,
   SettingType,
   SettingValue,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { cls, githubTip, MAC, orgsLine, aiName } from "../format.ts";
+import { ago, aiName, cls, githubTip, MAC, orgsLine } from "../format.ts";
 import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
@@ -826,6 +827,118 @@ function ViewRow({ id, help, tone }: { id: string; help: ReactNode; tone?: "bad"
   );
 }
 
+// Under Use it from your other devices: where the desk serves and for whom, or why it can't, then each paired device with
+// Revoke. Turning on takes Tailscale a moment, so a row still on its way is read again.
+function RemoteRows({
+  active,
+  loads,
+  on,
+  now,
+  flash,
+}: {
+  active: boolean;
+  loads: number;
+  on: boolean;
+  now: number;
+  flash: (text: string) => void;
+}) {
+  const [view, setView] = useState<RemoteView | null>(null);
+  const [tick, setTick] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const stop = new AbortController();
+    if (active) runUi(api.remote().pipe(Effect.map(setView), Effect.ignore), { signal: stop.signal });
+    return () => {
+      stop.abort();
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads, on and tick only trigger a re-read
+  }, [active, loads, on, tick]);
+  const turning = !!view && (view.on !== on || (on && !view.url && view.text === "Off.") || (!on && !!view.url));
+  // Each answer still on its way sets a new view, which sets the next try.
+  useEffect(() => {
+    const t = turning
+      ? setTimeout(() => {
+          setTick((n) => n + 1);
+        }, 1000)
+      : undefined;
+    return () => {
+      clearTimeout(t);
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- view only times the next read
+  }, [turning, view]);
+
+  function revoke(id: string, name: string) {
+    setError(null);
+    runUi(
+      api.revokeDevice(id).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            setView((v) => v && { ...v, devices: v.devices.filter((d) => d.id !== id) });
+            flash(`Revoked ${name}`);
+          }),
+        ),
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            setError(e.message);
+          }),
+        ),
+      ),
+    );
+  }
+
+  if (!view) return null;
+  const failed = on && !view.url && !turning;
+  return (
+    <>
+      {on && (
+        <div className="setting s-status">
+          <div className="s-label-col">
+            <p className="s-label">{view.url ? `At ${view.url}` : failed ? "Can't serve over Tailscale" : "Starting"}</p>
+            <p className={cls("s-help", failed && "t-bad")}>
+              {view.url ? (
+                <>
+                  For {view.login}'s devices. To pair one, run <code>desk pair</code> on this computer.
+                </>
+              ) : failed ? (
+                withCode(view.text)
+              ) : (
+                "Asking Tailscale."
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+      {view.devices.map((d) => (
+        <div key={d.id} className="setting s-status">
+          <div className="s-label-col">
+            <p className="s-label">{d.name}</p>
+            <p className="s-help">
+              {d.kind === "browser" ? "A browser" : "A machine's agents"}, paired {ago(d.created_at, now)}
+              {d.last_used_at ? `, last used ${ago(d.last_used_at, now)}` : ", not used yet"}.
+            </p>
+          </div>
+          <div className="s-control">
+            <button
+              type="button"
+              className="act"
+              onClick={() => {
+                revoke(d.id, d.name);
+              }}
+            >
+              Revoke
+            </button>
+          </div>
+        </div>
+      ))}
+      {error && (
+        <div className="setting s-status">
+          <p className="s-help t-bad">{error}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
 // What a part's lookups get: the page's state.
 interface PartProps {
   view: SettingsView;
@@ -858,6 +971,9 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
 
 // Rows after a setting's own, by its key: your policy under the switch that sorts by it.
 const AFTER: Record<string, (p: PartProps) => ReactNode> = {
+  "app.tailscale": (p) => (
+    <RemoteRows active={p.active} loads={p.loads} on={p.view.values["app.tailscale"] === true} now={p.now} flash={p.flash} />
+  ),
   // The agent's own status under its name, and only while something needs you.
   "agent.harness": (p) => (
     <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.policy?.judge} now={p.now} flash={p.flash} />

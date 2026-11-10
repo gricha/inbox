@@ -3815,6 +3815,39 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Use it from your other devices, on: where it serves and for whom under it, then each paired device with Revoke, which
+    // takes it off at once; off, the address goes and the devices stay listed.
+    name: "settings-app-remote",
+    sizes: ["mac"],
+    writes: true,
+    go: async (page) => {
+      await at("#/settings/app")(page);
+      const row = page.locator('[id="row-app.tailscale"]');
+      if (!(await row.isVisible())) failures.push("settings-app-remote: no Use it from your other devices row");
+      await row.locator("input.switch").check();
+      const where = page.locator(".s-status", { hasText: "At https://desk.tail1234.ts.net" });
+      await where.waitFor({ timeout: 5000 }).catch(() => {});
+      if (!(await where.isVisible())) failures.push("settings-app-remote: no line saying where it serves");
+      else if (!(await where.textContent())?.includes("you@example.com's devices"))
+        failures.push(`settings-app-remote: the line reads ${JSON.stringify(await where.textContent())}`);
+      const devices = await page.locator(".s-status", { has: page.getByRole("button", { name: "Revoke" }) }).allTextContents();
+      if (devices.length !== 2 || !devices[0]!.includes("Browser on iPhone") || !devices[0]!.includes("last used 40m ago"))
+        failures.push(`settings-app-remote: the devices read ${JSON.stringify(devices)}`);
+      await page.evaluate(`document.getElementById("row-app.tailscale").scrollIntoView({ block: "center" })`);
+    },
+    after: async (page) => {
+      const laptop = page.locator(".s-status", { hasText: "work-laptop" });
+      await laptop.getByRole("button", { name: "Revoke" }).click();
+      await laptop.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+      if (await laptop.count()) failures.push("settings-app-remote: Revoke left the device");
+      await page.locator('[id="row-app.tailscale"] input.switch').uncheck();
+      const where = page.locator(".s-status", { hasText: "At https://" });
+      await where.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+      if (await where.count()) failures.push("settings-app-remote: off, it still says where it serves");
+      await page.evaluate(`fetch("/api/mock/devices", { method: "POST" })`);
+    },
+  },
+  {
     // Another app has the shortcut: the app's status() says so, and the line under the label is that, in red.
     name: "settings-app-desktop-taken",
     sizes: ["mac"],
