@@ -280,6 +280,7 @@ async function started(
   status: Record<string, unknown>,
   settings: Record<string, unknown>,
   installed = true,
+  tailscale = false,
 ) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-ts-home-"));
   fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, ...settings }));
@@ -291,7 +292,7 @@ async function started(
   const saved = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
   process.env.PATH = ts.dir; // no gh: syncs fail at once; only the fake tailscale is found
   delete process.env.GITHUB_TOKEN;
-  const srv = await startServer({ port: await unusedPort(), home, log: () => {} });
+  const srv = await startServer({ port: await unusedPort(), home, log: () => {}, tailscale });
   c.after(async () => {
     await srv.close();
     for (const [k, v] of Object.entries(saved)) {
@@ -354,4 +355,12 @@ test("with no tailscale installed, Settings says so", async (c) => {
   for (let i = 0; i < 100 && (await text()) === "Off."; i++) await sleep(20);
   assert.equal(await text(), "Tailscale isn't installed here: there's no tailscale command.");
   await srv.close();
+});
+
+test("desk serve --tailscale serves over Tailscale with the setting off, for that run", async (c) => {
+  const { srv, ts } = await started(c, RUNNING, {}, true, true);
+  await until(() => !!ts.served(), `tailscale serve ran: ${ts.calls().join("; ")}`);
+  assert.equal(srv.desk.settings["app.tailscale"], false);
+  await srv.close();
+  assert.equal(ts.served(), null);
 });

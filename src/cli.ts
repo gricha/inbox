@@ -30,7 +30,8 @@ export interface IO {
 
 const USAGE = `usage: desk <command>
 
-  serve [--port N] [--open]           run the desk server in the foreground
+  serve [--port N] [--open] [--tailscale]
+                                      run the desk server in the foreground; --tailscale: also for your other devices
   open                                open the UI in the browser
   status [--short]                    counts per board; --short prints the status-line text
   ls [board|focus] [--all] [--json]   list cards (default focus); --all adds blocked, later and fyi
@@ -82,7 +83,7 @@ const PAST: Record<string, string> = {
 };
 
 const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
-  serve: { port: { type: "string" }, open: { type: "boolean" } },
+  serve: { port: { type: "string" }, open: { type: "boolean" }, tailscale: { type: "boolean" } },
   status: { short: { type: "boolean" } },
   ls: { all: { type: "boolean" }, json: { type: "boolean" } },
   brief: { force: { type: "boolean" } },
@@ -543,7 +544,7 @@ const serve = Effect.fnUntraced(function* (x: Ctx) {
   // Before the server's modules load, so Sentry instruments them.
   yield* Effect.promise(() => startSentry());
   const { startDesk, refreshAgents } = yield* Effect.promise(() => import("./server.ts"));
-  const srv = yield* startDesk({ port, open: !!x.opts.open });
+  const srv = yield* startDesk({ port, open: !!x.opts.open, tailscale: !!x.opts.tailscale });
   const desk = srv.desk;
   // The checkout's desk restarts on src/ changes only, so a skill-only merge would wait for an unrelated one.
   watchFile(agents.SKILL_MD, { interval: 5000, persistent: false }, () => {
