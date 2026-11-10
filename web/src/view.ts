@@ -84,12 +84,14 @@ export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | und
 
 // Settings' parts, each a route (#/settings/<id>) and an item of the sidebar while you're in Settings: the core's, then under
 // a hairline one per plugin, holding its account, its settings and the automations it comes with.
-export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true }[] = [
+// automations: false for a plugin that comes with none.
+export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true; automations?: false }[] = [
   { id: "queue", name: "Inbox and notifications" },
   { id: "agent", name: "Agent" },
   { id: "automations", name: "Your automations" },
   { id: "app", name: "This device" },
   { id: "github", name: "GitHub", plugin: true },
+  { id: "sessions", name: "Sessions", plugin: true, automations: false },
 ];
 
 // An automation's own view in Settings ("automations/warden-issues", a plugin's "automations/github.pick-reviewer"): its id.

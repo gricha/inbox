@@ -198,6 +198,9 @@ test("blocked and stalled are read from what the session shows, and anything els
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash })), null, "busy and writing");
   const quiet = NOW.getTime() - 30 * MIN;
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash, written: quiet })), "stalled: no progress");
+  const fifteen = seen({ row: live({ status: "busy" }), tail: bash, written: NOW.getTime() - 15 * MIN });
+  assert.equal(says(fifteen), null);
+  assert.equal(classify(fifteen, NOW.getTime(), 10 * MIN)?.key.endsWith("no progress"), true, "sessions.quiet_minutes at 10");
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: tailOf(l.prompt("go"), l.retry()), written: quiet })), null, "retrying");
   assert.equal(
     says(seen({ row: live({ status: "busy" }), tail: tailOf(l.tool("a", "Task", { prompt: "dig" })), written: quiet })),
@@ -636,6 +639,18 @@ test("only the desk's window kicks or opens a session; anyone may read one", pos
   assert.equal((await post("kick", page)).status, 409, "a desktop session is the app's: Open only");
   const read = await app.request(`http://127.0.0.1:47823/api/sessions/${id}`);
   assert.equal(((await read.json()) as { name: string }).name, "Deploy");
+});
+
+test("with sessions.ask off, a turn that ends asking something isn't read by the model, and isn't on the Inbox", posix, async (c) => {
+  const m = machine(c);
+  const t = await deskOn(c, m);
+  fs.writeFileSync(path.join(t.home, "settings.json"), JSON.stringify({ "policy.judge": false, "sessions.ask": false }));
+  await run(t.desk.reloadSettings());
+  m.agents([{ pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.ask, name: "ship", status: "idle" }]);
+  const l = lines(S.ask, m.work, Date.now());
+  m.transcript(S.ask, [l.prompt("go"), l.said("All green.\nShould I push to main?")]);
+  await t.poll();
+  assert.deepEqual([m.asks().length, (await run(t.desk.focus())).sessions.length], [0, 0]);
 });
 
 test("off in Settings, it reads nothing and shows nothing", posix, async (c) => {

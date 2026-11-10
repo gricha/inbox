@@ -16,7 +16,6 @@ export const TAIL = 64 * 1024; // bytes of a transcript or rollout read, from it
 const POLL = 30_000;
 const RECENT = 3 * 24 * 3_600_000; // a session idle longer than this is let go
 const CLI_RECENT = 24 * 3_600_000; // a terminal's session no longer running, by its transcript
-const QUIET = 25 * 60_000; // busy with nothing written this long: stalled (a weak signal)
 const ASK_MAX = 2000; // characters of a turn's last message the model reads
 const ASKS_PER_POLL = 3;
 const LINE = 160;
@@ -418,14 +417,15 @@ function errorVerdict(err: ApiError, t: Tail, now: number): Extract<Verdict, { s
   return null;
 }
 
-export function classify(s: Seen, now: number): Verdict | null {
+// quiet: busy with nothing written this long is stalled, a weak signal (sessions.quiet_minutes).
+export function classify(s: Seen, now: number, quiet = 25 * 60_000): Verdict | null {
   const { row, tail: t, desktop: d } = s;
   const live = !!row?.pid && !!row.status;
   if (s.codex) {
     const c = s.codex;
     if (c.end === "complete" && c.text?.includes("?")) return { ask: c.text, since: c.at, key: c.key, excerpt: askLine(c.text) };
     const idle = now - Date.parse(c.at);
-    if (c.end === "open" && (s.written ?? 0) < now - QUIET && idle > QUIET)
+    if (c.end === "open" && (s.written ?? 0) < now - quiet && idle > quiet)
       return { state: "stalled", reason: "no progress", excerpt: "", since: c.at, resets_at: null, key: `${c.key}:quiet` };
     return null;
   }
@@ -459,8 +459,8 @@ export function classify(s: Seen, now: number): Verdict | null {
     return v("stalled", d.error_mark.category === "query_error" ? "turn failed" : "stopped mid-turn");
   if (t?.end === "open" && !live && row?.state !== "stopped") return v("stalled", "stopped mid-turn", t.pending?.line ?? "");
   // Weak: busy, nothing written for a while, not retrying, no subagent at work.
-  const quiet = s.written === null ? 0 : now - s.written;
-  if (live && row.status === "busy" && t && !t.retrying && quiet > QUIET && !["Task", "Agent"].includes(t.pending?.name ?? ""))
+  const still = s.written === null ? 0 : now - s.written;
+  if (live && row.status === "busy" && t && !t.retrying && still > quiet && !["Task", "Agent"].includes(t.pending?.name ?? ""))
     return { ...v("stalled", "no progress", t.pending?.line ?? ""), since: new Date(s.written!).toISOString() };
   // A turn that ended asking something, where nothing else read it: the model says whether it waits on you.
   if (t?.end === "turn" && t.text?.includes("?") && live && row.status === "idle" && s.kind === "cli")
@@ -664,8 +664,8 @@ export class Sessions {
       const next = new Map<string, Found>();
       let asks = 0;
       for (const s of seen) {
-        const v = classify(s, now);
-        if (!v) continue;
+        const v = classify(s, now, this.desk.settings["sessions.quiet_minutes"] * 60_000);
+        if (!v || ("ask" in v && !this.desk.settings["sessions.ask"])) continue;
         if ("state" in v) {
           next.set(SESSION_PREFIX + s.session_id, { seen: s, verdict: v });
           continue;

@@ -1207,7 +1207,7 @@ export function Settings({
                   {folded.map((d) => row(d, !open))}
                 </div>
               )}
-              {SETTINGS_PARTS.some((s) => s.plugin && s.id === x.id) && (
+              {SETTINGS_PARTS.some((s) => s.plugin && s.automations !== false && s.id === x.id) && (
                 <>
                   <h2 className="group-head">Automations</h2>
                   <div className="lines s-sheet">
