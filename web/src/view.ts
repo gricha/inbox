@@ -82,16 +82,34 @@ export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | und
   policy: { name: "Your policy", part: "agent" },
 };
 
-// An automation's own view in Settings ("automations/warden-issues"): its id, or null.
-export const automationOf = (section: string): string | null => /^automations\/([\w-]+)$/.exec(section)?.[1] ?? null;
+// Settings' parts, each a route (#/settings/<id>) and an item of the sidebar while you're in Settings: the core's, then under
+// a hairline one per plugin, holding its account, its settings and the automations it comes with.
+export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true }[] = [
+  { id: "queue", name: "Inbox and notifications" },
+  { id: "agent", name: "Agent" },
+  { id: "automations", name: "Your automations" },
+  { id: "app", name: "This device" },
+  { id: "github", name: "GitHub", plugin: true },
+];
 
-// Where a Settings view's back link and Esc go: the part it opened from, or the Automations tab; null on a tab itself.
-export const settingsBack = (section: string): string | null =>
-  SETTINGS_VIEWS[section]?.part ?? (automationOf(section) === null ? null : "automations");
+// An automation's own view in Settings ("automations/warden-issues", a plugin's "automations/github.pick-reviewer"): its id.
+export const automationOf = (section: string): string | null => /^automations\/([\w-]+(?:\.[\w-]+)?)$/.exec(section)?.[1] ?? null;
 
-// Settings' tab a section is on: Automations (its rows and each one's view), or the settings themselves.
-export const settingsTab = (section: string): "settings" | "automations" =>
-  section === "automations" || automationOf(section) !== null ? "automations" : "settings";
+// Where a Settings view's back link and Esc go: the part it opened from (a plugin's automation's, its plugin's); null on a part.
+export function settingsBack(section: string): string | null {
+  const view = SETTINGS_VIEWS[section]?.part;
+  if (view) return view;
+  const id = automationOf(section);
+  if (id === null) return null;
+  const plugin = id.includes(".") ? id.slice(0, id.indexOf(".")) : null;
+  return plugin && SETTINGS_PARTS.some((p) => p.plugin && p.id === plugin) ? plugin : "automations";
+}
+
+// The part a Settings route is on, which the sidebar marks: its own, or the one its view opened from.
+export const settingsPart = (section: string): string => settingsBack(section) ?? section;
+
+// A part's name, for the page's head and the way back to it.
+export const partName = (id: string): string => SETTINGS_PARTS.find((p) => p.id === id)?.name ?? "Settings";
 
 // What shows an automation run's session (Claude Code's, or Codex's): resumed in the automations folder, beside settings.json in the desk's home.
 export function resumeCommand(settingsPath: string, session: string, codex = false): string {
@@ -151,8 +169,8 @@ export function hotkeyHelp(
 }
 
 export function parseRoute(hash: string): Route {
-  const m = hash.match(/^#\/settings(?:\/([\w-]*(?:\/[\w-]+)?))?\/?$/);
-  if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : "github" };
+  const m = hash.match(/^#\/settings(?:\/([\w-]*(?:\/[\w-]+(?:\.[\w-]+)?)?))?\/?$/);
+  if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : SETTINGS_PARTS[0]!.id };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/later") return { name: "later" };

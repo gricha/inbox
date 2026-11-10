@@ -1,5 +1,5 @@
-import { cls, MOD } from "../format.ts";
-import { routeHash, settingsBack, settingsTab, type ListPage, type Route } from "../view.ts";
+import { MOD } from "../format.ts";
+import { partName, routeHash, settingsBack, type ListPage, type Route } from "../view.ts";
 
 const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
 export const PAGE_NAME: Record<ListPage, string> = {
@@ -10,14 +10,8 @@ export const PAGE_NAME: Record<ListPage, string> = {
   archive: "Archive",
 };
 
-// Settings' two tabs, links like the sidebar's pages: the one you're on in ink over a mark on the head's hairline.
-const TABS = [
-  { id: "settings", name: "Settings", href: "#/settings" },
-  { id: "automations", name: "Automations", href: "#/settings/automations" },
-] as const;
-
 // The page's own head, at the top of its column: a list's filter, a review's, a question's or a Settings view's way back,
-// Settings' tabs, or the page's name.
+// or the page's name (Merging's, a Settings part's: the sidebar lists Settings' parts).
 // In the desktop app it's the window's drag handle, its controls excepted.
 export function PageHead({
   route,
@@ -34,8 +28,7 @@ export function PageHead({
 }) {
   const inSettings = route.name === "settings";
   const part = inSettings ? settingsBack(route.section) : null;
-  const tab = inSettings ? settingsTab(route.section) : null;
-  const backTo = tab === "automations" ? "Automations" : "Settings";
+  const backTo = part ? partName(part) : "";
   return (
     <header className="page-head">
       {part ? (
@@ -45,14 +38,8 @@ export function PageHead({
           </svg>
           <span>{backTo}</span>
         </a>
-      ) : tab ? (
-        <nav className="head-tabs" aria-label="Settings">
-          {TABS.map((t) => (
-            <a key={t.id} className={cls("head-tab", t.id === tab && "on")} href={t.href} aria-current={t.id === tab ? "page" : undefined}>
-              {t.name}
-            </a>
-          ))}
-        </nav>
+      ) : inSettings ? (
+        <h1 className="head-name">{partName(route.section)}</h1>
       ) : route.name === "inflight" ? (
         <h1 className="head-name">Merging</h1>
       ) : route.name === "review" || route.name === "inquiry" ? (

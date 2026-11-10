@@ -695,11 +695,25 @@ p {
   padding: 6px 10px 24px;
 }
 
-/* Merging and the Archive sit under a hairline, below the pages you look at. */
+/* Merging and the Archive sit under a hairline, below the pages you look at; in Settings, the plugins' parts. */
 .side-sep {
   height: 1px;
   margin: 8px 10px;
   background: var(--rule);
+}
+
+/* In Settings, the way back to the Inbox above its parts: quieter than they are, its chevron by its word. */
+.side-nav .side-back {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: var(--pencil);
+}
+
+.side-back .i {
+  flex: none;
+  margin-left: -4px;
 }
 
 .side-item {
@@ -827,16 +841,9 @@ p.side-sync {
   -webkit-app-region: no-drag;
 }
 
-/* Settings' tabs: plain words on the page's text, as its name would be; the one you're on in ink over a mark on the head's
-   hairline, neutral as the sidebar's pill: it says where you are, not what to press. One weight, so nothing moves. */
-.head-tabs {
-  display: flex;
-  align-self: stretch;
-
-  /* The first one's words on the Settings parts' headings and labels: 5px more than a tab's 12px makes their 17px. */
-  margin-left: 5px;
-}
-
+/* Two words in a head, as the review's two orders: plain words at the page name's size; the one you're on in ink over a
+   mark on the head's hairline, neutral as the sidebar's pill: it says where you are, not what to press. One weight, so
+   nothing moves. */
 .head-tab {
   position: relative;
   display: flex;
@@ -3490,25 +3497,10 @@ p.side-sync {
 
 /* Settings ----------------------------------------------------------------- */
 
-/* A part: the Inbox's part heading over one sheet of rows; a jump to it stops just under the page head. */
-.s-part {
-  scroll-margin-top: 64px;
-}
-
-.s-part + .s-part {
-  margin-top: 28px;
-}
-
-/* A part's heading on its labels' edge: a row's 16px inside the sheet's 1px. */
+/* A part: one sheet of rows under the page head, which names it; a plugin's automations under their own heading after it. */
 .s-part > .group-head {
-  padding: 0 17px;
-}
-
-.s-skel .group-head .sk {
-  width: 6em;
-
-  /* A heading's line tall, as its words will be: the heading is a flex box, so no line box holds it open. */
-  margin-block: calc((1lh - 0.7em) / 2);
+  margin-top: 28px;
+  padding: 0 17px; /* on its labels' edge: a row's 16px inside the sheet's 1px */
 }
 
 .s-skel .sk-lines {
@@ -5305,7 +5297,7 @@ a.rv-part-row:hover {
   min-width: 0;
 }
 
-/* The diff's two orders, as Settings' tabs: the first word on the diff's edge. */
+/* The diff's two orders: the first word on the diff's edge. */
 .rv-views {
   display: flex;
   height: 34px;

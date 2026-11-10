@@ -45,7 +45,6 @@ import {
   routeHash,
   SETTINGS_VIEWS,
   settingsBack,
-  settingsTab,
   SHOWN,
   valueOf,
 } from "../view.ts";
@@ -1039,7 +1038,7 @@ export function Settings({
   onRulesDirty,
 }: {
   active: boolean;
-  section: string; // a part's id, automations (its tab), or a view's (rules, policy, automations/<id>)
+  section: string; // a part's id (automations: yours), or a view's (rules, policy, automations/<id>)
   view: SettingsView | null;
   now: number;
   loads: number;
@@ -1053,7 +1052,6 @@ export function Settings({
   const [more, setMore] = useState<Record<string, boolean>>({});
   const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const inView = settingsBack(section) !== null;
-  const tab = settingsTab(section);
   const au = useAutomations(active, loads, flash);
   // Who answers an automation's question: the decision model once its key is set, else Claude.
   const decisionModel = view?.values["agent.decision_key"] ? String(view.values["agent.decision_model"]) : null;
@@ -1090,33 +1088,12 @@ export function Settings({
     };
   }, [view, hotkey]);
 
-  // A tab of parts; a link to a part scrolls to it, each time you come to it, and a view or the Automations tab opens at its top.
+  // A part or a view opens at its top.
   const ready = view !== null;
-  const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const top = section === "github" || tab === "automations" || inView;
-    // escaped: a mistyped #/settings/github/x mustn't throw
-    const jump = () => {
-      if (top) window.scrollTo({ top: 0 });
-      else document.querySelector(`#${CSS.escape(`s-${section}`)}`)?.scrollIntoView({ block: "start" });
-    };
-    if (active && ready) jump();
-    // The parts above load their own rows after the page (Claude's status): it jumps again as they grow, until you scroll or a
-    // moment has passed.
-    const ro = new ResizeObserver(jump);
-    if (active && ready && !top && page.current) ro.observe(page.current);
-    const stop = () => {
-      ro.disconnect();
-    };
-    const t = setTimeout(stop, 2000);
-    const input = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
-    for (const e of input) window.addEventListener(e, stop, { once: true, passive: true });
-    return () => {
-      stop();
-      clearTimeout(t);
-      for (const e of input) window.removeEventListener(e, stop);
-    };
-  }, [active, section, ready, inView, tab]);
+    if (active && ready) window.scrollTo({ top: 0 });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new section only triggers the scroll
+  }, [active, section, ready]);
 
   // Back from a view to its part, focus goes to what opened it (its row's Edit, an automation's name or Review), so Tab goes on
   // from there; after App's route change, which blurs whatever had it.
@@ -1156,12 +1133,9 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div ref={page} className="s-page" hidden={inView || tab !== "settings"}>
+      <div className="s-page" hidden={inView || section === "automations"}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
-            <h2 className="group-head">
-              <span className="sk" />
-            </h2>
             <div className="lines s-sheet">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="setting" aria-hidden="true">
@@ -1207,10 +1181,7 @@ export function Settings({
           const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));
           const lead = LEAD[x.id];
           return (
-            <section key={x.id} id={`s-${x.id}`} className="s-part" aria-labelledby={`s-${x.id}-title`}>
-              <h2 id={`s-${x.id}-title`} className="group-head">
-                {x.title}
-              </h2>
+            <section key={x.id} id={`s-${x.id}`} className="s-part" aria-label={x.title} hidden={section !== x.id}>
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">
                   {lead?.(p)}
@@ -1239,9 +1210,9 @@ export function Settings({
           );
         })}
       </div>
-      {/* The tabs and the views stay mounted, so an unsaved draft in any survives leaving it and coming back. */}
-      <div className="s-page" hidden={inView || tab !== "automations"}>
-        <section id="s-automations" className="s-part" aria-label="Automations">
+      {/* The parts and the views stay mounted, so an unsaved draft in any survives leaving it and coming back. */}
+      <div className="s-page" hidden={section !== "automations"}>
+        <section id="s-automations" className="s-part" aria-label="Your automations">
           <div className="lines s-sheet">
             <AutomationRows au={au} now={now} />
           </div>

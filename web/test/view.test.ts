@@ -69,7 +69,9 @@ import {
   sections,
   walk,
   settingsBack,
-  settingsTab,
+  settingsPart,
+  partName,
+  SETTINGS_PARTS,
   SETTINGS_VIEWS,
   SHOWN,
   stops,
@@ -141,12 +143,12 @@ const queue = (): QueueView => ({
 test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute(""), { name: "queue" });
   assert.deepEqual(parseRoute("#/focus"), { name: "queue" });
-  assert.deepEqual(parseRoute("#/settings"), { name: "settings", section: "github" });
+  assert.deepEqual(parseRoute("#/settings"), { name: "settings", section: "queue" });
   assert.deepEqual(parseRoute("#/rules"), { name: "settings", section: "rules" });
   assert.equal(routeHash({ name: "settings", section: "rules" }), "#/settings/rules");
   assert.deepEqual(parseRoute(routeHash({ name: "settings", section: "app" })), { name: "settings", section: "app" });
   assert.equal(routeHash({ name: "queue" }), "#/");
-  assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "github" });
+  assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "queue" });
   assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
   assert.equal(routeHash({ name: "inflight" }), "#/inflight");
   assert.deepEqual(parseRoute(routeHash({ name: "later" })), { name: "later" });
@@ -198,22 +200,40 @@ test("an automation opens as a view inside Settings, from its own link, and goes
   assert.deepEqual(parseRoute("#/settings/automations/a/b"), { name: "queue" });
 });
 
-test("Settings is two tabs: Automations holds its rows and each automation's view, the settings tab the rest", () => {
-  const tab = (hash: string) => {
+test("Settings' parts are the sidebar's items, each a route: the core's, then the plugins'; old links land on their part", () => {
+  assert.deepEqual(
+    SETTINGS_PARTS.map((p) => `${p.plugin ? "plugin " : ""}${p.id}`),
+    ["queue", "agent", "automations", "app", "plugin github"],
+  );
+  const part = (hash: string) => {
     const r = parseRoute(hash);
-    return r.name === "settings" ? settingsTab(r.section) : null;
+    return r.name === "settings" ? settingsPart(r.section) : null;
   };
-  assert.equal(tab("#/settings"), "settings");
-  for (const hash of ["#/settings/github", "#/settings/agent", "#/settings/queue", "#/settings/app", "#/settings/notify"])
-    assert.equal(tab(hash), "settings");
-  // Rules and the policy open from the settings tab's rows, and go back to them.
-  assert.equal(tab("#/settings/rules"), "settings");
-  assert.equal(tab("#/rules"), "settings");
-  assert.equal(tab("#/settings/policy"), "settings");
-  assert.equal(tab("#/settings/automations"), "automations");
-  assert.equal(tab("#/settings/automations/warden-issues"), "automations");
-  assert.equal(settingsBack("automations"), null); // a tab, not a view: Esc goes to the Inbox
-  assert.equal(settingsTab(settingsBack("automations/warden-issues")!), "automations");
+  // The sidebar's Settings opens the first part; each part's link is its own; an old tab, section or view still lands.
+  assert.equal(part("#/settings"), "queue");
+  for (const p of SETTINGS_PARTS) assert.equal(part(`#/settings/${p.id}`), p.id);
+  assert.equal(part("#/settings/notify"), "queue");
+  assert.equal(part("#/settings/review"), "github");
+  assert.equal(part("#/settings/appearance"), "app");
+  assert.equal(part("#/settings/rules"), "github");
+  assert.equal(part("#/rules"), "github");
+  assert.equal(part("#/settings/policy"), "agent");
+  assert.equal(part("#/settings/automations/warden-issues"), "automations");
+  // A plugin's own automation opens from its plugin's part and goes back to it.
+  const builtIn = parseRoute("#/settings/automations/github.pick-reviewer");
+  assert.deepEqual(builtIn, { name: "settings", section: "automations/github.pick-reviewer" });
+  assert.equal(routeHash(builtIn), "#/settings/automations/github.pick-reviewer");
+  assert.equal(automationOf("automations/github.pick-reviewer"), "github.pick-reviewer");
+  assert.equal(settingsBack("automations/github.pick-reviewer"), "github");
+  assert.equal(settingsBack("automations"), null); // a part, not a view: Esc goes to the Inbox
+  // The page head names the part.
+  assert.deepEqual(["queue", "agent", "automations", "app", "github"].map(partName), [
+    "Inbox and notifications",
+    "Agent",
+    "Your automations",
+    "This device",
+    "GitHub",
+  ]);
 });
 
 test("a permalink's route names its item, and an issue opens in place on the page and group that list it", () => {
