@@ -95,7 +95,8 @@ export function diagramText(graph: DiagramGraph): string[] {
 // A label as written, quoted or not: one line of plain words, no HTML, within its limit.
 function words(raw: string, max: number, quoted: boolean): string | Bad {
   let s = raw.trim();
-  if (quoted && s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+  // A message or note quoted as labels are (the prompt says to quote every label) reads without its quotes too.
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
   if (quoted && s.includes('"')) return bad(`a stray quote in ${raw.trim()}`);
   s = s.replaceAll(/\s+/g, " ").trim();
   if (/<\/?[A-Za-z!]/.test(s)) return bad(`HTML in a label: ${s}`);

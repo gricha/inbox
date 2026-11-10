@@ -317,3 +317,15 @@ test("the text: one line per edge or message, marks named, unlinked nodes and no
     ["Note over Desk: first", "Desk → Writer: prompt", "Writer → Desk: review", "Desk → C", "Note over Desk, Writer: last"],
   );
 });
+
+test("a sequence's message or note in quotes reads without them; a quote inside one stays", () => {
+  const r = parseDiagram(
+    ["sequenceDiagram", '  A->>B: "commit the queue"', '  B-->>C: "ok"', '  Note over C: "the "fill" job"', '  C->>A: say "hi"'].join("\n"),
+  );
+  assert.ok(r.ok);
+  assert.ok(r.graph.kind === "sequence");
+  assert.deepEqual(
+    [...r.graph.messages.map((m) => m.text), ...r.graph.notes.map((n) => n.text)],
+    ["commit the queue", "ok", 'say "hi"', 'the "fill" job'],
+  );
+});
