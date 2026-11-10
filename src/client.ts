@@ -115,8 +115,9 @@ function refusal(status: number, data: unknown): DeskApiError {
   return new DeskApiError({ status, said, tag, candidates, ...(reason && { reason }) });
 }
 
+// DESK_URL: a desk on another machine, at its tailnet address (DESK_TOKEN is its device token); else this machine's.
 export function baseUrl(): string {
-  return `http://127.0.0.1:${(process.env.DESK_PORT ?? "") || 47823}`;
+  return (process.env.DESK_URL?.trim().replace(/\/+$/, "") ?? "") || `http://127.0.0.1:${(process.env.DESK_PORT ?? "") || 47823}`;
 }
 
 function refused(e: unknown): boolean {
@@ -124,7 +125,15 @@ function refused(e: unknown): boolean {
   return cause?.code === "ECONNREFUSED" || !!cause?.errors?.some((x) => x.code === "ECONNREFUSED");
 }
 
-const overNetwork = (path: string, init: RequestInit): Promise<Response> => fetch(baseUrl() + path, init);
+// A token only ever goes over HTTPS.
+const overNetwork = (path: string, init: RequestInit): Promise<Response> => {
+  const base = baseUrl();
+  const token = process.env.DESK_TOKEN;
+  if (!token || !base.startsWith("https://")) return fetch(base + path, init);
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  return fetch(base + path, { ...init, headers });
+};
 
 const q = encodeURIComponent;
 
@@ -199,6 +208,10 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       return call<ActivityPage>("GET", `/api/activity?${params.toString()}`, undefined, ((o.wait ?? 0) + 15) * 1000);
     },
     health: () => call<{ ok: true; version: string }>("GET", "/health"),
+    // Pairing another device (src/remote.ts): a code to trade there, or a token here; the trade, from the other device.
+    pairCode: () => call<{ code: string; expires_at: string; url: string; pair_url: string }>("POST", "/api/pair/code", {}),
+    pairToken: (name: string) => call<{ url: string; token: string }>("POST", "/api/pair/token", { name }),
+    trade: (code: string, name: string) => call<{ ok: true; token: string }>("POST", "/api/pair", { code, name, kind: "device" }),
   };
 }
 export type DeskClient = ReturnType<typeof createClient>;
@@ -221,4 +234,6 @@ export const {
   status,
   aiReview,
   health,
+  pairCode,
+  pairToken,
 } = createClient();

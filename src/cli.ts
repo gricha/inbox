@@ -1,6 +1,7 @@
 // `desk`: a thin CLI over the local desk API.
 
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import { readFileSync, realpathSync, watchFile } from "node:fs";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
@@ -47,8 +48,13 @@ const USAGE = `usage: desk <command>
   settings set <key> <value>          change one; lists: a,b or a JSON array; booleans: true/false, yes/no, on/off
   settings reset <key>                back to the default
   fields                              the fields rules can use
-  mcp                                 MCP server on stdio (the desk also serves MCP over HTTP at /mcp)
+  mcp [--url <address>]               MCP server on stdio (the desk also serves MCP over HTTP at /mcp); --url or DESK_URL,
+                                      with DESK_TOKEN, for a desk on another machine
   connect [claude|codex] [--apply]    connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
+  connect <address> --code <code> [claude|codex]
+                                      on another machine: pair with the desk at its tailnet address, connect your agent to it
+  pair [--print] [--name <name>]      pair another device over Tailscale: a one-time code and what to run there;
+                                      --print: a token for one machine and the commands to paste there
   install | uninstall                 run the server at login (macOS launchd)
 
 <ref> is owner/repo#123, repo#123 when unique, a GitHub URL, or an item's link from the desk (inbox://item/owner/repo/123).
@@ -82,7 +88,9 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   brief: { force: { type: "boolean" } },
   show: { json: { type: "boolean" } },
   settings: { json: { type: "boolean" } },
-  connect: { apply: { type: "boolean" } },
+  connect: { apply: { type: "boolean" }, code: { type: "string" } },
+  pair: { print: { type: "boolean" }, name: { type: "string" } },
+  mcp: { url: { type: "string" } },
   add: { from: { type: "string" } },
 };
 
@@ -102,7 +110,8 @@ const ARITY: Record<string, [number, number]> = {
   config: [0, 1],
   settings: [0, 3],
   mcp: [0, 0],
-  connect: [0, 1],
+  connect: [0, 2],
+  pair: [0, 0],
   install: [0, 0],
   uninstall: [0, 0],
   add: [1, 2],
@@ -440,7 +449,61 @@ const HARNESSES: Record<string, { id: agents.DriverId; label: string }> = {
   codex: { id: "codex", label: "Codex" },
 };
 
+// A desk on another machine, from its address as `desk pair` prints it: https://<its tailnet name>.
+const addressOf = (typed: string): string | null => {
+  const u = URL.parse(typed.includes("://") ? typed : `https://${typed}`);
+  return u && u.protocol === "https:" && (u.pathname === "/" || u.pathname === "") && !u.search && !u.hash ? u.origin : null;
+};
+
+// On another machine: the code traded for this machine's token, then the agent given the desk's skill and MCP server.
+const connectTo = Effect.fnUntraced(function* (x: Ctx) {
+  const at = addressOf(x.args[0]!);
+  if (!at)
+    return yield* new UsageError({ message: `the desk's address is https://<its tailnet name>, as desk pair prints it: not ${x.args[0]}` });
+  const driver = HARNESSES[x.args[1] ?? "claude"];
+  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[1]} (try: claude, or codex)` });
+  if (typeof x.opts.code !== "string")
+    return yield* new UsageError({ message: "connect <address> needs --code <code>: run desk pair on the desk's machine" });
+  const desk = api.createClient((p, init) => fetch(at + p, init));
+  const { token } = yield* desk.trade(x.opts.code, os.hostname());
+  const noSkill = (why: string, cause?: unknown) =>
+    new CliError({ message: `the desk paired this machine but didn't send its skill (${why}): run desk pair again`, cause });
+  const res = yield* Effect.tryPromise({
+    try: () => fetch(`${at}/skill`, { headers: { authorization: `Bearer ${token}` } }),
+    catch: (cause) => noSkill(messageOf(cause), cause),
+  });
+  if (!res.ok) return yield* noSkill(`HTTP ${res.status}`);
+  const skill = yield* Effect.tryPromise({ try: () => res.text(), catch: (cause) => noSkill(messageOf(cause), cause) });
+  yield* agents.connectRemote(driver.id, `${at}/mcp`, token, skill);
+  x.out(`${x.c.green("✓")} ${driver.label}: paired with ${at}, MCP tools and skill connected`);
+  if (driver.id === "codex") {
+    x.out(`# Codex reads the token from ${agents.TOKEN_VAR}: put this line in your shell's profile (it's a password for your desk)`);
+    x.out(`export ${agents.TOKEN_VAR}=${token}`);
+  }
+  x.out(`# Revoke it on the desk's machine: Settings → This device`);
+  return 0;
+});
+
+// On the desk's machine: what another device needs to pair, or with --print one machine's token and what to paste there.
+const pair = Effect.fnUntraced(function* (x: Ctx) {
+  if (x.opts.print) {
+    const { url, token } = yield* api.pairToken(typeof x.opts.name === "string" ? x.opts.name : "A machine (desk pair --print)");
+    x.out("# Paste these on the other machine. The token is a password for your desk; revoke it in Settings → This device.");
+    for (const line of agents.remoteCommands(url, token)) x.out(line);
+    return 0;
+  }
+  const p = yield* api.pairCode();
+  x.out(`Pairing code ${x.c.bold(p.code)}: works once, for 10 minutes.`);
+  x.out("");
+  x.out(`A browser on your other device: open ${p.pair_url}`);
+  x.out(`Another machine with an Inbox checkout: bin/desk connect ${p.url} --code ${p.code}`);
+  x.out(`One without: run desk pair --print here instead, and paste what it prints there.`);
+  return 0;
+});
+
 const connect = Effect.fnUntraced(function* (x: Ctx) {
+  if (x.args[0] && /[.:]/.test(x.args[0])) return yield* connectTo(x);
+  if (x.args.length > 1) return yield* new UsageError({ message: `connect: unexpected argument ${x.args[1]}` });
   const driver = HARNESSES[x.args[0] ?? "claude"];
   if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[0]} (try: desk connect claude, or codex)` });
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
@@ -511,6 +574,7 @@ const COMMANDS: Record<string, Command> = {
   config,
   settings,
   connect,
+  pair,
   add,
   done: act("done"),
   mute: act("mute"),
@@ -559,8 +623,9 @@ const COMMANDS: Record<string, Command> = {
       return 0;
     }),
   // The MCP server answers its tools' failures itself; it runs until stdin ends.
-  mcp: () =>
+  mcp: (x) =>
     Effect.promise(async () => {
+      if (typeof x.opts.url === "string") process.env.DESK_URL = x.opts.url;
       const { runMcp } = await import("./mcp.ts");
       await runMcp();
       await new Promise((r) => {

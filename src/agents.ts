@@ -13,11 +13,13 @@ import type { AgentStatus } from "./types.ts";
 const SKILL = fileURLToPath(new URL("../skills/inbox", import.meta.url));
 export const SKILL_MD = path.join(SKILL, "SKILL.md");
 const NAME = "inbox"; // the MCP server's name, and the skill's folder
+export const TOKEN_VAR = "INBOX_TOKEN"; // where Codex reads a desk's token on another machine
 const OLD = "review-desk"; // both, before the rename to Inbox
 
 interface Driver {
   bin: string;
   add: (url: string) => string[]; // registers the desk's MCP server for every project
+  addRemote: (url: string, token: string) => string[]; // and a desk on another machine, with this machine's token
   remove: (name: string) => string[]; // and unregisters one
   servers: (home: string) => unknown; // the agent's user-level MCP servers, by name
   skills: (home: string) => string;
@@ -28,6 +30,18 @@ const DRIVERS = {
   "claude-code": {
     bin: "claude",
     add: (url) => ["mcp", "add", "--transport", "http", "--scope", "user", NAME, url],
+    addRemote: (url, token) => [
+      "mcp",
+      "add",
+      "--transport",
+      "http",
+      "--scope",
+      "user",
+      NAME,
+      url,
+      "--header",
+      `Authorization: Bearer ${token}`,
+    ],
     remove: (name) => ["mcp", "remove", "--scope", "user", name],
     servers: (home) => (JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")) as { mcpServers?: unknown }).mcpServers,
     skills: (home) => path.join(home, ".claude", "skills"),
@@ -36,6 +50,8 @@ const DRIVERS = {
   codex: {
     bin: "codex",
     add: (url) => ["mcp", "add", NAME, "--url", url],
+    // Codex keeps no literal bearer token from its CLI, only the variable it reads one from.
+    addRemote: (url) => ["mcp", "add", NAME, "--url", url, "--bearer-token-env-var", TOKEN_VAR],
     remove: (name) => ["mcp", "remove", name],
     servers: (home) => parse(fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8")).mcp_servers,
     skills: (home) => path.join(home, ".agents", "skills"),
@@ -155,7 +171,7 @@ const TIMEOUT = 60_000;
 const run = (bin: string, args: string[], command: string, timeout: number): Effect.Effect<void, RunError> =>
   Effect.flatMap(claudeSpawn(bin, args), (s) => {
     const summary = (why: string) =>
-      `${bin} failed: ${(why || `Command failed: ${[bin, ...args].join(" ")}`).trim().split("\n").slice(-2).join(" ")}. Run it yourself: ${command}`;
+      `${bin} failed: ${(why || `Command failed: ${command}`).trim().split("\n").slice(-2).join(" ")}. Run it yourself: ${command}`;
     return runCommand(s, { timeout, missing: `${bin} isn't on PATH. Run it yourself: ${command}` }).pipe(
       Effect.asVoid,
       Effect.catchTags({
@@ -274,6 +290,55 @@ export const refreshSkills = Effect.fn("agents.refreshSkills")(function* (deskHo
     );
   }
   return done;
+});
+
+// What to paste on another machine to give its agents a desk at `at` (https://<tailnet name>) with `token`: desk pair --print.
+export function remoteCommands(at: string, token: string): string[] {
+  const skill = (dir: string) =>
+    `mkdir -p ${dir}/${NAME} && curl -fsS -H ${sh(`Authorization: Bearer ${token}`)} ${at}/skill -o ${dir}/${NAME}/SKILL.md`;
+  return [
+    "# Claude Code",
+    commandOf(DRIVERS["claude-code"], DRIVERS["claude-code"].addRemote(`${at}/mcp`, token)),
+    skill("~/.claude/skills"),
+    `# Codex, which reads the token from ${TOKEN_VAR}: put the export in your shell's profile`,
+    commandOf(DRIVERS.codex, DRIVERS.codex.addRemote(`${at}/mcp`)),
+    skill("~/.agents/skills"),
+    `export ${TOKEN_VAR}=${token}`,
+  ];
+}
+
+// This machine's agent given a desk on another machine: its skill as that desk serves it, and its MCP server at `url` with
+// `token`, replacing one already there for the same address (a device paired again). Another server or skill named inbox
+// is yours to move first.
+export const connectRemote = Effect.fn("agents.connectRemote")(function* (
+  driver: DriverId,
+  url: string,
+  token: string,
+  skill: string,
+  { timeout = TIMEOUT }: { timeout?: number } = {},
+): Effect.fn.Return<void, FsError | RunError> {
+  const d: Driver = DRIVERS[driver];
+  const home = os.homedir();
+  const dir = path.join(d.skills(home), NAME);
+  if ((yield* skillState(dir)) === "taken")
+    return yield* new Conflict({
+      message: `${path.join(dir, "SKILL.md")} is another skill named ${NAME}, not the desk's: move it, then connect again`,
+    });
+  const entry = listed(d, home)[NAME];
+  const same = urlOf((entry as { url?: unknown } | undefined)?.url)?.href === urlOf(url)?.href;
+  if (entry !== undefined && !same)
+    return yield* new Conflict({
+      message: `${d.bin} has another MCP server named ${NAME}${shown(entry)}: remove it (${commandOf(d, d.remove(NAME))}), then connect again`,
+    });
+  yield* Effect.try({
+    try: () => {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "SKILL.md"), skill);
+    },
+    catch: fsError("write", path.join(dir, "SKILL.md")),
+  });
+  if (same) yield* run(d.bin, d.remove(NAME), commandOf(d, d.remove(NAME)), timeout);
+  return yield* run(d.bin, d.addRemote(url, token), commandOf(d, d.addRemote(url, "<token>")), timeout);
 });
 
 // Installs or refreshes the skill, registers the MCP server if it isn't yet, then lets go of the names from before the
