@@ -1,7 +1,7 @@
 // Turns a GitHub item plus facts about you into the signals rules can test.
 import { areaFiles } from "./areas.ts";
 import { onBehalf } from "./github/behalf.ts";
-import { approved, owesReply, waitsOf } from "./stage.ts";
+import { approved, owesReply, reviewOptional, waitsOf } from "./stage.ts";
 import type { Config, Context, FieldDoc, Item, ReviewState, Signals, Until } from "./types.ts";
 
 export const FIELDS: FieldDoc[] = [
@@ -91,6 +91,11 @@ export const FIELDS: FieldDoc[] = [
     path: "pr.unasked",
     type: "boolean",
     doc: "open and ready for review, but nobody's asked to review it (bots aside) and only bots or its author have reviewed it",
+  },
+  {
+    path: "pr.review_optional",
+    type: "boolean",
+    doc: "its repo needs no review to merge it: GitHub gives no review decision, on a PR based on the default branch",
   },
   { path: "pr.pushed_hours", type: "number", doc: "hours since the latest commit (-1 if unknown)" },
   {
@@ -316,6 +321,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
         !item.review_requests_hidden &&
         !item.review_requests.some((r) => !isBot(r.reviewer, r.bot)) &&
         !item.reviews.some((r) => lc(r.author) !== lc(item.author) && !isMe(r.author) && !isBot(r.author, r.author_bot)),
+      review_optional: reviewOptional(item),
       pushed_hours: hours(headAt),
       paths: item.paths ?? [],
       my_area_files: myAreaFiles,
@@ -371,7 +377,13 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       my_prs_90d: repoPrs,
     },
   };
-  signals.pr.waits = waitsOf(item, ctx.me, { mine: yours, unasked: signals.pr.unasked, askedYou: requested, waitingOn });
+  signals.pr.waits = waitsOf(item, ctx.me, {
+    mine: yours,
+    unasked: signals.pr.unasked,
+    askedYou: requested,
+    waitingOn,
+    optional: signals.pr.review_optional,
+  });
   return {
     signals,
     activity_at: activity,

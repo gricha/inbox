@@ -345,7 +345,11 @@ function mergingLine(r: InflightRow): string {
     r.rebase ? "rebase only: don't merge it" : "",
     r.draft ? "draft" : "",
     ci[r.ci],
-    r.approved_by.length ? `approved by ${r.approved_by.join(", ")}` : "not approved",
+    r.approved_by.length
+      ? `approved by ${r.approved_by.join(", ")}`
+      : r.review_optional
+        ? "no review needed: its repo requires none, so merge it once CI passes"
+        : "not approved",
     r.changes_by.length ? `changes requested by ${r.changes_by.join(", ")}` : "",
     r.waiting_on.length ? `waiting on ${r.waiting_on.join(", ")}` : "",
     r.threads_unresolved ? `${r.threads_unresolved} unresolved threads` : "",

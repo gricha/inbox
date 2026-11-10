@@ -199,6 +199,7 @@ const inflightView: InflightView = {
       state: "open",
       base: "feat/base",
       stacked: true,
+      review_optional: false,
       merge_method: "SQUASH",
       ci: "red",
       failing: ["backend (3.13)"],

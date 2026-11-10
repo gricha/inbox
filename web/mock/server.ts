@@ -1566,6 +1566,7 @@ function signals(r: Rec): Signals {
       base: pr ? (s.base ?? "main") : "",
       stacked: pr && (s.base ?? "main") !== "main",
       unasked: false, // the shots show it with queueAs and reviewAs
+      review_optional: pr && s.review === "none" && (s.base ?? "main") === "main",
       pushed_hours: pr ? (s.upd ?? s.age) : -1,
       paths: r.paths ?? [],
       my_area_files: myAreaFiles,
@@ -1859,6 +1860,7 @@ function cardOf(r: Rec, p: Placement): Card {
     inflight: inFlight(r),
     ...(handedBack(r) && { handed_back: true }),
     ...(me.author && s.draft && !s.resolved && sig.item.kind === "pr" && { cta: "ready" as const }),
+    ...(me.author && sig.pr.review_optional && { review_optional: true as const }),
     ...(!!TALK.get(r.id)?.length && { talk: true as const }),
     ...(actions.length > 0 && { actions }),
     ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
@@ -2191,9 +2193,10 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
-  if (r.ci === "pending") return "waits on CI";
+  if (r.ci === "pending") return r.review_optional ? "can merge once CI passes: no review needed" : "waits on CI";
   if (threads) return `waits on ${threads} unresolved ${threads === 1 ? "thread" : "threads"}`;
-  if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
+  if (!r.approved_by.length && !r.review_optional)
+    return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
   if (r.stacked) return `waits on ${r.base} to merge first`;
   return "ready to merge";
 }
@@ -2206,6 +2209,7 @@ function laneRow(r: Rec): InflightRow {
     state: s.resolved === "merged" ? ("merged" as const) : s.resolved === "closed" ? ("closed" as const) : ("open" as const),
     base: sig.pr.base,
     stacked: sig.pr.stacked,
+    review_optional: sig.pr.review_optional,
     merge_method: "SQUASH" as const,
     ci: sig.pr.ci,
     failing: s.fly?.failing ?? [],

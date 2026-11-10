@@ -5,12 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { askLine, carryTrust, denyDir, DENY, wakeFor } from "../src/coordinator.ts";
+import { askLine, carryTrust, denyDir, DENY, NO_REVIEW, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace, AsksView } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
-import { makeItem, NOW } from "./helpers/items.ts";
+import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
@@ -342,6 +342,25 @@ test("news on a PR in Merging wakes the same session with one line per batch; ne
   );
   assert.equal(starts(t.fake.calls()).length, 1);
 });
+
+test(
+  "a hand-off in a repo that needs no review tells it so: merging on green CI is expected, no review to ask for or wait on",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    t.gh.items.set("acme/web#4", { ...myPr(4, { ci: "pending", review_requests: [], review_decision: "none" }), updated_at: hoursAgo(0) });
+    assert.equal(runSync(t.desk.item("web#4")).signals.pr.review_optional, false);
+    await run(t.desk.sync());
+    runSync(t.desk.act("web#3", "inflight"));
+    runSync(t.desk.act("web#4", "inflight"));
+    await until(() => t.said().length === 1);
+    assert.equal(
+      t.said()[0],
+      `${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): handed off; acme/web#4 (https://github.com/acme/web/pull/4): handed off (${NO_REVIEW}).`,
+    );
+    assert.match(NO_REVIEW, /needs no review.*low stakes.*don't ask for or wait on a review/);
+  },
+);
 
 test("a busy coordinator isn't stopped: it gets the news once it's idle, all of it in one message", posix, async (c) => {
   const t = await coordinated(c);

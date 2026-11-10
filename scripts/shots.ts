@@ -1731,6 +1731,38 @@ const SHOTS: Shot[] = [
       await page.locator(".rv-suggested .suggest").first().waitFor();
       await page.waitForTimeout(300);
       if (await page.locator(".rv-reviewers-pop").count()) failures.push("review-unasked: the reviewers list opens over Ask reviewers");
+      if (await page.getByRole("button", { name: "Hand off for merge" }).count())
+        failures.push("review-unasked: Hand off for merge shows where a review is required");
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  // The same in a repo that needs no review (terraform-sandboxes): Hand off for merge beside Ask reviewers, which stays filled.
+  {
+    name: "review-unasked-no-review",
+    go: async (page) => {
+      await fresh(page);
+      await reviewAs((v) => {
+        if (v.card.id !== "acme/api#3051") return;
+        Object.assign(v.card, {
+          cta: "reviewers",
+          handed_back: true,
+          why: "nobody's asked to review it: add reviewers",
+          review: "none",
+          review_optional: true,
+        });
+        v.item = { ...v.item, review_requests: [], review_decision: "none" };
+      })(page);
+      await at(`#/review/${encodeURIComponent("acme/api#3051")}`)(page);
+      await page.waitForFunction(`document.activeElement?.matches(".rv-reviewers-input")`);
+      await page.locator(".rv-suggested .suggest").first().waitFor();
+      await page.waitForTimeout(300);
+      const hand = page.getByRole("button", { name: "Hand off for merge" });
+      if (!(await hand.count())) failures.push("review-unasked-no-review: no Hand off for merge beside Ask reviewers");
+      else if ((await hand.getAttribute("class"))?.split(" ").includes("primary"))
+        failures.push("review-unasked-no-review: Hand off for merge is filled beside Ask reviewers");
     },
     after: async (page) => {
       await unroute(page);
@@ -2247,6 +2279,29 @@ const SHOTS: Shot[] = [
       })()`);
       if (!note?.first || !note.title?.startsWith(note.first) || !note.title.slice(note.first.length).startsWith(" \u00b7 "))
         failures.push(`inflight: the first row's phrase has the tooltip ${JSON.stringify(note)}`);
+    },
+  },
+  // A PR in a repo that needs no review, CI running: it can merge once CI passes, no review to wait on.
+  {
+    name: "inflight-no-review",
+    go: async (page) => {
+      await page.route("**/api/inflight", async (route) => {
+        const res = await route.fetch();
+        const v = (await res.json()) as InflightView;
+        for (const r of v.rows)
+          if (r.card.id === "acme/web#2295")
+            Object.assign(r, { ci: "pending", failing: [], review_optional: true, waits_on: "can merge once CI passes: no review needed" });
+        await route.fulfill({ response: res, json: v });
+      });
+      await at("#/")(page);
+      await at("#/inflight")(page);
+      await page.locator(".lane [data-id]").first().waitFor();
+      const says = await page.locator('.lane [data-id="acme/web#2295"]').textContent();
+      if (!says?.includes("can merge once CI passes")) failures.push(`inflight-no-review: its row reads ${JSON.stringify(says)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
     },
   },
   {

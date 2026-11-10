@@ -21,6 +21,11 @@ export function approved(it: Item, self: string): boolean {
   return !v.changes_by.length && v.approved_by.length > 0 && it.review_decision !== "required";
 }
 
+// Its repo needs no review to merge it: GitHub gives no review decision then. A stacked PR's base is another PR's branch,
+// which never requires one, while where it lands may, so only a PR on the default branch counts.
+export const reviewOptional = (it: Item): boolean =>
+  it.kind === "pr" && it.review_decision === "none" && !!it.default_branch && it.base === it.default_branch;
+
 // `self` is the person whose own review doesn't count: the PR's author, or you on yours.
 export function stage(it: Item, self: string): Stage | undefined {
   if (it.kind !== "pr") return undefined;
@@ -129,18 +134,23 @@ export function askedAt(it: Item, me: string): string {
 }
 
 // What an open PR waits on next, in words: the first that applies of draft, CI, conflict, changes, a reply you owe, reviews;
-// your PR's conflict before its review is said with the review.
-export function waitsOf(it: Item, me: string, o: { mine: boolean; unasked: boolean; askedYou: boolean; waitingOn: string[] }): string {
+// your PR's conflict before its review is said with the review. Yours in a repo that needs no review waits on none.
+export function waitsOf(
+  it: Item,
+  me: string,
+  o: { mine: boolean; unasked: boolean; askedYou: boolean; waitingOn: string[]; optional?: boolean },
+): string {
   if (it.kind !== "pr" || it.state !== "open") return "";
   const self = o.mine ? me : it.author;
   if (it.draft) return o.mine ? "is your draft" : "is a draft";
   if (it.ci === "red") return o.mine ? "waits on a CI fix" : "has CI failing";
   const changes = verdicts(it, self).changes_by;
+  const through = approved(it, self) || (o.mine && !!o.optional);
   // Yours, short of its review with a conflict: the review is what holds it, so both are said (your agent rebases an approved one).
   const conflict = it.mergeable === "conflict";
-  if (conflict && !(o.mine && !changes.length && !approved(it, self) && o.waitingOn.length)) return "waits on a merge conflict fix";
+  if (conflict && !(o.mine && !changes.length && !through && o.waitingOn.length)) return "waits on a merge conflict fix";
   if (changes.length) return `has changes requested by ${andMore(changes)}`;
-  const review = approved(it, self)
+  const review = through
     ? ""
     : !o.mine && o.askedYou
       ? "your review"
@@ -149,7 +159,7 @@ export function waitsOf(it: Item, me: string, o: { mine: boolean; unasked: boole
         : "a review";
   const owed = o.mine ? owedTo(it, me) : [];
   if (owed.length) return `waits on your reply to ${andMore(owed)}${review ? `, then ${review}` : ""}`;
-  if (o.unasked) return "has nobody asked to review it";
+  if (o.unasked && !through) return "has nobody asked to review it";
   if (review) return `waits on ${review}${conflict ? ", and a merge conflict fix" : ""}`;
   if (it.ci === "pending") return "waits on CI";
   return o.mine ? "is ready to merge" : `is approved, for ${it.author} to merge`;

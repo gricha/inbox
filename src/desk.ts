@@ -1500,6 +1500,7 @@ export class Desk {
       // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
+      ...(me.author && sig.review_optional && { review_optional: true as const }),
       ...(talked(it, this.me()) && { talk: true as const }),
       ...(actions.length > 0 && { actions }),
       ...(by && { placed_by: by }),
@@ -2464,8 +2465,8 @@ export class Desk {
           if (s.inflight_at) return yield* new Conflict({ message: `${id} is in Merging already` });
           // Ready for review is yours, so a draft in Merging would wait on you there.
           if (entry.item.draft) return yield* new Conflict({ message: `${id} is a draft: mark it ready for review first` });
-          // Nobody would review it, so the coordinator would wait on nothing.
-          if (entry.analysis.signals.pr.unasked)
+          // Nobody would review it, so the coordinator would wait on nothing; a repo that needs no review merges on green CI.
+          if (entry.analysis.signals.pr.unasked && !entry.analysis.signals.pr.review_optional)
             return yield* new Conflict({ message: `nobody's asked to review ${id}: add reviewers first` });
           s.inflight_at = now.toISOString();
           // Merging has it now, so it isn't done, snoozed or muted in the queue any more (undo brings that back).
@@ -2782,6 +2783,7 @@ export class Desk {
           state: it.state,
           base: it.base,
           stacked: e.analysis.signals.pr.stacked,
+          review_optional: e.analysis.signals.pr.review_optional,
           merge_method: it.merge_method ?? null,
           ci: it.ci,
           failing: it.checks_failed ?? [],
@@ -2990,12 +2992,15 @@ export class Desk {
   }
 
   // A PR in Merging nobody's asked to review (its request taken back, say): the coordinator can't get it reviewed, so it
-  // comes back to you to ask someone. In Merging it's your open PR, and UNASKED is one line already: nothing to check.
+  // comes back to you to ask someone; not in a repo that needs no review. In Merging it's your open PR, and UNASKED is one
+  // line already: nothing to check.
   handBackUnasked(): void {
     if (!this.loaded) return;
-    for (const e of this.snapshot().entries.values())
-      if (e.inflight && e.status === "active" && this.stuckUnasked(e) && !e.analysis.signals.pr.blocked)
+    for (const e of this.snapshot().entries.values()) {
+      const pr = e.analysis.signals.pr;
+      if (e.inflight && e.status === "active" && this.stuckUnasked(e) && !pr.blocked && !pr.review_optional)
         this.sendBack(e.item.id, UNASKED, "desk");
+    }
   }
 
   // Your PRs a board lists or Merging has: log when one becomes blocked by another PR or stops being, which wakes the
@@ -3658,9 +3663,10 @@ function waitsOn(r: Omit<InflightRow, "card" | "waits_on" | "note">): string | n
   if (r.ci === "red") return "waits on a CI fix";
   if (r.mergeable === "conflict") return "waits on a merge conflict fix";
   if (r.changes_by.length) return `waits on a second look from ${names(r.changes_by)}`;
-  if (r.ci === "pending") return "waits on CI";
+  if (r.ci === "pending") return r.review_optional ? "can merge once CI passes: no review needed" : "waits on CI";
   if (threads) return `waits on ${threads} unresolved ${threads === 1 ? "thread" : "threads"}`;
-  if (!r.approved_by.length) return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
+  if (!r.approved_by.length && !r.review_optional)
+    return r.waiting_on.length ? `waits on a review from ${names(r.waiting_on)}` : "waits on a review";
   if (r.stacked) return `waits on ${r.base} to merge first`;
   return "ready to merge";
 }

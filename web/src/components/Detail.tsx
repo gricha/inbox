@@ -223,12 +223,12 @@ export function HandButton({
   run,
   primary,
 }: {
-  card: Pick<Card, "inflight" | "draft" | "cta" | "review">;
+  card: Pick<Card, "inflight" | "draft" | "cta" | "review" | "review_optional">;
   run: (k: string) => void;
   primary?: boolean;
 }) {
   if (card.inflight) return <ActButton k="b" label="Back to desk" title={BACK_TITLE} run={run} />;
-  if (!handsOff(card)) return null; // a draft, one nobody's asked to review, one that isn't approved yet
+  if (!handsOff(card)) return null; // a draft, one nobody's asked to review where review is needed, one not approved yet
   return (
     <ActButton
       k="m"

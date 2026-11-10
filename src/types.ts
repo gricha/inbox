@@ -156,6 +156,7 @@ export interface Signals {
     ready_weekday_hours: number; // hours it has been ready for review, Monday to Friday's only; -1 for a draft, an issue, once merged or closed, or while unknown
     asked_weekday_hours: number; // the same since the latest request to someone in people_requested, or since it went ready if later; -1 if nobody is, or as ready_weekday_hours
     unasked: boolean; // open and ready, nobody's asked to review it and only bots or the author have reviewed it
+    review_optional: boolean; // its repo needs no review to merge it: GitHub gives no review decision on the default branch
     pushed_hours: number;
     paths: string[]; // its changed files' paths, the first 50; empty while they aren't fetched
     my_area_files: number; // of its paths, how many are in your areas there; -1 while unknown
@@ -533,6 +534,7 @@ export interface Card {
   preflight?: Preflight; // Now and Today cards only
   handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
   cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft, Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
+  review_optional?: true; // your PR's repo needs no review to merge it (pr.review_optional): Hand off for merge beside Add reviewers
   talk?: true; // a PR people said something on (a thread, a comment, a review that commented): its review keeps the conversation's line while it loads
   actions?: GitHubAction[]; // the GitHub writes its More menu offers, as the desk allows them now; absent when none
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
@@ -947,6 +949,7 @@ export interface InflightRow {
   state: Item["state"];
   base: string;
   stacked: boolean; // its base isn't the repo's default branch: it sits on another PR
+  review_optional: boolean; // its repo needs no review to merge it (pr.review_optional): it merges once CI passes
   merge_method: Item["merge_method"] | null; // the repo's default merge method for you, when the desk knows it
   ci: Ci;
   failing: string[]; // failing check names

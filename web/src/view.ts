@@ -58,8 +58,10 @@ export interface Group {
 export const foldOf = (k: GroupKey) => `fold:${k}`;
 // Hand off for merge is for a PR that's through its review: your agent gets an approved PR merged, it doesn't get one approved.
 export const awaitsReview = (c: Pick<Card, "review">) => c.review === "required" || c.review === "changes_requested";
-// Nor a draft (Ready for review first), nor one nobody's asked to review (Add reviewers first).
-export const handsOff = (c: Pick<Card, "draft" | "cta" | "review">) => !c.draft && c.cta !== "reviewers" && !awaitsReview(c);
+// Nor a draft (Ready for review first), nor one nobody's asked to review (Add reviewers first), unless its repo needs no
+// review: then it's offered beside Add reviewers, and your agent merges it on green CI.
+export const handsOff = (c: Pick<Card, "draft" | "cta" | "review" | "review_optional">) =>
+  !c.draft && (c.cta !== "reviewers" || !!c.review_optional) && !awaitsReview(c);
 export const inquiryOf = (id: string) => `ask:${id}`; // an agent's question on the main page
 
 // The groups each list page shows.

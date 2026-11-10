@@ -49,6 +49,7 @@ import {
   type CoordinatorView,
 } from "./types.ts";
 import { report } from "./sentry.ts";
+import { reviewOptional } from "./stage.ts";
 
 const NAME = COORDINATOR_NAME;
 const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
@@ -102,6 +103,9 @@ const ROLE =
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 const PERMISSION = { bypass: "bypassPermissions", default: "default" } as const;
 type Mode = keyof typeof PERMISSION;
+// The desk's own fact on news for a PR whose repo needs no review (pr.review_optional).
+export const NO_REVIEW =
+  "its repo needs no review, so merging it once CI passes is expected and low stakes: don't ask for or wait on a review";
 // The desk's news for the owner's PR that's ready to merge but conflicts: it's in Merging only until GitHub sees it mergeable.
 export const REBASE =
   "ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly";
@@ -561,7 +565,9 @@ export class Coordinator {
     for (const [id, what] of news) by.set(id, (by.get(id) ?? new Set()).add(what));
     const lines = [...by].map(([id, what]) => {
       const [, repo, n] = PR.exec(id)!;
-      return `${id} (https://github.com/${repo}/pull/${n}): ${[...what].join(", ")}`;
+      const item = this.desk.store.itemsById([id]).get(id);
+      const free = item && reviewOptional(item) ? ` (${NO_REVIEW})` : "";
+      return `${id} (https://github.com/${repo}/pull/${n}): ${[...what].join(", ")}${free}`;
     });
     const parts = [...asks, ...(lines.length ? [`In Merging: ${lines.join("; ")}.`] : [])];
     return parts.length ? parts.join(" ") : "I'd like you to look at Merging now.";

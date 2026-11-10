@@ -1222,12 +1222,18 @@ test("treeGuides draws Blocked's tree from its depths: a branch with more under 
 });
 
 test("Hand off for merge waits for the review: not a PR whose review is required or asks for changes, a draft, or one nobody's asked", () => {
-  const pr = (o: Partial<Pick<Card, "draft" | "cta" | "review">>) => ({ draft: false, review: "approved" as const, ...o });
+  const pr = (o: Partial<Pick<Card, "draft" | "cta" | "review" | "review_optional">>) => ({
+    draft: false,
+    review: "approved" as const,
+    ...o,
+  });
   assert.equal(handsOff(pr({})), true, "approved");
   assert.equal(handsOff(pr({ review: "none" })), true, "its repo asks for no review");
   assert.equal(handsOff(pr({ cta: "reply" })), true, "approved, with a reply owed");
   assert.equal(handsOff(pr({ review: "required" })), false, "getsentry/sentry#129460: still waits on its review");
   assert.equal(handsOff(pr({ review: "changes_requested" })), false);
   assert.equal(handsOff(pr({ draft: true })), false);
-  assert.equal(handsOff(pr({ review: "none", cta: "reviewers" })), false);
+  assert.equal(handsOff(pr({ review: "none", cta: "reviewers" })), false, "stacked: where it lands may need a review");
+  assert.equal(handsOff(pr({ review: "none", cta: "reviewers", review_optional: true })), true, "terraform-sandboxes: none needed");
+  assert.equal(handsOff(pr({ review: "none", cta: "reviewers", review_optional: true, draft: true })), false, "Ready for review first");
 });

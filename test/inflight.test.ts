@@ -635,6 +635,61 @@ test("a PR in Merging nobody's asked to review any more comes back to you on the
   );
 });
 
+test("in a repo that needs no review, your ready PR nobody's asked is handed off beside Add reviewers; where review is required it isn't", async (c) => {
+  const free = { ci: "pending" as const, review_requests: [], review_decision: "none" as const };
+  const t = await setup(
+    [
+      myPr(3, free), // terraform-sandboxes: GitHub gives no review decision
+      myPr(4, { ...free, review_decision: "required" }),
+      myPr(5, { ...free, base: "feat/below" }), // stacked: its base needs none, where it lands may
+      myPr(6, { ...free, draft: true }),
+    ],
+    { settings: { "policy.judge": false }, desk: { writer: fakeWriter().writer } },
+  );
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const d = (ref: string) => runSync(t.desk.item(ref));
+  assert.deepEqual(
+    ["web#3", "web#4", "web#5", "web#6"].map((r) => [d(r).card.cta, d(r).card.review_optional, d(r).signals.pr.review_optional]),
+    [
+      ["reviewers", true, true],
+      ["reviewers", undefined, false],
+      ["reviewers", undefined, false],
+      ["ready", true, true],
+    ],
+    "Add reviewers stays its call to action; a draft is Ready for review first",
+  );
+  assert.equal(d("web#3").signals.pr.waits, "waits on CI", "no review to wait on");
+  assert.equal(d("web#4").signals.pr.waits, "has nobody asked to review it");
+  assert.throws(() => runSync(t.desk.act("web#4", "inflight")), /nobody's asked to review acme\/web#4: add reviewers first/);
+  assert.throws(() => runSync(t.desk.act("web#5", "inflight")), /nobody's asked to review acme\/web#5: add reviewers first/);
+  assert.throws(() => runSync(t.desk.act("web#6", "inflight")), /is a draft: mark it ready for review first/);
+  runSync(t.desk.act("web#3", "inflight"));
+  const row = () => runSync(t.desk.inflight()).rows.find((r) => r.card.id === "acme/web#3")!;
+  assert.deepEqual([row().review_optional, row().waits_on], [true, "can merge once CI passes: no review needed"]);
+  t.gh.items.set("acme/web#3", { ...myPr(3, { ...free, ci: "green" }), updated_at: hoursAgo(0) });
+  await run(t.desk.sync());
+  assert.equal(row().waits_on, "ready to merge", "green, and nobody to wait on");
+});
+
+test("a PR in Merging in a repo that needs no review isn't handed back for having nobody asked", async (c) => {
+  const t = await setup([myPr(3, { ci: "green", review_requests: [], review_decision: "none" })], {
+    settings: { "policy.judge": false, "notify.quiet": "" },
+    desk: { writer: fakeWriter().writer },
+  });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  runSync(t.desk.act("web#3", "inflight"));
+  t.setNow(new Date(NOW.getTime() + 30 * 60_000));
+  await run(t.desk.sync());
+  const d = runSync(t.desk.item("web#3"));
+  assert.deepEqual([d.card.inflight, d.card.handed_back], [true, undefined]);
+  assert.deepEqual(
+    runSync(t.desk.inflight()).rows.map((r) => [r.card.id, r.waits_on]),
+    [["acme/web#3", "ready to merge"]],
+  );
+});
+
 test("what counts as asked: a bot's request or review doesn't, one GitHub hides from you does; nor does a listed bot", async (c) => {
   const green = { ci: "green" as const, review_requests: [] };
   const t = await setup(
