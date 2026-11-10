@@ -72,7 +72,7 @@ export const GITHUB_AUTOMATIONS: readonly BuiltInAutomation[] = [
   {
     id: "mention-question",
     name: "Questions in mentions",
-    help: "When someone mentions you, Claude reads it and puts it in Today if they ask you something.",
+    help: "When someone mentions you, a model reads it and puts it on your desk if they ask you something.",
     on: false,
     schedule: "",
     events: ["mentioned"],
