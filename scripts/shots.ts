@@ -18,6 +18,8 @@ import type {
   OmarchyTheme,
   Overview,
   QueueView,
+  ReviewHunk,
+  ReviewOrder,
   ReviewView,
   SettingsView,
 } from "../src/types.ts";
@@ -1035,14 +1037,14 @@ const SHOTS: Shot[] = [
           box: Math.round(r(".rv-comment-input").height),
           boxTop: Math.round(r(".rv-comment-input").top),
           act: Math.round(r(".rv-actions .act").top),
-          file: Math.round(r(".rv-file-sec").top),
+          file: Math.round(r(".rv-views, .rv-file-sec").top), // where the diff starts: its two orders' switch, when it has one
           send: document.querySelectorAll(".rv-comment .act").length,
         };
       })()`);
       if (seen.box > 36) failures.push(`review-top: the empty comment box is ${seen.box}px tall, not one line`);
       if (Math.abs(seen.boxTop - seen.act) > 2 || seen.send)
         failures.push(`review-top: the empty comment box isn't alone on the actions' row: ${JSON.stringify(seen)}`);
-      if (seen.file > 386) failures.push(`review-top: the first file starts ${seen.file}px down the window, past 386`);
+      if (seen.file > 386) failures.push(`review-top: the diff starts ${seen.file}px down the window, past 386`);
     },
   },
   // Your comment on the PR: the box grows with its words while the buttons stay where they were, Comment beside it; Esc
@@ -1809,6 +1811,109 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await review("acme/worker#879")(page);
       await toBottom("review-unread")(page);
+    },
+  },
+  // The walk-through: two words above the diff where the review has steps, Walk-through first; its steps in order, each with
+  // its sections; what no step covers under its own heading; every hunk drawn once; By importance as before.
+  ...(["review-walk", "review-walk-next", "review-walk-beyond", "review-walk-importance"] as const).map((name): Shot => ({
+    name,
+    go: async (page) => {
+      await page.evaluate(`localStorage.removeItem("desk.review.view")`);
+      const id = name === "review-walk-beyond" ? "acme/worker#879" : "acme/api#4127";
+      await review(id)(page);
+      const bad = (m: string) => failures.push(`${name}: ${m}`);
+      const tabs = await page.locator(".rv-views .head-tab").allTextContents();
+      const on = await page.locator(".rv-views .head-tab.on").allTextContents();
+      if (tabs.join("|") !== "Walk-through|By importance" || on.join() !== "Walk-through")
+        bad(`the switch reads ${JSON.stringify(tabs)}, on ${JSON.stringify(on)}`);
+      // What the desk sent, and the sections the page drew, in order.
+      const seen = await page.evaluate<{ o: ReviewOrder; drawn: string[] }>(`(async () => {
+          scrollTo(0, document.documentElement.scrollHeight);
+          await new Promise((r) => setTimeout(r, 600));
+          const v = await (await fetch("/api/review/" + encodeURIComponent(${JSON.stringify(id)}) + "?ahead=1")).json();
+          const drawn = [...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) =>
+            el.classList.contains("rv-file-sec")
+              ? el.getAttribute("aria-label")
+              : "# " + (el.children.length ? [...el.children].map((c) => c.textContent).join(" ") : el.textContent).replace(/\\s+/g, " ").trim(),
+          );
+          scrollTo(0, 0);
+          return { o: v.order, drawn };
+        })()`);
+      const { o } = seen;
+      const all = [...o.chunks, ...o.unread, ...o.skipped].map((h) => h.id);
+      const walked = [...(o.steps ?? []).flatMap((st) => st.hunks), ...(o.beyond ?? [])].map((h) => h.id);
+      if (walked.length !== all.length || walked.toSorted().join() !== all.toSorted().join())
+        bad(`the walk-through doesn't hold every hunk once: ${walked.join()} against ${all.join()}`);
+      // Sections as the page groups them: a step's run of one file at one level, then what no step covers.
+      const runs = (hs: ReviewHunk[]) =>
+        hs.filter((h, i) => i === 0 || h.path !== hs[i - 1]!.path || h.level !== hs[i - 1]!.level).map((h) => h.path);
+      const steps = o.steps ?? [];
+      const uncovered = o.beyond ?? [];
+      const want = [
+        ...steps.flatMap((st, i) => [
+          `# ${i + 1} of ${steps.length} ${st.title}${st.body ? ` ${st.body.replaceAll("`", "")}` : ""}${st.check ? ` Check: ${st.check}` : ""}`,
+          ...runs(st.hunks),
+        ]),
+        ...(uncovered.length
+          ? [
+              `# Not in the walk-through · ${uncovered.length} ${uncovered.length === 1 ? "hunk" : "hunks"} in ${new Set(uncovered.map((h) => h.path)).size} ${new Set(uncovered.map((h) => h.path)).size === 1 ? "file" : "files"}`,
+              ...runs(uncovered),
+            ]
+          : []),
+      ];
+      if (steps.length < 2) bad(`the review has ${steps.length} steps`);
+      if (seen.drawn.join("\n") !== want.join("\n")) bad(`the page draws\n${seen.drawn.join("\n")}\nnot\n${want.join("\n")}`);
+      const nexts = await page.locator(".rv-next").allTextContents();
+      if (nexts.join("|") !== [...steps.slice(1).map((st) => `Next: ${st.title}`), "End of the walk-through"].join("|"))
+        bad(`the steps end with ${JSON.stringify(nexts)}`);
+      if (await page.locator(".rv-side").isVisible()) {
+        const rows = await page.locator(".rv-files .rv-file").allTextContents();
+        if (rows.length !== steps.length + (uncovered.length ? 1 : 0)) bad(`the sidebar lists ${JSON.stringify(rows)}`);
+      }
+      if (name === "review-walk") await page.locator(".rv-views").scrollIntoViewIfNeeded();
+      if (name === "review-walk-next") {
+        await page.locator(".rv-next").first().click();
+        await page.waitForTimeout(500);
+        const stepTop = await page.evaluate<number>(`document.querySelector("#rv-step-1").getBoundingClientRect().top`);
+        if (stepTop < 0 || stepTop > 140) bad(`Next leaves step 2's heading at ${Math.round(stepTop)}px`);
+        // Where the sidebar is folded, opened to show the step you're in.
+        if (!(await page.locator(".rv-side").isVisible())) await page.locator(".rv-side-toggle").click();
+        await page.waitForTimeout(300);
+        const marked = await page.locator(".rv-files .rv-file.on").allTextContents();
+        if (marked.length !== 1 || !marked[0]!.includes(steps[1]!.title)) bad(`the sidebar marks ${JSON.stringify(marked)}, not step 2`);
+      }
+      if (name === "review-walk-beyond") {
+        await page.locator("#rv-beyond").scrollIntoViewIfNeeded();
+        await page.evaluate(`document.querySelector("#rv-beyond").scrollIntoView({ block: "start" })`);
+        await page.waitForTimeout(300);
+      }
+      if (name === "review-walk-importance") {
+        await page.locator(".rv-views .head-tab", { hasText: "By importance" }).click();
+        await page.waitForTimeout(400);
+        const drawn = await page.evaluate<string[]>(
+          `[...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) => el.getAttribute("aria-label") ?? "# step")`,
+        );
+        const ranked = runs([...o.chunks, ...o.unread, ...o.skipped]);
+        if (drawn.join() !== ranked.join()) bad(`By importance draws ${drawn.join()}, not ${ranked.join()}`);
+        if ((await page.evaluate<string | null>(`localStorage.getItem("desk.review.view")`)) !== "importance") bad("the choice isn't kept");
+        if (await page.locator(".rv-next, .rv-files[aria-label='Steps of the walk-through']").count())
+          bad("By importance still shows the steps");
+        await page.locator(".rv-views").scrollIntoViewIfNeeded();
+      }
+    },
+    after: async (page) => {
+      await page.evaluate(`localStorage.setItem("desk.review.view", "importance")`);
+      await sideDefault(page);
+    },
+    // xl has room for the sidebar beside the list, where the steps replace the files.
+    sizes: ["wide", "mid", "min", "mac", "xl"],
+  })),
+  {
+    // A review without steps has no switch: the page is as it was.
+    name: "review-walk-none",
+    go: async (page) => {
+      await review("acme/api#4154")(page);
+      if (await page.locator(".rv-views, .rv-step").count()) failures.push("review-walk-none: a review without steps shows the switch");
     },
   },
   {
@@ -4313,6 +4418,8 @@ try {
         colorScheme: theme,
         deviceScaleFactor: 2,
       });
+      // The review shots read By importance, as they did before the walk-through; the review-walk ones start from the default.
+      await page.addInitScript(`localStorage.getItem("desk.review.view") ?? localStorage.setItem("desk.review.view", "importance")`);
       // The macOS app's bridge (electron/preload.cjs) with only status() faked: App takes the shell's markers from it, and
       // Settings → This device draws the app's rows. No theme, so the theme stays in localStorage as in a browser.
       if (size.mac) {

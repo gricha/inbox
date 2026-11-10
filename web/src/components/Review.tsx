@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import {
@@ -54,6 +54,7 @@ import {
   sections,
   splitPath,
   threadsOn,
+  walk,
   type Acted,
   type Section,
 } from "../view.ts";
@@ -112,6 +113,7 @@ const STACK_SHOWN = 4; // the PR below this one, this one and two above; the res
 const ROOM = 1000; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded, where it has room
+const VIEW = "desk.review.view"; // this device's choice: the walk-through or by importance, when a review has steps
 const pane = () => document.querySelector(".col");
 // The fractional width, as the container query reads it, so the two agree at the edge.
 const roomy = () => (pane()?.getBoundingClientRect().width ?? innerWidth) >= ROOM;
@@ -195,6 +197,7 @@ export function Review({
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
   const [restOpen, setRestOpen] = useState(false);
+  const [walking, setWalking] = useState(() => getStored(VIEW) !== "importance");
   const [side, setSide] = useState(() => getStored(SIDE) !== "folded");
   const [room, setRoom] = useState(roomy); // the page's column has room for the sidebar beside the diff
   const [over, setOver] = useState(false); // without room, Files opened it over the diff (not kept)
@@ -303,7 +306,26 @@ export function Review({
 
   // The desk's reading order; its notes are only those written for this commit, in reading order.
   const order = v?.order;
-  const { list, rest } = useMemo(() => (order ? sections(order) : { list: [], rest: 0 }), [order]);
+  const guided = !!order?.steps?.length;
+  const { list, rest, steps, beyond } = useMemo(
+    () =>
+      !order ? { list: [], rest: 0, steps: [], beyond: 0 } : guided && walking ? walk(order) : { ...sections(order), steps: [], beyond: 0 },
+    [order, guided, walking],
+  );
+  const outside = list.slice(beyond, rest);
+  const outHunks = outside.reduce((n, y) => n + y.hunks.length, 0);
+  const outFiles = new Set(outside.map((y) => y.path)).size;
+  // The sidebar's rows in the walk-through: each step, then what no step covers.
+  const noted = (at: number, end: number) => list.slice(at, end).some((y) => y.notes.length > 0);
+  const stops = [
+    ...steps.map((st, k) => {
+      const end = steps[k + 1]?.at ?? beyond;
+      return { n: k + 1, name: st.title, at: st.at, end, el: `#rv-step-${k}`, notes: noted(st.at, end) };
+    }),
+    ...(beyond < rest
+      ? [{ n: null, name: "Not in the walk-through", at: beyond, end: rest, el: "#rv-beyond", notes: noted(beyond, rest), count: outHunks }]
+      : []),
+  ];
   const notes = order?.notes ?? [];
   const folded = !!order?.ranked && rest < list.length && !restOpen;
   const visible = folded ? list.slice(0, rest) : list;
@@ -402,6 +424,10 @@ export function Review({
     requestAnimationFrame(() => {
       document.querySelector(el)?.scrollIntoView({ block });
     });
+  }
+
+  function toStep(k: number) {
+    goTo(steps[k]!.at, `#rv-step-${k}`);
   }
 
   function toggleFold(path: string, at: number) {
@@ -916,9 +942,77 @@ export function Review({
         )}
         {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
         {!view.files_error && !files.length && <p className="quiet rv-nofiles">No files changed.</p>}
+        {guided && list.length > 0 && (
+          <nav className="rv-views" aria-label="Diff order">
+            {(
+              [
+                [true, "Walk-through"],
+                [false, "By importance"],
+              ] as const
+            ).map(([w, name]) => (
+              <button
+                key={name}
+                type="button"
+                className={cls("head-tab", w === walking && "on")}
+                aria-pressed={w === walking}
+                onClick={() => {
+                  setWalking(w);
+                  setStored(VIEW, w ? "walk" : "importance");
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </nav>
+        )}
         {list.length > 0 && (
           <div className="rv-diffs">
-            {visible.slice(0, Math.min(rest, upTo)).map(section)}
+            {visible.slice(0, Math.min(rest, upTo)).map((x, i) => {
+              const k = steps.findIndex((st) => st.at === i);
+              const end = steps.findIndex((_, j) => (steps[j + 1]?.at ?? beyond) === i + 1);
+              const next = steps[end + 1];
+              return (
+                <Fragment key={x.key}>
+                  {k >= 0 && (
+                    <header className="rv-step" id={`rv-step-${k}`}>
+                      <h2 className="rv-step-head">
+                        <span className="rv-step-n">
+                          {k + 1} of {steps.length}
+                        </span>{" "}
+                        {steps[k]!.title}
+                      </h2>
+                      {steps[k]!.body && <p className="rv-step-body">{spans(unlinked(inline(steps[k]!.body)))}</p>}
+                      {steps[k]!.check && (
+                        <p className="rv-step-body">
+                          <b>Check:</b> {spans(unlinked(inline(steps[k]!.check)))}
+                        </p>
+                      )}
+                    </header>
+                  )}
+                  {steps.length > 0 && i === beyond && (
+                    <h2 className="rv-step rv-step-head" id="rv-beyond">
+                      Not in the walk-through · {outHunks} {outHunks === 1 ? "hunk" : "hunks"} in {outFiles}{" "}
+                      {outFiles === 1 ? "file" : "files"}
+                    </h2>
+                  )}
+                  {section(x, i)}
+                  {end >= 0 &&
+                    (next ? (
+                      <button
+                        type="button"
+                        className="link-btn rv-next"
+                        onClick={() => {
+                          toStep(end + 1);
+                        }}
+                      >
+                        Next: {next.title}
+                      </button>
+                    ) : (
+                      <p className="quiet rv-next">End of the walk-through</p>
+                    ))}
+                </Fragment>
+              );
+            })}
             {order?.ranked && rest < list.length && upTo >= rest && (
               <button
                 type="button"
@@ -982,7 +1076,8 @@ export function Review({
             }))}
           />
           {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
-          {list.length > 0 && (
+          {steps.length > 0 && <StepList stops={stops} on={secIdx} onGo={goTo} />}
+          {list.length > 0 && !steps.length && (
             <nav className="rv-files" aria-label="Files in reading order">
               <h2 className="rv-side-head">
                 <span>
@@ -1020,6 +1115,45 @@ export function Review({
         </aside>
       )}
     </div>
+  );
+}
+
+// The walk-through's steps in the sidebar, where the files list is in By importance; the one you're in follows the scroll.
+function StepList({
+  stops,
+  on,
+  onGo,
+}: {
+  stops: { n: number | null; name: string; at: number; end: number; el: string; notes: boolean; count?: number }[];
+  on: number;
+  onGo: (i: number, el: string) => void;
+}) {
+  return (
+    <nav className="rv-files" aria-label="Steps of the walk-through">
+      <h2 className="rv-side-head">
+        <span>Walk-through</span>
+      </h2>
+      <ol>
+        {stops.map((r) => (
+          <li key={r.at}>
+            <button
+              type="button"
+              className={cls("rv-file", on >= r.at && on < r.end && "on")}
+              onClick={() => {
+                onGo(r.at, r.el);
+              }}
+            >
+              {r.n && <span className="rv-lvl">{r.n}</span>}
+              <span className="rv-fname">
+                <span className="rv-base">{r.name}</span>
+              </span>
+              {r.notes && <span className="rv-nn" title="AI notes" />}
+              {r.count !== undefined && <span className="rv-lvl">{r.count}</span>}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }
 

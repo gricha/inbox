@@ -287,6 +287,37 @@ const CANNED: Record<string, Canned> = {
         unread: [],
         total: 6,
       },
+      guide: {
+        steps: [
+          {
+            title: "The row stream",
+            body: "A new generator, `streamRows`, yields rows in batches as the scan finds them. The planner and the route below both read from it.",
+            check: "A batch ends when the cursor closes, even mid-page.",
+            hunks: [{ id: "h1", path: "src/planner/stream.ts" }],
+          },
+          {
+            title: "The planner's budget",
+            body: "`runPlan` now reads from `streamRows` and checks its time budget between batches, marking the result partial when it runs out.",
+            check: "One slow batch can't run far past the budget.",
+            hunks: [
+              { id: "h2", path: "src/planner/plan.ts" },
+              { id: "h3", path: "src/planner/plan.ts" },
+            ],
+          },
+          {
+            title: "The query route",
+            body: "/v2/query passes `?budget=` through and sets X-Partial-Results when the planner stopped early.",
+            check: "",
+            hunks: [{ id: "h4", path: "src/routes/query.ts" }],
+          },
+          {
+            title: "Tests",
+            body: "The stream's batching and the budget's cut-off, against a fake scan.",
+            check: "",
+            hunks: [{ id: "h5", path: "test/planner/stream.test.ts" }],
+          },
+        ],
+      },
     },
   },
   "acme/ml-pipeline#311": {

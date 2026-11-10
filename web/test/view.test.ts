@@ -65,6 +65,7 @@ import {
   routeHash,
   says,
   sections,
+  walk,
   settingsBack,
   settingsTab,
   SETTINGS_VIEWS,
@@ -736,6 +737,69 @@ test("the review reads in the desk's order: a file's hunks next to each other at
       ["b.ts", null, 1, []],
       ["logo.png", null, 0, [2]],
     ],
+  );
+});
+
+test("the walk-through is one list: each step's sections, then what no step covers, then the desk's fold, every hunk once", () => {
+  const hunk = (id: string, path: string, level: ReviewHunk["level"]): ReviewHunk => ({
+    id,
+    path,
+    file: path === "a.ts" ? 0 : 1,
+    header: "@@ -1,3 +1,4 @@",
+    patch: "@@ -1,3 +1,4 @@\n+x",
+    additions: 1,
+    deletions: 0,
+    level,
+    rank: null,
+    why: null,
+    notes: [],
+  });
+  const [h1, h2, h3, h5, h6] = [
+    hunk("h1", "a.ts", "skim"),
+    hunk("h2", "a.ts", "skim"),
+    hunk("h3", "b.ts", "look"),
+    hunk("h5", "b.ts", "unread"),
+    hunk("h6", "b.ts", "skim"),
+  ];
+  const o: ReviewOrder = {
+    ranked: true,
+    chunks: [h3, h1, h2, h6],
+    unread: [h5],
+    skipped: [],
+    rest: [{ path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip")], notes: [] }],
+    notes: [],
+    steps: [
+      { title: "The type", body: "b", check: "c", hunks: [h1, h2, h3] },
+      { title: "Its callers", body: "", check: "", hunks: [h6] },
+    ],
+    beyond: [h5],
+  };
+  const w = walk(o);
+  assert.deepEqual(
+    w.list.map((s) => [s.path, s.level, s.hunks.map((h) => h.id)]),
+    [
+      ["a.ts", "skim", ["h1", "h2"]],
+      ["b.ts", "look", ["h3"]],
+      ["b.ts", "skim", ["h6"]],
+      ["b.ts", "unread", ["h5"]],
+      ["a.lock", "skip", ["h4"]],
+    ],
+    "a step's sections never merge into the next step's",
+  );
+  assert.deepEqual(
+    w.steps.map((st) => [st.at, st.title]),
+    [
+      [0, "The type"],
+      [2, "Its callers"],
+    ],
+  );
+  assert.deepEqual([w.beyond, w.rest], [3, 4]);
+  assert.equal(new Set(w.list.map((s) => s.key)).size, w.list.length, "keys stay unique");
+  assert.deepEqual(
+    w.list.flatMap((s) => s.hunks.map((h) => h.id)).toSorted(),
+    sections(o)
+      .list.flatMap((s) => s.hunks.map((h) => h.id))
+      .toSorted(),
   );
 });
 

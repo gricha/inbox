@@ -12,7 +12,7 @@ import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
-import { CLAUDE_PAUSED, lineAt, parseReview, reviewOrder } from "../../src/review.ts";
+import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
@@ -2776,6 +2776,26 @@ function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRan
   return pick([[1, "look", "calls the new path, with retries"]]);
 }
 
+// A walk-through on the scheduler split, its unread and skipped files left out (the planner's is canned in diffs.ts).
+const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => `h${a + i}`);
+const STEPS: Record<string, { title: string; body: string; check: string; hunks: string[] }[]> = {
+  "acme/worker#879": [
+    {
+      title: "Leases and the fencing token",
+      body: "Lease owns the jobs table: the new types and store hand out time-limited leases with a token, and the scheduler's entry point starts its loop.",
+      check: "A renewal after the lease expired is refused, not extended.",
+      hunks: ["h2", "h3", "h1"],
+    },
+    {
+      title: "Dispatch reads from a channel",
+      body: "Dispatch asks Lease for work through a bounded channel and reports back with the token.",
+      check: "A full channel slows leasing instead of dropping jobs.",
+      hunks: range(4, 10),
+    },
+    { title: "Errors, retries and config", body: "Moved from the old scheduler with the new names.", check: "", hunks: range(11, 20) },
+  ],
+};
+
 function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
@@ -2793,6 +2813,7 @@ function written(r: Rec, head: string): AiReview {
         ]
       : [];
   const chunks = ranking(r.id, files, notes);
+  const guide = chunks && STEPS[r.id] && parseSteps(STEPS[r.id], files, chunks);
   return {
     verdict: sig.author.bot || sig.pr.approvals >= 2 ? "skip" : sig.me.requested_direct || sig.author.close ? "look" : "skim",
     risk: sig.pr.size > 800 ? "high" : sig.pr.size > 200 ? "medium" : "low",
@@ -2804,6 +2825,7 @@ function written(r: Rec, head: string): AiReview {
     ...WRITTEN[r.id],
     notes,
     ...(chunks && { chunks }),
+    ...(guide && { guide }),
     head_oid: head,
     model: MODEL,
     at: new Date().toISOString(),

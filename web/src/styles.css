@@ -5347,6 +5347,62 @@ a.rv-part-row:hover {
   min-width: 0;
 }
 
+/* The diff's two orders, as Settings' tabs: the first word on the diff's edge. */
+.rv-views {
+  display: flex;
+  height: 34px;
+  margin: 0 0 4px -12px;
+}
+
+.rv-views .head-tab {
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* A stop of the walk-through: a heading in the diff's column, its words, then its sections. No colour, no box. */
+.rv-step {
+  display: grid;
+  gap: 4px;
+  max-width: 780px;
+  margin: 10px 0 -12px;
+  scroll-margin-top: 64px;
+}
+
+.rv-step-head {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rv-step-n {
+  margin-right: 6px;
+  color: var(--pencil);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-step-body {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.rv-step-body b {
+  font-weight: 600;
+}
+
+.rv-next {
+  justify-self: end;
+  margin: -14px 0 0;
+}
+
+p.rv-next {
+  font-size: 12.5px;
+}
+
 /* minmax(0, 1fr): a long file name in the header wraps instead of widening the track, and the page, past the window. */
 .rv-file-sec {
   display: grid;

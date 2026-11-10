@@ -215,28 +215,55 @@ export interface Section {
   notes: number[]; // indices into ai.notes, in reading order
 }
 
-// The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
-export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
-  const list: Section[] = [];
-  for (const h of [...o.chunks, ...o.unread, ...o.skipped]) {
-    const last = list.at(-1);
+// A file's neighbouring hunks at one level and for one reason, as one section.
+function grouped(hunks: ReviewHunk[], list: Section[] = []): Section[] {
+  const from = list.length;
+  for (const h of hunks) {
+    const last = list.length > from ? list.at(-1) : undefined;
     if (last?.path === h.path && last.level === h.level && last.why === h.why) {
       last.hunks.push(h);
       last.notes.push(...h.notes);
     } else list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes] });
   }
+  return list;
+}
+
+const restOf = (o: ReviewOrder): Section[] =>
+  o.rest.map((r) => ({
+    key: `rest:${r.path}`,
+    path: r.path,
+    file: r.file,
+    level: o.ranked ? "skip" : null,
+    why: r.why,
+    hunks: r.hunks,
+    notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
+  }));
+
+// The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
+export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
+  const list = grouped([...o.chunks, ...o.unread, ...o.skipped]);
+  return { list: [...list, ...restOf(o)], rest: list.length };
+}
+
+export interface WalkStep {
+  at: number; // its first section in the list
+  title: string;
+  body: string;
+  check: string;
+}
+
+// The walk-through as one list of sections: each step's, then from `beyond` on what no step covers, then the desk's fold.
+export function walk(o: ReviewOrder): { list: Section[]; rest: number; steps: WalkStep[]; beyond: number } {
+  const list: Section[] = [];
+  const steps = (o.steps ?? []).map((st) => {
+    const at = list.length;
+    grouped(st.hunks, list);
+    return { at, title: st.title, body: st.body, check: st.check };
+  });
+  const beyond = list.length;
+  grouped(o.beyond ?? [], list);
   const rest = list.length;
-  for (const r of o.rest)
-    list.push({
-      key: `rest:${r.path}`,
-      path: r.path,
-      file: r.file,
-      level: o.ranked ? "skip" : null,
-      why: r.why,
-      hunks: r.hunks,
-      notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
-    });
-  return { list, rest };
+  return { list: [...list, ...restOf(o)], rest, steps, beyond };
 }
 
 const DRAW_LINES = 400; // about what Pierre highlights in a frame or two
