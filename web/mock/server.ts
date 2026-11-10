@@ -18,7 +18,7 @@ import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { mergeLine, stage, standings } from "../../src/stage.ts";
-import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
+import { checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import type { ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -79,7 +79,7 @@ import type {
   Job,
   Work,
 } from "../../src/types.ts";
-import { COORDINATOR_NAME, RANK, UNTIL } from "../../src/types.ts";
+import { COORDINATOR_NAME, RANK, SECRET_SET, UNTIL } from "../../src/types.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -3233,7 +3233,7 @@ const settingsView = (): SettingsView => ({
   path: `${homedir()}/.inbox/settings.json (mock, in memory)`,
   sections: SECTIONS,
   defs: [...SETTINGS],
-  values: { ...DEFAULTS, ...overrides },
+  values: masked({ ...DEFAULTS, ...overrides }),
   overridden: Object.keys(overrides),
   errors: [],
   github: github(),
@@ -3253,6 +3253,7 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
   if (errors.length) return { ok: false, errors, settings: settingsView() };
   const next = { ...overrides };
   for (const [k, v] of Object.entries(set)) {
+    if (settingDef(k)!.type === "secret" && v === SECRET_SET) continue;
     if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
     else next[k] = v as SettingValue;
   }

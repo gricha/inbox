@@ -270,6 +270,20 @@ export class ClaudeBadOutput extends Data.TaggedError("ClaudeBadOutput")<{
 
 export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput;
 
+// ---------------------------------------------------------------- the decision model (OpenRouter's Decisions API)
+
+// It can't answer now, for a reason that's nothing about what was asked: OpenRouter refused the key (401), the key is out
+// of credits (402) or rate limited (429). The message is the owner's fix; what asked waits and asks again.
+export class DecisionModelDown extends Data.TaggedError("DecisionModelDown")<{ readonly status: number; readonly message: string }> {}
+
+// Anything else it fails with: unreachable, a request it refuses, a provider's failure, an answer that isn't the documented
+// shape. status is OpenRouter's, when it answered.
+export class DecisionModelError extends Data.TaggedError("DecisionModelError")<{
+  readonly message: string;
+  readonly status?: number;
+  readonly cause?: unknown;
+}> {}
+
 // ---------------------------------------------------------------- GitHub
 
 // No token to send (gh isn't installed, or `gh auth token` failed: cause is its error), or GitHub refused the one a read

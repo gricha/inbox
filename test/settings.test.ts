@@ -268,3 +268,53 @@ test("defaults are what parseConfig uses without settings", () => {
   assert.equal(cfg.poll_seconds, DEFAULTS["github.poll_seconds"]);
   assert.equal(cfg.handoff.prompt, DEFAULTS["handoff.prompt"]);
 });
+
+test("a secret setting is kept in settings.json, yours alone to read, and never sent back: set, it reads as dots", async (c) => {
+  const { setup } = await import("./helpers/desk.ts");
+  const { createApp } = await import("../src/server.ts");
+  const { run } = await import("./helpers/run.ts");
+  const KEY = "sk-or-v1-1111111111111111111111111111111111111111111111111111111111111111";
+  const DOTS = "•".repeat(8);
+  const logs: string[] = [];
+  const t = await setup([], {
+    desk: {
+      log: (m) => {
+        logs.push(m);
+      },
+    },
+  });
+  c.after(t.cleanup);
+  const def = (SETTINGS as readonly SettingDef[]).find((d) => d.key === "agent.decision_key")!;
+  assert.deepEqual([def.type, def.default, t.desk.getSettings().values["agent.decision_key"]], ["secret", "", ""], "none by default");
+  for (const [bad, why] of [
+    [3, "must be one line with no spaces"],
+    ["sk or", "must be one line with no spaces"],
+    [`${DOTS}sk-or-new`, "paste the whole key in place of the dots"],
+  ] as const)
+    assert.equal(checkSetting("agent.decision_key", bad), why);
+
+  const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin", "content-type": "application/json" };
+  const app = createApp(t.desk, 47823);
+  const put = async (body: unknown) => {
+    const res = await app.request("http://127.0.0.1:47823/api/settings", { method: "PUT", headers: DESK, body: JSON.stringify(body) });
+    return res.text();
+  };
+  const saved = await put({ set: { "agent.decision_key": KEY } });
+  assert.ok(!saved.includes(KEY), "the answer to the save doesn't repeat it");
+  assert.equal(t.desk.settings["agent.decision_key"], KEY, "the desk has it");
+  const file = path.join(t.home, "settings.json");
+  assert.equal((JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>)["agent.decision_key"], KEY);
+  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const view = t.desk.getSettings();
+  assert.deepEqual([view.values["agent.decision_key"], view.overridden.includes("agent.decision_key")], [DOTS, true]);
+  for (const p of ["/api/settings", "/api/overview", "/api/automations", "/api/status", "/api/policy", "/api/config"]) {
+    const body = await (await app.request(`http://127.0.0.1:47823${p}`)).text();
+    assert.ok(!body.includes(KEY), `${p} doesn't carry it`);
+  }
+  // What a client was shown, sent back, changes nothing; another setting saved beside it leaves it alone.
+  await put({ set: { "agent.decision_key": DOTS, "queue.cards": 12 } });
+  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.cards"]], [KEY, 12]);
+  await run(t.desk.putSettings({ reset: ["agent.decision_key"] }));
+  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.getSettings().values["agent.decision_key"]], ["", ""], "reset clears it");
+  assert.ok(!logs.join("\n").includes(KEY), "nothing logged it");
+});

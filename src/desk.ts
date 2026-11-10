@@ -90,7 +90,7 @@ import type {
   Until,
   Work,
 } from "./types.ts";
-import { byPart, isCoordinator, RANK, UNTIL } from "./types.ts";
+import { byPart, isCoordinator, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
 import {
@@ -123,6 +123,7 @@ import {
   SECTIONS,
   SETTINGS,
   settingDef,
+  masked,
   settingsPath,
   writeSettings,
   type Settings,
@@ -233,6 +234,7 @@ export interface DeskOptions {
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
   writer?: GitHubWriter; // the desk's GitHub writes; without it they're off
+  decisions?: string; // the Decisions API's URL, in place of OpenRouter's: tests point it at a local server
 }
 
 // Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
@@ -310,6 +312,7 @@ export class Desk {
   log: (msg: string) => void;
   review: ReviewDeps | null;
   writer: GitHubWriter | null;
+  decisions: string | undefined;
   policyPath: string;
   policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
@@ -368,6 +371,7 @@ export class Desk {
     );
     this.review = opts.review ?? null;
     this.writer = opts.writer ?? null;
+    this.decisions = opts.decisions;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
     this.policyPath = path.join(this.home, "policy.md");
@@ -738,7 +742,7 @@ export class Desk {
       path: this.settingsPath,
       sections: SECTIONS,
       defs: [...SETTINGS],
-      values: this.settings,
+      values: masked(this.settings),
       overridden: Object.keys(this.settingsOverrides),
       errors: this.settingsErrors,
       github: {
@@ -779,6 +783,7 @@ export class Desk {
       // Start from the file as written, so entries that are invalid or unknown survive the save.
       const next = { ...this.settingsRaw };
       for (const [k, v] of Object.entries(patch.set ?? {})) {
+        if (settingDef(k)!.type === "secret" && v === SECRET_SET) continue; // a client sent back what it was shown: unchanged
         if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
         else next[k] = v;
       }

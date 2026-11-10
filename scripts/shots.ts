@@ -2916,6 +2916,54 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // More Agent settings, opened: the decision model's key is a password field whose help says what leaves this computer;
+    // saved, it shows dots and the desk never sends the key back, and Reset to default clears it. Shot with one saved.
+    name: "settings-agent-more",
+    go: async (page) => {
+      const KEY = "sk-or-v1-shots-0000000000000000000000000000000000000000000000000000";
+      await at("#/settings/agent")(page);
+      await page.getByRole("button", { name: "More Agent settings" }).click();
+      const key = page.locator('[id="setting-agent.decision_key"]');
+      const row = page.locator('[id="row-agent.decision_key"]');
+      const seen = await page.evaluate<{ type: string; value: string; hint: string | null; help: string }>(`(() => {
+        const r = document.getElementById("row-agent.decision_key"), i = r.querySelector("input");
+        return { type: i.type, value: i.value, hint: i.placeholder, help: r.querySelector(".s-help")?.textContent ?? "" };
+      })()`);
+      if (
+        seen.type !== "password" ||
+        seen.value !== "" ||
+        seen.hint !== "An OpenRouter key" ||
+        seen.help !==
+          "Sends automations' questions to OpenRouter, with each item's title, author and who's asked. Empty, Claude answers them."
+      )
+        failures.push(`settings-agent-more: the key's row reads ${JSON.stringify(seen)}`);
+      const model = await page.locator('[id="setting-agent.decision_model"]').inputValue();
+      if (model !== "typesafe/jev-1.14") failures.push(`settings-agent-more: the model reads ${JSON.stringify(model)}`);
+      await key.fill(KEY);
+      await key.blur();
+      await row.getByText("Saved").waitFor({ timeout: 3000 });
+      await page.waitForTimeout(1800); // "Saved" gives way to Reset to default
+      const after = await page.evaluate<{ shown: string; api: unknown; onPage: boolean; reset: boolean }>(`(async () => ({
+        shown: document.getElementById("setting-agent.decision_key").value,
+        api: (await (await fetch("/api/settings")).json()).values["agent.decision_key"],
+        onPage: document.documentElement.outerHTML.includes(${JSON.stringify(KEY)}),
+        reset: [...document.getElementById("row-agent.decision_key").querySelectorAll("button")].some((b) => b.textContent === "Reset to default"),
+      }))()`);
+      const dots = "\u2022".repeat(8);
+      if (after.shown !== dots || after.api !== dots || after.onPage || !after.reset)
+        failures.push(`settings-agent-more: with a key saved the row is ${JSON.stringify(after)}`);
+      await page.evaluate(`scrollBy(0, document.querySelector("#s-agent .s-more").getBoundingClientRect().top - 160)`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator('[id="row-agent.decision_key"]').getByRole("button", { name: "Reset to default" }).click();
+      await page.waitForTimeout(300);
+      const cleared = await deskHas(page, "agent.decision_key");
+      if (cleared !== "") failures.push(`settings-agent-more: Reset to default leaves ${JSON.stringify(cleared)}`);
+      await page.getByRole("button", { name: "More Agent settings" }).click();
+    },
+  },
+  {
     // Your agent off: letting it run without asking would do nothing, so that row isn't drawn; Run your agent is.
     name: "settings-agent-off",
     go: async (page) => {

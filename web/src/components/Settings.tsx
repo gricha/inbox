@@ -166,6 +166,25 @@ function StringField(p: FieldProps) {
   return <input className="input" type="text" placeholder={emptyLabel(p)} autoCapitalize="off" autoCorrect="off" {...d.bind} />;
 }
 
+// A secret never comes back from the desk: once set, its field holds the dots that stand in for it, selected when you
+// come to it so what you paste takes their place.
+function SecretField(p: FieldProps) {
+  const d = useDraft(p);
+  return (
+    <input
+      className="input"
+      type="password"
+      placeholder={p.def.placeholder}
+      autoComplete="off"
+      {...d.bind}
+      onFocus={(e) => {
+        d.bind.onFocus();
+        e.currentTarget.select();
+      }}
+    />
+  );
+}
+
 function TextField(p: FieldProps) {
   const d = useDraft(p);
   return <textarea className="input area" rows={Math.max(3, d.draft.split("\n").length)} {...d.bind} />;
@@ -434,6 +453,7 @@ const CONTROLS: Record<SettingType, ComponentType<FieldProps>> = {
   list: ListField,
   hotkey: HotkeyField,
   select: SelectField,
+  secret: SecretField,
 };
 // A setting whose control isn't its type's, by key, looked up first.
 const BY_KEY: Record<string, ComponentType<FieldProps> | undefined> = { "notify.quiet": QuietHours };

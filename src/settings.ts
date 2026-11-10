@@ -5,7 +5,7 @@ import path from "node:path";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { fsError, type FsError } from "./errors.ts";
-import type { ConfigError, SettingDef, SettingsSection, SettingValue } from "./types.ts";
+import { SECRET_SET, type ConfigError, type SettingDef, type SettingsSection, type SettingValue } from "./types.ts";
 
 const DEFAULT_PROMPT = `Review {item.url} by {item.author}.
 Read it with \`gh pr view {item.number} --repo {item.repo}\` and \`gh pr diff {item.number} --repo {item.repo}\`.
@@ -178,6 +178,28 @@ export const SETTINGS = [
     help: "On your own Claude Code login, 20 items a call.",
   },
   {
+    key: "agent.decision_key",
+    section: "agent",
+    more: true,
+    label: "Decision model key",
+    type: "secret",
+    default: "",
+    placeholder: "An OpenRouter key",
+    help: "Sends automations' questions to OpenRouter, with each item's title, author and who's asked. Empty, Claude answers them.",
+  },
+  {
+    key: "agent.decision_model",
+    section: "agent",
+    more: true,
+    label: "Decision model",
+    type: "string",
+    default: "typesafe/jev-1.14",
+    required: true,
+    pattern: "^~?[\\w.-]+/[\\w.:-]+$",
+    pattern_hint: "a model's id on OpenRouter, like typesafe/jev-1.14",
+    help: "Which of OpenRouter's decision models answers. A pinned one keeps answering the same way.",
+  },
+  {
     key: "queue.quiet_days",
     section: "queue",
     label: "Move untouched items to FYI after",
@@ -271,6 +293,10 @@ export function checkSetting(key: string, value: unknown): string | null {
       if (picked?.off) return `${picked.label} ${picked.off}`;
       return picked ? null : `must be one of ${d.options?.map((o) => o.value).join(", ")}`;
     }
+    case "secret":
+      if (typeof value !== "string" || /\s/.test(value)) return "must be one line with no spaces";
+      // Typed after what the field showed for the saved one, not in its place.
+      return value !== SECRET_SET && value.includes(SECRET_SET[0]!) ? "paste the whole key in place of the dots" : null;
     case "string":
     case "text":
     case "hotkey":
@@ -344,15 +370,22 @@ export const readSettings = (file: string): SettingsFile =>
 
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });
 
+// The settings as anything outside the desk may see them: a secret that's set reads SECRET_SET, never its value.
+export const masked = (values: Settings): Settings =>
+  Object.fromEntries(
+    Object.entries(values).map(([k, v]) => [k, DEFS.get(k)?.type === "secret" && v !== "" ? SECRET_SET : v]),
+  ) as unknown as Settings;
+
 // Through a temporary file and a rename, so a reader never sees half of it, and through a symlinked settings.json.
 export const writeSettings = Effect.fn("writeSettings")(function* (file: string, values: Record<string, unknown>) {
   const real = fs.existsSync(file) ? yield* Effect.try({ try: () => fs.realpathSync(file), catch: fsError("realpath", file) }) : file;
   const sorted = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
   const tmp = `${real}.${process.pid}.tmp`;
   const text = JSON.stringify(sorted, null, 2) + "\n";
+  // Yours alone to read: it may hold a key.
   yield* Effect.try({
     try: () => {
-      fs.writeFileSync(tmp, text);
+      fs.writeFileSync(tmp, text, { mode: 0o600 });
     },
     catch: fsError("write", tmp),
   });

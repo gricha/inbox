@@ -242,7 +242,10 @@ export interface Config {
 // ---------------------------------------------------------------------------
 // Settings (settings.json): how the desk behaves. Boards and rules stay in config.toml.
 
-export type SettingType = "number" | "boolean" | "string" | "text" | "list" | "hotkey" | "select";
+export type SettingType = "number" | "boolean" | "string" | "text" | "list" | "hotkey" | "select" | "secret";
+// What a secret setting's value reads as once it's set: the desk never sends the value itself (GET /api/settings, the CLI),
+// and takes this back as "unchanged". "" still means none.
+export const SECRET_SET = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
 export type SettingValue = number | boolean | string | string[];
 
 export interface SettingDef {
@@ -250,7 +253,9 @@ export interface SettingDef {
   section: string;
   label: string;
   help?: string;
-  type: SettingType; // text = multi-line string, list = strings, hotkey = Electron accelerator ("" = off), select = one of options
+  // text = multi-line string, list = strings, hotkey = Electron accelerator ("" = off), select = one of options, secret = a
+  // string the desk keeps in settings.json and never sends back (SECRET_SET stands in for it)
+  type: SettingType;
   default: number | boolean | string | readonly string[];
   options?: readonly { value: string; label: string; off?: string }[]; // select only; off: why it can't be picked yet
   min?: number;
