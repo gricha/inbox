@@ -957,6 +957,107 @@ const SHOTS: Shot[] = [
         failures.push("review: the AI review isn't above the conversation and your comment");
     },
   },
+  // The top of a review stays short, so the diff starts high: your comment's box is one line on the actions' row, with no
+  // row of its own, until it has words. On the three-line box over its own row of actions the first file started at 486px
+  // in the mac window, 478 and 475 in the narrower ones; a box or a row creeping back would pass 386 again.
+  {
+    name: "review-top",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      const seen = await page.evaluate<{ box: number; boxTop: number; act: number; file: number; send: number }>(`(() => {
+        const r = (s) => document.querySelector(s).getBoundingClientRect();
+        return {
+          box: Math.round(r(".rv-comment-input").height),
+          boxTop: Math.round(r(".rv-comment-input").top),
+          act: Math.round(r(".rv-actions .act").top),
+          file: Math.round(r(".rv-file-sec").top),
+          send: document.querySelectorAll(".rv-comment .act").length,
+        };
+      })()`);
+      if (seen.box > 36) failures.push(`review-top: the empty comment box is ${seen.box}px tall, not one line`);
+      if (Math.abs(seen.boxTop - seen.act) > 2 || seen.send)
+        failures.push(`review-top: the empty comment box isn't alone on the actions' row: ${JSON.stringify(seen)}`);
+      if (seen.file > 386) failures.push(`review-top: the first file starts ${seen.file}px down the window, past 386`);
+    },
+  },
+  // Your comment on the PR: the box grows with its words while the buttons stay where they were, Comment beside it; Esc
+  // leaves it with the words kept; they're still in it, at their size, after stepping to the next item and back; and the
+  // platform's send key sends it.
+  {
+    name: "review-comment",
+    go: async (page) => {
+      type Edge = { left: number; top: number; bottom: number };
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      await page.route("**/comment", () => {}); // GitHub never answers here, so the mock's PR stays as it was
+      await review("acme/api#4127")(page);
+      const box = page.locator(".rv-comment-input");
+      const says = () =>
+        page.evaluate<{ box: number; approve: Edge | null; send: Edge | null; focused: boolean; hash: string }>(`(() => {
+          const r = (s) => { const b = document.querySelector(s)?.getBoundingClientRect(); return b ? { left: Math.round(b.left), top: Math.round(b.top), bottom: Math.round(b.bottom) } : null; };
+          const input = document.querySelector(".rv-comment-input").getBoundingClientRect();
+          return {
+            box: Math.round(input.height),
+            approve: r(".rv-actions > .act"),
+            send: r(".rv-comment .act"),
+            focused: document.activeElement?.matches(".rv-comment-input") ?? false,
+            hash: decodeURIComponent(location.hash),
+          };
+        })()`);
+      const empty = await says();
+      const words = [
+        "Two things before this merges:",
+        "1. the budget is only checked between batches",
+        "2. a partial result needs saying so",
+      ];
+      await box.click();
+      const cursor = await says();
+      for (const [i, line] of words.entries()) {
+        if (i) await page.keyboard.press("Enter");
+        await page.keyboard.type(line);
+      }
+      const typed = await says();
+      if (cursor.box !== empty.box) failures.push(`review-comment: the cursor alone resized the box, ${empty.box}px to ${cursor.box}px`);
+      if (typed.box < 70) failures.push(`review-comment: with three lines in it the box is ${typed.box}px tall`);
+      if (JSON.stringify(typed.approve) !== JSON.stringify(empty.approve))
+        failures.push(
+          `review-comment: Approve moved as the box grew, ${JSON.stringify(empty.approve)} to ${JSON.stringify(typed.approve)}`,
+        );
+      // Comment is beside the box, inside its height: no row added under the actions.
+      const row = typed.approve?.top ?? 0;
+      if (!typed.send || typed.send.top < row - 2 || typed.send.bottom > row + typed.box + 2)
+        failures.push(`review-comment: Comment isn't beside the box: ${JSON.stringify(typed)}`);
+      await page.keyboard.press("Escape");
+      const left = await says();
+      if (left.focused || left.hash !== "#/review/acme/api#4127" || (await box.inputValue()) !== words.join("\n"))
+        failures.push(`review-comment: Esc in the box with words in it left ${JSON.stringify([left, await box.inputValue()])}`);
+      // The item after, then back: the words are still in the box, at the size they need.
+      await box.click();
+      await page.keyboard.press(`${mod}+BracketRight`);
+      await page.waitForTimeout(400);
+      const away = (await says().catch(() => null))?.hash ?? decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (away === "#/review/acme/api#4127") failures.push("review-comment: the next-item key didn't leave the review");
+      await page.keyboard.press(`${mod}+BracketLeft`);
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(400);
+      const back = await says();
+      const kept = await box.inputValue();
+      if (back.hash !== "#/review/acme/api#4127" || kept !== words.join("\n"))
+        failures.push(`review-comment: back on the review, the comment box reads ${JSON.stringify(kept)}`);
+      else if (back.box < 70) failures.push(`review-comment: back on the review, the box with its words is ${back.box}px tall`);
+      await box.click();
+      await page.keyboard.press(`${mod}+Enter`);
+      await page
+        .locator(".rv-acted")
+        .waitFor({ timeout: 5000 })
+        .catch(() => {});
+      const acted = (await page.locator(".rv-acted").count()) ? await page.locator(".rv-acted-what").textContent() : null;
+      if (acted !== "\u2713 Commented") failures.push(`review-comment: the send key in the box left ${JSON.stringify(acted)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
   // From 1160px the list a review was opened from stays beside it, two lines a row, the open one marked; below, none.
   {
     name: "beside-review",

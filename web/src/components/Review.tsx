@@ -31,7 +31,9 @@ import {
   holding,
   holdKeys,
   isSending,
+  keepComment,
   keepDraft,
+  keptComment,
   keptDraft,
   keysHeld,
   returnDraft,
@@ -205,8 +207,13 @@ export function Review({
   const [more, setMore] = useState(false); // the More menu
   const [checksOpen, setChecksOpen] = useState(false); // the sidebar's checks, listed: every PR opens with them in one line
   const [writing, setWriting] = useState(false); // Request changes, being written
-  // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it.
-  const [comment, setComment] = useState("");
+  // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it,
+  // and per PR for this window, as a line's is, so leaving the review and coming back finds it; sent, it's cleared.
+  const [comment, setComment] = useState(() => keptComment(id));
+  const writeComment = (text: string) => {
+    setComment(text);
+    keepComment(id, text);
+  };
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set()); // files whose diff you folded, by path
   const [draft, setDraft] = useState<Draft | null>(() => restored(id, 1));
   const [sent, setSent] = useState<Sent[]>([]);
@@ -738,18 +745,13 @@ export function Review({
             />
           )}
           <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
-          {/* Still there once you've acted, so you can comment on what you did and nothing under it moves. */}
-          {/* While Request changes is open its box is the one you write in, so an empty comment box steps aside. */}
-          {(open || !!comment.trim()) && !(writing && !comment.trim()) && (
-            <CommentBox card={card} body={comment} setBody={setComment} sending={!!acted?.sending} onComment={onComment} />
-          )}
         </div>
 
         {picking && !acted && (
           <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />
         )}
-        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest; done from here,
-            what you did and where it went, in place of the button you pressed. */}
+        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest, then your
+            comment's box on the same row; done from here, what you did and where it went, in place of the button you pressed. */}
         <div className="actions rv-actions">
           {acted && (
             <p className="rv-acted">
@@ -860,6 +862,11 @@ export function Review({
               />
             )}
           </span>
+          {/* Still there once you've acted, so you can comment on what you did and nothing under it moves. */}
+          {/* While Request changes is open its box is the one you write in, so an empty comment box steps aside. */}
+          {(open || !!comment.trim()) && !(writing && !comment.trim()) && (
+            <CommentBox card={card} body={comment} setBody={writeComment} sending={!!acted?.sending} onComment={onComment} />
+          )}
         </div>
         {writing && (
           <WriteBox
@@ -1140,17 +1147,16 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
           {(card?.talk === true || card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
             <SkLines count={1} className="rv-convo sk-short" />
           )}
-          {/* An open PR's comment box, empty, at its height. */}
-          {card && !card.resolved && (
-            <div className="rv-comment" aria-hidden="true">
-              <div className="rv-comment-input sk-box" />
-            </div>
-          )}
         </div>
-        {/* Its call to action and More. */}
+        {/* Its call to action and More, then an open PR's comment box, empty, at its height. */}
         <div className="actions rv-actions" aria-hidden="true">
           <span className="sk sk-key" />
           <span className="sk sk-key" />
+          {card && !card.resolved && (
+            <div className="rv-comment">
+              <div className="rv-comment-input sk-box" />
+            </div>
+          )}
         </div>
         <div className="rv-diffs" aria-hidden="true">
           {[0, 1].map((i) => (
@@ -1516,8 +1522,9 @@ function Dir({ path }: { path: string }) {
   );
 }
 
-// Your comment on the PR, under what reviewers said, while it's open (or while it has words): Comment (or Cmd+Enter) sends
-// it, Esc leaves it. The words are the review's, so GitHub refusing them leaves them here.
+// Your comment on the PR, on the actions' row, while it's open (or while it has words): one line until it has words, then
+// as tall as they need, with Comment at its foot. Comment (or Cmd+Enter) sends it, Esc leaves it. The words are the
+// review's, so GitHub refusing them leaves them here.
 function CommentBox({
   card,
   body,
@@ -1549,6 +1556,7 @@ function CommentBox({
         className="rv-comment-input"
         aria-label={`Your comment on ${shortRef(card)}`}
         placeholder={`Comment on ${shortRef(card)}\u2026`}
+        rows={1}
         value={body}
         onChange={(e) => {
           setBody(e.target.value);
@@ -1563,19 +1571,17 @@ function CommentBox({
         }}
       />
       {body.trim() && (
-        <div className="actions">
-          <button
-            type="button"
-            className="act primary"
-            title={`Comment on GitHub, as you (${MOD}\u21b5)`}
-            disabled={sending}
-            onClick={() => {
-              send();
-            }}
-          >
-            {sending ? "Commenting\u2026" : "Comment"}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="act primary"
+          title={`Comment on GitHub, as you (${MOD}\u21b5)`}
+          disabled={sending}
+          onClick={() => {
+            send();
+          }}
+        >
+          {sending ? "Commenting\u2026" : "Comment"}
+        </button>
       )}
     </div>
   );

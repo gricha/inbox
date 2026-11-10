@@ -4310,6 +4310,11 @@ button.s-edit:hover:not(:disabled) {
   container: pane / inline-size;
 }
 
+/* The review starts close under its head, as it does in a narrow window: what's above the diff is kept short. */
+.col:has(.review) .main {
+  padding-top: 18px;
+}
+
 .review {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -4320,7 +4325,7 @@ button.s-edit:hover:not(:disabled) {
 .rv-main {
   position: relative;
   display: grid;
-  gap: 22px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -4343,25 +4348,6 @@ button.s-edit:hover:not(:disabled) {
   position: absolute;
   top: 0;
   right: 0;
-}
-
-/* Your comment on the PR, under what reviewers said. */
-.rv-comment {
-  display: grid;
-  gap: 8px;
-  max-width: 720px;
-}
-
-.rv-comment-input {
-  min-height: 38px;
-  field-sizing: content;
-}
-
-/* The comment box's place while the review loads: a quiet bar as tall as the box. */
-.rv-comment-input.sk-box {
-  border-color: transparent;
-  background: var(--wash);
-  resize: none;
 }
 
 .rv-side {
@@ -4555,7 +4541,6 @@ a.rv-check:hover {
 .rv-desc,
 .rv-ai,
 .rv-actions,
-.rv-comment,
 .rv-changes,
 .rv-files-err,
 .rv-nofiles {
@@ -4568,7 +4553,6 @@ a.rv-check:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  margin-top: 18px;
   padding: 0 12px;
   font-size: 13.5px;
 }
@@ -4726,10 +4710,10 @@ a.rv-check:hover {
   margin-top: 12px;
 }
 
-/* The facts, Claude's read, the threads waiting on you and your comment. */
+/* The facts, Claude's read and the threads waiting on you. */
 .rv-top {
   display: grid;
-  gap: 22px;
+  gap: 16px;
 }
 
 .rv-head {
@@ -5089,6 +5073,41 @@ a.rv-check:hover {
 .cv-reply::placeholder,
 .rv-comment-input::placeholder {
   color: var(--pencil);
+}
+
+/* Your comment on the PR, on the actions' row after them: one line, as tall as a button, until it has words, then as tall
+   as they need, with Comment at its foot. The cursor alone doesn't resize it, so nothing under it jumps as it comes and
+   goes, and the buttons keep to the row's top while it grows. */
+.rv-actions {
+  align-items: flex-start;
+}
+
+.rv-comment {
+  display: flex;
+  flex: 1 1 260px;
+  gap: 6px;
+  align-items: flex-end;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.rv-comment-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 10px;
+  line-height: 20px;
+}
+
+.rv-comment .act.primary {
+  min-width: 0;
+}
+
+/* The comment box's place while the review loads: a quiet bar as tall as the box. */
+.rv-comment-input.sk-box {
+  border-color: transparent;
+  background: var(--wash);
 }
 
 .cv-quiet {
@@ -5529,10 +5548,10 @@ a.rv-check:hover {
   max-width: 100%;
 }
 
-/* The call to action's shape, then the rest as text, as the loaded row has them. */
+/* The call to action's shape, then More's width, so the comment box's bar starts where the box will. */
 .sk-key {
   align-self: center;
-  width: 88px;
+  width: 32px;
   height: 12px;
   margin: 0 10px;
 }

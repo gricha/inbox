@@ -18,6 +18,16 @@ export function keepDraft(pr: string, d: Kept | null): void {
   else kept.delete(pr);
 }
 
+// Your comment on the PR itself, unsent: kept the same way, so a key that leaves the review takes nothing with it.
+const comments = new Map<string, string>();
+
+export const keptComment = (pr: string): string => comments.get(pr) ?? "";
+
+export function keepComment(pr: string, text: string): void {
+  if (text.trim()) comments.set(pr, text);
+  else comments.delete(pr);
+}
+
 const sending = new Set<string>();
 const watchers = new Set<(pr: string) => void>();
 
