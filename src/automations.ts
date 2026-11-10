@@ -98,7 +98,7 @@ const DENY = [
     "secret",
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "automations"]),
+  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations"]),
 ];
 // What a run the desk stopped in the middle of says; it doesn't count as the last run, so the next look runs it again.
 const CUT = "the desk stopped during this run, so it ran again";

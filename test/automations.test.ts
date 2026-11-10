@@ -240,6 +240,7 @@ test("a run puts what it lists on the desk with its why; what's on your queue, d
     "Edit",
     "mcp__inbox__desk_add",
     "mcp__review-desk__desk_add",
+    "mcp__inbox__desk_inquiry", // reading your answer marks it picked up, and a run asked nothing
   ])
     assert.ok(deny.includes(r), r);
   assert.match(fake.stdin(1), /Look at getsentry\/warden's new issues/);
