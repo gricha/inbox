@@ -21,7 +21,8 @@ export function requesterOf(markdown: string): string {
   return named.size === 1 ? [...named][0]! : "";
 }
 
-// A bot's PR is yours when it names you by login and assigns you, names you by a name you gave (`names`), or is
+// A bot's PR is yours when it names you by login and assigns you, names you by your GitHub profile name or one you gave
+// (`names`, compared by letters alone: "greg.pstrucha" is "Greg Pstrucha"), or is
 // Copilot's with you its only human assignee. A person's PR is only ever its author's.
 export function onBehalf(
   it: Pick<Item, "kind" | "author" | "author_bot" | "assignees" | "requester">,
@@ -33,7 +34,8 @@ export function onBehalf(
   if (it.kind !== "pr" || !me || !isBot(it.author, it.author_bot) || lc(it.author) === lc(me)) return false;
   const r = it.requester ?? "";
   if (r.startsWith("@")) return lc(r.slice(1)) === lc(me) && it.assignees.some((a) => lc(a) === lc(me));
-  if (r) return names.some((n) => lc(n.trim()) === lc(r));
+  const letters = (s: string) => s.toLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
+  if (r) return !!letters(r) && names.some((n) => letters(n) === letters(r));
   const people = it.assignees.filter((a) => !ASSIGNS.has(lc(a)) && !isBot(a));
   return ASSIGNS.has(lc(it.author)) && people.length === 1 && lc(people[0]!) === lc(me);
 }

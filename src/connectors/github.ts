@@ -255,7 +255,7 @@ export class GitHubConnector implements Connector {
     const stored = bots.length ? this.desk.store.itemsById(bots) : new Map<string, Item>();
     return hits.map((h) => {
       const it = stored.get(h.id);
-      return it && onBehalf(it, me, signals.my_names, isBot) ? { ...h, mine: true } : h;
+      return it && onBehalf(it, me, [this.ctx?.name ?? "", ...signals.my_names], isBot) ? { ...h, mine: true } : h;
     });
   }
 

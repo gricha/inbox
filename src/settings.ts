@@ -88,7 +88,7 @@ export const SETTINGS = [
     default: [],
     pattern: "^[^*@\\n]{1,60}$",
     pattern_hint: "a name, as an agent writes it",
-    help: "A bot's PR that says it's via one of these is yours. Your login counts already when the PR assigns you too.",
+    help: "A bot's PR via one of these is yours; your GitHub name counts already.",
   },
   {
     key: "github.close_collaborator_min",

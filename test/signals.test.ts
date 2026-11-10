@@ -178,14 +178,15 @@ test("a CODEOWNERS ping that changes code you work in, one that doesn't, and one
   );
 });
 
-test("a bot's PR opened for you is yours: its line names your login and it assigns you, or it names a name you gave", () => {
+test("a bot's PR opened for you is yours: its line names your login and it assigns you, or it names your profile name or one you gave", () => {
   const c = makeContext({ name: "Greg Pstrucha" });
   const named = { ...cfg, signals: { ...cfg.signals, my_names: ["greg.pstrucha"] } };
   const by = (o: Partial<Item>, conf = cfg) => analyze(makeItem({ author: "sentry-junior", author_bot: true, ...o }), c, conf, NOW).signals;
   const s = by({ requester: "@me", assignees: ["me"], via: "@me" });
   assert.deepEqual([s.me.author, s.author.me, s.author.via, s.author.bot], [true, true, "@me", true]);
   assert.equal(by({ requester: "greg.pstrucha" }, named).me.author, true, "a name you gave");
-  assert.equal(by({ requester: "greg.pstrucha" }).me.author, false, "your GitHub name alone isn't yours: anyone may share it");
+  assert.equal(by({ requester: "greg.pstrucha" }).me.author, true, "your GitHub profile name, compared by letters alone");
+  assert.equal(by({ requester: "dana.k" }).me.author, false, "someone else's name");
   assert.equal(by({ via: "Greg Pstrucha" }).me.author, false, "a via line alone");
   assert.equal(by({ requester: "@me" }).me.author, false, "not assigned to you");
   assert.equal(by({ requester: "@dana", assignees: ["me"] }).me.author, false, "opened for someone else");

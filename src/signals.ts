@@ -243,7 +243,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
   const via = authorBot ? (item.via ?? "") : "";
-  const yours = isMe(author) || onBehalf(item, ctx.me, cfg.signals.my_names, isBot);
+  const yours = isMe(author) || onBehalf(item, ctx.me, [ctx.name ?? "", ...cfg.signals.my_names], isBot);
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
   const myAreaFiles = areaFiles(item, ctx);
   const waitingOn =
