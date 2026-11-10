@@ -1904,3 +1904,21 @@ test("each automation GitHub comes with is one you could have written: it saves 
     assert.deepEqual([copy.on, copy.when, copy.rule, copy.decide], [false, a.when, a.rule, a.decide], a.id);
   }
 });
+
+test("a rule's sort lets go of an item its check no longer passes, as when a release or your edit narrows it", async (c) => {
+  fakeClaude(c);
+  const t = await setup([teamPing(4)], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await runFx(t.desk.sync());
+  const card = () => runSync(t.desk.item("acme/api#4")).card;
+  const before = card().bucket;
+  const rule = { name: "Carol", schedule: "weekdays hourly", prompt: "", decide: "rule" as const, can: ["hide" as const] };
+  const a = runSync(
+    t.desk.automations.set("carol", { ...rule, when: "item.author == 'carol'", rule: { do: "hide", why: "carol's" } }, true),
+  );
+  await t.desk.automations.run(a, "now").p;
+  assert.equal(card().bucket, "hide");
+  runSync(t.desk.automations.set("carol", { ...rule, when: "item.author == 'dana'", rule: { do: "hide", why: "carol's" } }, true));
+  t.desk.changed();
+  assert.equal(card().bucket, before, "its check no longer passes: back where the rules put it");
+});

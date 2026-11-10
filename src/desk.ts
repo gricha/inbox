@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber } from "effect";
+import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber, Result } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
@@ -109,7 +109,7 @@ import {
 } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
 import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
-import { renderTemplate } from "./expr.ts";
+import { compile, renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
 import {
@@ -1285,7 +1285,16 @@ export class Desk {
       const s = sorts.get(id);
       const e = entries.get(id);
       const a = s && automations.get(s.automation);
-      const holds = s && e && a?.on && canOf(a).some((v) => v === s.bucket) && s.key === sortKeyOf(e, pins.get(id));
+      // A rule's sort also needs its check to pass still: a rule narrowed since (a release, your edit) lets go of what it no longer covers.
+      const still = (x: Automation, sig: Signals) => {
+        if (x.decide !== "rule" || !x.when) return true;
+        const c = compile(x.when);
+        if (Result.isFailure(c)) return true;
+        const v = c.success.eval(sig);
+        return Result.isSuccess(v) && Boolean(v.success);
+      };
+      const holds =
+        s && e && a?.on && canOf(a).some((v) => v === s.bucket) && s.key === sortKeyOf(e, pins.get(id)) && still(a, e.analysis.signals);
       return holds ? { bucket: s.bucket, why: s.why, pending: false, by: s.name } : null;
     };
     const claude = (id: string): JudgeStep => {
