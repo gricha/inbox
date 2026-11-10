@@ -940,10 +940,20 @@ function overTailnet(app: Hono, remote: Remote, desk: Desk, wanted: () => boolea
     const s = yield* listen(remoteFetch(app), 0, "a free loopback port");
     const target = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
     const mine = desk.store.get("tailscale_serve");
-    yield* serveOn(tn.name, target, typeof mine === "string" ? mine : null).pipe(Effect.onError(() => shut(s)));
+    // Ready before serve points at it, so the first request through isn't refused.
+    remote.tailnet = tn;
+    yield* serveOn(tn.name, target, typeof mine === "string" ? mine : null).pipe(
+      Effect.onError(() =>
+        Effect.andThen(
+          Effect.sync(() => {
+            remote.tailnet = null;
+          }),
+          shut(s),
+        ),
+      ),
+    );
     desk.store.set("tailscale_serve", target);
     server = s;
-    remote.tailnet = tn;
     remote.text = `On at https://${tn.name}/, for ${tn.login}'s paired devices.`;
     desk.log(`serving over Tailscale at https://${tn.name}/ for ${tn.login}`);
   });
