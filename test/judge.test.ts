@@ -629,6 +629,26 @@ echo "{\\"type\\":\\"result\\",\\"is_error\\":false,\\"structured_output\\":{\\"
   };
 }
 
+// A fake codex for the judge: places every item it's asked about in today, in its -o file; fails as logged out while `fail` exists.
+function fakeCodex(): { bin: string; dir: string; calls: () => number; args: () => string[] } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-codex-"));
+  const bin = path.join(dir, "codex");
+  fs.writeFileSync(
+    bin,
+    `#!/bin/sh
+d="$(dirname "$0")"
+echo x >> "$d/calls"; printf '%s\\n' "$@" > "$d/args"; cat > "$d/stdin"
+while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done
+if [ -f "$d/fail" ]; then echo 'Error: Not logged in' >&2; exit 1; fi
+items=$(sed -n 's/^- id: //p' "$d/stdin" | awk '{ printf "%s{\\"id\\":\\"%s\\",\\"bucket\\":\\"today\\",\\"why\\":\\"codex says today\\"}", (NR > 1 ? "," : ""), $0 }')
+printf '{"items":[%s]}' "$items" > "$out"
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  const lines = (f: string) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8").trimEnd().split("\n") : []);
+  return { bin, dir, calls: () => lines("calls").length, args: () => lines("args") };
+}
+
 // Asked via a team, by someone you rarely review: no default rule matches, so the review board's default (later) holds.
 const gray = (n: number, o: Partial<Item> = {}) =>
   makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }], ...o });
@@ -680,6 +700,36 @@ async function setup(
   const placed = (n: number) => runSync(desk.item(`api#${n}`)).placements[0]!;
   return { desk, gh, fake, home, logs, sync, settle, placed };
 }
+
+test("with Codex chosen, codex sorts the desk and claude isn't asked; its login pauses the desk in its own words", posix, async (c) => {
+  const codex = fakeCodex();
+  process.env.DESK_CODEX = codex.bin;
+  c.after(() => {
+    delete process.env.DESK_CODEX;
+    fs.rmSync(codex.dir, { recursive: true, force: true });
+  });
+  const t = await setup(c, [gray(1)], { settings: { "agent.harness": "codex" } });
+  await t.sync();
+  assert.deepEqual([codex.calls(), t.fake.calls()], [1, 0]);
+  assert.equal(codex.args()[0], "exec");
+  assert.deepEqual([t.placed(1).bucket, t.placed(1).why], ["today", "codex says today"]);
+  assert.ok(t.logs.includes("judge: Codex sorted 1 of 1 items by the policy"));
+
+  fs.writeFileSync(path.join(codex.dir, "fail"), "");
+  t.gh.items.set("acme/api#1", { ...gray(1), head_oid: "pushed", updated_at: hoursAgo(0) });
+  await t.sync();
+  assert.equal(t.desk.judge.error, "Codex isn't logged in. Run `codex login` in a terminal.");
+  assert.deepEqual(t.desk.paused(), {
+    who: "claude",
+    why: "Codex isn't logged in, so nothing is being sorted or reviewed. Run `codex login`.",
+  });
+
+  // Claude Code chosen again: the call that failed on Codex's login goes now, on claude.
+  runSync(t.desk.putSettings({ set: { "agent.harness": "claude-code" } }));
+  await t.settle();
+  assert.equal(t.fake.calls(), 1);
+  assert.deepEqual([t.placed(1).bucket, t.placed(1).why], ["today", "fake says today"]);
+});
 
 test("with policy.md empty, the starter policy is in effect: Claude sorts by it from the first sync", posix, async (c) => {
   const t = await setup(c, [gray(1)]);

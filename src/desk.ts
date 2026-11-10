@@ -109,7 +109,7 @@ import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } 
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, agentDown, CLAUDE_PAUSED, NOT_LOGGED_IN, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
+import { agentDir, agentDown, CLAUDE_PAUSED, CODEX_PAUSED, notLoggedIn, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, sortKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
@@ -144,7 +144,7 @@ const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead
 const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
-const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"]]);
+const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"], agents.driverOf(s["agent.harness"])]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
@@ -297,7 +297,14 @@ const upstream =
 
 export interface ReviewDeps {
   fetchPr(item: Item, since?: string): Effect.Effect<PrText, FetchPrError>;
-  generate(item: Item, s: Signals, why: string, pr: PrText, dir: string): Effect.Effect<AiReview, CommandError | ClaudeError>;
+  generate(
+    item: Item,
+    s: Signals,
+    why: string,
+    pr: PrText,
+    dir: string,
+    agent: agents.DriverId,
+  ): Effect.Effect<AiReview, CommandError | ClaudeError>;
 }
 
 // What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
@@ -551,6 +558,11 @@ export class Desk {
   // Where the tool-less agent calls run (the AI review, the judge, the read of conversations).
   agentDir(): string {
     return agentDir(this.home);
+  }
+
+  // The agent the tool-less calls run on (Settings → Agent): Claude Code unless it's Codex.
+  agent(): agents.DriverId {
+    return agents.driverOf(this.settings["agent.harness"]);
   }
 
   // config.toml as it is now, in Node's words when it can't be read.
@@ -1529,9 +1541,10 @@ export class Desk {
 
   // Said once above the queue, not on every card: a failed login stops every agent, so it's Claude as a whole.
   paused(): Paused | null {
-    const login = (why: string | null | undefined) => !!why?.endsWith(NOT_LOGGED_IN);
+    const login = (why: string | null | undefined) => !!why?.endsWith(notLoggedIn(this.agent()));
     const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
-    if (login(ai) || (!this.judge.offReason() && login(this.judge.error))) return { who: "claude", why: CLAUDE_PAUSED };
+    if (login(ai) || (!this.judge.offReason() && login(this.judge.error)))
+      return { who: "claude", why: this.agent() === "codex" ? CODEX_PAUSED : CLAUDE_PAUSED };
     return ai ? { who: "ai", why: ai } : null;
   }
 
@@ -1943,7 +1956,7 @@ export class Desk {
       const review = Effect.gen({ self: this }, function* () {
         if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
         const pr = yield* this.prText(id);
-        const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir());
+        const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent());
         this.store.set(`review:${id}`, ai);
         this.jobs.done("ai_review", id);
         this.aiFailures = 0;
@@ -1953,7 +1966,7 @@ export class Desk {
         this.log(
           `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}, ${ai.guide ? `${ai.guide.steps.length} steps covering ${ai.guide.steps.reduce((n, st) => n + st.hunks.length, 0)} hunks` : "no walk-through"}`,
         );
-        this.retryAgents(NOT_LOGGED_IN);
+        this.retryAgents(notLoggedIn(this.agent()));
         return ai;
       });
       return yield* review.pipe(

@@ -5,7 +5,8 @@ import { Cache, Cause, Duration, Effect, Exit, type Fiber } from "effect";
 import type { Desk } from "./desk.ts";
 import { messageOf, type GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
-import { askClaude, makeAgentDir } from "./review.ts";
+import { agentName } from "./agents.ts";
+import { askAgent, makeAgentDir } from "./review.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
 import { pushedAt, threadWaitsOnYou, waitsOnYou } from "./stage.ts";
@@ -289,11 +290,12 @@ export class Conversations {
       if (!unread.length) return;
       const prompt = buildTakePrompt(e.item, desk.me() || "the owner", unread, ctx);
       const dir = yield* makeAgentDir(desk.home);
-      const { answer } = yield* askClaude(prompt, { schema: TAKE_SCHEMA, dir });
+      const agent = desk.agent();
+      const { answer } = yield* askAgent(prompt, { schema: TAKE_SCHEMA, dir, agent });
       const got = parseTakes(answer, new Map(unread.map((c) => [c.id, c.comments.at(-1)!.id])), new Date().toISOString());
       desk.store.set(`take:${id}`, { ...(desk.store.get(`take:${id}`) as Takes | null), ...got });
       this.errors.delete(id);
-      desk.log(`Claude read ${Object.keys(got).length} of ${unread.length} conversations waiting on you on ${id}`);
+      desk.log(`${agentName(agent)} read ${Object.keys(got).length} of ${unread.length} conversations waiting on you on ${id}`);
     }).pipe(
       Effect.catchDefect((defect) =>
         Effect.sync(() => {

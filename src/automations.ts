@@ -11,7 +11,7 @@ import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
 import { describe, sortKey, textHash } from "./judge.ts";
 import { BadRequest, ClaudeBadOutput, DecisionModelDown, messageOf, NotFound, type FsError } from "./errors.ts";
-import { agentDown, askClaude, claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, makeAgentDir, runCommand } from "./review.ts";
+import { agentDown, askAgent, claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, makeAgentDir, runCommand } from "./review.ts";
 import {
   ACTIVITY_KINDS,
   EVENT,
@@ -732,9 +732,10 @@ export class Automations {
     return Effect.gen({ self: this }, function* () {
       const desk = this.desk;
       const dir = yield* makeAgentDir(desk.home);
-      const { answer } = yield* askClaude(askPrompt(a, desk.me() || "the owner", this.fence(asked, batch?.happened)), {
+      const { answer } = yield* askAgent(askPrompt(a, desk.me() || "the owner", this.fence(asked, batch?.happened)), {
         schema: askSchema(canOf(a)),
         dir,
+        agent: desk.agent(),
       });
       const list = (answer as { items?: unknown } | null)?.items;
       const said: Said[] = [];

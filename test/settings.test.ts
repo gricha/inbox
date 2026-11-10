@@ -66,7 +66,7 @@ test("checkSetting", () => {
   assert.match(checkSetting("github.my_repos", ["getsentry"])!, /owner\/name/);
   assert.equal(checkSetting("github.my_repos", ["getsentry/sentry"]), null);
   assert.equal(checkSetting("agent.harness", "claude-code"), null);
-  assert.equal(checkSetting("agent.harness", "codex"), "Codex can't sort or review yet", "listed, and not to be picked yet");
+  assert.equal(checkSetting("agent.harness", "codex"), null, "Codex sorts and reviews too");
   assert.match(checkSetting("agent.harness", "cursor")!, /one of claude-code, codex/);
   assert.equal(checkSetting("notify.quiet", ""), null);
   assert.match(checkSetting("notify.quiet", "7pm")!, /19:00-09:00/);

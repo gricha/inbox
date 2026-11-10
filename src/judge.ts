@@ -4,7 +4,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { Effect, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
-import { askClaude, makeAgentDir, NOT_LOGGED_IN } from "./review.ts";
+import { agentName } from "./agents.ts";
+import { askAgent, makeAgentDir, notLoggedIn } from "./review.ts";
 import { andMore, pushAnswered, pushesOf } from "./stage.ts";
 import {
   BUCKETS,
@@ -470,7 +471,8 @@ export class Judge {
     return Effect.gen({ self: this }, function* () {
       const prompt = buildJudgePrompt(batch, desk.policyText(), desk.me() || "the owner", desk.ctx);
       const dir = yield* makeAgentDir(desk.home);
-      const answers = parseVerdicts((yield* askClaude(prompt, { schema: JUDGE_SCHEMA, dir })).answer, ids);
+      const agent = desk.agent();
+      const answers = parseVerdicts((yield* askAgent(prompt, { schema: JUDGE_SCHEMA, dir, agent })).answer, ids);
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.
       desk.store.set("judge_spent", [...this.spent(), ...batch.map(() => Date.now())]);
       const at = new Date().toISOString();
@@ -491,8 +493,8 @@ export class Judge {
       this.error = null;
       this.failures = 0;
       this.lastAt = at;
-      desk.log(`judge: Claude sorted ${answers.size} of ${batch.length} items by the policy`);
-      desk.retryAgents(NOT_LOGGED_IN);
+      desk.log(`judge: ${agentName(agent)} sorted ${answers.size} of ${batch.length} items by the policy`);
+      desk.retryAgents(notLoggedIn(agent));
     }).pipe(
       Effect.catchDefect((defect) =>
         Effect.sync(() => {

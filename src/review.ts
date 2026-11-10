@@ -8,6 +8,8 @@ import { Effect, Result } from "effect";
 import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
+  CODEX_NOT_LOGGED_IN,
+  NOT_LOGGED_IN,
   ClaudeBadOutput,
   ClaudeNotLoggedIn,
   CommandBadOutput,
@@ -647,9 +649,11 @@ const codexAnswer = Effect.fnUntraced(function* (events: string, last: string): 
   return { answer: yield* readJson(/\{[\s\S]*\}/.exec(last)?.[0] ?? "{}", last), model: model ?? "codex" };
 });
 
-export { NOT_LOGGED_IN } from "./errors.ts";
 // The queue's one line when it is: every agent stops on it, the judge too.
 export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
+export const CODEX_PAUSED = "Codex isn't logged in, so nothing is being sorted or reviewed. Run `codex login`.";
+// The agent's not-logged-in words: what a success on it retries, by suffix.
+export const notLoggedIn = (agent: DriverId) => (agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN);
 
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `detail`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | ClaudeApiError {
@@ -707,12 +711,13 @@ export const generateReview = Effect.fn("generateReview")(function* (
   why: string,
   pr: PrText,
   dir: string,
+  agent: DriverId = "claude-code",
 ): Effect.fn.Return<AiReview, CommandError | ClaudeError> {
-  const { answer, model } = yield* askClaude(buildPrompt(item, s, why, pr), { dir });
+  const { answer, model } = yield* askAgent(buildPrompt(item, s, why, pr), { dir, agent });
   const r = readReview(answer, pr.files);
   if (!r.summary) return yield* new ClaudeBadOutput({ message: "the agent returned no summary" });
   const all = [...r.concerns, ...r.notes];
-  const held = all.length ? yield* checkClaims(item, pr, all, dir) : new Set<number>();
+  const held = all.length ? yield* checkClaims(item, pr, all, dir, agent) : new Set<number>();
   const checked = {
     ...r,
     concerns: r.concerns.filter((_, i) => held.has(i)),
@@ -774,8 +779,8 @@ function buildCheckPrompt(item: Item, pr: PrText, comments: Placed[], tag = rand
 }
 
 // Which comments held up: c1, c2, … by their place in `comments`; one it didn't say holds is out.
-const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comments: Placed[], dir: string) {
-  const { answer } = yield* askClaude(buildCheckPrompt(item, pr, comments), { dir, schema: CHECK_SCHEMA });
+const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comments: Placed[], dir: string, agent: DriverId) {
+  const { answer } = yield* askAgent(buildCheckPrompt(item, pr, comments), { dir, schema: CHECK_SCHEMA, agent });
   const held = new Set<number>();
   for (const c of list(((answer ?? {}) as Record<string, unknown>).comments)) {
     const n = Number(/^c(\d+)$/i.exec(text(c?.id))?.[1]);

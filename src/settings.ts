@@ -138,7 +138,7 @@ export const SETTINGS = [
     default: "claude-code",
     options: [
       { value: "claude-code", label: "Claude Code" },
-      { value: "codex", label: "Codex", off: "can't sort or review yet" },
+      { value: "codex", label: "Codex" },
     ],
     help: "Sorts your desk, reviews PRs ahead of time and runs as your agent, on your own login.",
   },

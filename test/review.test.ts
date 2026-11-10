@@ -31,6 +31,7 @@ import {
   claudeError,
   claudeSpawn,
   CLAUDE_PAUSED,
+  CODEX_PAUSED,
   fetchPr,
   generateReview,
   filesHead,
@@ -1292,6 +1293,42 @@ test("without a ranking for this commit the order is today's: every hunk file by
   assert.equal(reviewOrder(files, ranked, false).ranked, true);
 });
 
+test("with Codex chosen, the AI review and its check both run on codex, and its words land as Claude Code's do", posix, async () => {
+  const review = {
+    summary: "Caps rows.",
+    since: "",
+    concerns: [
+      { body: "Drops rows past the limit.", path: FILE.path, side: "new", line: 11, quote: "const limited = rows.slice(0, q.limit);" },
+    ],
+    chunks: [],
+    steps: [],
+    notes: [],
+    verdict: "look",
+    risk: "medium",
+  };
+  const check = { comments: [{ id: "c1", holds: true, why: "-" }] };
+  const f = fakeCodex(
+    `echo x >> "$d/calls"; if grep -q "check another reviewer" "$d/stdin"; then printf '%s' '${JSON.stringify(check)}' > "$out"; else printf '%s' '${JSON.stringify(review)}' > "$out"; fi`,
+  );
+  const claude = fakeAgent("claude", `echo x >> "$(dirname "$0")/calls"; exit 1`);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  process.env.DESK_CODEX = f.bin;
+  process.env.DESK_CLAUDE = claude.bin;
+  try {
+    const item = makeItem();
+    const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "codex"));
+    assert.deepEqual([ai.summary, ai.concerns, ai.verdict, ai.model], ["Caps rows.", ["Drops rows past the limit."], "look", "codex"]);
+    assert.equal(f.read("calls").split("\n").filter(Boolean).length, 2, "the writer and the check");
+    assert.ok(!fs.existsSync(path.join(claude.dir, "calls")), "claude never ran");
+  } finally {
+    delete process.env.DESK_CODEX;
+    delete process.env.DESK_CLAUDE;
+    fs.rmSync(f.dir, { recursive: true });
+    fs.rmSync(claude.dir, { recursive: true });
+    fs.rmSync(home, { recursive: true });
+  }
+});
+
 // ---------------------------------------------------------------- the desk
 
 const ask = (n: number, o: Partial<Item> = {}) =>
@@ -1322,6 +1359,7 @@ function deferred() {
 function fakeDeps(chunks?: unknown) {
   const fetched: string[] = [];
   const started: string[] = [];
+  const agents: string[] = [];
   const gates = new Map<string, ReturnType<typeof deferred>>();
   let fail: string | null = null;
   const deps: ReviewDeps = {
@@ -1330,9 +1368,10 @@ function fakeDeps(chunks?: unknown) {
         fetched.push(`${item.id}@${item.head_oid}`);
         return { body: "why", files: [FILE] } satisfies PrText;
       }),
-    generate: (item, _s, _why, pr) =>
+    generate: (item, _s, _why, pr, _dir, agent) =>
       Effect.gen(function* () {
         started.push(item.id);
+        agents.push(agent);
         const g = deferred();
         gates.set(item.id, g);
         yield* Effect.promise(() => g.promise);
@@ -1340,7 +1379,9 @@ function fakeDeps(chunks?: unknown) {
           return yield* Effect.fail(
             fail === NOT_LOGGED_IN
               ? new ClaudeNotLoggedIn({ detail: "401 OAuth access token has expired" })
-              : new ClaudeApiError({ message: fail }),
+              : fail === CODEX_NOT_LOGGED_IN
+                ? new ClaudeNotLoggedIn({ detail: "Not logged in", agent: "codex" })
+                : new ClaudeApiError({ message: fail }),
           );
         const notes = [{ path: FILE.path, side: "new", line: 11, quote: "rows.slice(0, q.limit)", body: "Caps the rows." }];
         return {
@@ -1355,6 +1396,7 @@ function fakeDeps(chunks?: unknown) {
     deps,
     fetched,
     started,
+    agents,
     release: async (id: string) => {
       gates.get(id)!.resolve();
       await flush();
@@ -1585,6 +1627,24 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
   assert.equal((await asked).verdict, "skim");
   assert.equal(t.desk.aiPaused, null, "a success resumes them");
   assert.equal((await run(t.desk.reviewView(untried))).ai_error, null);
+  t.cleanup();
+});
+
+test("AI reviews run on the agent you chose; Codex's login pauses them in its words, and choosing Claude Code tries again at once", async () => {
+  const t = await setup([ask(1)], { settings: { "agent.harness": "codex" } });
+  t.f.setFail(CODEX_NOT_LOGGED_IN);
+  await t.sync();
+  await t.f.release("acme/api#1");
+  assert.deepEqual(t.f.agents, ["codex"]);
+  assert.deepEqual(t.desk.paused(), { who: "claude", why: CODEX_PAUSED });
+  assert.equal(t.desk.getSettings().paused.ai?.why, "Codex isn't logged in. Run `codex login` in a terminal.");
+  t.f.setFail(null);
+  runSync(t.desk.putSettings({ set: { "agent.harness": "claude-code" } }));
+  await flush();
+  assert.ok(!t.desk.aiPausedNow(), "another agent: what waited on Codex's login goes now");
+  assert.deepEqual(t.f.agents, ["codex", "claude-code"]);
+  await t.f.release("acme/api#1");
+  assert.equal((await run(t.desk.reviewView("acme/api#1"))).ai?.verdict, "skim");
   t.cleanup();
 });
 
