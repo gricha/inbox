@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { askLine, denyDir, DENY, wakeFor } from "../src/coordinator.ts";
+import { askLine, carryTrust, denyDir, DENY, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace, AsksView } from "../src/types.ts";
@@ -1529,4 +1529,24 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
   ]);
   const broken = await place("a1", createApp(cold, 49401));
   assert.deepEqual([broken.status, broken.body.error?.startsWith("config has errors: ")], [503, true], JSON.stringify(broken));
+});
+
+test("the coordinator's folder inherits the trust you gave its folder before the move to ~/.inbox, and nothing else is trusted for you", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-trust-"));
+  const file = path.join(dir, ".claude.json");
+  const write = (projects: Record<string, unknown>) => {
+    fs.writeFileSync(file, JSON.stringify({ numStartups: 3, projects }));
+  };
+  const read = () =>
+    JSON.parse(fs.readFileSync(file, "utf8")) as { numStartups: number; projects: Record<string, Record<string, unknown>> };
+  write({ "/old/coordinator": { hasTrustDialogAccepted: true }, "/new/coordinator": { allowedTools: ["x"] } });
+  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), true);
+  assert.deepEqual(read().projects["/new/coordinator"], { allowedTools: ["x"], hasTrustDialogAccepted: true }, "its other settings kept");
+  assert.equal(read().numStartups, 3, "the rest of the file as it was");
+  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), false, "once: already trusted");
+  write({ "/old/coordinator": { hasTrustDialogAccepted: false } });
+  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), false, "never trusted before: still yours to trust");
+  assert.equal(read().projects["/new/coordinator"], undefined);
+  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", path.join(dir, "missing.json")), false, "no file: nothing written");
+  fs.rmSync(dir, { recursive: true, force: true });
 });

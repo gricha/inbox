@@ -24,7 +24,7 @@ import {
   type FsError,
   type UnsafeArgument,
 } from "./errors.ts";
-import { oldHome } from "./home.ts";
+import { oldHome, ownersHome } from "./home.ts";
 import { answerOf, askOf } from "./jobs.ts";
 import {
   CODEX_DOWN,
@@ -570,7 +570,11 @@ export class Coordinator {
   // Keeps the id claude says it backgrounded: a copy's, if it made one.
   launch(args: string[], mode: Mode): Effect.Effect<void, CommandError | FsError | ClaudeBadOutput> {
     return Effect.gen({ self: this }, function* () {
-      const out = yield* claude(args, yield* this.dir());
+      const dir = yield* this.dir();
+      // Only the owner's own desk: a scratch desk (a test) never touches their Claude Code config.
+      if (ownersHome(this.desk.home) && carryTrust(path.join(oldHome(), "coordinator"), dir))
+        this.desk.log(`coordinator: trusted ${dir}, as you trusted its folder before the move`);
+      const out = yield* claude(args, dir);
       const id = yield* backgrounded(out);
       const s = this.saved();
       if (id !== s?.id || mode !== s.mode) {
@@ -787,3 +791,28 @@ export class Coordinator {
     this.desk.changed();
   }
 }
+
+// The home's move to ~/.inbox left Claude Code's trust on the coordinator's old folder: the owner's yes there carries over to
+// the new one, once, so it starts as before. A folder never trusted is still the owner's to trust; this grants nothing new.
+export function carryTrust(from: string, to: string, file = claudeConfig()): boolean {
+  const read = Result.try({
+    try: () => JSON.parse(fs.readFileSync(file, "utf8")) as { projects?: Record<string, Record<string, unknown>> },
+    catch: () => null,
+  });
+  const conf = Result.getOrNull(read);
+  const projects = conf?.projects;
+  if (!conf || !projects || projects[from]?.hasTrustDialogAccepted !== true || projects[to]?.hasTrustDialogAccepted === true) return false;
+  projects[to] = { ...projects[to], hasTrustDialogAccepted: true };
+  const tmp = `${file}.inbox-${process.pid}`;
+  return Result.isSuccess(
+    Result.try({
+      try: () => {
+        fs.writeFileSync(tmp, JSON.stringify(conf, null, 2));
+        fs.renameSync(tmp, file);
+      },
+      catch: () => null,
+    }),
+  );
+}
+
+const claudeConfig = () => path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? process.env.CLAUDE_CONFIG_DIR : os.homedir(), ".claude.json");
