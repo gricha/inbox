@@ -550,6 +550,7 @@ export interface Card {
   section?: InboxSection; // on the Inbox: which of its sections it's in (QueueView.inbox)
   score?: number; // on the Inbox: 0 to 10, a model's or the desk's own (src/urgency.ts); its section's order
   reason?: string; // on the Inbox: why it's there, quietly on its row
+  quick?: string; // quick to review, and why ("low risk, 24 lines"): someone else's PR you can unblock cheaply, a bolt on its row
 }
 
 // ---------------------------------------------------------------------------

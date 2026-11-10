@@ -66,7 +66,19 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
   const note = why ? noteOf(card, variant) : reason.charAt(0).toUpperCase() + reason.slice(1);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = variant === "blocked" ? card.waiting_since : (card.resolved_at ?? card.done_at ?? card.waiting_since);
-  const kind = <span className="line-kind">{card.kind === "pr" ? "PR" : "Issue"}</span>;
+  // A bolt by the label: someone else's PR that's quick to review, a cheap unblock. Titles stay in line.
+  const kind = (
+    <span className="line-kind">
+      {card.kind === "pr" ? "PR" : "Issue"}
+      {card.quick && (
+        <span className="line-quick" title={card.quick} aria-label={card.quick}>
+          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M9 1.5 3.5 9h4.5l-1 5.5 5.5-7.5H8z" />
+          </svg>
+        </span>
+      )}
+    </span>
+  );
   const title = <span className="line-title">{card.title}</span>;
   // A long repo name gives way before the title; the number never does.
   const ref = (

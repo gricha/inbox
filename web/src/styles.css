@@ -1475,6 +1475,20 @@ p.side-sync {
 }
 
 /* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
+.line-quick {
+  display: inline-flex;
+  margin-left: 4px;
+  color: var(--accent-ink);
+  vertical-align: -2px;
+}
+
+.line-quick .i {
+  width: 14px;
+  height: 14px;
+  fill: currentcolor;
+  stroke-width: 1;
+}
+
 .line-title {
   flex: 0 1 auto;
   min-width: calc-size(max-content, min(size, 40%, 24ch));

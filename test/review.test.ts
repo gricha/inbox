@@ -2399,3 +2399,16 @@ test("a PR in a stack is reviewed in its context: the stack is in the prompt, fe
   const ms = analyze(mineItem, makeContext(), cfg, NOW).signals;
   assert.match(buildPrompt(mineItem, ms, "", { body: "", files: [FILE], stack }, "TAG"), /^You explain a GitHub pull request me wrote/);
 });
+
+test("someone else's small PR its review calls low risk gets a bolt on the Inbox, with why; a big one, or yours, doesn't", async () => {
+  const t = await setup([ask(1), { ...ask(2), additions: 900 }, { ...mine(4), ci: "green" }]);
+  await t.sync();
+  while (t.desk.generating.size) await t.f.release(t.f.started.find((id) => t.desk.generating.has(id))!);
+  const inbox = runSync(t.desk.queue()).inbox;
+  const card = (id: string) => [...inbox.urgent, ...inbox.standard, ...inbox.fyi].find((c) => c.id === id);
+  const lines = ask(1).additions + ask(1).deletions;
+  assert.equal(card("acme/api#1")?.quick, `Quick to review: low risk, ${lines} lines`);
+  assert.equal(card("acme/api#2")?.quick, undefined, "too big");
+  assert.equal(card("acme/web#4")?.quick, undefined, "yours");
+  t.cleanup();
+});

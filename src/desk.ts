@@ -161,6 +161,7 @@ const stateOf = (s: StateRow): ItemState => {
   return state;
 };
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
+const QUICK_LINES = 200; // at most this many lines changed for a PR to be quick to review
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
@@ -1611,6 +1612,17 @@ export class Desk {
     return c;
   }
 
+  // Someone else's open PR its AI review of this commit calls low risk and not one to read closely, and small: quick to
+  // review, so a cheap unblock. Its words for the bolt's tooltip; null when it isn't.
+  quick(e: Entry, snap: Snapshot): string | null {
+    const it = e.item;
+    if (it.kind !== "pr" || it.state !== "open" || it.draft || e.analysis.signals.me.author) return null;
+    const ai = snap.reviews.get(it.id);
+    const lines = it.additions + it.deletions;
+    if (ai?.head_oid !== it.head_oid || ai.risk !== "low" || ai.verdict === "look" || lines > QUICK_LINES) return null;
+    return `Quick to review: low risk, ${lines} ${lines === 1 ? "line" : "lines"}`;
+  }
+
   // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
   preflight(e: Entry, snap: Snapshot): Preflight {
     const it = e.item;
@@ -1731,12 +1743,14 @@ export class Desk {
       // What the rules or Claude hid, an urgent criterion still brings to the Inbox.
       const lifted = hidden.filter((c) => this.urgency.urgent(snap.entries.get(c.id)!));
       const kept = hidden.filter((c) => !lifted.includes(c));
-      const inbox = this.urgency.inbox(snap, [
-        ...byPart([...sections.now, ...sections.today]),
-        ...sections.later,
-        ...sections.fyi,
-        ...lifted,
-      ]);
+      const quick = (c: Card): Card => {
+        const q = this.quick(snap.entries.get(c.id)!, snap);
+        return q ? { ...c, quick: q } : c;
+      };
+      const inbox = this.urgency.inbox(
+        snap,
+        [...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi, ...lifted].map(quick),
+      );
       const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
       const aged = (c: Card): Card => {
         const e = snap.entries.get(c.id)!;

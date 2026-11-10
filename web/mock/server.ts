@@ -2068,6 +2068,8 @@ const yesOf = (r: Rec): Criterion[] => {
     return !!v && Result.isSuccess(v) && Boolean(v.success);
   });
 };
+const QUICK: Record<string, string> = { "oss/tinyhttp#212": "Quick to review: low risk, 38 lines" };
+
 function inboxOf(cards: Card[]): Record<InboxSection, Card[]> {
   const out: Record<InboxSection, Card[]> = { urgent: [], standard: [], fyi: [] };
   const t = { urgent_at: setting("queue.urgent_at"), fyi_at: setting("queue.fyi_at") };
@@ -2085,7 +2087,9 @@ function inboxOf(cards: Card[]): Record<InboxSection, Card[]> {
       [c.handed_back ? c.why : "", names(urgent), c.placed_by === "automation" ? c.why : "", model?.why ?? "", names(yes), c.why].find(
         Boolean,
       ) ?? "";
-    out[section].push({ ...c, section, score, reason });
+    // The desk's Desk.quick(): someone else's small, low-risk PR. The mock marks one so the bolt shows.
+    const quick = QUICK[c.id];
+    out[section].push({ ...c, section, score, reason, ...(quick && { quick }) });
   }
   for (const k of INBOX_SECTIONS) out[k].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   return out;
