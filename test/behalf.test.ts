@@ -42,6 +42,8 @@ test("a bot's PR is yours only when it names you and assigns you, names a name y
   assert.equal(yours({ ...bot, requester: "greg.pstrucha" }), false, "a name you didn't give");
   assert.equal(yours({ ...bot, requester: "Greg" }, ["greg.pstrucha"]), false, "names match whole");
   assert.equal(yours({ ...bot, requester: "greg.pstrucha" }, ["Greg Pstrucha"]), true, "your profile name, compared by letters alone");
+  assert.equal(yours({ ...bot, via: "greg.pstrucha" }, ["Greg Pstrucha"]), true, "stored before requesters were read: its via line");
+  assert.equal(yours({ ...bot, requester: "", via: "greg.pstrucha" }, ["Greg Pstrucha"]), false, "a requester read as none wins over via");
   assert.equal(yours({ ...bot, requester: "*" }, [""]), false, "no letters never matches an empty name");
   assert.equal(yours({ author: "carol", requester: "@me", assignees: ["me"] }), false, "a person's PR is its author's");
   assert.equal(yours({ author: "carol", requester: "greg.pstrucha" }, ["greg.pstrucha"]), false, "a person's PR, a name you gave");

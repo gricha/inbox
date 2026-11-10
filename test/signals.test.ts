@@ -187,7 +187,8 @@ test("a bot's PR opened for you is yours: its line names your login and it assig
   assert.equal(by({ requester: "greg.pstrucha" }, named).me.author, true, "a name you gave");
   assert.equal(by({ requester: "greg.pstrucha" }).me.author, true, "your GitHub profile name, compared by letters alone");
   assert.equal(by({ requester: "dana.k" }).me.author, false, "someone else's name");
-  assert.equal(by({ via: "Greg Pstrucha" }).me.author, false, "a via line alone");
+  assert.equal(by({ requester: "", via: "Greg Pstrucha" }).me.author, false, "a via line its description's markers don't back");
+  assert.equal(by({ via: "greg.pstrucha" }).me.author, true, "stored before requesters were read: its via line until it's fetched again");
   assert.equal(by({ requester: "@me" }).me.author, false, "not assigned to you");
   assert.equal(by({ requester: "@dana", assignees: ["me"] }).me.author, false, "opened for someone else");
   const human = analyze(makeItem({ author: "carol", requester: "@me", assignees: ["me"] }), c, cfg, NOW).signals;

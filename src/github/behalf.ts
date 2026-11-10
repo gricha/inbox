@@ -25,14 +25,15 @@ export function requesterOf(markdown: string): string {
 // (`names`, compared by letters alone: "greg.pstrucha" is "Greg Pstrucha"), or is
 // Copilot's with you its only human assignee. A person's PR is only ever its author's.
 export function onBehalf(
-  it: Pick<Item, "kind" | "author" | "author_bot" | "assignees" | "requester">,
+  it: Pick<Item, "kind" | "author" | "author_bot" | "assignees" | "requester" | "via">,
   me: string,
   names: readonly string[],
   isBot: (login: string, flagged?: boolean) => boolean,
 ): boolean {
   const lc = (s: string) => s.toLowerCase();
   if (it.kind !== "pr" || !me || !isBot(it.author, it.author_bot) || lc(it.author) === lc(me)) return false;
-  const r = it.requester ?? "";
+  // Stored before the desk read requesters: its via line, until the item is fetched again.
+  const r = it.requester ?? it.via ?? "";
   if (r.startsWith("@")) return lc(r.slice(1)) === lc(me) && it.assignees.some((a) => lc(a) === lc(me));
   const letters = (s: string) => s.toLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
   if (r) return !!letters(r) && names.some((n) => letters(n) === letters(r));
