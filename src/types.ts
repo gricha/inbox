@@ -296,6 +296,24 @@ export interface SettingsView {
   paused: { ai: { why: string; until: string } | null };
 }
 
+// A device paired over Tailscale: a browser holds its token in a cookie, a machine's agents in their MCP config.
+export interface Device {
+  id: string;
+  name: string;
+  kind: "browser" | "device";
+  created_at: string;
+  last_used_at: string | null;
+}
+
+// Settings → This device's Tailscale rows (GET /api/remote): on, its words, the address while it serves, who may use it.
+export interface RemoteView {
+  on: boolean;
+  text: string;
+  url: string | null;
+  login: string | null;
+  devices: Device[];
+}
+
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.
 export interface AgentStatus {
   driver: string;

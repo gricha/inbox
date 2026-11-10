@@ -16,6 +16,13 @@ export class BadRequest extends Data.TaggedError("BadRequest")<{ readonly messag
   }
 }
 
+// From another device with no token this desk issued (or one revoked): pair it first.
+export class Unauthorized extends Data.TaggedError("Unauthorized")<{ readonly message: string }> {
+  get status(): 401 {
+    return 401;
+  }
+}
+
 // Not from here: another site, another host, or a write only the desk's own window may send.
 export class Forbidden extends Data.TaggedError("Forbidden")<{ readonly message: string }> {
   get status(): 403 {
@@ -27,6 +34,13 @@ export class Forbidden extends Data.TaggedError("Forbidden")<{ readonly message:
 export class NotFound extends Data.TaggedError("NotFound")<{ readonly message: string }> {
   get status(): 404 {
     return 404;
+  }
+}
+
+// Too many pairing attempts this minute.
+export class TooManyRequests extends Data.TaggedError("TooManyRequests")<{ readonly message: string }> {
+  get status(): 429 {
+    return 429;
   }
 }
 
@@ -86,12 +100,25 @@ export class Unavailable extends Data.TaggedError("Unavailable")<{ readonly mess
 }
 
 export type DeskHttpError =
-  BadRequest | Forbidden | NotFound | AmbiguousRef | Conflict | Stale | Busy | Upstream | ReviewersNotAsked | Unavailable;
+  | BadRequest
+  | Unauthorized
+  | Forbidden
+  | NotFound
+  | TooManyRequests
+  | AmbiguousRef
+  | Conflict
+  | Stale
+  | Busy
+  | Upstream
+  | ReviewersNotAsked
+  | Unavailable;
 
 const HTTP_CLASSES = [
   BadRequest,
+  Unauthorized,
   Forbidden,
   NotFound,
+  TooManyRequests,
   AmbiguousRef,
   Conflict,
   Stale,
@@ -236,6 +263,10 @@ export class CommandBadOutput extends Data.TaggedError("CommandBadOutput")<{
 export class UnsafeArgument extends Data.TaggedError("UnsafeArgument")<{ readonly message: string }> {}
 
 export type CommandError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed | UnsafeArgument;
+
+// Serving over Tailscale can't start: no tailscale, not signed in, no HTTPS names, or `tailscale serve` refused; the
+// message is what Settings → This device says.
+export class TailscaleError extends Data.TaggedError("TailscaleError")<{ readonly message: string; readonly cause?: unknown }> {}
 
 // ---------------------------------------------------------------- Claude Code
 

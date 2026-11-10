@@ -97,9 +97,11 @@ export type ClientError = DeskDown | DeskNoAnswer | DeskApiError;
 
 const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
   400: "BadRequest",
+  401: "Unauthorized",
   403: "Forbidden",
   404: "NotFound",
   409: "Conflict",
+  429: "TooManyRequests",
   502: "Upstream",
   503: "Unavailable",
 };

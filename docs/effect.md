@@ -63,8 +63,10 @@ services, `Data.TaggedError`, the desk's own `log`.
 | Tag                 | Status | Where                                                                                                                |
 | ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `BadRequest`        | 400    | what you sent: the routes' `need { … }`, `line`/`paragraphs`/`parseUntil`, hold's unreadable ref, automations' `set` |
+| `Unauthorized`      | 401    | a request from another device (through `tailscale serve`) with no token this desk issued, or one revoked             |
 | `Forbidden`         | 403    | the host/origin/cross-site middleware, `fromUi`, the desk-window-only routes, an agent's hand-off                    |
 | `NotFound`          | 404    | resolve's unknown or unreadable ref, a board, an ask, an inquiry, an automation, an `/api/*` route, `fromUi`'s loop  |
+| `TooManyRequests`   | 429    | the pairing trade past five tries a minute (`Remote.trade`)                                                          |
 | `AmbiguousRef`      | 409    | resolve's ref matching several items, with `candidates`                                                              |
 | `Stale`             | 409    | `putPolicy`'s and `putConfig`'s stale base, approve's and `githubAct`'s stale head                                   |
 | `Busy`              | 409    | a held `approving`/`sending` lock                                                                                    |

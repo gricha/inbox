@@ -1,16 +1,18 @@
 // HTTP API + web UI on 127.0.0.1.
 import fs from "node:fs";
 import type { IncomingMessage, Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import net from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option, Semaphore } from "effect";
 import { Hono, type Context, type Next } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { streamSSE } from "hono/streaming";
 import { serve, type ServerType } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { refreshSkills } from "./agents.ts";
+import { refreshSkills, SKILL_MD } from "./agents.ts";
 import { createClient } from "./client.ts";
 import { createGitHub } from "./github/index.ts";
 import { createWriter, type GitHubWriter } from "./github/write.ts";
@@ -24,6 +26,7 @@ import {
   isDeskHttpError,
   ListenFailed,
   NotFound,
+  Unauthorized,
   Unavailable,
   type ErrorBody,
   type FsError,
@@ -35,10 +38,11 @@ import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
+import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
 import { fetchPr, generateReview } from "./review.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
-import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt } from "./types.ts";
+import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
 
 const VERSION = "0.1.0";
 export const DEFAULT_PORT = 47823;
@@ -143,10 +147,43 @@ export function proxyUpgrades(server: Server, port: number, ui: string): () => v
   };
 }
 
+// Requests that came in on the listener only `tailscale serve` is pointed at, and how each proved it's a paired device.
+// By the connection, never a header: serve passes on the client's own Host, so a peer could send `Host: localhost`.
+const REMOTE = new WeakSet<Request>();
+const VIA = new WeakMap<Request, "cookie" | "bearer">();
+export const remoteFetch =
+  (app: Hono) =>
+  (req: Request, env?: unknown): Response | Promise<Response> => {
+    REMOTE.add(req);
+    return app.fetch(req, env);
+  };
+const SESSION = "__Host-inbox"; // a paired browser's token: HttpOnly, Secure, SameSite=Strict, this host only
+
 // The desk's own page, for its GitHub writes (approve, a reply, ready for review, the More menu's), hand-offs and asks: a browser marks the request same-origin and sends an Origin, which
-// the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both.
-const fromDesk = (c: { req: { header(name: string): string | undefined } }) =>
-  c.req.header("sec-fetch-site") === "same-origin" && !!c.req.header("origin");
+// the check below lets through only when it's ours. curl, the CLI and agents send neither unless they forge both; from
+// another device it's also a paired browser's session, which a bearer token never is.
+const fromDesk = (c: Context) =>
+  c.req.header("sec-fetch-site") === "same-origin" &&
+  !!c.req.header("origin") &&
+  (!REMOTE.has(c.req.raw) || VIA.get(c.req.raw) === "cookie");
+
+const PAIR_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Inbox</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:4em auto;max-width:32em;padding:0 1em;color-scheme:light dark}</style>
+<p id="m">Pairing this browser with your desk…</p>
+<script>
+const code = location.hash.slice(1);
+history.replaceState(null, "", "/pair");
+const say = (t) => { document.getElementById("m").textContent = t; };
+if (!code) say("This link has no pairing code. On the desk's machine, run desk pair and open the link it prints.");
+else
+  fetch("/api/pair", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, kind: "browser", name: "Browser on " + (navigator.platform || "a device") }),
+  })
+    .then(async (r) => (r.ok ? location.replace("/") : say(((await r.json().catch(() => null))?.error ?? "Pairing failed") + ".")))
+    .catch(() => say("The desk didn't answer. Try the link again."));
+</script>`;
 
 // docs/effect.md Boundaries → HTTP: the value or its Response, a refusal's status, 499 for a client gone, else a logged 500 Sentry sees.
 function reply<A, E>(c: Context, exit: Exit.Exit<A, E>, log: (m: string) => void): Response {
@@ -184,7 +221,7 @@ function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
   return line(from) && side(was) ? { path: file, line: at, side: on, start: { line: from, side: was } } : null;
 }
 
-export function createApp(desk: Desk, port: number): Hono {
+export function createApp(desk: Desk, port: number, remote: Remote = new Remote(desk.store)): Hono {
   const app = new Hono();
   instrument(app);
   const origins = originsOf(port);
@@ -206,8 +243,31 @@ export function createApp(desk: Desk, port: number): Hono {
         return refused("forbidden cross-site request");
       return Effect.void;
     });
+  // From another device, through `tailscale serve`: this desk's tailnet name, its owner's login as Tailscale names them,
+  // and a paired device's token; pairing itself, its page and its trade, is the only thing without one.
+  const tailnet = (c: Context) =>
+    Effect.suspend((): Effect.Effect<void, Forbidden | Unauthorized> => {
+      const refused = (message: string) => Effect.fail(new Forbidden({ message }));
+      const tn = remote.tailnet;
+      if (!tn) return refused("this desk isn't served over Tailscale now");
+      if (new URL(c.req.url).hostname !== tn.name) return refused("forbidden host");
+      const origin = c.req.header("origin");
+      if (origin && origin !== `https://${tn.name}`) return refused("forbidden origin");
+      const site = c.req.header("sec-fetch-site");
+      if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
+        return refused("forbidden cross-site request");
+      if ((c.req.header("tailscale-user-login") ?? "").toLowerCase() !== tn.login)
+        return refused("only the desk's owner may use it from another device");
+      if ((c.req.method === "GET" && c.req.path === "/pair") || (c.req.method === "POST" && c.req.path === "/api/pair")) return Effect.void;
+      const bearer = /^Bearer (\S+)$/i.exec(c.req.header("authorization") ?? "")?.[1];
+      if (bearer ? remote.verify(bearer, "device") : remote.verify(getCookie(c, SESSION), "browser")) {
+        VIA.set(c.req.raw, bearer ? "bearer" : "cookie");
+        return Effect.void;
+      }
+      return Effect.fail(new Unauthorized({ message: "pair this device first: run desk pair on the desk's machine" }));
+    });
   app.use("*", async (c: Context, next: Next) => {
-    const checked = Effect.runSyncExit(local(c));
+    const checked = Effect.runSyncExit(REMOTE.has(c.req.raw) ? tailnet(c) : local(c));
     if (Exit.isFailure(checked)) c.res = reply(c, checked, log);
     else {
       await next();
@@ -714,6 +774,92 @@ export function createApp(desk: Desk, port: number): Hono {
     ),
   );
 
+  // Your other devices (src/remote.ts). Only this machine mints a code or a token; the code's trade is the other device's.
+  const here = (c: Context, what: string) =>
+    Effect.suspend(() => (REMOTE.has(c.req.raw) ? Effect.fail(new Forbidden({ message: `${what} on the desk's machine` })) : Effect.void));
+  const served = Effect.suspend(() =>
+    remote.url
+      ? Effect.succeed(remote.url)
+      : Effect.fail(new Conflict({ message: "turn on Settings → This device → Use it from your other devices first" })),
+  );
+  app.get("/api/remote", (c) =>
+    total(
+      c,
+      () =>
+        ({
+          on: remote.wanted,
+          text: remote.text,
+          url: remote.url,
+          login: remote.tailnet?.login ?? null,
+          devices: remote.devices(),
+        }) satisfies RemoteView,
+    ),
+  );
+  app.post("/api/pair/code", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* here(c, "pair a device");
+        const url = yield* served;
+        const { code, expires_at } = remote.mint();
+        return { code, expires_at, url, pair_url: `${url}/pair#${code}` };
+      }),
+      { log },
+    ),
+  );
+  app.post("/api/pair/token", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* here(c, "mint a token");
+        const url = yield* served;
+        const { name } = yield* bodyOf(c);
+        return { url, ...remote.issue(name, "device") };
+      }),
+      { log },
+    ),
+  );
+  app.post("/api/pair", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        if (!REMOTE.has(c.req.raw)) return yield* new Forbidden({ message: "pair from the other device, at the desk's tailnet address" });
+        const { code, name, kind } = yield* bodyOf(c);
+        const paired = yield* remote.trade(code, name, kind === "browser" ? "browser" : "device");
+        log(`paired ${paired.device.kind} "${paired.device.name}" (${paired.device.id})`);
+        if (kind !== "browser") return { ok: true, token: paired.token, device: paired.device };
+        setCookie(c, SESSION, paired.token, { path: "/", httpOnly: true, secure: true, sameSite: "Strict", maxAge: 400 * 86_400 });
+        return { ok: true, device: paired.device };
+      }),
+      { log },
+    ),
+  );
+  app.get("/pair", (c) => total(c, () => c.html(PAIR_PAGE, 200, { "cache-control": "no-store" })));
+  app.delete("/api/devices/:id", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        if (!fromDesk(c)) return yield* new Forbidden({ message: "revoke it in the desk's window: Settings → This device" });
+        yield* remote.revoke(c.req.param("id"));
+        log(`revoked paired device ${c.req.param("id")}`);
+        return { ok: true };
+      }),
+      { log },
+    ),
+  );
+  // The skill for a paired machine's agents, its addresses this desk's as that machine reaches it.
+  app.get("/skill", (c) =>
+    respond(
+      c,
+      Effect.map(Effect.try({ try: () => fs.readFileSync(SKILL_MD, "utf8"), catch: fsError("read", SKILL_MD) }), (text) => {
+        const at = REMOTE.has(c.req.raw) ? remote.url : null;
+        const body = at ? text.replaceAll("http://localhost:47823", at).replaceAll("localhost:47823", at) : text;
+        return c.body(body, 200, { "content-type": "text/markdown; charset=utf-8" });
+      }),
+      { log, read: true },
+    ),
+  );
+
   // MCP over Streamable HTTP, stateless: a fresh server per request whose tools call the routes in-process and answer for their failures.
   app.post("/mcp", (c) => {
     const api = createClient((p, init) => app.request(p, init));
@@ -756,13 +902,14 @@ type ServeOptions = {
   notify?: (title: string, body: string) => void; // the desktop app shows its own notifications
   log?: (msg: string) => void;
   writer?: GitHubWriter; // a stand-in for live checks that must not write to GitHub
+  tailscale?: boolean; // desk serve --tailscale: serve over Tailscale whatever the setting says
 };
 type Served = { url: string; desk: Desk; close(): Promise<void> };
 
 // Listening on 127.0.0.1, or why it can't: the port in use, or Node's error.
-const listen = (app: Hono, port: number, url: string) =>
+const listen = (fetch: (req: Request, env?: unknown) => Response | Promise<Response>, port: number, url: string) =>
   Effect.callback<ServerType, ListenFailed>((resume) => {
-    const s = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
+    const s = serve({ fetch, port, hostname: "127.0.0.1" }, () => {
       resume(Effect.succeed(s));
     });
     s.once("error", (cause: Error) => {
@@ -772,6 +919,73 @@ const listen = (app: Hono, port: number, url: string) =>
       s.close();
     });
   });
+
+const shut = (s: ServerType) =>
+  Effect.callback<void>((resume) => {
+    s.close(() => {
+      resume(Effect.void);
+    });
+    (s as { closeAllConnections?: () => void }).closeAllConnections?.();
+  });
+
+// Served over Tailscale while `wanted()`: `tailscale serve` on https://<tailnet name>/ to a listener on a free loopback
+// port of its own, so what arrives there is remote. One change at a time; a failed start waits for the setting to change.
+function overTailnet(app: Hono, remote: Remote, desk: Desk, wanted: () => boolean) {
+  const lock = Semaphore.makeUnsafe(1);
+  let server: ServerType | null = null;
+  let failed = false;
+  let closed = false;
+  const on = Effect.gen(function* () {
+    const tn = yield* readTailnet(desk.settings["app.tailscale_login"]);
+    const s = yield* listen(remoteFetch(app), 0, "a free loopback port");
+    const target = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+    const mine = desk.store.get("tailscale_serve");
+    yield* serveOn(tn.name, target, typeof mine === "string" ? mine : null).pipe(Effect.onError(() => shut(s)));
+    desk.store.set("tailscale_serve", target);
+    server = s;
+    remote.tailnet = tn;
+    remote.text = `On at https://${tn.name}/, for ${tn.login}'s paired devices.`;
+    desk.log(`serving over Tailscale at https://${tn.name}/ for ${tn.login}`);
+  });
+  const off = Effect.gen(function* () {
+    remote.tailnet = null;
+    const s = server;
+    server = null;
+    if (s) yield* shut(s);
+    const done = yield* Effect.exit(serveOff);
+    if (Exit.isFailure(done)) desk.log(`tailscale serve didn't turn off: ${Cause.pretty(done.cause)}`);
+    remote.text = "Off.";
+    desk.log("stopped serving over Tailscale");
+  });
+  const settle: Effect.Effect<void> = Effect.suspend(() => {
+    const want = !closed && wanted();
+    remote.wanted = want;
+    if (!want) failed = false;
+    if (want === !!server || (want && failed)) return Effect.void;
+    const step = want
+      ? on.pipe(
+          Effect.catch((e) =>
+            Effect.sync(() => {
+              failed = true;
+              remote.text = e.message;
+              desk.log(`can't serve over Tailscale: ${e.message}`);
+            }),
+          ),
+        )
+      : off;
+    return Effect.andThen(step, settle);
+  });
+  const settled = lock.withPermits(1)(settle);
+  return {
+    check: () => {
+      if (!closed && (!!server !== wanted() || remote.wanted !== wanted())) desk.runner.fork("tailscale serve", settled);
+    },
+    stop: Effect.suspend(() => {
+      closed = true;
+      return settled;
+    }),
+  };
+}
 
 // What the desk installed in your agents, kept current and renamed from before Inbox, on every start of the owner's desk
 // (desk serve, the app's own): what it did, in the log.
@@ -803,11 +1017,12 @@ export const startDesk = Effect.fnUntraced(function* (
     review: { fetchPr, generate: generateReview },
     writer: opts.writer ?? createWriter({ log }),
   });
-  const app = createApp(desk, port);
+  const remote = new Remote(desk.store);
+  const app = createApp(desk, port, remote);
   const url = `http://localhost:${port}`;
 
   // The desktop app retries: don't leak the SQLite handle each time.
-  const server = yield* listen(app, port, url).pipe(
+  const server = yield* listen(app.fetch, port, url).pipe(
     Effect.onError(() =>
       Effect.sync(() => {
         desk.stop();
@@ -828,6 +1043,9 @@ export const startDesk = Effect.fnUntraced(function* (
   );
   desk.start();
   desk.runner.fork("skill refresh", refreshAgents(desk, url));
+  const tailscale = overTailnet(app, remote, desk, () => !!opts.tailscale || desk.settings["app.tailscale"]);
+  desk.onChange(tailscale.check);
+  tailscale.check();
   if (opts.open) openUrl(url);
 
   // The desk stops at once; its agents may take a moment.
@@ -839,7 +1057,10 @@ export const startDesk = Effect.fnUntraced(function* (
     dropUpgrades();
   });
   // The port is let go even when closing the desk dies.
-  const closing = Effect.all([Effect.exit(desk.close()), stopListening], { concurrency: 2 }).pipe(Effect.flatMap(([closed]) => closed));
+  const closing = Effect.andThen(
+    tailscale.stop,
+    Effect.all([Effect.exit(desk.close()), stopListening], { concurrency: 2 }).pipe(Effect.flatMap(([closed]) => closed)),
+  );
   return { url, desk, close: () => Effect.runPromise(closing) };
 });
 

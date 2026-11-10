@@ -261,6 +261,23 @@ export const SETTINGS = [
     default: "",
     help: "An Inbox clone, npm install done; changing it restarts the app.",
   },
+  {
+    key: "app.tailscale",
+    section: "app",
+    label: "Use it from your other devices",
+    type: "boolean",
+    default: false,
+    help: "Over Tailscale, at this machine's tailnet address, for you alone; each device pairs once with desk pair.",
+  },
+  {
+    key: "app.tailscale_login",
+    section: "app",
+    label: "Tailscale login allowed in",
+    type: "string",
+    default: "",
+    more: true,
+    help: "Empty: the login that owns this machine in Tailscale.",
+  },
 ] as const satisfies readonly SettingDef[];
 
 type ValueOf<T> = T extends "number" ? number : T extends "boolean" ? boolean : T extends "list" ? string[] : string;

@@ -1,6 +1,6 @@
 // SQLite cache of every source's items (GitHub's today), your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Head, Item, ItemState, Job } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Device, Head, Item, ItemState, Job } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -60,6 +60,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS activity (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL, item_id TEXT NOT NULL, kind TEXT NOT NULL, actor TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS activity_item ON activity (item_id, seq);
       -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
+      -- Your other devices paired over Tailscale (src/remote.ts): a token's sha256, never the token.
+      CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
       CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
     const columns = (table: string) =>
@@ -396,6 +398,34 @@ export class Store {
 
   dropJob(kind: Job["kind"], key: string): void {
     this.db.prepare("DELETE FROM jobs WHERE kind = ? AND key = ?").run(kind, key);
+  }
+
+  // --- paired devices
+
+  devices(): (Device & { hash: string })[] {
+    const rows = this.db.prepare("SELECT id, name, kind, hash, created_at, last_used_at FROM devices ORDER BY created_at").all();
+    return rows.map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      kind: r.kind as Device["kind"],
+      hash: r.hash as string,
+      created_at: r.created_at as string,
+      last_used_at: (r.last_used_at as string | null) ?? null,
+    }));
+  }
+
+  addDevice(d: Device & { hash: string }): void {
+    this.db
+      .prepare("INSERT INTO devices (id, name, kind, hash, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(d.id, d.name, d.kind, d.hash, d.created_at, d.last_used_at);
+  }
+
+  usedDevice(id: string, at: string): void {
+    this.db.prepare("UPDATE devices SET last_used_at = ? WHERE id = ?").run(at, id);
+  }
+
+  removeDevice(id: string): boolean {
+    return this.db.prepare("DELETE FROM devices WHERE id = ?").run(id).changes > 0;
   }
 
   // --- key/value
