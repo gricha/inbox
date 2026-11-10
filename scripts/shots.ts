@@ -3209,10 +3209,9 @@ const SHOTS: Shot[] = [
         return [k, (r?.querySelector(".s-label")?.textContent ?? "") + " / " + (r?.querySelector(".s-help")?.textContent ?? "")];
       })))()`);
       const want = {
-        "agent.harness":
-          "Agent / Sorts your desk and reviews PRs ahead of time, on your own login. Your agent and automations with tools run on Claude Code.",
+        "agent.harness": "Agent / Sorts your desk and reviews PRs ahead of time, on your own login.",
         "policy.judge": "Sort my desk with Codex / Codex places each item by your policy; off, only your rules do.",
-        "agent.coordinator": "Run your agent / A Claude Code session that answers Ask your agent and gets what you hand off merged.",
+        "agent.coordinator": "Run your agent / A Codex session that answers Ask your agent and gets what you hand off merged.",
       };
       if (JSON.stringify(said) !== JSON.stringify(want)) failures.push(`settings-agent-codex: the rows read ${JSON.stringify(said)}`);
     },
