@@ -230,6 +230,19 @@ queries = ["is:open is:pr review-requested:{me}"]
 
 `trackBlocked` keeps its scope, your PRs a board lists or Merging has, by reading `host.seat(id).listed` and `merging`. It runs in `react({ on: "synced" })`, which the core calls after its moves and before it notifies, as today (:765), so a hand-back a merge freed is notified with its "unblocked: sentry#X merged ·" prefix. Its kv `blocked` keeps feeding Blocked's order and age through `waits_since` (until D2). Its events go through `put` with no items, under `desk` (until D5).
 
+### Sessions (`src/connectors/sessions.ts`, built)
+
+The second real source, and the first that isn't GitHub-shaped: your own Claude Code and Codex sessions on this computer that are blocked on you or stalled (docs/api.md → Sessions has what it reads and decides). It follows the one rule for every item hook already: each pass derives the fact (blocked or stalled, and why) from what it read, and an item exists only while the fact holds, so a session that moves on, loses its process with its turn finished, or is archived resolves on its own; done, snooze, mute and undo are the core's verbs on its id (`session:<id>`, in the `state` table and the action log like any item's). It isn't a `Connector` yet, because the recompute still reads every item as GitHub's: its cards live in memory and reach the core through `QueueView.sessions` and `FocusView.sessions` (after agents' questions), `Desk.sessionAct()` (the triage), `desk_list` and `desk_item` (`GET /api/sessions/:id`), the way questions do, rather than through `members`, `row` and the store's items. Its one write is a session's, never GitHub's: Kick and Resume (`claude --resume <id> --bg`, through the coordinator's own `halt()`) and Open (the desktop app's or Codex's link), from the desk's window only. Its setting is its own part, `sessions.enabled` under section `sessions`. When the core takes plugins, it maps onto the plan as:
+
+| Today                                                                           | In the plugin                                                               |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `Sessions.start`, `stop`, `reschedule`, `poll` (30 s, only while the desk runs) | `start`, `stop`, `sync`, `react({ on: "settings" })`                        |
+| `classify()`, `Found`, `cards()`                                                | `look`'s fields and `resolved()`: the item is there while the verdict holds |
+| `SessionCard`, `SessionRow`/`SessionDetail` in `web/src/components/Session.tsx` | `row`, `detail`                                                             |
+| `Desk.kickSession`, `openSession` (`POST /api/sessions/:id/kick`, `/open`)      | `write`: Kick, Resume, Open                                                 |
+| `isSessionRef` (`session:` prefix)                                              | `ref`                                                                       |
+| `askAgent` on a turn that ended asking something                                | `Lens.judge`-like: the plugin's own read, cached per session and last event |
+
 ### Agents' questions (desk.ts:2520-2640, kv `inquiries`)
 
 They're the agents' channel to you, as asks are yours to your agent, and nothing about them is GitHub-shaped except `item`, which resolves through refs like any other. `Desk.inquire` checks a question in today's words and notifies "Your agent asks" or "<from> asks". kv `inquiries` holds at most 100 in all, dropping the oldest answered (:2598-2600). `answerInquiry` passes your answer to your agent, and its route needs no config, so you can answer while config.toml has errors. They lead the main page as `QueueView.inquiries` and count as `focus.asks`. Until Q they stay exactly that, in desk.ts. With Q, they become the second plugin (section 9).
