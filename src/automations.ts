@@ -813,8 +813,16 @@ export class Automations {
       return Result.isSuccess(v) && Boolean(v.success); // one it can't work out for an item doesn't pass
     };
     const at = (id: string) => snap.entries.get(id)!.analysis.activity_at;
+    // A rule that adds is asked of what you marked done too: nothing else brings one back, and its add does, once (Desk.push()).
+    const listed = (id: string) => [...snap.boards.values()].some((b) => b.result.placements.has(id));
+    const done =
+      !of && a.decide === "rule" && a.rule?.do === "add"
+        ? [...snap.entries.values()]
+            .filter((e) => e.status === "done" && !e.resolved && !e.inflight && listed(e.item.id))
+            .map((e) => e.item.id)
+        : [];
     return Result.succeed(
-      (of ?? [...snap.best.keys()]).filter(passes).toSorted((x, y) => at(y).localeCompare(at(x)) || x.localeCompare(y)),
+      (of ?? [...snap.best.keys(), ...done]).filter(passes).toSorted((x, y) => at(y).localeCompare(at(x)) || x.localeCompare(y)),
     );
   }
 

@@ -2304,25 +2304,35 @@ export class Desk {
 
   // An automation's find: on your desk as desk_add puts it, with its why. One that's on your queue already stays as it is;
   // one you dealt with (done, snoozed, muted, handed off for merge), or that nobody needs now, stays that way too.
+  // A rule or a question has no agent that's told what its last run added, so the desk remembers (`once`, per automation:
+  // the item's sortKey, less the pin): it adds an item once for what it is, also one you'd marked done, which nothing else
+  // would bring back; after that the item stays where you put it (Done, Unpin) until it changes.
   push(ref: string, why: string, a: Automation): Effect.Effect<AutomationItem, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.hold(ref);
       const note = yield* this.line(why, "why", 300);
-      this.store.set(`pushed:${id}`, { automation: a.id, name: a.name, why: note, at: this.now().toISOString() });
+      const once = { ...(this.store.get(`pushed:${id}`) as { once?: Record<string, string> } | null)?.once };
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
+      const key = a.decide ? sortKey(e.item, e.analysis.activity_at, undefined, e.analysis.signals.pr.blocker) : null;
+      const done = key !== null && e.status === "done";
       let outcome: AutomationItem["outcome"] = "kept";
       if (e.resolved) outcome = "resolved";
-      else if (e.status !== "active" || e.inflight) outcome = "left";
-      else if (!e.state.pinned && !queued) {
-        this.store.putState({ ...e.state, pinned: true });
-        this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
-        outcome = "added";
-        this.changed(); // the pump reads the snapshot: it must have the pin
-        this.warmAdded(id);
+      else if ((e.status !== "active" && !done) || e.inflight) outcome = "left";
+      else if (done || (!e.state.pinned && !queued)) {
+        if (key !== null && once[a.id] === key) outcome = "left";
+        else {
+          if (key !== null) once[a.id] = key;
+          this.store.putState({ ...e.state, ...(done && ACTIVE), pinned: true });
+          this.store.logAction(id, "pin", e.state, this.now().toISOString(), `automation:${a.id}`);
+          outcome = "added";
+          this.warmAdded(id);
+        }
       }
-      this.changed();
+      const said = { automation: a.id, name: a.name, why: note, at: this.now().toISOString() };
+      this.store.set(`pushed:${id}`, { ...said, ...(Object.keys(once).length > 0 && { once }) });
+      this.changed(); // the pump reads the snapshot: it must have the pin
       return { item_id: id, why: note, outcome };
     });
   }

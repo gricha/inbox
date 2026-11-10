@@ -14,7 +14,7 @@ import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
 import { myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
-import { makeItem, NOW } from "./helpers/items.ts";
+import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run as runFx, runSync } from "./helpers/run.ts";
 
 async function until(cond: () => boolean): Promise<void> {
@@ -1021,6 +1021,152 @@ test("a rule acts with no model: every item its check passes gets its action, on
   // Run now on one with only events has nothing to act on, and says so.
   const now = await t.desk.automations.run(runSync(t.desk.automations.set("red", { ...red, when: undefined, on: true }, true)), "now").p;
   assert.deepEqual([now.summary, now.items], ["It acts on the items its events land on, so there's nothing to run it on now.", []]);
+});
+
+// The owner's two reviewer nudges, as they asked for them (ad42399 gave the fields): rules, hourly, adding with a why.
+const PICK = {
+  name: "Pick a reviewer",
+  schedule: "weekdays hourly",
+  when: "me.author && !item.draft && pr.ready_weekday_hours >= 24 && len(pr.people_requested) == 0 && len(pr.reviewers) == 0",
+  decide: "rule" as const,
+  rule: { do: "add" as const, why: "a day with no review and nobody asked by name: pick a reviewer" },
+};
+const FOLLOW = {
+  name: "Follow up",
+  schedule: "weekdays hourly",
+  when: "me.author && !item.draft && pr.asked_weekday_hours >= 48 && len(pr.reviewers) == 0",
+  decide: "rule" as const,
+  rule: { do: "add" as const, why: "asked by name two days ago and no review: follow up" },
+};
+
+test("the two reviewer nudges are rules on a schedule: no model, each PR on your desk once with its why, also one you'd marked done, and again only once it changes", async (c) => {
+  const fake = fakeClaude(c);
+  const team = { reviewer: "platform", type: "team" as const, codeowner: true };
+  const asked = (h: number) => [{ at: hoursAgo(h), actor: "me", actor_bot: false, reviewer: "dana", reviewer_type: "user" as const }];
+  const old = { ci: "green" as const, created_at: hoursAgo(130) };
+  const t = await setup(
+    [
+      myPr(1, { ...old, review_requests: [team] }), // ready for days, only CODEOWNERS' team asked
+      myPr(2, { ci: "green", created_at: hoursAgo(5), review_requests: [team] }), // the same, this morning
+      myPr(3, { ...old, request_events: asked(120) }), // dana asked by name last week
+      myPr(4, { ...old, request_events: asked(5) }), // dana asked this morning
+      myPr(5, { ...old, request_events: asked(120) }), // as 3, and you marked it done when you asked
+      myPr(6, { ...old, review_requests: [team], draft: true }), // a draft is on your desk as yours to mark ready
+      myPr(7, {
+        ...old,
+        review_requests: [],
+        reviews: [{ author: "dana", state: "commented", at: hoursAgo(100), author_bot: false, commit: "abc" }],
+      }),
+      myPr(8, { ...old, ci: "red", review_requests: [team] }), // on your desk already: its CI is red
+      reviewAsk(9, old), // carol's
+    ],
+    { settings: { "policy.judge": false, "notify.quiet": "" } },
+  );
+  c.after(t.cleanup);
+  await runFx(t.desk.sync());
+  runSync(t.desk.act("acme/web#5", "done"));
+  const card = (n: number) => runSync(t.desk.item(`acme/web#${n}`)).card;
+  const onDesk = () => [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => card(n).status === "active" && ["now", "today"].includes(card(n).bucket));
+  assert.deepEqual(onDesk(), [6, 8]);
+
+  const pick = runSync(t.desk.automations.set("pick", PICK, true));
+  const follow = runSync(t.desk.automations.set("follow", FOLLOW, true));
+  assert.deepEqual(
+    [pick, follow].map((a) => [a.schedule, a.when, a.decide, a.rule, a.can, a.prompt, a.on]),
+    [PICK, FOLLOW].map((a) => [a.schedule, a.when, "rule", a.rule, undefined, "", true]),
+  );
+  // The next hour, by the clock: a tick runs each once.
+  let at = NOW.getTime();
+  const hour = async () => {
+    at += 61 * 60_000;
+    t.setNow(new Date(at));
+    t.notes.length = 0;
+    t.desk.automations.tick();
+    t.desk.automations.tick();
+    for (let i = 0; i < 50 && t.desk.automations.running.size; i++)
+      await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
+    const runs = t.desk.automations.runs().filter((r) => r.at === new Date(at).toISOString());
+    assert.deepEqual(
+      runs.map((r) => [r.automation, r.trigger, r.error].join()).toSorted(),
+      ["follow,schedule,", "pick,schedule,"],
+      "each ran once, on its schedule",
+    );
+    const did = (id: string) =>
+      Object.fromEntries(
+        runs
+          .find((r) => r.automation === id)!
+          .items.map((x) => [Number(x.item_id.split("#")[1]), x.outcome] as const)
+          .toSorted((x, y) => x[0] - y[0]),
+      );
+    return { pick: did("pick"), follow: did("follow"), notes: t.notes.toSorted() };
+  };
+
+  // Each puts what passes its check on your desk, with its why; one on your desk already stays as it is, and one you'd
+  // marked done (Ready for review does, once someone's asked) is back: nothing else would bring it.
+  assert.deepEqual(await hour(), {
+    pick: { 1: "added", 8: "kept" },
+    follow: { 3: "added", 5: "added" },
+    notes: ["1 on your desk", "2 on your desk"],
+  });
+  assert.deepEqual(onDesk(), [1, 3, 5, 6, 8]);
+  assert.deepEqual(
+    [1, 3, 5, 8].map((n) => card(n).why),
+    [
+      "Pick a reviewer: a day with no review and nobody asked by name: pick a reviewer",
+      "Follow up: asked by name two days ago and no review: follow up",
+      "Follow up: asked by name two days ago and no review: follow up",
+      "CI failing",
+    ],
+  );
+  const first = t.desk.automations.view().find((v) => v.id === "follow")!.runs[0]!;
+  assert.deepEqual([first.did, first.didnt], ["put 2 on your desk", ""]);
+
+  // An hour on they're still there: nothing's added twice, and nothing's said.
+  assert.deepEqual(await hour(), { pick: { 1: "kept", 8: "kept" }, follow: { 3: "kept", 5: "kept" }, notes: [] });
+
+  // You deal with them without doing what they say: Done on one, Unpin on another. Neither is back the next hour.
+  runSync(t.desk.act("acme/web#1", "done"));
+  runSync(t.desk.act("acme/web#3", "unpin"));
+  runSync(t.desk.act("acme/web#5", "done"));
+  assert.deepEqual(onDesk(), [6, 8]);
+  for (let i = 0; i < 3; i++)
+    assert.deepEqual(await hour(), { pick: { 1: "left", 8: "kept" }, follow: { 3: "left", 5: "left" }, notes: [] }, `hour ${i}`);
+  assert.deepEqual(onDesk(), [6, 8]);
+  assert.deepEqual([card(1).status, card(3).status, card(3).bucket, card(5).status], ["done", "active", "blocked", "done"]);
+
+  // Something about the PR changes and its check still passes: it's back, once. A push of yours to the one you marked done
+  // (which no one else's activity would bring back), a label on the other.
+  moved(t, {
+    "acme/web#1": { head_oid: "def", head_committed_at: new Date(at).toISOString() },
+    "acme/web#3": { labels: ["needs-review"] },
+  });
+  await runFx(t.desk.sync());
+  assert.deepEqual(await hour(), {
+    pick: { 1: "added", 8: "kept" },
+    follow: { 3: "added", 5: "left" },
+    notes: ["1 on your desk", "1 on your desk"],
+  });
+  assert.deepEqual(await hour(), { pick: { 1: "kept", 8: "kept" }, follow: { 3: "kept", 5: "left" }, notes: [] });
+
+  // You do what one says, here asking dana: its check passes no more, and two weekdays on the other nudge has it, as each
+  // has this morning's PR that was too new for it.
+  runSync(t.desk.act("acme/web#1", "done"));
+  moved(t, {
+    "acme/web#1": {
+      review_requests: [team, { reviewer: "dana", type: "user", codeowner: false }],
+      request_events: [{ at: new Date(at).toISOString(), actor: "me", actor_bot: false, reviewer: "dana", reviewer_type: "user" }],
+    },
+  });
+  await runFx(t.desk.sync());
+  assert.deepEqual(await hour(), { pick: { 8: "kept" }, follow: { 3: "kept", 5: "left" }, notes: [] });
+  at += 4 * 24 * 3_600_000; // Tuesday to Saturday: every hour of three weekdays, wherever the desk is
+  assert.deepEqual(await hour(), {
+    pick: { 2: "added", 8: "kept" },
+    follow: { 1: "added", 3: "kept", 4: "added", 5: "left" },
+    notes: ["1 on your desk", "2 on your desk"],
+  });
+  assert.equal(card(1).why, "Follow up: asked by name two days ago and no review: follow up");
+  assert.equal(fake.calls(), 0, "no model, ever");
 });
 
 test("a question is one call with no tools: it says what to do with each item it was asked about, or leaves it alone", async (c) => {
