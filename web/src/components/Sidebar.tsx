@@ -63,7 +63,7 @@ export function Sidebar({
         <span>Inbox</span>
       </div>
       {onSettings ? (
-        <nav className="side-nav" aria-label="Settings">
+        <nav className="side-nav side-parts" aria-label="Settings">
           <a href="#/" className="side-item side-back" title={`Back to the Inbox (${MOD}1)`}>
             <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M10 3.5 5.5 8l4.5 4.5" />

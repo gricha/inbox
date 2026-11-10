@@ -702,20 +702,6 @@ p {
   background: var(--rule);
 }
 
-/* In Settings, the way back to the Inbox above its parts: quieter than they are, its chevron by its word. */
-.side-nav .side-back {
-  justify-content: flex-start;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 6px;
-  color: var(--pencil);
-}
-
-.side-back .i {
-  flex: none;
-  margin-left: -4px;
-}
-
 .side-item {
   display: flex;
   align-items: center;
@@ -775,6 +761,28 @@ p {
 .side-nav .side-item {
   align-items: baseline;
   line-height: 30px;
+}
+
+/* In Settings, the way back to the Inbox above its parts: quieter than they are, its chevron by its word. */
+.side-nav .side-back {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: var(--pencil);
+}
+
+.side-back .i {
+  flex: none;
+  margin-left: -4px;
+}
+
+/* A part's name may take two lines in the compact sidebar ("Inbox and notifications"), never over the next. */
+.side-parts .side-item {
+  height: auto;
+  min-height: 30px;
+  padding-block: 6px;
+  line-height: 18px;
 }
 
 .side-foot .i {
@@ -5840,6 +5848,10 @@ p.rv-next {
     width: 1px;
     height: 16px;
     margin: 0 6px;
+  }
+
+  .side-nav .side-back {
+    margin-bottom: 0;
   }
 
   .page-head {

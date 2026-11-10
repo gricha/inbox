@@ -1,5 +1,5 @@
-// Settings → Your automations: your instructions, on a schedule or when something happens. The tab lists them (turn one on, run
-// it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
+// Settings → Your automations: your instructions, on a schedule or when something happens; a plugin's part lists the ones it
+// comes with, which you only switch or copy. The part lists them (turn one on, run it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -166,8 +166,22 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     });
   }
 
-  // The whole automation each time: what a switch doesn't change goes back as it is.
-  const turn = (a: Auto, on: boolean) => put(a.id, bodyOf({ ...editing(a), on }), `${a.name} is ${on ? "on" : "off"}`);
+  // The whole automation each time: what a switch doesn't change goes back as it is. A plugin's is only switched.
+  function turn(a: Auto, on: boolean): Effect.Effect<boolean> {
+    if (!a.plugin) return put(a.id, bodyOf({ ...editing(a), on }), `${a.name} is ${on ? "on" : "off"}`);
+    return Effect.suspend(() => {
+      setBusy(true);
+      return api.switchAutomation(a.id, on).pipe(
+        Effect.andThen(() => {
+          flash(`${a.name} is ${on ? "on" : "off"}`);
+          return load();
+        }),
+        Effect.as(true),
+        Effect.catch((e) => failed(e).pipe(Effect.as(false))),
+        Effect.ensuring(idle),
+      );
+    });
+  }
 
   function runNow(a: Auto): Effect.Effect<void> {
     return api.runAutomation(a.id).pipe(
@@ -192,19 +206,29 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     });
   }
 
-  // A new one's id is its name's, made free with -2, -3… so it never lands on one you have. True once it's saved.
-  function save(d: Draft): Effect.Effect<boolean> {
+  // A new one's id is its name's, made free with -2, -3… so it never lands on one you have. Its id once it's saved, else null.
+  function save(d: Draft, done?: string): Effect.Effect<string | null> {
     const base = d.id ?? slug(d.name);
     if (!base) {
       flash("Give it a name", true);
-      return Effect.succeed(false);
+      return Effect.succeed(null);
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    return put(id, bodyOf(d), d.id ? `Saved ${d.name}` : `Added ${d.name}`);
+    return put(id, bodyOf(d), done ?? (d.id ? `Saved ${d.name}` : `Added ${d.name}`)).pipe(Effect.map((ok) => (ok ? id : null)));
   }
 
-  return { list, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save };
+  // A plugin's, as one of yours to change: its definition, off until you turn it on; its view opens.
+  const copy = (a: Auto) =>
+    save({ ...editing(a), id: null, on: false }, `Copied ${a.name} to your automations, off`).pipe(
+      Effect.tap((id) =>
+        Effect.sync(() => {
+          if (id) location.hash = viewOf(id);
+        }),
+      ),
+    );
+
+  return { list, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save, copy };
 }
 
 const editing = (a: Auto): Draft => ({
@@ -220,9 +244,10 @@ const editing = (a: Auto): Draft => ({
   on: a.on,
 });
 
-// The Automations tab's rows on its sheet: each its name (its view), when it runs and its last run, Run now while it's on
-// and its switch; an agent's draft has Review instead, so it can't run before its instruction has been on screen.
-export function AutomationRows({ au, now }: { au: Automations; now: number }) {
+// A part's automation rows on its sheet: each its name (its view), when it runs (a plugin's: what it does) and its last run,
+// Run now while it's on and its switch; an agent's draft has Review instead, so it can't run before its instruction has been
+// on screen. `plugin`: that plugin's, which you don't write; else yours, ending in New automation.
+export function AutomationRows({ au, now, plugin }: { au: Automations; now: number; plugin?: string }) {
   if (au.error && !au.list)
     return (
       <div className="setting s-status">
@@ -238,6 +263,8 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
         <SkLines count={2} />
       </div>
     );
+  const list = au.list.filter((a) => a.plugin === plugin);
+  if (plugin) return list.map((a) => <AutomationRow key={a.id} a={a} au={au} now={now} />);
   const write = au.writing ? null : (
     <button
       type="button"
@@ -259,7 +286,7 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
       New automation
     </button>
   );
-  if (!au.list.length)
+  if (!list.length)
     return (
       <div className="setting">
         <div className="s-label-col">
@@ -271,7 +298,7 @@ export function AutomationRows({ au, now }: { au: Automations; now: number }) {
     );
   return (
     <>
-      {au.list.map((a) => (
+      {list.map((a) => (
         <AutomationRow key={a.id} a={a} au={au} now={now} />
       ))}
       {write && <div className="s-more">{write}</div>}
@@ -296,7 +323,7 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
             `An agent wrote it; read it before it runs · ${a.trigger}`
           ) : (
             <>
-              {timing} · {a.waiting ? "" : last.text}
+              {a.help ?? timing} · {a.waiting ? "" : last.text}
               {a.waiting ? <span className="t-bad">waiting: {a.waiting.why}</span> : last.bad && <span className="t-bad">{last.bad}</span>}
             </>
           )}
@@ -370,7 +397,7 @@ export function NewAutomation({ au, model }: { au: Automations; model: string | 
 }
 
 // An automation's view (#/settings/automations/<id>): its name and what starts it, its instruction, then in plain words its
-// check, how it decides and what it may do, what you can do with it, and its runs.
+// check, how it decides and what it may do, what you can do with it (a plugin's: switch it, or copy it to yours), and its runs.
 export function AutomationView({
   au,
   id,
@@ -451,6 +478,7 @@ export function AutomationView({
       <h1 id="s-view-automation" className="s-view-name">
         {a.name}
       </h1>
+      {a.help && <p className="s-view-line">{a.help}</p>}
       <p className="s-view-line">{line}</p>
       <div className="au-view">
         {draft ? (
@@ -514,15 +542,28 @@ export function AutomationView({
                   {a.running ? "Running…" : "Run now"}
                 </button>
               )}
-              <button
-                type="button"
-                className="act"
-                onClick={() => {
-                  setDraft(editing(a));
-                }}
-              >
-                Edit
-              </button>
+              {a.plugin ? (
+                <button
+                  type="button"
+                  className="act"
+                  disabled={au.busy}
+                  onClick={() => {
+                    runUi(au.copy(a));
+                  }}
+                >
+                  Copy to your automations
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="act"
+                  onClick={() => {
+                    setDraft(editing(a));
+                  }}
+                >
+                  Edit
+                </button>
+              )}
               {!agents && (
                 <button type="button" className="act" disabled={au.busy} onClick={turn(!a.on)}>
                   {a.on ? "Turn off" : "Turn on"}

@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { plan } from "../../src/agents.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
 import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
 import { renderTemplate } from "../../src/expr.ts";
@@ -2295,7 +2296,40 @@ const AUTOMATIONS: Automation[] = [
     updated_at: iso(400),
   },
 ];
+// What GitHub comes with, as the desk lists it: its definition the code's, on or off as you switched it.
+const SWITCHED = new Map<string, boolean>();
+const builtIns = (): Automation[] =>
+  GITHUB_AUTOMATIONS.map((b) => {
+    const id = `github.${b.id}`;
+    return Object.assign({}, b, { id, on: SWITCHED.get(id) ?? b.on, by: "you" as const, updated_at: "", plugin: "github" });
+  });
+
 const RUNS: AutomationRun[] = [
+  {
+    id: "r0",
+    automation: "github.pick-reviewer",
+    trigger: "schedule",
+    at: iso(0.7),
+    done_at: iso(0.7),
+    error: null,
+    summary: "",
+    items: [{ item_id: "acme/web#418", why: "nobody asked by name for a workday", do: "add", outcome: "added" }],
+    session: null,
+  },
+  {
+    id: "r00",
+    automation: "github.wide-ping",
+    trigger: "event",
+    at: iso(3),
+    done_at: iso(3),
+    error: null,
+    summary: "",
+    items: [
+      { item_id: "acme/api#2231", why: "asked of four or more teams at once", do: "hide", outcome: "did" },
+      { item_id: "acme/api#2240", why: "asked of four or more teams at once", do: "hide", outcome: "did" },
+    ],
+    session: null,
+  },
   {
     id: "r1",
     automation: "warden-issues",
@@ -2369,10 +2403,9 @@ const RUNS: AutomationRun[] = [
   },
 ];
 function automationsView(): AutomationView[] {
-  return AUTOMATIONS.map((a) => {
+  return [...AUTOMATIONS, ...builtIns()].map((a) => {
     const s = parseSchedule(a.schedule);
-    return {
-      ...a,
+    return Object.assign({}, a, {
       trigger: a.events ? eventsWords(a.events) : scheduleWords(a.schedule),
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
       next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
@@ -2381,7 +2414,7 @@ function automationsView(): AutomationView[] {
       runs: RUNS.filter((r) => r.automation === a.id)
         .toReversed()
         .map((r) => Object.assign({}, r, { did: didText(r.items), didnt: didntText(r.items) })),
-    };
+    });
   });
 }
 
@@ -3630,10 +3663,18 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "POST /api/coordinator/wake") return { ok: true };
   if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS, coordinator };
   if (route === "GET /api/automations") return automationsView();
-  const auto = /^\/api\/automations\/([^/]+)(\/run)?$/.exec(url.pathname);
+  const auto = /^\/api\/automations\/([^/]+)(\/run|\/on)?$/.exec(url.pathname);
   if (auto) {
     const id = decodeURIComponent(auto[1]!);
     const i = AUTOMATIONS.findIndex((a) => a.id === id);
+    const plugin = builtIns().find((a) => a.id === id);
+    if (plugin && req.method === "PUT" && auto[2] === "/on") {
+      SWITCHED.set(id, (await readBody(req)).on === true);
+      bump();
+      return { ok: true, automation: builtIns().find((a) => a.id === id) };
+    }
+    if (plugin && req.method === "POST" && auto[2] === "/run") return { ok: true, running: id };
+    if (plugin) throw new HttpError(400, `"${plugin.name}" comes with GitHub: only its switch is yours, in its part of Settings`);
     if (req.method === "PUT") {
       const b = await readBody(req);
       const a: Automation = {

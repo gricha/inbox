@@ -349,8 +349,8 @@ const linesInChat = async (page: Page) => {
   await page.locator(".chat-input").waitFor();
 };
 const LINES = { path: "src/planner/plan.ts", line: 23, side: "new", start: { line: 20, side: "new" } };
-// A Settings view: the head is its way back to Settings' part `part` (or the Automations tab, named so), the view names
-// itself, and the column is `col` at most.
+// A Settings view: the head is its way back to Settings' part `part`, named so, the view names itself, and the column is
+// `col` at most.
 const settingsView = async (page: Page, name: string, title: string, part: string, col: string) => {
   const seen = await page.evaluate<{ back: string | null; href: string | null; h1: string | null; col: string }>(`(() => {
     const back = document.querySelector(".page-head a.back");
@@ -361,12 +361,12 @@ const settingsView = async (page: Page, name: string, title: string, part: strin
       col: getComputedStyle(document.querySelector(".main")).maxWidth,
     };
   })()`);
-  const to = part === "automations" ? "Automations" : "Settings";
+  const to = ({ github: "GitHub", agent: "Agent", automations: "Your automations" } as Record<string, string>)[part] ?? part;
   if (seen.back !== to) failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}, not ${to}`);
   if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
   if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
   if (seen.col !== col) failures.push(`${name}: the column is ${seen.col}, not ${col}`);
-  if (await page.locator(".s-page:visible").count()) failures.push(`${name}: a Settings tab shows beside the view`);
+  if (await page.locator(".s-page:visible").count()) failures.push(`${name}: a Settings part shows beside the view`);
 };
 // The policy view's hourly cap: its row, on screen once scrolled to, under the judge's status line.
 const capUnderStatus = async (page: Page, name: string) => {
@@ -566,12 +566,20 @@ const headSays = (page: Page) =>
   page.evaluate<string | null>(
     `(() => { const h = document.querySelector(".page-head"); return h && (h.querySelector("input")?.placeholder ?? h.textContent.trim()); })()`,
   );
-// Settings' tabs in the page head, the one it marks current in brackets: "[Settings] Automations"; null with none.
-const tabsSay = (page: Page) =>
+// In Settings: the page head's words, then the sidebar's items, "|" for its hairline and the one it marks current in brackets:
+// "Agent: Inbox Inbox and notifications [Agent] Your automations This device | GitHub"; null outside Settings.
+const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "This device"];
+const settingsSays = (page: Page) =>
   page.evaluate<string | null>(`(() => {
-    const tabs = [...document.querySelectorAll(".page-head .head-tabs a")];
-    return tabs.length ? tabs.map((a) => (a.getAttribute("aria-current") === "page" ? "[" + a.textContent + "]" : a.textContent)).join(" ") : null;
+    const nav = document.querySelector('.side-nav[aria-label="Settings"]');
+    if (!nav) return null;
+    const items = [...nav.children].map((el) =>
+      el.classList.contains("side-sep") ? "|" : el.getAttribute("aria-current") === "page" ? "[" + el.textContent.trim() + "]" : el.textContent.trim(),
+    );
+    return document.querySelector(".page-head").textContent.trim() + ": " + items.join(" ");
   })()`);
+// What settingsSays reads on the part named `on`.
+const onPart = (on: string) => `${on}: Inbox ${[...SETTINGS_SIDE, "|", "GitHub"].map((p) => (p === on ? `[${p}]` : p)).join(" ")}`;
 // The sidebar's pages in order, "|" for its hairline; null where it's hidden.
 const sidePages = (page: Page) =>
   page.evaluate<string | null>(`(() => {
@@ -3050,8 +3058,8 @@ const SHOTS: Shot[] = [
       const filled = await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Claude Code" }).isVisible();
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
       // The part is the agent's: its name is the first row's choice, Codex listed beside it; its status follows.
-      const head = (await page.locator("#s-agent h2, #s-agent .s-title").first().textContent())?.trim();
-      if (head !== "Agent") failures.push(`settings-agent: the part is headed ${JSON.stringify(head)}`);
+      const head = await settingsSays(page);
+      if (head !== onPart("Agent")) failures.push(`settings-agent: the head and the sidebar read ${JSON.stringify(head)}`);
       const first = await page.evaluate<{ label: string; options: [string, boolean][]; status: boolean } | null>(`(() => {
         const row = document.querySelector("#s-agent .setting");
         const sel = row?.querySelector("select");
@@ -3239,9 +3247,9 @@ const SHOTS: Shot[] = [
       await at("#/settings/queue")(page);
       const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
-      const tabs = await tabsSay(page);
-      if (tabs !== "Settings [Automations]") failures.push(`settings-automations: the page head's tabs read ${JSON.stringify(tabs)}`);
-      if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: the settings tab's parts show on Automations");
+      const says = await settingsSays(page);
+      if (says !== onPart("Your automations")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
+      if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: another part shows on Your automations");
       const [mine, draft, rule, ask, ...more] = await automationRows(page);
       if (
         !mine ||
@@ -3659,51 +3667,57 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Settings' tabs are links Tab reaches: Enter on Automations opens it, and the sidebar's Settings the settings tab. A new
-    // automation half written survives a trip to the settings tab, and an edit in an automation's view one to Settings and
-    // back; Esc on the Automations tab goes to the Inbox, as from any part. Shot on the settings tab, Automations focused.
-    name: "settings-tabs",
+    // Settings' parts are the sidebar's items under the way back to the Inbox; drafts survive a trip between them.
+    name: "settings-nav",
     go: async (page) => {
       const hash = () => page.evaluate<string>("location.hash");
-      const tab = (name: string) => page.locator(".page-head .head-tab", { hasText: name });
-      await at("#/settings/github")(page);
+      const side = (name: string) => page.locator('.side-nav[aria-label="Settings"] .side-item', { hasText: new RegExp(`^${name}$`) });
+      await at("#/settings")(page);
+      if ((await settingsSays(page)) !== onPart("Inbox and notifications"))
+        failures.push(`settings-nav: #/settings reads ${JSON.stringify(await settingsSays(page))}`);
       const links = await page.evaluate<string[]>(
-        `[...document.querySelectorAll(".page-head .head-tabs a")].map((a) => a.getAttribute("href") + (a.tabIndex < 0 ? " (no Tab)" : ""))`,
+        `[...document.querySelectorAll('.side-nav[aria-label="Settings"] a')].map((a) => a.getAttribute("href"))`,
       );
-      if (links.join() !== "#/settings,#/settings/automations") failures.push(`settings-tabs: the tabs link to ${JSON.stringify(links)}`);
-      await tab("Settings").focus();
-      await page.keyboard.press("Tab");
-      const focused = await page.evaluate<string | null>("document.activeElement?.textContent ?? null");
-      if (focused !== "Automations") failures.push(`settings-tabs: Tab from the Settings tab goes to ${JSON.stringify(focused)}`);
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(400);
-      if ((await hash()) !== "#/settings/automations" || (await tabsSay(page)) !== "Settings [Automations]")
-        failures.push(`settings-tabs: Enter on Automations goes to ${await hash()}, the tabs reading ${await tabsSay(page)}`);
-      // A new one half written, then the settings tab and back.
+      const want = ["#/", "#/settings/queue", "#/settings/agent", "#/settings/automations", "#/settings/app", "#/settings/github"];
+      if (links.join() !== want.join()) failures.push(`settings-nav: the sidebar links to ${JSON.stringify(links)}`);
+      if (await page.locator(".page-head .head-tabs").count()) failures.push("settings-nav: the page head still has tabs");
+      for (const [name, id] of [
+        ["Agent", "agent"],
+        ["GitHub", "github"],
+        ["Your automations", "automations"],
+      ] as const) {
+        await side(name).click();
+        await page.waitForTimeout(300);
+        if ((await hash()) !== `#/settings/${id}` || (await settingsSays(page)) !== onPart(name))
+          failures.push(`settings-nav: ${name} goes to ${await hash()}, reading ${JSON.stringify(await settingsSays(page))}`);
+      }
+      // A new one half written, then another part and back.
       await page.locator("#s-automations").getByRole("button", { name: "New automation" }).click();
       await page.locator("#s-automations .au-editor input").first().fill("Half written");
-      await tab("Settings").click();
+      await side("Agent").click();
       await page.waitForTimeout(300);
-      if (await page.locator("#s-automations").isVisible()) failures.push("settings-tabs: Automations shows on the settings tab");
-      await tab("Automations").click();
+      if (await page.locator("#s-automations").isVisible()) failures.push("settings-nav: Your automations shows on Agent");
+      await side("Your automations").click();
       await page.waitForTimeout(300);
       const kept = await page
         .locator("#s-automations .au-editor input")
         .first()
         .inputValue({ timeout: 2000 })
         .catch(() => null);
-      if (kept !== "Half written") failures.push(`settings-tabs: back on Automations, the new one's name reads ${JSON.stringify(kept)}`);
+      if (kept !== "Half written")
+        failures.push(`settings-nav: back on Your automations, the new one's name reads ${JSON.stringify(kept)}`);
       await page.locator("#s-automations .au-editor").getByRole("button", { name: "Cancel" }).click();
-      // An edit in a view, then the sidebar's Settings, the Automations tab and its name again.
+      // An edit in a view, then the footer's Settings, and its name again: the sidebar marks Your automations in its view.
       const name = "Warden and dotagents issues";
       await page.locator("#s-automations .s-name", { hasText: name }).click();
+      await page.waitForTimeout(300);
+      if ((await sideOn(page)) !== "Your automations") failures.push(`settings-nav: in a view, the sidebar marks ${await sideOn(page)}`);
       await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
       await page.locator(".s-view .au-editor input").first().fill("Warden, edited");
-      await page.locator(".side-item", { hasText: "Settings" }).click();
+      await page.locator(".side-foot .side-item", { hasText: "Settings" }).click();
       await page.waitForTimeout(400);
-      if ((await hash()) !== "#/settings" || (await tabsSay(page)) !== "[Settings] Automations")
-        failures.push(`settings-tabs: the sidebar's Settings goes to ${await hash()}, the tabs reading ${await tabsSay(page)}`);
-      await tab("Automations").click();
+      if ((await hash()) !== "#/settings") failures.push(`settings-nav: the footer's Settings goes to ${await hash()}`);
+      await side("Your automations").click();
       await page.locator("#s-automations .s-name", { hasText: name }).click();
       await page.waitForTimeout(300);
       const edited = await page
@@ -3711,17 +3725,65 @@ const SHOTS: Shot[] = [
         .first()
         .inputValue({ timeout: 2000 })
         .catch(() => null);
-      if (edited !== "Warden, edited") failures.push(`settings-tabs: back in its view, the edit's name reads ${JSON.stringify(edited)}`);
+      if (edited !== "Warden, edited") failures.push(`settings-nav: back in its view, the edit's name reads ${JSON.stringify(edited)}`);
       await page.locator(".s-view .au-editor").getByRole("button", { name: "Cancel" }).click();
       await at("#/settings/automations")(page);
       await page.keyboard.press("Escape");
       await page.waitForTimeout(300);
-      if ((await hash()) !== "#/") failures.push(`settings-tabs: Esc on the Automations tab goes to ${await hash()}, not the Inbox`);
-      await at("#/settings")(page);
-      await tab("Settings").focus();
-      await page.keyboard.press("Tab");
+      if ((await hash()) !== "#/") failures.push(`settings-nav: Esc on Your automations goes to ${await hash()}, not the Inbox`);
+      await at("#/settings/agent")(page);
+      await side("Inbox").click();
+      await page.waitForTimeout(300);
+      if ((await hash()) !== "#/") failures.push(`settings-nav: the sidebar's Inbox goes to ${await hash()}`);
+      await at("#/settings/app")(page);
     },
     after: at("#/"),
+  },
+  {
+    // What GitHub comes with, on its part under its settings: a switch and one line each; one opens as a view you can only
+    // switch or copy, and a copy is yours, off, in Your automations.
+    name: "settings-github-automations",
+    writes: true,
+    go: async (page) => {
+      await at("#/settings/github")(page);
+      const rows = await page.evaluate<string[]>(`[...document.querySelectorAll("#s-github .au-row")].map((r) =>
+        r.querySelector(".s-name").textContent.trim() + " " + (r.querySelector("input.switch").checked ? "on" : "off"))`);
+      const want = [
+        "Pick a reviewer on",
+        "Follow up on silent reviewers on",
+        "Team reviews someone else took on",
+        "Wide team pings on",
+        "Snooze while CI is red off",
+        "Questions in mentions off",
+      ];
+      if (rows.join() !== want.join()) failures.push(`settings-github-automations: GitHub's automations read ${JSON.stringify(rows)}`);
+      const help = await page.locator("#s-github .au-row .s-help").first().textContent();
+      if (!help?.startsWith("Your ready PR waited a workday with nobody asked by name") || !/ran \d+m ago, put 1 on your desk$/.test(help))
+        failures.push(`settings-github-automations: Pick a reviewer's line reads ${JSON.stringify(help)}`);
+      if (await page.locator("#s-github .au-row", { hasText: "Pick a reviewer" }).locator(".s-help .t-bad").count())
+        failures.push("settings-github-automations: a red word on Pick a reviewer");
+      await page.locator("#s-github .s-name", { hasText: "Pick a reviewer" }).click();
+      await page.waitForTimeout(300);
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Copy to your automations" }).click();
+      await page.waitForTimeout(500);
+      const copied = await page.evaluate<string>("location.hash");
+      if (copied !== "#/settings/automations/pick-a-reviewer") failures.push(`settings-github-automations: Copy goes to ${copied}`);
+      await settingsView(page, "settings-github-automations (copy)", "Pick a reviewer", "automations", "760px");
+      if (!(await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).count()))
+        failures.push("settings-github-automations: the copy has no Edit");
+      if ((await page.locator(".s-view .au-view").getByRole("button", { name: "Turn on" }).count()) !== 1)
+        failures.push("settings-github-automations: the copy isn't off");
+      // The mock keeps it: gone again, so the next size and Your automations' shots start from the mock's four.
+      await page.evaluate(`fetch("/api/automations/${copied.split("/").pop()}", { method: "DELETE" })`);
+      // The shot: the built-in one's own view, its way back GitHub, Copy where Edit would be.
+      await at("#/settings/automations/github.pick-reviewer")(page);
+      await settingsView(page, "settings-github-automations", "Pick a reviewer", "github", "760px");
+      if (await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).count())
+        failures.push("settings-github-automations: a built-in one has Edit");
+      if ((await sideOn(page)) !== "GitHub")
+        failures.push(`settings-github-automations: in its view, the sidebar marks ${await sideOn(page)}`);
+    },
+    after: at("#/settings/github"),
   },
   {
     // policy.md empty: the editor holds the starter, and says so.
@@ -3761,11 +3823,11 @@ const SHOTS: Shot[] = [
       if (!(await page.evaluate<boolean>("!!window.desktop")) && rows.join() !== "s-theme")
         failures.push(`settings-app: This device in a browser has ${JSON.stringify(rows)}, not the theme alone`);
       const on = await sideOn(page);
-      if (on !== "Settings") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
-      const tabs = await tabsSay(page);
-      if (tabs !== "[Settings] Automations") failures.push(`settings-app: the page head's tabs read ${JSON.stringify(tabs)}`);
+      if (on !== "This device") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
+      const says = await settingsSays(page);
+      if (says !== onPart("This device")) failures.push(`settings-app: the head and the sidebar read ${JSON.stringify(says)}`);
       if (await page.locator(".page-head a.back").count()) failures.push("settings-app: the page head is a way back");
-      if (await page.locator("#s-automations").isVisible()) failures.push("settings-app: Automations shows on the settings tab");
+      if (await page.locator("#s-automations").isVisible()) failures.push("settings-app: Your automations shows on This device");
       const col = await page.evaluate<string>(`getComputedStyle(document.querySelector(".main")).maxWidth`);
       if (col !== "760px") failures.push(`settings-app: the column is ${col}, not 760px`);
     },
@@ -3869,15 +3931,15 @@ const SHOTS: Shot[] = [
       ]) {
         await at(`#/settings/${old}`)(page);
         const seen = await page.evaluate<boolean>(`(() => {
-          const h = document.querySelector("#s-${part} > .group-head")?.getBoundingClientRect();
-          return !!h && h.top >= 52 && h.bottom <= innerHeight && (${JSON.stringify(part)} !== "github" || scrollY === 0);
+          const shown = [...document.querySelectorAll(".s-part")].filter((p) => p.getClientRects().length).map((p) => p.id);
+          return shown.join() === "s-${part}" && scrollY === 0;
         })()`);
         if (!seen) failures.push(`settings-aliases: #/settings/${old} doesn't land on ${part}`);
       }
     },
   },
   {
-    // Settings is one page: its end, with More closed.
+    // A part's end, with More closed: This device, the last of the core's.
     name: "settings-bottom",
     go: async (page) => {
       await at("#/settings/app")(page);
@@ -4028,8 +4090,7 @@ const SHOTS: Shot[] = [
       },
       after: systemTheme,
     },
-    // Settings' controls in the theme's colours: from GitHub's switch on, the agent's select, the filled Connect, a switch off
-    // and the Inbox's numbers.
+    // Settings' controls in the theme's colours, on the Agent part: its select, the filled Connect, a switch on and one off.
     {
       name: `theme-${id}-settings`,
       go: async (page) => {
@@ -4037,18 +4098,17 @@ const SHOTS: Shot[] = [
           v.values["agent.coordinator_bypass"] = false;
         })(page);
         await pickTheme(id)(page);
-        await at("#/settings/github")(page);
+        await at("#/settings/agent")(page);
         await page.locator("#s-agent .s-status .act.primary").waitFor();
-        await page.evaluate(`scrollTo(0, document.getElementById("row-review.auto_ai").getBoundingClientRect().top + scrollY - 64)`);
-        const seen = await page.evaluate<{ off: boolean; select: boolean; number: boolean }>(`(() => {
+        const seen = await page.evaluate<{ on: boolean; off: boolean; select: boolean }>(`(() => {
           const shown = (el) => { const r = el?.getBoundingClientRect(); return !!r && r.top >= 52 && r.bottom <= innerHeight; };
           return {
+            on: [...document.querySelectorAll(".settings .switch")].some((s) => s.checked && shown(s)),
             off: [...document.querySelectorAll(".settings .switch")].some((s) => !s.checked && shown(s)),
             select: [...document.querySelectorAll(".settings select")].some(shown),
-            number: [...document.querySelectorAll(".settings .input.num")].some(shown),
           };
         })()`);
-        if (!seen.off || !seen.select || !seen.number) failures.push(`theme-${id}-settings: on screen ${JSON.stringify(seen)}`);
+        if (!seen.on || !seen.off || !seen.select) failures.push(`theme-${id}-settings: on screen ${JSON.stringify(seen)}`);
       },
       after: async (page) => {
         await systemTheme(page);

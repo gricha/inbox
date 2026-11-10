@@ -43,6 +43,7 @@ import {
   onePause,
   quietTimes,
   routeHash,
+  SETTINGS_PARTS,
   SETTINGS_VIEWS,
   settingsBack,
   SHOWN,
@@ -1205,6 +1206,14 @@ export function Settings({
                   )}
                   {folded.map((d) => row(d, !open))}
                 </div>
+              )}
+              {SETTINGS_PARTS.some((s) => s.plugin && s.id === x.id) && (
+                <>
+                  <h2 className="group-head">Automations</h2>
+                  <div className="lines s-sheet">
+                    <AutomationRows au={au} now={now} plugin={x.id} />
+                  </div>
+                </>
               )}
             </section>
           );
