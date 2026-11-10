@@ -66,6 +66,7 @@ import type {
   ReviewDecision,
   ReviewFile,
   Inquiry,
+  SessionCard,
   ReviewNote,
   Reviewer,
   ReviewView,
@@ -1902,7 +1903,7 @@ function focus(): FocusView {
   };
   oneLinePerStack(sections, ["now", "today"], stacks());
   return {
-    sessions: [],
+    sessions: activeSessions(),
     sections,
     reviewing: 0,
     cards: setting("queue.cards"),
@@ -1962,7 +1963,7 @@ function queue(): QueueView {
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
   return {
     inquiries: INQUIRIES.filter((q) => !q.answer),
-    sessions: [],
+    sessions: sessionCards(),
     sections,
     reviewing: 0,
     hidden,
@@ -2154,6 +2155,51 @@ const coordinator: CoordinatorView = {
 
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
 // you answered: one its session never came back for, one it picked up two minutes later.
+// Two of your sessions that need you: the desktop app's, waiting on a permission, and a background one stopped by a rate limit.
+const SESSIONS: SessionCard[] = [
+  {
+    id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+    session_id: "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+    kind: "desktop",
+    name: "Fix the flaky upload test",
+    cwd: "/Users/you/code/api",
+    branch: "fix/upload-flake",
+    state: "blocked",
+    reason: "needs permission: Bash",
+    since: iso(0.3),
+    excerpt: "Bash: Run the upload tests 20 times with retries off",
+    resets_at: null,
+    alive: true,
+    actions: ["open"],
+    open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
+    attach: null,
+    status: "active",
+    snooze_until: null,
+  },
+  {
+    id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+    session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+    kind: "background",
+    name: "Migrate the job store to SQLite",
+    cwd: "/Users/you/code/worker",
+    branch: "store-sqlite",
+    state: "stalled",
+    reason: `rate limited until ${new Date(T0 + HOUR).toTimeString().slice(0, 5)}`,
+    since: iso(1.6),
+    excerpt: "API Error: Rate limit reached for your five-hour window",
+    resets_at: new Date(T0 + HOUR).toISOString(),
+    alive: false,
+    actions: ["kick"],
+    open_url: null,
+    attach: null,
+    status: "active",
+    snooze_until: null,
+  },
+];
+const sessionTriage = new Map<string, SessionCard["status"]>();
+const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
+const activeSessions = () => sessionCards().filter((x) => x.status === "active");
+
 const INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
@@ -2539,7 +2585,7 @@ function overview(): Overview {
       today: f.sections.today.length,
       new: all.filter((c) => c.new).length,
       asks: INQUIRIES.filter((q) => !q.answer).length,
-      sessions: 0,
+      sessions: activeSessions().length,
     },
     inflight: { total: recs.filter(inFlight).length },
     agent: setting("agent.coordinator"),
@@ -3545,7 +3591,25 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/item") return detail(resolve(url.searchParams.get("id") ?? ""));
   if (route === "POST /api/act") {
     const body = await readBody(req);
+    const session = SESSIONS.find((x) => x.id === body.id);
+    if (session) {
+      const done = { done: "done", snooze: "snoozed", mute: "muted", unmute: "active", restore: "active" } as const;
+      const to = done[body.action as keyof typeof done] as SessionCard["status"] | undefined;
+      if (!to) throw new HttpError(409, `a session takes done, snooze, mute, unmute and restore; not ${String(body.action)}`);
+      sessionTriage.set(session.id, to);
+      bump();
+      return { ok: true, state: { id: session.id, muted: to === "muted" }, undo_seq: 0 };
+    }
     return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
+  }
+  // A session's Kick and Open: the rate-limited one refuses as the desk does; nothing runs.
+  const sessionAt = /^\/api\/sessions\/([^/]+)\/(kick|open)$/.exec(url.pathname);
+  if (sessionAt && req.method === "POST") {
+    const x = SESSIONS.find((y) => y.id === decodeURIComponent(sessionAt[1]!));
+    if (!x) throw new HttpError(404, "no session needs you now");
+    if (sessionAt[2] === "open") return { ok: true, url: x.open_url };
+    if (x.resets_at && Date.parse(x.resets_at) > Date.now()) throw new HttpError(409, `${x.name} is ${x.reason}; kick it after that`);
+    return { ok: true, args: ["--resume", x.session_id, "--bg", "Continue where you left off."] };
   }
   // Ready for review on your own draft, and the reviewers picked with it: the mock only remembers them. `done` as the desk
   // answers it: with nobody asked to review it, it stays on your desk.

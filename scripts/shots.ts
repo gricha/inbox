@@ -645,7 +645,7 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "mid", "min", "mac", "xl"],
     go: async (page) => {
       await at("#/")(page);
-      if (await page.evaluate<boolean>("innerWidth >= 1280")) await faces(page, "queue", ".line:not(.c-line, .inq) .line-by");
+      if (await page.evaluate<boolean>("innerWidth >= 1280")) await faces(page, "queue", ".line:not(.c-line, .inq, .session) .line-by");
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
       if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
       const on = await sideOn(page);
@@ -679,6 +679,69 @@ const SHOTS: Shot[] = [
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
       if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
       if (!/^\d+ more$/.test(list.fold ?? "")) failures.push(`queue: the fold line reads ${JSON.stringify(list.fold)}`);
+    },
+  },
+  {
+    // Sessions that need you, after the agents' questions and before every PR: rows like the others (Session, its name,
+    // quietly its folder, its call to action, its kind where a PR's author goes and why where its stage goes), and the
+    // blocked one opened in place with what it said, where it runs and its buttons.
+    name: "queue-session",
+    after: async (page) => {
+      if (await page.locator(".line.session.open").count()) await page.locator(".session-more button", { hasText: "Close" }).click();
+    },
+    go: async (page) => {
+      await at("#/")(page);
+      const rows = await page.evaluate<{ order: string[]; rows: (string | null)[][] }>(`(() => {
+        const text = (el, sel) => el.querySelector(sel)?.textContent.trim() ?? null;
+        const lines = [...document.querySelectorAll(".queue .lines > .line")];
+        return {
+          order: lines.map((el) => (el.classList.contains("inq") ? "q" : el.classList.contains("session") ? "s" : "c")),
+          rows: [...document.querySelectorAll(".queue .line.session")].map((el) =>
+            [".line-kind", ".line-title", ".line-ref", ".line-cta", ".line-by", ".line-stage"].map((sel) => text(el, sel)),
+          ),
+        };
+      })()`);
+      const order = rows.order.join("");
+      if (!/^q*ssc/.test(order)) failures.push(`queue-session: the Inbox's order reads ${order}`);
+      const [blocked, stalled] = rows.rows;
+      if (blocked?.join(" · ") !== "Session · Fix the flaky upload test · api · Open · Desktop · needs permission: Bash")
+        failures.push(`queue-session: the blocked session's row reads ${JSON.stringify(blocked)}`);
+      if (
+        !/^Session · Migrate the job store to SQLite · worker · Kick · Background · rate limited until \d\d:\d\d$/.test(
+          stalled?.join(" · ") ?? "",
+        )
+      )
+        failures.push(`queue-session: the stalled session's row reads ${JSON.stringify(stalled)}`);
+      await page.locator(".line.session", { hasText: "Fix the flaky upload test" }).locator(".row-main").click();
+      await page.waitForTimeout(200);
+      const open = await page.evaluate<{ why: string; said: string; facts: string[]; acts: [string, boolean][] } | null>(`(() => {
+        const d = document.querySelector(".line.session.open .session-more");
+        return d && {
+          why: d.querySelector(".d-why")?.textContent.trim() ?? "",
+          said: d.querySelector(".session-said")?.textContent.trim() ?? "",
+          facts: [...d.querySelectorAll(".card-facts span")].map((x) => x.textContent.trim()),
+          acts: [...d.querySelectorAll(".card-keys button")].map((b) => [b.textContent.trim(), b.classList.contains("primary")]),
+        };
+      })()`);
+      if (!open) failures.push("queue-session: a click doesn't open the session in place");
+      else {
+        if (!open.why.startsWith("Needs permission: Bash")) failures.push(`queue-session: its detail says ${JSON.stringify(open.why)}`);
+        if (open.said !== "Bash: Run the upload tests 20 times with retries off")
+          failures.push(`queue-session: what it said reads ${JSON.stringify(open.said)}`);
+        if (open.facts.join(" · ") !== "Desktop · /Users/you/code/api · fix/upload-flake · running")
+          failures.push(`queue-session: where it runs reads ${JSON.stringify(open.facts)}`);
+        if (
+          JSON.stringify(open.acts) !==
+          JSON.stringify([
+            ["Open", true],
+            ["Done", false],
+            ["Snooze", false],
+            ["Mute", false],
+            ["Close", false],
+          ])
+        )
+          failures.push(`queue-session: its buttons read ${JSON.stringify(open.acts)}`);
+      }
     },
   },
   {
@@ -849,6 +912,7 @@ const SHOTS: Shot[] = [
         q.sections.now = [];
         q.sections.today = [];
         q.inquiries = [];
+        q.sessions = [];
       })(page);
       await top(page);
       await emptyInbox(page, "queue-empty");
@@ -883,6 +947,7 @@ const SHOTS: Shot[] = [
         q.sections.now = [];
         q.sections.today = [];
         q.inquiries = [];
+        q.sessions = [];
         q.reviewing = 1;
       })(page);
       await top(page);

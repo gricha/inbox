@@ -7,6 +7,8 @@ import type {
   GitHubAction,
   InflightView,
   Inquiry,
+  SessionAction,
+  SessionCard,
   ItemDetail,
   OmarchyTheme,
   Overview,
@@ -55,6 +57,7 @@ import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
 import { QuestionMenu, RowMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
+import type { SessionCtx } from "./components/Session.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
@@ -446,6 +449,14 @@ export function App() {
       (q) => !answered.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
     );
   }, [view, answered, filter, listPage]);
+  // Then the sessions that need you, which the filter reads too.
+  const sessions = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    if (listPage !== "queue") return [];
+    return (view?.sessions ?? []).filter(
+      (s) => s.status === "active" && !leaving.has(s.id) && (!f || [s.name, s.reason, s.cwd].some((x) => x.toLowerCase().includes(f))),
+    );
+  }, [view, leaving, filter, listPage]);
   const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
@@ -669,6 +680,55 @@ export function App() {
   function openInquiry(q: Inquiry) {
     setSelected(inquiryOf(q.id));
     go({ name: "inquiry", id: q.id });
+  }
+
+  // A session's triage: it fades off the list at once, and comes back if the desk refuses.
+  function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute") {
+    if (selected === s.id) setSelected(null);
+    if (expanded === s.id) setExpanded(null);
+    setLeaving((x) => new Set(x).add(s.id));
+    runUi(
+      api.act(s.id, action).pipe(
+        Effect.tap((res) =>
+          Effect.sync(() => {
+            undoSeq.current = res.undo_seq || null;
+            undoWrite.current = null;
+            flash(`${action === "snooze" ? "Snoozed until tomorrow" : VERB[action]}: ${s.name}`, false, true);
+          }),
+        ),
+        Effect.catch(failed),
+        Effect.ensuring(
+          Effect.sync(() => {
+            unhide(s.id);
+            refresh(0);
+          }),
+        ),
+      ),
+    );
+  }
+
+  // Kick and Resume start it again where it left off, Open follows its own link, Copy attach command copies it; the desk
+  // refuses in words what it won't do (its process runs, its rate limit hasn't reset).
+  function sessionStart(s: SessionCard, action: SessionAction) {
+    const step: Effect.Effect<string, ApiError | ClipboardUnavailable> =
+      action === "attach"
+        ? s.attach
+          ? Effect.as(copyText(s.attach), "Copied. Run it in a terminal to open the session.")
+          : Effect.succeed("")
+        : action === "open"
+          ? Effect.as(api.openSession(s.id), `Opened ${s.name}.`)
+          : Effect.as(api.kickSession(s.id), `${action === "kick" ? "Kicked" : "Resumed"} ${s.name}: it carries on in the background.`);
+    runUi(
+      step.pipe(
+        Effect.tap((text) =>
+          Effect.sync(() => {
+            if (text) flash(text);
+            if (action === "kick" || action === "resume") refresh(0);
+          }),
+        ),
+        Effect.catch(failed),
+      ),
+    );
   }
 
   // A row leaving the list: it fades out, and takes its selection with it.
@@ -1250,6 +1310,21 @@ export function App() {
   const inbox = view ? inboxCount(view, leaving, answered) : null;
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
+  const ses: SessionCtx = {
+    now,
+    selected,
+    expanded,
+    leaving,
+    select: (s) => {
+      setSelected(s.id);
+    },
+    toggle: (s) => {
+      setSelected(s.id);
+      setExpanded(expanded === s.id ? null : s.id);
+    },
+    act: sessionAct,
+    start: sessionStart,
+  };
   const inq = {
     now,
     selected,
@@ -1414,6 +1489,8 @@ export function App() {
               ctx={ctx}
               inquiries={inquiries}
               inq={inq}
+              sessions={sessions}
+              ses={ses}
               filter={filter}
               unfold={unfold}
               selectFold={(k) => {

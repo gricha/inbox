@@ -1148,6 +1148,16 @@ p.side-sync {
     display: block;
     width: 9em;
   }
+
+  /* A session's reason is why it's there: it takes its kind's place, to the last. */
+  .line.session .line-row > .line-by {
+    display: none;
+  }
+
+  .line.session .line-row > .line-stage {
+    display: block;
+    width: 11em;
+  }
 }
 
 @container (width < 620px) {
@@ -2347,6 +2357,20 @@ p.side-sync {
 
 .more.opened .trace-toggle {
   margin-top: 4px;
+}
+
+/* A session opened in place: what it last said, quoted in pencil, and where it runs. */
+.session-said {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--pencil);
+  overflow-wrap: anywhere;
+}
+
+.session-note {
+  margin: 0;
+  color: var(--pencil);
 }
 
 /* Merging --------------------------------------------------------------------

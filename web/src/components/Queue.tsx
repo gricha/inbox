@@ -1,13 +1,14 @@
-import type { Card, Inquiry, Overview, QueueView } from "../../../src/types.ts";
+import type { Card, Inquiry, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
 import { foldOf, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
+import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
 // The main page: only what needs you, one line each on one table with no headings, in the desk's order; agents' questions
-// first, since one waits on each.
+// first, since one waits on each, then the sessions that need you.
 export function Queue({
   view,
   overview,
@@ -15,6 +16,8 @@ export function Queue({
   ctx,
   inquiries,
   inq,
+  sessions,
+  ses,
   filter,
   unfold,
   selectFold,
@@ -25,6 +28,8 @@ export function Queue({
   ctx: RowCtx;
   inquiries: Inquiry[];
   inq: InquiryCtx;
+  sessions?: SessionCard[]; // none beside a review: two lines a row has no room for one's detail
+  ses?: SessionCtx;
   filter: string;
   unfold: (k: GroupKey, keyboard: boolean) => void;
   selectFold: (k: GroupKey) => void;
@@ -40,7 +45,7 @@ export function Queue({
   const g = groups.find((x) => x.key === "queue");
   const cards = g?.cards ?? [];
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
-  const any = inquiries.length > 0 || cards.some((c) => !ctx.leaving.has(c.id));
+  const any = inquiries.length > 0 || !!sessions?.length || cards.some((c) => !ctx.leaving.has(c.id));
   return (
     <div className="queue">
       {view.paused && (
@@ -53,6 +58,7 @@ export function Queue({
           {inquiries.map((q) => (
             <InquiryRow key={q.id} q={q} ctx={inq} />
           ))}
+          {ses && sessions?.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
           {cards.map((c) => (
             <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
           ))}

@@ -394,13 +394,18 @@ test("the list beside a review or a question: from 1160px, folded by you or by t
   assert.equal(at({ folded: true, chat: true, crowded: true, peek: true }), "rail");
 });
 
-test("the Inbox counts what's on it and the agents' questions", () => {
+test("the Inbox counts what's on it, the agents' questions and the sessions that need you", () => {
   const q = queue();
   assert.equal(inboxCount(q), 2);
   q.inquiries = [{ id: "q1" } as QueueView["inquiries"][number]];
   assert.equal(inboxCount(q), 3);
   // A row you acted on and a question you answered leave the count at once.
   assert.equal(inboxCount(q, new Set([q.sections.now[0]!.id]), new Set(["q1"])), 1);
+  // A session that needs you counts; one you marked done, or are taking off, doesn't.
+  const session = (id: string, status: QueueView["sessions"][number]["status"]) => ({ id, status }) as QueueView["sessions"][number];
+  q.sessions = [session("session:a", "active"), session("session:b", "done")];
+  assert.equal(inboxCount(q), 4);
+  assert.equal(inboxCount(q, new Set(["session:a"])), 3);
 });
 
 test("settings fields: text to value and back", () => {
