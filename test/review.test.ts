@@ -35,6 +35,7 @@ import {
   numberPatch,
   parseFiles,
   parseReview,
+  parseSteps,
   reviewOrder,
   runCommand,
   type PrText,
@@ -545,6 +546,10 @@ test("the prompt numbers hunks h1, h2, … across files for the ranking; a lockf
   const first = buildPrompt(item, signalsOf(item), "", { body: "", files: [FILE] }, "TAG");
   assert.match(first, /at most 20: most worth first, looks before skims\./);
   assert.doesNotMatch(first, /changed since then first/);
+  assert.match(
+    first,
+    /\n- steps: a walk through the change for me, in the order that makes it easiest to understand, not the order of importance:.*Put every hunk in chunks in exactly one step\./,
+  );
 });
 
 test("parseReview ranks only hunks the prompt showed, each once, in Claude's order; unknown ids and bad levels are dropped", () => {
@@ -977,6 +982,149 @@ test("the review order: ranked chunks across files, then unread, then what Claud
     ],
   );
   assert.deepEqual(o.notes, [3, 0, 1, 2, 4], "] and [ follow the order");
+});
+
+test("parseSteps keeps a walk-through of shown hunks, each in the first step naming it, capped, and only when it leads", () => {
+  const files = [FILE, LOCK, OTHER];
+  const chunks = ["h1", "h2", "h4", "h5"].map((id) => ({ id, level: "look", why: "" }));
+  const r = parseReview(
+    {
+      summary: "x",
+      chunks,
+      steps: [
+        { title: " The row stream ", body: " Starts here. ", check: "", hunks: ["h4", "H1", "h3", "h99", "h4", 7] },
+        { title: "", body: "no title", check: "", hunks: ["h2"] },
+        { title: "Again", body: "its only hunk is taken", check: "", hunks: ["h1"] },
+        null,
+        { title: "t".repeat(100), body: "b".repeat(400), check: "c".repeat(300), hunks: ["2", "h5"] },
+      ],
+    },
+    files,
+  );
+  assert.deepEqual(r.guide, {
+    steps: [
+      {
+        title: "The row stream",
+        body: "Starts here.",
+        check: "",
+        hunks: [
+          { id: "h4", path: "src/b.ts" },
+          { id: "h1", path: "src/planner/plan.ts" },
+        ],
+      },
+      {
+        title: "t".repeat(60),
+        body: "b".repeat(300),
+        check: "c".repeat(200),
+        hunks: [
+          { id: "h2", path: "src/planner/plan.ts" },
+          { id: "h5", path: "src/b.ts" },
+        ],
+      },
+    ],
+  });
+  const ranking = r.chunks!;
+  const step = (...hunks: string[]) => ({ title: "s", body: "", check: "", hunks });
+  assert.equal(parseSteps([step("h1", "h2", "h4")], files, ranking), undefined, "one step is no walk-through");
+  assert.equal(parseSteps([step("h1"), step("h3")], files, ranking), undefined, "a lockfile hunk was never shown");
+  assert.equal(parseSteps([step("h1"), step("h1")], files, ranking), undefined, "a repeat leaves one step");
+  assert.equal(parseSteps([step("h1"), step("h99")], files, ranking), undefined);
+  assert.ok(parseSteps([step("h1"), step("h4")], files, ranking), "half of the ranked hunks is enough");
+  assert.equal(
+    parseSteps([step("h1"), step("h1", "h4")], files, {
+      ...ranking,
+      ranked: [...ranking.ranked, ...ranking.ranked.map((c) => ({ ...c, id: `x${c.id}` }))],
+    }),
+    undefined,
+    "under half isn't",
+  );
+  assert.equal(parseSteps("steps", files, ranking), undefined);
+  assert.ok(!("guide" in parseReview({ summary: "x", steps: [step("h1"), step("h4")] }, files)), "no ranking, no walk-through");
+  assert.ok(!("guide" in parseReview({ summary: "x", chunks, steps: [] }, files)), "an empty list is none");
+
+  const ten: ReviewFile = {
+    ...FILE,
+    path: "src/ten.ts",
+    patch: Array.from({ length: 10 }, (_, i) => `@@ -${i * 10 + 1} +${i * 10 + 1} @@\n-a${i}\n+b${i}`).join("\n"),
+  };
+  const all = Array.from({ length: 10 }, (_, i) => `h${i + 1}`);
+  const many = parseReview({ summary: "x", chunks: all.map((id) => ({ id, level: "skim", why: "" })), steps: all.map((id) => step(id)) }, [
+    ten,
+  ]);
+  assert.deepEqual(
+    many.guide?.steps.map((st) => st.hunks[0]!.id),
+    all.slice(0, 8),
+    "at most 8 steps",
+  );
+});
+
+test("with a walk-through, steps, the hunks no step covers and the desk's fold hold every hunk once, the ranked view's own", () => {
+  const files = [FILE, LOCK, OTHER, PNG];
+  const chunks = {
+    ranked: [
+      { id: "h4", path: "src/b.ts", level: "look" as const, why: "the fix" },
+      { id: "h1", path: FILE.path, level: "skim" as const, why: "" },
+    ],
+    unread: ["h5"],
+    total: 5,
+  };
+  const guides = [
+    [["h4"], ["h1"]],
+    [
+      ["h1", "h5"],
+      ["h2", "h4"],
+    ],
+    [["h2"], ["h4", "h1", "h5"]],
+  ];
+  for (const g of guides) {
+    const guide = {
+      steps: g.map((ids, i) => ({
+        title: `s${i}`,
+        body: "",
+        check: "",
+        hunks: ids.map((id) => ({ id, path: id === "h4" || id === "h5" ? "src/b.ts" : FILE.path })),
+      })),
+    };
+    const o = reviewOrder(files, aiOf({ chunks, guide }), false);
+    const walked = [...o.steps!.flatMap((st) => st.hunks), ...o.beyond!, ...o.rest.flatMap((r) => r.hunks)];
+    assert.deepEqual(walked.map((h) => h.id).toSorted(), ["h1", "h2", "h3", "h4", "h5"], `every hunk once: ${JSON.stringify(g)}`);
+    const ranked = new Map([...o.chunks, ...o.unread, ...o.skipped].map((h) => [h.id, h]));
+    for (const h of [...o.steps!.flatMap((st) => st.hunks), ...o.beyond!])
+      assert.equal(h, ranked.get(h.id), "the same hunk the ranked view has");
+  }
+  const o = reviewOrder(
+    files,
+    aiOf({
+      chunks,
+      guide: {
+        steps: [
+          { title: "a", body: "", check: "", hunks: [{ id: "h4", path: "src/b.ts" }] },
+          { title: "b", body: "", check: "", hunks: [{ id: "h1", path: FILE.path }] },
+        ],
+      },
+    }),
+    false,
+  );
+  assert.deepEqual(
+    o.beyond!.map((h) => [h.id, h.level]),
+    [
+      ["h2", "skip"],
+      ["h5", "unread"],
+    ],
+    "file by file, each keeping its level",
+  );
+  const ai = aiOf({
+    chunks,
+    guide: {
+      steps: [
+        { title: "a", body: "", check: "", hunks: [{ id: "h4", path: "src/elsewhere.ts" }] },
+        { title: "b", body: "", check: "", hunks: [{ id: "h1", path: FILE.path }] },
+      ],
+    },
+  });
+  assert.ok(!("steps" in reviewOrder(files, ai, false)), "a retargeted base: no walk-through");
+  assert.ok(!("steps" in reviewOrder(files, aiOf({ chunks, guide: { steps: [] } }), true)), "a stale review: none");
+  assert.ok(!("steps" in reviewOrder(files, aiOf({ chunks }), false)), "a review written before walk-throughs: none");
 });
 
 test("without a ranking for this commit the order is today's: every hunk file by file; an older commit's notes aren't placed", () => {

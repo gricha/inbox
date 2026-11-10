@@ -673,6 +673,7 @@ export interface AiReview {
   notes: ReviewNote[]; // each quoted code in the diff and held up when a second Claude checked it against the diff
   dropped?: number; // concerns and notes the check took out: their quote wasn't in the diff, or the diff didn't bear them out
   chunks?: ChunkRanking; // absent on reviews written before ranking, or when Claude didn't rank
+  guide?: ReviewGuide; // absent on reviews written before it, and when Claude wrote no walk-through worth keeping
   head_oid: string; // the commit it read; a newer push makes it stale
   model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
   at: string;
@@ -684,6 +685,12 @@ export interface ChunkRanking {
   ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // in Claude's order, then any hunk it noted but didn't rank, as a skim
   unread: string[]; // left out of the prompt because the PR, or the hunk's file, was too long to read whole: not judged either way
   total: number; // hunks in the diff
+}
+
+// Claude's walk through the diff, in the order to understand it. Ids and paths as ChunkRanking keeps them, so a retargeted
+// base can't point a step at other code.
+export interface ReviewGuide {
+  steps: { title: string; body: string; check: string; hunks: { id: string; path: string }[] }[];
 }
 
 // One hunk of the diff in GET /api/review/:id, with what the AI review made of it.
@@ -710,6 +717,16 @@ export interface ReviewOrder {
   skipped: ReviewHunk[]; // Claude saw these and left them out (level "skip"), file by file
   rest: ReviewRest[]; // folded, by file: lockfiles and generated files, and files with no text diff
   notes: number[]; // ai.notes in reading order: what ] and [ step through; empty when the review is for an older commit
+  steps?: ReviewStep[]; // the walk-through, when this commit's review has one: its hunks are the same ones chunks, unread and skipped hold
+  beyond?: ReviewHunk[]; // with steps: the hunks of chunks, unread and skipped no step covers, file by file
+}
+
+// One stop of the walk-through.
+interface ReviewStep {
+  title: string;
+  body: string;
+  check: string; // what to verify here, or ""
+  hunks: ReviewHunk[];
 }
 
 export interface ReviewRest {

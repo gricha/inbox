@@ -1951,7 +1951,7 @@ export class Desk {
         if (this.aiPaused) this.log("AI reviews resume");
         this.aiPaused = null;
         this.log(
-          `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}`,
+          `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}, ${ai.guide ? `${ai.guide.steps.length} steps covering ${ai.guide.steps.reduce((n, st) => n + st.hunks.length, 0)} hunks` : "no walk-through"}`,
         );
         this.retryAgents(NOT_LOGGED_IN);
         return ai;

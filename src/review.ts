@@ -23,7 +23,18 @@ import {
   type FsError,
 } from "./errors.ts";
 import { GH_MISSING } from "./github/client.ts";
-import type { AiReview, ChunkRanking, Item, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder, ReviewRest, Signals } from "./types.ts";
+import type {
+  AiReview,
+  ChunkRanking,
+  Item,
+  ReviewFile,
+  ReviewGuide,
+  ReviewHunk,
+  ReviewNote,
+  ReviewOrder,
+  ReviewRest,
+  Signals,
+} from "./types.ts";
 
 const STATUSES = ["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"] as const;
 const MAX_DIFF = 80_000;
@@ -33,6 +44,7 @@ const MAX_NOTES = 12;
 const MAX_CONCERNS = 6;
 const MAX_CHUNKS = 20;
 const MAX_WHY = 80;
+const MAX_STEPS = 8;
 const TIMEOUT = 300_000;
 const MAX_OUTPUT = 64 * 1024 * 1024;
 // Lockfiles and snapshots eat the budget and say nothing a reviewer reads.
@@ -43,7 +55,7 @@ const NOISE =
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "since", "concerns", "chunks", "notes", "verdict", "risk"],
+  required: ["summary", "since", "concerns", "chunks", "steps", "notes", "verdict", "risk"],
   properties: {
     summary: { type: "string" },
     since: { type: "string" },
@@ -72,6 +84,20 @@ const SCHEMA = {
           id: { type: "string" },
           level: { type: "string", enum: ["look", "skim"] },
           why: { type: "string" },
+        },
+      },
+    },
+    steps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "body", "check", "hunks"],
+        properties: {
+          title: { type: "string" },
+          body: { type: "string" },
+          check: { type: "string" },
+          hunks: { type: "array", items: { type: "string" } },
         },
       },
     },
@@ -419,6 +445,9 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
       ` The desk shows each concern on its line in the code, so don't also write it as a note.`,
     `- chunks: the hunks worth ${s.me.login}'s attention, in the order to read them, at most ${MAX_CHUNKS}: ${pr.since ? "they reviewed it before, so what changed since then first, then the rest, most worth first" : "most worth first, looks before skims"}. Each hunk's @@ line starts with its id (h1, h2, …). For each: id; level "look" (read it closely: logic, behaviour, data, security) or "skim" (glance at it); why in at most six words.` +
       ` Leave out everything not worth reviewing: imports, renames, formatting, generated files, lockfiles, snapshots, tests that just mirror the code. Empty when nothing is worth a look.`,
+    `- steps: a walk through the change for ${s.me.login}, in the order that makes it easiest to understand, not the order of importance: start where the change starts (the new type, contract or core function), then what builds on it, then its callers, then wiring and tests. Two to ${MAX_STEPS} steps, each a part of the change, not a file; an empty list when the PR is one small change.` +
+      ` For each: title, at most six words; body, one or two sentences on what this part changes and why it's read at this point; check, one sentence on what to verify here, or an empty string; hunks, the ids it covers, from any files, in the order to read them.` +
+      ` Put every hunk in chunks in exactly one step. Describe; anything you'd assert about a bug belongs in concerns.`,
     `- notes: short notes, written for ${s.me.login} as the reviewer, up to ${MAX_NOTES} counting the concerns: context on the hunks worth explaining, one or two sentences each, about the change this PR makes there: what's different now and why it matters (a behaviour that changed, a caller it affects, an assumption it relies on). Never describe what a function or the code does in general, and never restate the diff. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files.`,
     `  quote: the line of the diff the note is about, copied exactly, without its number or sign. Anchor each note on the first line of the change it explains. Diff lines start with their line number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). Use side "new" with an n number; use side "old" with an o number only for a removal with nothing added. path is exactly as after "file:".`,
     `- verdict: "look" (review it closely), "skim" (glance at it) or "skip" (trivial, or not theirs to review).`,
@@ -693,6 +722,7 @@ function readReview(answer: unknown, files: ReviewFile[]) {
     concerns: placed(raw.concerns, 1_200),
     notes: placed(raw.notes, 600),
     chunks: raw.chunks,
+    steps: raw.steps,
     unbacked,
   };
 }
@@ -705,6 +735,7 @@ function keep(r: ReturnType<typeof readReview>, files: ReviewFile[]): Omit<AiRev
     .slice(0, MAX_NOTES)
     .map((n): ReviewNote => ({ path: n.path, side: n.side, line: n.line, body: n.body }));
   const chunks = parseChunks(r.chunks, files, notes);
+  const guide = chunks && parseSteps(r.steps, files, chunks);
   return {
     ...(r.since && { since: r.since }),
     verdict: r.verdict,
@@ -713,6 +744,7 @@ function keep(r: ReturnType<typeof readReview>, files: ReviewFile[]): Omit<AiRev
     concerns: concerns.map((c) => c.body),
     notes,
     ...(chunks && { chunks }),
+    ...(guide && { guide }),
   };
 }
 
@@ -770,6 +802,31 @@ function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[]): Ch
     unread: hunks.filter((h) => !read.has(h.id) && !NOISE.test(h.path)).map((h) => h.id),
     total: hunks.length,
   };
+}
+
+// Claude's walk-through, kept only where it can be trusted to lead: hunks the prompt showed, each in the first step naming it,
+// two steps or more, covering at least half of what it ranked.
+export function parseSteps(raw: unknown, files: ReviewFile[], ranking: ChunkRanking): ReviewGuide | undefined {
+  const { hunks, read } = promptDiff(files, true);
+  const byId = new Map(hunks.map((h) => [h.id, h]));
+  const taken = new Set<string>();
+  const steps: ReviewGuide["steps"] = [];
+  for (const st of list(raw)) {
+    const title = text(st?.title).slice(0, 60);
+    const own: { id: string; path: string }[] = [];
+    for (const id of Array.isArray(st?.hunks) ? (st.hunks as unknown[]) : []) {
+      const n = /^h?(\d+)$/i.exec(text(id))?.[1];
+      const h = n ? byId.get(`h${Number(n)}`) : undefined;
+      if (h && read.has(h.id) && !taken.has(h.id) && !own.some((o) => o.id === h.id)) own.push({ id: h.id, path: h.path });
+    }
+    if (!title || !own.length) continue;
+    for (const o of own) taken.add(o.id);
+    steps.push({ title, body: text(st?.body).slice(0, 300), check: text(st?.check).slice(0, 200), hunks: own });
+  }
+  const kept = steps.slice(0, MAX_STEPS);
+  const covered = new Set(kept.flatMap((st) => st.hunks.map((h) => h.id)));
+  const ranked = ranking.ranked.filter((c) => covered.has(c.id)).length;
+  return kept.length >= 2 && ranked * 2 >= ranking.ranked.length ? { steps: kept } : undefined;
 }
 
 const anchorKey = (side: ReviewNote["side"], line: number) => `${side}:${line}`;
@@ -858,5 +915,25 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
     const hs = folded.map((h) => view(h, "skip", null, null));
     rest.push({ path: f.path, file: i, why, hunks: hs, notes: own.length ? [] : take(f.path, []) });
   }
-  return { ranked: !!ranking, chunks, unread: left, skipped, rest, notes: order };
+  const guide = ranking && fresh?.guide?.steps.every((st) => st.hunks.every((h) => byId.get(h.id)?.path === h.path)) ? fresh.guide : null;
+  return {
+    ranked: !!ranking,
+    chunks,
+    unread: left,
+    skipped,
+    rest,
+    notes: order,
+    ...(guide && walk(guide, [...chunks, ...left, ...skipped])),
+  };
+}
+
+// The walk-through over the hunks the ranked view shows (the same objects), and what no step covers, file by file.
+function walk(guide: ReviewGuide, shown: ReviewHunk[]): Pick<ReviewOrder, "steps" | "beyond"> {
+  const byId = new Map(shown.map((h) => [h.id, h]));
+  const steps = guide.steps
+    .map((st) => ({ title: st.title, body: st.body, check: st.check, hunks: st.hunks.flatMap((h) => byId.get(h.id) ?? []) }))
+    .filter((st) => st.hunks.length);
+  const inSteps = new Set(steps.flatMap((st) => st.hunks.map((h) => h.id)));
+  const beyond = shown.filter((h) => !inSteps.has(h.id)).toSorted((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+  return { steps, beyond };
 }
