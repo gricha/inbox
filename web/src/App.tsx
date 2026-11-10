@@ -139,7 +139,6 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
-  const [showSignals, setShowSignals] = useState(false);
   const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (its Comment, opened in place)
   // A row's menu: at a right-click, or under an issue's Snooze with Snooze open.
   const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean } | null>(null);
@@ -628,7 +627,6 @@ export function App() {
       return;
     }
     setExpanded(c.id);
-    setShowSignals(false);
     runUi(fetchDetail(c.id));
     runUi(seen(c));
   }
@@ -1069,15 +1067,7 @@ export function App() {
     else if (k === "link") runUi(copyLink(c));
     else if (k === "close") setExpanded(null);
     else if (k === "t") openAsk(c.id);
-    else if (k === "why") {
-      if (expanded === c.id && showSignals) {
-        if (c.kind === "pr") setExpanded(null);
-        else setShowSignals(false);
-      } else {
-        if (expanded !== c.id) toggle(c);
-        setShowSignals(true);
-      }
-    } else if (k === "b") runUi(back(c));
+    else if (k === "b") runUi(back(c));
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
@@ -1247,7 +1237,6 @@ export function App() {
     selected,
     expanded,
     leaving,
-    showSignals,
     details,
     boardLabel,
     click: openCard,
@@ -1606,7 +1595,6 @@ export function App() {
           y={menuAt.y}
           snooze={menuAt.snooze}
           me={me}
-          agent={!!overview?.agent}
           run={run}
           act={(c, a, until) => {
             runUi(act(c, a, until));

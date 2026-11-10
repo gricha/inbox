@@ -1639,7 +1639,7 @@ p.side-sync {
   }
 }
 
-/* Opened in place (an issue, or Why it's here): under the title's edge. */
+/* Opened in place (an issue): under the title's edge. */
 .line .more.opened,
 .line .detail {
   padding: 4px var(--pad, 12px) 18px;
@@ -2452,39 +2452,8 @@ p.side-sync {
   font-weight: 400;
 }
 
-.facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 18px;
-  margin: 0;
-}
-
 .fact {
   display: contents;
-}
-
-.facts dt {
-  color: var(--pencil);
-}
-
-.facts dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-/* Passing is no news: no colour, as in the review header and the lane. */
-.t-ci-green {
-  color: inherit;
-}
-
-.t-ci-red {
-  color: var(--red);
-  font-weight: 600;
-}
-
-.t-ci-pending {
-  color: var(--amber);
 }
 
 .pl-head {
@@ -2802,17 +2771,6 @@ p.side-sync {
   color: var(--pencil);
   font-size: 12.5px;
   cursor: pointer;
-}
-
-.signals {
-  max-height: 320px;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  border-radius: 8px;
-  background: var(--sheet);
-  box-shadow: inset 0 0 0 1px var(--rule);
-  font: 11.5px/1.5 var(--mono);
 }
 
 /* Controls ----------------------------------------------------------------- */
@@ -5932,7 +5890,6 @@ code,
 pre,
 .editor,
 .input.area,
-.signals,
 .cheat code,
 .trace code {
   font-variant-ligatures: none;

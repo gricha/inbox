@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Action, Card, GitHubAction, Inquiry } from "../../../src/types.ts";
 import { cls, fromName, snoozeOptions } from "../format.ts";
-import { handsOff } from "../view.ts";
 import { MORE, rowActions } from "./More.tsx";
 
 // What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
@@ -18,7 +17,6 @@ export interface RowMenuProps {
   y: number;
   snooze?: boolean; // opened by an issue's Snooze: Snooze open, its first time focused
   me: string;
-  agent: boolean; // your agent is on: Ask your agent is one of its entries
   run: (c: Card, key: string) => void;
   act: (c: Card, action: Action, until?: string) => void;
   github: (c: Card, a: GitHubAction) => void;
@@ -27,37 +25,24 @@ export interface RowMenuProps {
 }
 
 // A row's right-click menu: every write a row has. Snooze opens to the side with the times and what this item can wait on.
-export function RowMenu({ card, x, y, snooze, me, agent, run, act, github, reopen, onClose }: RowMenuProps) {
-  const mine = card.kind === "pr" && card.author.toLowerCase() === me.toLowerCase();
+export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose }: RowMenuProps) {
   const snoozes = card.inflight ? [] : snoozeOptions(card);
 
   const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
-  const muted = card.status === "muted";
+  // Only what's worth a right-click: off your desk (Done) or until later (Snooze), closing it, and its link. The rest is
+  // a click on the row, its call to action, or its review.
   const groups: Entry[][] = [
-    [go(card.kind === "pr" ? "Review" : "Open", "enter"), go("Open on GitHub", "o"), go("Copy link", "link")],
-    [
-      ...(card.cta === "ready" ? [go("Ready for review", "a")] : []),
-      ...(card.cta === "reviewers" ? [go("Add reviewers", "a")] : []),
-      ...(mine && !card.resolved && !card.inflight && handsOff(card) ? [go("Hand off for merge", "m")] : []),
-      ...(card.inflight ? [go("Back to the desk", "b")] : []),
-      ...(card.inflight
-        ? []
-        : [
-            card.status === "active"
-              ? { label: "Done", do: { act: "done" as const } }
-              : { label: "Back on the desk", do: { act: "restore" as const } },
-          ]),
-    ],
-    [
-      ...(card.inflight ? [] : [{ label: muted ? "Unmute" : "Mute", do: { act: muted ? ("unmute" as const) : ("mute" as const) } }]),
-      { label: card.pinned ? "Unpin" : "Pin", do: { act: card.pinned ? ("unpin" as const) : ("pin" as const) } },
-      ...(card.inflight ? [] : [go("Why it's here", "why")]),
-      ...(agent ? [go("Ask your agent", "t")] : []),
-    ],
-    // Its call to action is above already.
+    card.inflight
+      ? [go("Back to the desk", "b")]
+      : [
+          card.status === "active"
+            ? { label: "Done", do: { act: "done" as const } }
+            : { label: "Back on the desk", do: { act: "restore" as const } },
+        ],
     rowActions(card)
-      .filter((a) => !(a === "ready" && card.cta === "ready"))
+      .filter((a) => a === "close")
       .map((a) => ({ label: `${MORE[a]} on GitHub`, do: { github: a } })),
+    [go("Copy link", "link")],
   ];
   function pick(d: Do) {
     if ("key" in d) run(card, d.key);
@@ -113,7 +98,7 @@ export function QuestionMenu({
   );
 }
 
-// The menu itself, at the pointer: its entries in groups, Snooze's side menu after the second, and the keyboard while it's open.
+// The menu itself, at the pointer: its entries in groups, Snooze's side menu after Done, and the keyboard while it's open.
 function Menu({
   label,
   groups,
@@ -290,7 +275,7 @@ function Menu({
             <div key={g[0]!.label} className="ctx-group">
               {g.map(item)}
               {/* Snooze sits after Done. */}
-              {gi === 1 && snoozes.length > 0 && (
+              {gi === 0 && snoozes.length > 0 && (
                 <div
                   className="ctx-subwrap"
                   onMouseEnter={() => {

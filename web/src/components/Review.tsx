@@ -753,9 +753,6 @@ export function Review({
   );
   const open = item.state === "open";
   const aiShown = !isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error;
-  // One way to ask for an AI review in each state: the AI section's own line when it offers one, else More.
-  const aiInline = !!view.ai_error || (!view.ai && open && aiShown);
-  const aiLink = !view.generating && busy !== "ai" && !flying && !aiInline;
 
   return (
     <div className={cls("review", showSide && "side-open")}>
@@ -857,7 +854,7 @@ export function Review({
             {more && (
               <MoreMenu
                 card={card}
-                actions={card.actions ?? []}
+                actions={(card.actions ?? []).filter((a) => a === "close" || a === "request_changes")}
                 links={[
                   // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
                   ...(!card.inflight && !acted
@@ -870,22 +867,6 @@ export function Review({
                         },
                       ]
                     : []),
-                  ...(aiLink
-                    ? [
-                        {
-                          label: view.ai ? `Ask ${aiName()} to review it again` : `Ask ${aiName()} to review it`,
-                          run: () => {
-                            askAi();
-                          },
-                        },
-                      ]
-                    : []),
-                  {
-                    label: "Open on GitHub",
-                    run: () => {
-                      run("o");
-                    },
-                  },
                   {
                     label: "Copy link",
                     run: () => {

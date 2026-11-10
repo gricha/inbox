@@ -115,106 +115,48 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   );
 
   // Opened in place (an issue): why it's here (its row doesn't say), one line of facts, more on why, its activity, its actions.
-  if (!ctx.showSignals) {
-    const facts = [
-      ...cardFacts(card, ctx.me),
-      ...(says(card.why, asked) ? [] : [asked]),
-      ...(item.labels.length ? [item.labels.join(", ")] : []),
-      plural(item.comments_total, "comment"),
-      // Recent activity below says when, and what.
-      ...(events.length ? [] : [`active ${age(card.activity_at, ctx.now)} ago`]),
-    ];
-    return (
-      <div className="more opened">
-        {card.why && !card.resolved && <p className="d-why">{card.why.charAt(0).toUpperCase() + card.why.slice(1)}</p>}
-        {card.handoff && (
-          <p className="d-why d-handoff">
-            <b>{handoffLabel(card.handoff)}</b> {card.handoff.why}
-          </p>
-        )}
-        <p className="card-facts dots">
-          {facts.map((f) => (
-            <span key={f}>{f}</span>
-          ))}
-        </p>
-        {why}
-        {activity}
-        <div className="actions card-keys">
-          {card.kind === "issue" && !card.resolved && <ActButton k="comment" label="Comment" run={run} />}
-          <ActButton k="o" label="Open on GitHub" run={run} />
-          {mine && <HandButton card={card} run={run} />}
-          <ActButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
-          <button
-            type="button"
-            className="act"
-            aria-haspopup="menu"
-            onClick={(e) => {
-              ctx.menu(card, e.currentTarget, true);
-            }}
-          >
-            Snooze
-          </button>
-          {!mine && <ActButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
-          {/* Last, so a pointer that read down to here closes it here. */}
-          <ActButton k="close" label="Close" title="Close (Esc)" run={run} />
-        </div>
-      </div>
-    );
-  }
-
-  const facts: [string, ReactNode][] = [];
-  if (pr) {
-    facts.push(
-      // oxlint-disable-next-line react/jsx-key -- a [label, value] pair rendered on its own, not a list
-      ["CI", <span className={`t-ci-${item.ci}`}>{CI[item.ci]}</span>],
-      ["Size", `+${item.additions} −${item.deletions} in ${plural(item.changed_files, "file")}`],
-    );
-    if (item.mergeable !== "unknown")
-      // oxlint-disable-next-line react/jsx-key -- a [label, value] pair rendered on its own, not a list
-      facts.push(["Merge", item.mergeable === "conflict" ? <span className="t-warn">conflicts with {item.base}</span> : "clean"]);
-  }
-  if (item.labels.length) facts.push(["Labels", item.labels.join(", ")]);
-  if (!says(card.why, asked)) facts.push(["Asked", asked]);
-  if (s.me.reviewed)
-    facts.push([
-      "You",
-      `${s.me.review_state.replace("_", " ")} ${hours(s.me.reviewed_hours)} ago${s.me.pushed_since_review ? ", new commits since" : ""}`,
-    ]);
-  if (pr)
-    facts.push([
-      "Review",
-      `${REVIEW[item.review_decision].replace(/^review /, "")}${
-        item.reviews.length
-          ? `: ${item.reviews.map((r) => `${r.author} ${r.state.replace("_", " ")} ${age(r.at, ctx.now)} ago`).join(", ")}`
-          : ", none yet"
-      }`,
-    ]);
-  if (item.threads_total)
-    facts.push([
-      "Threads",
-      item.threads_unresolved
-        ? `${item.threads_unresolved} of ${item.threads_total} unresolved`
-        : `${plural(item.threads_total, "thread")}, none unresolved`,
-    ]);
-  facts.push(["Activity", `${age(card.activity_at, ctx.now)} ago, ${plural(item.comments_total, "comment")}`]);
-
-  // Why it's here: the item's signals in full, its rule trace and its raw signals.
+  const facts = [
+    ...cardFacts(card, ctx.me),
+    ...(says(card.why, asked) ? [] : [asked]),
+    ...(item.labels.length ? [item.labels.join(", ")] : []),
+    plural(item.comments_total, "comment"),
+    // Recent activity below says when, and what.
+    ...(events.length ? [] : [`active ${age(card.activity_at, ctx.now)} ago`]),
+  ];
   return (
-    <div className="detail">
-      <dl className="facts">
-        {facts.map(([k, v]) => (
-          <div key={k} className="fact">
-            <dt>{k}</dt>
-            <dd>{v}</dd>
-          </div>
+    <div className="more opened">
+      {card.why && !card.resolved && <p className="d-why">{card.why.charAt(0).toUpperCase() + card.why.slice(1)}</p>}
+      {card.handoff && (
+        <p className="d-why d-handoff">
+          <b>{handoffLabel(card.handoff)}</b> {card.handoff.why}
+        </p>
+      )}
+      <p className="card-facts dots">
+        {facts.map((f) => (
+          <span key={f}>{f}</span>
         ))}
-      </dl>
+      </p>
       {why}
       {activity}
       <div className="actions card-keys">
-        <ActButton k="why" label="Hide signals" run={run} />
+        {card.kind === "issue" && !card.resolved && <ActButton k="comment" label="Comment" run={run} />}
+        <ActButton k="o" label="Open on GitHub" run={run} />
+        {mine && <HandButton card={card} run={run} />}
+        <ActButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
+        <button
+          type="button"
+          className="act"
+          aria-haspopup="menu"
+          onClick={(e) => {
+            ctx.menu(card, e.currentTarget, true);
+          }}
+        >
+          Snooze
+        </button>
+        {!mine && <ActButton k="m" label={muted ? "Unmute" : "Mute"} run={run} />}
+        {/* Last, so a pointer that read down to here closes it here. */}
+        <ActButton k="close" label="Close" title="Close (Esc)" run={run} />
       </div>
-      <pre className="signals">{JSON.stringify(s, null, 2)}</pre>
     </div>
   );
 }

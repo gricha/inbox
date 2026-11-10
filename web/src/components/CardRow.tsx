@@ -11,7 +11,6 @@ export interface RowCtx {
   selected: string | null;
   expanded: string | null;
   leaving: Set<string>;
-  showSignals: boolean;
   details: Record<string, ItemDetail | string>; // string = load error
   boardLabel: (id: string) => string;
   click: (c: Card) => void;

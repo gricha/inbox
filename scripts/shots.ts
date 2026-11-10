@@ -2293,15 +2293,14 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Hand off for merge, in your own approved PR's row menu: the row leaves at once, a spinner in the toast while the desk (here never) answers.
+    // Hand off for merge, in your own approved PR's review: it leaves at once, a spinner in the toast while the desk (here never) answers.
     name: "handoff-sent",
     go: async (page) => {
       await page.route("**/api/act", async (route) => {
         if ((route.request().postDataJSON() as { action?: string }).action !== "inflight") await route.continue();
       });
-      await at("#/")(page);
-      await unfold(page); // yours come after the reviews asked of you
-      await rowMenuPick(page, '.line[data-id="acme/worker#875"]', "Hand off for merge");
+      await review("acme/worker#875")(page);
+      await page.getByRole("button", { name: "Hand off for merge" }).click();
       await page.waitForTimeout(300);
     },
     after: fresh,
@@ -2415,11 +2414,12 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A row menu's Ask your agent: the chat about that row, the queue narrowed beside it at wide sizes.
+    // The sidebar's Ask your agent on a focused row: the chat about that row, the queue narrowed beside it at wide sizes.
     name: "ask-row",
     go: async (page) => {
       await at("#/")(page);
-      await rowMenuPick(page, '.line[data-id="oss/tinyhttp#205"]', "Ask your agent");
+      await page.locator('.line[data-id="oss/tinyhttp#205"] .row-main').focus();
+      await page.locator(".side-ask").click();
       await page.locator(".chat-input").waitFor();
       await page.keyboard.type("I think we addressed this in the follow-up, you can dismiss it");
       await page.waitForTimeout(300);
@@ -2733,18 +2733,6 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(500); // past the row's fade and fold
     },
     after: fresh,
-  },
-  {
-    // A PR the policy judge placed: Why it's here opens it in place; its rule trace ends with the policy step.
-    name: "judged",
-    after: refold,
-    go: async (page) => {
-      await at("#/")(page);
-      await unfold(page);
-      await rowMenuPick(page, '.line:has-text("Rewrite the tokenizer with a state table")', "Why it's here");
-      await page.locator(".trace-toggle summary").first().click();
-      await page.waitForTimeout(300);
-    },
   },
   {
     // GitHub's part at the top, its tuning and prompts folded behind More.
@@ -3934,7 +3922,7 @@ const SHOTS: Shot[] = [
   },
   // The More menu in a review.
   {
-    // Done first, then what isn't a write, then the writes under "On GitHub".
+    // Done and Copy link, then Close and Request changes under "On GitHub".
     name: "more-review",
     go: async (page) => {
       await review("acme/worker#875", [MORE])(page);
@@ -3942,13 +3930,7 @@ const SHOTS: Shot[] = [
       if (back !== "Inbox") failures.push(`more-review: the review's way back reads ${JSON.stringify(back)}`);
       const items = await moreItems(page);
       const head = items.indexOf("#On GitHub");
-      if (
-        items[0] !== "Done" ||
-        head < 2 ||
-        head === items.length - 1 ||
-        items[head - 2] !== "Open on GitHub" ||
-        items[head - 1] !== "Copy link"
-      )
+      if (items[0] !== "Done" || items[1] !== "Copy link" || (head >= 0 && (head !== 2 || head === items.length - 1)))
         failures.push(`more-review: the More menu reads ${JSON.stringify(items)}`);
     },
   },
@@ -4214,12 +4196,14 @@ const SHOTS: Shot[] = [
       await page.locator(".ctx-has-sub").hover();
       await page.locator(".ctx-sub").waitFor();
       await page.waitForTimeout(200);
-      if (!(await page.locator(".ctx-item", { hasText: "Why it's here" }).count())) failures.push("row-menu: no Why it's here");
-      const first = await page.evaluate<string[]>(
-        `[...document.querySelectorAll(".ctx > .ctx-group:first-child .ctx-item")].map((b) => b.textContent)`,
+      const items = await page.evaluate<string[][]>(
+        `[...document.querySelectorAll(".ctx > .ctx-group")].map((g) => [...g.querySelectorAll(".ctx-item")].filter((b) => !b.closest(".ctx-sub")).map((b) => b.textContent.trim()))`,
       );
-      if (first.join(" · ") !== "Review · Open on GitHub · Copy link")
-        failures.push(`row-menu: its first part reads ${JSON.stringify(first)}`);
+      if (
+        JSON.stringify(items[0]) !== JSON.stringify(["Done", "Snooze›"]) ||
+        JSON.stringify(items.at(-1)) !== JSON.stringify(["Copy link"])
+      )
+        failures.push(`row-menu: it reads ${JSON.stringify(items)}`);
     },
     after: async (page) => {
       await page.keyboard.press("Escape");
