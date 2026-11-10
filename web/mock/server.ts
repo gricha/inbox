@@ -18,7 +18,7 @@ import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { mergeLine, stage, standings } from "../../src/stage.ts";
-import { checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
+import { agentDefs, agentName, checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, settingDef } from "../../src/settings.ts";
 import type { ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
@@ -2506,6 +2506,7 @@ function overview(): Overview {
     },
     inflight: { total: recs.filter(inFlight).length },
     agent: setting("agent.coordinator"),
+    ai_agent: agentName(setting("agent.harness")),
     rate_limit: rateLimit(),
   };
 }
@@ -3325,7 +3326,7 @@ function github(): GitHubStatus {
 const settingsView = (): SettingsView => ({
   path: `${homedir()}/.inbox/settings.json (mock, in memory)`,
   sections: SECTIONS,
-  defs: [...SETTINGS],
+  defs: agentDefs(setting("agent.harness")),
   values: masked({ ...DEFAULTS, ...overrides }),
   overridden: Object.keys(overrides),
   errors: [],
@@ -3358,13 +3359,16 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 }
 
 // ---------------------------------------------------------------------------
-// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agent shows Connect.
+// Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agent shows Connect; Codex has neither.
 
 const linked = new Set(["claude-code mcp"]);
 function agentStatus(): AgentStatus {
-  const driver = "claude-code";
-  const command = "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp";
-  const skills = `${homedir()}/.claude/skills`;
+  const driver = setting("agent.harness") === "codex" ? "codex" : "claude-code";
+  const command =
+    driver === "codex"
+      ? "codex mcp add inbox --url http://localhost:47823/mcp"
+      : "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp";
+  const skills = driver === "codex" ? `${homedir()}/.agents/skills` : `${homedir()}/.claude/skills`;
   const mcp = { connected: linked.has(`${driver} mcp`), command };
   const skill: AgentStatus["skill"] = {
     state: linked.has(`${driver} skill`) ? "installed" : "missing",

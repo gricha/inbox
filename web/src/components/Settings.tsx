@@ -23,7 +23,7 @@ import type {
   SettingValue,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { cls, githubTip, MAC, orgsLine } from "../format.ts";
+import { cls, githubTip, MAC, orgsLine, aiName } from "../format.ts";
 import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
@@ -628,35 +628,36 @@ function GitHubStatusRow({ gh }: { gh: GitHubStatus }) {
   );
 }
 
-const NEED = {
+// In the words of the agent you chose: its tools and skill are what Connect sets up.
+const needs = (agent: string) => ({
   connect: {
-    label: "Claude Code isn't connected to the desk",
+    label: `${agent} isn't connected to the desk`,
     help: "Your agent and agents' questions need the desk's tools and skill.",
-    press: "Connect Claude Code",
+    press: `Connect ${agent}`,
     busy: "Connecting…",
     failed: "Couldn't connect",
-    done: "Connected Claude Code to the desk.",
+    done: `Connected ${agent} to the desk.`,
   },
   update: {
     label: "The desk's skill is out of date",
-    help: "Claude Code has an older copy than this desk.",
+    help: `${agent} has an older copy than this desk.`,
     press: "Update the skill",
     busy: "Updating…",
     failed: "Couldn't update it",
-    done: "Updated Claude Code's copy of the desk's skill.",
+    done: `Updated ${agent}'s copy of the desk's skill.`,
   },
   // Its help is the status's own words: what holds the name, and where it points.
   taken: {
-    label: "Claude Code has another skill or server named inbox",
+    label: `${agent} has another skill or server named inbox`,
     help: "",
-    press: "Connect Claude Code",
+    press: `Connect ${agent}`,
     busy: "Connecting…",
     failed: "Couldn't connect",
-    done: "Connected Claude Code to the desk.",
+    done: `Connected ${agent} to the desk.`,
   },
-};
+});
 
-// Under the agent's name, what needs you, and only then: Claude Code missing the desk's tools or skill, AI reviews paused.
+// Under the agent's name, what needs you, and only then: the agent missing the desk's tools or skill, AI reviews paused.
 function ClaudeStatus({
   active,
   loads,
@@ -688,7 +689,7 @@ function ClaudeStatus({
   }, [active, loads]);
 
   const need = status?.needs;
-  const say = need && NEED[need];
+  const say = need && needs(status.driver === "codex" ? "Codex" : "Claude Code")[need];
 
   function connect() {
     setBusy(true);
@@ -745,7 +746,7 @@ function ClaudeStatus({
       {paused && (
         <div className="setting s-status">
           <div className="s-label-col">
-            <p className="s-label">{both ? "Claude is paused" : "AI reviews are paused"}</p>
+            <p className="s-label">{both ? `${aiName()} is paused` : "AI reviews are paused"}</p>
             <p className="s-help s-ink">
               {withCode(paused.why.replace(/\.?$/, "."))}
               {both && " Nothing is sorted or reviewed until then."} Next try in{" "}
@@ -873,7 +874,7 @@ const AFTER: Record<string, (p: PartProps) => ReactNode> = {
             ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
             : policy && !policy.text.trim()
               ? "The starter policy, until you change it."
-              : "How Claude sorts, in your words."
+              : `How ${aiName()} sorts, in your words.`
         }
       />
     );
@@ -1132,7 +1133,7 @@ export function Settings({
         </section>
       </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">
-        <ViewHead id="rules" line="Which GitHub searches feed your desk, and where each item starts before Claude sorts it." />
+        <ViewHead id="rules" line={`Which GitHub searches feed your desk, and where each item starts before ${aiName()} sorts it.`} />
         <Rules
           active={active}
           shown={active && section === "rules"}
@@ -1143,7 +1144,7 @@ export function Settings({
         />
       </section>
       <section className="s-view" hidden={section !== "policy"} aria-labelledby="s-view-policy">
-        <ViewHead id="policy" line="How you want Claude to sort your desk, in your words. An agent can change it when you ask." />
+        <ViewHead id="policy" line={`How you want ${aiName()} to sort your desk, in your words. An agent can change it when you ask.`} />
         <Policy active={active} shown={active && section === "policy"} refresh={loads} now={now} flash={flash} onDoc={setPolicy}>
           {view && <div className="lines s-sheet">{row(view.defs.find((d) => d.key === "policy.max_per_hour"))}</div>}
         </Policy>

@@ -44,8 +44,6 @@ const DRIVERS = {
 export type DriverId = keyof typeof DRIVERS;
 // agent.harness as a driver: a value this desk doesn't know is Claude Code's.
 export const driverOf = (id: string): DriverId => (Object.hasOwn(DRIVERS, id) ? (id as DriverId) : "claude-code");
-// Who sorts and reviews, as the window and the desk's words name it.
-export const agentName = (id: DriverId): "Claude" | "Codex" => (id === "codex" ? "Codex" : "Claude");
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 const commandOf = (d: Driver, args: string[]) => [d.bin, ...args].map(sh).join(" ");

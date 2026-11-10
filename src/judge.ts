@@ -4,8 +4,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { Effect, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
-import { agentName } from "./agents.ts";
 import { askAgent, makeAgentDir, notLoggedIn } from "./review.ts";
+import { agentName } from "./settings.ts";
 import { andMore, pushAnswered, pushesOf } from "./stage.ts";
 import {
   BUCKETS,

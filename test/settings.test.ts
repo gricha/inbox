@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
 import {
+  agentDefs,
+  agentName,
   checkSetting,
   DEFAULTS,
   effective,
@@ -354,4 +356,22 @@ test("a secret in settings.json moves to secrets.json once, and secrets.json is 
   assert.equal(r.ok, false);
   assert.equal(fs.readFileSync(elsewhere, "utf8"), "{}", "nothing written through it");
   assert.equal(runSync(t.desk.putSettings({ set: { "queue.cards": 9 } })).ok, true, "other settings save as before");
+});
+
+test("what sorts and reviews names the agent you chose; your agent stays Claude Code's", () => {
+  const by = (harness: string) => new Map(agentDefs(harness).map((d) => [d.key, d]));
+  assert.deepEqual(agentDefs("claude-code"), [...SETTINGS], "Claude Code's words, unchanged");
+  assert.deepEqual([agentName("codex"), agentName("claude-code"), agentName("cursor")], ["Codex", "Claude", "Claude"]);
+  const codex = by("codex");
+  assert.equal(codex.get("policy.judge")!.label, "Sort my desk with Codex");
+  assert.equal(codex.get("policy.judge")!.help, "Codex places each item by your policy; off, only your rules do.");
+  assert.equal(codex.get("policy.max_per_hour")!.label, "Let Codex sort up to");
+  assert.equal(codex.get("policy.max_per_hour")!.help, "On your own Codex login, 20 items a call.");
+  assert.equal(codex.get("review.auto_ai")!.label, "Codex reviews other people's PRs ahead of time");
+  assert.match(codex.get("agent.decision_key")!.help!, /Empty: Codex answers\.$/);
+  assert.match(codex.get("agent.harness")!.help!, /Your agent and automations with tools run on Claude Code\.$/);
+  assert.equal(
+    codex.get("agent.coordinator")!.help,
+    "A Claude Code session that answers Ask your agent and gets what you hand off merged.",
+  );
 });

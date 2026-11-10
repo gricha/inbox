@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
-import { age, BUCKET_LABEL, cls, eventText, handoffLabel } from "../format.ts";
+import { age, BUCKET_LABEL, cls, eventText, handoffLabel, aiName } from "../format.ts";
 import { cardFacts, handsOff, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { SkLines } from "./Skeleton.tsx";
@@ -58,7 +58,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   // The why, the board and the trace, saying only what the card's own why doesn't. Claude's bucket, or an automation's,
   // unless a hard rule's floor held.
   const claude = !!main?.judge?.bucket && main.judge.bucket === main.rule_bucket;
-  const sorter = main?.judge?.by ? `automation ${main.judge.by}` : "Claude";
+  const sorter = main?.judge?.by ? `automation ${main.judge.by}` : aiName();
   const why = main && (
     <div className="why-block">
       {card.resolved && (
@@ -248,7 +248,7 @@ function PlacementView({ p }: { p: Placement }) {
         {p.judge && (
           <li className={cls(p.judge.bucket && "hit")}>
             <span className={cls("tick", p.judge.bucket ? "ok" : "no")}>{p.judge.bucket ? "→" : "…"}</span>
-            <span className="idx">{p.judge.by ? "automation" : "Claude"}</span>
+            <span className="idx">{p.judge.by ? "automation" : aiName()}</span>
             <span>
               {p.judge.by && `${p.judge.by}: `}
               {judgeStepText(p.judge)}

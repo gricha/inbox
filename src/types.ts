@@ -590,6 +590,7 @@ export interface Overview {
   focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
   inflight: { total: number }; // your open PRs in Merging
   agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
+  ai_agent: "Claude" | "Codex"; // who sorts and reviews (agent.harness), as the window names it
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
 }
@@ -617,7 +618,7 @@ export interface FocusView {
   paused: Paused | null; // said once above the queue instead of on every card
 }
 
-// Claude stopped: its login failed (the AI review or the judge), or AI reviews nobody asked for keep failing.
+// The agent stopped (Claude or Codex, as Overview.ai_agent names it): its login failed, or AI reviews nobody asked for keep failing.
 export interface Paused {
   who: "claude" | "ai";
   why: string;

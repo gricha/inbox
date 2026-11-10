@@ -21,6 +21,7 @@ import {
   githubTip,
   modelName,
   orgsLine,
+  setAiName,
   shortId,
   shortRef,
   snoozeOptions,
@@ -1110,6 +1111,14 @@ test("the judge in plain words", () => {
     judgeStatusText({ ...j, spent: 60, retry_at: "2026-10-27T12:12:00Z" }, now),
     "14 items sorted by Claude, 2 waiting. The hour's limit is reached (60); next batch in 12m.",
   );
+  // With Codex chosen (Overview.ai_agent), the words name it.
+  setAiName("Codex");
+  assert.equal(judgeStatusText(j, now), "14 items sorted by Codex, 2 waiting. 20 of 60 this hour.");
+  assert.equal(
+    judgeStatusText({ ...j, state: "off", off_reason: "it's turned off" }, now),
+    "Codex doesn't sort your desk: it's turned off.",
+  );
+  setAiName("Claude");
   assert.equal(judgeStepText({ bucket: "today", why: "your library", pending: false }), "today, your library");
   assert.equal(judgeStepText({ bucket: "later", why: "", pending: false }), "later, keeps the rule's why");
   assert.equal(judgeStepText({ bucket: null, why: "", pending: true }), "not sorted yet, so where the rules put it");

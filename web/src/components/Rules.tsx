@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewResult } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { BUCKET_LABEL, cls, MOD, shortId, tilde } from "../format.ts";
+import { BUCKET_LABEL, cls, MOD, shortId, tilde, aiName } from "../format.ts";
 import { lineOf } from "../view.ts";
 import { ActButton } from "./Detail.tsx";
 
@@ -356,15 +356,15 @@ export function Rules({
           )}
 
           <section className="side-block">
-            <h2 className="s-sub">Rules Claude can't sort below</h2>
+            <h2 className="s-sub">Rules {aiName()} can't sort below</h2>
             {hard.length ? (
               <p className="small">
-                What a hard rule matches stays at least in its bucket (<code>today</code> for a <code>now</code> rule), whatever Claude,
-                quiet days or caps say. A final rule places what it matches itself: Claude doesn't re-sort it.
+                What a hard rule matches stays at least in its bucket (<code>today</code> for a <code>now</code> rule), whatever {aiName()},
+                quiet days or caps say. A final rule places what it matches itself: {aiName()} doesn't re-sort it.
               </p>
             ) : (
               <p className="small">
-                None: Claude can sort anything off your desk. <code>hard = true</code> on a rule keeps what it matches there.
+                None: {aiName()} can sort anything off your desk. <code>hard = true</code> on a rule keeps what it matches there.
               </p>
             )}
             {hard.length > 0 && (
@@ -527,14 +527,14 @@ export function Rules({
                 <dt>hard</dt>
                 <dd>
                   <code>hard = true</code> on a rule: a floor. What it matches never sorts below its bucket (<code>today</code> for a{" "}
-                  <code>now</code> rule); Claude sorts within it, and everything else with the rule's bucket as its hint
+                  <code>now</code> rule); {aiName()} sorts within it, and everything else with the rule's bucket as its hint
                 </dd>
               </div>
               <div className="fact">
                 <dt>final</dt>
                 <dd>
-                  <code>final = true</code> on a rule: Claude doesn't re-sort what it matches; it stays in the rule's bucket (your pin still
-                  lifts it)
+                  <code>final = true</code> on a rule: {aiName()} doesn't re-sort what it matches; it stays in the rule's bucket (your pin
+                  still lifts it)
                 </dd>
               </div>
             </dl>

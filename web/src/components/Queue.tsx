@@ -1,5 +1,5 @@
 import type { Card, Inquiry, Overview, QueueView } from "../../../src/types.ts";
-import { cls } from "../format.ts";
+import { cls, aiName } from "../format.ts";
 import { foldOf, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
@@ -45,7 +45,7 @@ export function Queue({
     <div className="queue">
       {view.paused && (
         <p className="ai-paused">
-          <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
+          <b>{view.paused.who === "claude" ? `${aiName()} is paused:` : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
       {any ? (
@@ -82,8 +82,8 @@ export function Queue({
       {view.reviewing > 0 && (
         <p className="queue-reviewing">
           {view.reviewing === 1
-            ? "1 more PR reaches you once Claude has reviewed it."
-            : `${view.reviewing} more PRs reach you once Claude has reviewed them.`}
+            ? `1 more PR reaches you once ${aiName()} has reviewed it.`
+            : `${view.reviewing} more PRs reach you once ${aiName()} has reviewed them.`}
         </p>
       )}
     </div>

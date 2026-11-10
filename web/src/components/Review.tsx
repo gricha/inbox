@@ -20,7 +20,7 @@ import {
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
-import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when, aiName } from "../format.ts";
 import { blocks, inline, lead, unlinked, urlPlace } from "../prose.ts";
 import { reviewOf } from "../reviews.ts";
 import {
@@ -873,7 +873,7 @@ export function Review({
                   ...(aiLink
                     ? [
                         {
-                          label: view.ai ? "Ask Claude to review it again" : "Ask Claude to review it",
+                          label: view.ai ? `Ask ${aiName()} to review it again` : `Ask ${aiName()} to review it`,
                           run: () => {
                             askAi();
                           },
@@ -1593,8 +1593,8 @@ function AiSection({
       {busy && (
         <p className="quiet">
           {so || tries
-            ? `Claude is reviewing it${so}${tries}.`
-            : "Claude is reviewing it. The notes land in the code below in a minute or two."}
+            ? `${aiName()} is reviewing it${so}${tries}.`
+            : `${aiName()} is reviewing it. The notes land in the code below in a minute or two.`}
         </p>
       )}
       {!busy && error && (
@@ -1606,8 +1606,8 @@ function AiSection({
               {job.state === "queued" &&
                 job.retry_at &&
                 (Date.parse(job.retry_at) > now
-                  ? ` Claude tries again in ${plural(minutes(job.retry_at))}.`
-                  : " Claude tries again shortly.")}
+                  ? ` ${aiName()} tries again in ${plural(minutes(job.retry_at))}.`
+                  : ` ${aiName()} tries again shortly.`)}
             </>
           ) : (
             withCode(error)
@@ -1622,7 +1622,7 @@ function AiSection({
         <p className="quiet">
           No AI review yet.{" "}
           <button type="button" className="link-btn" disabled={!onAsk} onClick={onAsk}>
-            Ask Claude for one
+            Ask {aiName()} for one
           </button>
         </p>
       )}

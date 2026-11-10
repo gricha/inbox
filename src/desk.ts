@@ -125,7 +125,8 @@ import {
   SECTIONS,
   secretsPath,
   secretsRefused,
-  SETTINGS,
+  agentDefs,
+  agentName,
   settingDef,
   masked,
   settingsPath,
@@ -807,7 +808,7 @@ export class Desk {
     return {
       path: this.settingsPath,
       sections: SECTIONS,
-      defs: [...SETTINGS],
+      defs: agentDefs(this.settings["agent.harness"]),
       values: masked(this.settings),
       overridden: Object.keys(this.settingsOverrides),
       errors: this.settingsErrors,
@@ -1475,6 +1476,7 @@ export class Desk {
         },
         inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
         agent: this.settings["agent.coordinator"],
+        ai_agent: agentName(this.settings["agent.harness"]),
         rate_limit: this.gh.api.rateLimit(),
       };
     });

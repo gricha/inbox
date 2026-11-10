@@ -3061,7 +3061,7 @@ const SHOTS: Shot[] = [
         failures.push(`settings-agent: the agent's status rows read ${JSON.stringify(rows)}`);
       const filled = await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Claude Code" }).isVisible();
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
-      // The part is the agent's: its name is the first row's choice, Codex listed and not yet to be picked; its status follows.
+      // The part is the agent's: its name is the first row's choice, Codex listed beside it; its status follows.
       const head = (await page.locator("#s-agent h2, #s-agent .s-title").first().textContent())?.trim();
       if (head !== "Agent") failures.push(`settings-agent: the part is headed ${JSON.stringify(head)}`);
       const first = await page.evaluate<{ label: string; options: [string, boolean][]; status: boolean } | null>(`(() => {
@@ -3080,11 +3080,45 @@ const SHOTS: Shot[] = [
         JSON.stringify(first.options) !==
           JSON.stringify([
             ["Claude Code", false],
-            ["Codex (can't sort or review yet)", true],
+            ["Codex", false],
           ]) ||
         !first.status
       )
         failures.push(`settings-agent: the part starts with ${JSON.stringify(first)}`);
+    },
+  },
+  {
+    // Codex chosen: the status row and Connect name it, sorting and reviewing say Codex, your agent stays Claude Code's.
+    name: "settings-agent-codex",
+    writes: true,
+    go: async (page) => {
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ set: { "agent.harness": "codex" } }) })`,
+      );
+      await at("#/settings/agent")(page);
+      const rows = await statusRows(page, "agent");
+      if (rows.join("|") !== "Codex isn't connected to the desk")
+        failures.push(`settings-agent-codex: the status rows read ${JSON.stringify(rows)}`);
+      if (!(await page.locator("#s-agent .s-status .act.primary", { hasText: "Connect Codex" }).isVisible()))
+        failures.push("settings-agent-codex: no filled Connect Codex");
+      const said = await page.evaluate<
+        Record<string, string>
+      >(`(() => Object.fromEntries(["agent.harness", "policy.judge", "agent.coordinator"].map((k) => {
+        const r = document.getElementById("row-" + k);
+        return [k, (r?.querySelector(".s-label")?.textContent ?? "") + " / " + (r?.querySelector(".s-help")?.textContent ?? "")];
+      })))()`);
+      const want = {
+        "agent.harness":
+          "Agent / Sorts your desk and reviews PRs ahead of time, on your own login. Your agent and automations with tools run on Claude Code.",
+        "policy.judge": "Sort my desk with Codex / Codex places each item by your policy; off, only your rules do.",
+        "agent.coordinator": "Run your agent / A Claude Code session that answers Ask your agent and gets what you hand off merged.",
+      };
+      if (JSON.stringify(said) !== JSON.stringify(want)) failures.push(`settings-agent-codex: the rows read ${JSON.stringify(said)}`);
+    },
+    after: async (page) => {
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ reset: ["agent.harness"] }) })`,
+      );
     },
   },
   {

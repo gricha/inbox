@@ -18,7 +18,7 @@ import type {
 import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
-import { cls, copyText, fromName, MAC, shortId, shortRef, snoozeOptions } from "./format.ts";
+import { cls, copyText, fromName, MAC, shortId, shortRef, snoozeOptions, aiName, setAiName } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
@@ -244,6 +244,7 @@ export function App() {
           Effect.match({
             onSuccess: ([ov, v, d, l]) => {
               if (n !== loadSeq.current) return;
+              setAiName(ov.ai_agent);
               setOverview(ov);
               startSentry(ov.sentry);
               if (l) setLane(l);
@@ -1049,7 +1050,7 @@ export function App() {
         Effect.catch(failed),
       );
     const ref = shortId(w.key);
-    flash(`Claude is reviewing ${ref} again.`);
+    flash(`${aiName()} is reviewing ${ref} again.`);
     return api.aiReview(w.key).pipe(
       Effect.match({
         onSuccess: (r) => {

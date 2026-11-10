@@ -28,7 +28,7 @@ import {
   type Verb,
 } from "./types.ts";
 import { report } from "./sentry.ts";
-import { secretsPath } from "./settings.ts";
+import { agentName, secretsPath } from "./settings.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -677,7 +677,7 @@ export class Automations {
       const desk = this.desk;
       const key = desk.settings["agent.decision_key"];
       const model = desk.settings["agent.decision_model"];
-      const who = key ? model : "Claude";
+      const who = key ? model : agentName(desk.settings["agent.harness"]); // another agent asks again
       // On its schedule, what it was asked about and hasn't changed since is no news: it's asked about the rest.
       const fresh = run.trigger === "schedule" ? this.unasked(a, who, passed) : passed;
       if (!fresh.length) {

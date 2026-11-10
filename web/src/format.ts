@@ -54,6 +54,13 @@ export function when(at: string): string {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
+// Who sorts and reviews (Settings → Agent), as Overview.ai_agent names it: set on every load, read while drawing.
+let sorter: "Claude" | "Codex" = "Claude";
+export const aiName = () => sorter;
+export function setAiName(name: "Claude" | "Codex"): void {
+  sorter = name;
+}
+
 // Who wrote an AI review: "claude-opus-5[1m]" → "Opus 5", "claude-sonnet-4-5-20250929" → "Sonnet 4.5", "codex" → "Codex".
 export function modelName(id: string): string {
   if (id === "claude-code") return "Claude Code";

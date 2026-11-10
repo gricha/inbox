@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PolicyDoc } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { cls, MOD, tilde } from "../format.ts";
+import { cls, MOD, tilde, aiName } from "../format.ts";
 import { ActButton } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { judgeStatusText } from "../view.ts";
@@ -80,7 +80,9 @@ export function Policy({
             setDoc({ ...doc, text, hash: r.hash });
             if (!text.trim()) setText(doc.starter);
             flash(
-              text.trim() ? "Policy saved. Claude sorts your desk by it." : "Policy cleared. Claude sorts by the starter policy again.",
+              text.trim()
+                ? `Policy saved. ${aiName()} sorts your desk by it.`
+                : `Policy cleared. ${aiName()} sorts by the starter policy again.`,
             );
           }),
         ),
@@ -149,7 +151,7 @@ export function Policy({
       <textarea
         className="editor prose"
         value={text}
-        placeholder="Empty: Claude sorts by the starter policy."
+        placeholder={`Empty: ${aiName()} sorts by the starter policy.`}
         aria-label="Policy"
         disabled={!doc}
         onChange={(e) => {
@@ -181,7 +183,7 @@ export function Policy({
         <span className="grow" />
         {dirty && <span className="unsaved">Unsaved changes</span>}
       </div>
-      {starter && <p className="s-live quiet">This is the starter policy. Claude sorts by it until you change it.</p>}
+      {starter && <p className="s-live quiet">This is the starter policy. {aiName()} sorts by it until you change it.</p>}
       {/* An agent's failure is about the agent, not your work: ink, not red. */}
       {doc && <p className={cls("s-live", doc.judge.state !== "error" && "quiet")}>{withCode(judgeStatusText(doc.judge, now))}</p>}
       {children}

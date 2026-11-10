@@ -140,7 +140,7 @@ export const SETTINGS = [
       { value: "claude-code", label: "Claude Code" },
       { value: "codex", label: "Codex" },
     ],
-    help: "Sorts your desk, reviews PRs ahead of time and runs as your agent, on your own login.",
+    help: "Sorts your desk and reviews PRs ahead of time, on your own login.",
   },
   {
     key: "policy.judge",
@@ -267,6 +267,21 @@ type ValueOf<T> = T extends "number" ? number : T extends "boolean" ? boolean : 
 export type Settings = { [D in (typeof SETTINGS)[number] as D["key"]]: ValueOf<D["type"]> };
 
 const DEFS = new Map<string, SettingDef>(SETTINGS.map((d) => [d.key, d]));
+
+// Who sorts and reviews (agent.harness), as the window and the desk's words name it.
+export const agentName = (harness: string): "Claude" | "Codex" => (harness === "codex" ? "Codex" : "Claude");
+
+// What sorts and reviews says who does it; your agent and agent-mode automations stay Claude Code's, and say so.
+const AGENT_WORDED = new Set(["review.auto_ai", "policy.judge", "policy.max_per_hour", "agent.decision_key"]);
+export function agentDefs(harness: string): SettingDef[] {
+  if (agentName(harness) === "Claude") return [...SETTINGS];
+  const say = (t: string | undefined) => t?.replaceAll(/Claude( Code)?/g, "Codex");
+  return SETTINGS.map((d: SettingDef) => {
+    if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label)!, ...(d.help && { help: say(d.help) }) };
+    if (d.key === "agent.harness") return { ...d, help: `${d.help} Your agent and automations with tools run on Claude Code.` };
+    return d;
+  });
+}
 export const settingDef = (key: string) => DEFS.get(key);
 export const DEFAULTS = Object.fromEntries(SETTINGS.map((d) => [d.key, d.default])) as unknown as Settings;
 

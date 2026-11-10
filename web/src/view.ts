@@ -17,7 +17,7 @@ import type {
   SettingsView,
 } from "../../src/types.ts";
 import { byPart } from "../../src/types.ts";
-import { ago, BUCKET_LABEL, shortRef } from "./format.ts";
+import { ago, BUCKET_LABEL, shortRef, aiName } from "./format.ts";
 
 // The Inbox (`queue`), a PR's review in its place, Blocked, FYI (`later`: what was sorted away), your PRs in Merging, the
 // Archive (what's done), and Settings (with the rules).
@@ -360,7 +360,7 @@ export const lineName = (at: InlineAt) => `${splitPath(at.path)[1]}:${at.start ?
 
 // Mixed sides read as the new file's lines: only an all-removed range says so.
 export function linesLabel(l: AskLines): string {
-  if (l.note) return `Claude's note on ${lineName(l)}`;
+  if (l.note) return `${aiName()}'s note on ${lineName(l)}`;
   return l.side === "old" && (!l.start || l.start.side === "old") ? `${lineName(l)}, removed` : lineName(l);
 }
 
@@ -499,10 +499,16 @@ export const says = (why: string, fact: string) =>
 const PLACED_BY: Record<NonNullable<Card["placed_by"]>, string> = {
   hard: "placed by a hard rule",
   pin: "kept up by its pin",
-  claude: "sorted by Claude",
+  get claude() {
+    return `sorted by ${aiName()}`;
+  },
   automation: "sorted by an automation",
-  pending: "not sorted by Claude yet",
-  unanswered: "Claude gave no answer",
+  get pending() {
+    return `not sorted by ${aiName()} yet`;
+  },
+  get unanswered() {
+    return `${aiName()} gave no answer`;
+  },
 };
 
 // The selected card's facts, in the review header's words, less what the card already says: its why, its problems and
@@ -708,11 +714,11 @@ export function onePause(ai: SettingsView["paused"]["ai"], judge?: JudgeStatus):
 }
 
 export function judgeStatusText(j: JudgeStatus, now: number): string {
-  if (j.state === "off") return `Claude doesn't sort your desk: ${j.off_reason ?? "it's off"}.`;
+  if (j.state === "off") return `${aiName()} doesn't sort your desk: ${j.off_reason ?? "it's off"}.`;
   const hour = `${j.spent} of ${j.max_per_hour} this hour.`;
   if (j.state === "error")
-    return `Claude's last sorting call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
-  const placed = `${count(j.judged, "item")} sorted by Claude${j.waiting ? `, ${j.waiting} waiting` : ""}`;
+    return `${aiName()}'s last sorting call failed: ${sentence(j.error ?? "unknown error")}${j.retry_at ? ` Next try in ${until(j.retry_at, now)}.` : ""}`;
+  const placed = `${count(j.judged, "item")} sorted by ${aiName()}${j.waiting ? `, ${j.waiting} waiting` : ""}`;
   if (j.state === "idle" && j.retry_at)
     return `${sentence(placed)} The hour's limit is reached (${j.max_per_hour}); next batch in ${until(j.retry_at, now)}.`;
   return j.state === "running" ? `Sorting now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;

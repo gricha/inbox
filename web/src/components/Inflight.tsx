@@ -1,5 +1,5 @@
 import { JOB_ATTEMPTS, type CoordinatorView, type InflightRow, type InflightView, type Work } from "../../../src/types.ts";
-import { age, cls, fromName } from "../format.ts";
+import { age, cls, fromName, aiName } from "../format.ts";
 import { Dots } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
@@ -89,7 +89,7 @@ function ClaudesWork({ work, now, onWork }: { work: Work[]; now: number; onWork:
   return (
     <section className="group" aria-labelledby="h-work">
       <h3 id="h-work" className="group-head">
-        <span>Claude's work</span>
+        <span>{aiName()}'s work</span>
         <span className="count">{work.length}</span>
       </h3>
       <div className="lines">
@@ -112,7 +112,7 @@ function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k
   const phrase = answer
     ? [`Your answer to ${fromName(w.from ?? "", false)} hasn't been picked up`, ...(w.error ? [error] : [])]
     : w.state === "running"
-      ? [review ? "Claude is reviewing it" : "Your agent has it", ...tries]
+      ? [review ? `${aiName()} is reviewing it` : "Your agent has it", ...tries]
       : w.state === "failed"
         ? [
             <>

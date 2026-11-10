@@ -18,7 +18,7 @@ import {
   type Way,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { ago, cls, copyText, issueUrl, MOD, when } from "../format.ts";
+import { ago, cls, copyText, issueUrl, MOD, when, aiName } from "../format.ts";
 import { resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -63,7 +63,9 @@ const WAY: Record<Way, { name: string; help: string }> = {
   agent: { name: "An agent with tools", help: "Your own Claude Code, read only, with your tools: it can look further than the items." },
 };
 // Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
-const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : "Claude answers, without tools");
+const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : `${aiName()} answers, without tools`);
+// An agent run is Claude Code's whichever agent sorts and reviews: said when that's Codex.
+const onClaude = () => (aiName() === "Codex" ? " It runs on Claude Code." : "");
 
 // What goes to the desk for a draft: the whole automation. A rule's verb is the one thing it may do.
 function bodyOf(d: Draft): AutomationBody {
@@ -544,7 +546,7 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
       ? `A rule, with no model: ${VERB[rule.do]}${rule.do === "snooze" ? ` until ${untilWords(rule.until)}` : ""}, saying \u201c${rule.why}\u201d`
       : way === "ask"
         ? `A question: ${answers(model)}`
-        : "An agent: your Claude Code, with read-only tools";
+        : `An agent: your Claude Code, with read-only tools.${onClaude()}`;
   return (
     <dl className="au-facts">
       {a.when && (
@@ -847,7 +849,7 @@ function Editor({
             <span className="s-help">
               {d.decide === "ask"
                 ? "In your words: what should happen to which items. It answers for each item, or leaves it as it is."
-                : "Your own Claude Code runs it read only, with your tools; it lists PRs and issues with a line on why, and the desk does with them what you allow below."}
+                : `Your own Claude Code runs it read only, with your tools; it lists PRs and issues with a line on why, and the desk does with them what you allow below.${onClaude()}`}
             </span>
           </label>
           <fieldset className="au-field">

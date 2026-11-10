@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
-import { age, cls, MOD } from "../format.ts";
+import { age, cls, MOD, aiName } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
 import { Avatar } from "./Avatar.tsx";
 import { Words } from "./Prose.tsx";
@@ -126,8 +126,12 @@ export function Conversation({
                 )}
               </p>
             )}
-            {!c.take && view.reading && <p className="quiet">Claude is reading it.</p>}
-            {!c.take && view.reading_error && <p className="cv-take">Claude couldn't read it: {view.reading_error}</p>}
+            {!c.take && view.reading && <p className="quiet">{aiName()} is reading it.</p>}
+            {!c.take && view.reading_error && (
+              <p className="cv-take">
+                {aiName()} couldn't read it: {view.reading_error}
+              </p>
+            )}
             <Said c={c} label={`What ${c.comments.length > 1 ? "was said" : `${last.author} wrote`}`} now={now} />
             <textarea
               className="cv-reply"
