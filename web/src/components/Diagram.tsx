@@ -14,6 +14,7 @@ const SMALL = 11.5;
 const PAD_X = 12;
 const NODE_H = 30;
 const MAX_H = 320;
+const MIN_SCALE = 0.85;
 
 interface Pt {
   x: number;
@@ -93,9 +94,10 @@ export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGra
   );
 }
 
-// At most the column's width and MAX_H tall, never larger than drawn: the width attribute caps it, CSS scales it down.
+// At most the column's width and MAX_H tall, never larger than drawn: the width attribute caps it, CSS scales it down. A tall
+// one (a long sequence) grows past MAX_H rather than shrink its text below MIN_SCALE.
 function Svg({ drawn, label, desc, descId }: { drawn: Drawn; label: string; desc: string; descId: string }) {
-  const scale = Math.min(1, MAX_H / drawn.h);
+  const scale = Math.max(MIN_SCALE, Math.min(1, MAX_H / drawn.h));
   const minX = drawn.kind === "sequence" ? drawn.minX : 0;
   return (
     <svg
