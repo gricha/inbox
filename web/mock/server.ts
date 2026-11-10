@@ -19,6 +19,7 @@ import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
+import { parseDiagram } from "../../src/diagram.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
@@ -3017,6 +3018,7 @@ const STEPS: Record<string, { title: string; body: string; check: string; note?:
       body: "Lease owns the jobs table: the new types and store hand out time-limited leases with a token, and the scheduler's entry point starts its loop.",
       check: "A renewal after the lease expired is refused, not extended.",
       note: "Lease ships first and runs alone for a release: Dispatch only starts asking it for work once SCHEDULER_V2 is on, so the old scheduler and Lease never hand out the same job.",
+      diagram: "d1",
       hunks: ["h2", "h3", "h1"],
     },
     {
@@ -3028,6 +3030,18 @@ const STEPS: Record<string, { title: string; body: string; check: string; note?:
     { title: "Errors, retries and config", body: "Moved from the old scheduler with the new names.", check: "", hunks: range(11, 20) },
   ],
 };
+
+const LEASE_FLOW = parseDiagram(
+  [
+    "flowchart LR",
+    '  w["Worker"] -->|"asks for work"| d["Dispatch"]:::new',
+    '  d -->|"lease()"| l["Lease"]:::new',
+    '  l --> t[("jobs table")]',
+    '  d -->|"report(token)"| l',
+    '  l -.->|"reclaims expired"| t',
+    '  s["Old scheduler"]:::removed -.-> t',
+  ].join("\n"),
+);
 
 // The newer review's parts on the scheduler split: a look range, an interface and an improvement, on its first file's change.
 function extras(path: string, line: number): Partial<AiReview> {
@@ -3063,6 +3077,16 @@ function extras(path: string, line: number): Partial<AiReview> {
         body: "Pass the token into `report()` rather than reading it from the job row, so a stale row can't supply it.",
       },
     ],
+    diagrams: LEASE_FLOW.ok
+      ? [
+          {
+            id: "d1",
+            title: "Who owns a job now",
+            caption: "Dispatch never writes the jobs table: every result goes back through Lease with its token.",
+            graph: LEASE_FLOW.graph,
+          },
+        ]
+      : [],
   };
 }
 

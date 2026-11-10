@@ -1513,6 +1513,26 @@ const SHOTS: Shot[] = [
         if (!text.includes(want)) bad(`the fold has no ${want}`);
       if (!(await page.locator(".rv-look").count())) bad("no Look here in the diff");
       if (!(await page.locator(".rv-step-note").count())) bad("the first step's note is missing");
+      const fig = page.locator(".rv-step .dg").first();
+      if (!(await fig.count())) bad("the first step's diagram is missing");
+      else if (!(await fig.locator(".dg-svg").count())) {
+        await fig.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(2000);
+        if (!(await fig.locator(".dg-svg").count())) bad("the first step's diagram fell back to text");
+      }
+    },
+  },
+  {
+    // A step's diagram, laid out by ELK in the app's tokens, under its step's note.
+    name: "review-diagram",
+    go: async (page) => {
+      await page.evaluate(`localStorage.removeItem("desk.review.view")`);
+      await review("acme/worker#879")(page);
+      const fig = page.locator(".rv-step .dg").first();
+      await fig.scrollIntoViewIfNeeded();
+      await page.locator(".rv-step .dg-svg").first().waitFor({ timeout: 15_000 });
+      await page.evaluate(`document.querySelector("#rv-step-0").scrollIntoView({ block: "start" })`);
+      await page.waitForTimeout(300);
     },
   },
   {
@@ -2008,7 +2028,7 @@ const SHOTS: Shot[] = [
           const drawn = [...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) =>
             el.classList.contains("rv-file-sec")
               ? el.getAttribute("aria-label")
-              : "# " + (el.children.length ? [...el.children].map((c) => c.textContent).join(" ") : el.textContent).replace(/\\s+/g, " ").trim(),
+              : "# " + (el.children.length ? [...el.querySelectorAll(":scope > h2, :scope > p")].map((c) => c.textContent).join(" ") : el.textContent).replace(/\\s+/g, " ").trim(),
           );
           scrollTo(0, 0);
           return { o: v.order, drawn };

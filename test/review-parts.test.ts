@@ -109,8 +109,9 @@ test("interfaces and improvements are placed like notes; a breaking interface ne
   assert.ok(!("intent" in parseReview({ summary: "x" }, [FILE])), "no goal, no intent");
 });
 
-test("a step keeps its note and a diagram it names only when the diagram survived; notes are capped by risk", () => {
+test("a step keeps its note and a diagram it names only when the diagram survived the grammar; notes and diagrams are capped by risk", () => {
   const files: ReviewFile[] = [FILE, { ...FILE, path: "src/b.ts" }, { ...FILE, path: "src/c.ts" }];
+  const flow = 'flowchart LR\n  a["fetch"] --> b["plan"] --> c[("rows")]:::new';
   const r = parseReview(
     {
       risk: "low",
@@ -118,19 +119,32 @@ test("a step keeps its note and a diagram it names only when the diagram survive
       chunks: ["h1", "h2", "h3"].map((id) => ({ id, level: "look", why: "" })),
       steps: [
         { title: "One", body: "", check: "", note: "Ships before the migration.", diagram: "d1", hunks: ["h1"] },
-        { title: "Two", body: "", check: "", note: "Over the low cap.", diagram: "", hunks: ["h2", "h3"] },
+        { title: "Two", body: "", check: "", note: "Over the low cap.", diagram: "d2", hunks: ["h2", "h3"] },
       ],
-      diagrams: [{ id: "d1", title: "t", caption: "c", source: "flowchart LR\n  a --> b" }],
+      diagrams: [
+        { id: "d1", title: "The new path", caption: "c", source: flow },
+        { id: "d2", title: "Over the low cap", caption: "c", source: flow },
+        {
+          id: "d3",
+          title: "Refused",
+          caption: "c",
+          source: 'flowchart LR\n  a --> b\n  click a "javascript:alert(1)"\n  b --> c\n  <img src=x>',
+        },
+      ],
     },
     files,
   );
   assert.deepEqual(
     r.guide!.steps.map((st) => [st.note, st.diagram]),
     [
-      ["Ships before the migration.", undefined],
+      ["Ships before the migration.", "d1"],
       [undefined, undefined],
     ],
-    "the placeholder grammar refuses every diagram, so d1 is dropped; one note at low risk",
+    "one note and one diagram at low risk",
+  );
+  assert.deepEqual(
+    r.diagrams!.map((d) => [d.id, d.graph.kind]),
+    [["d1", "flow"]],
   );
 });
 
