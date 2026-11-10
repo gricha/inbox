@@ -461,6 +461,16 @@ const automationsAs = (change: (v: AutomationView[]) => void) => async (page: Pa
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
+// Its last run `minutes` before the page reads it, not before the mock started: a whole round of shots outlasts an hour.
+const ranAgo = (id: string, minutes: number) => (v: AutomationView[]) => {
+  const runs = v.find((a) => a.id === id)!.runs;
+  const by = Date.now() - minutes * 60_000 - Date.parse(runs[0]!.at);
+  for (const r of runs)
+    Object.assign(r, {
+      at: new Date(Date.parse(r.at) + by).toISOString(),
+      done_at: r.done_at && new Date(Date.parse(r.done_at) + by).toISOString(),
+    });
+};
 // Each automation's row in Automations: its name, its help (and the part of it in red), and its controls.
 const automationRows = (page: Page) =>
   page.evaluate<{ name: string; help: string; red: string[]; run: boolean; on: boolean | null; review: string | null }[]>(`
@@ -3357,6 +3367,7 @@ const SHOTS: Shot[] = [
     // that runs on events says what it reacts to, and each says what its last run did by verb; New automation last.
     name: "settings-automations",
     go: async (page) => {
+      await automationsAs(ranAgo("team-pings", 30))(page);
       await at("#/settings/queue")(page);
       const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
@@ -3386,7 +3397,7 @@ const SHOTS: Shot[] = [
         failures.push(`settings-automations: the rule's row reads ${JSON.stringify(rule)}`);
       if (
         !ask ||
-        !/^Weekdays, every hour · next \S+( \S+)? · ran \d+m ago, sorted 1 to Today, sorted 2 to FYI, left 1 where a rule or your pin holds it$/.test(
+        !/^Weekdays, every hour · next \S+( \S+)? · ran 30m ago, sorted 1 to Today, sorted 2 to FYI, left 1 where a rule or your pin holds it$/.test(
           ask.help,
         ) ||
         ask.red.length
@@ -3410,6 +3421,7 @@ const SHOTS: Shot[] = [
       );
       if (last !== "New automation") failures.push(`settings-automations: the sheet's last row reads ${JSON.stringify(last)}`);
     },
+    after: unsettle,
   },
   {
     // The last run failed: only those words are red; one of yours that's off says so, with its switch and no Run now.
@@ -3866,6 +3878,7 @@ const SHOTS: Shot[] = [
     name: "settings-github-automations",
     writes: true,
     go: async (page) => {
+      await automationsAs(ranAgo("github.pick-reviewer", 42))(page);
       await at("#/settings/github")(page);
       const rows = await page.evaluate<string[]>(`[...document.querySelectorAll("#s-github .au-row")].map((r) =>
         r.querySelector(".s-name").textContent.trim() + " " + (r.querySelector("input.switch").checked ? "on" : "off"))`);
@@ -3879,7 +3892,10 @@ const SHOTS: Shot[] = [
       ];
       if (rows.join() !== want.join()) failures.push(`settings-github-automations: GitHub's automations read ${JSON.stringify(rows)}`);
       const help = await page.locator("#s-github .au-row .s-help").first().textContent();
-      if (!help?.startsWith("Your ready PR waited a workday with nobody asked by name") || !/ran \d+m ago, put 1 on your desk$/.test(help))
+      if (
+        !help?.startsWith("Your ready PR waited a workday with nobody asked by name") ||
+        !help.endsWith("ran 42m ago, put 1 on your desk")
+      )
         failures.push(`settings-github-automations: Pick a reviewer's line reads ${JSON.stringify(help)}`);
       if (await page.locator("#s-github .au-row", { hasText: "Pick a reviewer" }).locator(".s-help .t-bad").count())
         failures.push("settings-github-automations: a red word on Pick a reviewer");
@@ -3904,7 +3920,10 @@ const SHOTS: Shot[] = [
       if ((await sideOn(page)) !== "GitHub")
         failures.push(`settings-github-automations: in its view, the sidebar marks ${await sideOn(page)}`);
     },
-    after: at("#/settings/github"),
+    after: async (page) => {
+      await unsettle(page);
+      await at("#/settings/github")(page);
+    },
   },
   {
     // policy.md empty: the editor holds the starter, and says so.
