@@ -20,7 +20,7 @@ import type {
 import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
-import { cls, copyText, fromName, MAC, shortId, shortRef, snoozeOptions, aiName, setAiName } from "./format.ts";
+import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
@@ -55,7 +55,7 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { QuestionMenu, RowMenu } from "./components/RowMenu.tsx";
+import { QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { Review } from "./components/Review.tsx";
@@ -506,7 +506,7 @@ export function App() {
   // the one you left it with.
   function rowMenu(x: number, y: number, target: Element | null): boolean {
     const id = target?.closest<HTMLElement>(".line[data-id]")?.dataset.id;
-    if (!id || !(onScreen.some((c) => c.id === id) || inquiries.some((q) => inquiryOf(q.id) === id))) {
+    if (!id || !(onScreen.some((c) => c.id === id) || inquiries.some((q) => inquiryOf(q.id) === id) || sessions.some((s) => s.id === id))) {
       stay.current = null;
       setMenuAt(null);
       return false;
@@ -539,14 +539,15 @@ export function App() {
   };
   const menuCard = menuAt ? onScreen.find((c) => c.id === menuAt.id) : undefined;
   const menuQuestion = menuAt ? inquiries.find((q) => inquiryOf(q.id) === menuAt.id) : undefined;
+  const menuSession = menuAt ? sessions.find((x) => x.id === menuAt.id) : undefined;
   const closeMenu = useCallback(() => {
     stay.current = null;
     setMenuAt(null);
   }, []);
   // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
   useEffect(() => {
-    if (menuAt && !menuCard && !menuQuestion) closeMenu();
-  }, [menuAt, menuCard, menuQuestion, closeMenu]);
+    if (menuAt && !menuCard && !menuQuestion && !menuSession) closeMenu();
+  }, [menuAt, menuCard, menuQuestion, menuSession, closeMenu]);
 
   // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
@@ -683,17 +684,18 @@ export function App() {
   }
 
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
-  function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute") {
+  function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
     if (selected === s.id) setSelected(null);
     if (expanded === s.id) setExpanded(null);
     setLeaving((x) => new Set(x).add(s.id));
     runUi(
-      api.act(s.id, action).pipe(
+      api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
           Effect.sync(() => {
             undoSeq.current = res.undo_seq || null;
             undoWrite.current = null;
-            flash(`${action === "snooze" ? "Snoozed until tomorrow" : VERB[action]}: ${s.name}`, false, true);
+            const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
+            flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
           }),
         ),
         Effect.catch(failed),
@@ -1679,6 +1681,18 @@ export function App() {
           github={(c, a) => {
             runUi(github(c, a));
           }}
+          reopen={reopenMenu}
+          onClose={closeMenu}
+        />
+      )}
+      {menuAt && menuSession && (
+        <SessionMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          s={menuSession}
+          x={menuAt.x}
+          y={menuAt.y}
+          act={sessionAct}
+          start={sessionStart}
           reopen={reopenMenu}
           onClose={closeMenu}
         />

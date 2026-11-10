@@ -8,12 +8,12 @@ export interface SessionCtx {
   leaving: Set<string>;
   select: (s: SessionCard) => void;
   toggle: (s: SessionCard) => void; // a click: its detail in place, or closed again
-  act: (s: SessionCard, action: "done" | "snooze" | "mute") => void;
+  act: (s: SessionCard, action: "done" | "snooze" | "mute", until?: string) => void;
   start: (s: SessionCard, action: SessionAction) => void; // Kick, Resume, Copy attach command, Open
 }
 
 // What each action's button says, and its tooltip.
-const ACTION: Record<SessionAction, { label: string; title: string }> = {
+export const SESSION_ACTION: Record<SessionAction, { label: string; title: string }> = {
   kick: { label: "Kick", title: "Start it again in the background, where it left off" },
   resume: { label: "Resume in background", title: "Its terminal is gone: carry on in the background, where it left off" },
   attach: { label: "Copy attach command", title: "Copy claude attach, to open it in a terminal" },
@@ -55,12 +55,12 @@ export function SessionRow({ s, ctx }: { s: SessionCard; ctx: SessionCtx }) {
           <button
             type="button"
             className="act line-cta"
-            title={ACTION[first].title}
+            title={SESSION_ACTION[first].title}
             onClick={() => {
               ctx.start(s, first);
             }}
           >
-            {ACTION[first].label}
+            {SESSION_ACTION[first].label}
           </button>
         )}
         <span className="line-by">{SESSION_KIND[s.kind]}</span>
@@ -108,12 +108,12 @@ function SessionDetail({ s, ctx }: { s: SessionCard; ctx: SessionCtx }) {
             key={a}
             type="button"
             className={cls("act", i === 0 && "primary")}
-            title={a === "attach" && s.attach ? s.attach : ACTION[a].title}
+            title={a === "attach" && s.attach ? s.attach : SESSION_ACTION[a].title}
             onClick={() => {
               ctx.start(s, a);
             }}
           >
-            {ACTION[a].label}
+            {SESSION_ACTION[a].label}
           </button>
         ))}
         <button

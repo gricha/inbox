@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Action, Card, GitHubAction, Inquiry } from "../../../src/types.ts";
-import { cls, fromName, snoozeOptions } from "../format.ts";
+import type { Action, Card, GitHubAction, Inquiry, SessionAction, SessionCard } from "../../../src/types.ts";
+import { cls, fromName, SNOOZE, snoozeOptions } from "../format.ts";
 import { MORE, rowActions } from "./More.tsx";
+import { SESSION_ACTION } from "./Session.tsx";
 
 // What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
 type Do = { key: string } | { act: Action } | { github: GitHubAction } | { snooze: string };
@@ -91,6 +92,43 @@ export function QuestionMenu({
       y={y}
       pick={(d) => {
         if ("key" in d) run(q, d.key);
+      }}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// A session's menu: Done and Snooze (to a time: a session has no activity to wait on), then its first action.
+export function SessionMenu({
+  s,
+  x,
+  y,
+  act,
+  start,
+  reopen,
+  onClose,
+}: {
+  s: SessionCard;
+  x: number;
+  y: number;
+  act: (s: SessionCard, action: "done" | "snooze", until?: string) => void;
+  start: (s: SessionCard, action: SessionAction) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  const [first] = s.actions;
+  return (
+    <Menu
+      label={`Session ${s.name}`}
+      groups={[[{ label: "Done", do: { act: "done" } }], first ? [{ label: SESSION_ACTION[first].label, do: { key: first } }] : []]}
+      snoozes={SNOOZE.filter((o) => o.until !== "activity")}
+      x={x}
+      y={y}
+      pick={(d) => {
+        if ("snooze" in d) act(s, "snooze", d.snooze);
+        else if ("act" in d) act(s, "done");
+        else if ("key" in d) start(s, d.key as SessionAction);
       }}
       reopen={reopen}
       onClose={onClose}

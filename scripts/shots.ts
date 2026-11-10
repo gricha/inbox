@@ -712,6 +712,14 @@ const SHOTS: Shot[] = [
         )
       )
         failures.push(`queue-session: the stalled session's row reads ${JSON.stringify(stalled)}`);
+      // Its menu, as minimal as a PR's: Done, Snooze (to a time), then its call to action.
+      await page.locator(".line.session", { hasText: "Migrate the job store" }).locator(".row-main").click({ button: "right" });
+      await page.locator(".ctx-item").first().waitFor();
+      const menu = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".ctx > .ctx-group > .ctx-item, .ctx > .ctx-group > .ctx-subwrap > .ctx-item")].map((el) => (el.querySelector("span") ?? el).textContent.trim())`,
+      );
+      if (menu.join(" · ") !== "Done · Snooze · Kick") failures.push(`queue-session: a session's menu reads ${JSON.stringify(menu)}`);
+      await page.keyboard.press("Escape");
       await page.locator(".line.session", { hasText: "Fix the flaky upload test" }).locator(".row-main").click();
       await page.waitForTimeout(200);
       const open = await page.evaluate<{ why: string; said: string; facts: string[]; acts: [string, boolean][] } | null>(`(() => {
@@ -2870,6 +2878,26 @@ const SHOTS: Shot[] = [
     after: unsettle,
   },
   { name: "settings-queue", go: at("#/settings/queue") },
+  {
+    // Sessions' own part, a plugin's under GitHub in the sidebar: its switch and the model's read, Stalled after behind
+    // More, and no Automations heading, as it comes with none.
+    name: "settings-sessions",
+    go: async (page) => {
+      await at("#/settings/sessions")(page);
+      const part = await page.evaluate<{ rows: string[]; heads: number; side: string[] }>(`(() => {
+        const s = document.querySelector("#s-sessions");
+        return {
+          rows: [...s.querySelectorAll(".setting:not([hidden]) .s-label")].map((el) => el.textContent.trim()),
+          heads: s.querySelectorAll(".group-head").length,
+          side: [...document.querySelectorAll(".side-nav .side-name")].map((el) => el.textContent.trim()).slice(-2),
+        };
+      })()`);
+      if (part.rows.join(" · ") !== "Show sessions that need you · Ask your agent whether a question waits on you")
+        failures.push(`settings-sessions: its rows read ${JSON.stringify(part.rows)}`);
+      if (part.heads) failures.push("settings-sessions: it has an Automations heading with nothing under it");
+      if (part.side.join(" · ") !== "GitHub · Sessions") failures.push(`settings-sessions: the sidebar ends ${JSON.stringify(part.side)}`);
+    },
+  },
   {
     // Quiet hours stored unpadded, as `desk settings set` may write it: in and out of its time without a change saves nothing.
     name: "settings-queue-quiet-kept",
