@@ -24,6 +24,7 @@ import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
 import {
+  attachCommand,
   beside,
   awaitsReview,
   DEFAULT_OPEN,
@@ -981,7 +982,7 @@ export function App() {
     document.querySelector<HTMLTextAreaElement>(".chat-input")?.focus();
   }
 
-  // Copy attach command copies `claude attach <id>`; Wake it starts your agent, or has it look at Merging now.
+  // Copy attach command copies `claude attach <id>` (Codex's: `codex resume <id>`); Wake it starts your agent, or has it look at Merging now.
   function coordinatorAct(k: "copy" | "wake"): Effect.Effect<void> {
     const id = lane?.coordinator.id;
     const step: Effect.Effect<void, ApiError | ClipboardUnavailable> =
@@ -995,7 +996,7 @@ export function App() {
             ),
           )
         : id
-          ? copyText(`claude attach ${id}`).pipe(
+          ? copyText(attachCommand(id, aiName() === "Codex")).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
                   flash("Copied. Run it in a terminal to open your agent.");

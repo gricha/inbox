@@ -60,12 +60,13 @@ const untilWords = (u: string | undefined) => UNTILS.find(([k]) => k === (u ?? "
 const WAY: Record<Way, { name: string; help: string }> = {
   rule: { name: "A rule", help: "No model: every item that passes the check gets the one action below." },
   ask: { name: "Ask a model", help: "One call reads the items and answers for each, or leaves it as it is." },
-  agent: { name: "An agent with tools", help: "Your own Claude Code, read only, with your tools: it can look further than the items." },
+  agent: { name: "An agent with tools", help: "Your own agent, read only, with tools: it can look further than the items." },
 };
 // Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
 const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : `${aiName()} answers, without tools`);
-// An agent run is Claude Code's whichever agent sorts and reviews: said when that's Codex.
-const onClaude = () => (aiName() === "Codex" ? " It runs on Claude Code." : "");
+// Codex's run has only the desk's read tools: Codex can't hold a shell to gh's reads, so it has none.
+const agentRun = () =>
+  aiName() === "Codex" ? "your Codex, read only, with the desk's read tools and no shell" : "your Claude Code, with read-only tools";
 
 // What goes to the desk for a draft: the whole automation. A rule's verb is the one thing it may do.
 function bodyOf(d: Draft): AutomationBody {
@@ -417,9 +418,9 @@ export function AutomationView({
   const turn = (on: boolean) => () => {
     runUi(au.turn(a, on));
   };
-  const resume = (session: string) => {
+  const resume = (session: string, codex: boolean) => {
     if (!settingsPath) return null;
-    const cmd = resumeCommand(settingsPath, session);
+    const cmd = resumeCommand(settingsPath, session, codex);
     return (
       <button
         type="button"
@@ -546,7 +547,7 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
       ? `A rule, with no model: ${VERB[rule.do]}${rule.do === "snooze" ? ` until ${untilWords(rule.until)}` : ""}, saying \u201c${rule.why}\u201d`
       : way === "ask"
         ? `A question: ${answers(model)}`
-        : `An agent: your Claude Code, with read-only tools.${onClaude()}`;
+        : `An agent: ${agentRun()}.`;
   return (
     <dl className="au-facts">
       {a.when && (
@@ -570,7 +571,7 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
 }
 
 // Each run: when, what it found, and what came of each item; its session one click from your clipboard.
-function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }) {
+function Runs({ a, resume }: { a: Auto; resume: (session: string, codex: boolean) => ReactNode }) {
   return (
     <div className="lines">
       {a.runs.map((r) => (
@@ -582,7 +583,7 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
               {r.didnt && <span className="t-bad"> · {r.didnt}</span>}
               {!r.done_at && <span className="busy" aria-label="running" />}
             </h3>
-            {r.session && resume(r.session)}
+            {r.session && resume(r.session, r.agent === "codex")}
           </div>
           {r.error && <p className="t-bad au-run-error">{r.error}</p>}
           {r.summary && <p className="au-summary">{r.summary}</p>}
@@ -849,7 +850,7 @@ function Editor({
             <span className="s-help">
               {d.decide === "ask"
                 ? "In your words: what should happen to which items. It answers for each item, or leaves it as it is."
-                : `Your own Claude Code runs it read only, with your tools; it lists PRs and issues with a line on why, and the desk does with them what you allow below.${onClaude()}`}
+                : `${aiName() === "Codex" ? "Your own Codex runs it read only, with the desk's read tools and no shell" : "Your own Claude Code runs it read only, with your tools"}; it lists PRs and issues with a line on why, and the desk does with them what you allow below.`}
             </span>
           </label>
           <fieldset className="au-field">

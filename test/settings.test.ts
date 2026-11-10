@@ -358,7 +358,7 @@ test("a secret in settings.json moves to secrets.json once, and secrets.json is 
   assert.equal(runSync(t.desk.putSettings({ set: { "queue.cards": 9 } })).ok, true, "other settings save as before");
 });
 
-test("what sorts and reviews names the agent you chose; your agent stays Claude Code's", () => {
+test("what sorts and reviews, and your agent, name the agent you chose", () => {
   const by = (harness: string) => new Map(agentDefs(harness).map((d) => [d.key, d]));
   assert.deepEqual(agentDefs("claude-code"), [...SETTINGS], "Claude Code's words, unchanged");
   assert.deepEqual([agentName("codex"), agentName("claude-code"), agentName("cursor")], ["Codex", "Claude", "Claude"]);
@@ -369,9 +369,7 @@ test("what sorts and reviews names the agent you chose; your agent stays Claude 
   assert.equal(codex.get("policy.max_per_hour")!.help, "On your own Codex login, 20 items a call.");
   assert.equal(codex.get("review.auto_ai")!.label, "Codex reviews other people's PRs ahead of time");
   assert.match(codex.get("agent.decision_key")!.help!, /Empty: Codex answers\.$/);
-  assert.match(codex.get("agent.harness")!.help!, /Your agent and automations with tools run on Claude Code\.$/);
-  assert.equal(
-    codex.get("agent.coordinator")!.help,
-    "A Claude Code session that answers Ask your agent and gets what you hand off merged.",
-  );
+  assert.equal(codex.get("agent.harness")!.help, "Sorts your desk and reviews PRs ahead of time, on your own login.");
+  assert.equal(codex.get("agent.coordinator")!.help, "A Codex session that answers Ask your agent and gets what you hand off merged.");
+  assert.match(codex.get("agent.coordinator_bypass")!.help!, /^No sandbox and no approvals/);
 });

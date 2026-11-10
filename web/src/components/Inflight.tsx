@@ -3,6 +3,7 @@ import { age, cls, fromName, aiName } from "../format.ts";
 import { Dots } from "./Detail.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
+import { attachCommand } from "../view.ts";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note;
 // then Claude's work. Beside a review (compact), its rows alone, two lines each.
@@ -222,7 +223,7 @@ function Coordinator({ c, act }: { c: CoordinatorView; act: (k: "copy" | "wake")
             key="attach"
             type="button"
             className="link-btn"
-            title={`claude attach ${c.id}`}
+            title={attachCommand(c.id, aiName() === "Codex")}
             onClick={() => {
               act("copy");
             }}

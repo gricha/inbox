@@ -63,6 +63,7 @@ import {
   removeCard,
   resolvedHead,
   resumeCommand,
+  attachCommand,
   routeHash,
   says,
   sections,
@@ -240,6 +241,12 @@ test("Copy resume command resumes a run's session in the automations folder besi
     `cd /Users/me/.inbox/automations && claude --resume ${id}`,
   );
   assert.equal(resumeCommand("/tmp/my desk/settings.json", id), `cd '/tmp/my desk/automations' && claude --resume ${id}`);
+  assert.equal(
+    resumeCommand("/Users/me/.inbox/settings.json", id, true),
+    `cd /Users/me/.inbox/automations && codex resume ${id}`,
+    "a Codex run's",
+  );
+  assert.deepEqual([attachCommand("c0ffee01", false), attachCommand(id, true)], ["claude attach c0ffee01", `codex resume ${id}`]);
   assert.equal(resumeCommand("/tmp/it's/settings.json", id), String.raw`cd '/tmp/it'\''s/automations' && claude --resume ${id}`);
   assert.equal(
     resumeCommand(String.raw`C:\Users\me\.inbox\settings.json`, id),

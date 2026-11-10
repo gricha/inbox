@@ -93,13 +93,16 @@ export const settingsBack = (section: string): string | null =>
 export const settingsTab = (section: string): "settings" | "automations" =>
   section === "automations" || automationOf(section) !== null ? "automations" : "settings";
 
-// What shows an automation run's Claude Code session: resumed in the automations folder, beside settings.json in the desk's home.
-export function resumeCommand(settingsPath: string, session: string): string {
+// What shows an automation run's session (Claude Code's, or Codex's): resumed in the automations folder, beside settings.json in the desk's home.
+export function resumeCommand(settingsPath: string, session: string, codex = false): string {
   const win = /^[A-Za-z]:\\/.test(settingsPath);
   const dir = `${settingsPath.replace(/[\\/]settings\.json\b.*$/, "")}${win ? "\\" : "/"}automations`;
   const quoted = /^[\w./\\:~+-]+$/.test(dir) ? dir : win ? `"${dir}"` : `'${dir.replaceAll("'", String.raw`'\''`)}'`;
-  return `cd ${quoted} && claude --resume ${session}`;
+  return `cd ${quoted} && ${codex ? "codex resume" : "claude --resume"} ${session}`;
 }
+
+// What opens your agent from a terminal: Claude Code's attach, or Codex's resume of its session.
+export const attachCommand = (id: string, codex: boolean): string => (codex ? `codex resume ${id}` : `claude attach ${id}`);
 
 // The desktop app's bridge as far as Settings' rows care (window.desktop): absent in a browser.
 type Shell = { platform: string } | undefined;

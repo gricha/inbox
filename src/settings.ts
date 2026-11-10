@@ -288,14 +288,15 @@ const DEFS = new Map<string, SettingDef>(SETTINGS.map((d) => [d.key, d]));
 // Who sorts and reviews (agent.harness), as the window and the desk's words name it.
 export const agentName = (harness: string): "Claude" | "Codex" => (harness === "codex" ? "Codex" : "Claude");
 
-// What sorts and reviews says who does it; your agent and agent-mode automations stay Claude Code's, and say so.
-const AGENT_WORDED = new Set(["review.auto_ai", "policy.judge", "policy.max_per_hour", "agent.decision_key"]);
+// What the agent does names the one you chose; on Codex, running without asking is its bypass of sandbox and approvals.
+const AGENT_WORDED = new Set(["review.auto_ai", "policy.judge", "policy.max_per_hour", "agent.decision_key", "agent.coordinator"]);
+const CODEX_BYPASS = "No sandbox and no approvals, as your own sessions run; off, it writes only in its folder. Its deny rules still hold.";
 export function agentDefs(harness: string): SettingDef[] {
   if (agentName(harness) === "Claude") return [...SETTINGS];
   const say = (t: string | undefined) => t?.replaceAll(/Claude( Code)?/g, "Codex");
   return SETTINGS.map((d: SettingDef) => {
     if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label)!, ...(d.help && { help: say(d.help) }) };
-    if (d.key === "agent.harness") return { ...d, help: `${d.help} Your agent and automations with tools run on Claude Code.` };
+    if (d.key === "agent.coordinator_bypass") return { ...d, help: CODEX_BYPASS };
     return d;
   });
 }
