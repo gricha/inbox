@@ -1377,8 +1377,6 @@ const TALK = new Map<string, Conversation[]>([
         take: {
           gist: "Should endpoints opt in to service accounts, rather than all of them taking one?",
           take: "Only you can answer: it's a call on how wide the change should be, and the billing PRs below wait on it.",
-          reply:
-            "Only the ones that check the actor: everything else still refuses a service account. An opt-in list per endpoint can follow.",
           comment_id: "sc1",
           at: iso(4),
         },
@@ -1404,8 +1402,6 @@ const TALK = new Map<string, Conversation[]>([
         take: {
           gist: "Tombstones are never compacted, so every sync ships all of them",
           take: "Valid concern: nothing in this PR or on main prunes the tombstone list, and `syncTombstones()` sends it whole on every pull.",
-          reply:
-            "Good catch: nothing prunes them yet. I'll have merge() drop tombstones older than the oldest device's last full sync, in this PR, with a test that a week-old delete doesn't come back.",
           comment_id: "c1",
           at: iso(4.5),
         },
@@ -1418,7 +1414,6 @@ const TALK = new Map<string, Conversation[]>([
         take: {
           gist: "Can it ship before Thursday's freeze?",
           take: "Only you can answer: it turns on whether the tombstone fix lands here or in a follow-up.",
-          reply: "Yes, if compacting tombstones can follow in its own PR; otherwise [Friday].",
           comment_id: "ic1",
           at: iso(1.5),
         },

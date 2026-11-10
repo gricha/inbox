@@ -863,7 +863,6 @@ export interface Conversation {
 export interface Take {
   gist: string; // what they want, one line
   take: string; // Claude's call and why: "Valid concern: …", "A nit: …", "Already addressed: …", "Only you can answer: …"
-  reply: string; // a suggested reply, in your voice
   comment_id: string; // the latest comment it read; a newer one asks again
   at: string;
 }

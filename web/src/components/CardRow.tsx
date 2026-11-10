@@ -26,7 +26,7 @@ const TREE_STEP = 20; // px a level, as .tree's steps are wide
 const CTA = {
   ready: { label: "Ready for review", title: "Mark it ready for review on GitHub" },
   reviewers: { label: "Add reviewers", title: "Nobody's asked to review it: opens its review to pick reviewers" },
-  reply: { label: "Reply", title: "Someone waits on your answer: opens its review with a reply ready" },
+  reply: { label: "Reply", title: "Someone waits on your answer: opens its review at their conversation" },
 };
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the

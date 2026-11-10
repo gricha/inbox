@@ -100,7 +100,7 @@ export function Conversation({
       )}
       {waiting.map((c) => {
         const last = c.comments.at(-1)!;
-        const text = drafts[c.id] ?? c.take?.reply ?? "";
+        const text = drafts[c.id] ?? "";
         const [call = "", why] = (c.take?.take ?? "").split(/: (.*)/s);
         return (
           <article key={c.id} className="cv">

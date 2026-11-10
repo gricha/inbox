@@ -238,7 +238,6 @@ test("Claude's prompt fences GitHub's text, and its answers are checked against 
     PRRT_open: {
       gist: "Do tombstones expire?",
       take: "Valid concern: nothing compacts them.",
-      reply: "Good catch. [plan]",
       comment_id: "c1",
       at: "2026-10-27T12:00:00Z",
     },
@@ -256,7 +255,7 @@ function fakeClaude(c: TestContext) {
 d="$(dirname "$0")"
 n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1))
 printf '%s\\n' "$@" > "$d/args.$n"; cat > "$d/stdin.$n"; echo $n > "$d/count"
-items=$(sed -n 's/^- id: //p' "$d/stdin.$n" | awk '{ printf "%s{\\"id\\":\\"%s\\",\\"gist\\":\\"gist of %s\\",\\"take\\":\\"A nit: fake\\",\\"reply\\":\\"Thanks, fixed.\\"}", (NR > 1 ? "," : ""), $0, $0 }')
+items=$(sed -n 's/^- id: //p' "$d/stdin.$n" | awk '{ printf "%s{\\"id\\":\\"%s\\",\\"gist\\":\\"gist of %s\\",\\"take\\":\\"A nit: fake\\"}", (NR > 1 ? "," : ""), $0, $0 }')
 echo "{\\"type\\":\\"result\\",\\"is_error\\":false,\\"structured_output\\":{\\"items\\":[$items]}}"
 `,
   );
@@ -330,7 +329,6 @@ test("Claude reads what waits on you once per latest comment, in the background,
   assert.deepEqual(v.conversation[0]!.take, {
     gist: "gist of PRRT_open",
     take: "A nit: fake",
-    reply: "Thanks, fixed.",
     comment_id: "c1",
     at: v.conversation[0]!.take!.at,
   });
