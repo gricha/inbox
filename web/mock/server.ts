@@ -2992,9 +2992,14 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
   } catch (e) {
     const why = (e as Error).message;
     aiErrors.set(r.id, why);
-    // Like the desk, a run the pause stopped is a try to come, not a review Claude gave up on.
+    // Like the desk (Jobs.held), a run the pause stopped is a try to come, not a review Claude gave up on, and not counted.
     if (why === LOGGED_OUT)
-      setJob("ai_review", r.id, { state: "queued", retry_at: new Date(Date.now() + 120_000).toISOString(), error: why });
+      setJob("ai_review", r.id, {
+        state: "queued",
+        attempts: Math.max(0, jobs.get(`ai_review ${r.id}`)!.attempts - 1),
+        retry_at: new Date(Date.now() + 120_000).toISOString(),
+        error: why,
+      });
     else setJob("ai_review", r.id, { state: "failed", finished_at: new Date().toISOString(), error: why });
     throw e;
   } finally {
