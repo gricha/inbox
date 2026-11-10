@@ -1494,6 +1494,28 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The next review's parts: the goal leads, the first risk reason after the meter, the gap unfolded; the fold holds the
+    // summary, the other reasons, Interfaces and Could be better; Look here sits on its line and the first step has a note.
+    name: "review-ai-parts",
+    go: async (page) => {
+      await page.evaluate(`localStorage.removeItem("desk.review.view")`);
+      await review("acme/worker#879")(page);
+      const ai = page.locator(".rv-ai");
+      const bad = (m: string) => failures.push(`review-ai-parts: ${m}`);
+      if (!(await ai.locator(".rv-gist").innerText()).startsWith("Splits the scheduler into Lease and Dispatch"))
+        bad("the goal doesn't lead");
+      if (!(await ai.locator(".rv-reason").count())) bad("no risk reason after the meter");
+      if (!(await ai.innerText()).includes("Not quite what the description says:")) bad("no gap line");
+      await page.locator(".rv-ai-lead").click();
+      await page.waitForTimeout(200);
+      const text = await ai.innerText();
+      for (const want of ["Interfaces", "Lease.renew()", "Could be better", "Also risky:"])
+        if (!text.includes(want)) bad(`the fold has no ${want}`);
+      if (!(await page.locator(".rv-look").count())) bad("no Look here in the diff");
+      if (!(await page.locator(".rv-step-note").count())) bad("the first step's note is missing");
+    },
+  },
+  {
     // A re-review being written over one on an earlier commit: since and the concerns stay out of the fold.
     name: "review-ai-since",
     go: async (page) => {
@@ -2003,7 +2025,7 @@ const SHOTS: Shot[] = [
       const uncovered = o.beyond ?? [];
       const want = [
         ...steps.flatMap((st, i) => [
-          `# ${i + 1} of ${steps.length} ${st.title}${st.body ? ` ${st.body.replaceAll("`", "")}` : ""}${st.check ? ` Check: ${st.check}` : ""}`,
+          `# ${i + 1} of ${steps.length} ${st.title}${st.body ? ` ${st.body.replaceAll("`", "")}` : ""}${st.check ? ` Check: ${st.check}` : ""}${st.note ? ` ${st.note}` : ""}`,
           ...runs(st.hunks),
         ]),
         ...(uncovered.length
