@@ -39,7 +39,7 @@ import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
-import { fetchPr, generateReview, loggedIn } from "./review.ts";
+import { dropHostSession, fetchPr, generateReview, loggedIn } from "./review.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
@@ -1048,6 +1048,9 @@ export const startDesk = Effect.fnUntraced(function* (
       console.error(`${new Date().toISOString()} ${m}`);
       logLine(m);
     });
+  const dropped = dropHostSession(process.env);
+  if (dropped.length)
+    log(`started inside a Claude Code session: dropped its ${dropped.length} variables so your agent uses your own login`);
   const home = opts.home ?? (yield* settleHome(port, log));
   const desk = new Desk({
     home,

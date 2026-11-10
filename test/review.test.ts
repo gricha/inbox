@@ -22,6 +22,7 @@ import { GH_MISSING } from "../src/github/client.ts";
 import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
+  dropHostSession,
   agentDir,
   agentDown,
   askAgent,
@@ -2339,4 +2340,23 @@ test("without a write client, approving is off", async () => {
   assert.deepEqual((await run(t.desk.reviewView("api#1"))).approve, { ok: false, reason: "approving isn't available in this desk" });
   await assert.rejects(run(t.desk.approve("api#1", "h1")), /isn't available/);
   t.cleanup();
+});
+
+test("a desk started inside a Claude Code session drops that session's variables, so its claude uses the owner's login; elsewhere it keeps them all", () => {
+  const inside = {
+    CLAUDECODE: "1",
+    CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
+    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1",
+    ANTHROPIC_BASE_URL: "http://127.0.0.1:1",
+    CLAUDE_AGENT_SDK_VERSION: "1",
+    HOME: "/home/me",
+    PATH: "/bin",
+    DESK_HOME: "/h",
+  };
+  const env: NodeJS.ProcessEnv = { ...inside };
+  assert.equal(dropHostSession(env).length, 5);
+  assert.deepEqual(env, { HOME: "/home/me", PATH: "/bin", DESK_HOME: "/h" });
+  const own: NodeJS.ProcessEnv = { ANTHROPIC_BASE_URL: "https://proxy.example", HOME: "/home/me" };
+  assert.deepEqual(dropHostSession(own), [], "your own ANTHROPIC_BASE_URL, outside a session, stays");
+  assert.equal(own.ANTHROPIC_BASE_URL, "https://proxy.example");
 });

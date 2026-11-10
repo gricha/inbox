@@ -484,6 +484,17 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
 // ---------------------------------------------------------------- the agents
 
 // Every agent run is your own Claude Code: `claude` from PATH, no override. DESK_CLAUDE points tests and QA at a fake.
+// A desk started from inside a Claude Code session (the app opened by an agent, `npm run app` in its terminal) inherits that
+// session's variables, which point every claude it runs at the host's login and say "Not logged in". Only then are they dropped.
+export function dropHostSession(env: NodeJS.ProcessEnv): string[] {
+  if (!env.CLAUDECODE && !env.CLAUDE_CODE_ENTRYPOINT) return [];
+  const host =
+    /^(CLAUDECODE|CLAUDE_CODE_\w+|CLAUDE_AGENT_SDK_\w+|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_\w+|USE_STAGING_OAUTH|USE_LOCAL_OAUTH|API_TIMEOUT_MS)$/;
+  const dropped = Object.keys(env).filter((k) => host.test(k));
+  for (const k of dropped) delete env[k];
+  return dropped;
+}
+
 export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
 // Where it runs and the answer's shape. Interrupting the run kills it (the desk stopping).
