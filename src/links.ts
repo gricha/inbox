@@ -17,7 +17,9 @@ export type Place = { page: Page } | { item: string } | { question: string };
 
 const isPage = (s: string): s is Page => Object.hasOwn(PAGES, s);
 const GITHUB_ID = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
-const DESK_LINK = /^(?:inbox:|https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?:[:/#]|$))/i;
+// The desk's http links: this machine's, or its tailnet address (https://<machine>.<tailnet>.ts.net) from another device.
+const DESK_HOST = String.raw`(?:localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.[\w-]+\.ts\.net)`;
+const DESK_LINK = new RegExp(String.raw`^(?:inbox:|https?:\/\/${DESK_HOST}(?:[:/#]|$))`, "i");
 const decode = (s: string): string | null => {
   const r = Result.try({ try: () => decodeURIComponent(s), catch: () => null });
   return Result.isSuccess(r) && r.success ? r.success : null;
@@ -36,7 +38,7 @@ export function hashOf(p: Place): string {
   return "question" in p ? `#/inquiry/${p.question}` : `#/item/${encodeURIComponent(p.item)}`;
 }
 
-// What a link names: an inbox:// permalink, or the desk's own http link (localhost, any port); null for anything else.
+// What a link names: an inbox:// permalink, or the desk's own http link (localhost, any port, or its tailnet address); null for anything else.
 export function placeOf(link: string): Place | null {
   const s = link.trim();
   const app = /^inbox:\/\/([^?#]*?)\/?$/i.exec(s);
@@ -53,7 +55,7 @@ export function placeOf(link: string): Place | null {
     const id = other ? decode(other) : null;
     return id?.includes(":") ? { item: id } : null;
   }
-  const web = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/?(?:#(.*))?$/i.exec(s);
+  const web = new RegExp(String.raw`^https?:\/\/${DESK_HOST}(?::\d+)?\/?(?:#(.*))?$`, "i").exec(s);
   if (!web) return null;
   const route = web[1] ?? "";
   if (route === "" || route === "/") return { page: "inbox" };

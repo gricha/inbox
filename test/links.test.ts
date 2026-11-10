@@ -79,3 +79,11 @@ test("a ref that's a desk link is its item's id; one naming no item is refused i
   for (const ref of ["acme/api#7", "api#7", "#7", "https://github.com/acme/api/pull/7", "http://localhostile.example/#/review/x"])
     assert.equal(linkRef(ref), null, ref);
 });
+
+test("the desk's link from another device, at its tailnet address, reads as the item or question it names", () => {
+  assert.deepEqual(placeOf("https://desk.tail1234.ts.net/#/review/acme%2Fapi%237"), { item: "acme/api#7" });
+  assert.deepEqual(placeOf("https://desk.tail1234.ts.net/#/inquiry/q-1"), { question: "q-1" });
+  assert.deepEqual(linkRef("https://desk.tail1234.ts.net/#/item/acme%2Fapi%237"), { id: "acme/api#7" });
+  assert.equal(placeOf("https://evil.example/#/review/acme%2Fapi%237"), null);
+  assert.equal(linkRef("https://ts.net.evil.example/#/review/x"), null);
+});
