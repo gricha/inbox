@@ -12,6 +12,7 @@ import {
   type InlineAt,
   type Job,
   type ReviewFile,
+  type ReviewLook,
   type ReviewNote,
   type Reviewer,
   type ReviewView,
@@ -48,6 +49,7 @@ import {
   lineName,
   linesLabel,
   onLines,
+  sectionOf,
   resolvedHead,
   routeHash,
   says,
@@ -66,6 +68,7 @@ import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
+import { Diagram } from "./Diagram.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { ProseBlocks, spans, Words } from "./Prose.tsx";
 import { focusReviewers, Reviewers } from "./Reviewers.tsx";
@@ -75,6 +78,7 @@ import { SkLines } from "./Skeleton.tsx";
 // writing, or one you sent that the conversation doesn't show yet.
 type Meta =
   | { kind: "note"; index: number; body: string }
+  | { kind: "look"; line: number; end: number; why: string }
   | { kind: "thread"; id: string }
   | { kind: "draft" }
   | { kind: "sent"; body: string; url: string };
@@ -426,6 +430,18 @@ export function Review({
     });
   }
 
+  // To a line the AI review names (an interface, an improvement): its section, the line in view.
+  function toLine(path: string, at: "new" | "old", line: number) {
+    const i = sectionOf(list, path, { side: at, line });
+    if (i >= 0) goTo(i);
+  }
+
+  // A step's diagram, when the review drew one that survived the grammar.
+  function figure(which: string) {
+    const d = which ? v?.ai?.diagrams?.find((x) => x.id === which) : undefined;
+    return d ? <Diagram graph={d.graph} title={d.title} caption={d.caption} /> : null;
+  }
+
   function toStep(k: number) {
     goTo(steps[k]!.at, `#rv-step-${k}`);
   }
@@ -725,6 +741,7 @@ export function Review({
       index={i}
       file={files[x.file]!}
       notes={view.ai?.notes ?? []}
+      looks={view.ai_stale ? [] : (view.ai?.look ?? [])}
       order={notes}
       now={now}
       shut={shut.has(x.path)}
@@ -773,6 +790,7 @@ export function Review({
               now={now}
               open={open}
               notes={notes.length}
+              onLine={toLine}
               onAsk={
                 flying
                   ? undefined
@@ -968,6 +986,8 @@ export function Review({
                           <b>Check:</b> {spans(unlinked(inline(steps[k]!.check)))}
                         </p>
                       )}
+                      {steps[k]!.note && <p className="rv-step-body rv-step-note">{spans(unlinked(inline(steps[k]!.note)))}</p>}
+                      {figure(steps[k]!.diagram)}
                     </header>
                   )}
                   {steps.length > 0 && i === beyond && (
@@ -1519,7 +1539,13 @@ function StackList({ stack }: { stack: Stack }) {
 }
 
 // The AI review's read, from the review or, until it lands, from its row's preflight (no model or time yet).
-type AiShown = Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns"> & Partial<Pick<AiReview, "model" | "at">>;
+type AiShown = Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns"> &
+  Partial<Pick<AiReview, "model" | "at" | "intent" | "risk_reasons" | "interfaces" | "improvements" | "diagrams" | "guide">>;
+
+const FIT: Partial<Record<NonNullable<AiReview["intent"]>["fit"], string>> = {
+  partial: "Not quite what the description says",
+  differs: "Not what the description says",
+};
 
 function AiSection({
   ai,
@@ -1531,6 +1557,7 @@ function AiSection({
   open,
   notes,
   onAsk,
+  onLine,
 }: {
   ai: AiShown | null;
   stale: boolean;
@@ -1541,11 +1568,21 @@ function AiSection({
   open: boolean;
   notes: number;
   onAsk: (() => void) | undefined; // none for a PR in Merging: it's your agent's
+  onLine?: (path: string, side: "new" | "old", line: number) => void; // to a line of the diff
 }) {
   const [more, setMore] = useState(false); // the rest of the summary, on this PR only: every PR opens folded
   const summary = ai?.summary ?? "";
-  const { first, rest } = useMemo(() => lead(blocks(summary)), [summary]);
-  const folds = first.length > 0 && rest.length > 0;
+  const goal = ai?.intent?.goal ?? "";
+  // A review with a goal leads with it and folds its whole summary; an older one leads with the summary's first sentence.
+  const { first, rest } = useMemo(() => (goal ? { first: inline(goal), rest: blocks(summary) } : lead(blocks(summary))), [goal, summary]);
+  const reasons = ai?.risk_reasons ?? [];
+  const lead1 = ai && ai.risk !== "low" ? reasons[0] : undefined;
+  const later = lead1 ? reasons.slice(1) : reasons;
+  const ifaces = ai?.interfaces ?? [];
+  const better = ai?.improvements ?? [];
+  // A diagram no step draws sits in the fold, at most one.
+  const loose = ai?.diagrams?.find((d) => !ai.guide?.steps.some((st) => st.diagram === d.id));
+  const folds = first.length > 0 && (rest.length > 0 || later.length > 0 || ifaces.length > 0 || better.length > 0 || !!loose);
   const verdict = ai && (
     <>
       <span className={`verdict v-${ai.verdict}`}>{VERDICT[ai.verdict]}</span>
@@ -1557,6 +1594,7 @@ function AiSection({
         </span>
         {ai.risk} risk
       </span>
+      {lead1 && <span className="quiet rv-reason">{lead1.why}</span>}
       {stale && <span className="quiet">on an earlier commit</span>}
     </>
   );
@@ -1629,7 +1667,71 @@ function AiSection({
             )}
           </p>
           {first.length > 0 && <p className="rv-gist">{spans(unlinked(first))}</p>}
-          {rest.length > 0 && (more || !folds) && <ProseBlocks bs={rest} links={false} />}
+          {ai.intent?.stack && (
+            <p className="rv-since">
+              <b>In the stack:</b> {spans(unlinked(inline(ai.intent.stack)))}
+            </p>
+          )}
+          {ai.intent && FIT[ai.intent.fit] && ai.intent.gap && (
+            <p className="rv-since">
+              <b>{FIT[ai.intent.fit]}:</b> {spans(unlinked(inline(ai.intent.gap)))}
+            </p>
+          )}
+          {(more || !folds) && (
+            <>
+              {rest.length > 0 && <ProseBlocks bs={rest} links={false} />}
+              {later.length > 0 && (
+                <p className="rv-more-line">
+                  <b>Also risky:</b> {later.map((r) => r.why).join("; ")}
+                </p>
+              )}
+              {ifaces.length > 0 && (
+                <div className="rv-more-list">
+                  <h3 className="rv-more-head">Interfaces</h3>
+                  <ul>
+                    {ifaces.map((x) => (
+                      <li key={`${x.path}:${x.line}:${x.name}`}>
+                        <button
+                          type="button"
+                          className="rv-more-item"
+                          title={`${x.path}:${x.line}`}
+                          onClick={() => {
+                            onLine?.(x.path, x.side, x.line);
+                          }}
+                        >
+                          <code>{x.name}</code> {x.change}
+                          {x.breaking && <b> breaking</b>}
+                        </button>{" "}
+                        <span className="quiet">{spans(unlinked(inline(x.impact)))}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {better.length > 0 && (
+                <div className="rv-more-list">
+                  <h3 className="rv-more-head">Could be better</h3>
+                  <ul>
+                    {better.map((x) => (
+                      <li key={`${x.path}:${x.line}:${x.body}`}>
+                        <button
+                          type="button"
+                          className="rv-more-item"
+                          title={`${x.path}:${x.line}`}
+                          onClick={() => {
+                            onLine?.(x.path, x.side, x.line);
+                          }}
+                        >
+                          {spans(unlinked(inline(x.body)))}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {loose && <Diagram graph={loose.graph} title={loose.title} caption={loose.caption} />}
+            </>
+          )}
           {ai.since && (
             <p className="rv-since">
               <b>Since your review:</b> {spans(unlinked(inline(ai.since)))}
@@ -1770,6 +1872,7 @@ function SectionView({
   index,
   file,
   notes,
+  looks,
   order,
   now,
   shut,
@@ -1788,6 +1891,7 @@ function SectionView({
   index: number;
   file: ReviewFile;
   notes: ReviewNote[]; // the AI review's
+  looks: ReviewLook[]; // the AI review's: where correctness hinges
   order: number[]; // ReviewView.order.notes: a note's place in it is its place in reading order
   now: number;
   shut: boolean; // you folded this file
@@ -1829,6 +1933,10 @@ function SectionView({
     () => [
       // First, so nothing landing on the file moves it (Pierre keys these by place); its CSS order puts it last on its line.
       ...(writing && boxLine && boxSide ? [{ side: sideOf(boxSide), lineNumber: boxLine, metadata: { kind: "draft" } as const }] : []),
+      ...[...new Set(x.hunks.flatMap((h) => h.looks ?? []))].flatMap((i): DiffLineAnnotation<Meta>[] => {
+        const l = looks[i];
+        return l ? [{ side: sideOf(l.side), lineNumber: l.line, metadata: { kind: "look", line: l.line, end: l.end, why: l.why } }] : [];
+      }),
       ...mine
         .filter((n) => n.inline)
         .map((n): DiffLineAnnotation<Meta> => ({
@@ -1849,7 +1957,7 @@ function SectionView({
           metadata: { kind: "sent", body: s.body, url: s.url },
         })),
     ],
-    [mine, threads, writing, boxLine, boxSide, sent, x],
+    [mine, looks, threads, writing, boxLine, boxSide, sent, x],
   );
   // The lines marked only while you drag down the gutter: Pierre's own selection would outlive the box, and pin the + to it.
   const [dragging, setDragging] = useState<SelectedLineRange | null>(null);
@@ -1925,6 +2033,7 @@ function SectionView({
           renderAnnotation={(a) => {
             const m = a.metadata;
             if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} />;
+            if (m.kind === "look") return <Look key={`l${m.line}`} line={m.line} end={m.end} why={m.why} />;
             if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
             if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
             const t = threads.find((c) => c.id === m.id);
@@ -2192,6 +2301,15 @@ function Yours({ body, url }: { body: string; url: string }) {
       <div className="rv-tc-body">
         <Words text={body} />
       </div>
+    </div>
+  );
+}
+
+// Where the change's correctness hinges: read these lines even if nothing else.
+function Look({ line, end, why }: { line: number; end: number; why: string }) {
+  return (
+    <div className="rv-note rv-look">
+      <b>Look here{end > line ? `, lines ${line}–${end}` : ""}:</b> {spans(unlinked(inline(why)))}
     </div>
   );
 }

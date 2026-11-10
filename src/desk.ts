@@ -129,6 +129,7 @@ import {
 } from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, sortKey, textHash } from "./judge.ts";
+import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
 import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
@@ -1621,7 +1622,11 @@ export class Desk {
     const ai = snap.reviews.get(it.id);
     const lines = it.additions + it.deletions;
     if (ai?.head_oid !== it.head_oid || ai.risk !== "low" || ai.verdict === "look" || lines > QUICK_LINES) return null;
-    return `Quick to review: low risk, ${lines} ${lines === 1 ? "line" : "lines"}`;
+    // The newer review's parts, when it has them: nothing it kept to raise, nothing it breaks, and it does what it says.
+    if (ai.concerns.length || ai.interfaces?.some((x) => x.breaking)) return null;
+    const fit = ai.intent?.fit;
+    if (fit === "partial" || fit === "differs") return null;
+    return `Quick to review: low risk, ${lines} ${lines === 1 ? "line" : "lines"}${fit === "matches" ? ", does what it says" : ""}`;
   }
 
   // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
@@ -2092,7 +2097,8 @@ export class Desk {
       const e = snap.entries.get(id)!;
       const review = Effect.gen({ self: this }, function* () {
         if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
-        const pr = { ...(yield* this.prText(id)), stack: this.stackLines(snap, id) };
+        const own = yield* this.reviewSkill();
+        const pr = { ...(yield* this.prText(id)), stack: this.stackLines(snap, id), own: own.own, skill: own.hash };
         const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent());
         this.store.set(`review:${id}`, ai);
         this.jobs.done("ai_review", id);
@@ -2100,8 +2106,9 @@ export class Desk {
         this.aiLastFailed = null;
         if (this.aiPaused) this.log("AI reviews resume");
         this.aiPaused = null;
+        for (const why of ai.refused ?? []) this.log(`AI review of ${id}: diagram ${why}: dropped`);
         this.log(
-          `AI review of ${id}: ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}, ${ai.guide ? `${ai.guide.steps.length} steps covering ${ai.guide.steps.reduce((n, st) => n + st.hunks.length, 0)} hunks` : "no walk-through"}`,
+          `AI review of ${id}: ${ai.risk} risk, ${ai.verdict}, ${ai.concerns.length} concerns, ${ai.notes.length} notes${ai.dropped ? ` (${ai.dropped} the check dropped)` : ""}, ${ai.chunks ? `${ai.chunks.ranked.length} of ${ai.chunks.total} chunks ranked` : "no ranking"}, ${ai.guide ? `${ai.guide.steps.length} steps covering ${ai.guide.steps.reduce((n, st) => n + st.hunks.length, 0)} hunks` : "no walk-through"}`,
         );
         this.retryAgents(notLoggedIn(this.agent()));
         return ai;
@@ -2149,13 +2156,45 @@ export class Desk {
   }
 
   // Its stack, bottom first, for its review to say where it sits and what it adds; none when it's on its own.
+  // The 3 below and 2 above it, each below with its own review's goal when the desk holds one of its head.
   stackLines(snap: Snapshot, id: string): string[] {
     const st = this.stack(id, snap);
     if (!st || st.line.length < 2) return [];
+    const at = st.line.findIndex((m) => m.current);
+    const from = Math.max(0, at - 3);
+    const to = Math.min(st.line.length, at + 3);
+    const goal = (mid: string) => {
+      const ai = snap.reviews.get(mid);
+      const g = ai?.head_oid === snap.entries.get(mid)?.item.head_oid ? ai?.intent?.goal : undefined;
+      return g ? ` (goal: ${g})` : "";
+    };
     return [
       `bottom first, on ${st.base}:`,
-      ...st.line.map((m) => `${m.current ? "-> this PR" : "-"} ${m.id} (${m.draft ? "draft" : m.state}): ${m.title}`),
+      ...(from > 0 ? [`- ${from} more below`] : []),
+      ...st.line
+        .slice(from, to)
+        .map(
+          (m, i) =>
+            `${m.current ? "-> this PR" : "-"} ${m.id} (${m.draft ? "draft" : m.state}): ${m.title}${from + i < at ? goal(m.id) : ""}`,
+        ),
+      ...(to < st.line.length ? [`- ${st.line.length - to} more above`] : []),
     ];
+  }
+
+  // ~/.inbox/review.md, read on each review: the owner's changes to the review's instructions, and the hash kept on it.
+  reviewSkill(): Effect.Effect<{ own: OwnSkill | null; hash: string }> {
+    const file = path.join(this.home, "review.md");
+    return Effect.try({ try: () => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""), catch: fsError("read", file) }).pipe(
+      Effect.catch((e) =>
+        Effect.as(
+          Effect.sync(() => {
+            this.log(`${e.message}: reviewing with the default instructions`);
+          }),
+          "",
+        ),
+      ),
+      Effect.map((md) => ({ own: md.trim() ? readOwnSkill(md) : null, hash: textHash(`${REVIEW_SKILL_VERSION}\n${md}`) })),
+    );
   }
 
   wantsAi(e: Entry, snap: Snapshot): boolean {

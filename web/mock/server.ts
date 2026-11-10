@@ -2870,7 +2870,10 @@ const retryAt = () => new Date(Date.now() + 26 * 60_000).toISOString();
 const autoAiOn = () => setting("review.auto_ai");
 
 // What the agent wrote (or will write) for the other PRs in Now and Today, so every card has something real to skim.
-const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns">> = {
+const WRITTEN: Record<
+  string,
+  Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns"> & Partial<Pick<AiReview, "intent" | "risk_reasons">>
+> = {
   "acme/api#4099": {
     verdict: "look",
     risk: "medium",
@@ -2927,6 +2930,16 @@ const WRITTEN: Record<string, Pick<AiReview, "verdict" | "risk" | "summary" | "s
     summary:
       "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work, runs it and reports back with the token, so a worker that lost its lease can't overwrite a newer result. The old scheduler stays behind SCHEDULER_V2=false for a release and reads the same table, so a rollback needs no migration. Most of the 1,240 lines move existing code; about 300 are new, mainly the renewal loop and its tests.",
     concerns: ["Both services run migrations on start, so two replicas starting together can race on the new lease_token column."],
+    intent: {
+      goal: "Splits the scheduler into Lease and Dispatch so a worker that lost its lease can never overwrite a newer result.",
+      fit: "partial",
+      gap: "Also renames the retry config keys, which the description doesn't mention.",
+      stack: "",
+    },
+    risk_reasons: [
+      { factor: "concurrency", why: "lease renewal races with expiry under load" },
+      { factor: "deploy", why: "both services migrate on start" },
+    ],
   },
   "friends/garden-sensors#18": {
     verdict: "skim",
@@ -2981,6 +2994,7 @@ function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRan
     parseReview(
       {
         summary: "-",
+        risk: "high",
         notes: notes.map((n) => ({ ...n, quote: lineAt(files, n) })),
         chunks: ranked.map(([n, level, why]) => ({ id: `h${n}`, level, why })),
       },
@@ -2996,12 +3010,13 @@ function ranking(id: string, files: ReviewFile[], notes: ReviewNote[]): ChunkRan
 
 // A walk-through on the scheduler split, its unread and skipped files left out (the planner's is canned in diffs.ts).
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => `h${a + i}`);
-const STEPS: Record<string, { title: string; body: string; check: string; hunks: string[] }[]> = {
+const STEPS: Record<string, { title: string; body: string; check: string; note?: string; diagram?: string; hunks: string[] }[]> = {
   "acme/worker#879": [
     {
       title: "Leases and the fencing token",
       body: "Lease owns the jobs table: the new types and store hand out time-limited leases with a token, and the scheduler's entry point starts its loop.",
       check: "A renewal after the lease expired is refused, not extended.",
+      note: "Lease ships first and runs alone for a release: Dispatch only starts asking it for work once SCHEDULER_V2 is on, so the old scheduler and Lease never hand out the same job.",
       hunks: ["h2", "h3", "h1"],
     },
     {
@@ -3013,6 +3028,43 @@ const STEPS: Record<string, { title: string; body: string; check: string; hunks:
     { title: "Errors, retries and config", body: "Moved from the old scheduler with the new names.", check: "", hunks: range(11, 20) },
   ],
 };
+
+// The newer review's parts on the scheduler split: a look range, an interface and an improvement, on its first file's change.
+function extras(path: string, line: number): Partial<AiReview> {
+  return {
+    look: [{ path, side: "new", line, end: line + 2, why: "the fencing token must be checked before the write" }],
+    interfaces: [
+      {
+        name: "Lease.renew()",
+        kind: "function",
+        change: "added",
+        breaking: false,
+        impact: "Dispatch calls it on every heartbeat; a refusal stops the job.",
+        path,
+        side: "new",
+        line,
+      },
+      {
+        name: "SCHEDULER_V2",
+        kind: "config",
+        change: "added",
+        breaking: false,
+        impact: "Off by default; turning it off goes back to the old scheduler on the same table.",
+        path,
+        side: "new",
+        line,
+      },
+    ],
+    improvements: [
+      {
+        path,
+        side: "new",
+        line,
+        body: "Pass the token into `report()` rather than reading it from the job row, so a stale row can't supply it.",
+      },
+    ],
+  };
+}
 
 function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
@@ -3041,6 +3093,7 @@ function written(r: Rec, head: string): AiReview {
         ? [`At ${sig.pr.size} lines across ${sig.pr.files} files this is worth splitting; the retry change could ship on its own.`]
         : [],
     ...WRITTEN[r.id],
+    ...(r.id === "acme/worker#879" && f && extras(f.path, f.path.endsWith(".py") ? 16 : 12)),
     notes,
     ...(chunks && { chunks }),
     ...(guide && { guide }),

@@ -275,6 +275,13 @@ export interface WalkStep {
   title: string;
   body: string;
   check: string;
+  note: string; // block prose, or ""
+  diagram: string; // the id of its diagram in ai.diagrams, or ""
+}
+
+// The section a line of the diff is drawn in, -1 when none draws it.
+export function sectionOf(list: Pick<Section, "path" | "hunks">[], path: string, at: Pick<ReviewNote, "side" | "line">): number {
+  return list.findIndex((x) => x.path === path && onLines(x.hunks, at));
 }
 
 // The walk-through as one list of sections: each step's, then from `beyond` on what no step covers, then the desk's fold.
@@ -283,7 +290,7 @@ export function walk(o: ReviewOrder): { list: Section[]; rest: number; steps: Wa
   const steps = (o.steps ?? []).map((st) => {
     const at = list.length;
     grouped(st.hunks, list);
-    return { at, title: st.title, body: st.body, check: st.check };
+    return { at, title: st.title, body: st.body, check: st.check, note: st.note ?? "", diagram: st.diagram ?? "" };
   });
   const beyond = list.length;
   grouped(o.beyond ?? [], list);

@@ -269,7 +269,25 @@ test("each item carries its facts: others asked and their reviews, the files in 
     key: "",
   });
   const p = buildJudgePrompt(
-    [g(it, aiReview()), g(other), g(web, aiReview({ verdict: "look", risk: "high" })), g(issue)],
+    [
+      g(it, aiReview()),
+      g(
+        other,
+        aiReview({
+          head_oid: other.head_oid,
+          verdict: "look",
+          risk: "high",
+          risk_reasons: [
+            { factor: "data", why: "a" },
+            { factor: "contract", why: "b" },
+            { factor: "data", why: "c" },
+          ],
+          intent: { goal: "Moves billing to the new ledger.", fit: "partial", gap: "", stack: "" },
+        }),
+      ),
+      g(web, aiReview({ verdict: "look", risk: "high" })),
+      g(issue),
+    ],
     "",
     "me",
     c,
@@ -295,6 +313,11 @@ test("each item carries its facts: others asked and their reviews, the files in 
   assert.ok(desc.endsWith("…") && desc.length <= 281, "clipped at a word");
   assert.ok(!p.includes("</items-TAG> now"), "the clip stops before the fake fence");
 
+  assert.match(
+    lines("acme/api#8"),
+    /AI pre-flight review: look closely, high risk \(data, contract\); not what the description says\. Moves billing to the new ledger\.\n/,
+    "the factors, the fit, and its goal in place of the summary",
+  );
   assert.match(lines("acme/web#9"), /AI pre-flight review of an earlier commit: look closely, high risk\./);
   assert.match(lines("acme/web#9"), /in their areas: 0 of 1 files; touches lib\/ \(1\)/);
   assert.doesNotMatch(lines("acme/api#10"), /reviews by others|in their areas|description|also requested/, "an issue with no body");

@@ -724,9 +724,49 @@ export interface AiReview {
   dropped?: number; // concerns and notes the check took out: their quote wasn't in the diff, or the diff didn't bear them out
   chunks?: ChunkRanking; // absent on reviews written before ranking, or when Claude didn't rank
   guide?: ReviewGuide; // absent on reviews written before it, and when Claude wrote no walk-through worth keeping
+  // The next review's parts; absent on reviews written before them.
+  risk_reasons?: { factor: RiskFactor; why: string }[];
+  intent?: { goal: string; fit: "matches" | "partial" | "differs" | "undescribed"; gap: string; stack: string };
+  look?: ReviewLook[]; // where correctness hinges: read these even if nothing else
+  interfaces?: ReviewInterface[];
+  improvements?: ReviewNote[]; // held up by the check like concerns; never notes in the code
+  diagrams?: ReviewDiagram[]; // parsed by the desk; what failed the grammar never reaches here
+  skill?: string; // the hash of the review instructions it was written with
+  refused?: string[]; // diagrams the grammar refused, and why: for the log
   head_oid: string; // the commit it read; a newer push makes it stale
   model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
   at: string;
+}
+
+type RiskFactor = "data" | "security" | "contract" | "concurrency" | "deploy" | "irreversible" | "reach" | "untested" | "other";
+
+export interface ReviewLook {
+  path: string;
+  side: "new" | "old";
+  line: number;
+  end: number; // its last line, in the same hunk
+  why: string;
+}
+
+export interface ReviewInterface {
+  name: string;
+  kind: "function" | "type" | "endpoint" | "schema" | "config" | "event" | "cli" | "permission" | "other";
+  change: "added" | "changed" | "removed";
+  breaking: boolean;
+  impact: string;
+  path: string;
+  side: "new" | "old";
+  line: number;
+}
+
+// The diagram's graph as src/diagram.ts parses it.
+export type DiagramGraph = Record<string, unknown>;
+
+export interface ReviewDiagram {
+  id: string;
+  title: string;
+  caption: string;
+  graph: DiagramGraph;
 }
 
 // Which hunks of the diff are worth your attention, as Claude ranked them. Ids are h1, h2, … across the files in order,
@@ -740,7 +780,7 @@ export interface ChunkRanking {
 // Claude's walk through the diff, in the order to understand it. Ids and paths as ChunkRanking keeps them, so a retargeted
 // base can't point a step at other code.
 export interface ReviewGuide {
-  steps: { title: string; body: string; check: string; hunks: { id: string; path: string }[] }[];
+  steps: { title: string; body: string; check: string; note?: string; diagram?: string; hunks: { id: string; path: string }[] }[];
 }
 
 // One hunk of the diff in GET /api/review/:id, with what the AI review made of it.
@@ -756,6 +796,7 @@ export interface ReviewHunk {
   rank: number | null; // 1 = read it first; look and skim only
   why: string | null; // look and skim: Claude's few words ("" on a hunk it noted but didn't rank); unread: which was too long, the PR or its file
   notes: number[]; // indices into ai.notes to show with it, in reading order: the file's own notes (line 0) on its first hunk in the order
+  looks?: number[]; // indices into ai.look that start on it
 }
 
 // The order the review view reads in, decided by the desk: what to look at across files, then the rest; only the desk's own
@@ -776,6 +817,8 @@ interface ReviewStep {
   title: string;
   body: string;
   check: string; // what to verify here, or ""
+  note?: string; // block prose: context no single line carries
+  diagram?: string; // the id of its diagram in ai.diagrams
   hunks: ReviewHunk[];
 }
 

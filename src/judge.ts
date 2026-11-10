@@ -178,7 +178,9 @@ function preflight(it: Item, ai: AiReview | null): string | null {
   if (!ai) return null;
   const first = oneLine(ai.summary).match(/^.+?[.!?](?=\s|$)/)?.[0] ?? oneLine(ai.summary);
   const of = ai.head_oid === it.head_oid ? "" : " of an earlier commit";
-  return `AI pre-flight review${of}: ${CALL[ai.verdict]}, ${ai.risk} risk. ${clip(first, 160)}`;
+  const factors = ai.risk_reasons?.length ? ` (${[...new Set(ai.risk_reasons.map((r) => r.factor))].join(", ")})` : "";
+  const fit = ai.intent?.fit === "partial" || ai.intent?.fit === "differs" ? "; not what the description says" : "";
+  return `AI pre-flight review${of}: ${CALL[ai.verdict]}, ${ai.risk} risk${factors}${fit}. ${clip(ai.intent?.goal ? oneLine(ai.intent.goal) : first, 160)}`;
 }
 
 // Who opened it: a bot's PR opened for a person ("via …") is that person's.

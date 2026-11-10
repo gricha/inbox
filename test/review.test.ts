@@ -726,10 +726,14 @@ test("the prompt numbers hunks h1, h2, … across files for the ranking; a lockf
   assert.equal(p.split("\n").filter((l) => l.startsWith("@@ ")).length, 2, "the since diff's hunks aren't rankable");
   assert.match(
     p,
-    /- chunks: the hunks worth me's attention, in the order to read them, at most 20: they reviewed it before, so what changed since then first,/,
+    /- chunks: the hunks worth me's attention, in the order to read them: they reviewed it before, so what changed since then first,/,
   );
   const first = buildPrompt(item, signalsOf(item), "", { body: "", files: [FILE] }, "TAG");
-  assert.match(first, /at most 20: most worth first, looks before skims\./);
+  assert.match(first, /in the order to read them: the look ranges' hunks first, then most worth first, looks before skims\./);
+  assert.match(
+    first,
+    /\n {2}high: at most 12 things in the code \(concerns ≤6, look ≤3, improvements ≤3, the rest notes\), 3 risk reasons, 5 interfaces, 20 ranked hunks/,
+  );
   assert.doesNotMatch(first, /changed since then first/);
   assert.match(
     first,
@@ -775,7 +779,8 @@ test("at most 20 chunks are ranked; hunks left out for length are unread, not ra
     patch: Array.from({ length: 25 }, (_, i) => `@@ -${i * 10 + 1},1 +${i * 10 + 1},1 @@\n-a${i}\n+b${i}`).join("\n"),
   };
   const all = Array.from({ length: 25 }, (_, i) => ({ id: `h${i + 1}`, level: i % 2 ? "look" : "skim", why: "" }));
-  const r = parseReview({ summary: "x", chunks: all }, [many]).chunks!;
+  const r = parseReview({ summary: "x", risk: "high", chunks: all }, [many]).chunks!;
+  assert.equal(parseReview({ summary: "x", risk: "low", chunks: all }, [many]).chunks!.ranked.length, 8, "a low risk ranks fewer");
   assert.deepEqual(
     r.ranked.map((c) => c.id),
     all.slice(0, 20).map((c) => c.id),
@@ -1002,7 +1007,7 @@ test(
         chunks: [],
         notes: [],
         verdict: "look",
-        risk: "medium",
+        risk: "high",
       },
     };
     const check = {
@@ -1233,9 +1238,10 @@ test("parseSteps keeps a walk-through of shown hunks, each in the first step nam
     patch: Array.from({ length: 10 }, (_, i) => `@@ -${i * 10 + 1} +${i * 10 + 1} @@\n-a${i}\n+b${i}`).join("\n"),
   };
   const all = Array.from({ length: 10 }, (_, i) => `h${i + 1}`);
-  const many = parseReview({ summary: "x", chunks: all.map((id) => ({ id, level: "skim", why: "" })), steps: all.map((id) => step(id)) }, [
-    ten,
-  ]);
+  const many = parseReview(
+    { summary: "x", risk: "high", chunks: all.map((id) => ({ id, level: "skim", why: "" })), steps: all.map((id) => step(id)) },
+    [ten],
+  );
   assert.deepEqual(
     many.guide?.steps.map((st) => st.hunks[0]!.id),
     all.slice(0, 8),
@@ -2386,12 +2392,12 @@ test("a PR in a stack is reviewed in its context: the stack is in the prompt, fe
   const s = analyze(theirs, makeContext(), cfg, NOW).signals;
   const stack = ["bottom first, on main:", "- acme/api#1 (open): Add the leases table", "-> this PR acme/api#2 (draft): Use the leases"];
   const p = buildPrompt(theirs, s, "", { body: "", files: [FILE], stack }, "TAG");
-  assert.match(p, /add one sentence on where it sits and what it adds over the PR below it/);
+  assert.match(p, /intent\.stack: it's in a stack .*one sentence on where it sits and what it adds over the PR below/);
   assert.ok(p.indexOf("stack, bottom first, on main:") > p.indexOf("<pr-TAG>"), "fenced: titles are GitHub text");
   assert.ok(p.indexOf("-> this PR acme/api#2 (draft): Use the leases") < p.lastIndexOf("</pr-TAG>"));
   assert.doesNotMatch(
     buildPrompt(theirs, s, "", { body: "", files: [FILE] }, "TAG"),
-    /stack, bottom first|where it sits/,
+    /stack, bottom first|where it sits|start from what this PR takes/,
     "no stack, no line",
   );
   assert.match(p, /^You prepare a GitHub pull request for me to review/);
@@ -2410,5 +2416,19 @@ test("someone else's small PR its review calls low risk gets a bolt on the Inbox
   assert.equal(card("acme/api#1")?.quick, `Quick to review: low risk, ${lines} lines`);
   assert.equal(card("acme/api#2")?.quick, undefined, "too big");
   assert.equal(card("acme/web#4")?.quick, undefined, "yours");
+  // The newer review's parts: one that does more than it says, or breaks an interface, isn't quick; one that fits says so.
+  const ai = t.desk.store.get("review:acme/api#1") as AiReview;
+  const again = (o: Partial<AiReview>) => {
+    t.desk.store.set("review:acme/api#1", { ...ai, ...o });
+    t.desk.changed();
+    const ib = runSync(t.desk.queue()).inbox;
+    return [...ib.urgent, ...ib.standard, ...ib.fyi].find((c) => c.id === "acme/api#1")?.quick;
+  };
+  const goal = { goal: "g", gap: "", stack: "" };
+  assert.equal(again({ intent: { ...goal, fit: "matches" } }), `Quick to review: low risk, ${lines} lines, does what it says`);
+  assert.equal(again({ intent: { ...goal, fit: "partial" } }), undefined);
+  const iface = { name: "f", kind: "function", change: "changed", impact: "", path: "a", side: "new", line: 1 } as const;
+  assert.equal(again({ interfaces: [{ ...iface, breaking: true }] }), undefined);
+  assert.equal(again({ interfaces: [{ ...iface, breaking: false }] }), `Quick to review: low risk, ${lines} lines`);
   t.cleanup();
 });
