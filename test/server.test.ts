@@ -111,7 +111,7 @@ test("an /api path the desk doesn't route is a NotFound, and a window-only delet
   const del = await t.req("/api/automations/warden", { method: "DELETE" });
   assert.deepEqual(
     [del.status, await del.json()],
-    [403, { error: "delete it in the desk's window: Settings → Automations", tag: "Forbidden" }],
+    [403, { error: "delete it in the desk's window: Settings → Your automations", tag: "Forbidden" }],
   );
   t.cleanup();
 });

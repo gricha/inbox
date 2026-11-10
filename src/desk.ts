@@ -2469,7 +2469,7 @@ export class Desk {
       if (p?.judge?.by === a.name && p.rule_bucket === bucket) return { ...said, outcome: "did" as const };
       const pin = this.store.lastPin(id)?.agent?.startsWith("automation:") ? "an automation's pin" : "your pin";
       const holds = !a.on
-        ? "it's off, so what it sorts doesn't hold: turn it on in Settings → Automations"
+        ? "it's off, so what it sorts doesn't hold: turn it on in Settings → Your automations"
         : (this.raised(now, id) ??
           (p?.floor ? `${p.hard ? "a hard rule" : pin} keeps it in ${AT[p.floor]} or above` : "a final rule places it"));
       return { ...said, outcome: "held" as const, error: holds };

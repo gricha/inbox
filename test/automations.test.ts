@@ -400,7 +400,7 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
   const draft = await req("POST", "/api/automations/warden/run");
   assert.deepEqual(
     [draft.status, await draft.json()],
-    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Automations', tag: "Conflict" }],
+    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Your automations', tag: "Conflict" }],
     "an agent can't run a draft",
   );
   assert.equal((await req("DELETE", "/api/automations/warden")).status, 403);
@@ -579,7 +579,7 @@ test("a run's item says what to do with it, and the desk does only what you allo
     run.items.map((x) => [x.item_id, x.do ?? null, x.outcome, x.error ?? null]),
     [
       ["acme/api#4", "fyi", "did", null],
-      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Automations"],
+      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Your automations"],
       ["acme/api#1", null, "refused", `"explode" isn't something the desk does: add, today, later, fyi, hide, snooze, done, mute`],
       ["acme/other#9", null, "added", null],
     ],
@@ -1744,4 +1744,80 @@ test("an event automation whose run failed waits half an hour before its next, a
   await runFx(t.desk.sync());
   await settled(t);
   assert.equal(fake.calls(), 2, "then it runs, on what landed meanwhile too");
+});
+
+// A plugin's own, as a plugin's file declares it: the desk runs it as yours, and you only switch it.
+const TIDY = {
+  id: "tidy-pings",
+  name: "Mute CODEOWNERS pings",
+  help: "A CODEOWNERS ping to your team, not asked of you by name, is muted.",
+  on: true,
+  schedule: "",
+  events: ["new" as const, "review_requested" as const],
+  prompt: "",
+  when: "me.requested_codeowner && !me.requested_direct",
+  decide: "rule" as const,
+  rule: { do: "mute" as const, why: "a CODEOWNERS ping" },
+  can: ["mute" as const],
+};
+
+test("a plugin's automation runs as yours do, its effects in its name and undone alike; switched off it stays off, and only from the window", async (c) => {
+  fakeClaude(c);
+  const t = await setup([reviewAsk(1), teamPing(4), teamPing(5)], { settings: { "policy.judge": false, "notify.quiet": "" } });
+  c.after(t.cleanup);
+  t.desk.gh.automations = [TIDY];
+  t.desk.automations.start(); // a fresh desk: the first sync is its news
+  await runFx(t.desk.sync());
+  const card = (n: number) => runSync(t.desk.item(`acme/api#${n}`)).card;
+  assert.deepEqual(
+    [1, 4, 5].map((n) => card(n).status),
+    ["active", "muted", "muted"],
+    "your direct ask is left alone",
+  );
+  assert.equal(card(4).why, "Mute CODEOWNERS pings: a CODEOWNERS ping");
+  assert.equal(t.desk.store.lastActionFor("acme/api#4")!.agent, "automation:github.tidy-pings");
+  const v = t.desk.automations.view().find((x) => x.id === "github.tidy-pings")!;
+  assert.deepEqual(
+    [v.plugin, v.help, v.on, v.by, v.trigger],
+    ["github", TIDY.help, true, "you", "When it first reaches the desk or a review is asked of you or your team"],
+  );
+  assert.equal(v.runs[0]!.did, "muted 2");
+  runSync(t.desk.act("api#4", "undo"));
+  assert.equal(card(4).status, "active", "Undo takes its mute back");
+
+  // An agent may not change, delete or switch it; the window switches it, and nothing else of it changes.
+  const req = http(createApp(t.desk, 47823));
+  const put = await req("PUT", "/api/automations/github.tidy-pings", { name: "Mine now", schedule: "daily 09:00", prompt: "x" }, DESK);
+  assert.deepEqual(
+    [put.status, ((await put.json()) as { error: string }).error],
+    [
+      400,
+      '"Mute CODEOWNERS pings" comes with GitHub: only its switch is yours, in its part of Settings; copy it to your automations to change it',
+    ],
+  );
+  const agent = await req("PUT", "/api/automations/github.tidy-pings/on", { on: false });
+  assert.deepEqual(
+    [agent.status, await agent.json()],
+    [403, { error: "only the owner switches it, in the desk's window: Settings", tag: "Forbidden" }],
+  );
+  assert.equal((await req("DELETE", "/api/automations/github.tidy-pings", undefined, DESK)).status, 400);
+  assert.equal((await req("PUT", "/api/automations/github.tidy-pings/on", { on: false }, DESK)).status, 200);
+  assert.equal(runSync(t.desk.automations.get("github.tidy-pings")).on, false);
+
+  // Off, it does nothing with what comes next, and it's off after a restart too.
+  t.gh.items.set("acme/api#6", teamPing(6));
+  await runFx(t.desk.sync());
+  assert.equal(card(6).status, "active");
+  t.desk.stop();
+  const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    next.stop();
+  });
+  next.gh.automations = [TIDY];
+  assert.equal(runSync(next.automations.get("github.tidy-pings")).on, false, "off across a restart");
+  // A release that changes its definition just takes effect; one it drops is gone.
+  next.gh.automations = [{ ...TIDY, name: "Mute team pings" }];
+  assert.equal(runSync(next.automations.get("github.tidy-pings")).name, "Mute team pings");
+  next.gh.automations = [];
+  assert.deepEqual(next.automations.all(), []);
 });

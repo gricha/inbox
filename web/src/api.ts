@@ -196,6 +196,8 @@ export const api = {
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
   setAutomation: (id: string, b: AutomationBody) =>
     call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}`, b),
+  switchAutomation: (id: string, on: boolean) =>
+    call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}/on`, { on }),
   deleteAutomation: (id: string) => call<{ ok: true }>("DELETE", `/api/automations/${encodeURIComponent(id)}`),
   runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${encodeURIComponent(id)}/run`),
   // Your answer to an agent's question, or leaving it unanswered.

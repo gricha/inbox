@@ -14,7 +14,7 @@ import {
 import type { GitHub, SearchHit } from "../github/index.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
-import type { ConnectorStatus, Context, Item } from "../types.ts";
+import type { BuiltInAutomation, ConnectorStatus, Context, Item } from "../types.ts";
 import { KEEP_RESOLVED, type Connector, type Members, type NewEvent } from "./connector.ts";
 import { itemEvents } from "./github-events.ts";
 import { botCheck } from "../signals.ts";
@@ -70,6 +70,7 @@ const settle =
 export class GitHubConnector implements Connector {
   readonly id = "github";
   readonly name = "GitHub";
+  automations: readonly BuiltInAutomation[] = [];
   desk: Desk;
   api: GitHub;
   syncing = false;

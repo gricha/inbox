@@ -1072,7 +1072,7 @@ export const VERB: Record<Verb, string> = {
 export const WAYS = ["rule", "ask", "agent"] as const;
 export type Way = (typeof WAYS)[number];
 
-// An automation (Settings → Automations): your instruction, run on its schedule or when something happens on an item, by
+// An automation (Settings → Your automations): your instruction, run on its schedule or when something happens on an item, by
 // your own Claude Code, read only. What a run lists, the desk acts on: only the verbs you allow it (`can`). An agent may
 // draft or edit one; it's off until you turn it on.
 export interface Automation {
@@ -1088,7 +1088,17 @@ export interface Automation {
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
+  plugin?: string; // one a plugin comes with: its plugin's id ("github"); its definition is the plugin's, you only switch it
+  help?: string; // a plugin's: what it does, in one plain line
 }
+
+// What a plugin comes with: an automation in its own file, whose id ("<plugin>.<id>"), name and definition are the code's;
+// the desk keeps only whether you switched it on or off, and `on` is what it is until you do.
+export type BuiltInAutomation = Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can"> & {
+  id: string; // within its plugin, stable across releases: "pick-reviewer"
+  help: string;
+  on: boolean;
+};
 
 // What came of one item of a run, as its record says it: "Added", "Sorted to FYI", "Snoozed until CI passes", "Couldn't mute".
 const DID: Record<Verb, string> = {

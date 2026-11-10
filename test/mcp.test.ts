@@ -72,7 +72,7 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     schedule: "weekdays 09:00",
     prompt: "look",
   });
-  assert.equal(set.text, "saved warden (weekdays 09:00); it's off until the owner turns it on in Settings → Automations");
+  assert.equal(set.text, "saved warden (weekdays 09:00); it's off until the owner turns it on in Settings → Your automations");
   assert.deepEqual([lastCall().body.can, lastCall().body.when], [undefined, undefined], "left out, it adds and has no check");
   await call("desk_automations", {
     action: "set",
@@ -92,7 +92,7 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
   );
   assert.equal((await call("desk_automations", { action: "set", id: "warden" })).isError, true);
   const onEvents = await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look", events: ["ci", "pushed"] });
-  assert.equal(onEvents.text, "saved warden (on ci, pushed); it's off until the owner turns it on in Settings → Automations");
+  assert.equal(onEvents.text, "saved warden (on ci, pushed); it's off until the owner turns it on in Settings → Your automations");
   assert.deepEqual([lastCall().body.events, lastCall().body.schedule], [["ci", "pushed"], undefined]);
   assert.equal(
     (await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look" })).isError,
@@ -113,10 +113,7 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     true,
     "a question needs its instruction",
   );
-  assert.equal(
-    (await call("desk_automations", { action: "run", id: "warden" })).text,
-    "running warden; its result shows in Settings → Automations",
-  );
+  assert.equal((await call("desk_automations", { action: "run", id: "warden" })).text, "running warden; its result shows in Settings");
 });
 
 test("lists the tools", async () => {

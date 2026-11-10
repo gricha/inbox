@@ -605,7 +605,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     return respond(c, answer, { log });
   });
   // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
-  // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one.
+  // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one. A
+  // plugin's is listed too, and only switched, only from the window.
   app.get("/api/automations", (c) => total(c, () => desk.automations.view()));
   app.put("/api/automations/:id", (c) => {
     const set = Effect.gen(function* () {
@@ -634,9 +635,20 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, set, { log });
   });
+  // What a plugin comes with: only the owner switches it, in the window, and nothing else of it changes.
+  app.put("/api/automations/:id/on", (c) => {
+    const turn = Effect.gen(function* () {
+      yield* up;
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings" });
+      const { on } = yield* bodyOf(c);
+      if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
+      return { ok: true, automation: yield* desk.automations.switch(c.req.param("id"), on) };
+    });
+    return respond(c, turn, { log });
+  });
   app.delete("/api/automations/:id", (c) => {
     const remove = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automations" });
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Your automations" });
       yield* desk.automations.remove(c.req.param("id"));
       return { ok: true };
     });
@@ -647,7 +659,9 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       yield* up;
       const a = yield* desk.automations.get(c.req.param("id"));
       if (!a.on && !fromDesk(c))
-        return yield* new Conflict({ message: `"${a.name}" is off: the owner turns it on in Settings → Automations` });
+        return yield* new Conflict({
+          message: `"${a.name}" is off: the owner turns it on in Settings → ${a.plugin ? (desk.connectors.find((x) => x.id === a.plugin)?.name ?? a.plugin) : "Your automations"}`,
+        });
       desk.automations.run(a, "now");
       return { ok: true, running: a.id };
     });

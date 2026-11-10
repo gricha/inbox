@@ -43,6 +43,7 @@ import { agentName, secretsPath } from "./settings.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
+const SWITCHED = "automations_builtin"; // by a plugin's automation's id: whether you switched it on or off, and when
 const SEEN = "automation_seen"; // by automation: the event log's seq its events are read up to
 const ASKED = "automation_asked"; // by automation: who a question last asked and each item as it was, so a schedule asks what's new
 const RUNS_KEPT = 10; // per automation
@@ -309,8 +310,44 @@ export class Automations {
     this.desk = desk;
   }
 
+  // The plugins' first, then yours: the engine runs both alike.
   all(): Automation[] {
+    return [...this.builtIns(), ...this.own()];
+  }
+
+  own(): Automation[] {
     return (this.desk.store.get(KEY) as Automation[] | null) ?? [];
+  }
+
+  // What the plugins come with, as the code defines each now, on or off as you switched it (else as it comes).
+  builtIns(): Automation[] {
+    const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+    return this.desk.connectors.flatMap((c) =>
+      c.automations.map(({ id: own, help, on, ...def }) => {
+        const id = `${c.id}.${own}`;
+        const s = switched[id];
+        return { id, ...def, on: s?.on ?? on, by: "you" as const, updated_at: s?.at ?? "", plugin: c.id, help };
+      }),
+    );
+  }
+
+  builtIn(id: string): Automation | undefined {
+    return this.builtIns().find((a) => a.id === id);
+  }
+
+  // A plugin's automation, on or off: only from the desk's window, and only that; to change it, copy it to yours.
+  switch(id: string, on: boolean): Effect.Effect<Automation, NotFound> {
+    return Effect.suspend((): Effect.Effect<Automation, NotFound> => {
+      const was = this.builtIn(id);
+      if (!was) return Effect.fail(new NotFound({ message: `no automation "${id}" comes with a plugin` }));
+      const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+      const at = this.desk.now().toISOString();
+      this.desk.store.set(SWITCHED, { ...switched, [id]: { on, at } });
+      this.held.delete(id);
+      if (on && !was.on && was.events) this.look(id, this.desk.store.lastSeq());
+      this.desk.changed();
+      return Effect.succeed({ ...was, on, updated_at: at });
+    });
   }
 
   runs(): AutomationRun[] {
@@ -361,6 +398,11 @@ export class Automations {
     byYou: boolean,
   ): Effect.Effect<Automation, BadRequest> {
     return Effect.gen({ self: this }, function* () {
+      const plugin = this.builtIn(id);
+      if (plugin)
+        return yield* new BadRequest({
+          message: `"${plugin.name}" comes with ${this.desk.connectors.find((c) => c.id === plugin.plugin)?.name ?? plugin.plugin}: only its switch is yours, in its part of Settings; copy it to your automations to change it`,
+        });
       if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id))
         return yield* new BadRequest({ message: "an automation's id is lowercase letters, digits and -, up to 40" });
       const name = yield* this.desk.line(b.name, "name", 80);
@@ -392,7 +434,7 @@ export class Automations {
       if (b.rule && way !== "rule")
         return yield* new BadRequest({ message: "rule goes with decide rule: a question or an agent says what to do itself" });
       const rule = way === "rule" ? yield* this.fixed(b.rule, can) : undefined;
-      const all = this.all();
+      const all = this.own();
       const was = all.find((x) => x.id === id);
       const next = {
         name,
@@ -441,7 +483,8 @@ export class Automations {
   }
 
   // Its run in progress stops, and adds nothing; what it sorted goes back to where your rules and Claude put it.
-  remove(id: string): Effect.Effect<void, NotFound> {
+  remove(id: string): Effect.Effect<void, NotFound | BadRequest> {
+    if (this.builtIn(id)) return Effect.fail(new BadRequest({ message: "it comes with a plugin: switch it off instead" }));
     return Effect.map(this.get(id), () => {
       this.running.get(id)?.fiber?.interruptUnsafe();
       this.running.delete(id);
@@ -450,7 +493,7 @@ export class Automations {
       this.desk.store.pruneKv("sorted:", new Set([...sorts].flatMap(([item, s]) => (s?.automation === id ? [] : [item]))));
       this.desk.store.set(
         KEY,
-        this.all().filter((x) => x.id !== id),
+        this.own().filter((x) => x.id !== id),
       );
       this.desk.store.set(
         RUNS,
@@ -468,6 +511,9 @@ export class Automations {
     // A run the desk was in when it stopped never finishes; it says so instead of running forever.
     const now = this.desk.now().toISOString();
     for (const r of this.runs()) if (!r.done_at) this.record({ ...r, done_at: now, error: CUT });
+    // A plugin's that's on with events and hasn't read the log yet starts where it ends now: a fresh desk's first sync is its news.
+    const seen = (this.desk.store.get(SEEN) as Record<string, number> | null) ?? {};
+    for (const a of this.builtIns()) if (a.on && a.events && seen[a.id] === undefined) this.look(a.id, this.desk.store.lastSeq());
     this.timer = setInterval(() => {
       this.desk.runner.fork(
         "automations",
@@ -496,6 +542,7 @@ export class Automations {
     for (const a of this.all()) {
       const s = parseSchedule(a.schedule);
       if (!a.on || typeof s === "string" || this.running.has(a.id) || this.waits(a.id)) continue;
+      if (a.plugin && !this.desk.syncedAt) continue; // it has nothing to look at before then; the next tick after it runs it
       const due = dueAt(s, now)?.toISOString();
       const last = runs.findLast((r) => r.automation === a.id && r.error !== CUT)?.at ?? "";
       if (due && due > a.updated_at && due > last) this.run(a, "schedule");
@@ -961,7 +1008,7 @@ export class Automations {
     if (!a) return Effect.succeed(refused("it was deleted during its run"));
     if (started.on && !a.on) return Effect.succeed(refused("it was turned off during its run"));
     if (!verb) return Effect.succeed(refused(`"${String(x.do)}" isn't something the desk does: ${VERBS.join(", ")}`));
-    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Automations`));
+    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Your automations`));
     const desk = this.desk;
     const failed = (e: { message: string }) => Effect.succeed({ ...failedItem(x, e.message), ...(verb !== "add" && { do: verb }) });
     if (verb === "add") return desk.push(x.ref, x.why, a).pipe(Effect.catch(failed));

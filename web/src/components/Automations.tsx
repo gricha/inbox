@@ -1,4 +1,4 @@
-// Settings → Automations: your instructions, on a schedule or when something happens. The tab lists them (turn one on, run
+// Settings → Your automations: your instructions, on a schedule or when something happens. The tab lists them (turn one on, run
 // it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
