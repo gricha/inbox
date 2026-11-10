@@ -5898,6 +5898,140 @@ p.rv-next {
   margin: 0;
 }
 
+/* Diagrams ----------------------------------------------------------------- */
+
+/* An AI review's diagram: its title and caption in pencil above it, then the figure at the column's width, never more than
+   320px tall (Diagram.tsx scales it), and never larger than drawn. Its colours are the theme's: a theme switch restyles it. */
+.dg {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+
+.dg-head {
+  display: grid;
+  gap: 1px;
+  color: var(--pencil);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.dg-title {
+  font-weight: 600;
+}
+
+.dg-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font: 12.5px var(--sans);
+}
+
+.dg-node rect,
+.dg-node path,
+.dg-node ellipse {
+  fill: var(--sheet);
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.dg-node .dg-lid {
+  fill: none;
+}
+
+.dg-node text {
+  fill: var(--ink);
+  font-weight: 500;
+}
+
+/* Before and after on one graph: the accent marks what's new, a darker outline what changed, and what's gone is struck. */
+.dg-new rect,
+.dg-new path,
+.dg-new ellipse {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.dg-changed rect,
+.dg-changed path,
+.dg-changed ellipse {
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+
+.dg-removed rect,
+.dg-removed path,
+.dg-removed ellipse {
+  fill: var(--paper);
+  stroke: var(--faint);
+  stroke-dasharray: 4 3;
+}
+
+.dg-node.dg-removed text {
+  fill: var(--pencil);
+  text-decoration: line-through;
+}
+
+.dg-line {
+  fill: none;
+  stroke: var(--pencil);
+  stroke-width: 1.25;
+}
+
+.dg-dotted .dg-line {
+  stroke-dasharray: 4 3;
+}
+
+.dg-tip {
+  fill: var(--pencil);
+}
+
+.dg-label {
+  fill: var(--pencil);
+  font-size: 11.5px;
+}
+
+.dg-label-bg {
+  fill: var(--sheet);
+}
+
+.dg-group rect {
+  fill: none;
+  stroke: var(--rule-strong);
+  stroke-dasharray: 2 3;
+}
+
+.dg-group text {
+  fill: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.dg-life {
+  stroke: var(--rule-strong);
+  stroke-dasharray: 3 4;
+}
+
+.dg-note rect {
+  fill: var(--wash);
+}
+
+.dg-note text {
+  fill: var(--ink-2);
+  font-size: 11.5px;
+}
+
+/* Layout failed: the graph as text, one pencil line an edge. */
+.dg-text {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--pencil);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Narrow windows ----------------------------------------------------------- */
 
 @media (width <= 1000px) {

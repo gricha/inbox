@@ -759,9 +759,6 @@ export interface ReviewInterface {
   line: number;
 }
 
-// The diagram's graph as src/diagram.ts parses it.
-export type DiagramGraph = Record<string, unknown>;
-
 export interface ReviewDiagram {
   id: string;
   title: string;
@@ -1371,3 +1368,59 @@ export interface FieldDoc {
   type: "string" | "number" | "boolean" | "string[]";
   doc: string;
 }
+
+// ---------------------------------------------------------------------------
+// A diagram in an AI review: the strict Mermaid subset src/diagram.ts parses, as plain data the window lays out and draws.
+// Every string in it is untrusted (the model wrote it) and only ever becomes SVG text.
+
+export type DiagramShape = "box" | "term" | "store" | "choice" | "circle";
+export type DiagramMark = "new" | "changed" | "removed";
+
+export interface DiagramNode {
+  id: string;
+  label: string;
+  shape: DiagramShape;
+  mark: DiagramMark | null;
+  group: string | null; // the subgraph it sits in
+}
+
+export interface DiagramEdge {
+  from: string;
+  to: string;
+  label: string; // "" for none
+  style: "arrow" | "line" | "dotted"; // -->, ---, -.->
+}
+
+export interface DiagramParticipant {
+  id: string;
+  label: string;
+  actor: boolean;
+}
+
+export interface DiagramMessage {
+  from: string;
+  to: string;
+  text: string;
+  reply: boolean; // -->>
+}
+
+export interface DiagramNote {
+  over: string[]; // one participant, or the two it spans
+  text: string;
+  at: number; // drawn before messages[at]
+}
+
+export type DiagramGraph =
+  | {
+      kind: "flow"; // a flowchart, or a state diagram drawn as one
+      direction: "LR" | "TB";
+      nodes: DiagramNode[];
+      edges: DiagramEdge[];
+      groups: { id: string; label: string }[];
+    }
+  | {
+      kind: "sequence";
+      participants: DiagramParticipant[];
+      messages: DiagramMessage[];
+      notes: DiagramNote[];
+    };

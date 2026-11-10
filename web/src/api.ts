@@ -93,6 +93,13 @@ export class ClipboardUnavailable extends Data.TaggedError("ClipboardUnavailable
   }
 }
 
+// ELK threw on a diagram, or never answered: it's drawn as text instead.
+export class LayoutFailed extends Data.TaggedError("LayoutFailed")<{ readonly cause?: unknown }> {
+  override get message(): string {
+    return "the diagram couldn't be laid out";
+  }
+}
+
 // ---------------------------------------------------------------- calls
 
 // An older desk sends no tag: its status says it.
