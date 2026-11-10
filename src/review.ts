@@ -756,6 +756,18 @@ export const CODEX_PAUSED = "Codex isn't logged in, so nothing is being sorted o
 // The agent's not-logged-in words: what a success on it retries, by suffix.
 export const notLoggedIn = (agent: DriverId) => (agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN);
 
+// Whether the agent's CLI is logged in now, by its own status command (no model call): `claude auth status` prints
+// {"loggedIn": …}, `codex login status` exits 0 only when it is. Anything else (not installed, a timeout) is no.
+export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
+  const command = agent === "codex" ? codexCommand() : claudeCommand();
+  const args = agent === "codex" ? ["login", "status"] : ["auth", "status"];
+  return claudeSpawn(command, args).pipe(
+    Effect.flatMap((s) => runCommand(s, { timeout: 15_000, missing: command })),
+    Effect.map((out) => agent === "codex" || /"loggedIn"\s*:\s*true/.test(out)),
+    Effect.orElseSucceed(() => false),
+  );
+}
+
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `detail`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | ClaudeApiError {
   const msg = raw.replace(/\{.*"message"\s*:\s*"([^"]*)".*\}/s, "$1");

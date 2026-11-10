@@ -1691,6 +1691,35 @@ test("failures in a row (an expired login) pause AI reviews nobody asked for; as
   t.cleanup();
 });
 
+test("logging in after a lapsed login retries at the next sync, without waiting out the pause: the CLI's own status says so", async () => {
+  const t = await setup([ask(1), ask(2)]);
+  let loggedIn = false;
+  const checks: string[] = [];
+  t.desk.review!.loggedIn = (agent) =>
+    Effect.sync(() => {
+      checks.push(agent);
+      return loggedIn;
+    });
+  t.f.setFail(LOGGED_OUT);
+  await t.sync();
+  for (const id of t.f.started.slice()) await t.f.release(id);
+  assert.ok(t.desk.aiPausedNow());
+  await t.sync();
+  assert.ok(checks.length > 0 && t.desk.aiPausedNow(), "still logged out: asked, and it stays paused");
+  const tried = t.f.started.length;
+  loggedIn = true;
+  t.f.setFail(null);
+  await t.sync();
+  await flush();
+  assert.ok(!t.desk.aiPausedNow(), "logged in: the pause lifts at once");
+  assert.ok(t.f.started.length > tried, "and what waited on the login runs again");
+  for (const id of t.f.started.slice(tried)) await t.f.release(id);
+  const asked = checks.length;
+  await t.sync();
+  assert.equal(checks.length, asked, "nothing waits on the login: no more checks");
+  t.cleanup();
+});
+
 test("AI reviews run on the agent you chose; Codex's login pauses them in its words, and choosing Claude Code tries again at once", async () => {
   const t = await setup([ask(1)], { settings: { "agent.harness": "codex" } });
   t.f.setFail(CODEX_NOT_LOGGED_IN);

@@ -39,7 +39,7 @@ import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
-import { fetchPr, generateReview } from "./review.ts";
+import { fetchPr, generateReview, loggedIn } from "./review.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
@@ -1054,7 +1054,7 @@ export const startDesk = Effect.fnUntraced(function* (
     github: createGitHub({ log }),
     log,
     notify: opts.notify,
-    review: { fetchPr, generate: generateReview },
+    review: { fetchPr, generate: generateReview, loggedIn },
     writer: opts.writer ?? createWriter({ log }),
     mcpUrl: `http://localhost:${port}/mcp`,
   });

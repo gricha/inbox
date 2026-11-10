@@ -326,6 +326,7 @@ export interface ReviewDeps {
     dir: string,
     agent: agents.DriverId,
   ): Effect.Effect<AiReview, CommandError | ClaudeError>;
+  loggedIn?(agent: agents.DriverId): Effect.Effect<boolean>; // the CLI's own status command; absent: nothing checks it
 }
 
 // What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
@@ -772,6 +773,36 @@ export class Desk {
     this.judge.pump();
   }
 
+  // While anything waits on the agent's login (an AI review, the judge, a conversation's read), each sync asks its CLI whether
+  // it's logged in now, so logging in shows at once instead of after the pause; a yes retries what waited.
+  private checkingLogin = false;
+  recheckLogin(): void {
+    const agent = this.agent();
+    const why = notLoggedIn(agent);
+    const waits =
+      !!this.aiPaused?.why.endsWith(why) ||
+      !!this.judge.error?.endsWith(why) ||
+      this.jobs.list().some((j) => j.state !== "running" && j.state !== "done" && !!j.error?.endsWith(why));
+    const review = this.review;
+    if (!review?.loggedIn || !waits || this.checkingLogin || this.stopped) return;
+    this.checkingLogin = true;
+    this.runner.fork(
+      "login check",
+      review.loggedIn(agent).pipe(
+        Effect.tap((yes) =>
+          Effect.sync(() => {
+            if (yes && agent === this.agent()) this.retryAgents(why);
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.checkingLogin = false;
+          }),
+        ),
+      ),
+    );
+  }
+
   // Settings used to live in config.toml; move them to settings.json once.
   migrateSettings(): Effect.Effect<void, FsError> {
     return Effect.gen({ self: this }, function* () {
@@ -934,6 +965,7 @@ export class Desk {
     this.automations.pump();
     this.notifyNew();
     this.pumpAi();
+    this.recheckLogin();
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
     this.store.pruneKv("pr:", kept);
