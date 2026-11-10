@@ -1,4 +1,4 @@
-import { QUEUE_GROUPS, type Card, type Inquiry, type Overview, type QueueGroup, type QueueView } from "../../../src/types.ts";
+import type { Card, Inquiry, Overview, QueueView } from "../../../src/types.ts";
 import { cls } from "../format.ts";
 import { foldOf, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
@@ -6,21 +6,8 @@ import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-const PART: Record<QueueGroup, string> = {
-  back: "Back to you",
-  review: "Waiting on your review",
-  other: "Issues and other PRs",
-  mine: "Your PRs",
-};
-// What the fold line says each part has behind it.
-const FOLDED: Record<QueueGroup, string> = {
-  back: "back to you",
-  review: "waiting on your review",
-  other: "issues and other PRs",
-  mine: "of your PRs",
-};
-
-// The main page: only what needs you, one line each, in the desk's order; agents' questions first, since one waits on each.
+// The main page: only what needs you, one line each on one table with no headings, in the desk's order; agents' questions
+// first, since one waits on each.
 export function Queue({
   view,
   overview,
@@ -46,45 +33,14 @@ export function Queue({
     const first = !!overview && !overview.synced_at;
     return (
       <div className="queue">
-        {first ? (
-          <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p>
-        ) : (
-          // Under a part's heading, as its rows will be, so the sheet doesn't move when they land.
-          <section className="group part">
-            <h2 className="group-head" aria-hidden="true">
-              <span className="sk" />
-            </h2>
-            <SkRows />
-          </section>
-        )}
+        {first ? <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p> : <SkRows />}
       </div>
     );
   }
   const g = groups.find((x) => x.key === "queue");
-  // A row you acted on is on its way off: it fades out where it is, but no longer counts, and a part it was the last of goes.
-  const staying = (c: Card) => !ctx.leaving.has(c.id);
-  // The cards come in their parts' order (byPart): a heading where the part changes, each counting all of its lines.
-  const parts: { key: QueueGroup; cards: Card[] }[] = [];
-  for (const c of g?.cards ?? []) {
-    const key = c.group ?? "other";
-    const last = parts.at(-1);
-    if (last?.key === key) last.cards.push(c);
-    else parts.push({ key, cards: [c] });
-  }
-  const live = parts.filter((p) => p.cards.some(staying));
-  const total = (k: QueueGroup) =>
-    [...view.sections.now, ...view.sections.today].filter((c) => (c.group ?? "other") === k && staying(c)).length;
-  const shown = (p: { cards: Card[] }) => p.cards.filter(staying).length;
-  // Filtering, a heading says how many of its lines match, as FYI's do.
-  const count = (p: { key: QueueGroup; cards: Card[] }) => (filter.trim() ? `${shown(p)} of ${total(p.key)}` : total(p.key));
-  // The fold is only there unfiltered, so what each part has behind it is its total less what shows.
-  const folded = QUEUE_GROUPS.map((k) => [k, total(k) - shown(parts.find((p) => p.key === k) ?? { cards: [] })] as const).filter(
-    ([, n]) => n > 0,
-  );
-  const foldText =
-    folded.length === 1
-      ? `${folded[0]![1]} more ${FOLDED[folded[0]![0]]}`
-      : `${folded.reduce((n, [, x]) => n + x, 0)} more: ${folded.map(([k, n]) => `${n} ${FOLDED[k]}`).join(", ")}`;
+  const cards = g?.cards ?? [];
+  // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
+  const any = inquiries.length > 0 || cards.some((c) => !ctx.leaving.has(c.id));
   return (
     <div className="queue">
       {view.paused && (
@@ -92,33 +48,15 @@ export function Queue({
           <b>{view.paused.who === "claude" ? "Claude is paused:" : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
         </p>
       )}
-      {inquiries.length > 0 || live.length > 0 ? (
-        <>
-          {inquiries.length > 0 && (
-            <section className="group part" aria-labelledby="h-questions">
-              <h2 id="h-questions" className="group-head">
-                Questions <span className="count">{inquiries.length}</span>
-              </h2>
-              <div className="lines">
-                {inquiries.map((q) => (
-                  <InquiryRow key={q.id} q={q} ctx={inq} />
-                ))}
-              </div>
-            </section>
-          )}
-          {live.map((p) => (
-            <section key={p.key} className={`group part part-${p.key}`} aria-labelledby={`h-${p.key}`}>
-              <h2 id={`h-${p.key}`} className="group-head">
-                {PART[p.key]} <span className="count">{count(p)}</span>
-              </h2>
-              <div className="lines">
-                {p.cards.map((c) => (
-                  <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
-                ))}
-              </div>
-            </section>
+      {any ? (
+        <div className="lines">
+          {inquiries.map((q) => (
+            <InquiryRow key={q.id} q={q} ctx={inq} />
           ))}
-        </>
+          {cards.map((c) => (
+            <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
+          ))}
+        </div>
       ) : (
         <p className="queue-empty">{filter.trim() ? "No matches." : "Nothing needs you right now."}</p>
       )}
@@ -138,7 +76,7 @@ export function Queue({
             selectFold(g.key);
           }}
         >
-          {foldText}
+          {g.fold} more
         </button>
       )}
       {view.reviewing > 0 && (

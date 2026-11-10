@@ -1113,12 +1113,11 @@ p.side-sync {
   padding: 24px var(--pad) 8px;
 }
 
-/* A tight table drops the stage column and a question's sender first, then who it's from, before a repo or a why is cut
-   to a few letters; a review still shows both, and so do the two-line rows beside it. On your own row "by you" says nothing
-   its part's heading doesn't, so there the stage takes its place, as wide; changes requested stays to the last. */
+/* A tight table drops the stage column first, then who it's from, before a repo or a why is cut to a few letters; a review
+   still shows both, and so do the two-line rows beside it. On your own row the stage says more than "by you", so there it
+   takes its place, as wide; changes requested and handed back stay to the last. */
 @container (width < 760px) {
-  .line-row:not(.c-row) .line-stage,
-  .line:not(.c-line) .inq-from {
+  .line-row:not(.c-row) .line-stage {
     display: none;
   }
 
@@ -1138,19 +1137,9 @@ p.side-sync {
 
 @container (width < 620px) {
   .line-row:not(.c-row) .line-by,
-  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage:not(.t-warn) {
+  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage:not(.t-warn, .handed) {
     display: none;
   }
-}
-
-/* An agent's question: its label in the accent, since one waits on your answer. */
-.line.inq .line-kind,
-.inq-kind {
-  color: var(--accent-ink);
-}
-
-.line .inq-from {
-  max-width: 28ch;
 }
 
 /* A question's page: one reading column, what it's about, all the agent said, its links, then the answers. */
@@ -1161,7 +1150,9 @@ p.side-sync {
   min-width: 0;
 }
 
+/* Whose words these are, in the accent: an agent's, waiting on your answer. */
 .inq-kind {
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -1446,6 +1437,11 @@ p.side-sync {
   letter-spacing: 0.02em;
 }
 
+/* The Inbox's has a third, Question, and a column as wide as that; with no weight, so a row beside a review keeps its own. */
+:where(.queue:not(.later)) .line-kind {
+  width: 4.9em;
+}
+
 /* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
 .line-title {
   flex: 0 1 auto;
@@ -1502,6 +1498,11 @@ p.side-sync {
 
 .line-by.mine {
   color: var(--ink-2);
+}
+
+/* A question has no stage: who asks takes that column's room too; with no weight, so a tight table still narrows it. */
+:where(.inq:not(.c-line)) .line-by {
+  width: calc(17em + 14px);
 }
 
 .line-stage {
@@ -1695,22 +1696,6 @@ p.side-sync {
   display: grid;
 }
 
-/* The main page's parts: a quiet heading each; people waiting on your review lead, in amber. */
-.part {
-  display: grid;
-}
-
-.part .group-head {
-  font-size: 14px;
-}
-
-.part-back .group-head,
-.part-back .group-head .count,
-.part-review .group-head,
-.part-review .group-head .count {
-  color: var(--amber);
-}
-
 .quiet-note {
   padding: 40px var(--pad);
   color: var(--pencil);
@@ -1824,8 +1809,9 @@ p.side-sync {
   -webkit-app-region: no-drag;
 }
 
-/* A list that starts with a row, not a heading (Merging's): on the heads' hairline instead, so it never sits on that row. */
-.beside:has(.beside-list > .lane > .lines:first-child) .beside-fold {
+/* A list that starts with a row, not a heading (the Inbox's, Merging's): on the heads' hairline instead, so it never sits on
+   that row. */
+.beside:has(.beside-list > :is(.queue, .lane) > .lines:first-child) .beside-fold {
   top: 38px;
 }
 
@@ -1863,8 +1849,7 @@ p.side-sync {
 }
 
 /* Its rows as a list page's (its --pad narrower), a step smaller. */
-.beside .group-head,
-.beside .part .group-head {
+.beside .group-head {
   padding-top: 18px;
   font-size: 13.5px;
 }
@@ -1883,6 +1868,10 @@ p.side-sync {
 .beside .queue-reviewing {
   padding-top: 14px;
   font-size: 13px;
+}
+
+.beside .ai-paused {
+  padding-bottom: 12px;
 }
 
 .beside .lane-stack {
@@ -2021,11 +2010,6 @@ p.side-sync {
   padding: 0;
 }
 
-/* Beside a review the Questions heading says what they are: Agent goes quiet, so Answer is the line's one accent. */
-.c-line.inq .c-meta > .line-kind {
-  color: var(--pencil);
-}
-
 /* The row's call to action, as accent text before its age, so the ages end in one column. */
 .c-row > .c-cta {
   position: relative;
@@ -2154,10 +2138,10 @@ p.side-sync {
   font-variant-numeric: tabular-nums;
 }
 
-/* AI reviews are paused (an expired login): said once, above the queue, not on every card. */
+/* AI reviews are paused (an expired login): said once, above the queue, not on every card; clear of the table's top hairline. */
 .ai-paused {
   margin: 0;
-  padding: 20px var(--pad) 0;
+  padding: 20px var(--pad) 16px;
   color: var(--ink-2);
   font-size: 14px;
 }
@@ -3548,8 +3532,7 @@ p.side-sync {
   padding: 0 17px;
 }
 
-.s-skel .group-head .sk,
-.queue .group-head .sk {
+.s-skel .group-head .sk {
   width: 6em;
 
   /* A heading's line tall, as its words will be: the heading is a flex box, so no line box holds it open. */

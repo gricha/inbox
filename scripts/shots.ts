@@ -579,6 +579,32 @@ const SHOTS: Shot[] = [
       const head = await headSays(page);
       if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
       if (await page.locator(".side-sync").count()) failures.push("queue: the sidebar has a sync line while the sync is fine");
+      // One list: no heading over any of it, an agent's question a row like the rest, a hand-back saying so on its own row
+      // at every width, and one fold line that says just how many.
+      const list = await page.evaluate<{
+        heads: number;
+        tables: number;
+        first: (string | null)[];
+        back: string | null;
+        fold: string | null;
+      }>(`(() => {
+        const text = (el, sel) => el?.querySelector(sel)?.textContent.trim() ?? null;
+        const first = document.querySelector(".queue .line");
+        const back = document.querySelector('.queue .line[data-id="oss/tinyhttp#205"] .line-stage');
+        return {
+          heads: document.querySelectorAll(".queue .group-head").length,
+          tables: document.querySelectorAll(".queue .lines").length,
+          first: [text(first, ".line-kind"), text(first, ".line-by"), text(first, ".line-cta")],
+          back: back?.getClientRects().length ? back.textContent : null,
+          fold: text(document, ".queue .fold"),
+        };
+      })()`);
+      if (list.heads || list.tables !== 1)
+        failures.push(`queue: the Inbox is ${list.tables} tables under ${list.heads} headings, not one list`);
+      if (list.first.join(" · ") !== "Question · by your agent · Answer")
+        failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
+      if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
+      if (!/^\d+ more$/.test(list.fold ?? "")) failures.push(`queue: the fold line reads ${JSON.stringify(list.fold)}`);
     },
   },
   {
@@ -731,7 +757,7 @@ const SHOTS: Shot[] = [
       await top(page);
       await page.locator(".queue [data-id]").nth(2).locator(".row-main").focus();
       await page.waitForTimeout(250);
-      // Within each part's sheet: the parts have room between them.
+      // One sheet: every row as far from the one before it.
       const gaps = await page.evaluate<number[]>(`(() => [...document.querySelectorAll(".queue .lines")].flatMap((sheet) => {
         const rows = [...sheet.querySelectorAll(":scope > [data-id]")].map((el) => el.getBoundingClientRect());
         return rows.slice(1).map((r, i) => Math.round(r.top - rows[i].bottom));
@@ -946,6 +972,11 @@ const SHOTS: Shot[] = [
       }
       await besideOpen(page, "beside-review", "acme/api#4127");
       if (b?.sideInline) failures.push("beside-review: the review's sidebar squeezes in beside the diff next to the list");
+      // The Inbox beside it is the page's one list: no headings, a question's row first.
+      const heads = await page.locator(".beside .group-head").count();
+      const first = await page.locator(".beside .line .c-meta").first().textContent();
+      if (heads || first !== "Questionby your agent")
+        failures.push(`beside-review: the Inbox beside it has ${heads} headings and starts ${JSON.stringify(first)}`);
       // The calls to action sit before the ages, so the ages end in one column.
       const ends = await page.evaluate<number[]>(
         `[...new Set([...document.querySelectorAll(".beside .c-row .line-age")].map((el) => Math.round(el.getBoundingClientRect().right)))]`,
@@ -1790,7 +1821,7 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // An agent's question leads the main page; a click opens its page: what it's about, all it said, its links, the answers.
+    // An agent's question leads the Inbox; a click opens its page: what it's about, all it said, its links, the answers.
     name: "inquiry",
     go: async (page) => {
       await at("#/")(page);

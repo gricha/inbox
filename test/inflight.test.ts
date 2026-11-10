@@ -559,7 +559,7 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
     ["reviewers", "nobody's asked to review it: add reviewers", true, "now"],
   );
   const top = runSync(t.desk.focus()).sections.now[0];
-  assert.deepEqual([top?.id, top?.group], ["acme/web#3", "back"], "on top, in Back to you");
+  assert.deepEqual([top?.id, top?.group, top?.stage], ["acme/web#3", "back", "waiting for review"], "on top; nobody handed it back");
   assert.equal(card("web#4").cta, "ready", "a draft: Ready for review comes first");
   assert.equal(card("web#5").cta, undefined, "dana's asked");
   assert.throws(() => runSync(t.desk.act("web#3", "inflight")), /nobody's asked to review acme\/web#3: add reviewers first/);

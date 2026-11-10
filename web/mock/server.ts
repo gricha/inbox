@@ -1763,8 +1763,8 @@ function cardOf(r: Rec, p: Placement): Card {
   const team = me.requested && !me.requested_direct && me.requested_team ? me.requested_team : "";
   const actions = actionsOf(r);
   const was = stage(itemOf(r), me.author ? ME : s.author);
-  // As Desk.card(): an open PR another one blocks says so, unless it's a draft or changes are requested.
-  const st = sig.pr.blocked && (was === "approved" || was === "waiting for review") ? "blocked" : was;
+  // As Desk.card(): a hand-back says so; an open PR another one blocks says so, unless it's a draft or changes are requested.
+  const st = handedBack(r) ? "handed back" : sig.pr.blocked && (was === "approved" || was === "waiting for review") ? "blocked" : was;
   const wake = waitable(sig, itemOf(r), ME);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),

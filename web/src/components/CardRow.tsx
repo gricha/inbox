@@ -89,9 +89,17 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
     </span>
   );
   const by = <span className={cls("line-by", card.by === "you" && "mine")}>by {card.by}</span>;
-  // Amber only on yours, where it's work for you.
+  // Amber only on yours, where it's work for you; a hand-back stays in a tight table, as nothing else on its row says so.
   const stage = (
-    <span className={cls("line-stage", card.stage === "changes requested" && card.by === "you" && "t-warn")}>{card.stage}</span>
+    <span
+      className={cls(
+        "line-stage",
+        card.stage === "changes requested" && card.by === "you" && "t-warn",
+        card.stage === "handed back" && "handed",
+      )}
+    >
+      {card.stage}
+    </span>
   );
   const ageEl = (
     <span

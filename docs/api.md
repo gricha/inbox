@@ -242,10 +242,10 @@ interface Card {
   resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"
   resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
   inflight: boolean; // your open PR, in Merging
-  group?: "back" | "review" | "other" | "mine"; // a Now or Today card's part of the main page, in this order: your PR back to you (handed back, or ready and nobody's asked to review it); someone else's PR waiting on your review (requested or pushed since your review, not a draft); any other issue or PR not yours; your PR. Desk.top() sorts Now and Today each by it (byPart)
+  group?: "back" | "review" | "other" | "mine"; // a Now or Today card's part of the main page, in this order: your PR back to you (handed back, or ready and nobody's asked to review it); someone else's PR waiting on your review (requested or pushed since your review, not a draft); any other issue or PR not yours; your PR. Desk.top() sorts Now and Today each by it (byPart); the window draws no heading for it, only that order
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in Merging
   stack?: StackRef; // an open PR whose line has two or more open PRs (Stacks, below)
-  stage?: "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "merged" | "closed"; // a PR's; "blocked" in place of approved or waiting for review while another PR blocks it
+  stage?: "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "handed back" | "merged" | "closed"; // a PR's; "blocked" in place of approved or waiting for review while another PR blocks it; "handed back" in place of any on your PR the coordinator handed back
   blocker?: { id: string; ref: string; waits: string }; // an open PR blocked by another (Dependencies, below): the item id at the end of the chain, as pr.blocker says it ("sentry#129460 (through api#2)"), and what that one waits on
   needs?: string[]; // a blocked PR's open PRs it needs merged first directly, as repo#number (pr.blocked_by)
   depth?: number; // on Blocked: how deep in its chain the row hangs, 0 for a chain's first rows

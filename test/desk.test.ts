@@ -480,6 +480,7 @@ test("the main page's parts: a hand-back, what waits on your review, the rest th
     "acme/web#3": "mine",
   });
   assert.equal(f.sections.now[0]?.id, "acme/web#5", "a hand-back tops the queue");
+  assert.equal(f.sections.now[0]?.stage, "handed back", "no heading says it's back to you: its own row does, where its stage would be");
   const rank = (cs: { group?: string }[]) => cs.map((x) => ["back", "review", "other", "mine"].indexOf(x.group ?? ""));
   for (const cs of [f.sections.now, f.sections.today])
     assert.deepEqual(

@@ -414,7 +414,7 @@ export function groupsOf(
   };
   const s = view.sections;
   return [
-    // One part at a time: the desk sorts Now and Today by part, and the page shows each part's Now before its Today.
+    // One list in the desk's order: it sorts Now and Today each by part, and the page shows each part's Now before its Today.
     group("queue", byPart([...s.now, ...s.today]), "active", view.cards),
     group("later", s.later),
     group("fyi", s.fyi),

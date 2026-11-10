@@ -17,16 +17,16 @@ export interface InquiryCtx {
   compact?: boolean; // the list beside a review: two lines a row
 }
 
-// An agent session's question for you, a row like a PR's labeled Agent: a click opens its page. Beside a review, two lines:
-// the question, then who asks, its age and Answer.
+// An agent session's question for you, a row in the table like a PR's or an issue's: Question, the question, its call to
+// action (Answer), who asks, its age; a click opens its page. Beside a review, two lines: the question, then the rest.
 export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
-  const kind = <span className="line-kind">Agent</span>;
+  const kind = <span className="line-kind">Question</span>;
   const title = <span className="line-title">{q.question}</span>;
-  const from = (
-    <span className="line-ref inq-from" title={q.from}>
-      {fromName(q.from)}
+  const by = (
+    <span className="line-by" title={q.from}>
+      by {fromName(q.from, false)}
     </span>
   );
   const ageEl = (
@@ -55,7 +55,7 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
               {title}
               <span className="c-meta">
                 {kind}
-                {from}
+                {by}
               </span>
               {ageEl}
             </>
@@ -63,7 +63,6 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
             <>
               {kind}
               {title}
-              {from}
             </>
           )}
         </button>
@@ -76,7 +75,12 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
         >
           Answer
         </button>
-        {!ctx.compact && ageEl}
+        {!ctx.compact && (
+          <>
+            {by}
+            {ageEl}
+          </>
+        )}
       </div>
     </div>
   );

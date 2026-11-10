@@ -1218,7 +1218,10 @@ export class Desk {
     const via = e.analysis.signals.author.via.replace(/^@/, "");
     const sig = e.analysis.signals.pr;
     const st = stage(it, me.author ? this.me() : it.author);
-    const shown = sig.blocked && (st === "approved" || st === "waiting for review") ? "blocked" : st;
+    // Back on top of your desk; your agent's hand-back says so where its stage would be, as no heading over its row does.
+    const back = !e.inflight && snap.needs.has(it.id);
+    const handed = back && snap.needs.get(it.id) !== UNASKED;
+    const shown = handed ? "handed back" : sig.blocked && (st === "approved" || st === "waiting for review") ? "blocked" : st;
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -1256,7 +1259,7 @@ export class Desk {
       resolved: e.resolved?.reason ?? null,
       resolved_at: e.resolved ? (e.resolved.at ?? it.updated_at) : null,
       inflight: e.inflight,
-      ...(!e.inflight && snap.needs.has(it.id) && { handed_back: true }),
+      ...(back && { handed_back: true }),
       // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),

@@ -8,7 +8,8 @@ export type Ci = "green" | "red" | "pending" | "none";
 export type ReviewDecision = "approved" | "changes_requested" | "required" | "none";
 export type Mergeable = "clean" | "conflict" | "unknown";
 export type ReviewState = "approved" | "changes_requested" | "commented" | "dismissed" | "pending";
-export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "merged" | "closed"; // blocked: only Desk.card() sets it
+// blocked and handed back: only Desk.card() sets them
+export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "handed back" | "merged" | "closed";
 
 // ---------------------------------------------------------------------------
 // What the desk reads of any source's item, stored whole as JSON. Its source is the id's prefix ("notes:1"); a bare id is GitHub's.
@@ -449,10 +450,11 @@ export interface Handoff {
   from: string;
 }
 
-// The main page's parts, in order: your PRs the coordinator handed back, other people's PRs waiting on your review, the
-// rest that's someone else's (issues, PRs that mention you), then your own PRs.
-export type QueueGroup = "back" | "review" | "other" | "mine";
-export const QUEUE_GROUPS: readonly QueueGroup[] = ["back", "review", "other", "mine"];
+// The main page's order, by part: your PRs back to you (handed back, or nobody's asked to review them), other people's PRs
+// waiting on your review, the rest that's someone else's (issues, PRs that mention you), then your own PRs. The page is one
+// list: no heading says which part a row is in.
+type QueueGroup = "back" | "review" | "other" | "mine";
+const QUEUE_GROUPS: readonly QueueGroup[] = ["back", "review", "other", "mine"];
 // Cards in their parts' order, each part keeping the order it had.
 export const byPart = (cards: Card[]): Card[] =>
   cards.toSorted((a, b) => QUEUE_GROUPS.indexOf(a.group ?? "other") - QUEUE_GROUPS.indexOf(b.group ?? "other"));
@@ -467,7 +469,7 @@ export interface Card {
   author: string;
   author_bot: boolean;
   by: string; // as its row says who it's from: "you" (yours, or a bot's for you), the person a bot opened it for, else its author
-  stage?: Stage; // a PR's, from stage() in src/stage.ts; an issue has none
+  stage?: Stage; // a PR's, from stage() in src/stage.ts, or that your agent handed it back; an issue has none
   bucket: Bucket;
   why: string;
   handoff?: Handoff; // an agent put it on your desk (desk_add) and said why; gone once you act on it
@@ -498,7 +500,7 @@ export interface Card {
   resolved: string | null; // why it needs nobody now ("merged", "approved by alice"); null while it's open
   resolved_at: string | null; // when it resolved (else its last update, when GitHub doesn't say); null while it's open
   inflight: boolean; // your PR, in Merging
-  group?: QueueGroup; // a Now or Today card: which part of the main page it's in (QUEUE_GROUPS)
+  group?: QueueGroup; // a Now or Today card: which part of the main page's order it's in (QUEUE_GROUPS)
   placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off
   team_ask?: string; // a review asked only of your team: "CODEOWNERS ping to @ml-team", so a rule's why can't pass it off as yours
   stack?: StackRef; // an open PR whose line has two or more open

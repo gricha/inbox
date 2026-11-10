@@ -501,6 +501,7 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
     ["oss/tinyhttp#205"],
   );
   assert.match(q.sections.now[0]!.why, /^handed back: /);
+  assert.equal(q.sections.now[0]!.stage, "handed back", "its row says so, as the desk's does");
   const { data: o } = await call<Overview>("GET", "/api/overview");
   assert.deepEqual(o.inflight, { total: 7 });
 
