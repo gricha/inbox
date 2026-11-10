@@ -579,7 +579,8 @@ const settingsSays = (page: Page) =>
     return document.querySelector(".page-head").textContent.trim() + ": " + items.join(" ");
   })()`);
 // What settingsSays reads on the part named `on`.
-const onPart = (on: string) => `${on}: Inbox ${[...SETTINGS_SIDE, "|", "GitHub"].map((p) => (p === on ? `[${p}]` : p)).join(" ")}`;
+const onPart = (on: string) =>
+  `${on}: Inbox ${[...SETTINGS_SIDE, "|", "GitHub", "Sessions"].map((p) => (p === on ? `[${p}]` : p)).join(" ")}`;
 // The sidebar's pages in order, "|" for its hairline; null where it's hidden.
 const sidePages = (page: Page) =>
   page.evaluate<string | null>(`(() => {
@@ -3782,7 +3783,15 @@ const SHOTS: Shot[] = [
       const links = await page.evaluate<string[]>(
         `[...document.querySelectorAll('.side-nav[aria-label="Settings"] a')].map((a) => a.getAttribute("href"))`,
       );
-      const want = ["#/", "#/settings/queue", "#/settings/agent", "#/settings/automations", "#/settings/app", "#/settings/github"];
+      const want = [
+        "#/",
+        "#/settings/queue",
+        "#/settings/agent",
+        "#/settings/automations",
+        "#/settings/app",
+        "#/settings/github",
+        "#/settings/sessions",
+      ];
       if (links.join() !== want.join()) failures.push(`settings-nav: the sidebar links to ${JSON.stringify(links)}`);
       if (await page.locator(".page-head .head-tabs").count()) failures.push("settings-nav: the page head still has tabs");
       for (const [name, id] of [
