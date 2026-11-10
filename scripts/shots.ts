@@ -4313,7 +4313,7 @@ const SHOTS: Shot[] = [
   // The More menu open in a review.
   { name: "more-menu", go: review("acme/worker#875", [MORE]) },
   // The platform's keys: ⌘1 to ⌘5 are the sidebar's pages, top to bottom; ⌘] and ⌘[ open the item after and before the
-  // open one in its list (a question, then the rows), each as a click on its row would.
+  // open one in its list (the questions, the sessions, then the rows), each as a click on its row would.
   {
     name: "keys",
     go: async (page) => {
@@ -4332,13 +4332,19 @@ const SHOTS: Shot[] = [
       const ids = await page.evaluate<string[]>(
         `[...document.querySelectorAll(".queue .line")].slice(0, 4).map((l) => l.dataset.id ?? "q:" + l.querySelector(".row-main")?.textContent?.slice(0, 20))`,
       );
+      // A session opens in place on the Inbox, as an issue does: the row open there is where it went.
       const seen: string[] = [];
       for (const key of ["BracketRight", "BracketRight", "BracketRight", "BracketLeft"]) {
         await page.keyboard.press(`${mod}+${key}`);
         await page.waitForTimeout(250);
-        seen.push(decodeURIComponent(await hash()));
+        const h = decodeURIComponent(await hash());
+        seen.push(
+          h === "#/"
+            ? `#/ open ${await page.evaluate<string | null>(`document.querySelector(".queue .line.open")?.dataset.id ?? null`)}`
+            : h,
+        );
       }
-      const step = (h: string) => (h.startsWith("#/inquiry/") ? "question" : h.replace("#/review/", ""));
+      const step = (h: string) => (h.startsWith("#/inquiry/") ? "question" : h.replace(/^#\/review\/|^#\/ open /, ""));
       const went = seen.map(step);
       if (went[0] !== "question" || went[1] !== "question" || went[2] !== ids[2] || went[3] !== "question" || seen[3] !== seen[1])
         failures.push(`keys: ${mod}+] x3 then ${mod}+[ went to ${JSON.stringify(seen)}, the list starting ${JSON.stringify(ids)}`);

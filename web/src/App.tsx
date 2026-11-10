@@ -1191,7 +1191,7 @@ export function App() {
       if (to) go({ name: "review", id: to.card.id });
       return;
     }
-    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...flat.map((c) => c.id)];
+    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((x) => x.id), ...flat.map((c) => c.id)];
     // An issue it opened in place beside a review is where it is, not the review still drawn.
     const last = stepAt.current;
     const here = last !== null && (last === expanded || last === shown) ? last : (shown ?? expanded ?? selected);
@@ -1200,10 +1200,16 @@ export function App() {
     if (id === undefined) return;
     stepAt.current = id;
     const q = inquiries.find((x) => inquiryOf(x.id) === id);
+    const s = sessions.find((x) => x.id === id);
     const c = flat.find((x) => x.id === id);
     if (q) {
       setExpanded(null);
       openInquiry(q);
+    } else if (s) {
+      // A session opens in place on the Inbox, as an issue does.
+      if (route.name === "review" || route.name === "inquiry") go({ name: "queue" });
+      setSelected(s.id);
+      setExpanded(s.id);
     } else if (c?.kind === "pr") {
       setExpanded(null);
       openCard(c);
