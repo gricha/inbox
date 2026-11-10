@@ -57,7 +57,7 @@ test("a refusal is an answer; a question left out, or answered as another type, 
   }
 });
 
-test("401, 402 and 429 are the model being down, in the owner's words; anything else is its error, and neither repeats the key", async (c) => {
+test("401, 402, 429, a 5xx and no answer are the model being down, in the owner's words; anything else is its error, and neither repeats the key", async (c) => {
   let next: { status: number; json?: unknown; text?: string } = {
     status: 401,
     json: { error: { code: 401, message: "Missing Authentication header" } },
@@ -83,11 +83,20 @@ test("401, 402 and 429 are the model being down, in the owner's words; anything 
     [refused._tag, refused.message],
     ["DecisionModelError", "the decision model failed: Invalid request parameters for key [key] (HTTP 400)"],
   );
+  next = { status: 200, text: "<html>Fine</html>" };
+  assert.equal((await ask()).message, "the decision model's answer isn't JSON (HTTP 200)");
+  next = { status: 500, json: { error: { code: 500, message: `provider overloaded for ${KEY}` } } };
+  const failed = await ask();
+  assert.deepEqual(
+    [failed._tag, "status" in failed && failed.status, failed.message],
+    ["DecisionModelDown", 500, "OpenRouter's decision model failed: provider overloaded for [key] (HTTP 500)."],
+  );
   next = { status: 502, text: "<html>Bad gateway</html>" };
-  assert.equal((await ask()).message, "the decision model's answer isn't JSON (HTTP 502)");
+  const gateway = await ask();
+  assert.deepEqual([gateway._tag, gateway.message], ["DecisionModelDown", "OpenRouter's decision model failed (HTTP 502)."]);
   await api.close();
   const gone = await ask();
-  assert.equal(gone._tag, "DecisionModelError");
-  assert.match(gone.message, /^the decision model couldn't be reached: /);
+  assert.equal(gone._tag, "DecisionModelDown");
+  assert.match(gone.message, /^OpenRouter couldn't be reached: /);
   assert.ok(!gone.message.includes(KEY));
 });

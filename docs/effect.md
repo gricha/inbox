@@ -33,7 +33,7 @@ services, `Data.TaggedError`, the desk's own `log`.
 
 - Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the desk's own server
   (`ListenFailed`), the rules' expressions, files, child processes, Claude Code, the decision model (`DecisionModelDown`
-  for a key refused, out of credits or rate limited, which holds what asked; `DecisionModelError` for the rest), GitHub. The UI's own (the desk
+  for a key refused, out of credits or rate limited, a 5xx or no answer, which holds what asked; `DecisionModelError` for the rest), GitHub. The UI's own (the desk
   unreachable, an API refusal) live in `web/src/api.ts`; the CLI's and MCP's client's (`DeskDown`, `DeskNoAnswer`,
   `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
   `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. The desktop app's own (`DeskCallFailed`, `DeskFailed`,

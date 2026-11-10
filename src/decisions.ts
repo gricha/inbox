@@ -1,7 +1,7 @@
 // OpenRouter's Decisions API (alpha): typed questions about a `state`, answered by a decision model (TypeSafe's Jev) with
 // probabilities and no prose. Its one caller is an automation's question, and only once you've set its key in Settings:
 // with none, nothing here runs. https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { DecisionModelDown, DecisionModelError } from "./errors.ts";
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
@@ -57,18 +57,30 @@ export const decide = Effect.fn("decide")(function* <K extends string>(
       });
       return { status: res.status, text: await res.text() };
     },
+    // Unreachable or no answer in time is the model being down too: nothing about the item.
     catch: (cause) =>
-      new DecisionModelError({
-        message: `the decision model couldn't be reached: ${safe(cause instanceof Error ? cause.message : String(cause))}`,
-        cause,
+      new DecisionModelDown({
+        status: 0,
+        message: `OpenRouter couldn't be reached: ${safe(cause instanceof Error ? cause.message : String(cause))}`,
       }),
   });
   const down = DOWN[status];
   if (down) return yield* new DecisionModelDown({ status, message: down });
-  const body = yield* Effect.try({
+  const read = Result.try({
     try: () => JSON.parse(text) as { answers?: unknown; error?: { message?: unknown } } | null,
-    catch: (cause) => new DecisionModelError({ status, message: `the decision model's answer isn't JSON (HTTP ${status})`, cause }),
+    catch: (cause) => cause,
   });
+  if (status >= 500) {
+    const said = Result.isSuccess(read) && typeof read.success?.error?.message === "string" ? `: ${safe(read.success.error.message)}` : "";
+    return yield* new DecisionModelDown({ status, message: `OpenRouter's decision model failed${said} (HTTP ${status}).` });
+  }
+  if (Result.isFailure(read))
+    return yield* new DecisionModelError({
+      status,
+      message: `the decision model's answer isn't JSON (HTTP ${status})`,
+      cause: read.failure,
+    });
+  const body = read.success;
   if (status < 200 || status >= 300) {
     const said = typeof body?.error?.message === "string" ? safe(body.error.message) : "no reason given";
     return yield* new DecisionModelError({ status, message: `the decision model failed: ${said} (HTTP ${status})` });
