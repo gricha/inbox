@@ -58,6 +58,18 @@ export const SETTINGS = [
     help: "Once per commit; each joins your Inbox when its review is written.",
   },
   {
+    key: "review.at_once",
+    section: "github",
+    more: true,
+    label: "AI reviews running at once",
+    type: "number",
+    default: 8,
+    min: 1,
+    max: 32,
+    unit: "reviews",
+    help: "Each is one of your agent's runs; more finish sooner and use your plan faster.",
+  },
+  {
     key: "github.my_repos",
     section: "github",
     more: true,

@@ -157,7 +157,6 @@ const stateOf = (s: StateRow): ItemState => {
   return state;
 };
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
-const AI_AT_ONCE = 2;
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
@@ -2128,7 +2127,7 @@ export class Desk {
   // then Today from the top, so the cards on screen are ready first.
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi()) return;
-    let room = AI_AT_ONCE - this.generating.size; // counted here: a run that fails at once frees its slot before startAi returns
+    let room = this.settings["review.at_once"] - this.generating.size; // counted here: a run that fails at once frees its slot before startAi returns
     if (room <= 0) return;
     const snap = this.snapshot();
     for (const j of this.jobs.due("ai_review")) {
@@ -2646,7 +2645,7 @@ export class Desk {
     return need === UNASKED ? "it's your ready PR nobody's asked to review" : "your agent handed it back to you";
   }
 
-  // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to AI_AT_ONCE.
+  // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to review.at_once.
   warmAdded(id: string): void {
     if (this.snapshot().entries.get(id)!.item.kind === "pr") {
       this.runner.fork("diff", Effect.ignore(this.prText(id)), id); // ahead of time: opening it says what failed

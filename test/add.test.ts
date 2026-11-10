@@ -56,7 +56,7 @@ async function until(cond: () => boolean): Promise<void> {
 
 test("adding a PR the desk doesn't hold fetches it, pins it on the main page and starts its pre-review", async (c) => {
   const f = fakeReview();
-  const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
+  const t = await setup([teamPing(2)], { settings: { "policy.judge": false, "review.at_once": 2 }, desk: { review: f.review } });
   c.after(t.cleanup);
   await run(t.desk.sync());
   t.gh.items.set(ID, unknown());
@@ -235,7 +235,7 @@ test("adding a done, snoozed or muted item brings it back, and its one undo puts
 
 test("what you pin yourself is on your desk at once, reviewed or not; an agent's add waits for Claude's review", async (c) => {
   const f = fakeReview();
-  const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
+  const t = await setup([teamPing(2)], { settings: { "policy.judge": false, "review.at_once": 2 }, desk: { review: f.review } });
   c.after(t.cleanup);
   await run(t.desk.sync());
   const onDesk = (id: string) =>
@@ -253,7 +253,7 @@ test("what you pin yourself is on your desk at once, reviewed or not; an agent's
 
 test("adding several PRs at once starts their AI reviews two at a time, as the background ones run", async (c) => {
   const f = fakeReview();
-  const t = await setup([teamPing(2)], { settings: { "policy.judge": false }, desk: { review: f.review } });
+  const t = await setup([teamPing(2)], { settings: { "policy.judge": false, "review.at_once": 2 }, desk: { review: f.review } });
   c.after(t.cleanup);
   await run(t.desk.sync());
   for (const n of [9, 10, 11]) t.gh.items.set(`acme/other#${n}`, makeItem({ repo: "acme/other", number: n, author: "dave" }));

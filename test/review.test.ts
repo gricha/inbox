@@ -1471,7 +1471,7 @@ function fakeDeps(chunks?: unknown) {
 async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Record<string, unknown>; chunks?: unknown } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
   // No judge: these tests are about the AI review (test/judge.test.ts runs it).
-  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, ...opts.settings }));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, "review.at_once": 2, ...opts.settings }));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()];
     if (q.includes("review-requested:@me") && !q.includes("-review-requested"))
@@ -1758,6 +1758,20 @@ test("turning auto reviews off and on lifts the pause and tries the failed PRs a
   assert.deepEqual(t.f.started.slice(2), t.f.started.slice(0, 2), "the failed ones first");
   for (const id of t.f.started.slice(2)) await t.f.release(id);
   assert.ok(t.desk.aiPausedNow(), "failing again pauses again");
+  t.cleanup();
+});
+
+test("AI reviews run as many at once as review.at_once says: eight by default, so a sync's backlog isn't a queue", async () => {
+  const t = await setup(
+    Array.from({ length: 10 }, (_, i) => ask(i + 1)),
+    { settings: { "review.at_once": 8 } },
+  );
+  await t.sync();
+  assert.equal(t.f.started.length, 8);
+  for (const id of t.f.started.slice()) await t.f.release(id);
+  await flush();
+  assert.equal(t.f.started.length, 10, "the rest start as those finish");
+  for (const id of t.f.started.slice(8)) await t.f.release(id);
   t.cleanup();
 });
 

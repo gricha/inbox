@@ -422,7 +422,7 @@ test("settings lists effective values by section and stars overrides", async () 
   assert.equal(r.code, 0);
   assert.match(
     r.out,
-    /^GitHub\n {2}github\.resolve_on_others_approval +always\n {2}review\.auto_ai +true\n {2}github\.my_repos +\(none\)\n/,
+    /^GitHub\n {2}github\.resolve_on_others_approval +always\n {2}review\.auto_ai +true\n {2}review\.at_once +8\n {2}github\.my_repos +\(none\)\n/,
   );
   assert.match(r.out, /\n\* github\.poll_seconds +120\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
   assert.match(r.out, /\n\nAgent\n {2}agent\.harness +claude-code\n {2}policy\.judge +true\n/);
