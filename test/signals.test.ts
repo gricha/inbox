@@ -471,3 +471,23 @@ test("GitHub's two reviewer nudges leave a blocked PR alone: nobody can merge it
   assert.deepEqual(at(false), [false, true], "named reviewers silent for days: follow up");
   assert.deepEqual(at(true), [false, false], "the same PR, stacked on one still open");
 });
+
+test("GitHub's blunt team-ping rules leave a PR in code you work on to your policy: never hidden or sent to FYI by them", () => {
+  const whens = ["wide-ping", "team-reviewed"].map((id) => GITHUB_AUTOMATIONS.find((a) => a.id === id)!.when ?? "");
+  const pr = makeItem({
+    author: "trevor",
+    review_requests: ["a", "b", "c", "me-team"].map((t) => ({ reviewer: t, type: "team" as const, codeowner: true })),
+    reviews: [{ author: "kai", author_bot: false, state: "commented" as const, at: hoursAgo(2), commit: "abc" }],
+  });
+  const at = (my_area: boolean) => {
+    const sig = analyze(pr, ctx, cfg, NOW).signals;
+    const s = {
+      ...sig,
+      me: { ...sig.me, requested: true, requested_direct: false, requested_team: "me-team" },
+      pr: { ...sig.pr, my_area },
+    };
+    return whens.map((w) => Result.getOrThrow(Result.getOrThrow(compile(w)).eval(s)));
+  };
+  assert.deepEqual(at(false), [true, true], "a wide ping someone else took, outside your code");
+  assert.deepEqual(at(true), [false, false], "the same PR changing files you work on");
+});
