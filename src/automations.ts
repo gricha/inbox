@@ -3,6 +3,7 @@
 // decision model's through OpenRouter), and an agent is your own Claude Code, read only. What comes of it, the desk acts on, by the verbs you allow it (add, when you allow nothing else: on your desk
 // with its why). Agents may draft one; only you turn it on, in the desk.
 import { randomBytes } from "node:crypto";
+import path from "node:path";
 import { Effect, Result, type Fiber } from "effect";
 import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Desk, Entry } from "./desk.ts";
@@ -27,6 +28,7 @@ import {
   type Verb,
 } from "./types.ts";
 import { report } from "./sentry.ts";
+import { secretsPath } from "./settings.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -101,6 +103,8 @@ const DENY = [
   ].map((c) => `Bash(gh ${c}:*)`),
   ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations"]),
 ];
+// The secrets file is the desk's: no tool of a run reads it. A rule's absolute path starts with //.
+const secretsDeny = (home: string) => `Read(/${secretsPath(home).replaceAll(path.sep, "/").replace(/^\/?/, "/")})`;
 // What a run the desk stopped in the middle of says; it doesn't count as the last run, so the next look runs it again.
 const CUT = "the desk stopped during this run, so it ran again";
 // A run whose check nothing passed: no model was called.
@@ -781,7 +785,7 @@ export class Automations {
         : "the decision model's answer";
     const one = (id: string) =>
       Effect.gen({ self: this }, function* () {
-        const lines = this.lines(id, batch?.happened);
+        const lines = this.lines(id, batch?.happened, true);
         if (!lines) {
           gone.push(id);
           return [];
@@ -816,6 +820,8 @@ export class Automations {
         "dontAsk",
         "--allowedTools",
         ALLOW.join(","),
+        "--disallowedTools",
+        secretsDeny(this.desk.home),
         "--json-schema",
         JSON.stringify(schemaFor(canOf(a))),
       ]);
@@ -879,8 +885,9 @@ export class Automations {
   }
 
   // One item as a model is told it: the judge's prompt's lines for it, where it is now and what just happened on it; null
-  // once a sync took it off the desk.
-  lines(id: string, happened?: Map<string, string[]>): string[] | null {
+  // once a sync took it off the desk. `away`: for a model off your computer, less what the desk read itself (the AI
+  // review, the directories it touches), which a decision about the item doesn't need.
+  lines(id: string, happened?: Map<string, string[]>, away = false): string[] | null {
     const desk = this.desk;
     const snap = desk.snapshot();
     const e = snap.entries.get(id);
@@ -889,7 +896,8 @@ export class Automations {
     const board = p && (desk.loaded?.config.boards.find((b) => b.id === p.board)?.name ?? p.board);
     const where = p ? `on my desk: ${p.bucket}, on the "${board}" board${p.why ? ` (${p.why})` : ""}` : null;
     const what = happened?.get(id);
-    return describe({ item: e.item, signals: e.analysis.signals, ai: snap.reviews.get(id) ?? null }, desk.ctx, [
+    const item = away ? { ...e.item, paths: undefined } : e.item;
+    return describe({ item, signals: e.analysis.signals, ai: away ? null : (snap.reviews.get(id) ?? null) }, desk.ctx, [
       where,
       what ? `what happened: ${what.join("; ")}` : null,
     ]);
@@ -939,7 +947,7 @@ export class Automations {
 
   // The desk home's automations directory; its project settings keep the deny list, beside the owner's own.
   dir(): Effect.Effect<string, FsError> {
-    return denyDir(this.desk.home, "automations", DENY);
+    return denyDir(this.desk.home, "automations", [...DENY, secretsDeny(this.desk.home)]);
   }
 }
 

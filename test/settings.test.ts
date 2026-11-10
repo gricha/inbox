@@ -269,7 +269,7 @@ test("defaults are what parseConfig uses without settings", () => {
   assert.equal(cfg.handoff.prompt, DEFAULTS["handoff.prompt"]);
 });
 
-test("a secret setting is kept in settings.json, yours alone to read, and never sent back: set, it reads as dots", async (c) => {
+test("a secret setting is kept in secrets.json, yours alone to read, set only from the window, and never sent back: set, it reads as dots", async (c) => {
   const { setup } = await import("./helpers/desk.ts");
   const { createApp } = await import("../src/server.ts");
   const { run } = await import("./helpers/run.ts");
@@ -295,15 +295,24 @@ test("a secret setting is kept in settings.json, yours alone to read, and never 
 
   const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin", "content-type": "application/json" };
   const app = createApp(t.desk, 47823);
-  const put = async (body: unknown) => {
-    const res = await app.request("http://127.0.0.1:47823/api/settings", { method: "PUT", headers: DESK, body: JSON.stringify(body) });
-    return res.text();
+  const put = async (body: unknown, headers: Record<string, string> = DESK) => {
+    const res = await app.request("http://127.0.0.1:47823/api/settings", { method: "PUT", headers, body: JSON.stringify(body) });
+    return { status: res.status, text: await res.text() };
   };
-  const saved = await put({ set: { "agent.decision_key": KEY } });
+  // Not from an agent, the CLI or curl: only the desk's own page sets or clears it; other settings as before.
+  const agent = { "content-type": "application/json" };
+  for (const body of [{ set: { "agent.decision_key": KEY } }, { reset: ["agent.decision_key"] }]) {
+    const r = await put(body, agent);
+    assert.deepEqual([r.status, (JSON.parse(r.text) as { tag: string }).tag], [403, "Forbidden"], JSON.stringify(body));
+  }
+  assert.equal(t.desk.settings["agent.decision_key"], "");
+  assert.equal((await put({ set: { "queue.cards": 11 } }, agent)).status, 200);
+  const saved = (await put({ set: { "agent.decision_key": KEY } })).text;
   assert.ok(!saved.includes(KEY), "the answer to the save doesn't repeat it");
   assert.equal(t.desk.settings["agent.decision_key"], KEY, "the desk has it");
-  const file = path.join(t.home, "settings.json");
-  assert.equal((JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>)["agent.decision_key"], KEY);
+  const file = path.join(t.home, "secrets.json");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "agent.decision_key": KEY });
+  assert.ok(!fs.readFileSync(path.join(t.home, "settings.json"), "utf8").includes(KEY), "not in settings.json");
   if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   const view = t.desk.getSettings();
   assert.deepEqual([view.values["agent.decision_key"], view.overridden.includes("agent.decision_key")], [DOTS, true]);
@@ -317,4 +326,32 @@ test("a secret setting is kept in settings.json, yours alone to read, and never 
   await run(t.desk.putSettings({ reset: ["agent.decision_key"] }));
   assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.getSettings().values["agent.decision_key"]], ["", ""], "reset clears it");
   assert.ok(!logs.join("\n").includes(KEY), "nothing logged it");
+});
+
+test("a secret in settings.json moves to secrets.json once, and secrets.json is never written through a link", async (c) => {
+  const { setup } = await import("./helpers/desk.ts");
+  const KEY = "sk-or-v1-3333333333333333333333333333333333333333333333333333333333333333";
+  const t = await setup([], { settings: { "agent.decision_key": KEY, "queue.cards": 12 } });
+  c.after(t.cleanup);
+  const settings = path.join(t.home, "settings.json");
+  const secrets = path.join(t.home, "secrets.json");
+  assert.deepEqual(JSON.parse(fs.readFileSync(settings, "utf8")), { "queue.cards": 12 }, "moved out of settings.json");
+  assert.deepEqual(JSON.parse(fs.readFileSync(secrets, "utf8")), { "agent.decision_key": KEY });
+  if (process.platform !== "win32") assert.equal(fs.statSync(secrets).mode & 0o777, 0o600);
+  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.cards"]], [KEY, 12]);
+  if (process.platform === "win32") return;
+  const elsewhere = path.join(t.home, "dotfiles-secrets.json");
+  fs.writeFileSync(elsewhere, "{}");
+  fs.rmSync(secrets);
+  fs.symlinkSync(elsewhere, secrets);
+  const r = runSync(t.desk.putSettings({ set: { "agent.decision_key": "sk-or-v1-new" } }));
+  assert.deepEqual(r.errors, [
+    {
+      path: "secrets.json",
+      message: `${secrets} is a link; the desk writes keys only to a file of its own. Replace it with a plain file.`,
+    },
+  ]);
+  assert.equal(r.ok, false);
+  assert.equal(fs.readFileSync(elsewhere, "utf8"), "{}", "nothing written through it");
+  assert.equal(runSync(t.desk.putSettings({ set: { "queue.cards": 9 } })).ok, true, "other settings save as before");
 });

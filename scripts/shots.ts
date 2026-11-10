@@ -2947,8 +2947,7 @@ const SHOTS: Shot[] = [
         seen.type !== "password" ||
         seen.value !== "" ||
         seen.hint !== "An OpenRouter key" ||
-        seen.help !==
-          "Sends automations' questions to OpenRouter, with each item's title, author and who's asked. Empty, Claude answers them."
+        seen.help !== "Sends OpenRouter each item's title, labels, people, reviewers, state and description's start. Empty: Claude answers."
       )
         failures.push(`settings-agent-more: the key's row reads ${JSON.stringify(seen)}`);
       const model = await page.locator('[id="setting-agent.decision_model"]').inputValue();

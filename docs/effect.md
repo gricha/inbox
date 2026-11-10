@@ -75,7 +75,7 @@ services, `Data.TaggedError`, the desk's own `log`.
 
 Recoveries: `itemId` catches `NotFound` by its tag (plus the exact-id check); `hold` catches `NotFound` and lets
 `AmbiguousRef` and `Unavailable` through; `inquiryView` turns any `DeskHttpError` into `card: null`. A file the desk
-writes or reads for a request (`replaceFile`, config.toml, policy.md, settings.json) fails with `FsError` in Node's
+writes or reads for a request (`replaceFile`, config.toml, policy.md, settings.json, secrets.json) fails with `FsError` in Node's
 words, which a route answers as a logged 500. A stale base (`putPolicy`, `putConfig`) or head (`approve`, `githubAct`)
 answers 409 `Stale`, and a held lock 409 `Busy`; the UI shows any of them by its words. The GitHub writes, `hold` and
 `reviewers` keep GitHub's error as `Upstream`'s `cause`, one `report()` hasn't sent, so Sentry sees each 502.

@@ -119,12 +119,17 @@ import {
   checkSetting,
   effective,
   migrateLegacy,
+  isSecret,
+  readSecrets,
   readSettings,
   SECTIONS,
+  secretsPath,
+  secretsRefused,
   SETTINGS,
   settingDef,
   masked,
   settingsPath,
+  writeSecrets,
   writeSettings,
   type Settings,
   type SettingsFile,
@@ -309,6 +314,7 @@ export class Desk {
   settings: Settings;
   settingsOverrides: Record<string, SettingValue> = {};
   settingsRaw: Record<string, unknown> | null = {};
+  secretsRaw: Record<string, unknown> | null = {}; // secrets.json as last read; null for one that couldn't be
   settingsErrors: ConfigError[] = [];
   settingsText: string | null = ""; // as last read: "" for none, null for one that couldn't be read
   now: () => Date;
@@ -419,6 +425,7 @@ export class Desk {
       const parts = yield* Effect.forEach(this.connectors, (c) => c.init(first));
       if (first) yield* this.firstConfig(parts.filter((p) => p !== null).join("\n"));
       yield* this.migrateSettings();
+      yield* this.migrateSecrets();
       yield* this.migrateRules();
       yield* this.readPolicy();
       yield* this.reloadConfig();
@@ -612,15 +619,55 @@ export class Desk {
 
   // ---------------------------------------------------------------- settings
 
-  // From one read of settings.json (`file`: the caller's), what it says and what's wrong with it.
+  // From one read of settings.json (`file`: the caller's) and secrets.json, what they say and what's wrong with them.
   readSettings(file: SettingsFile = readSettings(this.settingsPath)): Settings {
     const { overrides, errors, raw, text } = file;
+    const secrets = readSecrets(secretsPath(this.home));
     this.settingsText = text;
-    this.settingsOverrides = overrides;
+    this.settingsOverrides = { ...overrides, ...secrets.overrides };
     this.settingsRaw = raw;
-    this.settingsErrors = errors;
-    if (errors.length) this.log(`settings.json has ${errors.length} problem(s); using defaults for those`);
-    return effective(overrides);
+    this.secretsRaw = secrets.raw;
+    this.settingsErrors = [...errors, ...secrets.errors];
+    if (this.settingsErrors.length) this.log(`settings have ${this.settingsErrors.length} problem(s); using defaults for those`);
+    return effective(this.settingsOverrides);
+  }
+
+  // The secret settings go to secrets.json, and only when they change; the rest to settings.json. A secrets.json the desk
+  // couldn't read, or one that's a link, is refused before anything is written: the problem, as data.
+  saveSettings(next: Record<string, unknown>): Effect.Effect<ConfigError[], FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const split = (o: Record<string, unknown>, secret: boolean) =>
+        Object.fromEntries(Object.entries(o).filter(([k]) => isSecret(k) === secret));
+      const secrets = split(next, true);
+      const was = split(this.secretsRaw ?? {}, true);
+      if (Object.keys({ ...secrets, ...was }).some((k) => secrets[k] !== was[k])) {
+        const file = secretsPath(this.home);
+        const refused =
+          this.secretsRaw === null
+            ? "secrets.json can't be read, so saving a key now would overwrite it. Fix or delete it first."
+            : secretsRefused(file);
+        if (refused) return [{ path: "secrets.json", message: refused }];
+        yield* writeSecrets(file, { ...split(this.secretsRaw ?? {}, false), ...secrets });
+      }
+      yield* writeSettings(this.settingsPath, split(next, false));
+      return [];
+    });
+  }
+
+  // A key saved in settings.json before secrets.json moves there once: settings.json is often a link into a dotfiles repo.
+  migrateSecrets(): Effect.Effect<void, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const raw = this.settingsRaw;
+      if (!raw || !Object.keys(raw).some(isSecret)) return;
+      const kept = Object.fromEntries(Object.entries(this.secretsRaw ?? {}).filter(([k]) => isSecret(k)));
+      const problems = yield* this.saveSettings({ ...raw, ...kept });
+      if (problems.length) {
+        this.log(`a key stays in settings.json for now: ${problems[0]!.message}`);
+        return;
+      }
+      this.settings = this.readSettings();
+      this.log(`moved secret settings from settings.json to ${secretsPath(this.home)}`);
+    });
   }
 
   reloadSettings(file?: SettingsFile): Effect.Effect<void, FsError> {
@@ -787,15 +834,16 @@ export class Desk {
       }
       for (const k of patch.reset ?? []) if (!settingDef(k)) errors.push({ path: k, message: `unknown setting "${k}"` });
       if (errors.length) return { ok: false, errors, settings: this.getSettings() };
-      // Start from the file as written, so entries that are invalid or unknown survive the save.
-      const next = { ...this.settingsRaw };
+      // Start from the files as written, so entries that are invalid or unknown survive the save.
+      const next = { ...this.settingsRaw, ...Object.fromEntries(Object.entries(this.secretsRaw ?? {}).filter(([k]) => isSecret(k))) };
       for (const [k, v] of Object.entries(patch.set ?? {})) {
         if (settingDef(k)!.type === "secret" && v === SECRET_SET) continue; // a client sent back what it was shown: unchanged
         if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
         else next[k] = v;
       }
       for (const k of patch.reset ?? []) delete next[k];
-      yield* writeSettings(this.settingsPath, next);
+      const problems = yield* this.saveSettings(next);
+      if (problems.length) return { ok: false, errors: problems, settings: this.getSettings() };
       yield* this.reloadSettings();
       return { ok: true, errors: [], settings: this.getSettings() };
     });

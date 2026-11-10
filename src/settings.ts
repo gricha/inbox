@@ -185,7 +185,7 @@ export const SETTINGS = [
     type: "secret",
     default: "",
     placeholder: "An OpenRouter key",
-    help: "Sends automations' questions to OpenRouter, with each item's title, author and who's asked. Empty, Claude answers them.",
+    help: "Sends OpenRouter each item's title, labels, people, reviewers, state and description's start. Empty: Claude answers.",
   },
   {
     key: "agent.decision_model",
@@ -382,10 +382,9 @@ export const writeSettings = Effect.fn("writeSettings")(function* (file: string,
   const sorted = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
   const tmp = `${real}.${process.pid}.tmp`;
   const text = JSON.stringify(sorted, null, 2) + "\n";
-  // Yours alone to read: it may hold a key.
   yield* Effect.try({
     try: () => {
-      fs.writeFileSync(tmp, text, { mode: 0o600 });
+      fs.writeFileSync(tmp, text);
     },
     catch: fsError("write", tmp),
   });
@@ -394,6 +393,48 @@ export const writeSettings = Effect.fn("writeSettings")(function* (file: string,
       fs.renameSync(tmp, real);
     },
     catch: fsError("rename", real),
+  });
+}, Effect.uninterruptible);
+
+// ---------------------------------------------------------------- secrets.json
+
+// The secret settings live in secrets.json beside settings.json, which people keep in a dotfiles repo through a link.
+export const secretsPath = (home: string) => path.join(home, "secrets.json");
+export const isSecret = (key: string) => DEFS.get(key)?.type === "secret";
+
+// Read as settings.json is, keeping only the secret settings; what's wrong is a problem on secrets.json.
+export function readSecrets(file: string): SettingsFile {
+  const read = readSettings(file);
+  return {
+    ...read,
+    overrides: Object.fromEntries(Object.entries(read.overrides).filter(([k]) => isSecret(k))),
+    errors: read.errors.map((e) => (e.path === "settings.json" ? { path: "secrets.json", message: e.message } : e)),
+  };
+}
+
+// Why the desk won't write secrets.json: a link would put a key wherever it points, a dotfiles repo say. Null: it may.
+export function secretsRefused(file: string): string | null {
+  return fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()
+    ? `${file} is a link; the desk writes keys only to a file of its own. Replace it with a plain file.`
+    : null;
+}
+
+// Yours alone to read (0600, made fresh), through a temporary file and a rename, which replaces the file and follows no link.
+export const writeSecrets = Effect.fn("writeSecrets")(function* (file: string, values: Record<string, unknown>) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  const sorted = Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)));
+  yield* Effect.try({
+    try: () => {
+      fs.rmSync(tmp, { force: true });
+      fs.writeFileSync(tmp, JSON.stringify(sorted, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    },
+    catch: fsError("write", tmp),
+  });
+  yield* Effect.try({
+    try: () => {
+      fs.renameSync(tmp, file);
+    },
+    catch: fsError("rename", file),
   });
 }, Effect.uninterruptible);
 

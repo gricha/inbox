@@ -36,6 +36,7 @@ import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import { fetchPr, generateReview } from "./review.ts";
+import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt } from "./types.ts";
 
@@ -647,6 +648,10 @@ export function createApp(desk: Desk, port: number): Hono {
   app.put("/api/settings", (c) => {
     const put = Effect.gen(function* () {
       const b = (yield* json(c)) as { set?: Record<string, unknown>; reset?: string[] };
+      // A key (a secret setting) is set or cleared in the desk's window only, as approve is: no agent, CLI or curl reaches it.
+      const keys = [...(b.set && typeof b.set === "object" ? Object.keys(b.set) : []), ...(Array.isArray(b.reset) ? b.reset : [])];
+      if (keys.some((k) => typeof k === "string" && isSecret(k)) && !fromDesk(c))
+        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Agent" });
       return yield* desk.putSettings({ set: b.set, reset: b.reset });
     });
     return respond(c, put, { log });

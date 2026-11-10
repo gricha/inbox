@@ -1644,6 +1644,55 @@ test("a scheduled question asks about what's new to it: an item it was asked abo
   assert.equal(await hour(13), 1, "the one that changed");
 });
 
+test("an agent's run is denied reading the desk's secrets file, by the arguments it starts with", async (c) => {
+  const fake = fakeClaude(c);
+  fake.answer("Nothing.", []);
+  const t = await setup([], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await runFx(t.desk.sync());
+  const a = runSync(t.desk.automations.set("warden", WARDEN, true));
+  await t.desk.automations.run(a, "now").p;
+  const args = fake.args(1);
+  const denied = args[args.indexOf("--disallowedTools") + 1] ?? "";
+  assert.ok(args.includes("--disallowedTools"), args.join(" "));
+  assert.deepEqual(denied.split(","), [`Read(/${path.join(t.home, "secrets.json").replaceAll(path.sep, "/").replace(/^\/?/, "/")})`]);
+});
+
+test("what goes to the decision model is what a decision needs: not the AI review's sentence, nor the directories touched", async (c) => {
+  const api = await fakeDecisions(() => ({ json: { answers: { decision: { type: "noul", noul: 0.1 } } } }));
+  c.after(api.close);
+  const ping = { ...teamPing(4), paths: ["src/auth/token.ts", "docs/auth.md"], body: "Moves session tokens to the new store." };
+  const t = await setup([ping], {
+    settings: { "policy.judge": false, "notify.quiet": "", "agent.decision_key": "sk-or-v1-0000" },
+    desk: { decisions: api.url },
+  });
+  c.after(t.cleanup);
+  await runFx(t.desk.sync());
+  const ctx = t.desk.ctx!;
+  Object.defineProperty(t.desk, "ctx", { get: () => ({ ...ctx, areas: { "acme/api": { "src/auth/": 9 } } }) });
+  const review = {
+    verdict: "skim",
+    risk: "low",
+    summary: "Swaps the token store. Fine.",
+    concerns: [],
+    notes: [],
+    head_oid: ping.head_oid,
+  };
+  t.desk.store.set("review:acme/api#4", { ...review, model: "claude-code", at: NOW.toISOString() });
+  t.desk.changed();
+  const both = t.desk.automations.lines("acme/api#4")!.join("\n");
+  assert.match(both, /AI pre-flight review/, "Claude's question still reads them");
+  assert.match(both, /in their areas/);
+  const q = { name: "Pings", schedule: "daily 09:00", when: "true", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  await t.desk.automations.run(runSync(t.desk.automations.set("p", q, true)), "now").p;
+  const sent = api.calls[0]!.body.state!.item!.join("\n");
+  assert.doesNotMatch(sent, /AI pre-flight|Swaps the token store|in their areas|src\/auth/);
+  assert.match(sent, /^id: acme\/api#4\ntitle: Change 4\n/);
+  assert.match(sent, /description: Moves session tokens/);
+  const help = t.desk.getSettings().defs.find((d) => d.key === "agent.decision_key")!.help!;
+  for (const w of ["title", "labels", "description", "reviewers"]) assert.ok(help.includes(w), help);
+});
+
 test("a question waiting on its model asks again at once when you edit it or set a new key", async (c) => {
   let down = true;
   const api = await fakeDecisions(() =>
