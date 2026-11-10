@@ -4011,6 +4011,7 @@ const SHOTS: Shot[] = [
     sizes: ["mac"],
     writes: true,
     go: async (page) => {
+      await page.evaluate(`fetch("/api/mock/devices", { method: "POST" })`); // used 40 minutes ago as of now
       await at("#/settings/app")(page);
       const row = page.locator('[id="row-app.tailscale"]');
       if (!(await row.isVisible())) failures.push("settings-app-remote: no Use it from your other devices row");

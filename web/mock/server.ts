@@ -3459,8 +3459,9 @@ const settingsView = (): SettingsView => ({
   },
 });
 
-// Settings → This device's Tailscale rows: on with the setting, two devices paired, one used in the last hour.
-const PAIRED: RemoteView["devices"] = [
+// Settings → This device's Tailscale rows: on with the setting, two devices paired, one used in the last hour; as of now,
+// since POST /api/mock/devices puts them back.
+const paired = (): RemoteView["devices"] => [
   {
     id: "a1",
     name: "Browser on iPhone",
@@ -3470,7 +3471,7 @@ const PAIRED: RemoteView["devices"] = [
   },
   { id: "b2", name: "work-laptop", kind: "device", created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(), last_used_at: null },
 ];
-const DEVICES = [...PAIRED];
+const DEVICES = paired();
 function remoteView(): RemoteView {
   const on = settingsView().values["app.tailscale"] === true;
   const url = on ? "https://desk.tail1234.ts.net" : null;
@@ -3870,7 +3871,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ok: true };
   }
   if (route === "POST /api/mock/devices") {
-    DEVICES.splice(0, DEVICES.length, ...PAIRED);
+    DEVICES.splice(0, DEVICES.length, ...paired());
     return { ok: true };
   }
   if (route === "GET /api/policy") return policyDoc();
