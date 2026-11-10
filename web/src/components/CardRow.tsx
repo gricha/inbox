@@ -91,7 +91,7 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
   const person = card.by !== "you" && !(card.author_bot && card.by === card.author);
   const by = (
     <span className={cls("line-by", card.by === "you" && "mine")}>
-      by {person && <Avatar login={card.by} />}
+      by {card.by === "you" && ctx.me ? <Avatar login={ctx.me} /> : person && <Avatar login={card.by} />}
       {card.by}
     </span>
   );

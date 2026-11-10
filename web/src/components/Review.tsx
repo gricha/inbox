@@ -1176,7 +1176,7 @@ function Head({
           </span>
         )}
         <span className="rv-by">
-          by {!isMine && !card.author_bot && <Avatar login={card.author} />}
+          by {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
           {isMine ? "you" : card.author}
           {card.author_bot ? " (bot)" : ""}
         </span>
