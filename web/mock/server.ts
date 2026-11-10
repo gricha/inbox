@@ -2245,7 +2245,8 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   return q;
 }
 
-// Your automations: one on, whose last run put two things on your desk; one an agent drafted, off until you turn it on.
+// Your automations: one on, whose last run put two things on your desk; one an agent drafted, off until you turn it on;
+// a rule that snoozes your PR when its CI goes red; and a question about team pings, asked every hour.
 const AUTOMATIONS: Automation[] = [
   {
     id: "warden-issues",
@@ -2265,6 +2266,32 @@ const AUTOMATIONS: Automation[] = [
     on: false,
     by: "an agent",
     updated_at: iso(1),
+  },
+  {
+    id: "my-red-ci",
+    name: "My red CI",
+    schedule: "",
+    events: ["ci"],
+    prompt: "",
+    when: "me.author && pr.ci == 'red'",
+    decide: "rule",
+    rule: { do: "snooze", until: "ci", why: "CI is red: back when it passes" },
+    can: ["snooze"],
+    on: true,
+    by: "you",
+    updated_at: iso(300),
+  },
+  {
+    id: "team-pings",
+    name: "Team pings",
+    schedule: "weekdays hourly",
+    prompt: "A ping to my whole team that isn't about the config loader is FYI. One that is, I want today.",
+    when: "me.requested && !me.requested_direct",
+    decide: "ask",
+    can: ["today", "fyi"],
+    on: true,
+    by: "you",
+    updated_at: iso(400),
   },
 ];
 const RUNS: AutomationRun[] = [
@@ -2294,6 +2321,50 @@ const RUNS: AutomationRun[] = [
       { item_id: "getsentry/warden#398", why: "still waiting on your answer from last week", outcome: "left" },
     ],
     session: "8a2d0c4b-77e1-4f2a-b0c3-5d9e1f6a2b44",
+  },
+  {
+    id: "r3",
+    automation: "my-red-ci",
+    trigger: "event",
+    at: iso(5),
+    done_at: iso(5),
+    error: null,
+    summary: "",
+    items: [{ item_id: "acme/web#412", why: "CI is red: back when it passes", do: "snooze", until: "ci", outcome: "did" }],
+    session: null,
+  },
+  {
+    id: "r4",
+    automation: "team-pings",
+    trigger: "schedule",
+    at: iso(1.5),
+    done_at: iso(1.5),
+    error: null,
+    summary: "Nothing on your desk passed its check, so nothing ran.",
+    items: [],
+    session: null,
+  },
+  {
+    id: "r5",
+    automation: "team-pings",
+    trigger: "schedule",
+    at: iso(0.5),
+    done_at: iso(0.5),
+    error: null,
+    summary: "Asked Claude about 5 items; it left 1 as it is.",
+    items: [
+      { item_id: "acme/api#2231", why: "a docs change, pinged to the whole team", do: "fyi", outcome: "did" },
+      { item_id: "acme/api#2240", why: "a dependency bump every team owns a line of", do: "fyi", outcome: "did" },
+      { item_id: "acme/api#2238", why: "it rewrites how the loader reads env vars", do: "today", outcome: "did" },
+      {
+        item_id: "acme/api#2219",
+        why: "a rename across teams",
+        do: "fyi",
+        outcome: "held",
+        error: "a hard rule keeps it in Today or above",
+      },
+    ],
+    session: null,
   },
 ];
 function automationsView(): AutomationView[] {

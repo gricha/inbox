@@ -1,11 +1,15 @@
-// Settings → Automations: your instructions on a schedule. The tab lists them (turn one on, run it now, write a new one);
-// each opens a view of its own with its instruction, its editor and its runs. A run's summary and whys are an agent's words:
-// shown as text, never markup.
+// Settings → Automations: your instructions, on a schedule or when something happens. The tab lists them (turn one on, run
+// it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
+// and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
+  ACTIVITY_KINDS,
+  EVENT,
   outcomeText,
+  UNTIL,
   VERB,
+  VERBS,
   type ActivityKind,
   type AutomationBody,
   type AutomationView as Auto,
@@ -34,11 +38,45 @@ interface Draft {
   on: boolean;
 }
 
-// What the desk may do with what it lists, after "may": "add to your desk, sort to FYI and snooze".
+// What the desk may do with what it lists: "add to your desk, sort to FYI and snooze".
 const mayText = (can: readonly Verb[]) => {
   const said = can.map((v) => VERB[v]);
   return said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : (said[0] ?? "");
 };
+const cap = (t: string) => `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
+
+// How long a rule's snooze lasts, after "until": the desk's own words for a snooze, less a date.
+const UNTILS: [string, string][] = [
+  ["tomorrow", "tomorrow"],
+  ["1h", "an hour from then"],
+  ["3h", "3 hours from then"],
+  ["monday", "Monday"],
+  ["activity", "new activity"],
+  ...Object.entries(UNTIL),
+];
+const untilWords = (u: string | undefined) => UNTILS.find(([k]) => k === (u ?? "tomorrow"))?.[1] ?? u ?? "";
+
+// How it decides, the three ways cheapest first, as the editor offers them.
+const WAY: Record<Way, { name: string; help: string }> = {
+  rule: { name: "A rule", help: "No model: every item that passes the check gets the one action below." },
+  ask: { name: "Ask a model", help: "One call reads the items and answers for each, or leaves it as it is." },
+  agent: { name: "An agent with tools", help: "Your own Claude Code, read only, with your tools: it can look further than the items." },
+};
+// Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
+const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : "Claude answers, without tools");
+
+// What goes to the desk for a draft: the whole automation. A rule's verb is the one thing it may do.
+function bodyOf(d: Draft): AutomationBody {
+  const rule = d.decide === "rule" ? (d.rule ?? { do: "fyi" as const, why: "" }) : null;
+  return {
+    name: d.name,
+    ...(d.schedule ? { schedule: d.schedule } : { events: d.events }),
+    ...(d.when.trim() && { when: d.when.trim() }),
+    decide: d.decide,
+    ...(rule ? { rule, can: [rule.do] } : { prompt: d.prompt, can: d.can }),
+    on: d.on,
+  };
+}
 
 const slug = (s: string) =>
   s
@@ -126,10 +164,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   }
 
   // The whole automation each time: what a switch doesn't change goes back as it is.
-  const turn = (a: Auto, on: boolean) => {
-    const { id: _, ...same } = editing(a);
-    return put(a.id, { ...same, on }, `${a.name} is ${on ? "on" : "off"}`);
-  };
+  const turn = (a: Auto, on: boolean) => put(a.id, bodyOf({ ...editing(a), on }), `${a.name} is ${on ? "on" : "off"}`);
 
   function runNow(a: Auto): Effect.Effect<void> {
     return api.runAutomation(a.id).pipe(
@@ -163,8 +198,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    const { id: _, ...body } = d;
-    return put(id, body, d.id ? `Saved ${d.name}` : `Added ${d.name}`);
+    return put(id, bodyOf(d), d.id ? `Saved ${d.name}` : `Added ${d.name}`);
   }
 
   return { list, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save };
@@ -259,8 +293,8 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
             `An agent wrote it; read it before it runs · ${a.trigger}`
           ) : (
             <>
-              {timing} · {last.text}
-              {last.bad && <span className="t-bad">{last.bad}</span>}
+              {timing} · {a.waiting ? "" : last.text}
+              {a.waiting ? <span className="t-bad">waiting: {a.waiting.why}</span> : last.bad && <span className="t-bad">{last.bad}</span>}
             </>
           )}
         </p>
@@ -304,12 +338,13 @@ function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }
 }
 
 // A new automation's editor, under the tab's sheet once its last row's New automation opens it.
-export function NewAutomation({ au }: { au: Automations }) {
+export function NewAutomation({ au, model }: { au: Automations; model: string | null }) {
   if (!au.writing) return null;
   return (
     <div className="au-new">
       <Editor
         draft={au.writing}
+        model={model}
         busy={au.busy}
         onSave={(d) => {
           runUi(
@@ -331,17 +366,19 @@ export function NewAutomation({ au }: { au: Automations }) {
   );
 }
 
-// An automation's view (#/settings/automations/<id>): its name and when it runs, its instruction and what you can do with
-// it, then its runs.
+// An automation's view (#/settings/automations/<id>): its name and what starts it, its instruction, then in plain words its
+// check, how it decides and what it may do, what you can do with it, and its runs.
 export function AutomationView({
   au,
   id,
   settingsPath,
+  model,
   flash,
 }: {
   au: Automations;
   id: string;
   settingsPath: string | null; // settings.json's: the runs' folder is beside it, in the desk's home
+  model: string | null; // the decision model that answers questions, once its key is set; else Claude does
   flash: (text: string, error?: boolean) => void;
 }) {
   const draft = au.edits[id] ?? null;
@@ -416,6 +453,7 @@ export function AutomationView({
         {draft ? (
           <Editor
             draft={draft}
+            model={model}
             busy={au.busy}
             onChange={setDraft}
             onSave={(d) => {
@@ -449,18 +487,19 @@ export function AutomationView({
           />
         ) : (
           <>
-            <p className="au-prompt">{a.prompt}</p>
-            <p className="au-note">
-              {a.can
-                ? `Runs with your Claude Code and only reads; with what it lists, the desk may ${mayText(a.can)}.`
-                : "Runs with your Claude Code and only reads; what needs you lands in your Inbox."}
-            </p>
+            {a.prompt && <p className="au-prompt">{a.prompt}</p>}
+            <Facts a={a} model={model} />
+            {a.waiting && (
+              <p className="au-note t-bad">
+                Waiting: {a.waiting.why} It asks again at {when(a.waiting.until)}; nothing was spent.
+              </p>
+            )}
             <div className="actions">
               {agents ? (
                 <button type="button" className="act primary" disabled={au.busy} onClick={turn(true)}>
                   Turn on
                 </button>
-              ) : (
+              ) : !a.schedule && !a.when && a.decide ? null : (
                 <button
                   type="button"
                   className="act"
@@ -493,6 +532,38 @@ export function AutomationView({
       <h2 className="group-head au-runs-head">Runs</h2>
       {a.runs.length ? <Runs a={a} resume={resume} /> : <p className="s-view-line">It hasn&rsquo;t run yet.</p>}
     </>
+  );
+}
+
+// What an automation is, in a few plain lines: its check, how it decides, what it may do.
+function Facts({ a, model }: { a: Auto; model: string | null }) {
+  const way = a.decide ?? "agent";
+  const rule = a.rule;
+  const decides =
+    way === "rule" && rule
+      ? `A rule, with no model: ${VERB[rule.do]}${rule.do === "snooze" ? ` until ${untilWords(rule.until)}` : ""}, saying \u201c${rule.why}\u201d`
+      : way === "ask"
+        ? `A question: ${answers(model)}`
+        : "An agent: your Claude Code, with read-only tools";
+  return (
+    <dl className="au-facts">
+      {a.when && (
+        <>
+          <dt>Only when</dt>
+          <dd>
+            <code>{a.when}</code>
+          </dd>
+        </>
+      )}
+      <dt>Decides</dt>
+      <dd>{decides}</dd>
+      {way !== "rule" && (
+        <>
+          <dt>May</dt>
+          <dd>{cap(mayText(a.can ?? ["add"]))}</dd>
+        </>
+      )}
+    </dl>
   );
 }
 
@@ -540,6 +611,7 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string) => ReactNode }
 
 function Editor({
   draft,
+  model,
   busy,
   onChange,
   onSave,
@@ -547,6 +619,7 @@ function Editor({
   onDelete,
 }: {
   draft: Draft;
+  model: string | null; // the decision model that answers questions, once its key is set
   busy: boolean;
   onChange?: (d: Draft) => void; // where it's kept while you write
   onSave: (d: Draft) => void;
@@ -554,11 +627,19 @@ function Editor({
   onDelete: (() => void) | null;
 }) {
   const [d, setDraft] = useState(draft);
+  // What the other way of starting it held, so switching there and back loses nothing.
+  const [other, setOther] = useState({ schedule: draft.schedule || "weekdays 09:00", events: draft.events });
   const setD = (next: Draft) => {
     setDraft(next);
     onChange?.(next);
   };
-  const ready = !!d.name.trim() && (!!d.schedule.trim() || d.events.length > 0) && !!d.prompt.trim();
+  const onEvents = d.schedule === "";
+  const rule = d.rule ?? { do: "fyi" as const, why: "" };
+  const starts = onEvents ? d.events.length > 0 : !!d.schedule.trim();
+  const says = d.decide === "rule" ? !!rule.why.trim() : !!d.prompt.trim() && d.can.length > 0;
+  // A rule or a question is about items: its events', or on a schedule the ones its check passes.
+  const needsCheck = d.decide !== "agent" && !onEvents && !d.when.trim();
+  const ready = !!d.name.trim() && starts && says && !needsCheck;
   // ⌘S or ⌘↵ saves from any field, Esc leaves it as it was.
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") onCancel();
@@ -567,6 +648,8 @@ function Editor({
       if (ready) onSave(d);
     }
   };
+  const tick = <T extends string>(list: T[], v: T, on: boolean, order: readonly T[]) =>
+    order.filter((x) => (x === v ? on : list.includes(x)));
   return (
     <form
       className="au-editor"
@@ -591,36 +674,205 @@ function Editor({
           }}
         />
       </label>
+      <fieldset className="au-field">
+        <legend className="s-label">Runs</legend>
+        <div className="au-line">
+          <select
+            className="input choice"
+            aria-label="What starts it"
+            value={onEvents ? "events" : "schedule"}
+            onKeyDown={keys}
+            onChange={(e) => {
+              setOther({ schedule: d.schedule || other.schedule, events: d.events });
+              setD(
+                e.target.value === "events" ? { ...d, schedule: "", events: other.events } : { ...d, schedule: other.schedule, events: [] },
+              );
+            }}
+          >
+            <option value="schedule">On a schedule</option>
+            <option value="events">When something happens</option>
+          </select>
+          {!onEvents && (
+            <input
+              className="input"
+              aria-label="Schedule"
+              value={d.schedule}
+              placeholder="weekdays 09:00"
+              onKeyDown={keys}
+              onChange={(e) => {
+                // Emptied, it's still a schedule: a space keeps it from reading as events.
+                setD({ ...d, schedule: e.target.value || " " });
+              }}
+            />
+          )}
+        </div>
+        {onEvents ? (
+          <>
+            <div className="au-checks">
+              {ACTIVITY_KINDS.map((k) => (
+                <label key={k} className="au-check">
+                  <input
+                    type="checkbox"
+                    checked={d.events.includes(k)}
+                    onChange={(e) => {
+                      setD({ ...d, events: tick<ActivityKind>(d.events, k, e.target.checked, ACTIVITY_KINDS) });
+                    }}
+                  />
+                  {cap(EVENT[k])}
+                </label>
+              ))}
+            </div>
+            <span className="s-help">Once for the items a sync brings these on, and never twice at once.</span>
+          </>
+        ) : (
+          <span className="s-help">Local time: daily 09:00, weekdays 09:00,13:00, mon,thu 17:30 or weekdays hourly.</span>
+        )}
+      </fieldset>
       <label className="au-field">
-        <span className="s-label">When</span>
+        <span className="s-label">Only when</span>
         <input
-          className="input"
-          value={d.schedule}
-          placeholder="weekdays 09:00"
+          className="input au-code"
+          value={d.when}
+          placeholder="me.requested_direct && pr.ci == 'red'"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
           onKeyDown={keys}
           onChange={(e) => {
-            setD({ ...d, schedule: e.target.value });
+            setD({ ...d, when: e.target.value });
           }}
         />
-        <span className="s-help">Local time: daily 09:00, weekdays 09:00,13:00, mon,thu 17:30 or weekdays hourly.</span>
-      </label>
-      <label className="au-field">
-        <span className="s-label">Instruction</span>
-        <textarea
-          className="editor prose"
-          value={d.prompt}
-          maxLength={8000}
-          onKeyDown={keys}
-          placeholder="Look at the issues opened or active in getsentry/warden and getsentry/dotagents since the last run. Put on my desk the ones that need me: a regression, a question to me, a PR that touches what I own. Nothing needs me? Say so."
-          onChange={(e) => {
-            setD({ ...d, prompt: e.target.value });
-          }}
-        />
-        <span className="s-help">
-          Your own Claude Code runs it read only, with your tools; it lists the PRs and issues that need you with a line on why, and the
-          desk puts them on your desk.
+        <span className={cls("s-help", needsCheck && "s-ink")}>
+          {needsCheck
+            ? `${WAY[d.decide].name === "A rule" ? "A rule" : "A question"} on a schedule needs a check: the items it's about.`
+            : "A check the desk asks of each item first, written like a rule's (Searches and rules lists the fields). Only what passes is handed on; empty, there's none."}
         </span>
       </label>
+      <fieldset className="au-field">
+        <legend className="s-label">How it decides</legend>
+        <div className="au-line">
+          <select
+            className="input choice"
+            aria-label="How it decides"
+            value={d.decide}
+            onKeyDown={keys}
+            onChange={(e) => {
+              setD({ ...d, decide: e.target.value as Way });
+            }}
+          >
+            {(["rule", "ask", "agent"] as const).map((w) => (
+              <option key={w} value={w}>
+                {WAY[w].name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className="s-help">
+          {WAY[d.decide].help}
+          {d.decide === "ask" && ` ${cap(answers(model))}.`}
+        </span>
+      </fieldset>
+      {d.decide === "rule" ? (
+        <fieldset className="au-field">
+          <legend className="s-label">Then</legend>
+          <div className="au-line">
+            <select
+              className="input choice"
+              aria-label="What it does"
+              value={rule.do}
+              onKeyDown={keys}
+              onChange={(e) => {
+                const verb = e.target.value as Verb;
+                const { until: _, ...kept } = rule;
+                setD({ ...d, rule: { ...kept, do: verb, ...(verb === "snooze" && { until: rule.until ?? "tomorrow" }) } });
+              }}
+            >
+              {VERBS.map((v) => (
+                <option key={v} value={v}>
+                  {cap(VERB[v])}
+                </option>
+              ))}
+            </select>
+            {rule.do === "snooze" && (
+              <>
+                <span className="s-unit">until</span>
+                <select
+                  className="input choice"
+                  aria-label="Until"
+                  value={rule.until ?? "tomorrow"}
+                  onKeyDown={keys}
+                  onChange={(e) => {
+                    setD({ ...d, rule: { ...rule, until: e.target.value } });
+                  }}
+                >
+                  {UNTILS.map(([k, words]) => (
+                    <option key={k} value={k}>
+                      {words}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+          <input
+            className="input"
+            aria-label="Why, as the item shows it"
+            value={rule.why}
+            maxLength={300}
+            placeholder="Why, as the item shows it: CI is red, back when it passes"
+            onKeyDown={keys}
+            onChange={(e) => {
+              setD({ ...d, rule: { ...rule, why: e.target.value } });
+            }}
+          />
+        </fieldset>
+      ) : (
+        <>
+          <label className="au-field">
+            <span className="s-label">Instruction</span>
+            <textarea
+              className="editor prose"
+              value={d.prompt}
+              maxLength={8000}
+              onKeyDown={keys}
+              placeholder={
+                d.decide === "ask"
+                  ? "A ping to my whole team that isn't about the config loader is FYI. One that is, I want today."
+                  : "Look at the issues opened or active in getsentry/warden and getsentry/dotagents since the last run. Put on my desk the ones that need me: a regression, a question to me, a PR that touches what I own. Nothing needs me? Say so."
+              }
+              onChange={(e) => {
+                setD({ ...d, prompt: e.target.value });
+              }}
+            />
+            <span className="s-help">
+              {d.decide === "ask"
+                ? "In your words: what should happen to which items. It answers for each item, or leaves it as it is."
+                : "Your own Claude Code runs it read only, with your tools; it lists PRs and issues with a line on why, and the desk does with them what you allow below."}
+            </span>
+          </label>
+          <fieldset className="au-field">
+            <legend className="s-label">It may</legend>
+            <div className="au-checks">
+              {VERBS.map((v) => (
+                <label key={v} className="au-check">
+                  <input
+                    type="checkbox"
+                    checked={d.can.includes(v)}
+                    onChange={(e) => {
+                      setD({ ...d, can: tick<Verb>(d.can, v, e.target.checked, VERBS) });
+                    }}
+                  />
+                  {cap(VERB[v])}
+                </label>
+              ))}
+            </div>
+            <span className="s-help">
+              What the desk does with what it lists; anything else is refused. A sort holds until the item changes; a snooze, done or mute
+              can be undone.
+            </span>
+          </fieldset>
+        </>
+      )}
       <div className="actions">
         <button type="submit" className="act primary" disabled={!ready || busy} title={`Save (${MOD}S)`}>
           Save

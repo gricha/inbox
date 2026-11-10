@@ -241,7 +241,11 @@ interface Said {
   until?: string;
 }
 // What each verb means as one of the decision model's options; a snooze has no "until" there, so it's the default's.
-const OPTION: Record<Verb, string> = { ...DOES, snooze: "off my desk until tomorrow, or until someone acts on it" };
+const OPTION: Record<Verb, string> = {
+  ...DOES,
+  add: "put it on my desk, in Today: it needs me now",
+  snooze: "off my desk until tomorrow, or until someone acts on it",
+};
 const LEAVE = "leave"; // the option that changes nothing
 
 // What a question's answer says of one item, strict-mode friendly like the judge's; an item it leaves out stays as it is.

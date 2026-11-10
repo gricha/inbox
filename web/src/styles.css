@@ -4104,10 +4104,96 @@ button.s-edit:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
+/* What an automation is, in a few plain lines: a pencil label and its words, the words starting in one column. */
+.au-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.au-facts dt {
+  color: var(--pencil);
+}
+
+.au-facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.au-facts code,
+.input.au-code {
+  font: 12.5px var(--mono);
+}
+
 .au-editor {
   display: grid;
   gap: 14px;
   max-width: 720px;
+}
+
+/* A field of several controls is a fieldset, laid out as the others: its legend is the label. */
+fieldset.au-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.au-field > legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+/* A field's controls side by side, wrapping on a narrow sheet; a text field takes what its choice leaves. */
+.au-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.au-line .input:not(.choice) {
+  flex: 1 1 220px;
+}
+
+.au-line .input.choice {
+  width: auto;
+  min-width: 200px;
+}
+
+.au-editor .input.au-code,
+.au-editor > .au-field > .input {
+  max-width: none;
+}
+
+/* A list to tick (the events it runs on, what it may do), in as many columns as fit. */
+.au-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 7px 16px;
+}
+
+.au-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.au-check input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink-2);
+  cursor: pointer;
 }
 
 .au-field {

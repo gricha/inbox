@@ -938,6 +938,8 @@ export function Settings({
   const inView = settingsBack(section) !== null;
   const tab = settingsTab(section);
   const au = useAutomations(active, loads, flash);
+  // Who answers an automation's question: the decision model once its key is set, else Claude.
+  const decisionModel = view?.values["agent.decision_key"] ? String(view.values["agent.decision_model"]) : null;
   // The automation last opened stays mounted, so an edit in its view survives a trip to its tab, or anywhere, and back.
   const automation = automationOf(section);
   const [lastAutomation, setLastAutomation] = useState(automation);
@@ -1126,7 +1128,7 @@ export function Settings({
           <div className="lines s-sheet">
             <AutomationRows au={au} now={now} />
           </div>
-          <NewAutomation au={au} />
+          <NewAutomation au={au} model={decisionModel} />
         </section>
       </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">
@@ -1148,7 +1150,14 @@ export function Settings({
       </section>
       <section className="s-view" hidden={automation === null} aria-labelledby="s-view-automation">
         {lastAutomation !== null && (
-          <AutomationView key={lastAutomation} au={au} id={lastAutomation} settingsPath={view?.path ?? null} flash={flash} />
+          <AutomationView
+            key={lastAutomation}
+            au={au}
+            id={lastAutomation}
+            settingsPath={view?.path ?? null}
+            model={decisionModel}
+            flash={flash}
+          />
         )}
       </section>
     </div>

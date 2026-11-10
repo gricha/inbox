@@ -421,6 +421,20 @@ const automationRows = (page: Page) =>
       on: r.querySelector(".switch")?.checked ?? null,
       review: r.querySelector(".s-cta")?.getAttribute("href") ?? null,
     }))`);
+// An automation's view, read off the page: its line, its instruction, its facts as "label: words", its buttons, each run's
+// head and what came of each item of the latest.
+const automationFacts = (page: Page) =>
+  page.evaluate<{ line: string; prompt: string | null; facts: string[]; buttons: string; runs: string[]; outcomes: string[] }>(`(() => {
+    const v = [...document.querySelectorAll(".s-view")].find((s) => !s.hidden);
+    return {
+      line: v.querySelector(".s-view-line").textContent,
+      prompt: v.querySelector(".au-prompt")?.textContent ?? null,
+      facts: [...v.querySelectorAll(".au-facts dt")].map((dt) => dt.textContent + ": " + dt.nextElementSibling.textContent),
+      buttons: [...v.querySelectorAll(".au-view .actions button")].map((b) => b.textContent).join(),
+      runs: [...v.querySelectorAll(".au-run-head")].map((h) => h.textContent),
+      outcomes: [...(v.querySelector(".au-run")?.querySelectorAll(".au-outcome") ?? [])].map((o) => o.textContent),
+    };
+  })()`);
 const unsettle = async (page: Page) => {
   await unroute(page);
   await at("#/")(page);
@@ -3039,8 +3053,8 @@ const SHOTS: Shot[] = [
   },
   {
     // Settings' Automations tab, on its own: a row each, its name, when it runs and its last run, Run now and its switch on the
-    // sheet's right edge in line with the settings tab's; the agent's draft has a tinted Review instead and no switch; New
-    // automation last.
+    // sheet's right edge in line with the settings tab's; the agent's draft has a tinted Review instead and no switch; one
+    // that runs on events says what it reacts to, and each says what its last run did by verb; New automation last.
     name: "settings-automations",
     go: async (page) => {
       await at("#/settings/queue")(page);
@@ -3049,7 +3063,7 @@ const SHOTS: Shot[] = [
       const tabs = await tabsSay(page);
       if (tabs !== "Settings [Automations]") failures.push(`settings-automations: the page head's tabs read ${JSON.stringify(tabs)}`);
       if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: the settings tab's parts show on Automations");
-      const [mine, draft, ...more] = await automationRows(page);
+      const [mine, draft, rule, ask, ...more] = await automationRows(page);
       if (
         !mine ||
         mine.name !== "Warden and dotagents issues" ||
@@ -3068,7 +3082,17 @@ const SHOTS: Shot[] = [
         draft.review !== "#/settings/automations/sdk-releases"
       )
         failures.push(`settings-automations: the agent's draft reads ${JSON.stringify(draft)}`);
-      if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's two`);
+      if (!rule || !/^When CI changes · ran \d+h ago, snoozed 1$/.test(rule.help) || !rule.run || rule.on !== true)
+        failures.push(`settings-automations: the rule's row reads ${JSON.stringify(rule)}`);
+      if (
+        !ask ||
+        !/^Weekdays, every hour · next \S+( \S+)? · ran \d+m ago, sorted 1 to Today, sorted 2 to FYI, left 1 where a rule or your pin holds it$/.test(
+          ask.help,
+        ) ||
+        ask.red.length
+      )
+        failures.push(`settings-automations: the question's row reads ${JSON.stringify(ask)}`);
+      if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's four`);
       const [tinted, wash] = await page.evaluate<string[]>(`(() => {
         const d = document.createElement("div");
         d.style.background = "var(--accent-wash)";
@@ -3222,6 +3246,238 @@ const SHOTS: Shot[] = [
       await open();
     },
     after: at("#/"),
+  },
+  {
+    // A rule's view: no instruction; what starts it, its check and its action in plain words; its run says what it did.
+    name: "settings-automations-rule",
+    go: async (page) => {
+      await at("#/settings/automations")(page);
+      await page.locator("#s-automations .s-name", { hasText: "My red CI" }).click();
+      await page.locator(".s-view .au-run").first().waitFor();
+      await settingsView(page, "settings-automations-rule", "My red CI", "automations", "760px");
+      const seen = await automationFacts(page);
+      const want = {
+        line: "When CI changes · on",
+        prompt: null,
+        facts: [
+          "Only when: me.author && pr.ci == 'red'",
+          "Decides: A rule, with no model: snooze until CI passes, saying \u201cCI is red: back when it passes\u201d",
+        ],
+        buttons: "Run now,Edit,Turn off",
+        runs: ["on an event · snoozed 1"],
+        outcomes: ["Snoozed until CI passes"],
+      };
+      if (JSON.stringify({ ...seen, runs: seen.runs.map((r) => r.replace(/^.*? · /, "")) }) !== JSON.stringify(want))
+        failures.push(`settings-automations-rule: the view reads ${JSON.stringify(seen)}`);
+    },
+    after: at("#/"),
+  },
+  {
+    // A question's view: its instruction, its check, who answers and what it may do; its run by verb, the item a hard rule
+    // held saying which. With a decision model's key set, the view names the model that answers instead of Claude.
+    name: "settings-automations-ask",
+    go: async (page) => {
+      const open = async () => {
+        await at("#/settings/automations")(page);
+        await page.locator("#s-automations .s-name", { hasText: "Team pings" }).click();
+        await page.locator(".s-view .au-run").first().waitFor();
+      };
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ set: { "agent.decision_key": "sk-or-v1-shots" } }) })`,
+      );
+      await page.reload();
+      await open();
+      const model = (await automationFacts(page)).facts[1];
+      if (model !== "Decides: A question: typesafe/jev-1.14 answers, through OpenRouter")
+        failures.push(`settings-automations-ask: with a decision model's key it reads ${JSON.stringify(model)}`);
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ reset: ["agent.decision_key"] }) })`,
+      );
+      await page.reload();
+      await open();
+      await settingsView(page, "settings-automations-ask", "Team pings", "automations", "760px");
+      const seen = await automationFacts(page);
+      const want = {
+        prompt: "A ping to my whole team that isn't about the config loader is FYI. One that is, I want today.",
+        facts: [
+          "Only when: me.requested && !me.requested_direct",
+          "Decides: A question: Claude answers, without tools",
+          "May: Sort to Today and sort to FYI",
+        ],
+        buttons: "Run now,Edit,Turn off",
+        outcomes: ["Sorted to FYI", "Sorted to FYI", "Sorted to Today", "Held where it is"],
+      };
+      const got = { prompt: seen.prompt, facts: seen.facts, buttons: seen.buttons, outcomes: seen.outcomes };
+      if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`settings-automations-ask: the view reads ${JSON.stringify(seen)}`);
+      if (!seen.line.startsWith("Weekdays, every hour · next "))
+        failures.push(`settings-automations-ask: its line reads ${JSON.stringify(seen.line)}`);
+      if (!seen.runs[0]?.endsWith("on schedule · sorted 1 to Today, sorted 2 to FYI, left 1 where a rule or your pin holds it"))
+        failures.push(`settings-automations-ask: its last run's head reads ${JSON.stringify(seen.runs[0])}`);
+      const last = await page.evaluate<string>(`[...document.querySelectorAll(".s-view:not([hidden]) .au-found li")].at(-1).textContent`);
+      if (!last.endsWith("a hard rule keeps it in Today or above"))
+        failures.push(`settings-automations-ask: the held item reads ${JSON.stringify(last)}`);
+    },
+    after: at("#/"),
+  },
+  {
+    // A question's editor: what starts it and its schedule, its check, how it decides with who answers, its instruction and
+    // what it may do as ticks. Choosing a rule swaps the instruction and the ticks for one action; choosing events swaps
+    // the schedule for the kinds to tick. Nothing is saved: Cancel leaves it as it was.
+    name: "settings-automations-edit",
+    go: async (page) => {
+      await at("#/settings/automations/team-pings")(page);
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+      const form = page.locator(".s-view .au-editor");
+      const read = () =>
+        page.evaluate<{
+          labels: string[];
+          selects: string[];
+          schedule: string | null;
+          when: string;
+          ticked: string[];
+          boxes: number;
+          help: string;
+        }>(`(() => {
+          const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+          return {
+            labels: [...f.querySelectorAll(".s-label")].map((l) => l.textContent),
+            selects: [...f.querySelectorAll("select")].map((x) => x.selectedOptions[0].textContent),
+            schedule: f.querySelector('input[aria-label="Schedule"]')?.value ?? null,
+            when: f.querySelector(".au-code").value,
+            ticked: [...f.querySelectorAll(".au-check")].filter((l) => l.querySelector("input").checked).map((l) => l.textContent),
+            boxes: f.querySelectorAll(".au-check").length,
+            help: [...f.querySelectorAll("fieldset .s-help")].map((h) => h.textContent).join(" | "),
+          };
+        })()`);
+      const asked = await read();
+      const want = {
+        labels: ["Name", "Runs", "Only when", "How it decides", "Instruction", "It may"],
+        selects: ["On a schedule", "Ask a model"],
+        schedule: "weekdays hourly",
+        when: "me.requested && !me.requested_direct",
+        ticked: ["Sort to Today", "Sort to FYI"],
+        boxes: 8,
+      };
+      const { help, ...got } = asked;
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        failures.push(`settings-automations-edit: the editor opens as ${JSON.stringify(asked)}`);
+      if (!help.includes("One call reads the items and answers for each, or leaves it as it is. Claude answers, without tools."))
+        failures.push(`settings-automations-edit: how it decides says ${JSON.stringify(help)}`);
+      // A rule: one action in place of the instruction and the ticks; back to a question, they're as they were.
+      await form.getByLabel("How it decides").selectOption({ label: "A rule" });
+      const ruled = await read();
+      if (
+        ruled.labels.join() !== "Name,Runs,Only when,How it decides,Then" ||
+        ruled.selects.join() !== "On a schedule,A rule,Sort to FYI" ||
+        ruled.boxes
+      )
+        failures.push(`settings-automations-edit: as a rule it reads ${JSON.stringify(ruled)}`);
+      await form.getByLabel("What it does").selectOption({ label: "Snooze" });
+      if ((await read()).selects.join() !== "On a schedule,A rule,Snooze,tomorrow")
+        failures.push(`settings-automations-edit: a snooze reads ${JSON.stringify((await read()).selects)}`);
+      await form.getByLabel("How it decides").selectOption({ label: "Ask a model" });
+      // Events: the kinds to tick in place of the schedule; back on a schedule, its words are as they were.
+      await form.getByLabel("What starts it").selectOption({ label: "When something happens" });
+      const events = await read();
+      if (events.schedule !== null || events.boxes !== 17 + 8 || events.ticked.join() !== "Sort to Today,Sort to FYI")
+        failures.push(`settings-automations-edit: on events it reads ${JSON.stringify(events)}`);
+      if (!(await form.getByRole("button", { name: "Save" }).isDisabled()))
+        failures.push("settings-automations-edit: Save is on with no event ticked");
+      await form.getByLabel("What starts it").selectOption({ label: "On a schedule" });
+      const back = await read();
+      if (JSON.stringify({ ...back, help: undefined }) !== JSON.stringify({ ...asked, help: undefined }))
+        failures.push(`settings-automations-edit: back as it was, it reads ${JSON.stringify(back)}`);
+      // Shot from its check down: how it decides, its instruction, what it may do and its buttons.
+      await page.evaluate(`(() => {
+        const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+        [...f.querySelectorAll(".s-label")].find((l) => l.textContent === "Only when").scrollIntoView({ block: "start" });
+        scrollBy(0, -90);
+      })()`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator(".s-view .au-editor").getByRole("button", { name: "Cancel" }).click();
+      const kept = await page.evaluate<unknown>(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => v.find((a) => a.id === "team-pings").decide)`,
+      );
+      if (kept !== "ask") failures.push(`settings-automations-edit: Cancel left it deciding by ${JSON.stringify(kept)}`);
+      await at("#/")(page);
+    },
+  },
+  {
+    // A rule's editor, on events: the kinds ticked, its check, and its action with what a snooze waits for. Saved, the desk has
+    // the whole automation as the editor says it, and the view says the new words; shot with the editor open again.
+    name: "settings-automations-edit-rule",
+    go: async (page) => {
+      const was = await page.evaluate<string>(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => JSON.stringify(v.find((a) => a.id === "my-red-ci")))`,
+      );
+      await at("#/settings/automations/my-red-ci")(page);
+      const edit = async () => {
+        await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+        return page.locator(".s-view .au-editor");
+      };
+      let form = await edit();
+      const seen = await page.evaluate<{ labels: string[]; selects: string[]; ticked: string[]; why: string }>(`(() => {
+        const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+        return {
+          labels: [...f.querySelectorAll(".s-label")].map((l) => l.textContent),
+          selects: [...f.querySelectorAll("select")].map((x) => x.selectedOptions[0].textContent),
+          ticked: [...f.querySelectorAll(".au-check")].filter((l) => l.querySelector("input").checked).map((l) => l.textContent),
+          why: f.querySelector('input[aria-label="Why, as the item shows it"]').value,
+        };
+      })()`);
+      const want = {
+        labels: ["Name", "Runs", "Only when", "How it decides", "Then"],
+        selects: ["When something happens", "A rule", "Snooze", "CI passes"],
+        ticked: ["CI changes"],
+        why: "CI is red: back when it passes",
+      };
+      if (JSON.stringify(seen) !== JSON.stringify(want))
+        failures.push(`settings-automations-edit-rule: the editor opens as ${JSON.stringify(seen)}`);
+      await form.getByLabel("Until").selectOption({ label: "tomorrow" });
+      await form.getByLabel("New commits are pushed").check();
+      await form.getByRole("button", { name: "Save" }).click();
+      await page.locator(".s-view .au-facts").waitFor();
+      const saved = await page.evaluate<Record<string, unknown>>(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => v.find((a) => a.id === "my-red-ci"))`,
+      );
+      const kept = [saved.schedule, saved.events, saved.when, saved.decide, saved.rule, saved.can, saved.prompt, saved.on];
+      const sent = [
+        "",
+        ["pushed", "ci"],
+        "me.author && pr.ci == 'red'",
+        "rule",
+        { do: "snooze", until: "tomorrow", why: "CI is red: back when it passes" },
+        ["snooze"],
+        "",
+        true,
+      ];
+      if (JSON.stringify(kept) !== JSON.stringify(sent))
+        failures.push(`settings-automations-edit-rule: saved, the desk has ${JSON.stringify(kept)}`);
+      const said = await automationFacts(page);
+      if (said.line !== "When new commits are pushed or CI changes · on" || !said.facts[1]?.includes("snooze until tomorrow, saying"))
+        failures.push(`settings-automations-edit-rule: saved, the view reads ${JSON.stringify(said)}`);
+      // As it was, for the shots after this one.
+      await page.evaluate(
+        `((a) => fetch("/api/automations/my-red-ci", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(a) }))(${was})`,
+      );
+      await page.reload();
+      await page.locator(".s-view .au-facts").waitFor();
+      form = await edit();
+      await form.waitFor();
+      // Shot from its check down: how it decides, its action and its buttons.
+      await page.evaluate(`(() => {
+        const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+        [...f.querySelectorAll(".s-label")].find((l) => l.textContent === "Only when").scrollIntoView({ block: "start" });
+        scrollBy(0, -90);
+      })()`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator(".s-view .au-editor").getByRole("button", { name: "Cancel" }).click();
+      await at("#/")(page);
+    },
   },
   {
     // Settings' tabs are links Tab reaches: Enter on Automations opens it, and the sidebar's Settings the settings tab. A new
