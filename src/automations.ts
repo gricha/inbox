@@ -310,9 +310,9 @@ export class Automations {
     this.desk = desk;
   }
 
-  // The plugins' first, then yours: the engine runs both alike.
+  // Yours, then the plugins': the engine runs both alike.
   all(): Automation[] {
-    return [...this.builtIns(), ...this.own()];
+    return [...this.own(), ...this.builtIns()];
   }
 
   own(): Automation[] {

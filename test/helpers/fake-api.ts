@@ -155,6 +155,27 @@ const AUTO: AutomationView = {
   ],
 };
 
+// What GitHub comes with: listed beside yours, and only the owner switches it.
+const BUILT_IN: AutomationView = {
+  id: "github.pick-reviewer",
+  name: "Pick a reviewer",
+  schedule: "weekdays hourly",
+  prompt: "",
+  when: "me.author && pr.ready_weekday_hours >= 24",
+  decide: "rule",
+  rule: { do: "add", why: "nobody asked by name for a workday" },
+  on: true,
+  by: "you",
+  updated_at: "",
+  plugin: "github",
+  help: "Your ready PR waited a workday with nobody asked by name: it comes to your desk so you pick a reviewer.",
+  trigger: "Weekdays, every hour",
+  next_at: null,
+  running: false,
+  waiting: null,
+  runs: [],
+};
+
 const queueView: QueueView = {
   inquiries: [],
   sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
@@ -443,7 +464,13 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case `POST /api/inflight/${encodeURIComponent(MINE.id)}/handback`:
       return reply(200, { ok: true, reason: body.why });
     case "GET /api/automations":
-      return reply(200, [AUTO]);
+      return reply(200, [AUTO, BUILT_IN]);
+    case "PUT /api/automations/github.pick-reviewer":
+      return reply(400, {
+        error:
+          '"Pick a reviewer" comes with GitHub: only its switch is yours, in its part of Settings; copy it to your automations to change it',
+        tag: "BadRequest",
+      });
     case "PUT /api/automations/warden":
       return reply(200, { ok: true, automation: { ...AUTO, schedule: "", ...(body as object), on: false, by: "an agent" } });
     case "POST /api/automations/warden/run":

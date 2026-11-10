@@ -491,9 +491,9 @@ export class Desk {
   }
 
   start(): void {
+    this.automations.start(); // before the first sync, whose events are a fresh desk's first news for what GitHub comes with
     for (const c of this.connectors) c.start();
     this.coordinator.start();
-    this.automations.start();
     this.jobs.start();
   }
 

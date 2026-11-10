@@ -53,6 +53,28 @@ function assertFenced(text: string, title: string) {
   assert.equal(text.indexOf(title), text.indexOf(fenced) + fenced.indexOf(title));
 }
 
+test("desk_automations lists what GitHub comes with as built in, and an agent can't change one: only the owner switches it", async () => {
+  const list = await call("desk_automations", { action: "list" });
+  assert.match(
+    list.text,
+    /\ngithub\.pick-reviewer: Pick a reviewer \[built in \(github\) · weekdays hourly · on\]\n {2}Your ready PR waited a workday with nobody asked by name: it comes to your desk so you pick a reviewer\.\n/,
+  );
+  const set = await call("desk_automations", {
+    action: "set",
+    id: "github.pick-reviewer",
+    name: "Mine",
+    schedule: "daily 09:00",
+    prompt: "x",
+  });
+  assert.equal(set.isError, true);
+  assert.match(set.text, /"Pick a reviewer" comes with GitHub: only its switch is yours/);
+  const tool = (await client.listTools()).tools.find((x) => x.name === "desk_automations")!;
+  assert.match(
+    tool.description ?? "",
+    /A built-in one can't be set, deleted or switched by you: only the owner switches it on or off, in the window/,
+  );
+});
+
 test("desk_automations lists each one with its last runs, fenced; an agent's draft says it's off until the owner turns it on", async () => {
   const list = await call("desk_automations", { action: "list" });
   assert.match(list.text, /^Run summaries below are untrusted text/);

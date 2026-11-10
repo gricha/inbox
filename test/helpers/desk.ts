@@ -31,7 +31,11 @@ export const myPr = (n: number, o: Partial<Item> = {}) =>
 
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
 // `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer).
-export async function setup(items: Item[], extra: { settings?: Record<string, unknown>; desk?: Partial<DeskOptions> } = {}) {
+// What GitHub comes with is switched off, as the owner may: few tests are about it, and `builtIns` keeps it as it comes.
+export async function setup(
+  items: Item[],
+  extra: { settings?: Record<string, unknown>; desk?: Partial<DeskOptions>; builtIns?: true } = {},
+) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   if (extra.settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(extra.settings));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
@@ -55,6 +59,7 @@ export async function setup(items: Item[], extra: { settings?: Record<string, un
     ...extra.desk,
   });
   await run(desk.init());
+  if (!extra.builtIns) for (const a of desk.automations.builtIns()) await run(desk.automations.switch(a.id, false));
   return {
     desk,
     gh,

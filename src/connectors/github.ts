@@ -1,5 +1,6 @@
 // GitHub as a connector: board searches plus details (reconcile), the notifications feed, and the snapshot diff.
 import { defaultConfigText, type LoadedConfig } from "../config.ts";
+import { GITHUB_AUTOMATIONS } from "./github-automations.ts";
 import type { Desk } from "../desk.ts";
 import { Cause, Effect, Result } from "effect";
 import {
@@ -70,7 +71,7 @@ const settle =
 export class GitHubConnector implements Connector {
   readonly id = "github";
   readonly name = "GitHub";
-  automations: readonly BuiltInAutomation[] = [];
+  automations: readonly BuiltInAutomation[] = GITHUB_AUTOMATIONS;
   desk: Desk;
   api: GitHub;
   syncing = false;

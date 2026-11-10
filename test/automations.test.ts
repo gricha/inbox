@@ -8,12 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import { dueAt, nextAt, parseSchedule, scheduleWords, type Schedule } from "../src/automations.ts";
+import { GITHUB_AUTOMATIONS } from "../src/connectors/github-automations.ts";
 import { Desk } from "../src/desk.ts";
 import { judgeText } from "../src/judge.ts";
 import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
-import { myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run as runFx, runSync } from "./helpers/run.ts";
 
@@ -458,7 +459,7 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
   }
   assert.equal((await req("PUT", "/api/automations/Bad_Id", body(), DESK)).status, 400);
   assert.equal((await req("DELETE", "/api/automations/warden", undefined, DESK)).status, 200);
-  assert.deepEqual(t.desk.automations.view(), []);
+  assert.deepEqual(t.desk.automations.own(), []);
 });
 
 test("the desk stopping during a run stops it: it records, notifies and reports nothing, and the next start marks it cut", async (c) => {
@@ -1820,4 +1821,86 @@ test("a plugin's automation runs as yours do, its effects in its name and undone
   assert.equal(runSync(next.automations.get("github.tidy-pings")).name, "Mute team pings");
   next.gh.automations = [];
   assert.deepEqual(next.automations.all(), []);
+});
+
+test("a desk started on an empty home runs what GitHub comes with that's on: no settings, no automations, no model", async (c) => {
+  const fake = fakeClaude(c);
+  const team = (reviewer: string) => ({ reviewer, type: "team" as const, codeowner: false });
+  const asked = [{ at: hoursAgo(120), actor: "me", actor_bot: false, reviewer: "dana", reviewer_type: "user" as const }];
+  const old = { ci: "green" as const, created_at: hoursAgo(130) };
+  const reviewed = [{ author: "dana", state: "commented" as const, at: hoursAgo(3), author_bot: false, commit: "abc" }];
+  const t = await setup(
+    [
+      myPr(1, { ...old, review_requests: [team("platform")] }), // ready for days, only a team asked
+      myPr(3, { ...old, request_events: asked }), // dana asked by name last week, silent since
+      makeItem({ number: 4, author: "carol", review_requests: [team("ml-team")], reviews: reviewed }), // dana took your team's review
+      makeItem({ number: 5, author: "carol", review_requests: ["ml-team", "a", "b", "c"].map(team) }), // four teams at once
+      reviewAsk(6, { review_requests: [{ reviewer: "me", type: "user", codeowner: false }, ...["ml-team", "a", "b", "c"].map(team)] }),
+      myPr(7, { ci: "red", review_requests: [team("platform")] }), // red CI: its snooze is off by default
+    ],
+    { builtIns: true },
+  );
+  c.after(t.cleanup);
+  assert.equal(fs.existsSync(path.join(t.home, "settings.json")), false, "no settings");
+  assert.deepEqual(t.desk.automations.own(), [], "no automations of yours");
+  assert.deepEqual(
+    t.desk.automations.all().map((a) => `${a.id} ${a.on ? "on" : "off"}`),
+    GITHUB_AUTOMATIONS.map((a) => `github.${a.id} ${a.on ? "on" : "off"}`),
+  );
+  t.desk.start();
+  await idle(t.desk);
+  t.desk.automations.tick(); // the minute's tick after the first sync
+  for (let i = 0; i < 50 && t.desk.automations.running.size; i++)
+    await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
+  const card = (id: string) => runSync(t.desk.item(id)).card;
+  const at = (id: string) => `${card(id).status} ${card(id).bucket}: ${card(id).why}`;
+  assert.deepEqual(["acme/web#1", "acme/web#3", "acme/api#4", "acme/api#5", "acme/api#6", "acme/web#7"].map(at), [
+    "active today: Pick a reviewer: nobody asked by name for a workday",
+    "active today: Follow up on silent reviewers: the reviewers you named are silent two workdays",
+    "active fyi: Team reviews someone else took: someone else reviewed it for your team",
+    "active hide: Wide team pings: asked of four or more teams at once",
+    `active now: ${card("acme/api#6").why}`,
+    `active ${card("acme/web#7").bucket}: ${card("acme/web#7").why}`,
+  ]);
+  assert.notEqual(card("acme/api#6").why.startsWith("Wide team pings"), true, "your direct ask keeps its floor");
+  assert.equal(card("acme/web#7").status, "active", "what's off by default does nothing");
+  assert.equal(fake.calls(), 0, "no model");
+
+  // Its pin is undone as an automation's of yours is.
+  const pin = t.desk.store.lastPin("acme/web#1")!;
+  assert.equal(pin.agent, "automation:github.pick-reviewer");
+  runSync(t.desk.undo(pin.seq));
+  assert.notEqual(card("acme/web#1").why, "Pick a reviewer: nobody asked by name for a workday");
+
+  // Switched off in the window, its sort stops holding at once, and it stays off once the desk starts again.
+  const req = http(createApp(t.desk, 47823));
+  assert.equal((await req("PUT", "/api/automations/github.wide-ping/on", { on: false }, DESK)).status, 200);
+  assert.equal(at("acme/api#5"), "active later: review requested");
+  t.desk.stop();
+  const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+  c.after(() => {
+    next.stop();
+  });
+  assert.deepEqual(
+    next.automations
+      .all()
+      .filter((a) => !a.on)
+      .map((a) => a.id),
+    ["github.wide-ping", "github.red-ci", "github.mention-question"],
+  );
+});
+
+test("each automation GitHub comes with is one you could have written: it saves as your own, as Copy to your automations does", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  for (const a of t.desk.automations.builtIns()) {
+    const copy = runSync(
+      t.desk.automations.set(
+        `copy-${a.id.split(".")[1]}`,
+        { ...a, events: a.events ?? [], can: a.can ?? (a.rule ? [a.rule.do] : ["add"]), on: false },
+        true,
+      ),
+    );
+    assert.deepEqual([copy.on, copy.when, copy.rule, copy.decide], [false, a.when, a.rule, a.decide], a.id);
+  }
 });
