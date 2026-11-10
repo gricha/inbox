@@ -2789,7 +2789,10 @@ export class Desk {
   }
 
   private didntStart(): Effect.Effect<never, Upstream> {
-    return Effect.fail(new Upstream({ message: "your agent didn't start; the desk's log says why", cause: this.coordinator.failure }));
+    const why = this.coordinator.failure ? messageOf(this.coordinator.failure) : "";
+    return Effect.fail(
+      new Upstream({ message: why ? `Your agent didn't start: ${why}` : "Your agent didn't start", cause: this.coordinator.failure }),
+    );
   }
 
   merging(id: string): Merging {
