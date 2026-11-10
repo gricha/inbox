@@ -1629,13 +1629,21 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // On its second try, minutes in: it says so, not that the notes land in a minute or two.
+    // On its second try, minutes in: it says so, not that the notes land in a minute or two. Four minutes in as the shot
+    // reads it, since a pause in an earlier shot starts the try again as on the desk.
     name: "review-ai-running",
     go: async (page) => {
+      await reviewAs((v) => {
+        if (v.ai_job) v.ai_job.started_at = new Date(Date.now() - 4 * 60_000).toISOString();
+      })(page);
       await review("acme/web#2301")(page);
       const ai = await page.locator(".rv-ai").textContent();
-      if (!/^Claude is reviewing it, \d+ minutes so far, try 2 of 3\.$/.test(ai ?? ""))
+      if (ai !== "Claude is reviewing it, 4 minutes so far, try 2 of 3.")
         failures.push(`review-ai-running: the AI section reads ${JSON.stringify(ai)}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
     },
   },
   {
