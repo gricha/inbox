@@ -1587,9 +1587,11 @@ export class Desk {
   }
 
   // Your PRs back on top of the queue: handed back, or ready and nobody's asked to review them.
-  needsCards(snap: Snapshot, seen: Set<string>): Card[] {
+  needsCards(snap: Snapshot, seen: Set<string>, all = false): Card[] {
     const out: Card[] = [];
-    for (const id of snap.needs.keys()) {
+    for (const [id, why] of snap.needs) {
+      // Your ready PR nobody's asked to review waits for its AI review too; a hand-back never waits.
+      if (!all && why === UNASKED && this.awaitsAi(snap.entries.get(id)!, snap)) continue;
       seen.add(id);
       out.push(this.queueCard(snap.entries.get(id)!, snap.best.get(id)!, snap));
     }
@@ -1612,7 +1614,7 @@ export class Desk {
   // The latest AI review's outcome (for an older head unless it's ready), and what happens next.
   preflight(e: Entry, snap: Snapshot): Preflight {
     const it = e.item;
-    if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return { state: "none" };
+    if (!this.reviewable(e)) return { state: "none" };
     const ai = snap.reviews.get(it.id);
     const got = ai
       ? {
@@ -1675,7 +1677,7 @@ export class Desk {
   // through unreviewed (out of tries, not while a retry is to come). Once shown (`shown:<id>`, or you put it there) it stays.
   awaitsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
-    if (!this.autoAiOn() || it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return false;
+    if (!this.autoAiOn() || !this.reviewable(e)) return false;
     if (snap.reviews.has(it.id) || this.store.get(`shown:${it.id}`)) return false;
     const j = this.jobs.get("ai_review", it.id);
     return !(j?.state === "failed" && j.head === it.head_oid); // only out of tries; a retry to come still holds it
@@ -1691,7 +1693,7 @@ export class Desk {
   // what waits on Claude's first review (awaitsAi), for the AI reviews and the notifications.
   top(snap: Snapshot, seen: Set<string>, all = false): FocusView["sections"] {
     const loaded = this.loaded!;
-    const sections: FocusView["sections"] = { now: this.needsCards(snap, seen), today: [] };
+    const sections: FocusView["sections"] = { now: this.needsCards(snap, seen, all), today: [] };
     for (const bucket of ["now", "today"] as const) {
       for (const board of boardsOf(loaded)) {
         for (const id of snap.boards.get(board.config.id)!.result.order[bucket]) {
@@ -2124,9 +2126,16 @@ export class Desk {
   }
 
   // Someone else's open PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
+  // An open PR Claude reviews ahead of time: someone else's, or yours once it's out of draft and not handed off for merge.
+  reviewable(e: Entry): boolean {
+    const it = e.item;
+    if (it.kind !== "pr" || it.state !== "open") return false;
+    return !e.analysis.signals.me.author || (!it.draft && !e.state.inflight_at);
+  }
+
   wantsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
-    if (it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author || this.generating.has(it.id)) return false;
+    if (!this.reviewable(e) || this.generating.has(it.id)) return false;
     if (snap.reviews.get(it.id)?.head_oid === it.head_oid) return false;
     const j = this.jobs.get("ai_review", it.id);
     return !(j && j.head === it.head_oid && j.state !== "done");
