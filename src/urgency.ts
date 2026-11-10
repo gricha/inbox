@@ -25,7 +25,7 @@ const SURE = 0.8; // a decision model's yes counts from here, as an automation's
 const MAX_ASK = 1_000;
 const LABELS = "labels.jsonl";
 // What the desk scores an item with no model's score: where the rules put it, and a point a yes.
-const BASE: Record<Bucket, number> = { now: 8, today: 6, later: 3, fyi: 1, blocked: 2, hide: 0 };
+const BASE: Record<Bucket, number> = { now: 7, today: 6, later: 3, fyi: 1, blocked: 2, hide: 0 };
 const ON_INBOX = new Set<Bucket>(["now", "today", "later", "fyi"]);
 
 // A criterion's answer for an item, kept in kv `said:<item>` by criterion id: good while `key` (the item and the question) holds.

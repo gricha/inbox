@@ -82,7 +82,7 @@ test("sections: an urgent yes and a hand-back lift it whatever its score; fyi ho
   // With no model: where the rules put it, and a point a yes.
   assert.deepEqual(
     [fallbackScore("now", 0), fallbackScore("today", 2), fallbackScore("later", 1), fallbackScore("fyi", 0), fallbackScore("now", 9)],
-    [8, 8, 4, 1, 10],
+    [7, 8, 4, 1, 10],
   );
 });
 
@@ -96,7 +96,7 @@ test("with no model to answer, the desk scores from the rules and the yeses: a f
   await settled(t);
   assert.match(t.desk.urgency.held?.why ?? "", /not found/, "it waits on the agent");
   const [s1, c1] = where(t, "acme/api#1")!;
-  assert.deepEqual([s1, c1.score, c1.reason], ["urgent", 9, "Asked by name"], "now's 8 and a yes");
+  assert.deepEqual([s1, c1.score, c1.reason], ["urgent", 8, "Asked by name"], "now's 7 and a yes");
   const [s3, c3] = where(t, "acme/web#3")!;
   assert.equal(s3, "standard");
   assert.equal(c3.reason, "Ready to merge");
