@@ -11,6 +11,7 @@ import { Desk, type ReviewDeps } from "../src/desk.ts";
 import {
   ClaudeApiError,
   ClaudeNotLoggedIn,
+  CODEX_NOT_LOGGED_IN,
   CommandFailed,
   CommandNotFound,
   CommandOutputTooLarge,
@@ -22,6 +23,8 @@ import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import {
   agentDir,
+  agentDown,
+  askAgent,
   askClaude,
   buildPrompt,
   claudeEnvelope,
@@ -308,6 +311,125 @@ test(
     fs.rmSync(home, { recursive: true });
   },
 );
+
+// A fake codex: records its arguments, stdin, what its directory held and the schema it was given, then runs `script` with
+// the -o file as $out.
+function fakeCodex(script: string): { bin: string; dir: string; args: () => string[]; read: (f: string) => string } {
+  const f = fakeAgent(
+    "codex",
+    `d="$(dirname "$0")"; ls -A > "$d/cwd-listing"
+while [ $# -gt 0 ]; do case "$1" in --output-schema) cp "$2" "$d/schema"; echo "$2" > "$d/schema-path";; -o) out="$2";; esac; shift; done
+${script}`,
+  );
+  return {
+    ...f,
+    args: () => fs.readFileSync(path.join(f.dir, "args"), "utf8").trimEnd().split("\n"),
+    read: (name) => fs.readFileSync(path.join(f.dir, name), "utf8"),
+  };
+}
+
+const ANSWERED = `printf '%s' '{"summary":"ok"}' > "$out"
+echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.completed","usage":{"input_tokens":9,"output_tokens":3}}'`;
+
+test(
+  "codex runs read only with its tools, web search, apps and MCP servers off, the schema in a file, and the prompt on stdin",
+  posix,
+  async () => {
+    const f = fakeCodex(ANSWERED);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const dir = agentDir(home);
+    const schema = { type: "object", properties: { summary: { type: "string" } } };
+    assert.deepEqual(await run(askAgent("PROMPT", { agent: "codex", command: f.bin, dir, schema })), {
+      answer: { summary: "ok" },
+      model: "codex",
+    });
+    const at = f.read("schema-path").trim();
+    const out = at.replace(/\.schema\.json$/, ".answer.json");
+    assert.equal(path.dirname(at), dir);
+    assert.deepEqual(f.args(), [
+      "exec",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-C",
+      dir,
+      ...["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "browser_use_external", "in_app_browser"].flatMap((x) => [
+        "--disable",
+        x,
+      ]),
+      ...["computer_use", "image_generation", "view_image", "multi_agent", "hooks", "memories"].flatMap((x) => ["--disable", x]),
+      "-c",
+      'web_search="disabled"',
+      "-c",
+      "mcp_servers={}",
+      "-c",
+      'approval_policy="never"',
+      "--output-schema",
+      at,
+      "-o",
+      out,
+      "-",
+    ]);
+    // Your model and your config: nothing of the desk's in their place.
+    for (const a of ["-m", "--model", "--ignore-user-config", "--profile", "--oss"]) assert.ok(!f.args().includes(a), a);
+    assert.equal(f.read("stdin"), "PROMPT");
+    assert.deepEqual(JSON.parse(f.read("schema")), schema);
+    assert.equal(f.read("cwd-listing").trim(), path.basename(at), "the run's directory holds only its schema");
+    assert.deepEqual(fs.readdirSync(dir), [], "both files are gone after the run");
+    fs.rmSync(f.dir, { recursive: true });
+    fs.rmSync(home, { recursive: true });
+  },
+);
+
+test(
+  "codex's errors: a login it needs pauses as Claude Code's does, a usage limit is held, anything else keeps its words",
+  posix,
+  async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
+    const ask = (script: string) => failure(askAgent("hi", { agent: "codex", command: fakeCodex(script).bin, dir }));
+    const stderr = await ask(`echo 'Error: Not logged in. Run codex login.' >&2; exit 1`);
+    assert.ok(stderr instanceof ClaudeNotLoggedIn);
+    assert.deepEqual(
+      [stderr.message, stderr.detail, agentDown(stderr)],
+      [CODEX_NOT_LOGGED_IN, "Error: Not logged in. Run codex login.", true],
+    );
+    const expired = await ask(
+      `echo '{"type":"error","message":"unexpected status 401 Unauthorized: token expired"}'; echo '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: token expired"}}'; exit 1`,
+    );
+    assert.equal(expired.message, CODEX_NOT_LOGGED_IN);
+    const limit = await ask(
+      `echo '{"type":"turn.failed","error":{"message":"You have hit your usage limit. Try again at 4:12 PM."}}'; exit 1`,
+    );
+    assert.ok(limit instanceof ClaudeApiError);
+    assert.deepEqual([limit.message, limit.status, agentDown(limit)], ["You have hit your usage limit. Try again at 4:12 PM.", 429, true]);
+    const other = await ask(`echo '{"type":"turn.failed","error":{"message":"model overloaded"}}'; exit 1`);
+    assert.deepEqual([other._tag, other.message, agentDown(other)], ["ClaudeApiError", "model overloaded", false]);
+    // A retry notice along the way isn't the answer's failure.
+    const f = fakeCodex(`echo '{"type":"error","message":"Reconnecting... 1/5"}'; ${ANSWERED}`);
+    assert.deepEqual(await run(askAgent("hi", { agent: "codex", command: f.bin, dir })), { answer: { summary: "ok" }, model: "codex" });
+    assert.deepEqual(fs.readdirSync(dir), [], "a failed run leaves no files either");
+    fs.rmSync(dir, { recursive: true });
+  },
+);
+
+test("the tool-less call is Claude Code's unless the agent is Codex", posix, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
+  const claude = fakeAgent("claude", `echo '{"structured_output":{"summary":"from claude"}}'`);
+  const codex = fakeCodex(`printf '%s' '{"summary":"from codex"}' > "$out"`);
+  process.env.DESK_CLAUDE = claude.bin;
+  process.env.DESK_CODEX = codex.bin;
+  try {
+    assert.deepEqual((await run(askAgent("hi", { dir }))).answer, { summary: "from claude" });
+    assert.deepEqual((await run(askAgent("hi", { dir, agent: "claude-code" }))).answer, { summary: "from claude" });
+    assert.deepEqual(await run(askAgent("hi", { dir, agent: "codex" })), { answer: { summary: "from codex" }, model: "codex" });
+  } finally {
+    delete process.env.DESK_CLAUDE;
+    delete process.env.DESK_CODEX;
+  }
+  fs.rmSync(dir, { recursive: true });
+});
 
 test("a command that fails says why in its last lines, its exit, or the hint for one that isn't there", posix, async () => {
   const f = fakeAgent("tool", `echo one >&2; echo two >&2; echo three >&2; echo four >&2; exit 3`);

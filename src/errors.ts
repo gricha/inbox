@@ -241,11 +241,12 @@ export type CommandError = CommandNotFound | CommandTimeout | CommandOutputTooLa
 
 // The whole message: retryAgents, paused() and the judge find it by suffix in the stored error texts.
 export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
+export const CODEX_NOT_LOGGED_IN = "Codex isn't logged in. Run `codex login` in a terminal.";
 
-// An expired or missing login. detail is the CLI's own words ("401 OAuth access token has expired"), for the log.
-export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ readonly detail: string }> {
+// An expired or missing login, Claude Code's unless agent says Codex. detail is the CLI's own words ("401 OAuth access token has expired"), for the log.
+export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ readonly detail: string; readonly agent?: "codex" }> {
   override get message(): string {
-    return NOT_LOGGED_IN;
+    return this.agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN;
   }
 }
 

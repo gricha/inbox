@@ -1,5 +1,5 @@
-// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own Claude Code writes from them.
-// The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
+// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own agent (Claude Code or Codex)
+// writes from them. The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
@@ -22,6 +22,7 @@ import {
   type CommandError,
   type FsError,
 } from "./errors.ts";
+import type { DriverId } from "./agents.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type {
   AiReview,
@@ -486,6 +487,7 @@ export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.en
 export interface AskOpts {
   dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
+  agent?: DriverId; // agent.harness: Claude Code unless it says Codex
 }
 
 export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
@@ -527,6 +529,122 @@ export const askClaude = Effect.fn("askClaude")(function* (
     missing: claudeMissing(command),
   });
   return yield* claudeEnvelope(out);
+});
+
+// The tool-less call on the agent you chose (Settings → Agent): the judge, the AI review and its check, the conversation
+// read and automations' questions all go through here, so they follow the setting from their next call.
+export const askAgent = (prompt: string, opts: { command?: string } & AskOpts): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError> =>
+  opts.agent === "codex" ? askCodex(prompt, opts) : askClaude(prompt, opts);
+
+// The owner's own codex, as claude is: DESK_CODEX points tests and QA at a fake.
+const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.DESK_CODEX : "codex");
+const codexMissing = (command: string) => `${command} not found: install Codex so codex runs from your PATH`;
+
+// Codex has no "no tools": everything that can act or reach out is turned off, and what's left runs in a read-only sandbox.
+// Your model, profile and login stay yours (no --model, no --ignore-user-config); your MCP servers don't come along.
+const CODEX_OFF = [
+  "shell_tool",
+  "unified_exec",
+  "apps",
+  "plugins",
+  "browser_use",
+  "browser_use_external",
+  "in_app_browser",
+  "computer_use",
+  "image_generation",
+  "view_image",
+  "multi_agent",
+  "hooks",
+  "memories",
+];
+const codexArgs = (dir: string, schema: string, out: string): string[] => [
+  "exec",
+  "--json",
+  "--sandbox",
+  "read-only",
+  "--ephemeral",
+  "--skip-git-repo-check",
+  "-C",
+  dir,
+  ...CODEX_OFF.flatMap((f) => ["--disable", f]),
+  "-c",
+  'web_search="disabled"',
+  "-c",
+  "mcp_servers={}",
+  "-c",
+  'approval_policy="never"',
+  "--output-schema",
+  schema,
+  "-o",
+  out,
+  "-",
+];
+
+// The schema and the final message go through two files in the agent's directory, removed after the run however it ends.
+const askCodex = Effect.fn("askCodex")(function* (
+  prompt: string,
+  opts: { command?: string } & AskOpts,
+): Effect.fn.Return<ClaudeAnswer, CommandError | ClaudeError> {
+  const command = opts.command ?? codexCommand();
+  const stem = path.join(opts.dir, `.codex-${randomBytes(6).toString("hex")}`);
+  const schema = `${stem}.schema.json`;
+  const out = `${stem}.answer.json`;
+  const run = Effect.gen(function* () {
+    // The agent's own directory, made by the desk: failing to write in it is a defect.
+    fs.writeFileSync(schema, JSON.stringify(opts.schema ?? SCHEMA));
+    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out));
+    const events = yield* runCommand(spawnAs, {
+      input: prompt,
+      cwd: opts.dir,
+      timeout: TIMEOUT,
+      stdoutOnError: true,
+      missing: codexMissing(command),
+    }).pipe(
+      // Nothing on stdout: its words are on stderr, a login or a limit among them.
+      Effect.catchTag("CommandFailed", (e): Effect.Effect<never, CommandFailed | ClaudeNotLoggedIn | ClaudeApiError> =>
+        Effect.fail(CODEX_DOWN.test(e.stderr) ? codexError(e.stderr) : e),
+      ),
+    );
+    const last = fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "";
+    return yield* codexAnswer(events, last);
+  });
+  return yield* run.pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        fs.rmSync(schema, { force: true });
+        fs.rmSync(out, { force: true });
+      }),
+    ),
+  );
+});
+
+const CODEX_LOGIN = /not logged in|\b401\b|unauthori[sz]ed|codex login|log ?in again|sign in again/i;
+const CODEX_LIMIT = /\b429\b|too many requests|usage limit|rate.?limit/i;
+const CODEX_DOWN = new RegExp(`${CODEX_LOGIN.source}|${CODEX_LIMIT.source}`, "i");
+
+// codex's error words: a login it needs is the same pause as Claude Code's, with codex's fix; a limit is the agent's, held.
+function codexError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
+  const msg = raw.trim();
+  if (CODEX_LOGIN.test(msg)) return new ClaudeNotLoggedIn({ detail: msg, agent: "codex" });
+  return new ClaudeApiError({ message: msg || "codex failed", ...(CODEX_LIMIT.test(msg) && { status: 429 }) });
+}
+
+// `codex exec --json`'s events and its last message: the message is the answer; with none, the turn's failure says why.
+// Codex's events carry no model today; one that does names the review's writer, else "codex".
+const codexAnswer = Effect.fnUntraced(function* (events: string, last: string): Effect.fn.Return<ClaudeAnswer, ClaudeError> {
+  let model: string | null = null;
+  let failed: string | null = null;
+  for (const line of events.split("\n")) {
+    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+    if (typeof e !== "object" || e === null) continue;
+    const ev = e as { type?: unknown; model?: unknown; message?: unknown; error?: { message?: unknown } };
+    if (typeof ev.model === "string" && ev.model) model = ev.model;
+    if (ev.type === "error" && typeof ev.message === "string") failed = ev.message;
+    if (ev.type === "turn.failed") failed = typeof ev.error?.message === "string" ? ev.error.message : "codex failed";
+  }
+  if (!last.trim() && failed !== null) return yield* codexError(failed);
+  if (!last.trim()) return yield* new ClaudeBadOutput({ message: "codex gave no answer", excerpt: events.slice(-500) });
+  return { answer: yield* readJson(/\{[\s\S]*\}/.exec(last)?.[0] ?? "{}", last), model: model ?? "codex" };
 });
 
 export { NOT_LOGGED_IN } from "./errors.ts";
