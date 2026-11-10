@@ -1355,6 +1355,13 @@ const SHOTS: Shot[] = [
         failures.push("review-loading: the row's AI read isn't folded");
       if ((await page.locator(".rv-convo.sk-short").count()) && !inOrder(await tops(page, [".rv-ai", ".rv-convo.sk-short"])))
         failures.push("review-loading: the AI read isn't above the conversation's placeholder");
+      // The sidebar's toggle is the loaded review's: the icon button, not words.
+      const toggle = await page.evaluate<{ tag: string; text: string; icon: boolean; label: string | null } | null>(`(() => {
+        const b = document.querySelector('.review[aria-busy="true"] .rv-side-toggle');
+        return b && { tag: b.tagName, text: b.textContent.trim(), icon: !!b.querySelector("svg"), label: b.getAttribute("aria-label") };
+      })()`);
+      if (toggle?.tag !== "BUTTON" || toggle.text || !toggle.icon || !toggle.label?.endsWith("checks and files"))
+        failures.push(`review-loading: the sidebar's toggle is ${JSON.stringify(toggle)}`);
     },
     // Then the rest lands: the comment box stays where it was drawn, its conversation's line kept for it.
     after: async (page) => {
@@ -1641,7 +1648,7 @@ const SHOTS: Shot[] = [
       await review("oss/tinyhttp#205")(page);
       const side = page.locator(".rv-side");
       if (!(await side.isVisible())) await page.locator(".rv-side-show").click(); // folded where the column is narrow
-      const lead = page.locator(".rv-checks-lead");
+      const lead = page.locator("[data-part=checks] .rv-part-lead");
       if (!(await lead.count())) {
         failures.push("review-checks: the sidebar has no checks");
         return;
@@ -1654,20 +1661,20 @@ const SHOTS: Shot[] = [
         rows: number;
         above: boolean;
       }>(`(() => {
-        const lead = document.querySelector(".rv-checks-lead"), words = lead.querySelector(".fact-word");
+        const lead = document.querySelector("[data-part=checks] .rv-part-lead"), words = lead.querySelector(".fact-word");
         const probe = document.createElement("span");
         probe.style.color = "var(--red)";
         document.body.append(probe);
         const red = getComputedStyle(probe).color;
         probe.remove();
-        const part = document.querySelector(".rv-checks").getBoundingClientRect();
+        const part = document.querySelector("[data-part=checks]").getBoundingClientRect();
         return {
           open: lead.getAttribute("aria-expanded"),
           line: words.textContent,
           lines: Math.round(words.getBoundingClientRect().height / parseFloat(getComputedStyle(words).lineHeight)),
           red: getComputedStyle(words).color === red,
-          rows: document.querySelectorAll(".rv-check").length,
-          above: !!document.querySelector(".rv-side .rv-checks") && part.bottom <= document.querySelector(".rv-files").getBoundingClientRect().top,
+          rows: document.querySelectorAll("[data-part=checks] .rv-part-row").length,
+          above: !!document.querySelector(".rv-side [data-part=checks]") && part.bottom <= document.querySelector(".rv-files").getBoundingClientRect().top,
         };
       })()`);
       if (closed.open !== "false" || closed.rows) failures.push(`review-checks: the checks don't open closed: ${JSON.stringify(closed)}`);
@@ -1675,7 +1682,7 @@ const SHOTS: Shot[] = [
         failures.push(`review-checks: closed, the checks read ${JSON.stringify(closed)}`);
       if (!closed.above) failures.push("review-checks: the checks aren't in the sidebar above its files");
       // With the sidebar hidden, the facts' "CI failing" opens it with the checks listed.
-      await side.locator(".rv-side-toggle").click();
+      await page.locator(".rv-side-toggle").click();
       const fact = page.locator(".rv-meta .rv-fact-btn");
       if ((await fact.textContent()) !== "CI failing")
         failures.push(`review-checks: the fact reads ${JSON.stringify(await fact.textContent())}`);
@@ -1689,10 +1696,10 @@ const SHOTS: Shot[] = [
         document.body.append(probe);
         const red = getComputedStyle(probe).color;
         probe.remove();
-        return [...document.querySelectorAll(".rv-check")].map((el) => {
-          const state = el.querySelector(".rv-check-state"), r = state.getBoundingClientRect();
+        return [...document.querySelectorAll("[data-part=checks] .rv-part-row")].map((el) => {
+          const state = el.querySelector(".rv-part-state"), r = state.getBoundingClientRect();
           return {
-            name: el.querySelector(".rv-check-name").textContent,
+            name: el.querySelector(".rv-part-name").textContent,
             state: state.textContent,
             href: el.getAttribute("href"),
             red: getComputedStyle(state).color === red,
@@ -1798,16 +1805,128 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(600);
     },
   },
+  // The review's sidebar is the PR's state, a line each: its stack, its checks, its reviewers, what stands in its merge,
+  // then its files, and no activity. One icon button at the review's top right shows it and hides it, and is still there,
+  // with the sidebar, at the bottom of a long review.
   {
-    // A PR's recent activity, every line of it.
-    name: "review-activity",
+    name: "review-panel",
     go: async (page) => {
-      await review("acme/api#4127")(page);
-      if (!(await page.locator(".rv-side").isVisible())) await page.locator(".rv-side-show").click(); // folded in a narrow window
-      await page.locator(".rv-side .rv-more").click();
-      await page.waitForTimeout(200);
+      // A conflict with its base, as the desk says it of your own PR.
+      await reviewAs((v) => {
+        if (v.card.id !== "acme/api#4154") return;
+        v.merge = "Merge conflict with main";
+        v.item.mergeable = "conflict";
+      })(page);
+      const toggle = page.locator(".rv-side-toggle");
+      const side = page.locator(".rv-side");
+      const says = () =>
+        page.evaluate<{
+          tag: string;
+          text: string;
+          icon: boolean;
+          label: string | null;
+          title: string | null;
+          open: string | null;
+          on: boolean;
+        }>(`(() => {
+          const b = document.querySelector(".rv-side-toggle"), r = b.getBoundingClientRect();
+          const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return {
+            tag: b.tagName,
+            text: b.textContent.trim(),
+            icon: !!b.querySelector("svg"),
+            label: b.getAttribute("aria-label"),
+            title: b.getAttribute("title"),
+            open: b.getAttribute("aria-expanded"),
+            on: r.top >= 52 && r.bottom <= innerHeight && r.right <= innerWidth && b.contains(at),
+          };
+        })()`);
+      // Hidden then shown then hidden, at the bottom of a long review; the sidebar, shown, is in the window too.
+      const atBottom = async (where: string) => {
+        if (await side.isVisible()) await toggle.click();
+        await page.evaluate("scrollTo(0, document.documentElement.scrollHeight)");
+        await page.waitForTimeout(300);
+        const hidden = await says();
+        if (!hidden.on || hidden.open !== "false" || hidden.label !== "Show checks and files")
+          failures.push(`review-panel: at the bottom of the review${where}, the toggle reads ${JSON.stringify(hidden)}`);
+        await toggle.click();
+        await page.waitForTimeout(200);
+        const shown = await says();
+        const inView = await page.evaluate<boolean>(`(() => {
+          const r = document.querySelector(".rv-side")?.getBoundingClientRect();
+          return !!r && r.height > 100 && r.top >= 51 && r.bottom <= innerHeight + 1;
+        })()`);
+        if (!shown.on || shown.open !== "true" || shown.label !== "Hide checks and files" || !inView)
+          failures.push(`review-panel: shown at the bottom of the review${where}, ${JSON.stringify({ ...shown, inView })}`);
+        await toggle.click();
+        await page.waitForTimeout(200);
+        if (await side.count()) failures.push(`review-panel: the toggle doesn't hide the sidebar at the bottom of the review${where}`);
+        await page.evaluate("scrollTo(0, 0)");
+      };
+      await review("acme/api#4099")(page);
+      const first = await says();
+      if (first.tag !== "BUTTON" || first.text || !first.icon || first.title !== first.label)
+        failures.push(`review-panel: the sidebar's toggle isn't one icon button named in its tooltip: ${JSON.stringify(first)}`);
+      await atBottom("");
+      // With the list folded there's room for the sidebar beside the diff: the same button, in its column.
+      const fold = page.locator(".beside-fold");
+      if (await fold.count()) {
+        await fold.click();
+        await page.waitForTimeout(300);
+        await atBottom(", the sidebar beside the diff");
+        await fold.click();
+        await page.waitForTimeout(300);
+      }
+      // A PR in a stack with a conflict: every part, in order, a line each.
+      await review("acme/api#4154")(page);
+      if ((await says()).label !== "Show the stack, checks and files")
+        failures.push(`review-panel: in a stack, the toggle reads ${JSON.stringify((await says()).label)}`);
+      await toggle.click();
+      await side.waitFor();
+      const parts = await page.evaluate<{
+        names: string[];
+        text: string;
+        lines: Record<string, { text: string; lines: number; amber: boolean; open: string | null }>;
+      }>(`(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--amber)";
+        document.body.append(probe);
+        const amber = getComputedStyle(probe).color;
+        probe.remove();
+        const side = document.querySelector(".rv-side"), lines = {};
+        for (const part of side.querySelectorAll(".rv-part")) {
+          const words = part.querySelector(".rv-side-head .fact-word");
+          lines[part.getAttribute("aria-label")] = {
+            text: words.textContent,
+            lines: Math.round(words.getBoundingClientRect().height / parseFloat(getComputedStyle(words).lineHeight)),
+            amber: getComputedStyle(words).color === amber,
+            open: part.querySelector(".rv-part-lead")?.getAttribute("aria-expanded") ?? null,
+          };
+        }
+        return { names: [...side.querySelectorAll("section, nav")].map((el) => el.getAttribute("aria-label")), text: side.textContent, lines };
+      })()`);
+      if (parts.names.join(" | ") !== "Stack | Checks | Reviewers | Merge | Files in reading order")
+        failures.push(`review-panel: the sidebar's parts are ${parts.names.join(" | ")}`);
+      if (/recent activity/i.test(parts.text)) failures.push("review-panel: the sidebar still lists recent activity");
+      const want = {
+        Checks: { text: "CI passing · 11 checks", lines: 1, amber: false, open: "false" },
+        Reviewers: { text: "Changes requested by sam", lines: 1, amber: true, open: "false" },
+        Merge: { text: "Merge conflict with main", lines: 1, amber: true, open: null },
+      };
+      if (JSON.stringify(parts.lines) !== JSON.stringify(want))
+        failures.push(`review-panel: closed, the parts read ${JSON.stringify(parts.lines)}`);
+      const lead = page.locator("[data-part=reviewers] .rv-part-lead");
+      if (await lead.count()) await lead.click();
+      const rows = await page.evaluate<string[]>(
+        `[...document.querySelectorAll("[data-part=reviewers] .rv-part-row")].map((el) => el.querySelector(".rv-part-name").textContent + ": " + el.querySelector(".rv-part-state").textContent)`,
+      );
+      if (rows.join(" | ") !== "sam: changes requested") failures.push(`review-panel: opened, the reviewers read ${rows.join(" | ")}`);
     },
-    after: sideDefault,
+    after: async (page) => {
+      await unroute(page);
+      await sideDefault(page);
+      await fresh(page);
+    },
   },
   // FYI: what Claude and the rules sorted away, on its own page.
   {

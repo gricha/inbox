@@ -4,10 +4,8 @@ import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
 import {
   JOB_ATTEMPTS,
-  type ActivityEvent,
   type AiReview,
   type Card,
-  type Checks,
   type Conversation as Convo,
   type GitHubAction,
   type InflightRow,
@@ -22,7 +20,7 @@ import {
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
-import { age, cls, eventText, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
+import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
 import { blocks, inline, lead, unlinked, urlPlace } from "../prose.ts";
 import { reviewOf } from "../reviews.ts";
 import {
@@ -104,7 +102,6 @@ interface Fact {
 // Sorted away, resolved or calm in Merging, a PR's problems go grey: its header's facts, and its checks in the sidebar.
 const calm = (c: Card) => cls(`b-${c.bucket}`, (c.status !== "active" || c.resolved !== null || c.bucket === "hide") && "dim");
 
-const EVENTS_SHOWN = 3; // the rest of the recent activity is a click away, so the diff stays near the top
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
 const LEVEL: Record<NonNullable<Section["level"]>, string> = { look: "Look", skim: "Skim", unread: "Not read", skip: "Skip" };
@@ -205,7 +202,9 @@ export function Review({
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   const [more, setMore] = useState(false); // the More menu
-  const [checksOpen, setChecksOpen] = useState(false); // the sidebar's checks, listed: every PR opens with them in one line
+  // The sidebar's checks and reviewers, listed: every PR opens with each in one line.
+  const [checksOpen, setChecksOpen] = useState(false);
+  const [reviewersOpen, setReviewersOpen] = useState(false);
   const [writing, setWriting] = useState(false); // Request changes, being written
   // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it,
   // and per PR for this window, as a line's is, so leaving the review and coming back finds it; sent, it's cleared.
@@ -353,7 +352,8 @@ export function Review({
     const box = document.querySelector<HTMLElement>(".rv-side");
     const on = box?.querySelector<HTMLElement>(".rv-file.on");
     if (!box || !on || box.scrollHeight <= box.clientHeight) return;
-    if (on.offsetTop < box.scrollTop) box.scrollTop = on.offsetTop - 8;
+    const strip = box.querySelector<HTMLElement>(".rv-side-top")?.offsetHeight ?? 0; // pinned at its top, under the toggle
+    if (on.offsetTop < box.scrollTop + strip) box.scrollTop = on.offsetTop - strip - 8;
     else if (on.offsetTop + on.offsetHeight > box.scrollTop + box.clientHeight)
       box.scrollTop = on.offsetTop + on.offsetHeight - box.clientHeight + 8;
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reads the DOM the new secIdx just rendered
@@ -513,7 +513,7 @@ export function Review({
     if (!showSide) toggleSide();
     setChecksOpen(true);
     requestAnimationFrame(() => {
-      document.querySelector(".rv-checks")?.scrollIntoView({ block: "nearest" });
+      document.querySelector(".rv-side")?.scrollTo({ top: 0 });
     });
   }
 
@@ -592,7 +592,25 @@ export function Review({
     };
   }, []);
 
-  if (view === null) return <Shell card={known} me={me} now={now} row={row} side={showSide} />;
+  // The sidebar's one toggle, pinned at the review's top right however far it's scrolled: it shows the sidebar and hides it.
+  const holds = `${(v?.stack ?? known?.stack) ? "the stack, " : ""}checks and files`;
+  const toggle = (
+    <button
+      type="button"
+      className={cls("act", "rv-side-toggle", !showSide && "rv-side-show")}
+      aria-expanded={showSide}
+      aria-controls="rv-side"
+      aria-label={`${showSide ? "Hide" : "Show"} ${holds}`}
+      title={`${showSide ? "Hide" : "Show"} ${holds}`}
+      onClick={toggleSide}
+    >
+      <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.5 3.5h11v9h-11zM10 3.5v9" />
+      </svg>
+    </button>
+  );
+
+  if (view === null) return <Shell card={known} me={me} now={now} row={row} side={showSide} toggle={toggle} />;
   if (typeof view === "string")
     return (
       <div className="review">
@@ -714,12 +732,8 @@ export function Review({
 
   return (
     <div className={cls("review", showSide && "side-open")}>
+      {toggle}
       <div className="rv-main">
-        {!showSide && (
-          <button type="button" className="act rv-side-toggle rv-side-show" title="Show the sidebar" onClick={toggleSide}>
-            {view.stack ? "Stack and files" : "Files"}
-          </button>
-        )}
         <div className="rv-top">
           <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
           {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
@@ -925,12 +939,47 @@ export function Review({
         )}
       </div>
       {showSide && (
-        <aside className="rv-side" aria-label="Stack, checks, files and recent activity">
-          <button type="button" className="act rv-side-toggle" title="Hide the sidebar" onClick={toggleSide}>
-            Hide
-          </button>
+        <aside id="rv-side" className="rv-side" aria-label="Stack, checks, reviewers and files">
+          <div className="rv-side-top" aria-hidden="true" />
           {view.stack && <StackList stack={view.stack} />}
-          <ChecksList checks={view.checks} error={view.checks_error} tone={calm(card)} open={checksOpen} setOpen={setChecksOpen} />
+          {view.checks_error && (
+            <section className="rv-part" data-part="checks" aria-label="Checks">
+              <p className="rv-part-err t-bad">Couldn't load the checks: {view.checks_error}</p>
+            </section>
+          )}
+          {view.checks && (
+            <SidePart
+              id="checks"
+              name="Checks"
+              line={view.checks.line}
+              bad={view.checks.failing ? "t-bad" : ""}
+              tone={calm(card)}
+              open={checksOpen}
+              setOpen={setChecksOpen}
+              rows={view.checks.list.map((c) => ({
+                name: c.name,
+                state: c.state === "failing" && c.optional ? "failing, not required" : c.state,
+                bad: c.state === "failing" && !c.optional ? "t-bad" : "",
+                url: c.url,
+              }))}
+            />
+          )}
+          <SidePart
+            id="reviewers"
+            name="Reviewers"
+            line={view.reviewers.line}
+            bad={view.reviewers.changes ? "t-warn" : ""}
+            tone={calm(card)}
+            open={reviewersOpen}
+            setOpen={setReviewersOpen}
+            rows={view.reviewers.list.map((r) => ({
+              name: r.who,
+              state: r.state,
+              bad: r.state === "changes requested" ? "t-warn" : "",
+              url: "",
+            }))}
+          />
+          {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
           {list.length > 0 && (
             <nav className="rv-files" aria-label="Files in reading order">
               <h2 className="rv-side-head">
@@ -966,8 +1015,6 @@ export function Review({
               </ol>
             </nav>
           )}
-          {/* "First seen" is the desk's own bookkeeping, not something that happened. */}
-          <Activity events={(resolved?.events ?? view.activity).filter((e) => e.kind !== "new")} me={me} now={now} />
         </aside>
       )}
     </div>
@@ -1082,7 +1129,21 @@ function rowFacts(c: Card): Fact[] {
 }
 
 // The review before it lands: what its row knows, and quiet placeholders where the rest will be, so nothing moves.
-function Shell({ card, me, now, row, side }: { card: Card | null; me: string; now: number; row: InflightRow | null; side: boolean }) {
+function Shell({
+  card,
+  me,
+  now,
+  row,
+  side,
+  toggle,
+}: {
+  card: Card | null;
+  me: string;
+  now: number;
+  row: InflightRow | null;
+  side: boolean;
+  toggle: ReactNode; // the sidebar's, as the loaded review draws it
+}) {
   const isMine = !!card && !!me && card.author.toLowerCase() === me.toLowerCase();
   const pf = card?.preflight;
   const ai =
@@ -1094,12 +1155,8 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
   const none = !ai && (pf?.state === "off" || pf?.state === "paused" || pf?.state === "failed");
   return (
     <div className={cls("review", side && "side-open")} aria-busy="true">
+      {toggle}
       <div className="rv-main">
-        {!side && card?.kind === "pr" && (
-          <span className="act rv-side-toggle rv-side-show" aria-hidden="true">
-            {card.stack ? "Stack and files" : "Files"}
-          </span>
-        )}
         <div className="rv-top">
           {card ? (
             <Head
@@ -1170,8 +1227,10 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
         </div>
       </div>
       {side && (
-        <aside className="rv-side" aria-hidden="true">
-          {card && card.ci !== "none" && <SkLines count={1} className="sk-files" />}
+        <aside id="rv-side" className="rv-side" aria-hidden="true">
+          <div className="rv-side-top" />
+          {/* Its checks, where any ran, and its reviewers: a line each. */}
+          <SkLines count={card && card.ci !== "none" ? 2 : 1} className="sk-files" />
           <nav className="rv-files">
             <h2 className="rv-side-head">Files</h2>
             <SkLines count={5} className="sk-files" />
@@ -1182,69 +1241,77 @@ function Shell({ card, me, now, row, side }: { card: Card | null; me: string; no
   );
 }
 
-// The PR's checks: one line that says where CI stands, opening to each check by name, its state in words and its page.
-function ChecksList({
-  checks,
-  error,
-  tone,
-  open,
+// One part of the sidebar (the checks, the reviewers, the merge): a line that says where it stands, red or amber where
+// that's a problem; with rows, a click opens it to each by name with its state in words, a link where it has a page.
+function SidePart({
+  id,
+  name,
+  line,
+  bad,
+  tone = "",
+  open = false,
   setOpen,
+  rows,
 }: {
-  checks: Checks | null;
-  error: string | null;
-  tone: string; // calm(): a sorted-away PR's failing checks are grey, as its "CI failing" is
-  open: boolean;
-  setOpen: (open: boolean) => void;
+  id: string; // data-part, for a check to find it by
+  name: string;
+  line: string;
+  bad: string; // t-bad, t-warn, or "" for pencil
+  tone?: string; // calm(): on a sorted-away PR its problems are grey, as the header's facts are
+  open?: boolean;
+  setOpen?: (open: boolean) => void;
+  rows?: { name: string; state: string; bad: string; url: string }[];
 }) {
-  if (error)
-    return (
-      <section className="rv-checks" aria-label="Checks">
-        <p className="rv-checks-err t-bad">Couldn't load the checks: {error}</p>
-      </section>
-    );
-  if (!checks) return null;
+  const words = (
+    <span className={cls("rv-part-line", "fact-word", bad)} title={line}>
+      {line}
+    </span>
+  );
   return (
-    <section className={cls("rv-checks", tone, !open && "shut")} aria-label="Checks">
+    <section className={cls("rv-part", tone, !open && "shut")} data-part={id} aria-label={name}>
       <h2 className="rv-side-head">
-        <button
-          type="button"
-          className="rv-checks-lead"
-          aria-expanded={open}
-          onClick={() => {
-            setOpen(!open);
-          }}
-        >
-          <span className={cls("fact-word", checks.failing && "t-bad")}>{checks.line}</span>
-          <span className="rv-chev" aria-hidden="true">
-            ›
-          </span>
-        </button>
+        {setOpen && rows?.length ? (
+          <button
+            type="button"
+            className="rv-part-lead"
+            aria-expanded={open}
+            onClick={() => {
+              setOpen(!open);
+            }}
+          >
+            {words}
+            <span className="rv-chev" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        ) : (
+          words
+        )}
       </h2>
       {open && (
         <ol>
-          {checks.list.map((c, i) => {
-            const words = c.state === "failing" && c.optional ? "failing, not required" : c.state;
+          {rows?.map((r, i) => {
             const row = (
               <>
-                <span className="rv-check-name">{c.name}</span>
-                <span className={cls("rv-check-state", "fact-word", c.state === "failing" && !c.optional && "t-bad")}>{words}</span>
+                <span className="rv-part-name">{r.name}</span>
+                <span className={cls("rv-part-state", "fact-word", r.bad)}>{r.state}</span>
               </>
             );
             return (
               // oxlint-disable-next-line react/no-array-index-key -- two checks can share a name, and the list never reorders in place
               <li key={i}>
-                {c.url ? (
+                {r.url ? (
                   <a
-                    className="rv-check"
-                    href={c.url}
+                    className="rv-part-row"
+                    href={r.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={`${c.name}: ${words}\n${urlPlace(c.url)}`}
+                    title={`${r.name}: ${r.state}\n${urlPlace(r.url)}`}
                   >
                     {row}
                   </a>
                 ) : (
-                  <span className="rv-check" title={`${c.name}: ${words}`}>
+                  <span className="rv-part-row" title={`${r.name}: ${r.state}`}>
                     {row}
                   </span>
                 )}
@@ -1468,39 +1535,6 @@ function AiSection({
 export function withCode(text: string) {
   // oxlint-disable-next-line react/no-array-index-key -- a fixed split never reorders, and the same command can appear twice
   return text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
-}
-
-function Activity({ events, me, now }: { events: ActivityEvent[]; me: string; now: number }) {
-  const [all, setAll] = useState(false);
-  if (!events.length) return null;
-  const more = events.length - EVENTS_SHOWN;
-  return (
-    <section className="rv-activity" aria-label="Recent activity">
-      <h2 className="d-head">Recent activity</h2>
-      <ul className="events">
-        {(all ? events : events.slice(0, EVENTS_SHOWN)).map((e) => (
-          <li key={e.seq}>
-            {eventText(e, me)}
-            <span className="rv-age">{age(e.at, now)}</span>
-          </li>
-        ))}
-        {more > 0 && (
-          <li>
-            <button
-              type="button"
-              className="rv-more"
-              aria-expanded={all}
-              onClick={() => {
-                setAll((a) => !a);
-              }}
-            >
-              {all ? "Fewer" : `${more} more`}
-            </button>
-          </li>
-        )}
-      </ul>
-    </section>
-  );
 }
 
 // A long file name wraps after a "_", "-" or ".", never mid-word.

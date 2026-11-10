@@ -748,6 +748,8 @@ export interface ReviewView {
   stack: Stack | null; // its stack, with it current
   checks: Checks | null; // its head commit's checks, one by one; null: none ran, or they couldn't be fetched
   checks_error: string | null; // they couldn't be fetched
+  reviewers: Standings; // who reviews it and where each stands
+  merge: string | null; // what stands in its merge's way, in one line ("Merge conflict with main"); null: nothing, or the desk doesn't know
   conversation: Conversation[]; // what reviewers said, those waiting on you first
   conversation_error: string | null; // it couldn't be fetched
   reading: boolean; // Claude is reading the ones waiting on you
@@ -768,6 +770,19 @@ export interface Checks {
   line: string; // all of them in one line: "CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"
   failing: boolean; // a check that counts is failing: the line is red, as "CI failing" is
   list: Check[]; // failing first, then cancelled, running, passing and skipped, each by name
+}
+
+// Where one reviewer stands on a PR: you are "you", a team is @slug.
+export interface Standing {
+  who: string;
+  state: "changes requested" | "asked" | "approved" | "commented"; // asked: to review it, and it waits on them
+}
+
+// Who reviews a PR and where each stands, as its review lists them in the sidebar.
+export interface Standings {
+  line: string; // all of it in one line: "Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Nobody's asked"
+  changes: boolean; // someone asks for changes: the line is amber, as "changes requested" is
+  list: Standing[]; // who holds it first: changes requested, asked, approved, commented
 }
 
 // One conversation on a PR: a review thread, a comment on the PR, or a review's body. Every text is untrusted GitHub text.

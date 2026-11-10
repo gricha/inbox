@@ -351,6 +351,20 @@ test("a review's checks agree with its PR's CI: failing first on a red one, with
   );
 });
 
+test("a review's reviewers and merge line come from its PR's reviews, requests and conflict", async () => {
+  const view = async (id: string) => (await call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}?ahead=1`)).data;
+  const asked = await view("acme/api#4099");
+  assert.deepEqual([asked.reviewers.line, asked.reviewers.changes], ["Changes requested by you · waiting on @backend", true]);
+  assert.deepEqual(
+    asked.reviewers.list.map((r) => `${r.who}: ${r.state}`),
+    ["you: changes requested", "@backend: asked", "sam: commented"],
+  );
+  assert.equal(asked.merge, null);
+  assert.equal((await view("acme/worker#875")).reviewers.line, "Approved by marco");
+  assert.equal((await view("acme/web#2303")).reviewers.line, "Nobody's asked");
+  assert.equal((await view("acme/api#4110")).merge, "Merge conflict with main");
+});
+
 test("review view: canned diffs whose notes sit on real lines, and approve as a no-op", async () => {
   const { data: v } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/api#4127")}`);
   assert.equal(v.card.id, "acme/api#4127");

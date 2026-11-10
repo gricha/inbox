@@ -4323,8 +4323,9 @@ button.s-edit:hover:not(:disabled) {
 }
 
 .rv-main {
-  position: relative;
   display: grid;
+  grid-row: 1;
+  grid-column: 1;
   gap: 16px;
   min-width: 0;
 }
@@ -4337,29 +4338,51 @@ button.s-edit:hover:not(:disabled) {
   }
 }
 
-/* The sidebar's own toggle: Hide at its top, and where it was while it's hidden. */
+/* The sidebar's one toggle, an icon that shows it and hides it: in the review's last column (over the diff's corner while
+   the sidebar is hidden or lies over the diff), and sticky under the page's head, so it's there however far the review is
+   scrolled. On the sheet with a hairline, so it reads on any line of the diff; above the file's sticky name and the sidebar. */
 .rv-side-toggle {
+  position: sticky;
+  top: 60px;
+  z-index: 6;
+  grid-row: 1;
+  grid-column: -2 / -1;
+  justify-content: center;
   justify-self: end;
+  width: 28px;
   height: 28px;
-  font-size: 12.5px;
+  padding: 0;
 }
 
-.rv-side-show {
-  position: absolute;
-  top: 0;
-  right: 0;
+/* Under the toggle while it's over the diff, a file's sticky name keeps its size clear of it. */
+.review:not(.side-open) .rv-fhead {
+  padding-right: 38px;
 }
 
 .rv-side {
   position: sticky;
-  top: 72px;
+  top: 60px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-row: 1;
+  grid-column: 2;
   gap: 26px;
   align-content: start;
-  max-height: calc(100vh - 92px);
+  max-height: calc(100vh - 80px);
+
+  /* Into the page's room under the review's last row, so it isn't pushed up under the head at the review's very end. */
+  margin-bottom: -64px;
   overflow: auto;
   font-size: 12.5px;
+}
+
+/* The toggle's row, kept at the sidebar's top while its parts scroll under it. */
+.rv-side-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 28px;
+  background: var(--paper);
 }
 
 /* Narrower, it opens over the diff's right edge rather than squeezing it. */
@@ -4372,10 +4395,15 @@ button.s-edit:hover:not(:disabled) {
     z-index: 5;
     width: min(300px, 85vw);
     max-height: none;
-    padding: 20px 14px 20px 16px;
+    margin-bottom: 0;
+    padding: 0 14px 20px 16px;
     border-left: 1px solid var(--rule);
     background: var(--paper);
     box-shadow: var(--shadow);
+  }
+
+  .rv-side-top {
+    height: 46px;
   }
 }
 
@@ -4461,13 +4489,13 @@ button.s-edit:hover:not(:disabled) {
   font-size: 13px;
 }
 
-/* The PR's checks: one line saying where CI stands, its chevron at the panel's edge so its words start where the other
-   headings do; open, each check's name and, in words, its state. */
-.rv-checks.shut .rv-side-head {
+/* A part of the sidebar (the checks, the reviewers, the merge): one line saying where it stands, its chevron at the
+   sidebar's edge so its words start where the other headings do; open, each row's name and, in words, its state. */
+.rv-part.shut .rv-side-head {
   margin-bottom: 0;
 }
 
-.rv-checks-lead {
+.rv-part-lead {
   display: flex;
   flex: 1;
   gap: 8px;
@@ -4483,12 +4511,12 @@ button.s-edit:hover:not(:disabled) {
   cursor: pointer;
 }
 
-.rv-checks-lead:hover,
-.rv-checks-lead:hover .rv-chev {
+.rv-part-lead:hover,
+.rv-part-lead:hover .rv-chev {
   color: var(--ink);
 }
 
-.rv-check {
+.rv-part-row {
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -4498,12 +4526,12 @@ button.s-edit:hover:not(:disabled) {
   font-size: 13px;
 }
 
-a.rv-check:hover {
+a.rv-part-row:hover {
   background: var(--side-hover);
   text-decoration: none;
 }
 
-.rv-check-name {
+.rv-part-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -4511,16 +4539,29 @@ a.rv-check:hover {
   white-space: nowrap;
 }
 
-.rv-check-state {
+.rv-part-state {
   flex: none;
 }
 
-.rv-check-state:not(.t-bad) {
+.rv-part-state:not(.t-bad, .t-warn) {
   color: var(--pencil);
 }
 
-.rv-checks-err {
+/* One line each, closed: a long one is cut at its end, whole in its tooltip and in its rows. */
+.rv-part-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rv-part-err {
   padding: 0 8px;
+}
+
+/* The parts are one group: closer to each other than to the stack above them and the files below. */
+.rv-part + .rv-part {
+  margin-top: -14px;
 }
 
 .back {
@@ -4821,22 +4862,6 @@ a.rv-check:hover {
 .rv-lane {
   color: var(--pencil);
   text-wrap: pretty;
-}
-
-/* Recent activity: a few quiet lines, the time after the same "·" as the facts; the rest behind "n more". */
-.rv-activity {
-  display: grid;
-  gap: 4px;
-  align-content: start;
-  justify-items: start;
-  min-width: 0;
-  padding: 0 8px;
-  color: var(--ink-2);
-  font-size: 13px;
-}
-
-.rv-activity .d-head {
-  margin: 0 0 2px;
 }
 
 .rv-age {

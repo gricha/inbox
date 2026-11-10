@@ -1,4 +1,4 @@
-import type { Item, Stage } from "./types.ts";
+import type { Item, Stage, Standing, Standings } from "./types.ts";
 
 // Only a collaborator's approval counts (the coordinator merges on it); anyone's change request holds the PR.
 export function verdicts(it: Item, self: string): { approved_by: string[]; changes_by: string[] } {
@@ -39,6 +39,38 @@ export function andMore(xs: string[], extra = 0): string {
 }
 
 const lc = (s: string) => s.toLowerCase();
+
+const STANDING: Standing["state"][] = ["changes requested", "asked", "approved", "commented"];
+
+// Who reviews a PR and where each stands, for its review's sidebar, bots and its author left out. verdicts() says who
+// approved and who asks for changes, as the stage does; who's still asked waits; anyone else who reviewed commented.
+export function standings(it: Item, me: string): Standings {
+  const { approved_by, changes_by } = verdicts(it, it.author);
+  const asked = it.review_requests.filter((r) => !r.bot).map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer));
+  const spoke = it.reviews.filter((r) => !r.author_bot && r.state !== "pending" && lc(r.author) !== lc(it.author)).map((r) => r.author);
+  const by = new Map<string, Standing>();
+  const add = (who: string[], state: Standing["state"]) => {
+    for (const w of who) if (!by.has(lc(w))) by.set(lc(w), { who: lc(w) === lc(me) ? "you" : w, state });
+  };
+  add(changes_by, "changes requested");
+  add(approved_by, "approved");
+  add(asked, "asked");
+  add(spoke, "commented");
+  const list = [...by.values()].toSorted((a, b) => STANDING.indexOf(a.state) - STANDING.indexOf(b.state));
+  const who = (state: Standing["state"]) => list.filter((s) => s.state === state).map((s) => s.who);
+  const hidden = it.review_requests_hidden ?? 0;
+  const parts = [
+    who("changes requested").length ? `changes requested by ${andMore(who("changes requested"))}` : "",
+    who("approved").length ? `approved by ${andMore(who("approved"))}` : "",
+    who("asked").length || hidden ? `waiting on ${andMore(who("asked"), hidden) || "a team GitHub doesn't show you"}` : "",
+  ].filter(Boolean);
+  const line = parts.join(" · ") || (list.length ? `comments from ${andMore(who("commented"))}` : "nobody's asked");
+  return { line: line.charAt(0).toUpperCase() + line.slice(1), changes: changes_by.length > 0, list };
+}
+
+// What stands in an open PR's merge, in one line; null when nothing does, or the desk doesn't know (it asks only of your own PRs).
+export const mergeLine = (it: Item): string | null =>
+  it.kind === "pr" && it.state === "open" && it.mergeable === "conflict" ? `Merge conflict with ${it.base}` : null;
 
 // The rule: a person other than you had the last word, so they wait on your reply.
 export const waitsOnYou = (last: { author: string; bot: boolean } | undefined, me: string) =>

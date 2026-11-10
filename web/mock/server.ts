@@ -17,7 +17,7 @@ import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rul
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
-import { stage } from "../../src/stage.ts";
+import { mergeLine, stage, standings } from "../../src/stage.ts";
 import { checkSetting, DEFAULTS, LEGACY_TABLES, SECTIONS, SETTINGS, settingDef } from "../../src/settings.ts";
 import type { ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
@@ -2863,6 +2863,8 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     stack: d.stack,
     checks: checksView(cannedChecks(r.seed)),
     checks_error: null,
+    reviewers: standings(d.item, ME),
+    merge: mergeLine(d.item),
     conversation: TALK.get(r.id) ?? [],
     conversation_error: null,
     reading: false,

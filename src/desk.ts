@@ -35,7 +35,7 @@ import { GitHubConnector } from "./connectors/github.ts";
 import { linkRef } from "./links.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { askedAt, owesReply, stage, verdicts } from "./stage.ts";
+import { askedAt, mergeLine, owesReply, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
   InlineAt,
@@ -1696,6 +1696,8 @@ export class Desk {
         stack: d.stack,
         asks: this.asks(id),
         ...checks,
+        reviewers: standings(d.item, this.me()),
+        merge: mergeLine(d.item),
         ...talk,
       };
     });

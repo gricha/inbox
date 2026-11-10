@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { andMore, askedAt, stage } from "../src/stage.ts";
+import { andMore, askedAt, mergeLine, stage, standings } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -107,4 +107,91 @@ test("askedAt is the latest ask of those still asked", () => {
     hoursAgo(5),
   );
   assert.equal(askedAt(it({ review_requests: [user("dana")] }), "me"), hoursAgo(48), "no ask logged: since it was opened");
+});
+
+// The review's sidebar: who reviews a PR and where each stands, in one line and one by one.
+test("a PR's reviewers, each with a standing: changes requested, asked, approved or commented, and all of it in one line", () => {
+  const ask = (reviewer: string, type: "user" | "team" = "user", bot = false) => ({
+    reviewer,
+    type,
+    codeowner: false,
+    ...(bot && { bot }),
+  });
+  const says = (o: Partial<Item>, me = "me") => standings(makeItem(o), me);
+  assert.deepEqual(says({}), { line: "Nobody's asked", changes: false, list: [] });
+
+  const mixed = says({
+    review_requests: [ask("sam"), ask("backend", "team"), ask("copilot", "user", true), ask("me")],
+    reviews: [
+      review("marco", "approved", 9),
+      review("kofi", "changes_requested", 8),
+      review("kai", "commented", 7),
+      review("alice", "commented", 6), // its author answering a thread
+      review("ci-bot", "approved", 5, { bot: true }),
+      review("guest", "approved", 4, { trusted: false }), // no say on the repo: a comment
+      review("me", "pending", 3), // your own, not sent
+    ],
+  });
+  assert.equal(mixed.line, "Changes requested by kofi · approved by marco · waiting on sam, @backend and 1 more");
+  assert.equal(mixed.changes, true);
+  assert.deepEqual(
+    mixed.list.map((s) => `${s.who}: ${s.state}`),
+    ["kofi: changes requested", "sam: asked", "@backend: asked", "you: asked", "marco: approved", "kai: commented", "guest: commented"],
+  );
+
+  // One standing each: an approval holds while they're asked again, a change request while they've approved since or not.
+  const again = says({
+    review_requests: [ask("marco"), ask("dana")],
+    reviews: [review("marco", "approved", 9), review("dana", "changes_requested", 8), review("dana", "commented", 2)],
+  });
+  assert.deepEqual(
+    again.list.map((s) => `${s.who}: ${s.state}`),
+    ["dana: changes requested", "marco: approved"],
+  );
+  assert.equal(again.line, "Changes requested by dana · approved by marco");
+
+  assert.equal(says({ reviews: [review("marco", "approved", 2)] }).line, "Approved by marco");
+  assert.equal(says({ review_requests: [ask("me")] }).line, "Waiting on you");
+  assert.equal(says({ reviews: [review("kai", "commented", 2), review("sam", "commented", 1)] }).line, "Comments from kai and sam");
+  assert.equal(says({ review_requests_hidden: 1 }).line, "Waiting on a team GitHub doesn't show you");
+  assert.equal(says({ review_requests: [ask("sam")], review_requests_hidden: 2 }).line, "Waiting on sam and 2 more");
+  // Yours: your own review of it never counts, so you're not among its reviewers.
+  assert.deepEqual(says({ author: "me", reviews: [review("me", "commented", 1)] }), { line: "Nobody's asked", changes: false, list: [] });
+});
+
+test("the merge's one line: a conflict with its base on an open PR, and nothing when it's clean, unknown or over", () => {
+  assert.equal(mergeLine(makeItem({ mergeable: "conflict", base: "release/24.1" })), "Merge conflict with release/24.1");
+  for (const o of [{ mergeable: "clean" }, { mergeable: "unknown" }, { mergeable: "conflict", state: "merged" }] as Partial<Item>[])
+    assert.equal(mergeLine(makeItem(o)), null);
+});
+
+test("a review carries who reviews its PR and what stands in its merge, as the desk says them", async (c) => {
+  const t = await setup(
+    [
+      myPr(3, {
+        ci: "green",
+        mergeable: "conflict",
+        review_requests: [
+          { reviewer: "dana", type: "user", codeowner: false },
+          { reviewer: "backend", type: "team", codeowner: true },
+        ],
+        reviews: [review("kofi", "changes_requested", 2)],
+      }),
+      reviewAsk(4, { reviews: [review("marco", "approved", 3)] }),
+    ],
+    { settings: { "policy.judge": false, "review.auto_ai": false } },
+  );
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const mine = await run(t.desk.reviewView("web#3", true));
+  assert.deepEqual(
+    [mine.reviewers.line, mine.reviewers.changes, mine.merge],
+    ["Changes requested by kofi · waiting on dana and @backend", true, "Merge conflict with main"],
+  );
+  const theirs = await run(t.desk.reviewView("api#4", true));
+  assert.deepEqual([theirs.reviewers.line, theirs.reviewers.changes, theirs.merge], ["Approved by marco · waiting on you", false, null]);
+  assert.deepEqual(theirs.reviewers.list, [
+    { who: "you", state: "asked" },
+    { who: "marco", state: "approved" },
+  ]);
 });
