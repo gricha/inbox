@@ -1902,6 +1902,7 @@ function focus(): FocusView {
   };
   oneLinePerStack(sections, ["now", "today"], stacks());
   return {
+    sessions: [],
     sections,
     reviewing: 0,
     cards: setting("queue.cards"),
@@ -1961,6 +1962,7 @@ function queue(): QueueView {
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
   return {
     inquiries: INQUIRIES.filter((q) => !q.answer),
+    sessions: [],
     sections,
     reviewing: 0,
     hidden,
@@ -2537,6 +2539,7 @@ function overview(): Overview {
       today: f.sections.today.length,
       new: all.filter((c) => c.new).length,
       asks: INQUIRIES.filter((q) => !q.answer).length,
+      sessions: 0,
     },
     inflight: { total: recs.filter(inFlight).length },
     agent: setting("agent.coordinator"),

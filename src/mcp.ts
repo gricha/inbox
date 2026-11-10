@@ -12,7 +12,9 @@ import { judgeText } from "./judge.ts";
 import { permalink, placeOf } from "./links.ts";
 import {
   ACTIVITY_KINDS,
+  isSessionRef,
   outcomeText,
+  SESSION_KIND,
   UNTIL,
   VERB,
   VERBS,
@@ -30,6 +32,7 @@ import {
   type Overview,
   type Placement,
   type PreviewResult,
+  type SessionCard,
   type Stack,
 } from "./types.ts";
 
@@ -194,6 +197,7 @@ type ListBucket = (typeof LIST_BUCKETS)[number];
 const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | undefined, buckets: ListBucket[], limit: number) {
   let pools: [ListBucket, Card[]][];
   let reviewing = 0;
+  let sessions: SessionCard[] = [];
   if (!board || board === "focus") {
     if (!buckets.some((b) => b === "now" || b === "today"))
       return yield* new ToolInputError({
@@ -201,6 +205,7 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
       });
     const f = yield* api.focus();
     reviewing = f.reviewing;
+    sessions = f.sessions;
     pools = [
       ["now", f.sections.now],
       ["today", f.sections.today],
@@ -221,9 +226,29 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
   const cards = all.slice(0, limit);
   let head = `${board && board !== "focus" ? `board ${board}` : "focus"} · buckets ${buckets.join(",")} · ${cards.length} of ${all.length} shown`;
   if (reviewing) head += ` · ${reviewing} more once Claude has reviewed them`;
-  if (!cards.length) return head;
-  return head + "\n" + untrusted([...cards.map(cardLine), json(cards.map(compact))]);
+  if (sessions.length) head += ` · ${sessions.length} session${sessions.length === 1 ? "" : "s"} first`;
+  if (!cards.length && !sessions.length) return head;
+  return head + "\n" + untrusted([...sessions.map(sessionLine), ...cards.map(cardLine), json([...sessions, ...cards.map(compact)])]);
 });
+
+// A Claude Code or Codex session that needs the user: its name and its reason are what it said or was named, so untrusted.
+const sessionLine = (s: SessionCard) =>
+  `${s.state.padEnd(7)}  ${s.id}  ${oneLine(s.name)}  [${oneLine(s.reason)}] ${SESSION_KIND[s.kind]} in ${s.cwd}${s.branch ? ` on ${s.branch}` : ""}`;
+
+function sessionText(s: SessionCard): string {
+  const triage = s.status === "active" ? "" : ` · ${s.status}${s.snooze_until ? ` until ${s.snooze_until}` : ""}`;
+  return (
+    `${s.id} · ${SESSION_KIND[s.kind]} session, ${s.state}${s.alive ? ", running" : ", no process"}${triage}\n` +
+    untrusted([
+      `name: ${oneLine(s.name)}`,
+      `reason: ${oneLine(s.reason)} (since ${s.since})`,
+      ...(s.excerpt ? [`it said: ${oneLine(s.excerpt)}`] : []),
+      `folder: ${s.cwd}${s.branch ? ` · branch ${s.branch}` : ""}`,
+      "desk_act's done, snooze and mute work on it; starting or opening it is the user's, in the desk's window.",
+      json(s),
+    ])
+  );
+}
 
 function itemText(d: ItemDetail): string {
   const c = d.card;
@@ -401,7 +426,7 @@ export function createMcpServer(
       inputSchema: { ref: z.string().describe(REF) },
       annotations: readOnly,
     },
-    ({ ref }) => run(Effect.map(api.item(ref), itemText)),
+    ({ ref }) => run(isSessionRef(ref) ? Effect.map(api.session(ref), sessionText) : Effect.map(api.item(ref), itemText)),
   );
 
   server.registerTool(

@@ -108,14 +108,14 @@ const overview: Overview = {
   config_errors: [],
   connectors: [{ id: "github", name: "GitHub", status: "ok", synced_at: ago(0.05), error: null }],
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
-  focus: { now: 1, today: 1, new: 1, asks: 0 },
+  focus: { now: 1, today: 1, new: 1, asks: 0, sessions: 0 },
   inflight: { total: 0 },
   agent: true,
   ai_agent: "Claude",
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 
-const focus: FocusView = { sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, cards: 10, paused: null };
+const focus: FocusView = { sessions: [], sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, cards: 10, paused: null };
 
 // One automation that's on and may snooze, with a run that added one item and snoozed another; its summary carries text a
 // fence must hold.
@@ -178,6 +178,7 @@ const BUILT_IN: AutomationView = {
 
 const queueView: QueueView = {
   inquiries: [],
+  sessions: [],
   sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
   reviewing: 0,
   hidden: [CARDS.hidden],

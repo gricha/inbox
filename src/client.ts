@@ -17,6 +17,7 @@ import {
   type Inquiry,
   type InquiryLink,
   type InquiryOption,
+  type SessionCard,
   type BoardView,
   type ConfigDoc,
   type ConfigError,
@@ -197,6 +198,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
       call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
     inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
+    session: (ref: string) => call<SessionCard>("GET", `/api/sessions/${q(ref)}`),
     unreadAnswers: () => call<Inquiry[]>("GET", "/api/inquiries/unread"),
     answerRead: (id: string) => call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${q(id)}/read`),
     automations: () => call<AutomationView[]>("GET", "/api/automations"),

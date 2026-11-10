@@ -225,7 +225,7 @@ const ROLE =
 async function coordinated(c: TestContext, settings: Record<string, unknown> = {}) {
   const fake = fakeClaude();
   const t = await setup([myPr(3, { ci: "pending", title: TITLE }), myPr(4, { ci: "pending" }), myPr(5, { ci: "pending" })], {
-    settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, ...settings },
+    settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, "sessions.enabled": false, ...settings },
   });
   const desks = [t.desk];
   c.after(() => {

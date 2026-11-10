@@ -605,7 +605,8 @@ export interface Overview {
   config_errors: ConfigError[];
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
-  focus: { now: number; today: number; new: number; asks: number }; // asks: agents' questions waiting on your answer
+  // asks: agents' questions waiting on your answer; sessions: sessions that need you
+  focus: { now: number; today: number; new: number; asks: number; sessions: number };
   inflight: { total: number }; // your open PRs in Merging
   agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
   ai_agent: "Claude" | "Codex"; // who sorts and reviews (agent.harness), as the window names it
@@ -630,6 +631,7 @@ export interface BoardView {
 }
 
 export interface FocusView {
+  sessions: SessionCard[]; // sessions that need you, after agents' questions: blocked, then stalled
   sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
   reviewing: number; // PRs that reach it once Claude's first review of them is written
   cards: number; // queue.cards: the queue shows this many, the rest behind one line; 0 = all
@@ -645,6 +647,7 @@ export interface Paused {
 // Every item once, at its best placement across boards: the app's main surface.
 export interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
+  sessions: SessionCard[]; // every session that needs you, with your triage on it; the active ones follow the questions
   // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks; a chain's rows together, longest wait first
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
   reviewing: number; // as in FocusView
@@ -1050,8 +1053,33 @@ export interface InquiryLink {
   url: string; // http(s), or claude: for a Claude session
 }
 
-// A Claude Code or Codex session on this machine (the Sessions source).
+// A Claude Code or Codex session on this machine that needs you (the Sessions source): blocked on you, or stalled.
+export const SESSION_PREFIX = "session:";
+export const isSessionRef = (ref: string): boolean => ref.startsWith(SESSION_PREFIX);
 export type SessionKind = "cli" | "background" | "desktop" | "codex";
+export const SESSION_KIND: Record<SessionKind, string> = { cli: "CLI", background: "Background", desktop: "Desktop", codex: "Codex" };
+// kick: start a background one again; resume: a terminal's whose process is gone, in the background; attach: copy
+// `claude attach <id>` for a background one that runs; open: the desktop app's or Codex's own link.
+export type SessionAction = "kick" | "resume" | "attach" | "open";
+export interface SessionCard {
+  id: string; // "session:<its id>": its ref on the desk
+  session_id: string; // Claude Code's session id, or Codex's thread id
+  kind: SessionKind;
+  name: string;
+  cwd: string;
+  branch: string | null;
+  state: "blocked" | "stalled";
+  reason: string; // in words: "needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn"
+  since: string; // when it got there
+  excerpt: string; // one line of what it asks or last did; "" when there's none
+  resets_at: string | null; // a rate limit's
+  alive: boolean; // its process runs
+  actions: SessionAction[];
+  open_url: string | null; // claude:// or codex://, for open
+  attach: string | null; // the command attach copies
+  status: "active" | "done" | "snoozed" | "muted";
+  snooze_until: string | null;
+}
 
 // What an automation may do with an item. add: on your desk, pinned to Today, with its why. today, later, fyi, hide: sorted
 // there as Claude's answer would be, until the item changes or you act on it. snooze, done, mute: the desk's own, logged as

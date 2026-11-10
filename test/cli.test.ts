@@ -433,7 +433,7 @@ test("settings lists effective values by section and stars overrides", async () 
   assert.match(r.out, /\n\nThis device\n {2}app\.hotkey +/);
   assert.deepEqual(
     r.out.split("\n").filter((l) => /^\S/.test(l) && !l.startsWith("*")),
-    ["GitHub", "Agent", "Inbox and notifications", "This device"],
+    ["GitHub", "Sessions", "Agent", "Inbox and notifications", "This device"],
   );
   assert.match(r.out, /\n\n\* set in \/home\/you\/\.inbox\/settings\.json\n$/);
   assert.equal(lastCall().path, "/api/settings");

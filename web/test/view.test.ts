@@ -124,6 +124,7 @@ const card = (id: string, extra: Partial<Card> = {}): Card => {
 
 const queue = (): QueueView => ({
   inquiries: [],
+  sessions: [],
   sections: {
     now: [card("acme/api#1")],
     today: [card("acme/web#2", { author: "priya" })],

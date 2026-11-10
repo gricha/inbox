@@ -29,6 +29,7 @@ const ACCELERATOR =
 // The Settings tab's parts in order: GitHub, where sources go, then the core's. Automations has no keys: it's a tab of its own.
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
+  { id: "sessions", title: "Sessions" },
   { id: "agent", title: "Agent" },
   { id: "queue", title: "Inbox and notifications" },
   { id: "app", title: "This device" },
@@ -129,6 +130,14 @@ export const SETTINGS = [
     type: "text",
     default: DEFAULT_ISSUE,
     required: true,
+  },
+  {
+    key: "sessions.enabled",
+    section: "sessions",
+    label: "Show sessions that need you",
+    type: "boolean",
+    default: true,
+    help: "Claude Code and Codex sessions on this computer that wait on you or stopped, read every 30 seconds while the desk runs.",
   },
   {
     key: "agent.harness",

@@ -604,6 +604,22 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, answer, { log });
   });
+  // Sessions that need you (src/connectors/sessions.ts): anyone may read one; only the desk's window starts or opens one.
+  app.get("/api/sessions/:id", (c) => respond(c, desk.session(c.req.param("id")), { log, read: true }));
+  app.post("/api/sessions/:id/kick", (c) => {
+    const kick = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "kick a session in the desk's window" });
+      return { ok: true, ...(yield* desk.kickSession(c.req.param("id"))) };
+    });
+    return respond(c, kick, { log });
+  });
+  app.post("/api/sessions/:id/open", (c) => {
+    const open = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "open a session from the desk's window" });
+      return { ok: true, ...(yield* desk.openSession(c.req.param("id"))) };
+    });
+    return respond(c, open, { log });
+  });
   // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
   // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one. A
   // plugin's is listed too, and only switched, only from the window.

@@ -32,6 +32,7 @@ import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector } from "./connectors/github.ts";
+import { openLink, Sessions, type Roots } from "./connectors/sessions.ts";
 import { linkRef } from "./links.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
@@ -69,6 +70,7 @@ import type {
   Item,
   ItemDetail,
   ItemState,
+  SessionCard,
   Job,
   JudgeAnswer,
   JudgeStep,
@@ -90,7 +92,7 @@ import type {
   Until,
   Work,
 } from "./types.ts";
-import { byPart, isCoordinator, RANK, SECRET_SET, UNTIL } from "./types.ts";
+import { byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
 import {
@@ -149,6 +151,10 @@ import {
 const HOUR = 3_600_000;
 const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
+const stateOf = (s: StateRow): ItemState => {
+  const { snoozed_at: _, acked_at: __, ...state } = s;
+  return state;
+};
 const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_at: null, muted: false } satisfies Partial<StateRow>; // what statusOf() calls active
 const AI_AT_ONCE = 2;
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
@@ -256,6 +262,8 @@ export interface DeskOptions {
   writer?: GitHubWriter; // the desk's GitHub writes; without it they're off
   decisions?: string; // the Decisions API's URL, in place of OpenRouter's: tests point it at a local server
   mcpUrl?: string; // its /mcp, which a Codex run is given as the desk's own MCP server
+  sessions?: Roots; // where the Sessions source reads; tests point it at fixtures
+  open?: (url: string) => Effect.Effect<void, CommandError>; // opens a session's link on this computer; tests record it
 }
 
 // Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
@@ -348,6 +356,8 @@ export class Desk {
   judge: Judge;
   convos: Conversations;
   coordinator: Coordinator;
+  sessions: Sessions;
+  opener: (url: string) => Effect.Effect<void, CommandError>;
   automations: Automations;
   jobs: Jobs; // the work Claude owes the owner
 
@@ -415,6 +425,8 @@ export class Desk {
     this.judge = new Judge(this);
     this.convos = new Conversations(this);
     this.coordinator = new Coordinator(this);
+    this.sessions = new Sessions(this, opts.sessions);
+    this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
   }
 
@@ -494,6 +506,7 @@ export class Desk {
     this.automations.start(); // before the first sync, whose events are a fresh desk's first news for what GitHub comes with
     for (const c of this.connectors) c.start();
     this.coordinator.start();
+    this.sessions.start();
     this.jobs.start();
   }
 
@@ -506,6 +519,7 @@ export class Desk {
     this.judge.stop();
     this.convos.stop();
     this.coordinator.close();
+    this.sessions.stop();
     this.automations.stop();
     this.jobs.stop();
     for (const wake of this.waiters) wake();
@@ -704,7 +718,9 @@ export class Desk {
       const coordinator = this.settings["agent.coordinator"];
       const bypass = this.settings["agent.coordinator_bypass"];
       const decider = this.settings["agent.decision_key"] + this.settings["agent.decision_model"];
+      const sessions = this.settings["sessions.enabled"];
       this.settings = this.readSettings(file);
+      if (this.settings["sessions.enabled"] !== sessions && !this.stopped) this.sessions.reschedule();
       // A question waiting on its model asks again at once with another key or model.
       if (this.settings["agent.decision_key"] + this.settings["agent.decision_model"] !== decider) this.automations.held.clear();
       if (coordinator && !this.settings["agent.coordinator"]) this.coordinator.stop();
@@ -1489,6 +1505,7 @@ export class Desk {
           today: focus.sections.today.length,
           new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
           asks: this.inquiries().filter((q) => !q.answer).length,
+          sessions: this.sessions.active().length,
         },
         inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
         agent: this.settings["agent.coordinator"],
@@ -1573,6 +1590,7 @@ export class Desk {
       const sections = this.top(snap, new Set());
       oneLinePerStack(sections, ["now", "today"], snap.stacks);
       return {
+        sessions: this.sessions.active(),
         sections,
         reviewing: this.reviewing(snap),
         cards: this.settings["queue.cards"],
@@ -1678,6 +1696,7 @@ export class Desk {
       }
       return {
         inquiries: this.inquiries().filter((q) => !q.answer),
+        sessions: this.sessions.cards(),
         sections,
         reviewing,
         hidden,
@@ -2249,6 +2268,7 @@ export class Desk {
     until?: string,
     agent?: string,
   ): Effect.Effect<{ state: ItemState; undo_seq: number }, RefError | Forbidden | Conflict | BadRequest> {
+    if (isSessionRef(ref)) return this.sessionAct(ref, action, until, agent);
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.resolve(ref);
       if (action === "undo") {
@@ -2361,6 +2381,86 @@ export class Desk {
       if (action === "inflight") this.coordinator.wake(id, "handed off");
       const { snoozed_at: _, acked_at: __, ...state } = s;
       return { state, undo_seq: seq };
+    });
+  }
+
+  // A session's triage: done until it moves on, snoozed until a time, muted. It isn't an item: nothing else applies.
+  sessionAct(
+    ref: string,
+    action: Action,
+    until?: string,
+    agent?: string,
+  ): Effect.Effect<{ state: ItemState; undo_seq: number }, NotFound | Conflict | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const c = yield* this.sessions.get(ref);
+      if (action === "undo") {
+        const ev = this.store.lastActionFor(c.id);
+        if (!ev) return yield* new NotFound({ message: `nothing to undo for ${c.name}` });
+        return { state: (yield* this.undo(ev.seq, agent)).state, undo_seq: 0 };
+      }
+      const now = this.now();
+      const before = this.store.state(c.id);
+      const s: StateRow = { ...before };
+      switch (action) {
+        case "done":
+          Object.assign(s, ACTIVE, { done_at: now.toISOString(), muted: s.muted });
+          break;
+        case "snooze": {
+          const u = until ?? "tomorrow";
+          if (u === "activity" || Object.hasOwn(UNTIL, u))
+            return yield* new Conflict({ message: `a session snoozes until a time; done brings it back when it moves on` });
+          Object.assign(s, ACTIVE, {
+            snooze_until: (yield* parseUntil(u, now)).toISOString(),
+            snoozed_at: now.toISOString(),
+            muted: s.muted,
+          });
+          break;
+        }
+        case "mute":
+          s.muted = true;
+          break;
+        case "unmute":
+          s.muted = false;
+          break;
+        case "restore":
+          Object.assign(s, ACTIVE);
+          break;
+        case "seen":
+          return { state: stateOf(s), undo_seq: 0 };
+        case "pin":
+        case "unpin":
+        case "inflight":
+        case "takeback":
+          return yield* new Conflict({ message: `a session takes done, snooze, mute, unmute and restore; not ${action}` });
+        default:
+          return yield* new BadRequest({ message: `unknown action "${action as string}"` });
+      }
+      this.store.putState(s);
+      const auto = agent?.startsWith("automation:") ? agent : undefined;
+      const seq = this.store.logAction(c.id, action, before, now.toISOString(), auto);
+      this.changed();
+      return { state: stateOf(s), undo_seq: seq };
+    });
+  }
+
+  // GET /api/sessions/:id (desk_item for a session).
+  session(ref: string): Effect.Effect<SessionCard, NotFound> {
+    return this.sessions.get(ref);
+  }
+
+  // Kick and Resume, from the desk's window only: the coordinator's safe stop-then-resume, refused while it runs or waits
+  // on a rate limit.
+  kickSession(ref: string): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | CommandError> {
+    return this.sessions.kick(ref);
+  }
+
+  // Open: the desktop app's or Codex's own link, which the desk's computer opens.
+  openSession(ref: string): Effect.Effect<{ url: string }, NotFound | Conflict | CommandError> {
+    return Effect.gen({ self: this }, function* () {
+      const c = yield* this.sessions.get(ref);
+      if (!c.open_url) return yield* new Conflict({ message: `${c.name} has no link to open` });
+      yield* this.opener(c.open_url);
+      return { url: c.open_url };
     });
   }
 

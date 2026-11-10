@@ -129,7 +129,7 @@ export const denyDir = Effect.fnUntraced(function* (home: string, name: string, 
   return dir;
 });
 
-interface Agent {
+export interface Agent {
   id: string;
   sessionId: string;
   cwd: string;
@@ -141,7 +141,7 @@ interface Agent {
 }
 
 // A minute at most; what cmd.exe can't pass fails before anything starts. Interrupted, it stops the command and waits for it.
-const claude = (args: string[], cwd?: string): Effect.Effect<string, CommandError> =>
+export const claude = (args: string[], cwd?: string): Effect.Effect<string, CommandError> =>
   Effect.flatMap(claudeSpawn(claudeCommand(), args), (s) =>
     runCommand(s, { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
   );
@@ -158,7 +158,15 @@ function backgrounded(out: string): Effect.Effect<string, ClaudeBadOutput> {
 }
 
 // kill(pid, 0) refuses a process that's gone.
-const alive = (pid: number) => Result.isSuccess(Result.try({ try: () => process.kill(pid, 0), catch: () => null }));
+export const alive = (pid: number) => Result.isSuccess(Result.try({ try: () => process.kill(pid, 0), catch: () => null }));
+
+// --resume continues a session (same id and history) only once its process has exited, and only with no other flag.
+export function halt(a: Pick<Agent, "id" | "status" | "pid">): Effect.Effect<void, CommandError> {
+  return Effect.gen(function* () {
+    if (a.status) yield* claude(["stop", a.id]);
+    for (let i = 0; a.pid && i < 50 && alive(a.pid); i++) yield* Effect.sleep(200);
+  });
+}
 
 const span = (s: "new" | "old") => (s === "old" ? "removed " : "");
 // Where lines are, by number and side only: the file's name is PR text, so desk_ask gives it.
@@ -402,7 +410,7 @@ export class Coordinator {
     this.desk.store.set(ASKS, null);
     this.asked = false;
     const flushing = this.flushing;
-    const halt = Effect.gen({ self: this }, function* () {
+    const stop = Effect.gen({ self: this }, function* () {
       if (flushing) yield* Effect.promise(() => flushing);
       if (this.turn) kill(this.turn);
       if (!this.saved() || this.codex) return;
@@ -410,7 +418,7 @@ export class Coordinator {
       if (a) yield* this.halt(a);
     });
     this.stopping = this.fork(
-      halt.pipe(
+      stop.pipe(
         Effect.catch((e) =>
           Effect.sync(() => {
             this.desk.log(`coordinator: ${e.message}`);
@@ -544,12 +552,8 @@ export class Coordinator {
     this.failed(message.trim());
   }
 
-  // --resume continues it (same id and history) only once its process has exited, and only with no other flag.
   halt(a: Agent): Effect.Effect<void, CommandError> {
-    return Effect.gen(function* () {
-      if (a.status) yield* claude(["stop", a.id]);
-      for (let i = 0; a.pid && i < 50 && alive(a.pid); i++) yield* Effect.sleep(200);
-    });
+    return halt(a);
   }
 
   message(news: [string, string][], asks: string[]): string {
