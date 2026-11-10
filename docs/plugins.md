@@ -249,6 +249,8 @@ A run is today's: your own `claude -p --permission-mode dontAsk --json-schema {s
 
 Your agent's own run keeps its list alone, because it pushes with `--force-with-lease` and merges. That list stays in coordinator.ts beside `ROLE` and `REBASE`. Each find goes to `push(ref, why, a)` as today, through `hold`, so any plugin's `ref` can claim it. An agent's draft or edit stays off until you turn it on, and only the window deletes one. With F1, `tools` is how a run reaches a system with no plugin: the data source is an MCP server, the rules are the prompt, and the output is items on the desk.
 
+Automations have grown past this section since it was written, and docs/api.md → Automations is their reference: one starts on a schedule or on the event log's kinds, may carry a `when` check, decides by a rule (no model), a question (one call with no tools) or the agent run above, and beyond `push` may sort an item, snooze it, mark it done or mute it, but only with the verbs in its `can`, which you set. So the table's Automation row and "AI never marks an item done or mutes it" describe the judge and an automation allowed nothing but `add`, the default.
+
 ### Your agent (the coordinator) and Merging (core)
 
 - **The core keeps:** `inflight_at` and kv `sitter:<id>`; the one `claude --bg` session with `--resume` wakes, `tell`, the 60 s batch and the 5-minute check; the Merging page, asks, `desk_note` and `desk_hand_back`; `takeback`; and the rule that agents never hand off.
