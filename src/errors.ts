@@ -307,6 +307,13 @@ export class CodexServersUnknown extends Data.TaggedError("CodexServersUnknown")
   }
 }
 
+// Codex reads a folder's rules only once you trust it there, so your agent doesn't start on Codex without its deny rules.
+export class CodexUntrusted extends Data.TaggedError("CodexUntrusted")<{ readonly dir: string; readonly config: string }> {
+  override get message(): string {
+    return `Codex reads your agent's deny rules only in a folder you trust, so it didn't start: add \`[projects."${this.dir}"]\` with \`trust_level = "trusted"\` to ${this.config}`;
+  }
+}
+
 export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput | CodexServersUnknown;
 
 // ---------------------------------------------------------------- the decision model (OpenRouter's Decisions API)

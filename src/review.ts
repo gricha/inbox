@@ -540,8 +540,8 @@ export const askAgent = (prompt: string, opts: { command?: string } & AskOpts): 
   opts.agent === "codex" ? askCodex(prompt, opts) : askClaude(prompt, opts);
 
 // The owner's own codex, as claude is: DESK_CODEX points tests and QA at a fake.
-const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.DESK_CODEX : "codex");
-const codexMissing = (command: string) => `${command} not found: install Codex so codex runs from your PATH`;
+export const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.DESK_CODEX : "codex");
+export const codexMissing = (command: string) => `${command} not found: install Codex so codex runs from your PATH`;
 
 // Codex has no "no tools": everything that can act or reach out is turned off, and what's left runs in a read-only sandbox.
 // Your model, profile and login stay yours (no --model, no --ignore-user-config); each of your MCP servers is turned off by name.
@@ -650,7 +650,7 @@ export const deskMcp = (url: string | null): Effect.Effect<string> =>
 // The -c overrides that leave a Codex run only the desk's MCP server, if any: every other one turned off by name. Yours
 // named inbox is used when it is the desk's (the same address), else turned off with the rest and the desk's added as
 // inbox_desk, since a url merged into another transport's entry wouldn't parse.
-const codexMcp = Effect.fnUntraced(function* (command: string, dir: string, desk?: DeskMcp) {
+export const codexMcp = Effect.fnUntraced(function* (command: string, dir: string, desk?: DeskMcp) {
   const listed = yield* codexServers(command, dir);
   const theirs = listed.find((s) => s.name === "inbox");
   const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
@@ -713,7 +713,7 @@ export const codexRun = Effect.fn("codexRun")(function* (
 });
 
 // The thread `codex exec --json` says it started: its first event.
-function codexThread(events: string): string | null {
+export function codexThread(events: string): string | null {
   for (const line of events.split("\n")) {
     const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as { thread_id?: unknown } | null;
     if (typeof e?.thread_id === "string" && e.thread_id) return e.thread_id;
@@ -723,10 +723,10 @@ function codexThread(events: string): string | null {
 
 const CODEX_LOGIN = /not logged in|\b401\b|unauthori[sz]ed|codex login|log ?in again|sign in again/i;
 const CODEX_LIMIT = /\b429\b|too many requests|usage limit|rate.?limit/i;
-const CODEX_DOWN = new RegExp(`${CODEX_LOGIN.source}|${CODEX_LIMIT.source}`, "i");
+export const CODEX_DOWN = new RegExp(`${CODEX_LOGIN.source}|${CODEX_LIMIT.source}`, "i");
 
 // codex's error words: a login it needs is the same pause as Claude Code's, with codex's fix; a limit is the agent's, held.
-function codexError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
+export function codexError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
   const msg = raw.trim();
   if (CODEX_LOGIN.test(msg)) return new ClaudeNotLoggedIn({ detail: msg, agent: "codex" });
   return new ClaudeApiError({ message: msg || "codex failed", ...(CODEX_LIMIT.test(msg) && { status: 429 }) });

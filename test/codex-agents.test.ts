@@ -5,15 +5,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CODEX_NOT_LOGGED_IN } from "../src/errors.ts";
-import { setup } from "./helpers/desk.ts";
+import { myPr, setup } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
-import { runSync } from "./helpers/run.ts";
+import { run, runSync } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 const MCP = "http://localhost:49401/mcp";
+const ROLE =
+  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the inbox skill.";
 const TOOL_LESS_OFF = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "browser_use_external", "in_app_browser"]
   .concat(["computer_use", "image_generation", "view_image", "multi_agent", "hooks", "memories"])
   .flatMap((x) => ["--disable", x]);
+const COORDINATOR_OFF = ["apps", "plugins", "browser_use", "browser_use_external", "in_app_browser", "computer_use"].flatMap((x) => [
+  "--disable",
+  x,
+]);
 const READ = '["desk_list","desk_item","desk_overview","desk_events","desk_brief","desk_merging"]';
 
 // A codex that lists `servers` for `mcp list --json`, and for exec records its args, folder and stdin, says its thread
@@ -83,6 +89,38 @@ say({ type: "turn.completed" });
             .map((l) => JSON.parse(l) as { args: string[]; cwd: string; stdin: string })
         : [],
   };
+}
+
+// A claude whose one background session, stopped, is resumed by --resume <its session> --bg.
+function fakeClaude(c: TestContext, folder: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-claude-"));
+  const bin = path.join(dir, "claude");
+  const row = JSON.stringify([{ id: "c0ffee01", sessionId: "c0ffee01-s", cwd: folder, kind: "background", name: "Inbox coordinator" }]);
+  fs.writeFileSync(
+    bin,
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$(dirname "$0")/calls"
+case "$1" in agents) echo '${row}';; --resume) echo "backgrounded · c0ffee01";; esac
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  const was = process.env.DESK_CLAUDE;
+  process.env.DESK_CLAUDE = bin;
+  c.after(() => {
+    process.env.DESK_CLAUDE = was;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return {
+    calls: () => (fs.existsSync(path.join(dir, "calls")) ? fs.readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n") : []),
+  };
+}
+
+async function until(cond: () => boolean): Promise<void> {
+  for (let i = 0; i < 500 && !cond(); i++)
+    await new Promise((r) => {
+      setTimeout(r, 10);
+    });
+  assert.ok(cond(), "timed out waiting");
 }
 
 // ---------------------------------------------------------------- an automation's agent run
@@ -184,4 +222,170 @@ test("a Codex agent run that needs a login says Codex's words; one at its limit 
   t.fake.file("fail", null);
   t.fake.file("turnfail", "You've hit your usage limit. Try again at 4:12 PM.");
   assert.equal((await t.go()).error, "You've hit your usage limit. Try again at 4:12 PM.");
+});
+
+// ---------------------------------------------------------------- your agent
+
+async function coordinating(c: TestContext, settings: Record<string, unknown> = {}, trust = true) {
+  const fake = fakeCodex(c);
+  fake.servers([
+    { name: "linear", enabled: true, transport: { type: "streamable_http", url: "https://mcp.linear.app/mcp" } },
+    { name: "inbox", enabled: true, transport: { type: "streamable_http", url: MCP } },
+  ]);
+  const t = await setup([myPr(3, { ci: "pending" }), myPr(4, { ci: "pending" }), myPr(5, { ci: "pending" })], {
+    settings: { "agent.harness": "codex", "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, ...settings },
+    desk: { mcpUrl: MCP },
+  });
+  c.after(() => {
+    t.desk.stop();
+    t.cleanup();
+  });
+  t.desk.coordinator.batch = 30;
+  await run(t.desk.sync());
+  const dir = path.join(t.home, "coordinator");
+  fs.mkdirSync(dir, { recursive: true });
+  if (trust) fake.trust(dir);
+  // Only the coordinator's calls: a tool-less call reads its prompt from stdin.
+  const turns = () => fake.calls().filter((x) => x.args.at(-1) !== "-");
+  const view = () => runSync(t.desk.inflight()).coordinator;
+  return { ...t, fake, dir, turns, view };
+}
+
+const MCP_ARGS = ["-c", "mcp_servers.linear.enabled=false", "-c", `mcp_servers.inbox.url="${MCP}"`, "-c", "mcp_servers.inbox.enabled=true"];
+const merging = (n: number) => `In Merging: acme/web#${n} (https://github.com/acme/web/pull/${n}): handed off.`;
+
+test(
+  "on Codex your agent starts as codex exec in its folder, keeps the thread it names, and each wake resumes it after the last ends",
+  posix,
+  async (c) => {
+    const t = await coordinating(c);
+    t.fake.file("hold", "");
+    runSync(t.desk.act("web#3", "inflight"));
+    await until(() => t.view().id === "th-1");
+    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "busy", queued: [] });
+    const [start] = t.turns();
+    assert.equal(fs.realpathSync(start!.cwd), fs.realpathSync(t.dir));
+    assert.deepEqual(start!.args, [
+      "exec",
+      "--json",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "-c",
+      'approval_policy="never"',
+      "-C",
+      t.dir,
+      "--skip-git-repo-check",
+      ...COORDINATOR_OFF,
+      ...MCP_ARGS,
+      `${ROLE} ${merging(3)}`,
+    ]);
+    const rules = fs.readFileSync(path.join(t.dir, ".codex", "rules", "inbox.rules"), "utf8");
+    for (const r of ['["gh","pr","close"]', '["gh","api"]', '["git","push","--force"]', '["gh","pr","comment"]'])
+      assert.ok(rules.includes(`prefix_rule(pattern = ${r}, decision = "forbidden")`), r);
+
+    runSync(t.desk.act("web#4", "inflight"));
+    await new Promise((r) => {
+      setTimeout(r, 200);
+    });
+    assert.equal(t.turns().length, 1, "one turn at a time: the next waits for this one to end");
+    t.fake.file("hold", null);
+    await until(() => t.turns().length === 2 && t.view().status === "idle");
+    assert.deepEqual(t.turns()[1]!.args, [
+      "exec",
+      "resume",
+      "--json",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "-c",
+      'approval_policy="never"',
+      "--skip-git-repo-check",
+      ...COORDINATOR_OFF,
+      ...MCP_ARGS,
+      "th-1",
+      merging(4),
+    ]);
+    assert.equal(fs.realpathSync(t.turns()[1]!.cwd), fs.realpathSync(t.dir));
+    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "idle", queued: [] });
+  },
+);
+
+test("with Let your agent run without asking on, Codex runs with no sandbox and no approvals", posix, async (c) => {
+  const t = await coordinating(c, { "agent.coordinator_bypass": true });
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.view().status === "idle");
+  runSync(t.desk.act("web#4", "inflight"));
+  await until(() => t.turns().length === 2 && t.view().status === "idle");
+  const [start, wake] = t.turns();
+  assert.deepEqual(start!.args.slice(0, 6), [
+    "exec",
+    "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "-C",
+    t.dir,
+    "--skip-git-repo-check",
+  ]);
+  assert.deepEqual(wake!.args.slice(0, 5), [
+    "exec",
+    "resume",
+    "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+  ]);
+  assert.ok(!t.turns().some((x) => x.args.some((a) => a.includes("sandbox_mode") || a.includes("approval_policy"))));
+});
+
+test("Codex logged out is your agent's error in Codex's words, and what it was told waits for the next try", posix, async (c) => {
+  const t = await coordinating(c);
+  t.fake.file("fail", "Error: Not logged in. Run `codex login`.\n");
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.view().error !== null);
+  assert.deepEqual(t.view(), { on: true, id: null, url: null, error: CODEX_NOT_LOGGED_IN, status: null, queued: [] });
+  assert.deepEqual(t.desk.coordinator.news(), [["acme/web#3", "handed off"]]);
+  t.fake.file("fail", null);
+  t.fake.file("turnfail", "You've hit your usage limit.");
+  runSync(t.desk.act("web#4", "inflight"));
+  await until(() => t.view().id === "th-2" && t.view().status === "idle" && t.view().error !== null);
+  assert.equal(t.view().error, "You've hit your usage limit.");
+  assert.equal(
+    t.turns()[1]!.args.at(-1),
+    `${ROLE} In Merging: acme/web#3 (https://github.com/acme/web/pull/3): handed off; acme/web#4 (https://github.com/acme/web/pull/4): handed off.`,
+  );
+  assert.deepEqual(t.desk.coordinator.news(), []);
+});
+
+test("your agent's folder untrusted in Codex: it doesn't start, and says how to trust it", posix, async (c) => {
+  const t = await coordinating(c, {}, false);
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.view().error !== null);
+  assert.match(
+    t.view().error!,
+    /^Codex reads your agent's deny rules only in a folder you trust, so it didn't start: add `\[projects\.".*coordinator"\]` with `trust_level = "trusted"` to .*config\.toml$/,
+  );
+  assert.deepEqual(t.turns(), []);
+});
+
+test("switching agents keeps each one's session: a wake goes to the chosen agent's", posix, async (c) => {
+  const t = await coordinating(c);
+  const claude = fakeClaude(c, t.dir);
+  t.desk.store.set("coordinator_bg", { id: "c0ffee01", mode: "default" });
+  runSync(t.desk.act("web#3", "inflight"));
+  await until(() => t.view().id === "th-1" && t.view().status === "idle");
+  assert.deepEqual(claude.calls(), [], "Codex chosen: Claude Code isn't asked");
+
+  await run(t.desk.putSettings({ set: { "agent.harness": "claude-code" } }));
+  assert.equal(t.view().id, "c0ffee01");
+  runSync(t.desk.act("web#4", "inflight"));
+  await until(() => claude.calls().some((l) => l.startsWith("--resume")));
+  assert.ok(claude.calls().includes(`--resume c0ffee01-s --bg ${merging(4)}`), claude.calls().join("\n"));
+
+  await run(t.desk.putSettings({ set: { "agent.harness": "codex" } }));
+  assert.equal(t.view().id, "th-1");
+  runSync(t.desk.act("web#5", "inflight"));
+  await until(() => t.turns().length === 2 && t.view().status === "idle");
+  assert.deepEqual(t.turns()[1]!.args.slice(-2), ["th-1", merging(5)]);
+  assert.deepEqual(t.desk.store.get("coordinator_bg"), { id: "c0ffee01", mode: "default" });
 });
