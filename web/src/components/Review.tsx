@@ -60,6 +60,7 @@ import {
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
+import { Avatar } from "./Avatar.tsx";
 import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
@@ -974,6 +975,7 @@ export function Review({
             setOpen={setReviewersOpen}
             rows={view.reviewers.list.map((r) => ({
               name: r.who,
+              ...(r.who !== "you" && !r.who.startsWith("@") && { login: r.who }),
               state: r.state,
               bad: r.state === "changes requested" ? "t-warn" : "",
               url: "",
@@ -1059,7 +1061,8 @@ function Head({
           </span>
         )}
         <span className="rv-by">
-          by {isMine ? "you" : card.author}
+          by {!isMine && !card.author_bot && <Avatar login={card.author} />}
+          {isMine ? "you" : card.author}
           {card.author_bot ? " (bot)" : ""}
         </span>
       </p>
@@ -1260,7 +1263,7 @@ function SidePart({
   tone?: string; // calm(): on a sorted-away PR its problems are grey, as the header's facts are
   open?: boolean;
   setOpen?: (open: boolean) => void;
-  rows?: { name: string; state: string; bad: string; url: string }[];
+  rows?: { name: string; login?: string; state: string; bad: string; url: string }[];
 }) {
   const words = (
     <span className={cls("rv-part-line", "fact-word", bad)} title={line}>
@@ -1293,7 +1296,10 @@ function SidePart({
           {rows?.map((r, i) => {
             const row = (
               <>
-                <span className="rv-part-name">{r.name}</span>
+                <span className="rv-part-name">
+                  {r.login && <Avatar login={r.login} />}
+                  {r.name}
+                </span>
                 <span className={cls("rv-part-state", "fact-word", r.bad)}>{r.state}</span>
               </>
             );
@@ -2005,7 +2011,10 @@ function ThreadNote({
     <>
       {convo.comments.map((c) => (
         <div key={c.id} className="rv-tc">
-          <span className="rv-tc-who">{c.author}</span>
+          <span className="rv-tc-who">
+            {!c.bot && <Avatar login={c.author} />}
+            {c.author}
+          </span>
           <span className="rv-tc-at">{age(c.at, now)}</span>
           <div className="rv-tc-body">
             <Words text={c.body} />

@@ -33,6 +33,55 @@ const VITE = Number(process.env.SHOTS_VITE_PORT ?? 5190);
 const kids: ChildProcess[] = [];
 const failures: string[] = [];
 
+// GitHub never answers a shot: a person's picture is a pattern made from their login, and NO_AVATAR's fails, to show the
+// name standing alone.
+const NO_AVATAR = "kofi";
+// No picture is a broken box, and each one in sight (not clipped or under the chat) has loaded.
+const AVATARS_DRAWN = `[...document.querySelectorAll("img.avatar")].every((i) => {
+  if (i.complete) return i.naturalWidth > 0;
+  const r = i.getBoundingClientRect();
+  return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) !== i;
+})`;
+// Each person named in `sel` on screen has their picture before the name, but NO_AVATAR, whose name stands alone.
+async function faces(page: Page, name: string, sel: string): Promise<void> {
+  await page.waitForFunction(AVATARS_DRAWN, undefined, { timeout: 3000 }).catch(() => null);
+  const seen = await page.evaluate<{ names: number; bare: string[]; wrong: string[] }>(`(() => {
+    const out = { names: 0, bare: [], wrong: [] };
+    for (const el of document.querySelectorAll(${JSON.stringify(sel)})) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || r.bottom < 0 || r.top > innerHeight) continue;
+      const who = el.textContent.trim().replace(/^by /, "");
+      if (who === "you" || who.startsWith("@") || who.endsWith("[bot]")) continue;
+      out.names++;
+      const img = el.querySelector("img.avatar");
+      if (who === ${JSON.stringify(NO_AVATAR)} ? img : !img) (img ? out.wrong : out.bare).push(who);
+    }
+    return out;
+  })()`);
+  if (!seen.names) failures.push(`${name}: no person's name on screen in ${sel}`);
+  if (seen.bare.length) failures.push(`${name}: ${seen.bare.join(", ")} without a picture in ${sel}`);
+  if (seen.wrong.length) failures.push(`${name}: ${NO_AVATAR}'s picture that failed still takes room in ${sel}`);
+}
+async function offline(page: Page): Promise<void> {
+  // On the context, so a shot's page.unrouteAll() never lets one through.
+  await page.context().route(/^https:\/\/([^/]+\.)?github(usercontent)?\.com\//, (route) => {
+    const url = new URL(route.request().url());
+    const login = decodeURIComponent(url.pathname.slice(1));
+    if (url.host !== "avatars.githubusercontent.com" || login === NO_AVATAR) {
+      if (url.host !== "avatars.githubusercontent.com") failures.push(`a shot fetched ${url.href}`);
+      return route.fulfill({ status: 404 });
+    }
+    let h = 0;
+    for (const ch of login) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+    const cells: string[] = [];
+    for (let i = 0; i < 15; i++)
+      if ((h >> i) & 1)
+        for (const x of new Set([i % 3, 4 - (i % 3)])) cells.push(`<rect x="${x}" y="${Math.floor(i / 3)}" width="1" height="1"/>`);
+    const body = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 7 7"><rect x="-1" y="-1" width="7" height="7" fill="#f0f0f0"/><g fill="hsl(${h % 360} 45% 55%)">${cells.join("")}</g></svg>`;
+    return route.fulfill({ contentType: "image/svg+xml", body });
+  });
+}
+
 async function up(url: string, ms = 30_000): Promise<void> {
   for (const end = Date.now() + ms; Date.now() < end;) {
     try {
@@ -586,6 +635,7 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "mid", "min", "mac", "xl"],
     go: async (page) => {
       await at("#/")(page);
+      if (await page.evaluate<boolean>("innerWidth >= 1280")) await faces(page, "queue", ".line:not(.c-line, .inq) .line-by");
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
       if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
       const on = await sideOn(page);
@@ -969,6 +1019,7 @@ const SHOTS: Shot[] = [
       if (await page.locator(".rv-ai .prose").count()) failures.push("review: the AI review doesn't open folded");
       if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
         failures.push("review: the AI review isn't above the conversation and your comment");
+      await faces(page, "review", ".rv-ref .rv-by:last-child, .cv-author");
     },
   },
   // The top of a review stays short, so the diff starts high: your comment's box is one line on the actions' row, with no
@@ -1080,6 +1131,7 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await review("acme/api#4127")(page);
       const wide = await page.evaluate<boolean>("innerWidth >= 1160");
+      if (wide) await faces(page, "beside-review", ".c-line:not(.inq) .c-meta .line-by");
       const b = await besideSays(page);
       if (!wide) {
         if (b || (await page.locator(".beside").count())) failures.push("beside-review: a list or its rail beside the review below 1160px");
@@ -1935,6 +1987,7 @@ const SHOTS: Shot[] = [
         `[...document.querySelectorAll("[data-part=reviewers] .rv-part-row")].map((el) => el.querySelector(".rv-part-name").textContent + ": " + el.querySelector(".rv-part-state").textContent)`,
       );
       if (rows.join(" | ") !== "sam: changes requested") failures.push(`review-panel: opened, the reviewers read ${rows.join(" | ")}`);
+      await faces(page, "review-panel", "[data-part=reviewers] .rv-part-name");
     },
     after: async (page) => {
       await unroute(page);
@@ -4280,8 +4333,10 @@ try {
           document.documentElement.append(lights);
         });`);
       }
+      await offline(page);
       page.on("console", (m) => {
-        if (m.type() === "error") failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
+        if (m.type() === "error" && !m.location().url.startsWith("https://avatars.githubusercontent.com/"))
+          failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
       });
       await page.goto(`${url}/#/`);
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
@@ -4291,6 +4346,9 @@ try {
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click
         const file = `${theme}-${size.name}-${shot.name}.png`;
+        // The pictures on screen have loaded, or gone for good: none is a broken box.
+        const box = (await page.waitForFunction(AVATARS_DRAWN, undefined, { timeout: 3000 }).catch(() => null)) === null;
+        if (box) failures.push(`${file}: a person's picture on screen hasn't loaded`);
         await page.screenshot({ path: path.join(out, file) });
         files.push(file);
         const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");

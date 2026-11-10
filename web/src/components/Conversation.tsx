@@ -4,6 +4,7 @@ import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, MOD } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
+import { Avatar } from "./Avatar.tsx";
 import { Words } from "./Prose.tsx";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
@@ -104,7 +105,10 @@ export function Conversation({
         return (
           <article key={c.id} className="cv">
             <p className="cv-who">
-              <span className="cv-author">{last.author}</span>
+              <span className="cv-author">
+                {!last.bot && <Avatar login={last.author} />}
+                {last.author}
+              </span>
               <span>{where(c)}</span>
               <span>{age(last.at, now)}</span>
             </p>
@@ -206,7 +210,10 @@ export function Conversation({
               }}
             >
               <summary>
-                <span className="cv-author">{first.author}</span>
+                <span className="cv-author">
+                  {!first.bot && <Avatar login={first.author} />}
+                  {first.author}
+                </span>
                 <span>{where(c)}</span>
                 {c.resolved && <span>resolved</span>}
                 <span className="cv-line">
@@ -228,7 +235,10 @@ function Said({ c, label, now }: { c: Convo; label?: string; now: number }) {
       {c.comments.map((x) => (
         <li key={x.id}>
           <p className="cv-who">
-            <span className="cv-author">{x.author}</span>
+            <span className="cv-author">
+              {!x.bot && <Avatar login={x.author} />}
+              {x.author}
+            </span>
             <span>{age(x.at, now)}</span>
           </p>
           <p className="cv-body">

@@ -1500,6 +1500,20 @@ p.side-sync {
   color: var(--ink-2);
 }
 
+/* A person's picture before their name, sized to its words (16px at a row's 13px), so a row stays one line. */
+.avatar {
+  width: 1.25em;
+  height: 1.25em;
+  margin-right: 0.3em;
+  border-radius: 50%;
+  vertical-align: -0.3em;
+}
+
+.rv-by .avatar {
+  width: 1.4em;
+  height: 1.4em;
+}
+
 /* A question has no stage: who asks takes that column's room too; with no weight, so a tight table still narrows it. */
 :where(.inq:not(.c-line)) .line-by {
   width: calc(17em + 14px);

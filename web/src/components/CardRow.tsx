@@ -1,6 +1,7 @@
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, clearedText, cls } from "../format.ts";
 import type { Guide, Variant } from "../view.ts";
+import { Avatar } from "./Avatar.tsx";
 import { Detail } from "./Detail.tsx";
 
 // Everything a row needs from the app; `run` takes an action id (enter close o e d m b p why comment a t).
@@ -88,7 +89,13 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
       {note}
     </span>
   );
-  const by = <span className={cls("line-by", card.by === "you" && "mine")}>by {card.by}</span>;
+  const person = card.by !== "you" && !(card.author_bot && card.by === card.author);
+  const by = (
+    <span className={cls("line-by", card.by === "you" && "mine")}>
+      by {person && <Avatar login={card.by} />}
+      {card.by}
+    </span>
+  );
   // Amber only on yours, where it's work for you; a hand-back stays in a tight table, as nothing else on its row says so.
   const stage = (
     <span
