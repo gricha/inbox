@@ -5,6 +5,7 @@ import { compile } from "../src/expr.ts";
 import { analyze, FIELDS, weekdayHours } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import type { Item } from "../src/types.ts";
+import { GITHUB_AUTOMATIONS } from "../src/connectors/github-automations.ts";
 import { hoursAgo, makeContext, makeItem, NOW } from "./helpers/items.ts";
 
 const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
@@ -452,4 +453,21 @@ test("the owner's two nudges as rules: a workday ready with nobody asked by name
   assert.deepEqual(both(asked, L(9, 10)), [false, true], "Monday 10:00: two workdays; follow up, not pick a reviewer");
   const reviewed = { ...asked, review_requests: [codeowners], reviews: [review("sam")] };
   assert.deepEqual(both(reviewed, L(9, 10)), [false, false], "sam reviewed: GitHub asks sam no more, and someone's on it");
+});
+
+test("GitHub's two reviewer nudges leave a blocked PR alone: nobody can merge it until what it needs merges, so it stays in Blocked", () => {
+  const whens = ["pick-reviewer", "follow-up"].map((id) => GITHUB_AUTOMATIONS.find((a) => a.id === id)!.when ?? "");
+  const pr = makeItem({
+    author: "me",
+    created_at: hoursAgo(24 * 10),
+    request_events: [{ reviewer: "kai", reviewer_type: "user", at: hoursAgo(24 * 10), actor: "me", actor_bot: false }],
+    review_requests: [{ reviewer: "kai", type: "user", codeowner: false }],
+  });
+  const at = (blocked: boolean) => {
+    const sig = analyze(pr, ctx, cfg, NOW).signals;
+    const s = { ...sig, pr: { ...sig.pr, blocked } };
+    return whens.map((w) => Result.getOrThrow(Result.getOrThrow(compile(w)).eval(s)));
+  };
+  assert.deepEqual(at(false), [false, true], "named reviewers silent for days: follow up");
+  assert.deepEqual(at(true), [false, false], "the same PR, stacked on one still open");
 });
