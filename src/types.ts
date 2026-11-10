@@ -1050,6 +1050,9 @@ export interface InquiryLink {
   url: string; // http(s), or claude: for a Claude session
 }
 
+// A Claude Code or Codex session on this machine (the Sessions source).
+export type SessionKind = "cli" | "background" | "desktop" | "codex";
+
 // What an automation may do with an item. add: on your desk, pinned to Today, with its why. today, later, fyi, hide: sorted
 // there as Claude's answer would be, until the item changes or you act on it. snooze, done, mute: the desk's own, logged as
 // the automation's, so Undo works. Never now: only a rule's own bucket or Claude's answer puts an item first.
