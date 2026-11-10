@@ -113,6 +113,22 @@ Clients that only speak stdio can run `desk mcp` instead. Routes, tools, connect
 
 There's also a `/desk` pane for Claude Code (the Desktop app or a terminal) in [integrations/claude-desktop/inbox](integrations/claude-desktop/inbox): your Inbox beside the chat, one line an item in the desk's order, each opening in the desk, with the desk's count (`desk 10 +2`) as a status line. Install it with `claude plugin marketplace add ~/code/review-desk`, then `claude plugin install inbox@inbox`, and type `/desk` in a new session. Installed it as `review-desk` before the rename to Inbox? Run `claude plugin uninstall review-desk@review-desk` and `claude plugin marketplace remove review-desk` first.
 
+## Use it from another machine
+
+Over [Tailscale](https://tailscale.com), for you alone. On the desk's computer, turn on Settings → This device → **Use it from your other devices** (or run `desk serve --tailscale`). The desk then runs `tailscale serve` in the background, so it answers at `https://<this machine's tailnet name>/` over HTTPS on your tailnet (never `tailscale funnel`, so never on the internet), and turns it off again with the setting or when the desk stops. It needs Tailscale signed in, with MagicDNS and HTTPS certificates on for your tailnet; the setting's row says in plain words what's missing. Only your own Tailscale login gets in (another person on your tailnet doesn't; More → Tailscale login allowed in changes whose), and only from a device you paired:
+
+```bash
+desk pair            # on the desk's computer: a one-time code (10 minutes, one try), and what to do with it
+```
+
+- **A browser** (a phone, a laptop): open the link it prints, `https://<name>/pair#<code>`. That browser keeps a session and lands on your Inbox.
+- **Another machine with an Inbox checkout**: `bin/desk connect https://<name> --code <code>` (add `codex` for Codex). It pairs the machine and gives its Claude Code the desk's MCP tools (over HTTP, with the machine's token) and the skill.
+- **A machine without one**: run `desk pair --print` on the desk's computer instead, and paste the commands it prints there. They carry a token: treat it as a password.
+- **Codex** reads the token from `INBOX_TOKEN`: `desk connect … codex` and `desk pair --print` print the `export` line for your shell's profile.
+- **stdio-only clients and the CLI**: `DESK_URL=https://<name> DESK_TOKEN=<token> desk mcp` (or any `desk` command).
+
+Settings → This device lists every paired device, with when it was last used; **Revoke** shuts it out at once. On this computer nothing changes: no token, as before. How each request is checked: [docs/api.md](docs/api.md) → Security model.
+
 ## Coordinator
 
 The desk's window calls it **your agent**.
@@ -155,7 +171,7 @@ An automation adds, and nothing else, unless you allow it more (`can`, which `de
 - Its writes to GitHub are approving a PR, when you click Approve in its review; a comment on a PR, when you click Comment in its review, or on an open issue, Comment on it opened in place; a comment on a line of its diff, when you click the `+` by the line's number (or drag it down several) and send it; your reply to a conversation, when you click Reply under it in a PR's review; marking your own draft ready for review, when you click Ready for review on its row or in its review, and asking the reviewers you picked there; asking reviewers on your ready PR nobody's asked to review, when you click Ask reviewers in its review; and the More menu's (in a PR's review, or a row's right-click menu), each only when the desk allows it for that item: closing or reopening a PR you opened, converting it to a draft, merging it now, without the coordinator (only when it's approved, green, not stacked on another PR and GitHub says it's mergeable, with the repo's merge method, pinned to the commit the desk judged ready), closing an issue you opened or are assigned, and requesting changes on someone else's PR with what you write in its review. The toast's Undo, while a close's or a draft's toast is up, reopens it or marks it ready again. They go through `src/github/write.ts`, whose allowlist holds only those mutations; agents can't reach it, and Hand off for merge, Back to desk and a hand-back write nothing. The coordinator is your own Claude Code session, which the desk starts and wakes: what it pushes and merges, it does with your `git` and `gh`. Everything the desk does is read only: GraphQL queries (the read client refuses any document containing `mutation`), GETs of your notifications (never marking them read), and `gh api` GETs for a PR's files and description.
 - An automation never writes: it runs read only behind a deny list, and the desk, not the run, acts on what it lists, only in the ways you allowed it (adding it to your desk, unless you allowed more). Only you turn one on.
 - Nothing about your items goes to a model that isn't your own Claude Code, unless you set a decision model's key: then automations' questions send each item's facts to OpenRouter (Automations, above). The key stays in `~/.inbox/settings.json`; the desk never shows it again, logs it or sends it anywhere else.
-- It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`.
+- It never listens beyond `127.0.0.1`, and it rejects requests with a foreign `Host` or `Origin`. Only with Use it from your other devices on does anything else reach it: through `tailscale serve`, from your own Tailscale login, on a device you paired.
 - What you write (comments, replies, your answers to agents, the policy) never reaches Sentry, where `desk serve` reports its errors, traces and log lines and the UI its errors and traces (`src/sentry.ts`): request and response bodies, MCP calls' arguments and results, and your IP stay off. Its log lines do carry what the desk logs, such as an agent's question or why a PR was handed back, and its errors GitHub's error text. `DESK_SENTRY=0` sends nothing.
 - It never puts PR text into the hand-off prompt, only the URL and number. The AI review's prompt fences PR text as untrusted, and the agent runs with no tools. Each of its concerns and notes quotes the code it's about, and a second run checks every one against the diff: what the diff doesn't bear out never reaches you.
 
@@ -165,7 +181,7 @@ An automation adds, and nothing else, unless you allow it more (`can`, which `de
 | -------------------------------------------- | ------------------------------------------------------------------------------ |
 | `~/.inbox/config.toml`                       | spaces, boards, rules                                                          |
 | `~/.inbox/settings.json`                     | settings you changed from the default                                          |
-| `~/.inbox/desk.db`                           | cache and your local state (SQLite)                                            |
+| `~/.inbox/desk.db`                           | cache and your local state (SQLite), and your paired devices' token hashes     |
 | [AGENTS.md](AGENTS.md)                       | where each kind of change goes                                                 |
 | [docs/architecture.md](docs/architecture.md) | modules, API, CLI, MCP, desktop app                                            |
 | [docs/ui.md](docs/ui.md)                     | the UI                                                                         |

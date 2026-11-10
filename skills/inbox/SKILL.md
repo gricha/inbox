@@ -22,7 +22,7 @@ All triage state is local: done, snooze, mute, pin and Merging live in `~/.inbox
 
 ## How to reach it
 
-The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` (`DESK_PORT` changes the port). If a tool says `desk is not running`, ask the user to open the app.
+The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` (`DESK_PORT` changes the port), or at the tailnet address this copy names when it came from the desk on another machine. If a tool says `desk is not running`, ask the user to open the app.
 
 **MCP tools** (preferred). `ref` is `owner/repo#123`, `repo#123` when unique, or a GitHub URL. The owner may paste an item's link from the desk (`inbox://item/owner/repo/123`, or `http://localhost:47823/#/review/…`): pass it as the item's `ref`; `desk_item` prints the link to give back. A link to an agent's question (`inbox://question/<id>`, or `http://localhost:47823/#/inquiry/<id>`) is no item's: pass it to `desk_inquiry` as its `id`, which returns the user's answer (or that there's none yet) and then the question whole, so you can talk about it with them. That doesn't pick its answer up: only the session that asked does, with its id.
 
@@ -53,7 +53,7 @@ The desk runs while the app (or `desk serve`) runs, on `http://localhost:47823` 
 
 **CLI** when the MCP tools aren't connected: `desk ls [--all]`, `desk show <ref>`, `desk add <ref> "<why>" --from "<your task>"`, `desk done|mute|unmute|pin|unpin|restore <ref>`, `desk snooze <ref> [until]`, `desk undo <seq>`, `desk prompt <ref>`, `desk brief <ref>`, `desk fields`, `desk config check`. `desk` is `bin/desk` in the Inbox repo; it may not be on PATH.
 
-**HTTP API** for everything else, notably rules: `GET /api/config`, `POST /api/config/preview`, `PUT /api/config`, `GET /api/fields`. JSON in and out, no auth, localhost only. Full reference: `docs/api.md` in the Inbox repo (https://github.com/gricha/inbox/blob/main/docs/api.md).
+**HTTP API** for everything else, notably rules: `GET /api/config`, `POST /api/config/preview`, `PUT /api/config`, `GET /api/fields`. JSON in and out, no auth on the desk's own machine; from another machine, with `Authorization: Bearer $INBOX_TOKEN` or through the MCP tools. Full reference: `docs/api.md` in the Inbox repo (https://github.com/gricha/inbox/blob/main/docs/api.md).
 
 ## Rules of engagement
 
