@@ -33,6 +33,7 @@ class Notes implements Connector {
   readonly id = "notes";
   readonly name = "Notes";
   readonly automations = [];
+  readonly criteria = [];
   desk: Desk;
   notes: Note[] = [];
   inits: boolean[] = []; // what each init was asked

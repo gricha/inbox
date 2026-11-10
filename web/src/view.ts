@@ -16,17 +16,15 @@ import type {
   SettingValue,
   SettingsView,
 } from "../../src/types.ts";
-import { byPart } from "../../src/types.ts";
 import { ago, BUCKET_LABEL, shortRef, aiName } from "./format.ts";
 
-// The Inbox (`queue`), a PR's review in its place, Blocked, FYI (`later`: what was sorted away), your PRs in Merging, the
-// Archive (what's done), and Settings (with the rules).
+// The Inbox (`queue`: Urgent, Standard and FYI), a PR's review in its place, Blocked, your PRs in Merging, the Archive
+// (what's done, snoozed, muted or hidden), and Settings (with the rules).
 export type Route =
   | { name: "queue" }
   | { name: "review"; id: string }
   | { name: "inquiry"; id: string } // an agent's question
   | { name: "item"; id: string } // a permalink's (src/links.ts): a PR opens in its review, an issue in place on its page
-  | { name: "later" }
   | { name: "blocked" } // what can't move until something else happens
   | { name: "inflight" }
   | { name: "archive" }
@@ -39,10 +37,10 @@ export interface Acted {
 }
 
 // A list page a review was opened from, and goes back to.
-export type ListPage = "queue" | "later" | "blocked" | "inflight" | "archive";
-// The Inbox is one list: what the rules and Claude put in now, then today, in the desk's order. What was sorted away is on
-// FYI (`later`); what's done (yours, or resolved by the world) is in the Archive.
-export type GroupKey = "queue" | "later" | "fyi" | "hidden" | "cleared" | "archive" | "blocked";
+export type ListPage = "queue" | "blocked" | "inflight" | "archive";
+// The Inbox is its sections, as the desk placed and ordered them (QueueView.inbox). What's done (yours, or resolved by the
+// world), snoozed, muted or hidden by rules is in the Archive.
+export type GroupKey = "urgent" | "standard" | "fyi" | "hidden" | "cleared" | "archive" | "blocked";
 export type Variant = "active" | "hidden" | "cleared" | "archive" | "blocked";
 
 export interface Group {
@@ -53,7 +51,7 @@ export interface Group {
   open: boolean;
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
-  fold: number; // the queue: items behind its "n more" line
+  fold: number; // Standard's and FYI's: items behind its "n more" line
 }
 
 // The cursor's stop on a group's "n more" line.
@@ -64,12 +62,10 @@ export const awaitsReview = (c: Pick<Card, "review">) => c.review === "required"
 export const handsOff = (c: Pick<Card, "draft" | "cta" | "review">) => !c.draft && c.cta !== "reviewers" && !awaitsReview(c);
 export const inquiryOf = (id: string) => `ask:${id}`; // an agent's question on the main page
 
-export const SORTED_AWAY: GroupKey[] = ["later", "fyi", "hidden", "cleared"];
 // The groups each list page shows.
-export const PAGE_GROUPS: Record<"queue" | "later" | "archive" | "blocked", GroupKey[]> = {
-  queue: ["queue"],
-  later: SORTED_AWAY,
-  archive: ["archive"],
+export const PAGE_GROUPS: Record<"queue" | "archive" | "blocked", GroupKey[]> = {
+  queue: ["urgent", "standard", "fyi"],
+  archive: ["archive", "cleared", "hidden"],
   blocked: ["blocked"],
 };
 
@@ -89,6 +85,7 @@ export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true;
   { id: "queue", name: "Inbox and notifications" },
   { id: "agent", name: "Agent" },
   { id: "automations", name: "Your automations" },
+  { id: "criteria", name: "Urgency" },
   { id: "app", name: "This device" },
   { id: "github", name: "GitHub", plugin: true },
   { id: "sessions", name: "Sessions", plugin: true, automations: false },
@@ -175,7 +172,6 @@ export function parseRoute(hash: string): Route {
   if (m) return { name: "settings", section: m[1] ? (SETTINGS_ALIAS[m[1]] ?? m[1]) : SETTINGS_PARTS[0]!.id };
   if (hash === "#/rules") return { name: "settings", section: "rules" };
   if (hash === "#/inflight") return { name: "inflight" };
-  if (hash === "#/later") return { name: "later" };
   if (hash === "#/blocked" || hash === "#/waiting") return { name: "blocked" };
   if (hash === "#/archive") return { name: "archive" };
   const page = /^#\/(review|inquiry|item)\/(.+)$/.exec(hash);
@@ -210,7 +206,7 @@ export function beside(o: {
 // What the Inbox counts: everything on it, an agent's question and a session that needs you included (each waits on you
 // too); a row on its way off (you acted on it) or a question you answered no longer counts.
 export const inboxCount = (v: QueueView, leaving: ReadonlySet<string> = new Set(), answered: ReadonlySet<string> = new Set()) =>
-  [...v.sections.now, ...v.sections.today].filter((c) => !leaving.has(c.id)).length +
+  [...v.inbox.urgent, ...v.inbox.standard].filter((c) => !leaving.has(c.id)).length +
   v.inquiries.filter((q) => !answered.has(q.id)).length +
   v.sessions.filter((s) => s.status === "active" && !leaving.has(s.id)).length;
 
@@ -419,11 +415,11 @@ export function currentFile(tops: number[], line: number, atEnd = false): number
 const matches = (c: Card, q: string) =>
   !q || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(q.trim().toLowerCase());
 
-// FYI's Later group opens with the page; the rest open when asked (a click on their heading).
+// The Inbox's sections, Blocked and the Archive's own group open with their page; the rest open when asked (a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
-  queue: true,
-  later: true,
-  fyi: false,
+  urgent: true,
+  standard: true,
+  fyi: true,
   hidden: false,
   cleared: false,
   archive: true,
@@ -431,8 +427,8 @@ export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
 };
 
 const LABEL: Record<GroupKey, string> = {
-  queue: "Queue",
-  later: "Later",
+  urgent: "Urgent",
+  standard: "Standard",
   fyi: "FYI",
   hidden: "Hidden by rules",
   cleared: "Snoozed or muted",
@@ -440,7 +436,7 @@ const LABEL: Record<GroupKey, string> = {
   blocked: "Blocked",
 };
 
-// The queue is now's items then today's, in the desk's order, and folds after its first queue.cards. While filtering, every
+// The Inbox's sections in the desk's order; Standard and FYI each fold after their first queue.cards. While filtering, every
 // group with a match opens so nothing that matches stays tucked away, and nothing folds.
 export function groupsOf(
   view: QueueView | null,
@@ -468,16 +464,9 @@ export function groupsOf(
   };
   const s = view.sections;
   return [
-    // One list in the desk's order: it sorts Now and Today each by part, and the page shows each part's Now before its Today.
-    group("queue", byPart([...s.now, ...s.today]), "active", view.cards),
-    group("later", s.later),
-    group("fyi", s.fyi),
-    group("hidden", view.hidden, "hidden"),
-    group(
-      "cleared",
-      view.cleared.filter((c) => c.status !== "done"),
-      "cleared",
-    ),
+    group("urgent", view.inbox.urgent),
+    group("standard", view.inbox.standard, "active", view.cards),
+    group("fyi", view.inbox.fyi, "active", view.cards),
     // What you did that took it off your desk, and what the world dealt with: newest first.
     group(
       "archive",
@@ -486,6 +475,12 @@ export function groupsOf(
       ),
       "archive",
     ),
+    group(
+      "cleared",
+      view.cleared.filter((c) => c.status !== "done"),
+      "cleared",
+    ),
+    group("hidden", view.hidden, "hidden"),
     // What can't move yet, a chain's rows together, in the desk's order.
     group("blocked", s.blocked, "blocked"),
   ];
@@ -493,7 +488,7 @@ export function groupsOf(
 
 // The list page and group that show a card, folds open: where a permalink to an issue opens it in place.
 export function whereIs(view: QueueView, id: string): { page: keyof typeof PAGE_GROUPS; group: GroupKey } | null {
-  const group = groupsOf(view, DEFAULT_OPEN, "", { queue: true }).find((g) => g.cards.some((c) => c.id === id))?.key;
+  const group = groupsOf(view, DEFAULT_OPEN, "", { standard: true, fyi: true }).find((g) => g.cards.some((c) => c.id === id))?.key;
   const page = group && (Object.keys(PAGE_GROUPS) as (keyof typeof PAGE_GROUPS)[]).find((p) => PAGE_GROUPS[p].includes(group));
   return group && page ? { page, group } : null;
 }
@@ -581,6 +576,7 @@ export function removeCard(v: QueueView, id: string): QueueView {
   return {
     ...v,
     sections: { now: drop(s.now), today: drop(s.today), blocked: drop(s.blocked), later: drop(s.later), fyi: drop(s.fyi) },
+    inbox: { urgent: drop(v.inbox.urgent), standard: drop(v.inbox.standard), fyi: drop(v.inbox.fyi) },
     hidden: drop(v.hidden),
   };
 }

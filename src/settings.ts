@@ -203,6 +203,14 @@ export const SETTINGS = [
     help: "Claude places each item by your policy; off, only your rules do.",
   },
   {
+    key: "agent.score",
+    section: "agent",
+    label: "Score the Inbox with Claude",
+    type: "boolean",
+    default: true,
+    help: "Orders your Inbox and says what's urgent, 20 items a call; off, the desk scores from your rules.",
+  },
+  {
     key: "agent.coordinator",
     section: "agent",
     label: "Run your agent",
@@ -274,6 +282,28 @@ export const SETTINGS = [
     help: "The rest fold behind one line you can open; 0 shows them all.",
   },
   {
+    key: "queue.urgent_at",
+    section: "queue",
+    label: "Urgent from a score of",
+    type: "number",
+    default: 8,
+    min: 0,
+    max: 10,
+    unit: "out of 10",
+    help: "A yes from an urgent criterion, or a PR your agent hands back, is urgent too.",
+  },
+  {
+    key: "queue.fyi_at",
+    section: "queue",
+    label: "FYI up to a score of",
+    type: "number",
+    default: 3,
+    min: 0,
+    max: 10,
+    unit: "out of 10",
+    help: "What your rules or an automation sort to FYI goes there too; asked of you by name or pinned, never.",
+  },
+  {
     key: "notify.enabled",
     section: "queue",
     label: "Notify me when something needs me",
@@ -341,7 +371,14 @@ const DEFS = new Map<string, SettingDef>(SETTINGS.map((d) => [d.key, d]));
 export const agentName = (harness: string): "Claude" | "Codex" => (harness === "codex" ? "Codex" : "Claude");
 
 // What the agent does names the one you chose; on Codex, running without asking is its bypass of sandbox and approvals.
-const AGENT_WORDED = new Set(["review.auto_ai", "policy.judge", "policy.max_per_hour", "agent.decision_key", "agent.coordinator"]);
+const AGENT_WORDED = new Set([
+  "review.auto_ai",
+  "policy.judge",
+  "policy.max_per_hour",
+  "agent.decision_key",
+  "agent.coordinator",
+  "agent.score",
+]);
 const CODEX_BYPASS = "No sandbox and no approvals, as your own sessions run; off, it writes only in its folder. Its deny rules still hold.";
 export function agentDefs(harness: string): SettingDef[] {
   if (agentName(harness) === "Claude") return [...SETTINGS];

@@ -516,6 +516,7 @@ export class Judge {
         Effect.sync(() => {
           desk.changed();
           this.pump();
+          desk.urgency.pump();
         }),
       ),
     );

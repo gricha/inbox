@@ -40,10 +40,10 @@ import {
   routeHash,
   PAGE_GROUPS,
   settingsBack,
-  SORTED_AWAY,
   type Acted,
   type ListPage,
   stops,
+  type Group,
   type GroupKey,
   type Route,
   whereIs,
@@ -96,12 +96,11 @@ const go = (r: Route) => {
 type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
-const LIST_PAGES = new Set<Route["name"]>(["queue", "later", "blocked", "archive"]);
-// The sidebar's pages, top to bottom: ⌘1 to ⌘5 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
-const SIDE_PAGES = ["queue", "blocked", "later", "inflight", "archive"] as const;
-// What FYI, Blocked and the Archive say with nothing on them.
+const LIST_PAGES = new Set<Route["name"]>(["queue", "blocked", "archive"]);
+// The sidebar's pages, top to bottom: ⌘1 to ⌘4 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
+const SIDE_PAGES = ["queue", "blocked", "inflight", "archive"] as const;
+// What Blocked and the Archive say with nothing on them.
 const EMPTY = {
-  later: "Nothing sorted away.",
   blocked: "Nothing is blocked.",
   archive: "Nothing here yet: what you finish, and what's dealt with, lands here.",
 };
@@ -434,7 +433,7 @@ export function App() {
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
-    const keys = PAGE_GROUPS[list === "later" || list === "archive" || list === "blocked" ? list : "queue"];
+    const keys = PAGE_GROUPS[list === "archive" || list === "blocked" ? list : "queue"];
     return groups.filter((g) => keys.includes(g.key));
   }, [groups, list]);
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
@@ -553,7 +552,7 @@ export function App() {
   const onRow =
     route.name === "inflight"
       ? (laneCur?.card ?? null)
-      : route.name === "queue" || route.name === "later" || route.name === "archive" || route.name === "blocked"
+      : route.name === "queue" || route.name === "archive" || route.name === "blocked"
         ? current
         : null;
   const restingPr = onRow?.kind === "pr" ? onRow.id : null;
@@ -1246,7 +1245,7 @@ export function App() {
     // The platform's own: ⌘1-5 are the sidebar's pages, ⌘[ and ⌘] the item before and after, where there's a list (a list
     // page, Merging, a review or a question). The shortcut recorder reads its own keys.
     const mod = (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey && !e.isComposing;
-    const digit = /^Digit([1-5])$/.exec(e.code)?.[1];
+    const digit = /^Digit([1-4])$/.exec(e.code)?.[1];
     const bracket = e.code === "BracketLeft" ? -1 : e.code === "BracketRight" ? 1 : 0;
     const listed = LIST_PAGES.has(route.name) || route.name === "inflight" || route.name === "review" || route.name === "inquiry";
     if (mod && digit && !(e.target instanceof HTMLElement && e.target.closest(".hotkey"))) {
@@ -1364,10 +1363,10 @@ export function App() {
   const compact: RowCtx = { ...ctx, compact: true, selected: listSel, select: ignore };
   // The open item's row is always in the list beside, marked: one behind the Inbox's "n more" opens that line there.
   const besideGroups = useMemo(() => {
-    const q = groups.find((g) => g.key === "queue");
-    if (!openSel || !q?.fold || q.cards.some((c) => c.id === openSel)) return groups;
-    const all = groupsOf(view, open, filter, { ...unfolded, queue: true });
-    return all.find((g) => g.key === "queue")?.cards.some((c) => c.id === openSel) ? all : groups;
+    const shows = (gs: Group[]) => gs.some((g) => PAGE_GROUPS.queue.includes(g.key) && g.cards.some((c) => c.id === openSel));
+    if (!openSel || shows(groups)) return groups;
+    const all = groupsOf(view, open, filter, { ...unfolded, standard: true, fyi: true });
+    return shows(all) ? all : groups;
   }, [groups, openSel, view, open, filter, unfolded]);
   const besideRows =
     side !== "open" || !listPage ? null : listPage === "queue" ? (
@@ -1381,6 +1380,7 @@ export function App() {
         filter={filter}
         unfold={unfold}
         selectFold={ignore}
+        toggle={toggleGroup}
       />
     ) : listPage === "inflight" ? (
       <Inflight
@@ -1504,10 +1504,8 @@ export function App() {
               selectFold={(k) => {
                 setSelected(`fold:${k}`);
               }}
+              toggle={toggleGroup}
             />
-          )}
-          {route.name === "later" && !broken && (
-            <Later view={view} groups={groups} keys={SORTED_AWAY} empty={EMPTY.later} ctx={ctx} filter={filter} toggle={toggleGroup} />
           )}
           {route.name === "blocked" && !broken && (
             <Later

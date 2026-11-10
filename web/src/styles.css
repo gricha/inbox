@@ -1160,6 +1160,13 @@ p.side-sync {
   }
 }
 
+/* An Inbox row's why is quiet extra: in a table too tight for it whole, it goes before the title or the columns give way. */
+@container (width < 900px) {
+  .line-row:not(.c-row) .line-reason {
+    display: none;
+  }
+}
+
 @container (width < 620px) {
   .line-row:not(.c-row) .line-by,
   .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage:not(.t-warn, .handed) {
@@ -2103,6 +2110,10 @@ p.side-sync {
 }
 
 /* Lines of text, each bar in the middle of its line's height. */
+.group-head .sk-head {
+  width: 5em;
+}
+
 .sk-lines {
   display: grid;
   line-height: 1.5;
@@ -3987,6 +3998,45 @@ button.s-edit:hover:not(:disabled) {
 
 .editor.prose::placeholder {
   color: var(--pencil);
+}
+
+/* Urgency: your criteria's names open their editor, in ink like a label; who last scored the Inbox, quietly under the sheets. */
+.cr-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cr-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cr-plugin > .group-head {
+  margin-top: 28px;
+  padding: 0 17px;
+}
+
+/* A criterion's question is a sentence: a few lines, growing with what's in it. */
+.au-editor .editor.prose.cr-ask {
+  height: auto;
+  min-height: 0;
+  field-sizing: content;
+}
+
+.cr-note {
+  margin: 14px 0 0;
+  padding: 0 17px;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+/* The Inbox's sections, each a table under its heading. */
+.queue .group {
+  display: grid;
 }
 
 /* Automations, Settings' second tab: a row each on its sheet, its switch on the sheet's right edge like a setting's; it stays

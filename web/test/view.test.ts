@@ -139,6 +139,7 @@ const queue = (): QueueView => ({
   cards: 10,
   paused: null,
   stacks: {},
+  inbox: { urgent: [card("acme/api#1")], standard: [card("acme/web#2", { author: "priya" })], fyi: [card("acme/api#3")] },
 });
 
 test("routes round-trip through the hash", () => {
@@ -152,11 +153,11 @@ test("routes round-trip through the hash", () => {
   assert.deepEqual(parseRoute("#/settings/"), { name: "settings", section: "queue" });
   assert.deepEqual(parseRoute("#/inflight"), { name: "inflight" });
   assert.equal(routeHash({ name: "inflight" }), "#/inflight");
-  assert.deepEqual(parseRoute(routeHash({ name: "later" })), { name: "later" });
+  assert.deepEqual(parseRoute(routeHash({ name: "archive" })), { name: "archive" });
 });
 
-test("the old links still open their pages under the new names: #/later is FYI, #/archive the Archive", () => {
-  assert.deepEqual(parseRoute("#/later"), { name: "later" });
+test("the old links still open their pages under the new names: #/later, the FYI page that's gone, is the Inbox, its FYI section", () => {
+  assert.deepEqual(parseRoute("#/later"), { name: "queue" });
   assert.deepEqual(parseRoute("#/archive"), { name: "archive" });
   assert.deepEqual(parseRoute("#/waiting"), { name: "blocked" });
 });
@@ -204,7 +205,7 @@ test("an automation opens as a view inside Settings, from its own link, and goes
 test("Settings' parts are the sidebar's items, each a route: the core's, then the plugins'; old links land on their part", () => {
   assert.deepEqual(
     SETTINGS_PARTS.map((p) => `${p.plugin ? "plugin " : ""}${p.id}`),
-    ["queue", "agent", "automations", "app", "plugin github", "plugin sessions"],
+    ["queue", "agent", "automations", "criteria", "app", "plugin github", "plugin sessions"],
   );
   const part = (hash: string) => {
     const r = parseRoute(hash);
@@ -228,10 +229,11 @@ test("Settings' parts are the sidebar's items, each a route: the core's, then th
   assert.equal(settingsBack("automations/github.pick-reviewer"), "github");
   assert.equal(settingsBack("automations"), null); // a part, not a view: Esc goes to the Inbox
   // The page head names the part.
-  assert.deepEqual(["queue", "agent", "automations", "app", "github"].map(partName), [
+  assert.deepEqual(["queue", "agent", "automations", "criteria", "app", "github"].map(partName), [
     "Inbox and notifications",
     "Agent",
     "Your automations",
+    "Urgency",
     "This device",
     "GitHub",
   ]);
@@ -241,14 +243,16 @@ test("a permalink's route names its item, and an issue opens in place on the pag
   // The route the desktop app sends a link to, as src/links.ts writes it.
   assert.deepEqual(parseRoute(hashOf({ item: "acme/api#7" })), { name: "item", id: "acme/api#7" });
   assert.equal(routeHash({ name: "item", id: "acme/api#7" }), "#/item/acme%2Fapi%237");
-  assert.equal(pageOf({ name: "item", id: "acme/api#7" }, "later"), "queue");
+  assert.equal(pageOf({ name: "item", id: "acme/api#7" }, "archive"), "queue");
   // A question's link goes straight to its page.
   assert.deepEqual(parseRoute(hashOf({ question: "1c0ffee2" })), { name: "inquiry", id: "1c0ffee2" });
   const q = queue();
-  q.sections.today.push(...Array.from({ length: 12 }, (_, i) => card(`acme/web#${30 + i}`, { kind: "issue" })));
-  assert.deepEqual(whereIs(q, "acme/web#41"), { page: "queue", group: "queue" }, "past the queue's fold");
-  assert.deepEqual(whereIs(q, "acme/api#4"), { page: "later", group: "hidden" });
-  assert.deepEqual(whereIs(q, "acme/api#5"), { page: "later", group: "cleared" });
+  q.inbox.standard.push(...Array.from({ length: 12 }, (_, i) => card(`acme/web#${30 + i}`, { kind: "issue" })));
+  assert.deepEqual(whereIs(q, "acme/web#41"), { page: "queue", group: "standard" }, "past Standard's fold");
+  assert.deepEqual(whereIs(q, "acme/api#3"), { page: "queue", group: "fyi" }, "what was sorted away is the Inbox's FYI");
+  // What the FYI page listed besides: hidden, snoozed and muted, now in the Archive, each its own group.
+  assert.deepEqual(whereIs(q, "acme/api#4"), { page: "archive", group: "hidden" });
+  assert.deepEqual(whereIs(q, "acme/api#5"), { page: "archive", group: "cleared" });
   assert.deepEqual(whereIs(q, "acme/api#6"), { page: "archive", group: "archive" });
   assert.equal(whereIs(q, "acme/api#99"), null);
 });
@@ -369,9 +373,9 @@ test("Settings draws a row only where it does something, and greys quiet hours w
 });
 
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {
-  assert.equal(pageOf({ name: "queue" }, "later"), "queue");
-  assert.equal(pageOf({ name: "inquiry", id: "q1" }, "later"), "queue");
-  assert.equal(pageOf({ name: "review", id: "acme/api#1" }, "later"), "later");
+  assert.equal(pageOf({ name: "queue" }, "archive"), "queue");
+  assert.equal(pageOf({ name: "inquiry", id: "q1" }, "archive"), "queue");
+  assert.equal(pageOf({ name: "review", id: "acme/api#1" }, "archive"), "archive");
   assert.equal(pageOf({ name: "blocked" }, "queue"), "blocked");
   assert.equal(pageOf({ name: "settings", section: "github" }, "queue"), null);
 });
@@ -400,7 +404,7 @@ test("the Inbox counts what's on it, the agents' questions and the sessions that
   q.inquiries = [{ id: "q1" } as QueueView["inquiries"][number]];
   assert.equal(inboxCount(q), 3);
   // A row you acted on and a question you answered leave the count at once.
-  assert.equal(inboxCount(q, new Set([q.sections.now[0]!.id]), new Set(["q1"])), 1);
+  assert.equal(inboxCount(q, new Set([q.inbox.urgent[0]!.id]), new Set(["q1"])), 1);
   // A session that needs you counts; one you marked done, or are taking off, doesn't.
   const session = (id: string, status: QueueView["sessions"][number]["status"]) => ({ id, status }) as QueueView["sessions"][number];
   q.sessions = [session("session:a", "active"), session("session:b", "done")];
@@ -496,32 +500,31 @@ test("auth problems are told apart from other GitHub errors", () => {
   assert.ok(!authProblem("1 search(es) failed: author not found"));
 });
 
-const away = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key !== "queue" && g.key !== "archive");
 const archive = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "archive");
-const main = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => g.key === "queue");
+const archived = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => PAGE_GROUPS.archive.includes(g.key));
+const main = (gs: ReturnType<typeof groupsOf>) => gs.filter((g) => PAGE_GROUPS.queue.includes(g.key));
 
-test("the queue shows one part at a time, each part's Now before its Today, in the desk's order", () => {
+test("the Inbox is its sections as the desk sent them: Urgent, Standard and FYI, each in its order", () => {
   const q = queue();
-  q.sections.now = [
-    card("acme/web#19", { group: "back" }),
-    card("acme/api#21", { group: "review" }),
-    card("acme/web#20", { group: "mine" }),
-  ];
-  q.sections.today = [
-    card("acme/api#23", { group: "review" }),
-    card("acme/api#22", { group: "other" }),
-    card("acme/web#24", { group: "mine" }),
-  ];
+  q.inbox = {
+    urgent: [card("acme/web#19", { section: "urgent", reason: "Handed back" }), card("acme/api#21", { section: "urgent" })],
+    standard: [card("acme/api#23"), card("acme/api#22")],
+    fyi: [card("acme/web#24")],
+  };
+  assert.deepEqual(PAGE_GROUPS.queue, ["urgent", "standard", "fyi"]);
+  const gs = main(groupsOf(q, DEFAULT_OPEN, ""));
   assert.deepEqual(
-    main(groupsOf(q, DEFAULT_OPEN, ""))[0]?.cards.map((c) => [c.id, c.group]),
+    gs.map((g) => [g.label, g.open, g.cards.map((c) => c.id)]),
     [
-      ["acme/web#19", "back"],
-      ["acme/api#21", "review"],
-      ["acme/api#23", "review"],
-      ["acme/api#22", "other"],
-      ["acme/web#20", "mine"],
-      ["acme/web#24", "mine"],
+      ["Urgent", true, ["acme/web#19", "acme/api#21"]],
+      ["Standard", true, ["acme/api#23", "acme/api#22"]],
+      ["FYI", true, ["acme/web#24"]],
     ],
+  );
+  // ⌘[ and ⌘] walk them in that order.
+  assert.deepEqual(
+    navigable(gs, new Set()).map((c) => c.id),
+    ["acme/web#19", "acme/api#21", "acme/api#23", "acme/api#22", "acme/web#24"],
   );
 });
 
@@ -560,20 +563,21 @@ test("Blocked is one group from sections.blocked, open, in the desk's order; act
   assert.ok(!navigable(main(groupsOf(q, DEFAULT_OPEN, "")), new Set()).some((c) => c.bucket === "blocked"), "not on the main page");
 });
 
-test("the queue, Later and the Archive are pages of their own: Later's own group opens with it, the rest when asked; filtering opens matches", () => {
+test("the Inbox and the Archive are pages of their own: the Inbox's sections open with it, the Archive's own group too, the rest when asked; filtering opens matches", () => {
   const groups = groupsOf(queue(), DEFAULT_OPEN, "");
   assert.deepEqual(
     groups.map((g) => [g.key, g.open, g.total]),
     [
-      ["queue", true, 2],
-      ["later", true, 1],
-      ["fyi", false, 0],
-      ["hidden", false, 1],
-      ["cleared", false, 1],
+      ["urgent", true, 1],
+      ["standard", true, 1],
+      ["fyi", true, 1],
       ["archive", true, 1],
+      ["cleared", false, 1],
+      ["hidden", false, 1],
       ["blocked", true, 0],
     ],
   );
+  assert.deepEqual(PAGE_GROUPS.archive, ["archive", "cleared", "hidden"]);
   assert.equal(groups.find((g) => g.key === "archive")?.variant, "archive");
   assert.deepEqual(
     navigable(archive(groups), new Set()).map((c) => c.id),
@@ -582,24 +586,20 @@ test("the queue, Later and the Archive are pages of their own: Later's own group
   );
   assert.deepEqual(
     navigable(main(groups), new Set()).map((c) => c.id),
-    ["acme/api#1", "acme/web#2"],
+    ["acme/api#1", "acme/web#2", "acme/api#3"],
   );
   assert.deepEqual(
     navigable(main(groups), new Set(["acme/api#1"])).map((c) => c.id),
-    ["acme/web#2"],
+    ["acme/web#2", "acme/api#3"],
   );
   assert.deepEqual(
-    navigable(away(groups), new Set()).map((c) => c.id),
-    ["acme/api#3"],
-  );
-  assert.deepEqual(
-    navigable(away(groupsOf(queue(), { ...DEFAULT_OPEN, cleared: true }, "")), new Set()).map((c) => c.id),
-    ["acme/api#3", "acme/api#5"],
+    navigable(archived(groupsOf(queue(), { ...DEFAULT_OPEN, cleared: true }, "")), new Set()).map((c) => c.id),
+    ["acme/api#6", "acme/api#5"],
   );
 
-  const filtered = groupsOf(queue(), { ...DEFAULT_OPEN, later: false }, "api#5");
+  const filtered = groupsOf(queue(), DEFAULT_OPEN, "api#5");
   assert.deepEqual(
-    navigable(away(filtered), new Set()).map((c) => c.id),
+    navigable(archived(filtered), new Set()).map((c) => c.id),
     ["acme/api#5"],
   );
   assert.deepEqual(navigable(main(filtered), new Set()), []);
@@ -613,27 +613,29 @@ test("the queue, Later and the Archive are pages of their own: Later's own group
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
 });
 
-test("the queue is now's items then today's in the desk's order, and folds after queue.cards: j/k stop on its line", () => {
-  const look = { state: "ready" as const, verdict: "look" as const };
-  const today = ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"].map((id) => card(id, { bucket: "today", author: id }));
-  const now = [card("acme/api#1", { preflight: { state: "ready", verdict: "skip" } }), card("acme/api#2", { preflight: look })];
-  const v = { ...queue(), sections: { ...queue().sections, now, today }, cards: 3 };
-  const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "queue")!;
+test("Standard folds after queue.cards, Urgent never does: j/k stop on its line", () => {
+  const standard = ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13", "acme/web#14", "acme/web#15"].map((id) =>
+    card(id, { bucket: "today", author: id }),
+  );
+  const urgent = ["acme/api#1", "acme/api#2", "acme/api#7", "acme/api#8", "acme/api#9"].map((id) => card(id));
+  const v = { ...queue(), inbox: { urgent, standard, fyi: [] }, cards: 3 };
+  const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "standard")!;
   const folded = groupsOf(v, DEFAULT_OPEN, "");
+  assert.equal(folded.find((x) => x.key === "urgent")!.fold, 0);
   assert.deepEqual(
     [t(folded).cards.map((c) => c.id), t(folded).fold, t(folded).total],
-    [["acme/api#1", "acme/api#2", "acme/web#10"], 3, 6],
+    [["acme/web#10", "acme/web#11", "acme/web#12"], 3, 6],
     "as the desk sent them: it orders them, the page only shows them",
   );
-  assert.deepEqual(stops(main(folded), new Set()), ["acme/api#1", "acme/api#2", "acme/web#10", foldOf("queue")]);
+  assert.deepEqual(stops(main(folded), new Set()).slice(5), ["acme/web#10", "acme/web#11", "acme/web#12", foldOf("standard")]);
 
-  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { queue: true })).cards.length, 6);
-  assert.ok(!stops(main(groupsOf(v, DEFAULT_OPEN, "", { queue: true })), new Set()).includes(foldOf("queue")));
+  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { standard: true })).cards.length, 6);
+  assert.ok(!stops(main(groupsOf(v, DEFAULT_OPEN, "", { standard: true })), new Set()).includes(foldOf("standard")));
   assert.equal(t(groupsOf({ ...v, cards: 0 }, DEFAULT_OPEN, "")).fold, 0);
   assert.equal(t(groupsOf({ ...v, cards: 5 }, DEFAULT_OPEN, "")).fold, 0, "a fold never hides just one");
   assert.deepEqual(
     t(groupsOf(v, DEFAULT_OPEN, "web#1")).cards.map((c) => c.id),
-    ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13"],
+    ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13", "acme/web#14", "acme/web#15"],
     "every match shows while filtering",
   );
 });
@@ -914,6 +916,7 @@ test("threads show on the lines they're on; outdated ones, other files' and PR c
 test("removeCard drops an item from every active group but keeps cleared and resolved", () => {
   const v = removeCard(removeCard(queue(), "acme/api#1"), "acme/api#4");
   assert.equal(v.sections.now.length, 0);
+  assert.equal(v.inbox.urgent.length, 0);
   assert.equal(v.hidden.length, 0);
   assert.equal(v.cleared.length, 1);
   assert.equal(removeCard(queue(), "acme/api#6").resolved.length, 1);
@@ -1174,7 +1177,7 @@ test("a diff's height is held at its context, added and removed lines until Pier
   assert.equal(diffRows([]), 0);
 });
 
-test("the Archive is what you did that took it off your desk and what resolved, newest first; snoozed and muted stay in Later", () => {
+test("the Archive is what you did that took it off your desk and what resolved, newest first; snoozed and muted are its own group there", () => {
   const v = queue();
   v.cleared = [card("acme/api#7", { status: "done", done_at: "2026-11-04T10:00:00Z" }), card("acme/api#8", { status: "snoozed" })];
   v.resolved = [card("acme/api#6", { resolved: "you approved", resolved_at: "2026-11-04T11:00:00Z" })];
@@ -1187,6 +1190,7 @@ test("the Archive is what you did that took it off your desk and what resolved, 
     groups.find((g) => g.key === "cleared")?.cards.map((c) => c.id),
     ["acme/api#8"],
   );
+  assert.ok(PAGE_GROUPS.archive.includes("cleared"), "the FYI page that listed them is gone");
 });
 
 test("a lapsed login that pauses the AI reviews and fails the sorting is one pause, its next try the sooner", () => {

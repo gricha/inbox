@@ -117,7 +117,7 @@ const DENY = [
     "secret",
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations"]),
+  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations", "criteria"]),
 ];
 // The secrets file is the desk's: no tool of a run reads it. A rule's absolute path starts with //.
 const secretsDeny = (home: string) => `Read(/${secretsPath(home).replaceAll(path.sep, "/").replace(/^\/?/, "/")})`;

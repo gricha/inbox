@@ -19,6 +19,9 @@ import type {
   Automation,
   AutomationBody,
   AutomationView,
+  CriteriaView,
+  Criterion,
+  CriterionBody,
   Inquiry,
   InquiryView,
   ItemDetail,
@@ -197,6 +200,12 @@ export const api = {
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),
   openSession: (id: string) => call<{ ok: true; url: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/open`),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
+  criteria: () => call<CriteriaView>("GET", "/api/criteria"),
+  setCriterion: (id: string, b: CriterionBody) =>
+    call<{ ok: true; criterion: Criterion }>("PUT", `/api/criteria/${encodeURIComponent(id)}`, b),
+  switchCriterion: (id: string, on: boolean) =>
+    call<{ ok: true; criterion: Criterion }>("PUT", `/api/criteria/${encodeURIComponent(id)}/on`, { on }),
+  deleteCriterion: (id: string) => call<{ ok: true }>("DELETE", `/api/criteria/${encodeURIComponent(id)}`),
   setAutomation: (id: string, b: AutomationBody) =>
     call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}`, b),
   switchAutomation: (id: string, on: boolean) =>

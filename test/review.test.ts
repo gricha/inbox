@@ -1472,7 +1472,10 @@ function fakeDeps(chunks?: unknown) {
 async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Record<string, unknown>; chunks?: unknown } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-review-"));
   // No judge: these tests are about the AI review (test/judge.test.ts runs it).
-  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, "review.at_once": 2, ...opts.settings }));
+  fs.writeFileSync(
+    path.join(home, "settings.json"),
+    JSON.stringify({ "policy.judge": false, "review.at_once": 2, "agent.score": false, ...opts.settings }),
+  );
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()];
     if (q.includes("review-requested:@me") && !q.includes("-review-requested"))

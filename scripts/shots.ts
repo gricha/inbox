@@ -216,10 +216,10 @@ const reviewAs = (change: (v: ReviewView) => void) => async (page: Page) => {
   await page.reload(); // nothing fetched before this stands in for it
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// The queue folds after its first ten: open it for a row that sits behind the line.
+// Standard and FYI fold after their first ten: open both for a row that sits behind a line.
 const unfold = async (page: Page) => {
-  const fold = page.locator(".queue .fold");
-  if (await fold.isVisible()) await fold.click();
+  const folds = page.locator(".queue .fold");
+  for (let n = await folds.count(); n > 0; n--) await folds.first().click();
   await page.waitForTimeout(200);
 };
 // The fold is per window: a reload folds the queue again for the shots after this one.
@@ -578,7 +578,7 @@ const headSays = (page: Page) =>
   );
 // In Settings: the page head's words, then the sidebar's items, "|" for its hairline and the one it marks current in brackets:
 // "Agent: Inbox Inbox and notifications [Agent] Your automations This device | GitHub"; null outside Settings.
-const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "This device"];
+const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "Urgency", "This device"];
 const settingsSays = (page: Page) =>
   page.evaluate<string | null>(`(() => {
     const nav = document.querySelector('.side-nav[aria-label="Settings"]');
@@ -664,28 +664,34 @@ const SHOTS: Shot[] = [
       const head = await headSays(page);
       if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
       if (await page.locator(".side-sync").count()) failures.push("queue: the sidebar has a sync line while the sync is fine");
-      // One list: no heading over any of it, an agent's question a row like the rest, a hand-back saying so on its own row
-      // at every width, and one fold line that says just how many.
+      // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
+      // its own row at every width; each row saying why it's there; a fold line that says just how many.
       const list = await page.evaluate<{
-        heads: number;
+        heads: string[];
         tables: number;
         first: (string | null)[];
         back: string | null;
         fold: string | null;
+        reasons: number;
+        rows: number;
       }>(`(() => {
         const text = (el, sel) => el?.querySelector(sel)?.textContent.trim() ?? null;
         const first = document.querySelector(".queue .line");
         const back = document.querySelector('.queue .line[data-id="oss/tinyhttp#205"] .line-stage');
+        const cards = [...document.querySelectorAll(".queue .line[data-id]:not(.inq, .session)")];
         return {
-          heads: document.querySelectorAll(".queue .group-head").length,
+          heads: [...document.querySelectorAll(".queue .group-head span:first-child")].map((h) => h.textContent),
           tables: document.querySelectorAll(".queue .lines").length,
           first: [text(first, ".line-kind"), text(first, ".line-by"), text(first, ".line-cta")],
           back: back?.getClientRects().length ? back.textContent : null,
           fold: text(document, ".queue .fold"),
+          reasons: cards.filter((c) => c.querySelector(".line-note")?.textContent.trim()).length,
+          rows: cards.length,
         };
       })()`);
-      if (list.heads || list.tables !== 1)
-        failures.push(`queue: the Inbox is ${list.tables} tables under ${list.heads} headings, not one list`);
+      if (list.heads.join(" ") !== "Urgent Standard FYI" || list.tables !== 3)
+        failures.push(`queue: the Inbox is ${list.tables} tables under ${JSON.stringify(list.heads)}`);
+      if (list.reasons !== list.rows) failures.push(`queue: ${list.rows - list.reasons} of ${list.rows} rows don't say why they're there`);
       if (list.first.join(" · ") !== "Question · by your agent · Answer")
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
       if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
@@ -930,6 +936,7 @@ const SHOTS: Shot[] = [
       await queueAs((q) => {
         q.sections.now = [];
         q.sections.today = [];
+        q.inbox = { urgent: [], standard: [], fyi: [] };
         q.inquiries = [];
         q.sessions = [];
       })(page);
@@ -965,6 +972,7 @@ const SHOTS: Shot[] = [
       await queueAs((q) => {
         q.sections.now = [];
         q.sections.today = [];
+        q.inbox = { urgent: [], standard: [], fyi: [] };
         q.inquiries = [];
         q.sessions = [];
         q.reviewing = 1;
@@ -1023,8 +1031,9 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await queueAs((q) => {
         const [pinned] = q.sections.blocked.splice(0, 1);
-        const at1294 = q.sections.today.findIndex((c) => c.id === "acme/api#1294");
-        if (pinned) q.sections.today.splice(at1294 + 1, 0, { ...pinned, group: "mine", pinned: true });
+        const list = Object.values(q.inbox).find((cs) => cs.some((c) => c.id === "acme/api#1294")) ?? q.inbox.standard;
+        const at1294 = list.findIndex((c) => c.id === "acme/api#1294");
+        if (pinned) list.splice(at1294 + 1, 0, { ...pinned, group: "mine", pinned: true, reason: "kept up by your pin" });
       })(page);
       await unfold(page);
       await page.evaluate(`document.querySelector('.queue [data-id="acme/billing#2298"]').scrollIntoView({ block: "center" })`);
@@ -1372,7 +1381,7 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "xl"],
     go: async (page) => {
       await queueAs((q) => {
-        for (const c of [...q.sections.now, ...q.sections.today]) if (c.id === "acme/api#4127") c.title = LONG;
+        for (const c of Object.values(q.inbox).flat()) if (c.id === "acme/api#4127") c.title = LONG;
       })(page);
       await at("#/")(page);
       // How many lines a row's title takes, and whether it's cut short.
@@ -1694,7 +1703,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await fresh(page);
       await queueAs((q) => {
-        for (const c of [...q.sections.now, ...q.sections.today])
+        for (const c of Object.values(q.inbox).flat())
           if (c.id === "acme/api#3051")
             Object.assign(c, { cta: "reviewers", handed_back: true, group: "back", why: "nobody's asked to review it: add reviewers" });
       })(page);
@@ -2211,33 +2220,15 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
   },
-  // FYI: what Claude and the rules sorted away, on its own page.
+  // The FYI page's old link opens the Inbox, whose FYI section is what that page's Later and FYI were.
   {
     name: "later",
     go: async (page) => {
       await at("#/later")(page);
       const on = await sideOn(page);
-      if (on !== "FYI") failures.push(`later: the sidebar marks ${JSON.stringify(on)}`);
-      const head = await headSays(page);
-      if (head !== "Filter") failures.push(`later: the page head reads ${JSON.stringify(head)}, not the filter`);
-    },
-  },
-  {
-    name: "later-empty",
-    go: async (page) => {
-      await queueAs((q) => {
-        q.sections.later = [];
-        q.sections.fyi = [];
-        q.hidden = [];
-        q.cleared = [];
-        q.resolved = [];
-      })(page);
-      await at("#/later")(page);
-    },
-    after: async (page) => {
-      await unroute(page);
-      await page.reload();
-      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      if (on !== "Inbox") failures.push(`later: the sidebar marks ${JSON.stringify(on)}`);
+      await page.locator(".queue .g-fyi").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
     },
   },
   // Merging: what each waits on and the coordinator's latest note, one merged; your agent's line has its buttons.
@@ -3362,6 +3353,31 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Settings → Urgency: your criteria (the agent's, on), then GitHub's under their heading, each with its switch; who last
+    // scored the Inbox, quietly under the sheets.
+    name: "settings-criteria",
+    go: async (page) => {
+      await at("#/settings/criteria")(page);
+      const says = await settingsSays(page);
+      if (says !== onPart("Urgency")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
+      const rows = await page.locator("#s-criteria .cr-row").count();
+      if (rows !== 6) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's five`);
+      if ((await page.locator("#s-criteria .switch:checked").count()) !== rows) failures.push("settings-criteria: a criterion is off");
+    },
+  },
+  {
+    // A criterion's editor, under the sheet, open on the agent's.
+    name: "settings-criteria-edit",
+    go: async (page) => {
+      await at("#/settings/criteria")(page);
+      await page.locator("#s-criteria .cr-name").first().click();
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator("#s-criteria .au-editor").getByRole("button", { name: "Cancel" }).click();
+    },
+  },
+  {
     // Settings' Automations tab, on its own: a row each, its name, when it runs and its last run, Run now and its switch on the
     // sheet's right edge in line with the settings tab's; the agent's draft has a tinted Review instead and no switch; one
     // that runs on events says what it reacts to, and each says what its last run did by verb; New automation last.
@@ -4113,10 +4129,10 @@ const SHOTS: Shot[] = [
     after: pauseAi(false),
   },
   {
-    // Snoozed or muted, under Later, with until when: its heading opens it.
+    // Snoozed or muted, in the Archive, with until when: its heading opens it.
     name: "cleared",
     go: async (page) => {
-      await at("#/later")(page);
+      await at("#/archive")(page);
       await page.locator(".g-cleared .group-toggle").click();
       await page.waitForTimeout(300);
       await page.locator(".g-cleared").scrollIntoViewIfNeeded();
@@ -4182,13 +4198,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The sidebar after use: FYI opened from it, then a Settings page. Only the page you're on gets the pill.
+    // The sidebar after use: Blocked opened from it, then a Settings page. Only the page you're on gets the pill.
     name: "sidebar-used",
     go: async (page) => {
       await at("#/")(page);
       const side = await sidePages(page);
-      if (side !== "Inbox Blocked FYI | Merging Archive") failures.push(`sidebar-used: the sidebar reads ${side}`);
-      await page.locator(".side-item", { hasText: "FYI" }).click();
+      if (side !== "Inbox Blocked | Merging Archive") failures.push(`sidebar-used: the sidebar reads ${side}`);
+      await page.locator(".side-item", { hasText: "Blocked" }).click();
       await at("#/settings/notify")(page);
     },
   },
@@ -4333,7 +4349,7 @@ const SHOTS: Shot[] = [
   },
   // The More menu open in a review.
   { name: "more-menu", go: review("acme/worker#875", [MORE]) },
-  // The platform's keys: ⌘1 to ⌘5 are the sidebar's pages, top to bottom; ⌘] and ⌘[ open the item after and before the
+  // The platform's keys: ⌘1 to ⌘4 are the sidebar's pages, top to bottom; ⌘] and ⌘[ open the item after and before the
   // open one in its list (the questions, the sessions, then the rows), each as a click on its row would.
   {
     name: "keys",
@@ -4342,13 +4358,12 @@ const SHOTS: Shot[] = [
       const hash = () => page.evaluate<string>("location.hash");
       await at("#/")(page);
       const pages: string[] = [];
-      for (const n of [2, 3, 4, 5, 1]) {
+      for (const n of [2, 3, 4, 1]) {
         await page.keyboard.press(`${mod}+Digit${n}`);
         await page.waitForTimeout(150);
         pages.push(await hash());
       }
-      if (pages.join(" ") !== "#/blocked #/later #/inflight #/archive #/")
-        failures.push(`keys: ${mod}+2,3,4,5,1 went to ${JSON.stringify(pages)}`);
+      if (pages.join(" ") !== "#/blocked #/inflight #/archive #/") failures.push(`keys: ${mod}+2,3,4,1 went to ${JSON.stringify(pages)}`);
       // From the Inbox with nothing open: the first item, the next two, then back one.
       const ids = await page.evaluate<string[]>(
         `[...document.querySelectorAll(".queue .line")].slice(0, 4).map((l) => l.dataset.id ?? "q:" + l.querySelector(".row-main")?.textContent?.slice(0, 20))`,

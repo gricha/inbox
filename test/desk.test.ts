@@ -7,7 +7,7 @@ import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
 import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
-import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
@@ -519,7 +519,7 @@ test("settings: saving changes the live config; bad values write nothing", async
   await run(t.desk.sync());
   const r = runSync(t.desk.putSettings({ set: { "handoff.prompt": "Look at {item.url} please", "github.poll_seconds": 120 } }));
   assert.equal(r.ok, true);
-  assert.deepEqual(r.settings.overridden.sort(), ["github.poll_seconds", "handoff.prompt"]);
+  assert.deepEqual(r.settings.overridden.sort(), [...Object.keys(UNSCORED), "github.poll_seconds", "handoff.prompt"]);
   assert.equal(t.desk.loaded!.config.poll_seconds, 120);
   assert.equal(runSync(t.desk.item("api#1")).handoff_prompt, "Look at https://github.com/acme/api/pull/1 please");
   const bad = runSync(t.desk.putSettings({ set: { "github.poll_seconds": 5, "notify.enabled": false } }));
@@ -528,7 +528,7 @@ test("settings: saving changes the live config; bad values write nothing", async
   assert.equal(t.desk.settings["notify.enabled"], true);
   // Setting a default value or resetting drops the key from settings.json.
   runSync(t.desk.putSettings({ set: { "github.poll_seconds": 90 }, reset: ["handoff.prompt"] }));
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), {});
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), UNSCORED);
   assert.equal(t.desk.getSettings().github.login, "me");
   t.cleanup();
 });
@@ -539,7 +539,11 @@ test("a removed setting is ignored: no settings problem, and a save keeps it for
   assert.deepEqual(t.desk.getSettings().errors, []);
   assert.equal(t.desk.settings["notify.enabled"], false);
   assert.equal(runSync(t.desk.putSettings({ set: { "github.poll_seconds": 120 } })).ok, true);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), { ...old, "github.poll_seconds": 120 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), {
+    ...UNSCORED,
+    ...old,
+    "github.poll_seconds": 120,
+  });
   t.cleanup();
 });
 

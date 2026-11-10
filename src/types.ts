@@ -180,6 +180,7 @@ export interface Signals {
     last_action_hours: number; // your latest comment, review, or head commit
     new_activity: boolean; // someone else commented, reviewed or pushed after your latest action
     owes_reply: boolean; // your PR has an open thread or a comment where someone other than you (bots aside) spoke last, threads your push outdated after their last word aside; false on others' PRs
+    handed_back: boolean; // your agent handed it back to you (Merging's hand-back) and you haven't acted on it since
   };
   author: {
     login: string;
@@ -534,6 +535,9 @@ export interface Card {
   needs?: string[]; // a blocked PR's open PRs it needs merged first directly, as repo#number (pr.blocked_by)
   depth?: number; // on Blocked: how deep in its chain the row hangs, 0 for a chain's first rows
   blocks?: string[]; // open PRs that need this one merged first, directly or not, as repo#number
+  section?: InboxSection; // on the Inbox: which of its sections it's in (QueueView.inbox)
+  score?: number; // on the Inbox: 0 to 10, a model's or the desk's own (src/urgency.ts); its section's order
+  reason?: string; // on the Inbox: why it's there, quietly on its row
 }
 
 // ---------------------------------------------------------------------------
@@ -658,7 +662,15 @@ export interface QueueView {
   cards: number; // as in FocusView
   paused: Paused | null;
   stacks: Record<string, Stack>; // by id: each stack a card here carries (current: the card sections list it by, else its first card)
+  // The Inbox, by section, each by score then the desk's order: what's in now, today, later and fyi (sections), as
+  // src/urgency.ts places it. Agents' questions and the sessions that need you lead Urgent.
+  inbox: Record<InboxSection, Card[]>;
 }
+
+// The Inbox's sections: Urgent (an urgent criterion said yes, a hand-back, or a score at queue.urgent_at or above), FYI
+// (what the rules or an automation sorted to fyi, or a score at queue.fyi_at or below) and Standard, the rest.
+export type InboxSection = "urgent" | "standard" | "fyi";
+export const INBOX_SECTIONS: readonly InboxSection[] = ["urgent", "standard", "fyi"];
 
 // One changed file, from GitHub's pulls/{n}/files.
 export interface ReviewFile {
@@ -1192,6 +1204,35 @@ export interface AutomationItem {
   // (error says which); refused: the automation may not do that (its `can`); failed: the desk couldn't (error says why)
   outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed";
   error?: string;
+}
+
+// A criterion (Settings → Urgency): a yes-or-no about an item that orders the Inbox and never acts on it. `when` is free (the
+// rules' language); `ask` is a question a model answers, only of the items whose `when` passes. A yes from an `urgent` one
+// puts the item in Urgent whatever its score. An agent's is saved on: it only orders.
+export interface Criterion {
+  id: string; // a slug: "service-accounts"
+  name: string;
+  when?: string;
+  ask?: string;
+  urgent: boolean;
+  on: boolean;
+  by: "you" | "an agent";
+  updated_at: string;
+  plugin?: string; // one a plugin comes with: its plugin's id; you only switch it
+  help?: string; // a plugin's: what it says yes to, in one plain line
+}
+
+// What a plugin comes with: a criterion in its own file, as BuiltInAutomation is.
+export type BuiltInCriterion = Pick<Criterion, "name" | "when" | "ask" | "urgent"> & { id: string; help: string; on: boolean };
+
+// PUT /api/criteria/:id
+export type CriterionBody = Pick<Criterion, "name" | "when" | "ask"> & { urgent?: boolean; on?: boolean };
+
+// GET /api/criteria
+export interface CriteriaView {
+  criteria: (Criterion & { yes: number; waiting: number })[]; // yes: Inbox items it says yes to now; waiting: its questions not answered yet
+  held: { why: string; until: string } | null; // its model can't answer now: questions wait, and the Inbox uses what it has
+  scored: { by: string; at: string } | null; // the latest model score: who gave it, when
 }
 
 // PUT /api/automations/:id: the whole automation; what's left out is its default.

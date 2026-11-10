@@ -337,7 +337,11 @@ test("a secret in settings.json moves to secrets.json once, and secrets.json is 
   c.after(t.cleanup);
   const settings = path.join(t.home, "settings.json");
   const secrets = path.join(t.home, "secrets.json");
-  assert.deepEqual(JSON.parse(fs.readFileSync(settings, "utf8")), { "queue.cards": 12 }, "moved out of settings.json");
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(settings, "utf8")),
+    { "agent.score": false, "queue.cards": 12 },
+    "moved out of settings.json",
+  );
   assert.deepEqual(JSON.parse(fs.readFileSync(secrets, "utf8")), { "agent.decision_key": KEY });
   if (process.platform !== "win32") assert.equal(fs.statSync(secrets).mode & 0o777, 0o600);
   assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.cards"]], [KEY, 12]);

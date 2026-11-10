@@ -683,6 +683,42 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, run, { log });
   });
+  // Criteria (src/urgency.ts): they only order the Inbox and never act on an item, so any local client may list, save or delete
+  // one, and an agent's is on as it's saved; switching one, a plugin's included, is the owner's, in the window.
+  app.get("/api/criteria", (c) => total(c, () => desk.urgency.view()));
+  app.put("/api/criteria/:id", (c) => {
+    const set = Effect.gen(function* () {
+      yield* up;
+      const b = yield* bodyOf(c);
+      if (
+        typeof b.name !== "string" ||
+        (b.when !== undefined && typeof b.when !== "string") ||
+        (b.ask !== undefined && typeof b.ask !== "string") ||
+        (b.urgent !== undefined && typeof b.urgent !== "boolean") ||
+        (b.on !== undefined && typeof b.on !== "boolean")
+      )
+        return yield* new BadRequest({ message: "need { name, when?, ask?, urgent?, on? }" });
+      const { name, when, ask, urgent, on } = b;
+      const criterion = yield* desk.urgency.set(
+        c.req.param("id"),
+        { name, when, ask, urgent, on: fromDesk(c) ? on : undefined },
+        fromDesk(c),
+      );
+      return { ok: true, criterion };
+    });
+    return respond(c, set, { log });
+  });
+  app.put("/api/criteria/:id/on", (c) => {
+    const turn = Effect.gen(function* () {
+      yield* up;
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Urgency" });
+      const { on } = yield* bodyOf(c);
+      if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
+      return { ok: true, criterion: yield* desk.urgency.switch(c.req.param("id"), on) };
+    });
+    return respond(c, turn, { log });
+  });
+  app.delete("/api/criteria/:id", (c) => respond(c, Effect.as(desk.urgency.remove(c.req.param("id")), { ok: true }), { log }));
   app.post("/api/undo", (c) => {
     const undo = Effect.gen(function* () {
       yield* up;

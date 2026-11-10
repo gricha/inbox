@@ -26,6 +26,7 @@ import type {
 import { api, runUi } from "../api.ts";
 import { ago, aiName, cls, githubTip, MAC, orgsLine } from "../format.ts";
 import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
+import { Criteria } from "./Criteria.tsx";
 import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
@@ -1134,7 +1135,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div className="s-page" hidden={inView || section === "automations"}>
+      <div className="s-page" hidden={inView || section === "automations" || section === "criteria"}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
             <div className="lines s-sheet">
@@ -1226,6 +1227,11 @@ export function Settings({
             <AutomationRows au={au} now={now} />
           </div>
           <NewAutomation au={au} model={decisionModel} />
+        </section>
+      </div>
+      <div className="s-page" hidden={section !== "criteria"}>
+        <section id="s-criteria" className="s-part" aria-label="Urgency">
+          <Criteria active={active && section === "criteria"} refresh={loads} now={now} flash={flash} />
         </section>
       </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">

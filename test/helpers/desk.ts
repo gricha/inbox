@@ -29,6 +29,9 @@ export const myPr = (n: number, o: Partial<Item> = {}) =>
     ...o,
   });
 
+// The Inbox's model score is off, as the owner may turn it: few tests are about it, and a fake agent would answer its calls.
+export const UNSCORED = { "agent.score": false };
+
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
 // `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer).
 // What GitHub comes with is switched off, as the owner may: few tests are about it, and `builtIns` keeps it as it comes.
@@ -37,7 +40,8 @@ export async function setup(
   extra: { settings?: Record<string, unknown>; desk?: Partial<DeskOptions>; builtIns?: true } = {},
 ) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
-  if (extra.settings) fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify(extra.settings));
+  if (extra.settings || !extra.builtIns)
+    fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ ...UNSCORED, ...extra.settings }));
   const gh: FakeGitHub = new FakeGitHub(items, (q) => {
     const all = [...gh.items.values()].filter((i) => i.state === "open");
     if (q.includes("review-requested:@me") && !q.includes("-review-requested"))

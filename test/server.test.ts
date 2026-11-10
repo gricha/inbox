@@ -250,6 +250,7 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_automations",
       "desk_brief",
       "desk_config",
+      "desk_criteria",
       "desk_events",
       "desk_hand_back",
       "desk_inquire",

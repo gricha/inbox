@@ -670,7 +670,7 @@ async function setup(
   const home = o.home ?? fs.mkdtempSync(path.join(os.tmpdir(), "desk-judge-"));
   const fake = fakeClaude();
   process.env.DESK_CLAUDE = fake.bin;
-  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ ...o.settings }));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "agent.score": false, ...o.settings }));
   if (o.policy !== undefined) fs.writeFileSync(path.join(home, "policy.md"), o.policy);
   if (o.config !== undefined) fs.writeFileSync(path.join(home, "config.toml"), o.config);
   const gh: FakeGitHub = new FakeGitHub(items, (q) =>

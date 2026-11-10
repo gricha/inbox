@@ -1,10 +1,9 @@
 import { MOD } from "../format.ts";
 import { partName, routeHash, settingsBack, type ListPage, type Route } from "../view.ts";
 
-const BACK = { queue: "the Inbox", later: "FYI", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
+const BACK = { queue: "the Inbox", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
 export const PAGE_NAME: Record<ListPage, string> = {
   queue: "Inbox",
-  later: "FYI",
   blocked: "Blocked",
   inflight: "Merging",
   archive: "Archive",

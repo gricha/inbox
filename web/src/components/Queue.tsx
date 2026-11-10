@@ -1,14 +1,14 @@
 import type { Card, Inquiry, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
-import { foldOf, treeGuides, type Group, type GroupKey } from "../view.ts";
+import { foldOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
-// The main page: only what needs you, one line each on one table with no headings, in the desk's order; agents' questions
-// first, since one waits on each, then the sessions that need you.
+// The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
+// that need you first, since one waits on each), Standard and FYI. Each row says why it's there, quietly.
 export function Queue({
   view,
   overview,
@@ -21,6 +21,7 @@ export function Queue({
   filter,
   unfold,
   selectFold,
+  toggle,
 }: {
   view: QueueView | null;
   overview: Overview | null;
@@ -33,19 +34,36 @@ export function Queue({
   filter: string;
   unfold: (k: GroupKey, keyboard: boolean) => void;
   selectFold: (k: GroupKey) => void;
+  toggle: (k: GroupKey) => void;
 }) {
   if (!view) {
     const first = !!overview && !overview.synced_at;
     return (
       <div className="queue">
-        {first ? <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p> : <SkRows />}
+        {first ? (
+          <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p>
+        ) : (
+          // Under a heading's placeholder, so the first section's rows land where these were.
+          <section className="group">
+            <h2 className="group-head" aria-hidden="true">
+              <span className="group-toggle">
+                <span className="sk sk-head" />
+                {"\u200b"}
+              </span>
+            </h2>
+            <SkRows />
+          </section>
+        )}
       </div>
     );
   }
-  const g = groups.find((x) => x.key === "queue");
-  const cards = g?.cards ?? [];
+  const shown = ses ? (sessions ?? []) : [];
+  const parts = groups
+    .filter((g) => PAGE_GROUPS.queue.includes(g.key))
+    .map((g) => ({ g, lead: g.key === "urgent" ? inquiries.length + shown.length : 0 }))
+    .filter(({ g, lead }) => lead > 0 || g.cards.length > 0 || g.fold > 0);
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
-  const any = inquiries.length > 0 || !!sessions?.length || cards.some((c) => !ctx.leaving.has(c.id));
+  const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
   return (
     <div className="queue">
       {view.paused && (
@@ -54,36 +72,55 @@ export function Queue({
         </p>
       )}
       {any ? (
-        <div className="lines">
-          {inquiries.map((q) => (
-            <InquiryRow key={q.id} q={q} ctx={inq} />
-          ))}
-          {ses && sessions?.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
-          {cards.map((c) => (
-            <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
-          ))}
-        </div>
+        parts.map(({ g, lead }) => (
+          <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
+            <h2 id={`h-${g.key}`} className="group-head">
+              <button
+                type="button"
+                className="group-toggle"
+                aria-expanded={g.open}
+                disabled={g.forced}
+                title={g.forced ? "Opened by the filter" : g.open ? "Close" : "Open"}
+                onClick={() => {
+                  toggle(g.key);
+                }}
+              >
+                <span>{g.label}</span>
+                <span className="count">{g.total + lead}</span>
+              </button>
+            </h2>
+            {g.open && (
+              <div className="lines">
+                {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
+                {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
+                {g.cards.map((c) => (
+                  <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
+                ))}
+              </div>
+            )}
+            {g.open && g.fold > 0 && (
+              <button
+                type="button"
+                className={cls("fold", ctx.selected === foldOf(g.key) && "sel")}
+                data-id={foldOf(g.key)}
+                // Focus on mousedown would move the selection before the click lands.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                }}
+                onClick={(e) => {
+                  unfold(g.key, e.detail === 0); // 0: Enter or Space, not a click
+                }}
+                onFocus={() => {
+                  selectFold(g.key);
+                }}
+              >
+                {g.fold} more
+              </button>
+            )}
+          </section>
+        ))
       ) : (
         <p className="queue-empty">{filter.trim() ? "No matches." : "Nothing needs you right now."}</p>
-      )}
-      {g && g.fold > 0 && (
-        <button
-          type="button"
-          className={cls("fold", ctx.selected === foldOf(g.key) && "sel")}
-          data-id={foldOf(g.key)}
-          // Focus on mousedown would move the selection before the click lands.
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
-          onClick={(e) => {
-            unfold(g.key, e.detail === 0); // 0: Enter or Space, not a click
-          }}
-          onFocus={() => {
-            selectFold(g.key);
-          }}
-        >
-          {g.fold} more
-        </button>
       )}
       {view.reviewing > 0 && (
         <p className="queue-reviewing">
@@ -96,8 +133,7 @@ export function Queue({
   );
 }
 
-// FYI (`later`): what Claude and the rules sorted away, and what you snoozed or muted. Blocked and the Archive are drawn by it
-// too. Each group opens on its heading.
+// Blocked and the Archive (what's done, snoozed, muted or hidden by rules): their groups, each opening on its heading.
 export function Later({
   view,
   groups,

@@ -130,6 +130,11 @@ export const FIELDS: FieldDoc[] = [
     type: "boolean",
     doc: "your PR has an open thread or a comment where someone other than you (bots aside) spoke last, threads your push outdated after their last word aside: its row's Reply; false on others' PRs",
   },
+  {
+    path: "me.handed_back",
+    type: "boolean",
+    doc: "your agent handed your PR back to you (Merging's hand-back) and you haven't acted on it since",
+  },
   { path: "author.login", type: "string", doc: "author login" },
   { path: "author.bot", type: "boolean", doc: "author is a bot (GitHub App or listed in signals.bots)" },
   {
@@ -350,6 +355,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       last_action_hours: hours(lastAction),
       new_activity: Boolean(lastAction && others && others > lastAction),
       owes_reply: yours && item.kind === "pr" && owesReply(item, ctx.me),
+      handed_back: false, // the desk's own fact: Desk.compute() sets it
     },
     author: {
       login: author,

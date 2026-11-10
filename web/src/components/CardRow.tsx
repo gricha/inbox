@@ -47,8 +47,7 @@ export function Owed({ why, tone }: { why: string; tone?: string | undefined }) 
   );
 }
 
-// What a row under Later or in the Archive says after its ref: why it's there. The queue's rows say nothing more: being
-// there is the why.
+// What a row on Blocked or in the Archive says after its ref: why it's there. The Inbox's rows say their `reason`.
 function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);
   if (variant === "hidden") return card.why || "hidden by your rules";
@@ -63,7 +62,8 @@ function noteOf(card: Card, variant: Variant): string {
 export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id;
-  const note = why ? noteOf(card, variant) : "";
+  const reason = card.reason ?? "";
+  const note = why ? noteOf(card, variant) : reason.charAt(0).toUpperCase() + reason.slice(1);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = variant === "blocked" ? card.waiting_since : (card.resolved_at ?? card.done_at ?? card.waiting_since);
   const kind = <span className="line-kind">{card.kind === "pr" ? "PR" : "Issue"}</span>;
@@ -84,7 +84,7 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
     </>
   );
   const noteEl = note && (
-    <span className="line-note" title={note}>
+    <span className={cls("line-note", !why && "line-reason")} title={note}>
       {note}
     </span>
   );

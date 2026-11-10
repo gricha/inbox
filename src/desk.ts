@@ -27,6 +27,7 @@ import {
   type GitHubWriteError,
 } from "./errors.ts";
 import { Automations, canOf } from "./automations.ts";
+import { Urgency } from "./urgency.ts";
 import { GONE, Jobs } from "./jobs.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
@@ -202,7 +203,7 @@ export interface Entry {
   activityAt: string; // its activity, or a later merge of a PR it needs: what done and snoozes compare with
 }
 
-interface Snapshot {
+export interface Snapshot {
   rev: number;
   at: number;
   entries: Map<string, Entry>;
@@ -360,6 +361,7 @@ export class Desk {
   sessions: Sessions;
   opener: (url: string) => Effect.Effect<void, CommandError>;
   automations: Automations;
+  urgency: Urgency; // the Inbox's sections and order: criteria and scores
   jobs: Jobs; // the work Claude owes the owner
 
   loaded: LoadedConfig | null = null;
@@ -429,6 +431,7 @@ export class Desk {
     this.sessions = new Sessions(this, opts.sessions);
     this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
+    this.urgency = new Urgency(this);
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -522,6 +525,7 @@ export class Desk {
     this.coordinator.close();
     this.sessions.stop();
     this.automations.stop();
+    this.urgency.stop();
     this.jobs.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
@@ -723,7 +727,10 @@ export class Desk {
       this.settings = this.readSettings(file);
       if (this.settings["sessions.enabled"] !== sessions && !this.stopped) this.sessions.reschedule();
       // A question waiting on its model asks again at once with another key or model.
-      if (this.settings["agent.decision_key"] + this.settings["agent.decision_model"] !== decider) this.automations.held.clear();
+      if (this.settings["agent.decision_key"] + this.settings["agent.decision_model"] !== decider) {
+        this.automations.held.clear();
+        this.urgency.held = null;
+      }
       if (coordinator && !this.settings["agent.coordinator"]) this.coordinator.stop();
       if (!coordinator && this.settings["agent.coordinator"]) this.coordinator.flush();
       else if (bypass !== this.settings["agent.coordinator_bypass"] && this.settings["agent.coordinator"])
@@ -742,6 +749,7 @@ export class Desk {
       }
       this.pumpAi();
       this.judge.pump();
+      this.urgency.pump();
     });
   }
 
@@ -765,11 +773,16 @@ export class Desk {
       this.judge.retry();
       any = true;
     }
+    if (this.urgency.held && hit(this.urgency.held.why)) {
+      this.urgency.held = null;
+      any = true;
+    }
     if (!any || !only) return; // a settings change pumps everything itself
     this.log("the agent works again: retrying what failed on its login");
     this.changed();
     this.pumpAi();
     this.judge.pump();
+    this.urgency.pump();
   }
 
   // While anything waits on the agent's login (an AI review, the judge, a conversation's read), each sync asks its CLI whether
@@ -975,6 +988,8 @@ export class Desk {
     this.store.pruneKv("acted:", kept);
     this.store.pruneKv("shown:", kept);
     this.store.pruneKv("take:", kept);
+    this.store.pruneKv("said:", kept);
+    this.store.pruneKv("score:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
@@ -983,6 +998,7 @@ export class Desk {
     }
     this.runner.fork("warm", this.warmReviews());
     this.judge.pump();
+    this.urgency.pump();
   }
 
   // The main page's PRs' diffs and conversations, fetched ahead (only what changed: both are kept) so opening one doesn't
@@ -1196,6 +1212,7 @@ export class Desk {
     // Who blocks whom, before any status: a PR it needs merging is news for it, and the rules read the facts as fields.
     const stacks = buildStacks(items);
     const deps = dependencies(items, stacks);
+    const merging = this.store.prefixed<Merging>("sitter:");
     for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
       let state = states.get(item.id) ?? emptyState(item.id);
@@ -1209,7 +1226,11 @@ export class Desk {
       const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
       const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
-      entries.set(item.id, { item, analysis, state, status: statusOf(state, activityAt, now), isNew, resolved, inflight, activityAt });
+      const status = statusOf(state, activityAt, now);
+      const back = merging.get(item.id)?.handback;
+      analysis.signals.me.handed_back =
+        !!back && !inflight && status === "active" && item.state === "open" && (state.done_at ?? "") <= back.at;
+      entries.set(item.id, { item, analysis, state, status, isNew, resolved, inflight, activityAt });
     }
     // An open PR waits on you: asked of you or your team, your reply, or your own outside Merging with its next step yours.
     const onYou = (e: Entry) => {
@@ -1355,10 +1376,9 @@ export class Desk {
     }
     // A PR in Merging stays there; one the coordinator handed back tops your desk until done or m again.
     const needs = new Map<string, string>();
-    const merging = this.store.prefixed<Merging>("sitter:");
     for (const e of entries.values()) {
       const back = merging.get(e.item.id)?.handback;
-      if (!back || e.inflight || e.status !== "active" || e.item.state !== "open" || (e.state.done_at ?? "") > back.at) continue;
+      if (!back || !e.analysis.signals.me.handed_back) continue;
       // Another PR blocks it and your rules keep it in Blocked: the hand-back waits there until that PR merges.
       if (e.analysis.signals.pr.blocked && best.get(e.item.id)?.bucket === "blocked") continue;
       // Held until it unblocked: trackBlocked() logged when, and which PR merged.
@@ -1695,6 +1715,15 @@ export class Desk {
         }
       }
       const leads = oneLinePerStack(sections, ["now", "today", "blocked", "later", "fyi"], snap.stacks);
+      // What the rules or Claude hid, an urgent criterion still brings to the Inbox.
+      const lifted = hidden.filter((c) => this.urgency.urgent(snap.entries.get(c.id)!));
+      const kept = hidden.filter((c) => !lifted.includes(c));
+      const inbox = this.urgency.inbox(snap, [
+        ...byPart([...sections.now, ...sections.today]),
+        ...sections.later,
+        ...sections.fyi,
+        ...lifted,
+      ]);
       const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
       const aged = (c: Card): Card => {
         const e = snap.entries.get(c.id)!;
@@ -1741,12 +1770,13 @@ export class Desk {
         sessions: this.sessions.cards(),
         sections,
         reviewing,
-        hidden,
+        hidden: kept,
         cleared,
         resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
         cards: this.settings["queue.cards"],
         paused: this.paused(),
         stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
+        inbox,
       };
     });
   }

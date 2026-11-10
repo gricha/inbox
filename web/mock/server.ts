@@ -4,15 +4,18 @@
 // MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Result } from "effect";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { onBehalf } from "../../src/github/behalf.ts";
 import { plan } from "../../src/agents.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
+import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
+import { fallbackScore, sectionOf } from "../../src/urgency.ts";
 import { checksView } from "../../src/checks.ts";
 import { catchAllOf, spaceOf } from "../../src/config.ts";
-import { renderTemplate } from "../../src/expr.ts";
+import { compile, renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
@@ -42,6 +45,9 @@ import type {
   BoardView,
   Bucket,
   Card,
+  CriteriaView,
+  Criterion,
+  InboxSection,
   ChunkRanking,
   Ci,
   Config,
@@ -83,7 +89,7 @@ import type {
   Work,
   RemoteView,
 } from "../../src/types.ts";
-import { COORDINATOR_NAME, RANK, SECRET_SET, UNTIL } from "../../src/types.ts";
+import { byPart, COORDINATOR_NAME, INBOX_SECTIONS, RANK, SECRET_SET, UNTIL } from "../../src/types.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -1601,6 +1607,7 @@ function signals(r: Rec): Signals {
       last_action_hours: myReview?.[2] ?? (mine ? (s.upd ?? s.age) : -1),
       new_activity: r.fresh,
       owes_reply: mine && !!TALK.get(r.id)?.some((x) => x.waiting_on_you),
+      handed_back: false,
     },
     author: {
       login: s.author,
@@ -2007,6 +2014,84 @@ function queue(): QueueView {
     cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
+    inbox: inboxOf([...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi]),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Urgency, as src/urgency.ts: criteria (GitHub's, and one an agent saved), the scorer's answers for a few items, the desk's
+// own score for the rest, and the sections.
+
+const criteria: Criterion[] = [
+  {
+    id: "auth-keys",
+    name: "Auth and keys",
+    ask: "Is it about authentication, service accounts or keys? I unblock those first.",
+    urgent: true,
+    on: true,
+    by: "an agent",
+    updated_at: iso(30),
+  },
+];
+const builtInCriteria = (): Criterion[] =>
+  GITHUB_CRITERIA.map(({ id, help, on, ...def }) =>
+    Object.assign({}, def, {
+      id: `github.${id}`,
+      on: criteriaSwitched.get(`github.${id}`) ?? on,
+      by: "you" as const,
+      updated_at: "",
+      plugin: "github",
+      help,
+    }),
+  );
+const criteriaSwitched = new Map<string, boolean>();
+const allCriteria = () => [...criteria, ...builtInCriteria()];
+// The model's yeses for the asked criterion, and the scorer's answers: what the desk keeps from them.
+const SAID_YES = new Map([["auth-keys", new Set(["acme/api#4099", "acme/infra#540"])]]);
+const SCORED: Record<string, { score: number; why: string }> = {
+  "acme/api#4127": { score: 9, why: "priya waits on your review; the planner's partial results" },
+  "acme/api#4099": { score: 6, why: "dana's auth cleanup, asked of your team" },
+};
+const yesOf = (r: Rec): Criterion[] => {
+  const sig = signals(r);
+  return allCriteria().filter((c) => {
+    if (!c.on) return false;
+    if (c.ask) return SAID_YES.get(c.id)?.has(r.id) ?? false;
+    const check = compile(c.when ?? "false");
+    const v = Result.isSuccess(check) ? check.success.eval(sig) : null;
+    return !!v && Result.isSuccess(v) && Boolean(v.success);
+  });
+};
+function inboxOf(cards: Card[]): Record<InboxSection, Card[]> {
+  const out: Record<InboxSection, Card[]> = { urgent: [], standard: [], fyi: [] };
+  const t = { urgent_at: setting("queue.urgent_at"), fyi_at: setting("queue.fyi_at") };
+  for (const c of cards) {
+    const r = recs.find((x) => x.id === c.id);
+    if (!r) continue;
+    const yes = yesOf(r);
+    const urgent = yes.filter((x) => x.urgent);
+    const model = setting("agent.score") ? SCORED[c.id] : undefined;
+    const score = model?.score ?? fallbackScore(c.bucket, yes.length);
+    const floor = signals(r).me.requested_direct ? true : c.pinned;
+    const section = sectionOf({ score, urgent: !!c.handed_back || urgent.length > 0, bucket: c.bucket, floor }, t);
+    const names = (xs: Criterion[]) => xs.map((x) => x.name).join(" \u00b7 ");
+    const reason =
+      [c.handed_back ? c.why : "", names(urgent), c.placed_by === "automation" ? c.why : "", model?.why ?? "", names(yes), c.why].find(
+        Boolean,
+      ) ?? "";
+    out[section].push({ ...c, section, score, reason });
+  }
+  for (const k of INBOX_SECTIONS) out[k].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return out;
+}
+
+function criteriaView(): CriteriaView {
+  const yes = new Map<string, number>();
+  for (const r of recs) if (status(r) === "active" && !r.seed.resolved) for (const c of yesOf(r)) yes.set(c.id, (yes.get(c.id) ?? 0) + 1);
+  return {
+    criteria: allCriteria().map((c) => Object.assign({}, c, { yes: yes.get(c.id) ?? 0, waiting: 0 })),
+    held: null,
+    scored: setting("agent.score") ? { by: "Claude", at: iso(0.2) } : null,
   };
 }
 
@@ -3811,6 +3896,43 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       return { ok: true };
     }
     if (req.method === "POST" && auto[2]) return { ok: true, running: id };
+  }
+  if (route === "GET /api/criteria") return criteriaView();
+  const crit = /^\/api\/criteria\/([^/]+)(\/on)?$/.exec(url.pathname);
+  if (crit) {
+    const id = decodeURIComponent(crit[1]!);
+    const i = criteria.findIndex((c) => c.id === id);
+    const b = req.method === "PUT" ? await readBody(req) : {};
+    if (req.method === "PUT" && crit[2]) {
+      if (id.startsWith("github.")) criteriaSwitched.set(id, b.on === true);
+      else if (i >= 0) criteria[i] = { ...criteria[i]!, on: b.on === true };
+      else throw new HttpError(404, `no criterion "${id}"`);
+      bump();
+      return { ok: true, criterion: allCriteria().find((c) => c.id === id) };
+    }
+    if (id.startsWith("github.")) throw new HttpError(400, "it comes with GitHub: only its switch is yours");
+    if (req.method === "PUT") {
+      const c: Criterion = {
+        id,
+        name: String(b.name),
+        ...(typeof b.when === "string" && b.when.trim() && { when: b.when.trim() }),
+        ...(typeof b.ask === "string" && b.ask.trim() && { ask: b.ask.trim() }),
+        urgent: b.urgent === true,
+        on: b.on !== false,
+        by: "you",
+        updated_at: new Date().toISOString(),
+      };
+      if (i >= 0) criteria[i] = c;
+      else criteria.push(c);
+      bump();
+      return { ok: true, criterion: c };
+    }
+    if (req.method === "DELETE" && i >= 0) {
+      criteria.splice(i, 1);
+      bump();
+      return { ok: true };
+    }
+    throw new HttpError(404, `no criterion "${id}"`);
   }
   const inq = /^\/api\/inquiries\/([^/]+)(\/answer)?$/.exec(url.pathname);
   if (inq && req.method === "POST" && inq[2]) return { ok: true, inquiry: answerInquiry(inq[1]!, await readBody(req)) };

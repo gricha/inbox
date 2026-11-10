@@ -4,7 +4,7 @@ import { cls, MOD, syncTrouble } from "../format.ts";
 import { pageOf, routeHash, SETTINGS_PARTS, settingsPart, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
-// The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, FYI, then Merging and the Archive under
+// The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, then Merging and the Archive under
 // a hairline; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins' under a
 // hairline. In the footer, bottom up, Settings, the sync line (only when something's wrong) and Ask your agent.
 export function Sidebar({
@@ -30,7 +30,6 @@ export function Sidebar({
 }) {
   const page = pageOf(route, from);
   const onQueue = page === "queue";
-  const onLater = page === "later";
   const onLane = page === "inflight";
   const onBlocked = page === "blocked";
   const onArchive = page === "archive";
@@ -113,22 +112,13 @@ export function Sidebar({
           >
             <span className="side-name">Blocked</span>
           </a>
-          {/* What Claude and the rules sorted away: no count, nothing there needs you. */}
-          <a
-            href="#/later"
-            className={cls("side-item", onLater && "on")}
-            aria-current={onLater ? "page" : undefined}
-            title={`What was sorted away, snoozed or muted (${MOD}3)`}
-          >
-            <span className="side-name">FYI</span>
-          </a>
           <div className="side-sep" aria-hidden="true" />
           {/* No count: nothing there needs you, the coordinator has it. */}
           <a
             href="#/inflight"
             className={cls("side-item", onLane && "on")}
             aria-current={onLane ? "page" : undefined}
-            title={`${flight?.total ? `${flight.total} merging` : "Your agent and what it merged"} (${MOD}4)`}
+            title={`${flight?.total ? `${flight.total} merging` : "Your agent and what it merged"} (${MOD}3)`}
           >
             <span className="side-name">Merging</span>
           </a>
@@ -137,7 +127,7 @@ export function Sidebar({
             href="#/archive"
             className={cls("side-item", onArchive && "on")}
             aria-current={onArchive ? "page" : undefined}
-            title={`What's done: what you acted on and what resolved (${MOD}5)`}
+            title={`What's done, snoozed or muted: what you acted on and what resolved (${MOD}4)`}
           >
             <span className="side-name">Archive</span>
           </a>
