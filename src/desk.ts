@@ -109,7 +109,17 @@ import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } 
 import { renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { agentDir, agentDown, CLAUDE_PAUSED, CODEX_PAUSED, notLoggedIn, reviewOrder, type FetchPrError, type PrText } from "./review.ts";
+import {
+  agentDir,
+  agentDown,
+  CLAUDE_PAUSED,
+  CODEX_PAUSED,
+  forgetCodexServers,
+  notLoggedIn,
+  reviewOrder,
+  type FetchPrError,
+  type PrText,
+} from "./review.ts";
 import * as agents from "./agents.ts";
 import { DEFAULT_POLICY, Judge, judgeKey, sortKey, textHash } from "./judge.ts";
 import { Conversations, talked } from "./conversation.ts";
@@ -706,7 +716,10 @@ export class Desk {
       else this.changed();
       if (this.settings["github.poll_seconds"] !== poll) for (const c of this.connectors) c.reschedule();
       // A changed agent starts afresh: whatever failed on the old one tries again now.
-      if (agentKey(this.settings) !== agent) this.retryAgents();
+      if (agentKey(this.settings) !== agent) {
+        forgetCodexServers();
+        this.retryAgents();
+      }
       this.pumpAi();
       this.judge.pump();
     });

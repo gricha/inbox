@@ -269,7 +269,14 @@ export class ClaudeBadOutput extends Data.TaggedError("ClaudeBadOutput")<{
   readonly cause?: unknown;
 }> {}
 
-export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput;
+// codex couldn't list its MCP servers, so the desk can't turn each off: the call isn't run, and waits as a down agent does.
+export class CodexServersUnknown extends Data.TaggedError("CodexServersUnknown")<{ readonly reason: string; readonly cause?: unknown }> {
+  override get message(): string {
+    return `Couldn't confirm Codex's MCP servers are off, so it didn't run: ${this.reason}`;
+  }
+}
+
+export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput | CodexServersUnknown;
 
 // ---------------------------------------------------------------- the decision model (OpenRouter's Decisions API)
 

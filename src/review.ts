@@ -9,6 +9,7 @@ import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
   CODEX_NOT_LOGGED_IN,
+  CodexServersUnknown,
   NOT_LOGGED_IN,
   ClaudeBadOutput,
   ClaudeNotLoggedIn,
@@ -543,7 +544,7 @@ const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.DESK_CO
 const codexMissing = (command: string) => `${command} not found: install Codex so codex runs from your PATH`;
 
 // Codex has no "no tools": everything that can act or reach out is turned off, and what's left runs in a read-only sandbox.
-// Your model, profile and login stay yours (no --model, no --ignore-user-config); your MCP servers don't come along.
+// Your model, profile and login stay yours (no --model, no --ignore-user-config); each of your MCP servers is turned off by name.
 const CODEX_OFF = [
   "shell_tool",
   "unified_exec",
@@ -559,7 +560,8 @@ const CODEX_OFF = [
   "hooks",
   "memories",
 ];
-const codexArgs = (dir: string, schema: string, out: string): string[] => [
+const codexOff = CODEX_OFF.flatMap((f) => ["--disable", f]);
+const codexArgs = (dir: string, schema: string, out: string, servers: string[]): string[] => [
   "exec",
   "--json",
   "--sandbox",
@@ -568,11 +570,10 @@ const codexArgs = (dir: string, schema: string, out: string): string[] => [
   "--skip-git-repo-check",
   "-C",
   dir,
-  ...CODEX_OFF.flatMap((f) => ["--disable", f]),
+  ...codexOff,
   "-c",
   'web_search="disabled"',
-  "-c",
-  "mcp_servers={}",
+  ...servers.flatMap((name) => ["-c", `mcp_servers.${tomlKey(name)}.enabled=false`]),
   "-c",
   'approval_policy="never"',
   "--output-schema",
@@ -581,6 +582,51 @@ const codexArgs = (dir: string, schema: string, out: string): string[] => [
   out,
   "-",
 ];
+
+// A server's name as a dotted key's part: bare when TOML allows it, else a quoted string.
+export const tomlKey = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name));
+
+const SERVERS_TTL = 5 * 60_000;
+let servers: { command: string; at: number; names: string[] } | null = null;
+// Another agent chosen (Settings → Agent): the next Codex call lists its servers afresh.
+export function forgetCodexServers(): void {
+  servers = null;
+}
+
+// The MCP servers codex would load with the features above off (plugins' own servers go with plugins): each to turn off.
+// A list that fails or can't be read refuses the call, so a Codex call never runs with a server reachable.
+const codexServers = Effect.fnUntraced(function* (command: string, dir: string) {
+  if (servers?.command === command && Date.now() - servers.at < SERVERS_TTL) return servers.names;
+  const spawnAs = yield* claudeSpawn(command, [...codexOff, "mcp", "list", "--json"]);
+  const out = yield* runCommand(spawnAs, { cwd: dir, timeout: 30_000, missing: codexMissing(command) }).pipe(
+    Effect.catchTags({
+      CommandFailed: (e) => Effect.fail(new CodexServersUnknown({ reason: e.message, cause: e })),
+      CommandTimeout: (e) => Effect.fail(new CodexServersUnknown({ reason: e.message, cause: e })),
+      CommandOutputTooLarge: (e) => Effect.fail(new CodexServersUnknown({ reason: e.message, cause: e })),
+    }),
+  );
+  const listed = Result.try({ try: (): unknown => JSON.parse(out), catch: (cause) => cause });
+  if (Result.isFailure(listed) || !enabledOf(listed.success))
+    return yield* new CodexServersUnknown({ reason: `\`codex mcp list --json\` printed ${JSON.stringify(out.trim().slice(0, 200))}` });
+  servers = { command, at: Date.now(), names: enabledOf(listed.success)! };
+  return servers.names;
+});
+
+// `codex mcp list --json`: a list of servers ({ name, enabled }), or one keyed by name; anything else is unreadable.
+function enabledOf(list: unknown): string[] | null {
+  const entries = Array.isArray(list)
+    ? list.map((e) => [(e as { name?: unknown } | null)?.name, e] as const)
+    : list && typeof list === "object"
+      ? Object.entries(list)
+      : null;
+  if (!entries) return null;
+  const names: string[] = [];
+  for (const [name, e] of entries) {
+    if (typeof name !== "string" || !name || !e || typeof e !== "object") return null;
+    if ((e as { enabled?: unknown }).enabled !== false) names.push(name);
+  }
+  return names;
+}
 
 // The schema and the final message go through two files in the agent's directory, removed after the run however it ends.
 const askCodex = Effect.fn("askCodex")(function* (
@@ -593,8 +639,9 @@ const askCodex = Effect.fn("askCodex")(function* (
   const out = `${stem}.answer.json`;
   const run = Effect.gen(function* () {
     // The agent's own directory, made by the desk: failing to write in it is a defect.
+    const off = yield* codexServers(command, opts.dir);
     fs.writeFileSync(schema, JSON.stringify(opts.schema ?? SCHEMA));
-    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out));
+    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, off));
     const events = yield* runCommand(spawnAs, {
       input: prompt,
       cwd: opts.dir,
@@ -668,6 +715,7 @@ export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | C
 // The agent itself can't work now (its login, its usage limit, not installed): no PR's fault, so no PR's try is spent on it.
 export const agentDown = (e: unknown): boolean =>
   e instanceof ClaudeNotLoggedIn ||
+  e instanceof CodexServersUnknown ||
   e instanceof CommandNotFound ||
   (e instanceof ClaudeApiError && (e.status === 429 || /\blimit\b.*\bresets?\b|usage limit|rate.?limit/i.test(e.message)));
 

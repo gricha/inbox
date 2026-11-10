@@ -629,7 +629,7 @@ echo "{\\"type\\":\\"result\\",\\"is_error\\":false,\\"structured_output\\":{\\"
   };
 }
 
-// A fake codex for the judge: places every item it's asked about in today, in its -o file; fails as logged out while `fail` exists.
+// A fake codex for the judge: lists no MCP servers, places every item it's asked about in today, in its -o file; fails as logged out while `fail` exists.
 function fakeCodex(): { bin: string; dir: string; calls: () => number; args: () => string[] } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-codex-"));
   const bin = path.join(dir, "codex");
@@ -637,6 +637,7 @@ function fakeCodex(): { bin: string; dir: string; calls: () => number; args: () 
     bin,
     `#!/bin/sh
 d="$(dirname "$0")"
+case " $* " in *" mcp list "*) echo '[]'; exit 0;; esac
 echo x >> "$d/calls"; printf '%s\\n' "$@" > "$d/args"; cat > "$d/stdin"
 while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done
 if [ -f "$d/fail" ]; then echo 'Error: Not logged in' >&2; exit 1; fi

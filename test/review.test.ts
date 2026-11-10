@@ -27,6 +27,8 @@ import {
   askAgent,
   askClaude,
   buildPrompt,
+  forgetCodexServers,
+  tomlKey,
   claudeEnvelope,
   claudeError,
   claudeSpawn,
@@ -313,12 +315,15 @@ test(
   },
 );
 
-// A fake codex: records its arguments, stdin, what its directory held and the schema it was given, then runs `script` with
-// the -o file as $out.
+// A fake codex: `mcp list --json` prints $d/servers ([] without one) and records its arguments in list-args, or fails
+// while list-fails exists; otherwise it records its arguments, stdin, what its directory held and the schema it was given,
+// then runs `script` with the -o file as $out.
 function fakeCodex(script: string): { bin: string; dir: string; args: () => string[]; read: (f: string) => string } {
   const f = fakeAgent(
     "codex",
-    `d="$(dirname "$0")"; ls -A > "$d/cwd-listing"
+    `d="$(dirname "$0")"
+case " $* " in *" mcp list "*) cp "$d/args" "$d/list-args"; echo x >> "$d/lists"; [ -f "$d/list-fails" ] && { echo 'boom' >&2; exit 2; }; cat "$d/servers" 2>/dev/null || echo '[]'; exit 0;; esac
+ls -A > "$d/cwd-listing"
 while [ $# -gt 0 ]; do case "$1" in --output-schema) cp "$2" "$d/schema"; echo "$2" > "$d/schema-path";; -o) out="$2";; esac; shift; done
 ${script}`,
   );
@@ -329,6 +334,10 @@ ${script}`,
   };
 }
 
+const CODEX_OFF_ARGS = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "browser_use_external", "in_app_browser"]
+  .concat(["computer_use", "image_generation", "view_image", "multi_agent", "hooks", "memories"])
+  .flatMap((x) => ["--disable", x]);
+
 const ANSWERED = `printf '%s' '{"summary":"ok"}' > "$out"
 echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.completed","usage":{"input_tokens":9,"output_tokens":3}}'`;
 
@@ -337,6 +346,15 @@ test(
   posix,
   async () => {
     const f = fakeCodex(ANSWERED);
+    // Yours, as `codex mcp list --json` lists them: each one enabled is turned off by name, a name a bare key can't hold quoted.
+    fs.writeFileSync(
+      path.join(f.dir, "servers"),
+      JSON.stringify([
+        { name: "linear", enabled: true, transport: { type: "streamable_http" } },
+        { name: "sentry", enabled: false },
+        { name: "my.server", enabled: true },
+      ]),
+    );
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
     const dir = agentDir(home);
     const schema = { type: "object", properties: { summary: { type: "string" } } };
@@ -364,7 +382,9 @@ test(
       "-c",
       'web_search="disabled"',
       "-c",
-      "mcp_servers={}",
+      "mcp_servers.linear.enabled=false",
+      "-c",
+      'mcp_servers."my.server".enabled=false',
       "-c",
       'approval_policy="never"',
       "--output-schema",
@@ -375,6 +395,11 @@ test(
     ]);
     // Your model and your config: nothing of the desk's in their place.
     for (const a of ["-m", "--model", "--ignore-user-config", "--profile", "--oss"]) assert.ok(!f.args().includes(a), a);
+    assert.deepEqual(
+      f.read("list-args").trimEnd().split("\n"),
+      [...CODEX_OFF_ARGS, "mcp", "list", "--json"],
+      "the servers it would load with the same features off, plugins' own gone with plugins",
+    );
     assert.equal(f.read("stdin"), "PROMPT");
     assert.deepEqual(JSON.parse(f.read("schema")), schema);
     assert.equal(f.read("cwd-listing").trim(), path.basename(at), "the run's directory holds only its schema");
@@ -411,6 +436,42 @@ test(
     const f = fakeCodex(`echo '{"type":"error","message":"Reconnecting... 1/5"}'; ${ANSWERED}`);
     assert.deepEqual(await run(askAgent("hi", { agent: "codex", command: f.bin, dir })), { answer: { summary: "ok" }, model: "codex" });
     assert.deepEqual(fs.readdirSync(dir), [], "a failed run leaves no files either");
+    fs.rmSync(dir, { recursive: true });
+  },
+);
+
+test(
+  "a Codex call never runs unless its MCP servers are listed: a list that fails or can't be read holds it, and a list is kept 5 minutes",
+  posix,
+  async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
+    const failing = fakeCodex(ANSWERED);
+    fs.writeFileSync(path.join(failing.dir, "list-fails"), "");
+    const e = await failure(askAgent("hi", { agent: "codex", command: failing.bin, dir }));
+    assert.deepEqual(
+      [e._tag, e.message, agentDown(e)],
+      ["CodexServersUnknown", "Couldn't confirm Codex's MCP servers are off, so it didn't run: boom", true],
+    );
+    assert.ok(!fs.existsSync(path.join(failing.dir, "stdin")) || failing.read("stdin") === "", "the call itself never ran");
+    assert.ok(!fs.existsSync(path.join(failing.dir, "cwd-listing")), "the call itself never ran");
+    for (const printed of ["not json", '{"linear":"on"}', '[{"enabled":true}]']) {
+      const odd = fakeCodex(ANSWERED);
+      fs.writeFileSync(path.join(odd.dir, "servers"), printed);
+      const bad = await failure(askAgent("hi", { agent: "codex", command: odd.bin, dir }));
+      assert.equal(bad._tag, "CodexServersUnknown", printed);
+      assert.ok(!fs.existsSync(path.join(odd.dir, "cwd-listing")), `${printed}: the call never ran`);
+    }
+    const f = fakeCodex(ANSWERED);
+    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
+    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
+    assert.equal(f.read("lists").trim().split("\n").length, 1, "listed once for both calls");
+    forgetCodexServers();
+    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
+    assert.equal(f.read("lists").trim().split("\n").length, 2, "another agent chosen: listed again");
+    assert.deepEqual(
+      [tomlKey("node_repl"), tomlKey("a-b"), tomlKey("my.server"), tomlKey('q"x')],
+      ["node_repl", "a-b", '"my.server"', '"q\\"x"'],
+    );
     fs.rmSync(dir, { recursive: true });
   },
 );
