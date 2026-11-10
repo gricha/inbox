@@ -23,7 +23,9 @@ export function compileBoard(board: BoardConfig, path: string): { board: Compile
   };
   const filter = board.filter ? at("filter", board.filter) : null;
   const priority = board.priority ? at("priority", board.priority) : null;
-  const rules = board.rules.map((r, i) => at(`rules[${i}].when`, r.when));
+  const rules = board.rules.map((r, i) =>
+    at(r.own === undefined && r.id !== undefined ? `builtin.${r.id}.when` : `rules[${r.own ?? i}].when`, r.when),
+  );
   return { board: { config: board, filter, priority, rules }, errors };
 }
 

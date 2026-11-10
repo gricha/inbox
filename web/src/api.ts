@@ -107,7 +107,7 @@ const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
   503: "Unavailable",
 };
 // Saving over a base that changed is the only 409 these answer, whatever tag the desk sends.
-const STALE = new Set(["PUT /api/policy", "PUT /api/config"]);
+const STALE = new Set(["PUT /api/policy", "PUT /api/config", "PUT /api/config/builtin"]);
 
 function refusal(status: number, body: Partial<ErrorBody> | null, statusText: string, stale: boolean): ApiError {
   const message = body?.error ?? (statusText || String(status));
@@ -231,6 +231,8 @@ export const api = {
   preview: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
   // A stale base fails with DeskConflict "Stale".
   saveConfig: (text: string, base?: string) => call<{ ok: boolean; errors: ConfigError[] }>("PUT", "/api/config", { text, base }),
+  switchRule: (board: string, rule: string, on: boolean, base?: string) =>
+    call<{ ok: boolean; errors: ConfigError[] }>("PUT", "/api/config/builtin", { board, rule, on, base }),
   fields: () => call<FieldDoc[]>("GET", "/api/fields"),
   settings: () => call<SettingsView>("GET", "/api/settings"),
   // Invalid values write nothing; `errors` says which keys and why.

@@ -416,7 +416,26 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case "POST /api/sync":
       return reply(200, { ok: true });
     case "GET /api/config":
-      return reply(200, { path: api.configPath, text: "poll_seconds = 60\n", hash: "c0ffee", errors: [] });
+      return reply(200, {
+        path: api.configPath,
+        text: "poll_seconds = 60\n",
+        hash: "c0ffee",
+        errors: [],
+        hard: [],
+        builtins: [
+          {
+            board: "acme-review",
+            name: "PRs to review",
+            source: "github",
+            set: "review",
+            set_name: "PRs to review",
+            rules: [
+              { id: "bot-pr", when: "author.bot", bucket: "hide", why: "bot PR", on: false, yours: false },
+              { id: "codeowners", when: "me.requested_codeowner", bucket: "fyi", why: "CODEOWNERS ping", on: true, yours: true },
+            ],
+          },
+        ],
+      });
     case "POST /api/config/preview":
       return reply(200, {
         errors: body.text.includes("INVALID") ? [{ path: "boards[0].rules[0].when", message: "unknown field me.nope" }] : [],

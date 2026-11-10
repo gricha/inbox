@@ -43,7 +43,10 @@ const board = (o: Partial<BoardConfig>): BoardConfig => ({
 // ---------------------------------------------------------------- rules and the judge
 
 test('"judge" is a rule bucket, not a board default', () => {
-  const text = defaultConfigText({ workOrgs: ["acme"] }).replace(`bucket = "hide", why = "bot PR"`, `bucket = "judge", why = "bot PR"`);
+  const text = defaultConfigText({ workOrgs: ["acme"], expanded: true }).replace(
+    `bucket = "hide", why = "bot PR"`,
+    `bucket = "judge", why = "bot PR"`,
+  );
   assert.deepEqual(parseConfig(text).errors, []);
   assert.equal(parseConfig(text).loaded!.config.boards[0]!.rules[7]!.bucket, "judge");
   const bad = parseConfig(text.replace(`default = "later"`, `default = "judge"`)).errors;
@@ -52,7 +55,7 @@ test('"judge" is a rule bucket, not a board default', () => {
 });
 
 test("hard = true: the first-run template sets it on asks by name, a person's or a bot's, and it must be a boolean with a real bucket", () => {
-  const text = defaultConfigText({ workOrgs: ["acme"] });
+  const text = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const boards = parseConfig(text).loaded!.config.boards;
   const hard = boards.flatMap((b) => b.rules.filter((r) => r.hard).map((r) => `${b.id}: ${r.when} -> ${r.bucket}`));
   assert.deepEqual(hard, [
@@ -1087,7 +1090,7 @@ test(
   "a config from before hard rules: its ask-by-name rule becomes hard once, so Claude and the coordinator can't clear it",
   posix,
   async (c) => {
-    const old = defaultConfigText({ workOrgs: ["acme"] })
+    const old = defaultConfigText({ workOrgs: ["acme"], expanded: true })
       .replaceAll('asked you directly", hard = true', 'asked you directly", nocap = true')
       .replaceAll(/^ *\{ when = "me\.requested_direct", .*\n/gm, "")
       .replaceAll('finish it", hard = true', 'finish it"');

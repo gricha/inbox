@@ -5,6 +5,7 @@ import {
   BUCKETS,
   type BoardConfig,
   type Bucket,
+  type BuiltInRules,
   type Config,
   type ConfigError,
   type Rule,
@@ -13,6 +14,7 @@ import {
 } from "./types.ts";
 import { compileBoard, type CompiledBoard } from "./rules.ts";
 import { DEFAULTS, LEGACY_TABLES, type Settings } from "./settings.ts";
+import { GITHUB_RULES } from "./connectors/github-rules.ts";
 
 export interface LoadedConfig {
   config: Config;
@@ -20,6 +22,34 @@ export interface LoadedConfig {
 }
 
 type Raw = Record<string, unknown>;
+
+// A connector the desk runs, as config.toml sees it: its id (a board's `source`) and the rules its boards may name.
+export interface Source {
+  id: string;
+  rules?: Readonly<Record<string, BuiltInRules>>;
+}
+
+const GITHUB: Source = { id: "github", rules: GITHUB_RULES };
+
+// A rule as it's placed: where it was written to go is done with.
+function placed(r: Rule): Rule {
+  const out = { ...r };
+  delete out.after;
+  return out;
+}
+
+// A board's rules in order: yours first, then the plugin's, each but those switched off, or yours in its place (an own rule
+// with its id), followed by yours placed `after` it.
+export function resolveRules(set: BuiltInRules, off: readonly string[], own: readonly Rule[]): Rule[] {
+  const out = own.filter((r) => r.id === undefined && r.after === undefined).map(placed);
+  for (const b of set.rules) {
+    const mine = own.find((r) => r.id === b.id);
+    if (mine) out.push(placed(mine));
+    else if (!off.includes(b.id)) out.push({ ...b });
+    out.push(...own.filter((r) => r.after === b.id).map(placed));
+  }
+  return out;
+}
 
 const SORTS = ["waiting", "updated", "newest"] as const;
 
@@ -33,7 +63,7 @@ function tomlError(e: unknown): ConfigError {
 export function parseConfig(
   text: string,
   settings: Settings = DEFAULTS,
-  sources: readonly { id: string }[] = [{ id: "github" }], // the connectors the desk runs: a board's `source` names one
+  sources: readonly Source[] = [GITHUB], // the connectors the desk runs: a board's `source` names one
 ): { loaded: LoadedConfig | null; errors: ConfigError[]; warnings: ConfigError[] } {
   const parsed = Result.try({ try: (): Raw => parse(text), catch: tomlError });
   if (Result.isFailure(parsed)) return { loaded: null, errors: [parsed.failure], warnings: [] };
@@ -128,6 +158,8 @@ export function parseConfig(
       "filter",
       "priority",
       "rules",
+      "builtin",
+      "off",
       "default",
       "default_why",
       "sort",
@@ -144,11 +176,25 @@ export function parseConfig(
       err(`${path}.source`, `must be one of ${sources.map((c) => c.id).join(", ")}`);
     const queries = [...strs(t.query, `${path}.query`), ...strs(t.queries, `${path}.queries`)];
     if (queries.length === 0 && (source ?? "github") === "github") err(`${path}.queries`, "needs at least one GitHub search query");
+    const builtin = t.builtin === undefined ? undefined : str(t.builtin, `${path}.builtin`, "");
+    const sets = sources.find((c) => c.id === (source ?? "github"))?.rules ?? {};
+    const set = builtin === undefined ? undefined : sets[builtin];
+    if (builtin !== undefined && !set)
+      err(
+        `${path}.builtin`,
+        Object.keys(sets).length ? `must be one of ${Object.keys(sets).join(", ")}` : `${source ?? "github"} comes with no rules`,
+      );
+    const has = (ref: string) => set?.rules.some((r) => r.id === ref) === true;
+    const off = strs(t.off, `${path}.off`);
+    off.forEach((ref, k) => {
+      if (set && !has(ref)) err(`${path}.off[${k}]`, `${builtin} has no rule "${ref}"`);
+    });
+    if (off.length && builtin === undefined) err(`${path}.off`, "switches off built-in rules: name them with builtin");
     const rawRules = t.rules === undefined ? [] : Array.isArray(t.rules) ? t.rules : (err(`${path}.rules`, "must be a list"), []);
-    const rules: Rule[] = rawRules.map((r, j) => {
+    const own: Rule[] = rawRules.map((r, j) => {
       const rp = `${path}.rules[${j}]`;
       const rt = table(r, rp);
-      known(rt, rp, ["when", "bucket", "why", "nocap", "hard", "final"]);
+      known(rt, rp, ["when", "bucket", "why", "nocap", "hard", "final", "id", "after"]);
       const when = str(rt.when, `${rp}.when`, "");
       if (!when) err(`${rp}.when`, "is required");
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
@@ -157,7 +203,19 @@ export function parseConfig(
       const to = ruleBucket(rt.bucket, `${rp}.bucket`);
       if (rt.hard === true && to === "judge") err(`${rp}.hard`, "a hard rule places the item itself; give it a bucket, not judge");
       if (rt.final === true && to === "judge") err(`${rp}.final`, "a final rule places the item itself; give it a bucket, not judge");
-      return {
+      const ref = rt.id === undefined ? undefined : str(rt.id, `${rp}.id`, "");
+      const after = rt.after === undefined ? undefined : str(rt.after, `${rp}.after`, "");
+      for (const [key, v] of [
+        ["id", ref],
+        ["after", after],
+      ] as const) {
+        if (v === undefined) continue;
+        if (builtin === undefined) err(`${rp}.${key}`, "names a built-in rule: name the board's with builtin");
+        else if (set && !has(v)) err(`${rp}.${key}`, `${builtin} has no rule "${v}"`);
+      }
+      if (ref !== undefined && after !== undefined) err(`${rp}.after`, "a rule with an id stands in that rule's place; drop after");
+      if (ref !== undefined && off.includes(ref)) err(`${rp}.id`, `"${ref}" is switched off in off; drop one of them`);
+      const rule: Rule = {
         when: when || "false",
         bucket: to,
         why: str(rt.why, `${rp}.why`, ""),
@@ -165,7 +223,16 @@ export function parseConfig(
         hard: rt.hard === true,
         final: rt.final === true,
       };
+      if (builtin !== undefined) rule.own = j;
+      if (ref !== undefined) rule.id = ref;
+      if (after !== undefined) rule.after = after;
+      return rule;
     });
+    own.forEach((r, j) => {
+      if (r.id !== undefined && own.findIndex((x) => x.id === r.id) < j)
+        err(`${path}.rules[${j}].id`, `another rule of yours replaces "${r.id}"`);
+    });
+    const rules = set ? resolveRules(set, off, own) : own.map(placed);
     const sort = str(t.sort, `${path}.sort`, "waiting");
     if (!(SORTS as readonly string[]).includes(sort)) err(`${path}.sort`, `must be one of ${SORTS.join(", ")}`);
     const caps = table(t.caps, `${path}.caps`);
@@ -181,6 +248,8 @@ export function parseConfig(
       filter: filter === "" ? undefined : filter,
       priority: priority === "" ? undefined : priority,
       rules,
+      ...(builtin !== undefined && { builtin }),
+      ...(off.length > 0 && { off }),
       default: bucket(t.default, `${path}.default`, "later"),
       default_why: str(t.default_why, `${path}.default_why`, ""),
       sort: (SORTS as readonly string[]).includes(sort) ? (sort as BoardConfig["sort"]) : "waiting",
@@ -258,11 +327,6 @@ export function migrateOnBehalf(text: string): string | null {
 }
 
 const FRESH_DRAFT = `{ when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true`;
-// Blocked is for your own PRs: someone else's blocked PR goes where its board's other rules put it (a review asked of you is
-// yours to give whatever the PR waits on), and pr.blocked and pr.blocker_mine are there for a rule of yours that wants them.
-// Yours: a change request or a reply you owe is yours to do now, blocked or not.
-const MINE_BLOCKED = `{ when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true }`;
-// A conflict doesn't take it out: it still waits on its reviews, and your agent only rebases a PR that's approved.
 const WAITS_REVIEW = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", bucket = "blocked", why = "{pr.waits}", final = true }`;
 const WAITS_NO_CONFLICT = `{ when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red' && pr.mergeable != 'conflict'", bucket = "blocked", why = "{pr.waits}", final = true }`;
 
@@ -315,14 +379,41 @@ export function spaceOf(org: string, spaces: readonly { name: string; scope: str
   return rest?.name ?? null;
 }
 
-// First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest.
-export function defaultConfigText(opts: { workOrgs: string[] }): string {
+// A rule as the first-run config writes one: on one line, in this order of keys.
+function ruleToml(r: Rule): string {
+  const keys = [
+    `when = ${toml(r.when)}`,
+    `bucket = ${toml(r.bucket)}`,
+    `why = ${toml(r.why ?? "")}`,
+    r.nocap && "nocap = true",
+    r.hard && "hard = true",
+    r.final && "final = true",
+  ];
+  return `{ ${keys.filter(Boolean).join(", ")} }`;
+}
+
+// A board's built-in rules: the line naming them, or (expanded) written out as rules of yours, as configs before them had them.
+function builtinLines(set: string, expanded: boolean): string[] {
+  const rules = GITHUB_RULES[set]!.rules;
+  if (!expanded) return [`builtin = ${toml(set)}`];
+  return [`rules = [`, ...rules.map((r) => `  ${ruleToml(r)},`), `]`];
+}
+
+// First-run config: one space per work org (the orgs most of your open items live in), plus Personal for the rest. Each board
+// names GitHub's rules for it (`builtin`); expanded writes them out instead, as the first-run config did before.
+export function defaultConfigText(opts: { workOrgs: string[]; expanded?: boolean }): string {
   const orgs = opts.workOrgs;
+  const expanded = opts.expanded === true;
   const personalScope = orgs.map((o) => `-org:${o}`).join(" ");
   const out: string[] = [
     `# Inbox config. Edit it in Settings → GitHub → Searches and rules, or here; the desk reloads it on save.`,
     `# Each [[boards]] table feeds your desk: GitHub searches (the space scope is appended), an optional filter,`,
     `# and rules. The first rule whose \`when\` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.`,
+    `# \`builtin\` names the rules GitHub comes with for the board (review, mine, mentions, issues, collaborators): they come`,
+    `# after yours and stay as the desk has them, so a release that improves one reaches you. Settings lists them with their ids.`,
+    `#   off = ["bot-pr"]                                      switches built-in rules off`,
+    `#   { id = "bot-pr", when = "...", bucket = "fyi", ... }   in rules: yours, in that built-in rule's place`,
+    `#   { after = "bot-pr", when = "...", bucket = "fyi" }     in rules: yours, right after it (the others in rules go first)`,
     `# Claude then sorts every item by your policy (Settings → Agent → Your policy), with the rule's bucket as its hint.`,
     `# A rule with \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever`,
     `# Claude, quiet days or caps say.`,
@@ -362,19 +453,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `caps = { now = 3, today = 6 }`,
       `default = "later"`,
       `default_why = "review requested"`,
-      `rules = [`,
-      `  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },`,
-      `  ${BOT_ASK},`,
-      `  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },`,
-      `  { when = "!me.requested && me.review_state == 'changes_requested'", bucket = "today", why = "new commits after you requested changes" },`,
-      `  { when = "!me.requested", bucket = "later", why = "new commits since your review" },`,
-      `  { when = "author.close", bucket = "later", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },`,
-      `  { when = "repo.mine", bucket = "today", why = "your repo" },`,
-      `  { when = "author.bot && author.via == ''", bucket = "hide", why = "bot PR" },`,
-      `  { when = "me.requested_by_bot", bucket = "later", why = "added by {me.requested_by} (bot)" },`,
-      `  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "later", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },`,
-      `  { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },`,
-      `]`,
+      ...builtinLines("review", expanded),
       ``,
       `[[boards]]`,
       `id = ${toml(`${s.id}-mine`)}`,
@@ -385,21 +464,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `caps = { now = 3, today = 6 }`,
       `default = "later"`,
       `default_why = "waiting on reviewers"`,
-      `rules = [`,
-      `  ${MINE_BLOCKED},`,
-      `  ${FRESH_DRAFT} },`,
-      `  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`,
-      `  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },`,
-      `  { when = "len(pr.requires_closed) > 0", bucket = "today", why = "needs {pr.requires_closed}, closed without merging" },`,
-      `  { when = "len(pr.blocks) > 0 && me.owes_reply", bucket = "today", why = "blocks {pr.blocks}; it {pr.waits}" },`,
-      `  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },`,
-      `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },`,
-      `  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },`,
-      `  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },`,
-      `  ${WAITS_REVIEW},`,
-      `  { when = "pr.unresolved_threads > 0", bucket = "later", why = "unresolved threads: {pr.unresolved_threads}" },`,
-      `  { when = "item.activity_hours > 72", bucket = "later", why = "quiet for 3+ days: nudge a reviewer?" },`,
-      `]`,
+      ...builtinLines("mine", expanded),
       ``,
       `[[boards]]`,
       `id = ${toml(`${s.id}-mentions`)}`,
@@ -415,12 +480,7 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
       `caps = { now = 3, today = 6 }`,
       `default = "fyi"`,
       `default_why = "mentions you"`,
-      `rules = [`,
-      `  { when = "me.new_activity", bucket = "today", why = "new replies since you last acted" },`,
-      `  { when = "!me.commented && !me.author && item.activity_hours < 72", bucket = "today", why = "you were mentioned and haven't replied" },`,
-      `  { when = "me.assignee", bucket = "later", why = "assigned to you" },`,
-      ...(work ? [] : [`  { when = "me.author", bucket = "fyi", why = "your issue" },`]),
-      `]`,
+      ...builtinLines(work ? "mentions" : "issues", expanded),
     );
     if (work) {
       out.push(
@@ -435,11 +495,206 @@ export function defaultConfigText(opts: { workOrgs: string[] }): string {
         `caps = { now = 3, today = 6 }`,
         `default = "fyi"`,
         `default_why = "{author.login}: you engaged with {author.engaged_90d} of their PRs in 90 days"`,
-        `rules = [`,
-        `  { when = "item.created_hours < 24", bucket = "later", why = "new from {author.login}" },`,
-        `]`,
+        ...builtinLines("collaborators", expanded),
       );
     }
   }
   return out.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------- built-in rules in a config written before them
+
+const plain = (r: Rule) => JSON.stringify([r.when, r.bucket, r.why ?? "", !!r.nocap, !!r.hard, !!r.final]);
+
+// The longest common subsequence of two lists of keys, as index pairs in order.
+function common(a: readonly string[], b: readonly string[]): [number, number][] {
+  const n = a.length;
+  const m = b.length;
+  const len = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--) len[i]![j] = a[i] === b[j] ? len[i + 1]![j + 1]! + 1 : Math.max(len[i + 1]![j]!, len[i]![j + 1]!);
+  const out: [number, number][] = [];
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (a[i] === b[j]) out.push([i++, j++]);
+    else if (len[i + 1]![j]! >= len[i]![j + 1]!) i++;
+    else j++;
+  }
+  return out;
+}
+
+// What a board's own rules become against a set: each dropped (it is the set's), in a built-in's place (`id`: one that
+// differs from it only in some keys, between the same neighbours), or after one (`after`), or first; and what's off.
+interface Plan {
+  set: string;
+  off: string[];
+  own: { at: number; id?: string; after?: string }[];
+}
+
+function planFor(rules: readonly Rule[], sets: Readonly<Record<string, BuiltInRules>>): Plan | null {
+  let best: { set: string; pairs: [number, number][] } | null = null;
+  for (const [name, set] of Object.entries(sets)) {
+    const pairs = common(rules.map(plain), set.rules.map(plain));
+    const better =
+      !best || pairs.length > best.pairs.length || (pairs.length === best.pairs.length && set.rules.length < sets[best.set]!.rules.length);
+    if (pairs.length && pairs.length * 2 >= set.rules.length && better) best = { set: name, pairs };
+  }
+  if (!best) return null;
+  const set = sets[best.set]!.rules;
+  const kept = new Map<number, string>(); // own index → the built-in it is (dropped) or stands in for (id)
+  const ids = new Map<number, string>();
+  const anchors: [number, number][] = [[-1, -1], ...best.pairs, [rules.length, set.length]];
+  for (let k = 0; k + 1 < anchors.length; k++) {
+    const [o0, b0] = anchors[k]!;
+    const [o1, b1] = anchors[k + 1]!;
+    if (k > 0) kept.set(o0, set[b0]!.id);
+    let from = b0 + 1;
+    for (let o = o0 + 1; o < o1; o++) {
+      const r = rules[o]!;
+      for (let b = from; b < b1; b++) {
+        if (set[b]!.when !== r.when && set[b]!.why !== (r.why ?? "")) continue;
+        ids.set(o, set[b]!.id);
+        from = b + 1;
+        break;
+      }
+    }
+  }
+  const used = new Set([...kept.values(), ...ids.values()]);
+  const own: Plan["own"] = [];
+  let anchor: string | undefined;
+  rules.forEach((_, at) => {
+    const id = kept.get(at) ?? ids.get(at);
+    if (kept.has(at)) anchor = id;
+    else if (id) {
+      own.push({ at, id });
+      anchor = id;
+    } else own.push({ at, ...(anchor !== undefined && { after: anchor }) });
+  });
+  return { set: best.set, off: set.filter((r) => !used.has(r.id)).map((r) => r.id), own };
+}
+
+// The span of a `rules = [ … ]` array in a board's table: where its line starts, where its last line ends, each element's
+// span, and the comments in it. Null when there's none, or it's not one this can read (the board's rules as [[boards.rules]]).
+function rulesArray(table: string): { start: number; end: number; elements: [number, number][]; comments: string[] } | null {
+  const head = /^[ \t]*rules[ \t]*=[ \t]*\[/m.exec(table);
+  if (!head) return null;
+  const elements: [number, number][] = [];
+  const comments: string[] = [];
+  let depth = 0;
+  let open = -1;
+  for (let i = head.index + head[0].length - 1; i < table.length; i++) {
+    const ch = table[i]!;
+    if (ch === '"' || ch === "'") {
+      for (i++; i < table.length && table[i] !== ch; i++) if (ch === '"' && table[i] === "\\") i++;
+    } else if (ch === "#") {
+      const eol = table.indexOf("\n", i);
+      comments.push(table.slice(i, eol < 0 ? undefined : eol).trimEnd());
+      i = eol < 0 ? table.length : eol - 1;
+    } else if (ch === "[" || ch === "{") {
+      if (depth === 1 && ch === "{") open = i;
+      depth++;
+    } else if (ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 1 && ch === "}") elements.push([open, i + 1]);
+      if (depth === 0) {
+        const eol = table.indexOf("\n", i);
+        const rest = table.slice(i + 1, eol < 0 ? undefined : eol);
+        if (rest.trim().startsWith("#")) comments.push(rest.trim());
+        else if (rest.trim()) return null;
+        return { start: head.index, end: eol < 0 ? table.length : eol, elements, comments };
+      }
+    }
+  }
+  return null;
+}
+
+// Splits config.toml into what comes before the first [[boards]] and one piece per board; null when that isn't one to a board.
+function boardTables(text: string, count: number): string[] | null {
+  const parts = text.split(/(?=^\[\[boards\]\][ \t]*(?:#[^\n]*)?\r?$)/m);
+  if (!(parts[0] ?? "").startsWith("[[boards]]")) return parts.length === count + 1 ? parts : null;
+  return parts.length === count ? ["", ...parts] : null;
+}
+
+// Where a board's own keys end: its next table, a sub-table or another kind's.
+const tableEnd = (part: string) => {
+  const next = /^[ \t]*\[\[?[ \t]*[A-Za-z_"']/m.exec(part.slice(part.indexOf("\n") + 1));
+  return next ? part.indexOf("\n") + 1 + next.index : part.length;
+};
+
+// A config written before built-in rules had GitHub's written out on each board: a board whose rules are mostly one set's
+// names that set (`builtin`), keeps the rules of yours (`id` where one stands in a built-in's place, `after` where it follows
+// one) and switches off what it didn't have (`off`). Only where every board's rules come out exactly as they were. Null if
+// nothing changes.
+export function migrateBuiltIns(text: string, sources: readonly Source[] = [GITHUB]): string | null {
+  const before = parseConfig(text, DEFAULTS, sources);
+  if (!before.loaded) return null;
+  const boards = before.loaded.config.boards;
+  const parts = boardTables(text, boards.length);
+  if (!parts) return null;
+  let changed = false;
+  boards.forEach((b, i) => {
+    const sets = sources.find((c) => c.id === (b.source ?? "github"))?.rules;
+    const part = parts[i + 1]!;
+    if (b.builtin !== undefined || !sets || !b.rules.length) return;
+    const own = part.slice(0, tableEnd(part));
+    const arr = rulesArray(own);
+    const plan = planFor(b.rules, sets);
+    if (!arr || !plan || arr.elements.length !== b.rules.length) return;
+    const indent = /^[ \t]*/.exec(own.slice(arr.start))![0];
+    const lines = [
+      ...arr.comments.map((c) => indent + c),
+      `${indent}builtin = ${toml(plan.set)}`,
+      ...(plan.off.length ? [`${indent}off = [${plan.off.map(toml).join(", ")}]`] : []),
+    ];
+    if (plan.own.length) {
+      lines.push(`${indent}rules = [`);
+      for (const o of plan.own) {
+        const [s, e] = arr.elements[o.at]!;
+        const key = o.id !== undefined ? `id = ${toml(o.id)}` : o.after !== undefined ? `after = ${toml(o.after)}` : "";
+        const el = own.slice(s, e);
+        lines.push(`${indent}  ${key ? `{ ${key}, ${el.slice(1).trimStart()}` : el},`);
+      }
+      lines.push(`${indent}]`);
+    }
+    parts[i + 1] = own.slice(0, arr.start) + lines.join("\n") + own.slice(arr.end) + part.slice(own.length);
+    changed = true;
+  });
+  if (!changed) return null;
+  const next = parts.join("");
+  const after = parseConfig(next, DEFAULTS, sources).loaded;
+  const same = (b: BoardConfig) =>
+    JSON.stringify(b, (k, v: unknown) => (k === "builtin" || k === "off" ? undefined : k === "rules" ? (v as Rule[]).map(plain) : v));
+  if (!after || after.config.boards.length !== boards.length || after.config.boards.some((b, i) => same(b) !== same(boards[i]!)))
+    return null;
+  return next;
+}
+
+// Switches one of a board's built-in rules on or off in config.toml's text, as its `off` list says; null when this can't
+// (no such board, or its `off` isn't on one line). Leaves the text as it is when it already says so.
+export function switchBuiltIn(text: string, board: string, rule: string, on: boolean): string | null {
+  const parsed = Result.try({ try: (): Raw => parse(text), catch: tomlError });
+  if (Result.isFailure(parsed) || !Array.isArray(parsed.success.boards)) return null;
+  const raw = parsed.success.boards as Raw[];
+  const i = raw.findIndex((b) => b.id === board);
+  const parts = boardTables(text, raw.length);
+  if (i < 0 || !parts) return null;
+  const part = parts[i + 1]!;
+  const own = part.slice(0, tableEnd(part));
+  const was = Array.isArray(raw[i]!.off) ? (raw[i]!.off as unknown[]).map(String) : [];
+  const next = on ? was.filter((x) => x !== rule) : was.includes(rule) ? was : [...was, rule];
+  if (next.length === was.length && next.every((x, k) => x === was[k])) return text;
+  const line = `off = [${next.map(toml).join(", ")}]`;
+  const at = /^([ \t]*)off[ \t]*=[ \t]*\[[^\n\]]*\][ \t]*(#[^\n]*)?(\r?\n|$)/m.exec(own);
+  let edited: string;
+  if (at) {
+    const tail = at[2] ? ` ${at[2]}` : "";
+    edited = own.slice(0, at.index) + (next.length ? `${at[1]}${line}${tail}${at[3]}` : "") + own.slice(at.index + at[0].length);
+  } else {
+    if (/^[ \t]*off[ \t]*=/m.test(own)) return null;
+    const head = /^([ \t]*)builtin[ \t]*=[^\n]*(\r?\n|$)/m.exec(own);
+    if (!head) return null;
+    const end = head.index + head[0].length;
+    edited = own.slice(0, end) + (head[2] ? "" : "\n") + `${head[1]}${line}\n` + own.slice(end);
+  }
+  parts[i + 1] = edited + part.slice(own.length);
+  return parts.join("");
 }

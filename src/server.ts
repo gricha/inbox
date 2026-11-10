@@ -758,6 +758,18 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, put, { log });
   });
+  app.put("/api/config/builtin", (c) => {
+    const put = Effect.gen(function* () {
+      yield* up;
+      const { board, rule, on, base } = yield* json(c);
+      if (typeof board !== "string" || typeof rule !== "string" || typeof on !== "boolean")
+        return yield* new BadRequest({ message: "need { board, rule, on }" });
+      if (base !== undefined && typeof base !== "string")
+        return yield* new BadRequest({ message: "base must be the hash from GET /api/config" });
+      return yield* desk.switchRule(board, rule, on, base);
+    });
+    return respond(c, put, { log });
+  });
   app.get("/api/policy", (c) => total(c, () => desk.getPolicy()));
   app.put("/api/policy", (c) => {
     const put = Effect.gen(function* () {

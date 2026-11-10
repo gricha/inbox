@@ -60,6 +60,7 @@ import type {
   BoardView,
   Bucket,
   Card,
+  BuiltInBoard,
   ConfigDoc,
   ConfigError,
   Context,
@@ -104,8 +105,10 @@ import {
   migrateWaitsConflict,
   migrateDrafts,
   migrateHard,
+  migrateBuiltIns,
   parseConfig,
   spaceOf,
+  switchBuiltIn,
   type LoadedConfig,
 } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
@@ -846,7 +849,8 @@ export class Desk {
   // Once each: the direct-ask rule of a config written before hard rules becomes hard (migrateHard), a direct ask a bot
   // added gets a hard rule too (migrateBotAsk), and the old rule sending all your drafts to later puts a draft you touched lately
   // on the desk (migrateDrafts), the rule putting a merge conflict on the desk goes (migrateConflict), and your PR waiting on
-  // reviewers stays in Blocked with a conflict (migrateWaitsConflict), and My PRs lists a bot's PR opened for you (migrateOnBehalf).
+  // reviewers stays in Blocked with a conflict (migrateWaitsConflict), and My PRs lists a bot's PR opened for you (migrateOnBehalf);
+  // last, a board's copy of GitHub's rules becomes a reference to them, so later releases' rules reach it (migrateBuiltIns).
   migrateRules(): Effect.Effect<void, FsError> {
     return Effect.gen({ self: this }, function* () {
       const due = [
@@ -860,6 +864,11 @@ export class Desk {
           did: "kept your PRs waiting on reviewers in Blocked when they have a merge conflict",
         },
         { key: "on_behalf_migrated", migrate: migrateOnBehalf, did: "listed bots' PRs opened for you under My PRs" },
+        {
+          key: "builtins_migrated",
+          migrate: (t: string) => migrateBuiltIns(t, this.connectors),
+          did: "named GitHub's built-in rules on your boards in place of the copies of them, keeping the rules you changed or added",
+        },
       ].filter((m) => !this.store.get(m.key));
       if (!due.length) return;
       const before = yield* this.readConfig();
@@ -3485,7 +3494,42 @@ export class Desk {
           : [],
       ),
     );
-    return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings, hard };
+    const builtins = boards.flatMap((b, i): BuiltInBoard[] => {
+      const source = b.source ?? "github";
+      const set = b.builtin === undefined ? undefined : this.connectors.find((c) => c.id === source)?.rules[b.builtin];
+      if (!set || b.builtin === undefined) return [];
+      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final }) => {
+        const own = b.rules.find((r) => r.id === id && r.own !== undefined)?.own;
+        return {
+          id,
+          when,
+          bucket,
+          why: plainWhy(why),
+          ...(h && { hard: true }),
+          ...(final && { final: true }),
+          on: !b.off?.includes(id),
+          yours: own !== undefined,
+          ...(own !== undefined && { path: `boards[${i}].rules[${own}]` }),
+        };
+      });
+      return [{ board: b.id, name: label(b), source, set: b.builtin, set_name: set.name, rules }];
+    });
+    return { path: this.configPath, text, hash: textHash(text), errors: this.configErrors, warnings: this.configWarnings, hard, builtins };
+  }
+
+  // Switches one of a board's built-in rules on or off: its `off` in config.toml, saved as an edit of yours would be.
+  switchRule(
+    board: string,
+    rule: string,
+    on: boolean,
+    base?: string,
+  ): Effect.Effect<{ ok: boolean; errors: ConfigError[]; warnings: ConfigError[] }, Stale | FsError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const text = switchBuiltIn(this.configText, board, rule, on);
+      if (text === null)
+        return yield* new BadRequest({ message: `can't switch ${rule} on ${board} here: edit its off list in config.toml` });
+      return yield* this.putConfig(text, base ?? this.configText);
+    });
   }
 
   preview(text: string): PreviewResult {

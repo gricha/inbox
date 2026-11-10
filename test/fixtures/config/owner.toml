@@ -1,0 +1,190 @@
+# Review Desk config. Edit it on the Rules page (⌘S saves) or here; the server reloads on save.
+# Each [[boards]] table is a tab: GitHub searches (the space scope is appended), an optional filter,
+# and rules. The first rule whose `when` is true puts the item in a bucket: now, today, blocked, later, fyi, hide.
+# `caps` limit NOW/TODAY; overflow moves down a bucket with a note. Pinned and `nocap` items don't count.
+# Expressions: && || ! == != < <= > >= in matches ( ) and len() lower() contains() startswith() any().
+# Fields (me.requested_direct, author.close, pr.ci, ...) are listed on the Rules page and by `desk fields`.
+# Within a bucket, cards sort by rule order (earlier rules first), then `priority`, then `sort`.
+# `why` texts can include fields: "{author.login} asked you".
+
+[[spaces]]
+id = "acme"
+name = "acme"
+scope = "org:acme"
+
+[[spaces]]
+id = "personal"
+name = "Personal"
+scope = "-org:acme"
+
+# ── acme ──
+
+[[boards]]
+id = "acme-review"
+space = "acme"
+name = "PRs to review"
+queries = [
+  "is:pr is:open archived:false review-requested:@me",
+  "is:pr is:open archived:false reviewed-by:@me -author:@me",
+]
+filter = "!item.draft && (me.requested || me.pushed_since_review)"
+priority = "author.engaged_90d"   # within a bucket: people you work with most first, then longest waiting
+sort = "waiting"
+caps = { now = 3, today = 6 }
+default = "later"
+default_why = "review requested"
+rules = [
+  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },
+  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },
+  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },
+  { when = "!me.requested && me.review_state == 'changes_requested'", bucket = "today", why = "new commits after you requested changes" },
+  { when = "!me.requested", bucket = "later", why = "new commits since your review" },
+  { when = "author.close", bucket = "later", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },
+  { when = "repo.mine", bucket = "today", why = "your repo" },
+  { when = "author.bot && author.via == ''", bucket = "hide", why = "bot PR" },
+  { when = "me.requested_by_bot", bucket = "later", why = "added by {me.requested_by} (bot)" },
+  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "later", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },
+  { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },
+]
+
+[[boards]]
+id = "acme-mine"
+space = "acme"
+name = "My PRs"
+queries = [
+  "is:pr is:open archived:false author:@me",
+  "is:pr is:open archived:false author:app/acme-bot \"me\" in:body",
+]
+sort = "updated"
+default = "later"
+default_why = "waiting on reviewers"
+rules = [
+  { when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true },
+  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },
+  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },
+  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },
+  { when = "len(pr.requires_closed) > 0", bucket = "today", why = "needs {pr.requires_closed}, closed without merging" },
+  { when = "len(pr.blocks) > 0 && me.owes_reply", bucket = "today", why = "blocks {pr.blocks}; it {pr.waits}" },
+  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },
+  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },
+  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },
+  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },
+  { when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", bucket = "blocked", why = "{pr.waits}", final = true },
+  { when = "pr.unresolved_threads > 0", bucket = "later", why = "unresolved threads: {pr.unresolved_threads}" },
+  { when = "item.activity_hours > 72", bucket = "later", why = "quiet for 3+ days: nudge a reviewer?" },
+]
+
+[[boards]]
+id = "acme-mentions"
+space = "acme"
+name = "Mentions & assigned"
+queries = [
+  "is:open archived:false mentions:@me -author:@me",
+  "is:open archived:false assignee:@me -author:@me",
+]
+filter = "item.updated_hours < 2160 && (item.activity_hours < 336 || me.assignee)"
+sort = "updated"
+default = "fyi"
+default_why = "mentions you"
+rules = [
+  { when = "me.new_activity", bucket = "today", why = "new replies since you last acted" },
+  { when = "!me.commented && !me.author && item.activity_hours < 72", bucket = "today", why = "you were mentioned and haven't replied" },
+  { when = "me.assignee", bucket = "later", why = "assigned to you" },
+]
+
+# PRs from people you work with most, where nobody asked you. {close_authors} expands to your top collaborators.
+[[boards]]
+id = "acme-collaborators"
+space = "acme"
+name = "Close collaborators"
+queries = ["is:pr is:open archived:false -is:draft -author:@me -review-requested:@me {close_authors}"]
+sort = "updated"
+default = "fyi"
+default_why = "{author.login}: you engaged with {author.engaged_90d} of their PRs in 90 days"
+rules = [
+  { when = "item.created_hours < 24", bucket = "later", why = "new from {author.login}" },
+]
+
+[[boards]]
+id = "acme-watching"
+space = "acme"
+name = "Watching"
+# PRs you put on your desk by hand: add the number to the query and the id to the filter.
+queries = ["is:pr is:open archived:false repo:acme/api 1234"]
+filter = "item.id in ['acme/api#1234']"
+default = "today"
+default_why = "you put it on your desk"
+
+# ── Personal ──
+
+[[boards]]
+id = "personal-review"
+space = "personal"
+name = "PRs to review"
+queries = [
+  "is:pr is:open archived:false review-requested:@me",
+  "is:pr is:open archived:false reviewed-by:@me -author:@me",
+]
+filter = "!item.draft && (me.requested || me.pushed_since_review)"
+priority = "author.engaged_90d"   # within a bucket: people you work with most first, then longest waiting
+sort = "waiting"
+default = "later"
+default_why = "review requested"
+rules = [
+  { when = "me.requested_direct && !me.requested_by_bot", bucket = "now", why = "{me.requested_by} asked you directly", hard = true },
+  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },
+  { when = "me.author", bucket = "later", why = "your PR, opened through {author.login}" },
+  { when = "!me.requested && me.review_state == 'changes_requested'", bucket = "today", why = "new commits after you requested changes" },
+  { when = "!me.requested", bucket = "later", why = "new commits since your review" },
+  { when = "author.close", bucket = "later", why = "close collaborator: you engaged with {author.engaged_90d} of their PRs in 90 days" },
+  { when = "repo.mine", bucket = "today", why = "your repo" },
+  { when = "author.bot && author.via == ''", bucket = "hide", why = "bot PR" },
+  { when = "me.requested_by_bot", bucket = "later", why = "added by {me.requested_by} (bot)" },
+  { when = "me.requested_codeowner && !me.requested_direct && pr.my_area", bucket = "later", why = "CODEOWNERS ping to @{me.requested_team}, in code you work on" },
+  { when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi", why = "CODEOWNERS ping to @{me.requested_team}" },
+]
+
+[[boards]]
+id = "personal-mine"
+space = "personal"
+name = "My PRs"
+queries = ["is:pr is:open archived:false author:@me", "is:open archived:false assignee:@me -author:@me"]
+filter = "me.author"
+sort = "updated"
+default = "later"
+default_why = "waiting on reviewers"
+rules = [
+  { when = "pr.blocked && pr.review != 'changes_requested' && !me.owes_reply", bucket = "blocked", why = "blocked by {pr.blocker}, which {pr.blocker_waits}", final = true },
+  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },
+  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },
+  { when = "pr.review == 'changes_requested'", bucket = "now", why = "changes requested", nocap = true },
+  { when = "len(pr.requires_closed) > 0", bucket = "today", why = "needs {pr.requires_closed}, closed without merging" },
+  { when = "len(pr.blocks) > 0 && me.owes_reply", bucket = "today", why = "blocks {pr.blocks}; it {pr.waits}" },
+  { when = "pr.stacked", bucket = "later", why = "stacked on {pr.base}" },
+  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "today", why = "CI failing" },
+  { when = "me.new_activity", bucket = "today", why = "new comments or reviews" },
+  { when = "pr.review == 'approved' && pr.ci == 'green'", bucket = "today", why = "approved and green: ready to merge" },
+  { when = "len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", bucket = "blocked", why = "{pr.waits}", final = true },
+  { when = "pr.unresolved_threads > 0", bucket = "later", why = "unresolved threads: {pr.unresolved_threads}" },
+  { when = "item.activity_hours > 72", bucket = "later", why = "quiet for 3+ days: nudge a reviewer?" },
+]
+
+[[boards]]
+id = "personal-mentions"
+space = "personal"
+name = "Issues & mentions"
+queries = [
+  "is:open archived:false mentions:@me -author:@me",
+  "is:open archived:false assignee:@me -author:@me",
+  "is:issue is:open archived:false author:@me",
+]
+filter = "item.updated_hours < 2160 && (item.activity_hours < 336 || me.assignee)"
+sort = "updated"
+default = "fyi"
+default_why = "mentions you"
+rules = [
+  { when = "me.new_activity", bucket = "today", why = "new replies since you last acted" },
+  { when = "!me.commented && !me.author && item.activity_hours < 72", bucket = "today", why = "you were mentioned and haven't replied" },
+  { when = "me.assignee", bucket = "later", why = "assigned to you" },
+  { when = "me.author", bucket = "fyi", why = "your issue" },
+]

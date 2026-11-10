@@ -153,11 +153,12 @@ test("Searches and rules lists the final rules with the hard ones, in board orde
 test("preview shows moves without saving; putConfig saves valid text only", async () => {
   const t = await setup([reviewAsk(1), teamPing(2)]);
   await run(t.desk.sync());
+  // Yours in place of GitHub's CODEOWNERS rule, which sends a team ping to FYI.
   const text = t.desk
     .getConfig()
     .text.replace(
-      `{ when = "me.requested_codeowner && !me.requested_direct", bucket = "fyi"`,
-      `{ when = "me.requested_codeowner && !me.requested_direct", bucket = "today"`,
+      `builtin = "review"\n`,
+      `builtin = "review"\nrules = [{ id = "codeowners", when = "me.requested_codeowner && !me.requested_direct", bucket = "today" }]\n`,
     );
   const p = t.desk.preview(text);
   assert.deepEqual(p.errors, []);
@@ -708,7 +709,7 @@ test("a desk started on the oldest config migrates its rules once, with one back
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   const config = path.join(home, "config.toml");
   const now = defaultConfigText({ workOrgs: ["acme"] });
-  const old = now
+  const old = defaultConfigText({ workOrgs: ["acme"], expanded: true })
     .replaceAll(
       `  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },\n`,
       "",
@@ -728,7 +729,14 @@ test("a desk started on the oldest config migrates its rules once, with one back
   assert.equal(fs.readFileSync(config, "utf8"), now);
   assert.equal(fs.readFileSync(`${config}.bak`, "utf8"), old);
   assert.equal(logs.filter((l) => l.includes("backup: config.toml.bak")).length, 1);
-  for (const k of ["hard_migrated", "bot_ask_migrated", "drafts_migrated", "conflict_migrated", "waits_conflict_migrated"]) {
+  for (const k of [
+    "hard_migrated",
+    "bot_ask_migrated",
+    "drafts_migrated",
+    "conflict_migrated",
+    "waits_conflict_migrated",
+    "builtins_migrated",
+  ]) {
     assert.ok(desk.store.get(k), k);
     desk.store.set(k, null);
   }

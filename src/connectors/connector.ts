@@ -3,7 +3,7 @@ import type { Effect } from "effect";
 import type { LoadedConfig } from "../config.ts";
 import type { GitHubReadError, NotFound, Upstream } from "../errors.ts";
 import type { CompiledBoard } from "../rules.ts";
-import type { ActivityEvent, BuiltInAutomation, BuiltInCriterion, ConnectorStatus, Item } from "../types.ts";
+import type { ActivityEvent, BuiltInAutomation, BuiltInCriterion, BuiltInRules, ConnectorStatus, Item } from "../types.ts";
 
 export type NewEvent = Omit<ActivityEvent, "seq" | "source">;
 
@@ -24,6 +24,8 @@ export interface Connector {
   readonly name: string; // "GitHub"
   readonly automations: readonly BuiltInAutomation[]; // what it comes with, run by the desk as yours are: Settings → its part
   readonly criteria: readonly BuiltInCriterion[]; // what it comes with for the Inbox's order, asked as yours are: Settings → Urgency
+  // What it comes with for its boards, by the name a board's `builtin` gives: read on every load, so a release's reach every desk.
+  readonly rules: Readonly<Record<string, BuiltInRules>>;
   // Before the desk starts: what it must have (GitHub: your context); first: its part of the first config.toml, else null.
   init(first: boolean): Effect.Effect<string | null, GitHubReadError | Upstream>;
   start(): void; // its loops: the full reconcile and the cheap change feed

@@ -210,6 +210,16 @@ export interface Rule {
   nocap?: boolean; // matched items don't count toward caps and are never demoted
   hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule)
   final?: boolean; // Claude doesn't re-sort what it matches: it stays in the rule's bucket (a pin's floor still lifts it)
+  id?: string; // the plugin's rule it is, or, with `own`, the one yours replaces
+  own?: number; // yours, on a board with `builtin`: its index in the board's `rules` in config.toml
+  after?: string; // yours, as config.toml has it: right after this built-in rule (resolved rules don't carry it)
+}
+
+// What a plugin comes with for a kind of board (GitHub's PRs to review, My PRs, …): a board names it with `builtin`, and gets
+// its rules after the board's own, as the code has them now. A rule's id is stable: config.toml switches one off or replaces it.
+export interface BuiltInRules {
+  name: string;
+  rules: readonly (Omit<Rule, "id" | "own" | "after" | "bucket"> & { id: string; bucket: Bucket; why: string })[];
 }
 
 export interface BoardConfig {
@@ -220,7 +230,9 @@ export interface BoardConfig {
   queries: string[]; // GitHub search; the space scope is appended. {me} and {close_authors} expand.
   filter?: string;
   priority?: string; // number expression; higher sorts first within a bucket, before `sort`
-  rules: Rule[];
+  rules: Rule[]; // what places its items, in order: yours, then the plugin's (`builtin`) with yours in their place or after them
+  builtin?: string; // the plugin's rules it uses (GitHub's "review", "mine", …)
+  off?: string[]; // of those, the ones switched off
   default: Bucket;
   default_why: string;
   sort: "waiting" | "updated" | "newest";
@@ -1272,6 +1284,26 @@ export interface ConfigDoc {
   errors: ConfigError[];
   warnings?: ConfigError[]; // leftover pre-settings keys: ignored, not fatal
   hard: { board: string; bucket: Bucket; when: string; why: string; final?: boolean }[]; // the loaded config's hard and final rules, for Searches and rules
+  builtins: BuiltInBoard[]; // the loaded config's boards that use a plugin's rules, and each of those rules as it stands
+}
+
+export interface BuiltInBoard {
+  board: string; // its id
+  name: string; // its name, with its space's when another board has it
+  source: string; // the plugin: "github"
+  set: string; // its `builtin`: "review"
+  set_name: string; // "PRs to review"
+  rules: {
+    id: string;
+    when: string;
+    bucket: Bucket;
+    why: string; // in plain words
+    hard?: boolean;
+    final?: boolean;
+    on: boolean; // not in the board's `off`
+    yours: boolean; // a rule of yours with its id stands in its place
+    path?: string; // yours: where it is in config.toml ("boards[1].rules[0]")
+  }[];
 }
 
 export interface PreviewResult {

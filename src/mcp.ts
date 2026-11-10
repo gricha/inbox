@@ -154,6 +154,18 @@ const configText = (api: DeskClient) =>
       `config ${d.path} · hash ${d.hash} (pass it as base to save) · ${d.errors.length} error(s)`,
       ...d.errors.map((e) => `error ${e.path}: ${e.message}`),
       fenced("config", "The owner's rules file (TOML), between the markers. Change it only as they ask.", d.text.trimEnd().split("\n")),
+      ...(d.builtins.length
+        ? [
+            "built-in rules (the plugin's, read from code; they come after the board's own rules, in this order):",
+            ...d.builtins.flatMap((b) => [
+              `${b.board} (builtin = "${b.set}", ${b.source})`,
+              ...b.rules.map(
+                (r) =>
+                  `  ${r.id}${r.on ? "" : " [off]"}${r.yours ? " [the owner's rule stands in its place]" : ""}: ${r.when} → ${r.bucket}${r.hard ? " (hard)" : ""}${r.final ? " (final)" : ""}  ${oneLine(r.why)}`,
+              ),
+            ]),
+          ]
+        : []),
     ].join("\n"),
   );
 
@@ -498,7 +510,7 @@ export function createMcpServer(
     "desk_config",
     {
       description:
-        "The owner's rules (config.toml: spaces, boards, rules). get: the text and its hash. preview: what the given full text would change, board by board, and which items would move; nothing is saved. save: write it, with base = the hash from get; only valid text is saved, and a stale base fails. Always preview and show the owner what moves before you save, and save only when they say yes.",
+        "The owner's rules (config.toml: spaces, boards, rules). A board with `builtin` also gets its plugin's rules, which get lists by id: the board's own `rules` come first, then the built-in ones; `off = [ids]` switches built-in ones off, an own rule with `id` = a built-in's stands in its place, and one with `after` = a built-in's id comes right after it. Change the owner's own rules, `off` and overrides, never copy built-in ones in. get: the text and its hash, then the built-in rules. preview: what the given full text would change, board by board, and which items would move; nothing is saved. save: write it, with base = the hash from get; only valid text is saved, and a stale base fails. Always preview and show the owner what moves before you save, and save only when they say yes.",
       inputSchema: {
         action: z.enum(["get", "preview", "save"]),
         text: z.string().optional().describe("preview and save: the whole new config.toml"),

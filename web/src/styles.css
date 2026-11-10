@@ -6010,3 +6010,38 @@ pre,
   padding: 48px;
   color: var(--ink);
 }
+
+/* Rules → built in: a board's plugin rules, folded; each its bucket and why, condition and id, then its switch. */
+.builtin-board summary {
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.builtin-rules {
+  margin: 4px 0 8px;
+}
+
+.builtin-rules li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.builtin-rules .br-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.builtin-rules code {
+  color: var(--pencil);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.builtin-rules li.off .br-text {
+  color: var(--faint);
+}

@@ -14,7 +14,8 @@ import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
 import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
 import { fallbackScore, sectionOf } from "../../src/urgency.ts";
 import { checksView } from "../../src/checks.ts";
-import { catchAllOf, spaceOf } from "../../src/config.ts";
+import { catchAllOf, resolveRules, spaceOf } from "../../src/config.ts";
+import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
@@ -70,6 +71,7 @@ import type {
   PolicyDoc,
   Preflight,
   PreviewResult,
+  Rule,
   ReviewDecision,
   ReviewFile,
   Inquiry,
@@ -230,10 +232,13 @@ let config: Config = {
       space: "personal",
       name: "Review requests",
       queries: ["is:open is:pr review-requested:{me}"],
+      // GitHub's rules, with two of yours in place of theirs, one after them, and one switched off.
+      builtin: "review",
+      off: ["added-by-bot"],
       rules: [
-        { when: W.direct, bucket: "now", why: "asked you directly", hard: true },
-        { when: W.depbot, bucket: "hide", why: "dependency bump by a bot" },
-        { when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
+        { id: "asked-directly", when: W.direct, bucket: "now", why: "asked you directly", hard: true },
+        { after: "asked-directly", when: W.depbot, bucket: "hide", why: "dependency bump by a bot" },
+        { id: "close-collaborator", when: W.close, bucket: "today", why: "close collaborator: {author.engaged_90d} PRs in 90 days" },
       ],
       default: "later",
       default_why: "team request",
@@ -1714,7 +1719,7 @@ function place(r: Rec, b: BoardConfig): Placement | null {
     const to = floor && RANK[floor] < RANK[j[0]] ? floor : j[0];
     return { ...p, bucket: to, rule_bucket: to, why: to === j[0] ? j[1] : p.why, judge: { bucket: j[0], why: j[1], pending: false }, hint };
   };
-  for (const [i, rule] of b.rules.entries()) {
+  for (const [i, rule] of rulesOf(b).entries()) {
     const matched = truths.includes(rule.when);
     trace.push({ index: i, when: rule.when, matched });
     if (!matched) continue;
@@ -1723,6 +1728,12 @@ function place(r: Rec, b: BoardConfig): Placement | null {
   }
   return judged(null, b.default, b.default_why);
 }
+
+// As src/config.ts: yours, then GitHub's for a board that names them.
+const rulesOf = (b: BoardConfig): Rule[] => {
+  const set = b.builtin === undefined ? undefined : GITHUB_RULES[b.builtin];
+  return set ? resolveRules(set, b.off ?? [], b.rules) : b.rules;
+};
 
 const waitingSince = (r: Rec) => iso(r.seed.wait ?? r.seed.age);
 
@@ -1770,7 +1781,7 @@ function boardPlacements(b: BoardConfig): { r: Rec; p: Placement }[] {
         !laneOwned(r) &&
         !r.state.pinned &&
         !(p.floor && RANK[to] > RANK[p.floor]) &&
-        !(p.rule !== null && b.rules[p.rule]?.nocap),
+        !(p.rule !== null && rulesOf(b)[p.rule]?.nocap),
     );
     for (const { r, p } of counted.toSorted((x, y) => call(x.r) - call(y.r)).slice(cap)) {
       p.bucket = to;
@@ -3243,8 +3254,13 @@ function toToml(c: Config): string {
           .map(([k, v]) => `${k} = ${v}`)
           .join(", ")} }`,
       );
+    if (b.builtin) out.push(`builtin = ${tomlStr(b.builtin)}`);
+    if (b.off?.length) out.push(`off = ${tomlArr(b.off)}`);
     for (const r of b.rules) {
-      out.push("", "[[boards.rules]]", `when = ${tomlStr(r.when)}`, `bucket = ${tomlStr(r.bucket)}`);
+      out.push("", "[[boards.rules]]");
+      if (r.id) out.push(`id = ${tomlStr(r.id)}`);
+      if (r.after) out.push(`after = ${tomlStr(r.after)}`);
+      out.push(`when = ${tomlStr(r.when)}`, `bucket = ${tomlStr(r.bucket)}`);
       if (r.why) out.push(`why = ${tomlStr(r.why)}`);
       if (r.nocap) out.push("nocap = true");
       if (r.hard) out.push("hard = true");
@@ -3424,6 +3440,8 @@ function validate(c: Config): ConfigError[] {
     bucket(`${p}.default`, b.default);
     if (b.filter) expr(`${p}.filter`, b.filter);
     if (b.priority) expr(`${p}.priority`, b.priority);
+    if (b.builtin !== undefined && !GITHUB_RULES[b.builtin])
+      errors.push({ path: `${p}.builtin`, message: `must be one of ${Object.keys(GITHUB_RULES).join(", ")}` });
     b.rules.forEach((r, j) => {
       if (!r.when) errors.push({ path: `${p}.rules[${j}].when`, message: "rule needs a when" });
       else expr(`${p}.rules[${j}].when`, r.when);
@@ -3953,13 +3971,43 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/config") {
     const hard = config.boards.flatMap((b) =>
-      b.rules.flatMap((r) =>
+      rulesOf(b).flatMap((r) =>
         (r.hard || r.final) && r.bucket !== "judge"
           ? [{ board: b.name, bucket: r.bucket, when: r.when, why: plainWhy(r.why ?? ""), ...(r.final && { final: true }) }]
           : [],
       ),
     );
-    return { path: `${homedir()}/.inbox/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard };
+    const builtins = config.boards.flatMap((b, i) => {
+      const set = b.builtin === undefined ? undefined : GITHUB_RULES[b.builtin];
+      if (!set) return [];
+      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final }) => {
+        const own = b.rules.findIndex((r) => r.id === id);
+        return {
+          id,
+          when,
+          bucket,
+          why: plainWhy(why),
+          ...(h && { hard: true }),
+          ...(final && { final: true }),
+          on: !b.off?.includes(id),
+          yours: own >= 0,
+          ...(own >= 0 && { path: `boards[${i}].rules[${own}]` }),
+        };
+      });
+      return [{ board: b.id, name: b.name, source: "github", set: b.builtin!, set_name: set.name, rules }];
+    });
+    return { path: `${homedir()}/.inbox/config.toml (mock, in memory)`, text: configText, hash: `mock${rev}`, errors: [], hard, builtins };
+  }
+  if (route === "PUT /api/config/builtin") {
+    const body = await readBody(req);
+    const b = config.boards.find((x) => x.id === body.board);
+    if (!b?.builtin) throw new HttpError(400, `no board ${String(body.board)} with built-in rules`);
+    const rest = (b.off ?? []).filter((x) => x !== body.rule);
+    b.off = body.on === true ? rest : [...rest, String(body.rule)];
+    configText = toToml(config);
+    bump();
+    sync();
+    return { ok: true, errors: [] };
   }
   if (route === "POST /api/config/preview") return preview(textOf(await readBody(req)));
   if (route === "PUT /api/config") {

@@ -72,7 +72,19 @@ rules = [
 - **Buckets**: `now`, `today`, `blocked`, `later`, `fyi`, `hide`. Only rules fill `blocked`: Claude never answers it. Hidden items stay visible under "Sorted away".
 - `{close_authors}` in a query expands to the people you review most.
 
-The first run writes a starting config: one space for the org with most of your open items, plus Personal for the rest.
+The first run writes a starting config: one space for the org with most of your open items, plus Personal for the rest. Its boards don't copy GitHub's rules: each names the set GitHub comes with for it (`builtin = "review"`, `"mine"`, `"mentions"`, `"issues"`, `"collaborators"`), which the desk reads from its code, so a release that improves one reaches your desk. Your file holds only what's yours:
+
+```toml
+builtin = "review"
+off = ["your-repo"]                                                   # GitHub's rules you switched off
+rules = [
+  { when = "'ml' in item.labels", bucket = "now", why = "ML" },        # yours come first
+  { id = "bot-pr", when = "author.bot", bucket = "fyi", why = "bot" }, # yours, in place of GitHub's bot-pr
+  { after = "stacked", when = "pr.ci == 'pending'", bucket = "later" }, # yours, right after GitHub's stacked
+]
+```
+
+Searches and rules lists GitHub's rules under Built in, each with its id and a switch (it writes `off`); a rule of yours in one's place is marked yours, with Edit taking you to it. A config written before this, with GitHub's rules copied in, is changed once to name them (`config.toml.bak` keeps the old one): rules exactly as GitHub's go, ones you changed or added stay yours, and nothing lands anywhere else.
 
 ## Agents
 

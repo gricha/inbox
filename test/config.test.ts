@@ -145,7 +145,7 @@ test("settings left in config.toml are ignored with a warning pointing to Settin
 });
 
 test("a config written before hard rules gets its ask-by-name rule made hard, and nothing else", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const old = now.replaceAll(`asked you directly", hard = true`, `asked you directly", nocap = true`);
   assert.notEqual(old, now);
   assert.equal(migrateHard(old), now);
@@ -169,7 +169,7 @@ test("a config written before hard rules gets its ask-by-name rule made hard, an
 });
 
 test("a config from before the bot-ask rule gets it right after the hard rule for a person's ask, once", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
   const old = now.replaceAll(`  ${bot}\n`, "");
   assert.notEqual(old, now);
@@ -183,7 +183,7 @@ test("a config from before the bot-ask rule gets it right after the hard rule fo
 });
 
 test("a config written before drafts reached the desk gets both draft rules on every My PRs board, and nothing else", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const fresh = `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`;
   const old = now.replaceAll(fresh, `  { when = "item.draft", bucket = "later", why = "draft" },`);
   assert.notEqual(old, now);
@@ -206,7 +206,7 @@ const RED = `  { when = "pr.ci == 'red' && pr.pushed_hours >= 1", bucket = "toda
 const CONFLICT = `  { when = "pr.mergeable == 'conflict'", bucket = "today", why = "merge conflict" },\n`;
 
 test("a merge conflict alone leaves the desk: the old rule goes from every My PRs board, unless the owner changed it", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const old = now.replaceAll(RED, RED + CONFLICT);
   assert.equal(old.split(CONFLICT).length - 1, 2, "both My PRs boards, as in the owner's config");
   assert.equal(migrateConflict(old), now);
@@ -224,7 +224,7 @@ const WAITS = `"len(pr.waiting_on) > 0 && !me.owes_reply && pr.ci != 'red'", buc
 const WAITS_NO_CONFLICT = WAITS.replace(`'red'"`, `'red' && pr.mergeable != 'conflict'"`);
 
 test("your PR waiting on reviewers stays in Blocked with a merge conflict: the old rule that left it out becomes today's, unless the owner changed it", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const old = now.replaceAll(WAITS, WAITS_NO_CONFLICT);
   assert.equal(old.split(WAITS_NO_CONFLICT).length - 1, 2, "both My PRs boards, as in the owner's config");
   assert.equal(migrateWaitsConflict(old), now);
@@ -235,8 +235,9 @@ test("your PR waiting on reviewers stays in Blocked with a merge conflict: the o
   assert.equal(kept.split(WAITS_NO_CONFLICT).length - 1, 1, "the other board's is today's");
 });
 
+// Configs before built-in rules had GitHub's copied in, as the expanded template writes them: what these migrations read.
 test("the oldest first-run config reaches today's through the migrations, and today's is left alone", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"] });
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
   const bot = `{ when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`;
   const fresh = `  { when = "item.draft && item.updated_hours < 336", bucket = "today", why = "your draft: finish it", hard = true },\n  { when = "item.draft", bucket = "later", why = "draft, quiet for 2+ weeks" },`;
   const old = now

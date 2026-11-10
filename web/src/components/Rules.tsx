@@ -27,6 +27,7 @@ export function Rules({
   const [errors, setErrors] = useState<ConfigError[]>([]);
   const [warnings, setWarnings] = useState<ConfigError[]>([]);
   const [hard, setHard] = useState<ConfigDoc["hard"]>([]);
+  const [builtins, setBuiltins] = useState<ConfigDoc["builtins"]>([]);
   const [preview, setPreview] = useState<{ text: string; result: PreviewResult } | null>(null);
   const [busy, setBusy] = useState<"" | "preview" | "save">("");
   const [fields, setFields] = useState<FieldDoc[]>([]);
@@ -52,6 +53,7 @@ export function Rules({
             setErrors(c.errors);
             setWarnings(c.warnings ?? []);
             setHard(c.hard);
+            setBuiltins(c.builtins);
             setLoadError("");
           },
           onFailure: (e) => {
@@ -183,6 +185,31 @@ export function Rules({
       window.removeEventListener("beforeunload", h);
     };
   }, [dirty]);
+
+  // A built-in rule's switch writes its board's `off` in the file, so it waits for an edit to be saved or reverted.
+  function turn(board: string, rule: string, on: boolean) {
+    setBusy("save");
+    runUi(
+      api.switchRule(board, rule, on, doc?.text).pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            setErrors(r.errors);
+            if (!r.ok) flash(`Not switched: ${r.errors[0]?.message ?? "the rules have errors"}`, true);
+            else onSaved();
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.andThen(load()),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy("");
+          }),
+        ),
+      ),
+    );
+  }
 
   function track() {
     const el = ta.current;
@@ -352,6 +379,67 @@ export function Rules({
                   </li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {builtins.length > 0 && (
+            <section className="side-block">
+              <h2 className="s-sub">Built in</h2>
+              <p className="small">
+                GitHub's rules, after yours on each board that names them with <code>builtin</code>, as this version of the desk has them.
+                Switch one off here; to change one, write a rule of yours with its <code>id</code> in the board's <code>rules</code>, and it
+                stands in its place.
+              </p>
+              {builtins.map((b) => (
+                // Open where you've changed something: what's off, or yours in a rule's place.
+                <details key={b.board} className="builtin-board" open={b.rules.some((r) => !r.on || r.yours)}>
+                  <summary>
+                    {b.name} <span className="quiet">{foldLine(b)}</span>
+                  </summary>
+                  <ul className="plain builtin-rules">
+                    {b.rules.map((r) => (
+                      <li key={r.id} className={cls(!r.on && "off")}>
+                        <span className="br-text">
+                          <span>
+                            {BUCKET_LABEL[r.bucket]}
+                            {r.why && `: ${r.why}`}
+                            {r.hard && <span className="quiet"> (hard)</span>}
+                            {r.final && <span className="quiet"> (final)</span>}
+                          </span>
+                          <code>{r.when}</code>
+                          <span className="quiet">{r.yours ? `${r.id}: yours stands in its place` : `${r.id}: built in`}</span>
+                        </span>
+                        {r.yours ? (
+                          <button
+                            type="button"
+                            className="s-edit"
+                            aria-label={`Edit yours in place of ${r.id}`}
+                            onClick={() => {
+                              if (r.path) jump(r.path);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        ) : (
+                          <input
+                            className="switch"
+                            type="checkbox"
+                            // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
+                            role="switch"
+                            checked={r.on}
+                            disabled={!!busy || dirty}
+                            title={dirty ? "Save or revert your edit first" : undefined}
+                            aria-label={`${r.id} on ${b.name}`}
+                            onChange={() => {
+                              turn(b.board, r.id, !r.on);
+                            }}
+                          />
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
             </section>
           )}
 
@@ -543,6 +631,13 @@ export function Rules({
       </div>
     </div>
   );
+}
+
+// A board's built-in rules folded: which set, and what you changed of it.
+function foldLine(b: ConfigDoc["builtins"][number]): string {
+  const off = b.rules.filter((r) => !r.on).length;
+  const yours = b.rules.filter((r) => r.yours).length;
+  return [b.set, off ? `${off} off` : "", yours ? `${yours} yours` : ""].filter(Boolean).join(" · ");
 }
 
 // How far down the editor `before` reaches once wrapped: laid out in a hidden copy of the editor, from one mark to another.

@@ -332,6 +332,10 @@ test("desk_config: get, preview with moved titles fenced, save with the hash", a
   const got = await call("desk_config", { action: "get" });
   assert.match(got.text, /^config \/nonexistent\/config\.toml · hash c0ffee \(pass it as base to save\) · 0 error\(s\)\n/);
   assert.match(got.text, /<config nonce="[0-9a-f]{8}">\npoll_seconds = 60\n<\/config nonce=/);
+  assert.match(
+    got.text,
+    /\nbuilt-in rules .*\nacme-review \(builtin = "review", github\)\n {2}bot-pr \[off\]: author\.bot → hide {2}bot PR\n {2}codeowners \[the owner's rule stands in its place\]: me\.requested_codeowner → fyi {2}CODEOWNERS ping$/,
+  );
 
   const pv = await call("desk_config", { action: "preview", text: "new rules" });
   assert.equal(pv.isError, false);
