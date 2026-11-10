@@ -1661,13 +1661,15 @@ export class Desk {
     });
   }
 
-  // Someone else's open PR reaches your desk once Claude has reviewed it: until its first AI review is written it waits,
-  // unless AI reviews are off or paused, or this commit's failed. Once shown (`shown:<id>`, or you put it there) it stays.
+  // Someone else's open PR reaches your desk only once Claude has reviewed it: until its first AI review is written it waits,
+  // paused AI reviews (a lapsed login) included; only AI reviews turned off or this commit's review failed for good let it
+  // through unreviewed (out of tries, not while a retry is to come). Once shown (`shown:<id>`, or you put it there) it stays.
   awaitsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
-    if (!this.autoAi() || it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return false;
+    if (!this.autoAiOn() || it.kind !== "pr" || it.state !== "open" || e.analysis.signals.me.author) return false;
     if (snap.reviews.has(it.id) || this.store.get(`shown:${it.id}`)) return false;
-    return !this.aiFailedOn(it);
+    const j = this.jobs.get("ai_review", it.id);
+    return !(j?.state === "failed" && j.head === it.head_oid); // only out of tries; a retry to come still holds it
   }
 
   // How many would be in Now or Today but for Claude's review.

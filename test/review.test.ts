@@ -1892,7 +1892,7 @@ test("the review view sends the desk's reading order", async () => {
   t.cleanup();
 });
 
-test("while AI reviews are paused, the queue says so once and the cards wait as paused", async () => {
+test("while AI reviews are paused, the queue says so once and the PRs wait off the desk until they're reviewed", async () => {
   const t = await setup([ask(1), ask(2), ask(3)]);
   t.f.setFail(LOGGED_OUT);
   await t.sync();
@@ -1902,10 +1902,8 @@ test("while AI reviews are paused, the queue says so once and the cards wait as 
   const claude = { who: "claude", why: CLAUDE_PAUSED };
   assert.deepEqual(q.paused, claude, "a failed login stops Claude as a whole");
   assert.deepEqual(runSync(t.desk.focus()).paused, claude);
-  assert.deepEqual(
-    q.sections.now.map((c) => c.preflight?.state),
-    ["paused", "paused", "paused"],
-  );
+  assert.deepEqual(q.sections.now, [], "a paused review still holds them: none reaches the desk unreviewed");
+  assert.equal(runSync(t.desk.focus()).reviewing, 3);
   assert.equal(t.desk.getSettings().paused.ai?.why, LOGGED_OUT, "Settings says what's paused, once");
 
   // Turning auto_ai off: nothing is paused any more, it's off.
@@ -1951,7 +1949,10 @@ test("a PR that waited for Claude's review notifies once it's on the queue; one 
   t.f.setFail("model overloaded");
   await t.f.release("acme/api#3");
   t.f.setFail(null);
-  assert.equal(card("acme/api#3")?.preflight?.state, "failed", "Claude couldn't review this commit: on the queue without one");
+  assert.equal(card("acme/api#3"), undefined, "a failed try with a retry to come still holds it");
+  t.desk.jobs.fail("ai_review", "acme/api#3", "model overloaded");
+  t.desk.changed();
+  assert.equal(card("acme/api#3")?.preflight?.state, "failed", "out of tries: on the queue without one");
 
   runSync(t.desk.putSettings({ set: { "review.auto_ai": false } }));
   t.gh.items.set("acme/api#5", ask(5));
@@ -1960,22 +1961,27 @@ test("a PR that waited for Claude's review notifies once it's on the queue; one 
   assert.equal(runSync(t.desk.focus()).reviewing, 0);
 });
 
-test("once on the queue, a PR stays: a pause ending, a lost failure or a push doesn't hold it again, nor notify it twice", async (c) => {
+test("a pause holds PRs off the desk until they're reviewed; once on it, a lost failure or a push doesn't hold one again", async (c) => {
   const t = await setup([ask(1), ask(2), ask(3)], { settings: { "notify.quiet": "" } });
   c.after(t.cleanup);
   await t.sync();
   assert.deepEqual(t.notes, [], "the first pass is quiet, held ones too");
   const ids = () => [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].map((x) => x.id).toSorted();
-  // Two failures in a row pause AI reviews: all three show, without a review.
+  // Two failures in a row pause AI reviews: none shows without a review.
   t.f.setFail("Not logged in");
   await t.f.release("acme/api#3");
   await t.f.release("acme/api#2");
   t.f.setFail(null);
   assert.ok(t.desk.aiPausedNow());
+  assert.deepEqual(ids(), [], "held while paused");
+  // Each reviewed once the pause is over: on the desk, and it stays.
+  t.desk.aiPaused = null;
+  for (const j of t.desk.jobs.list()) t.desk.jobs.drop(j.kind, j.key); // their backoff over
+  await t.sync();
+  for (let i = 0; i < 10 && t.desk.generating.size; i++)
+    for (const id of t.f.started.filter((x) => t.desk.generating.has(x))) await t.f.release(id);
   assert.deepEqual(ids(), ["acme/api#1", "acme/api#2", "acme/api#3"]);
-  assert.deepEqual(t.notes, [], "they were there before you looked");
-
-  t.desk.aiPaused = null; // the pause is over
+  t.notes.length = 0;
   for (const j of t.desk.jobs.list()) t.desk.jobs.drop(j.kind, j.key); // the failures lost
   t.gh.items.set("acme/api#3", { ...ask(3), head_oid: "h3b", updated_at: hoursAgo(0) });
   await t.sync();
