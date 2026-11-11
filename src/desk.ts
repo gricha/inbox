@@ -39,7 +39,7 @@ import { linkRef, permalink } from "./links.ts";
 import { renderDoc, renderText } from "./render.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { askedAt, mergeLine, owesReply, stage, standings, verdicts } from "./stage.ts";
+import { askedAt, mergeLine, owesReply, reviewOptional, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
   DocSaved,
@@ -1522,6 +1522,7 @@ export class Desk {
       // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
+      ...(actions.includes("merge") && { cta: "merge" as const }),
       ...(me.author && sig.review_optional && { review_optional: true as const }),
       ...(talked(it, this.me()) && { talk: true as const }),
       ...(actions.length > 0 && { actions }),
@@ -2439,7 +2440,7 @@ export class Desk {
       "close",
       ...(it.draft ? (["ready"] as const) : (["draft"] as const)),
       // Stacked: it would merge into the PR below, which Merging says it waits on.
-      ...(readyToMerge(it) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
+      ...(readyToMerge(it, this.me()) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
     ];
   }
 
@@ -3761,8 +3762,9 @@ export class Desk {
 }
 
 // The desk's ready rule: what o merges on GitHub, and what the More menu's merge needs.
-function readyToMerge(it: Item): boolean {
-  return it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+function readyToMerge(it: Item, me: string): boolean {
+  const reviewed = it.review_decision === "approved" || (reviewOptional(it) && !verdicts(it, me).changes_by.length);
+  return reviewed && it.ci === "green" && it.mergeable === "clean" && !it.draft;
 }
 
 function countsOf(r: BoardResult): Record<Bucket, number> {

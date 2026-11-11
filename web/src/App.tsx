@@ -1158,6 +1158,7 @@ export function App() {
     else if (k === "t") openAsk(c.id);
     else if (k === "b") runUi(back(c));
     else if (k === "a" && c.cta === "ready") markReady(c);
+    else if (k === "a" && c.cta === "merge") runUi(github(c, "merge"));
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
     else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {

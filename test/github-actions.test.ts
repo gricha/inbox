@@ -101,6 +101,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
     myPr(6, { ...READY, mergeable: "conflict" }),
     myPr(8, { ...READY, merge_method: undefined }),
     myPr(9, { ...READY, base: "feature-x", default_branch: "main" }),
+    myPr(10, { ...READY, review_decision: "none", base: "main", default_branch: "main", review_requests: [] }),
     makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" }),
   ]);
   runSync(t.desk.act("web#8", "inflight"));
@@ -113,6 +114,13 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   assert.deepEqual(actions("web#8"), undefined, "in Merging the coordinator has it");
   assert.deepEqual(actions("api#7"), ["close"], "your issue");
   assert.deepEqual(actions("web#9"), ["close", "draft"], "stacked: it waits on the PR below");
+  assert.deepEqual(actions("web#10"), ["close", "draft", "merge"], "its repo needs no review: green and mergeable is enough");
+  const cta = (ref: string) => runSync(t.desk.item(ref)).card.cta;
+  assert.deepEqual(
+    [cta("web#4"), cta("web#3"), cta("web#6"), cta("web#9")],
+    ["merge", undefined, undefined, undefined],
+    "Merge on the row when it can",
+  );
   const view = await run(t.desk.reviewView("web#4"));
   assert.deepEqual(view.card.actions, ["close", "draft", "merge"], "the review's card says the same");
 

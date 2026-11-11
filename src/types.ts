@@ -533,7 +533,7 @@ export interface Card {
   verdict: AiReview["verdict"] | null; // from the AI review of the current commit
   preflight?: Preflight; // Now and Today cards only
   handed_back?: boolean; // your PR back on top: the coordinator can't get it merged, or nobody's asked to review it; its why says which
-  cta?: "ready" | "reply" | "reviewers"; // the row's one call to action: Ready for review on your own open draft, Reply on your PR whose only action is answering someone, or Add reviewers on your ready PR nobody's asked to review
+  cta?: "ready" | "reply" | "reviewers" | "merge"; // the row's one call to action: Ready for review on your own open draft, Reply on your PR whose only action is answering someone, Add reviewers on your ready PR nobody's asked to review, or Merge on yours that's approved, green and mergeable
   review_optional?: true; // your PR's repo needs no review to merge it (pr.review_optional): Hand off for merge beside Add reviewers
   talk?: true; // a PR people said something on (a thread, a comment, a review that commented): its review keeps the conversation's line while it loads
   actions?: GitHubAction[]; // the GitHub writes its More menu offers, as the desk allows them now; absent when none

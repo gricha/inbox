@@ -27,6 +27,7 @@ const CTA = {
   ready: { label: "Ready for review", title: "Mark it ready for review on GitHub" },
   reviewers: { label: "Add reviewers", title: "Nobody's asked to review it: opens its review to pick reviewers" },
   reply: { label: "Reply", title: "Someone waits on your answer: opens its review at their conversation" },
+  merge: { label: "Merge", title: "Approved, green and mergeable: merges it on GitHub with its repo's merge method" },
 };
 
 // Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the

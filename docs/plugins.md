@@ -84,7 +84,7 @@ export interface Row {
   kind: string; // the small label: "pr", "issue"
   by: string; // "you", "alice", "Your agent"
   stage?: string; // "waiting for review"
-  cta?: string; // its one call to action ("ready", "reviewers", "reply")
+  cta?: string; // its one call to action ("ready", "reviewers", "merge", "reply")
   actions?: string[]; // the writes its menus offer (GitHub: today's Desk.actions())
   fold?: { key: string; at: number }; // rows sharing a key show as one line (a stack); oneLinePerStack stays the core's
   extra?: unknown; // what only its own cells and pages read: CI, verdict, preflight, the stack, blocks, Merging's columns

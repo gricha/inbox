@@ -88,7 +88,8 @@ test("sections: an urgent yes and a hand-back lift it whatever its score; fyi ho
 
 test("with no model to answer, the desk scores from the rules and the yeses: a fresh desk still sections and orders", posix, async (c) => {
   // DESK_CLAUDE points nowhere (test/helpers/no-agent.ts): the scorer's call fails, and it waits.
-  const t = await setup([reviewAsk(1), teamPing(2), myPr(3, { ci: "green", review_decision: "approved", mergeable: "clean" })], {
+  const ready = { ci: "green", review_decision: "approved", mergeable: "clean" } as const;
+  const t = await setup([reviewAsk(1), teamPing(2), myPr(3, ready), myPr(4, { ...ready, ci: "red" })], {
     settings: { ...QUIET, "agent.score": true },
   });
   c.after(t.cleanup);
@@ -98,12 +99,13 @@ test("with no model to answer, the desk scores from the rules and the yeses: a f
   const [s1, c1] = where(t, "acme/api#1")!;
   assert.deepEqual([s1, c1.score, c1.reason], ["urgent", 8, "Asked by name"], "now's 7 and a yes");
   const [s3, c3] = where(t, "acme/web#3")!;
-  assert.equal(s3, "standard");
-  assert.equal(c3.reason, "Ready to merge");
+  assert.deepEqual([s3, c3.reason], ["urgent", "Ready to merge"], "your PR approved and green: one press merges it");
   assert.ok((c3.score ?? 0) > fallbackScore("later", 0), "a yes counts toward it");
-  // The thresholds are settings: lower Urgent's, and the ready PR is urgent too.
-  runSync(t.desk.putSettings({ set: { "queue.urgent_at": c3.score! } }));
-  assert.equal(where(t, "acme/web#3")![0], "urgent");
+  const [s4, c4] = where(t, "acme/web#4")!;
+  assert.equal(s4, "standard", "red CI: not ready");
+  // The thresholds are settings: lower Urgent's, and it's urgent too.
+  runSync(t.desk.putSettings({ set: { "queue.urgent_at": c4.score! } }));
+  assert.equal(where(t, "acme/web#4")![0], "urgent");
   assert.equal(t.desk.urgency.view().criteria.find((x) => x.id === "github.asked")!.yes, 1);
 });
 
@@ -289,4 +291,25 @@ test("Blocked keeps its own page; the Inbox's sections are what's in now, today,
   const placed = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi].map((x) => x.id).sort();
   assert.deepEqual(onInbox, placed);
   for (const x of [...q.inbox.urgent, ...q.inbox.standard, ...q.inbox.fyi]) assert.ok(x.reason, `${x.id} says why it's there`);
+});
+
+test("Ready to merge says yes to your PR approved or needing no review, green and not waiting on another PR", posix, async (c) => {
+  const GREEN = { ci: "green", mergeable: "clean" } as const;
+  const t = await setup(
+    [
+      myPr(1, { ...GREEN, review_decision: "approved" }),
+      myPr(2, { ...GREEN, review_decision: "none", base: "main", default_branch: "main", review_requests: [] }),
+      myPr(3, { ...GREEN, review_decision: "approved", base: "feature-x", default_branch: "main" }),
+      myPr(4, { ...GREEN, review_decision: "approved", draft: true }),
+      myPr(5, { ...GREEN, ci: "pending", review_decision: "approved" }),
+      myPr(6, { ...GREEN, review_decision: "required" }),
+    ],
+    { settings: { ...QUIET, "agent.score": false } },
+  );
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  await settled(t);
+  const ready = (n: number) => where(t, `acme/web#${n}`)?.[1].reason === "Ready to merge";
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map(ready), [true, true, false, false, false, false]);
+  assert.equal(where(t, "acme/web#2")![0], "urgent", "a repo that needs no review never approves");
 });
