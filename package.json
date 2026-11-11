@@ -34,7 +34,8 @@
     "knip": "knip",
     "check": "npm run format:check && npm run lint && npm run lint:css && npm run typecheck && npm run knip && npm test",
     "prepare": "simple-git-hooks",
-    "shots": "node --disable-warning=ExperimentalWarning scripts/shots.ts"
+    "shots": "node --disable-warning=ExperimentalWarning scripts/shots.ts",
+    "release": "node --disable-warning=ExperimentalWarning scripts/release.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
@@ -88,6 +89,15 @@
       "package.json"
     ],
     "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gricha",
+        "repo": "inbox",
+        "private": true,
+        "releaseType": "release"
+      }
+    ],
     "protocols": [
       {
         "name": "Inbox",
@@ -122,6 +132,9 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "win": {
       "target": [

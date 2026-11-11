@@ -226,3 +226,14 @@ npm run icons       # every icon (app, tray, favicon) from the mark in assets/br
 Verification: Prettier formats; oxlint with type-aware rules (`.oxlintrc.json`) and stylelint lint; `tsc` runs with `noUncheckedIndexedAccess` and friends; knip catches dead code. A pre-commit hook formats and lints staged files, a pre-push hook runs `npm run check`, and CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs it on macOS, Linux and Windows.
 
 Set `DESK_HOME` and `DESK_PORT` to work on a scratch copy instead of your real desk, and `DESK_SENTRY=0` to keep it out of Sentry.
+
+## Release
+
+```bash
+npm run release 0.2.0          # on a clean main: package.json at 0.2.0, committed and tagged v0.2.0, nothing pushed
+git push origin main v0.2.0    # the tag starts the release workflow
+```
+
+[.github/workflows/release.yml](.github/workflows/release.yml) checks the tag is package.json's version and runs `npm run check`, builds macOS (arm64 and Intel), Linux and Windows with electron-builder, and publishes them as one GitHub Release with notes from the commits since the last one, beside the `latest*.yml` files the app's updater reads. One channel: the latest release that isn't a draft or prerelease.
+
+The packaged app's desk checks the latest release every 6 hours with your GitHub token (the repo is private), and when there's a newer one, the sidebar's footer says so above Settings: **Update to 0.2.0** where the app installs it itself (the Linux AppImage and the Windows installer's install: it downloads, quits and starts the new build), **Download 0.2.0** elsewhere, which opens the release page. The macOS build is ad hoc signed, which macOS's updater won't take, so on a Mac it's the release page: download the `.dmg` for your Mac, drag Inbox over the old one, and open it (the first time, right-click → Open, since it isn't notarized). A desk run from a checkout (Run from a checkout, `npm run app`, `desk serve`) never checks: main is what runs there.
