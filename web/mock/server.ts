@@ -4,7 +4,7 @@
 // MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { Result } from "effect";
+import { Effect, Result } from "effect";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { onBehalf } from "../../src/github/behalf.ts";
@@ -20,6 +20,8 @@ import { compile, renderTemplate } from "../../src/expr.ts";
 import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
 import { parseDiagram } from "../../src/diagram.ts";
+import { docOf } from "../../src/doc.ts";
+import { renderDoc } from "../../src/render.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
@@ -3031,17 +3033,16 @@ const STEPS: Record<string, { title: string; body: string; check: string; note?:
   ],
 };
 
-const LEASE_FLOW = parseDiagram(
-  [
-    "flowchart LR",
-    '  w["Worker"] -->|"asks for work"| d["Dispatch"]:::new',
-    '  d -->|"lease()"| l["Lease"]:::new',
-    '  l --> t[("jobs table")]',
-    '  d -->|"report(token)"| l',
-    '  l -.->|"reclaims expired"| t',
-    '  s["Old scheduler"]:::removed -.-> t',
-  ].join("\n"),
-);
+const LEASE_SOURCE = [
+  "flowchart LR",
+  '  w["Worker"] -->|"asks for work"| d["Dispatch"]:::new',
+  '  d -->|"lease()"| l["Lease"]:::new',
+  '  l --> t[("jobs table")]',
+  '  d -->|"report(token)"| l',
+  '  l -.->|"reclaims expired"| t',
+  '  s["Old scheduler"]:::removed -.-> t',
+].join("\n");
+const LEASE_FLOW = parseDiagram(LEASE_SOURCE);
 
 // The newer review's parts on the scheduler split: a look range, an interface and an improvement, on its first file's change.
 function extras(path: string, line: number): Partial<AiReview> {
@@ -3083,6 +3084,7 @@ function extras(path: string, line: number): Partial<AiReview> {
             id: "d1",
             title: "Who owns a job now",
             caption: "Dispatch never writes the jobs table: every result goes back through Lease with its token.",
+            source: LEASE_SOURCE,
             graph: LEASE_FLOW.graph,
           },
         ]
@@ -4169,6 +4171,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     req.on("close", () => {
       clients.delete(res);
     });
+    return;
+  }
+  // Any review document's page is the scheduler split's AI review, rendered as the desk renders one.
+  if (req.method === "GET" && /^\/api\/docs\/[0-9a-f]{16}\/html$/.test(url.pathname)) {
+    const v = reviewView(resolve("acme/worker#879"));
+    const r = v.ai && docOf({ ...v.item, head: "" }, v.files, v.ai);
+    if (!r?.ok) {
+      send(res, { error: r ? r.why : "no AI review", tag: "Internal" }, 500);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(await Effect.runPromise(renderDoc(r.doc, r.ai)));
     return;
   }
   try {

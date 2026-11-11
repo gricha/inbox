@@ -345,7 +345,9 @@ export function App() {
       if (was !== null && was !== route.id) setReviewQuestion(null);
       return;
     }
-    setReviewFrom(route.name === "settings" || route.name === "inquiry" || route.name === "item" ? "queue" : route.name);
+    setReviewFrom(
+      route.name === "settings" || route.name === "inquiry" || route.name === "item" || route.name === "doc" ? "queue" : route.name,
+    );
     setReviewQuestion(route.name === "inquiry" ? route.id : null);
   }, [route]);
   useEffect(() => {
@@ -1573,6 +1575,16 @@ export function App() {
                 setAsking((a) => (a && (!s || a.item === s.item) ? { ...a, spot: s } : a));
               }}
               onAskWaiting={setAskWaiting}
+            />
+          )}
+          {/* A review document's page as the desk rendered it: it runs nothing, so it's framed with nothing allowed but its links. */}
+          {route.name === "doc" && !broken && (
+            <iframe
+              key={route.id}
+              className="doc-frame"
+              title="Review document"
+              src={`/api/docs/${encodeURIComponent(route.id)}/html`}
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
             />
           )}
           {route.name === "inquiry" && !broken && (

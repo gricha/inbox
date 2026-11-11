@@ -3484,7 +3484,7 @@ p.side-sync {
   margin-left: auto;
 }
 
-/* An agent's words (web/src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */
+/* An agent's words (src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */
 .prose {
   display: grid;
   gap: 8px;
@@ -4451,6 +4451,23 @@ fieldset.au-field > legend {
 .cheat dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* A review document's page (#/doc/<id>), as the desk rendered it: the page's column edge to edge, the page scrolling inside
+   its frame, which runs nothing. */
+.col:has(.doc-frame) {
+  --col-w: 100%;
+}
+
+.main:has(> .doc-frame) {
+  padding: 0;
+}
+
+.doc-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 52px);
+  border: 0;
 }
 
 /* Review ------------------------------------------------------------------- */

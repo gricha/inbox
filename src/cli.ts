@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import os from "node:os";
-import { readFileSync, realpathSync, watchFile } from "node:fs";
+import { readFileSync, realpathSync, watchFile, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { Cause, Data, Effect, Exit, Option } from "effect";
@@ -13,6 +13,7 @@ import { fsError, messageOf } from "./errors.ts";
 import { deskHome } from "./home.ts";
 import { judgeText } from "./judge.ts";
 import { permalink } from "./links.ts";
+import { renderText } from "./render.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
 import { openCommand } from "./notify.ts";
@@ -44,6 +45,8 @@ const USAGE = `usage: desk <command>
   sync                                sync with GitHub now (read only)
   prompt <ref>                        print the review hand-off prompt
   brief <ref> [--force]               the PR's AI review: look/skim/skip, summary, concerns; cached per commit
+  render <doc.json> [-o out.html]     a review document (docs/review-format.md) as one HTML page, beside it unless -o
+                                      says where (- for stdout); no desk needed
   config [path|check|edit]            where the config lives, validate it, or edit it
   settings [--json]                   every setting by section; * = changed from the default
   settings set <key> <value>          change one; lists: a,b or a JSON array; booleans: true/false, yes/no, on/off
@@ -93,6 +96,7 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   pair: { print: { type: "boolean" }, name: { type: "string" } },
   mcp: { url: { type: "string" } },
   add: { from: { type: "string" } },
+  render: { out: { type: "string", short: "o" } },
 };
 
 // [min, max] positionals per command.
@@ -107,6 +111,7 @@ const ARITY: Record<string, [number, number]> = {
   sync: [0, 0],
   prompt: [1, 1],
   brief: [1, 1],
+  render: [1, 1],
   fields: [0, 0],
   config: [0, 1],
   settings: [0, 3],
@@ -623,6 +628,26 @@ const COMMANDS: Record<string, Command> = {
       if (b.notes.length) x.out(x.c.dim(`${b.notes.length} notes on the code: open the PR in the desk to read them`));
       return 0;
     }),
+  // No desk: the document is read and rendered here, as the desk would.
+  render: Effect.fnUntraced(function* (x: Ctx) {
+    const file = x.args[0]!;
+    const text = yield* Effect.try({ try: () => readFileSync(file, "utf8"), catch: fsError("read", file) });
+    const { html, dropped } = yield* renderText(text);
+    const out = typeof x.opts.out === "string" ? x.opts.out : file.replace(/(\.json)?$/i, ".html");
+    if (out === "-") {
+      x.out(html.trimEnd());
+      return 0;
+    }
+    yield* Effect.try({
+      try: () => {
+        writeFileSync(out, html);
+      },
+      catch: fsError("write", out),
+    });
+    for (const d of dropped) x.out(x.c.dim(`left out: ${d}`));
+    x.out(out);
+    return 0;
+  }),
   // The MCP server answers its tools' failures itself; it runs until stdin ends.
   mcp: (x) =>
     Effect.promise(async () => {

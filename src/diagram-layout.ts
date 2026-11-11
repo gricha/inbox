@@ -1,9 +1,11 @@
-// An AI review's diagram (src/diagram.ts) laid out and drawn as SVG markup (src/html.ts), apart from the window's React and
-// its Web Worker (web/src/components/Diagram.tsx), so whatever else draws a review lays it out and draws it the same way.
-// Every string in the graph is the model's, so it only ever becomes SVG text; nothing from it is a style or a link.
+// An AI review's diagram (src/diagram.ts) laid out and drawn as SVG markup (src/html.ts): one geometry for the window, which
+// runs ELK in a Web Worker and measures with a canvas (web/src/components/Diagram.tsx), and for a rendered review, which
+// runs ELK in Node and measures with Instrument Sans's widths (src/render.ts). Every string in the graph is the model's, so
+// it only ever becomes SVG text; nothing from it is a style or a link.
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { STATE_END, STATE_START } from "./diagram.ts";
 import { el, type El, type Kid } from "./html.ts";
+import { CHARS, W400, W500 } from "./metrics.ts";
 import type { DiagramEdge, DiagramGraph, DiagramNode, DiagramParticipant } from "./types.ts";
 
 const FONT = 12.5;
@@ -47,6 +49,18 @@ export type Drawn =
 type Row =
   | { kind: "message"; key: string; from: number; to: number; y: number; text: string; reply: boolean }
   | { kind: "note"; key: string; box: Box; text: string };
+
+// Instrument Sans as Chrome draws it, for Node, which has no canvas; a character it doesn't list is an average one.
+const AT = new Map(Array.from(CHARS, (c, i) => [c, i]));
+export const fontMeasure: Measure = (text, size, weight) => {
+  const table = weight >= 500 ? W500 : W400;
+  let w = 0;
+  for (const c of text) {
+    const i = AT.get(c);
+    w += i === undefined ? (c.codePointAt(0)! > 0x2e80 ? 1000 : 600) : table[i]!;
+  }
+  return (w * size) / 1000;
+};
 
 // ---------------------------------------------------------------------------- layout
 

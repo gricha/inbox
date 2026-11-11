@@ -1576,6 +1576,19 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A review document's page (inbox://doc/<id>) in the window: the desk's rendered page in a frame, under Back.
+    name: "doc",
+    go: async (page) => {
+      await at("#/doc/0123456789abcdef")(page);
+      const frame = page.frameLocator("iframe.doc-frame");
+      await frame.locator(".dg-svg").first().waitFor({ timeout: 15_000 });
+      const back = (await page.locator(".page-head .back").textContent())?.trim();
+      if (back !== "Inbox") failures.push(`doc: the back link reads ${JSON.stringify(back)}`);
+      if (!(await frame.locator(".rv-title").textContent())?.includes("Split the scheduler")) failures.push("doc: the page has no title");
+    },
+    after: at("#/"),
+  },
+  {
     // A re-review being written over one on an earlier commit: since and the concerns stay out of the fold.
     name: "review-ai-since",
     go: async (page) => {
@@ -4851,8 +4864,10 @@ try {
         });`);
       }
       await offline(page);
+      // A review document's frame runs no script, so the stand-ins above, which Playwright puts in every frame, are refused there.
+      const docFrame = (m: string) => m.startsWith("Blocked script execution in") && m.includes("/api/docs/");
       page.on("console", (m) => {
-        if (m.type() === "error" && !m.location().url.startsWith("https://avatars.githubusercontent.com/"))
+        if (m.type() === "error" && !m.location().url.startsWith("https://avatars.githubusercontent.com/") && !docFrame(m.text()))
           failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
       });
       await page.goto(`${url}/#/`);

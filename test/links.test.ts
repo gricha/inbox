@@ -80,6 +80,19 @@ test("a ref that's a desk link is its item's id; one naming no item is refused i
     assert.equal(linkRef(ref), null, ref);
 });
 
+test("a review document has a permalink that reads back as its id, routes to its page, and is no item's ref", () => {
+  const id = "0123456789abcdef";
+  assert.equal(permalink({ doc: id }), `inbox://doc/${id}`);
+  assert.deepEqual(placeOf(`inbox://doc/${id}`), { doc: id });
+  assert.deepEqual(placeOf(` inbox://Doc/${id.toUpperCase()}/ `), { doc: id });
+  assert.equal(hashOf({ doc: id }), `#/doc/${id}`);
+  assert.deepEqual(placeOf(`http://localhost:47823/#/doc/${id}`), { doc: id });
+  for (const s of ["inbox://doc/", "inbox://doc/0123", `inbox://doc/${id}/x`, "inbox://doc/../desk.db"]) assert.equal(placeOf(s), null, s);
+  assert.deepEqual(linkRef(`inbox://doc/${id}`), {
+    refused: `"inbox://doc/${id}" is a review document's link, not an item's: GET /api/docs/${id} reads it`,
+  });
+});
+
 test("the desk's link from another device, at its tailnet address, reads as the item or question it names", () => {
   assert.deepEqual(placeOf("https://desk.tail1234.ts.net/#/review/acme%2Fapi%237"), { item: "acme/api#7" });
   assert.deepEqual(placeOf("https://desk.tail1234.ts.net/#/inquiry/q-1"), { question: "q-1" });

@@ -744,6 +744,7 @@ export interface AiReview {
   improvements?: ReviewNote[]; // held up by the check like concerns; never notes in the code
   diagrams?: ReviewDiagram[]; // parsed by the desk; what failed the grammar never reaches here
   skill?: string; // the hash of the review instructions it was written with
+  doc?: string; // its review document's id (src/doc.ts), <home>/docs/<doc>.json and .html
   refused?: string[]; // diagrams the grammar refused, and why: for the log
   head_oid: string; // the commit it read; a newer push makes it stale
   model: string; // as claude reports it (claude-opus-5[1m]), else "claude-code"
@@ -771,10 +772,20 @@ export interface ReviewInterface {
   line: number;
 }
 
+// A review document the desk keeps (POST /api/docs, desk_doc): where it is, and what of it fell out on the way in.
+export interface DocSaved {
+  id: string;
+  json: string; // <home>/docs/<id>.json, the document
+  html: string; // <home>/docs/<id>.html, its page
+  link: string; // inbox://doc/<id>
+  dropped: string[]; // what was left out, part by part, as docs/review-format.md says why
+}
+
 export interface ReviewDiagram {
   id: string;
   title: string;
   caption: string;
+  source?: string; // the Mermaid it was parsed from; absent on reviews written before review documents
   graph: DiagramGraph;
 }
 
@@ -1076,7 +1087,7 @@ export interface Ask {
   thread_id: string | null; // a conversation in the PR's review
   thread_url: string | null;
   lines?: AskLines | null; // absent on asks kept before it; the file's name never goes in the wake line (desk_ask gives it)
-  answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by web/src/prose.ts, never as HTML
+  answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by src/prose.ts, never as HTML
 }
 
 // Lines of a PR's diff an ask is about, at the commit you read them in: picked with + (or a drag), or the AI note you were on.

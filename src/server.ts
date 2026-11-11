@@ -41,6 +41,7 @@ import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import type { AppUpdater } from "./updates.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
 import { dropHostSession, fetchPr, generateReview, loggedIn } from "./review.ts";
+import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
@@ -61,6 +62,7 @@ const TYPES: Record<string, string> = {
 };
 
 const LOCAL = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const DOC_PAGE = /^\/api\/docs\/[0-9a-f]{16}\/html$/;
 
 // Where a browser page may call the desk from: its own address, and the Vite servers that serve its UI in development.
 function originsOf(port: number): Set<string> {
@@ -272,8 +274,10 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     if (Exit.isFailure(checked)) c.res = reply(c, checked, log);
     else {
       await next();
-      c.header("X-Frame-Options", "DENY");
-      c.header("Content-Security-Policy", "frame-ancestors 'none'");
+      // A review document's page runs nothing and asks for nothing; only the desk's window frames it (#/doc/<id>).
+      const doc = DOC_PAGE.test(c.req.path);
+      c.header("X-Frame-Options", doc ? "SAMEORIGIN" : "DENY");
+      c.header("Content-Security-Policy", doc ? `${DOC_CSP}; frame-ancestors 'self'` : "frame-ancestors 'none'");
     }
   });
 
@@ -548,6 +552,39 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, answer, { log });
   });
+  // Review documents (docs/review-format.md): an agent's, read as the desk reads its own and kept under <home>/docs; a PR's
+  // AI review as one; each as JSON and as its page. Local only, so agents may call them.
+  app.post("/api/docs", (c) =>
+    respond(
+      c,
+      Effect.flatMap(
+        Effect.tryPromise({ try: () => c.req.text(), catch: () => new BadRequest({ message: "couldn't read the body" }) }),
+        (text) => Effect.map(desk.submitDoc(text), (saved) => ({ ok: true, ...saved })),
+      ),
+      { log },
+    ),
+  );
+  app.post("/api/review/:id{.+}/doc", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => Effect.map(desk.reviewDoc(c.req.param("id")), (saved) => ({ ok: true, ...saved }))),
+      { log },
+    ),
+  );
+  app.get("/api/docs/:id{[0-9a-f]{16}}", (c) =>
+    respond(
+      c,
+      Effect.map(desk.doc(c.req.param("id"), "json"), (text) => c.body(text, 200, { "content-type": "application/json; charset=utf-8" })),
+      { log, read: true },
+    ),
+  );
+  app.get("/api/docs/:id{[0-9a-f]{16}}/html", (c) =>
+    respond(
+      c,
+      Effect.map(desk.doc(c.req.param("id"), "html"), (text) => c.html(text, 200, { "cache-control": "no-cache" })),
+      { log, read: true },
+    ),
+  );
   // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.
   app.post("/api/inquiries", (c) => {
     const inquire = Effect.gen(function* () {

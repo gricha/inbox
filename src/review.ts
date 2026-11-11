@@ -1020,7 +1020,14 @@ function readReview(answer: unknown, files: ReviewFile[]) {
     if (!/^[A-Za-z][\w-]{0,15}$/.test(id) || diagrams.some((x) => x.id === id)) continue;
     const got = parseDiagram(typeof d?.source === "string" ? d.source : "");
     if (!got.ok) failed.push(`${id}: ${got.why}`);
-    else diagrams.push({ id, title: text(d?.title).slice(0, 60), caption: text(d?.caption).slice(0, 200), graph: got.graph });
+    else
+      diagrams.push({
+        id,
+        title: text(d?.title).slice(0, 60),
+        caption: text(d?.caption).slice(0, 200),
+        source: d!.source as string,
+        graph: got.graph,
+      });
   }
   return {
     summary,
@@ -1140,6 +1147,13 @@ function clipLooks(looks: Read["look"], files: ReviewFile[]): Read["look"] {
 
 export function parseReview(parsed: unknown, files: ReviewFile[], off?: ReadonlySet<string>): Omit<AiReview, "head_oid" | "model" | "at"> {
   return keep(readReview(parsed, files), files, off);
+}
+
+// An answer as the review is kept, with what fell out on the way: diagrams the grammar refused, and comments whose quote
+// isn't code in the diff. A review document (src/doc.ts) is read through this, as Claude's answer is.
+export function readAnswer(parsed: unknown, files: ReviewFile[]) {
+  const r = readReview(parsed, files);
+  return { review: keep(r, files), refused: r.failed, unbacked: r.unbacked };
 }
 
 const squash = (s: string) => s.replaceAll(/\s+/g, " ").trim();

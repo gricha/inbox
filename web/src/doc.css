@@ -1,0 +1,144 @@
+/* A review document rendered to one page (src/render.ts): the window's review rules (picked from styles.css) on a page of
+   their own, and the diff as a plain table in the theme's red and green, as the window's diff mixes them into the sheet. */
+
+.doc {
+  display: grid;
+  gap: 24px;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.doc .rv-fhead {
+  top: 0;
+}
+
+.doc a.rv-more-item {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.doc a.rv-next {
+  justify-self: end;
+  margin: -14px 0 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
+}
+
+.doc-diff {
+  --dd-add: color-mix(in srgb, var(--green) 12%, var(--sheet));
+  --dd-del: color-mix(in srgb, var(--red) 12%, var(--sheet));
+
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  border-collapse: collapse;
+  background: var(--sheet);
+  box-shadow: 0 0 0 1px var(--rule);
+  font: 12px/19px var(--mono);
+  table-layout: fixed;
+}
+
+.doc-diff col.dd-num {
+  width: 6ch;
+}
+
+.doc-diff td {
+  padding: 0;
+  vertical-align: top;
+}
+
+.dd-n {
+  padding: 0 1.5ch 0 0 !important;
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+}
+
+.dd-code {
+  padding: 0 12px 0 1ch !important;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dd-add {
+  background: var(--dd-add);
+}
+
+.dd-del {
+  background: var(--dd-del);
+}
+
+/* The window's bar on a changed line's edge, solid when added and dashed when removed, and its number in the same colour. */
+.dd-add .dd-n {
+  box-shadow: inset 3px 0 var(--green);
+  color: var(--green);
+}
+
+.dd-del .dd-n {
+  background: linear-gradient(0deg, transparent 50%, var(--red) 50%) 0 0 / 3px 6px repeat-y;
+  color: var(--red);
+}
+
+.dd-sep td {
+  padding: 0 12px !important;
+  background: var(--paper);
+  color: var(--pencil);
+  font: 12px/19px var(--sans);
+}
+
+.dd-said td {
+  padding: 0 0 0 12px !important;
+  font: 13px/1.5 var(--sans);
+}
+
+.doc-rest > summary {
+  list-style: none;
+}
+
+.doc-rest[open] > summary {
+  color: var(--ink-2);
+  font-weight: 550;
+}
+
+.doc-foot {
+  font-size: 12.5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .doc-diff {
+    --dd-add: color-mix(in srgb, var(--green) 18%, var(--sheet));
+    --dd-del: color-mix(in srgb, var(--red) 18%, var(--sheet));
+  }
+}
+
+@media (width <= 640px) {
+  .doc {
+    padding: 20px 12px 48px;
+  }
+
+  .doc-diff col.dd-num {
+    width: 5ch;
+  }
+
+  /* A phone's header: the file's name whole, and why it's there on a line of its own under it. */
+  .doc .rv-fhead {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .doc .rv-fhead .rv-base {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .doc .rv-why {
+    order: 1;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+}

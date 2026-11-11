@@ -41,7 +41,7 @@ export function PageHead({
         <h1 className="head-name">{partName(route.section)}</h1>
       ) : route.name === "inflight" ? (
         <h1 className="head-name">Merging</h1>
-      ) : route.name === "review" || route.name === "inquiry" ? (
+      ) : route.name === "review" || route.name === "inquiry" || route.name === "doc" ? (
         <a
           className="back"
           href={routeHash(question ? { name: "inquiry", id: question } : { name: from })}

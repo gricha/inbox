@@ -34,12 +34,15 @@ import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector } from "./connectors/github.ts";
 import { openLink, Sessions, type Roots } from "./connectors/sessions.ts";
-import { linkRef } from "./links.ts";
+import { docOf, docsDir, loadDoc, saveDoc } from "./doc.ts";
+import { linkRef, permalink } from "./links.ts";
+import { renderDoc, renderText } from "./render.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
 import { askedAt, mergeLine, owesReply, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
+  DocSaved,
   InlineAt,
   Action,
   ActivityPage,
@@ -2117,7 +2120,16 @@ export class Desk {
         if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
         const own = yield* this.reviewSkill();
         const pr = { ...(yield* this.prText(id)), stack: this.stackLines(snap, id), own: own.own, skill: own.hash };
-        const ai = yield* this.review.generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent());
+        const written = yield* this.review.generate(
+          e.item,
+          e.analysis.signals,
+          snap.best.get(id)?.why ?? "",
+          pr,
+          this.agentDir(),
+          this.agent(),
+        );
+        const doc = yield* this.writeDoc(e.item, pr.files, written);
+        const ai = doc ? { ...written, doc } : written;
         this.store.set(`review:${id}`, ai);
         this.jobs.done("ai_review", id);
         this.aiFailures = 0;
@@ -2141,6 +2153,65 @@ export class Desk {
         ),
       );
     });
+  }
+
+  // ---------------------------------------------------------------- review documents (src/doc.ts, docs/review-format.md)
+
+  // A PR's AI review as a document under <home>/docs: its id, or null when it couldn't be written, which the log says and
+  // the review never waits on.
+  private writeDoc(item: Item, files: ReviewFile[], ai: AiReview): Effect.Effect<string | null> {
+    return Effect.gen({ self: this }, function* () {
+      const pr = { title: item.title, repo: item.repo, number: item.number, url: item.url, author: item.author, head: ai.head_oid };
+      const r = docOf(pr, files, ai);
+      if (!r.ok) return yield* new BadRequest({ message: r.why });
+      return (yield* saveDoc(this.home, r.doc, yield* renderDoc(r.doc, r.ai))).id;
+    }).pipe(
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          this.log(`AI review of ${item.id}: no document: ${e.message}`);
+          return null;
+        }),
+      ),
+    );
+  }
+
+  // POST /api/docs (desk_doc): an agent's document, read as the desk reads its own, kept and rendered.
+  submitDoc(text: string): Effect.Effect<DocSaved, BadRequest | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const { doc, html, dropped } = yield* renderText(text);
+      const saved = yield* saveDoc(this.home, doc, html);
+      this.log(`review document ${saved.id} from ${doc.by}: ${doc.pr.title}`);
+      return { ...saved, link: permalink({ doc: saved.id }), dropped };
+    });
+  }
+
+  // POST /api/review/:id/doc: the PR's AI review for this commit as a document, written now if the review has none yet.
+  reviewDoc(ref: string): Effect.Effect<DocSaved, RefError | BadRequest | Conflict | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const ai = this.snapshot().reviews.get(e.item.id);
+      if (!ai) return yield* new Conflict({ message: `${e.item.id} has no AI review yet` });
+      const kept = ai.doc ? yield* loadDoc(this.home, ai.doc, "json") : null;
+      if (ai.doc && kept !== null) return { ...this.docPaths(ai.doc), link: permalink({ doc: ai.doc }), dropped: [] };
+      const pr = yield* this.prText(e.item.id).pipe(
+        Effect.mapError((err) => new Conflict({ message: `no diff to put in it: ${err.message}` })),
+      );
+      const doc = yield* this.writeDoc(e.item, pr.files, ai);
+      if (!doc) return yield* new Conflict({ message: "its document couldn't be written: the desk's log says why" });
+      this.store.set(`review:${e.item.id}`, { ...ai, doc });
+      return { ...this.docPaths(doc), link: permalink({ doc }), dropped: [] };
+    });
+  }
+
+  // GET /api/docs/:id and its page.
+  doc(id: string, ext: "json" | "html"): Effect.Effect<string, NotFound | FsError> {
+    return Effect.flatMap(loadDoc(this.home, id, ext), (text) =>
+      text === null ? Effect.fail(new NotFound({ message: `no review document ${id}` })) : Effect.succeed(text),
+    );
+  }
+
+  private docPaths(id: string) {
+    return { id, json: path.join(docsDir(this.home), `${id}.json`), html: path.join(docsDir(this.home), `${id}.html`) };
   }
 
   // A failed try: its job retries after its backoff, or fails for good with these words.

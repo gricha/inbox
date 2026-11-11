@@ -17,6 +17,7 @@ import {
   type CriteriaView,
   type Criterion,
   type CriterionBody,
+  type DocSaved,
   type Inquiry,
   type InquiryLink,
   type InquiryOption,
@@ -201,6 +202,9 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
       call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
     inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
+    // A review document (docs/review-format.md), kept and rendered by the desk.
+    submitDoc: (doc: unknown) => call<{ ok: true } & DocSaved>("POST", "/api/docs", doc, 60_000),
+    reviewDoc: (ref: string) => call<{ ok: true } & DocSaved>("POST", `/api/review/${q(ref)}/doc`, {}, 60_000),
     session: (ref: string) => call<SessionCard>("GET", `/api/sessions/${q(ref)}`),
     unreadAnswers: () => call<Inquiry[]>("GET", "/api/inquiries/unread"),
     answerRead: (id: string) => call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${q(id)}/read`),
