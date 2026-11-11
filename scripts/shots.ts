@@ -1457,10 +1457,10 @@ const SHOTS: Shot[] = [
       }
       await besideOpen(page, "beside-review", "acme/api#4127");
       if (b?.sideInline) failures.push("beside-review: the review's sidebar squeezes in beside the diff next to the list");
-      // The Inbox beside it is the page's one list: no headings, a question's row first.
+      // The Inbox beside it keeps the page's sections, Urgent first, a question's row leading it.
       const heads = await page.locator(".beside .group-head").count();
       const first = await page.locator(".beside .line .c-meta").first().textContent();
-      if (heads || first !== "Questionby your agent")
+      if (heads !== 3 || first !== "Questionby your agent")
         failures.push(`beside-review: the Inbox beside it has ${heads} headings and starts ${JSON.stringify(first)}`);
       // The calls to action sit before the ages, so the ages end in one column.
       const ends = await page.evaluate<number[]>(
@@ -4139,6 +4139,7 @@ const SHOTS: Shot[] = [
         "#/settings/queue",
         "#/settings/agent",
         "#/settings/automations",
+        "#/settings/criteria",
         "#/settings/app",
         "#/settings/github",
         "#/settings/sessions",
