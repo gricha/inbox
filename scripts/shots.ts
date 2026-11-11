@@ -3342,6 +3342,7 @@ const SHOTS: Shot[] = [
           JSON.stringify([
             ["Claude Code", false],
             ["Codex", false],
+            ["OpenCode", false],
           ]) ||
         !first.status
       )
