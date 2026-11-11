@@ -11,19 +11,22 @@ Runs on macOS, Linux and Windows.
 
 ## Start
 
-You need:
-
-- Node 22.18 or newer (`node -v`)
-- the GitHub CLI, logged in (`gh auth status`)
-- for AI reviews, sorting and the coordinator: Claude Code (`claude`), Codex or OpenCode, logged in
-
-Install (macOS and Linux):
-
 ```bash
-curl -fsSL -H "Authorization: Bearer $(gh auth token)" https://raw.githubusercontent.com/gricha/inbox/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gricha/inbox/main/install.sh | bash
 ```
 
-It installs the latest release, `/Applications/Inbox.app` on macOS or `~/.local/bin/Inbox.AppImage` on Linux, which then updates itself. Until the first release, or with `bash -s -- --source`, it clones the repo to `~/.local/share/inbox`, installs its packages and links `desk` into `~/.local/bin`; start the app there with `npm run app`. The header is there because the repo is private: `gh` reads it with your login. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
+On macOS and Linux, that one command:
+
+- installs the app from the latest release: `/Applications/Inbox.app`, or `~/.local/bin/Inbox.AppImage` on Linux. It updates itself from then on. Until there's a release (or with `bash -s -- --source`), it installs from source in `~/.local/share/inbox`, which needs Node 22.18+ and git;
+- signs you in to GitHub with the GitHub CLI (`gh auth login`), offering to install `gh` with Homebrew;
+- puts `desk` in `~/.local/bin` and that on your PATH (not with Linux's AppImage: there `npm install -g @gricha/inbox` brings it);
+- opens Inbox.
+
+Run it again to update. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
+
+**The first open** is one page: GitHub, signed in as you or what to run, and your agent. Claude Code, Codex and OpenCode each say whether they're installed and logged in, or the command that gets them there. Press **Use Claude Code** (or yours) and you're on your Inbox while the first sync runs, about 30 seconds. That also connects the agent to the desk: its MCP tools and the Inbox skill. Settings → Agent changes it later; `desk setup` does the same from a terminal.
+
+Every agent run is your own CLI, on your own login.
 
 Without the app, from npm: the server, the web UI at <http://localhost:47823> and the `desk` CLI.
 
@@ -39,7 +42,7 @@ npm install
 npm run app
 ```
 
-The first sync takes about 30 seconds. The app runs the desk server itself; if one is already running on port 47823 (`desk serve`), the app attaches to it.
+The app runs the desk server itself; if one is already running on port 47823 (`desk serve`), the app attaches to it.
 
 To build an installable app for the current OS into `release/` (a `.dmg`, an AppImage, or a Windows installer):
 
