@@ -65,6 +65,8 @@ const where = (t: Awaited<ReturnType<typeof setup>>, id: string): [InboxSection,
   return null;
 };
 const svcPr = (n: number, o: Partial<Item> = {}): Item => ({ ...teamPing(n), title: "Service accounts reach the control silo", ...o });
+const teamAsk = (n: number) =>
+  makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }] });
 
 test("sections: an urgent yes and a hand-back lift it whatever its score; fyi holds; a direct ask or a pin never goes below Standard", () => {
   const t = { urgent_at: 8, fyi_at: 3 };
@@ -171,7 +173,8 @@ test(
 
 test("the score orders each section and says why on the row; a model's score can't push an urgent yes out of Urgent", posix, async (c) => {
   const fake = fakeClaude(c);
-  const t = await setup([reviewAsk(1), reviewAsk(4), svcPr(2)], { settings: { ...QUIET, "agent.score": true } });
+  // Asked of your team: a review asked of you by name would be Urgent whatever its score.
+  const t = await setup([teamAsk(1), teamAsk(4), svcPr(2)], { settings: { ...QUIET, "agent.score": true } });
   c.after(t.cleanup);
   fake.say("ask", [{ id: "acme/api#2", yes: ["svc"] }]);
   fake.say("score", [
@@ -183,7 +186,7 @@ test("the score orders each section and says why on the row; a model's score can
   await run(t.desk.sync());
   await settled(t);
   assert.deepEqual(fake.calls(), ["ask", "score"], "questions first: a score weighs their answers");
-  assert.match(fake.stdin("score"), /criteria: Service accounts: no; Asked by name: yes/);
+  assert.match(fake.stdin("score"), /criteria: Service accounts: no; Asked by name: no/);
   const v = inbox(t);
   assert.deepEqual(
     v.standard.map((x) => [x.id, x.score, x.reason]),
@@ -205,7 +208,7 @@ test("the score orders each section and says why on the row; a model's score can
     input: { placed: { bucket: string } };
     score: number;
   };
-  assert.deepEqual([scored.score, scored.input.placed.bucket], [7, "now"]);
+  assert.deepEqual([scored.score, scored.input.placed.bucket], [7, "later"]);
   // Scored once: nothing changed, nothing asked.
   await run(t.desk.sync());
   await settled(t);
@@ -312,4 +315,29 @@ test("Ready to merge says yes to your PR approved or needing no review, green an
   const ready = (n: number) => where(t, `acme/web#${n}`)?.[1].reason === "Ready to merge";
   assert.deepEqual([1, 2, 3, 4, 5, 6].map(ready), [true, true, false, false, false, false]);
   assert.equal(where(t, "acme/web#2")![0], "urgent", "a repo that needs no review never approves");
+});
+
+test("a review asked of you by name is Urgent, whoever asked; one asked of your team isn't, nor one you've reviewed", posix, async (c) => {
+  const bot = { at: hoursAgo(1), actor: "renovate[bot]", actor_bot: true, reviewer: "me", reviewer_type: "user" as const };
+  const t = await setup([reviewAsk(1), reviewAsk(2, { request_events: [bot] }), teamPing(3), teamAsk(4), reviewAsk(5)], {
+    settings: { ...QUIET, "agent.score": false },
+  });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  await settled(t);
+  const [s1, c1] = where(t, "acme/api#1")!;
+  assert.deepEqual([s1, c1.reason], ["urgent", "Asked by name"]);
+  assert.equal(where(t, "acme/api#2")?.[0], "urgent", "a bot adding you by name counts");
+  assert.notEqual(where(t, "acme/api#3")?.[0], "urgent", "a CODEOWNERS team ping");
+  assert.notEqual(where(t, "acme/api#4")?.[0], "urgent", "a team's request");
+  // You reviewed it: GitHub drops your request, and it's no longer urgent.
+  const it = t.gh.items.get("acme/api#5")!;
+  t.gh.items.set(it.id, {
+    ...it,
+    review_requests: [],
+    reviews: [{ author: "me", author_bot: false, state: "commented", at: hoursAgo(0), commit: it.head_oid }],
+  });
+  await run(t.desk.sync());
+  await settled(t);
+  assert.notEqual(where(t, "acme/api#5")?.[0], "urgent");
 });

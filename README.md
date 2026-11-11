@@ -230,7 +230,7 @@ Every item on your Inbox gets a score out of 10. The score and your **criteria**
 
 - A **criterion** is a yes-or-no about an item: a rule (`when`, free and exact) or a question your model answers (`ask`, such as "Is it about service accounts?"). A yes raises the score. An **urgent** criterion's yes puts the item in Urgent whatever its score, even one your rules hid.
 - Tell your agent what you care about ("I care about PRs about service accounts") and it saves a criterion. Criteria only order your Inbox; they never act on an item.
-- Settings → Urgency lists yours and GitHub's (Asked by name, Waiting on your reply, and the urgent ones: Ready to merge, Your PR others wait on, Handed back), each with a switch.
+- Settings → Urgency lists yours and GitHub's (Waiting on your reply, and the urgent ones: Asked by name, Ready to merge, Your PR others wait on, Handed back), each with a switch.
 - Your agent scores 20 items a call, with the one-line why your row shows. With a decision model key (Settings → Agent → More), that model scores instead. Before a model answers, or with Score the Inbox off, the desk scores from the rules and criteria.
 - Urgent is 8 or more, FYI 3 or less (Settings → Inbox and notifications). A review asked of you by name, or your pin, never goes below Standard.
 - Every answer is kept in `~/.inbox/labels.jsonl`, to train a cheaper model later.

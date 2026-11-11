@@ -1089,7 +1089,7 @@ GitHub's are rule-only, so a fresh desk sections from its first sync:
 
 | Criterion              | Says yes when                                                                                                                                              | Urgent |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Asked by name          | `me.requested_direct`                                                                                                                                      |        |
+| Asked by name          | `me.requested_direct`: a review asked of you by name, whoever added it; not one asked only of a team you're on. Reviewing it drops the request             | yes    |
 | Waiting on your reply  | `me.owes_reply`, or someone else's PR you reviewed got pushes since                                                                                        |        |
 | Ready to merge         | yours, approved or in a repo that needs no review, green, not a draft, not stacked or blocked, and no PR waits on it: one press merges it (`cta: "merge"`) | yes    |
 | Your PR others wait on | yours, other PRs need it merged first, and it's ready to merge or waits on your reply                                                                      | yes    |
@@ -1115,7 +1115,7 @@ A model that can't answer holds every question and score for 30 minutes (`Urgenc
 2. Else FYI for what was sorted to fyi.
 3. Else Urgent at `queue.urgent_at` (8) or above, FYI at `queue.fyi_at` (3) or below, Standard between.
 
-A review asked of you by name, and your pin, are never below Standard. Agents' questions and the sessions that need you lead Urgent. Each section is ordered by score, then the desk's order (`byPart()` of now and today, then later, then fyi).
+A review asked of you by name, and your pin, are never below Standard, even with Asked by name off. Agents' questions and the sessions that need you lead Urgent. Each section is ordered by score, then the desk's order (`byPart()` of now and today, then later, then fyi).
 
 Each card carries `section`, `score` and `reason`, the row's quiet why. `reason` is the first of: a hand-back's words, the urgent yeses' names, an automation's why, the score's why, the yeses' names, the rules' why.
 

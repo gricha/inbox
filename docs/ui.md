@@ -99,7 +99,7 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 
 The main page: what the desk put on your desk, in three sections. `src/urgency.ts` places and orders them ([api.md → Urgency](api.md#urgency)); the page only draws `QueueView.inbox`.
 
-- **Urgent**: what an urgent criterion says yes to (for example "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold. Agents' questions and sessions that need you lead it.
+- **Urgent**: what an urgent criterion says yes to (for example "Asked by name": a review asked of you, not your team, until you review it; or "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold. Agents' questions and sessions that need you lead it.
 - **Standard**: the rest.
 - **FYI**: what rules or an automation sorted away, or a low score. A review asked of you by name and a pinned item never go here.
 
