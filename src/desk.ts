@@ -69,6 +69,7 @@ import type {
   ConfigDoc,
   ConfigError,
   Context,
+  FirstPass,
   FocusView,
   GitHubAction,
   Handoff,
@@ -489,6 +490,8 @@ export class Desk {
       const first = !fs.existsSync(this.configPath);
       // A desk never set up shows the first-run page until you pick your agent; one from before that page never does.
       if (first && this.store.get("context") === null) this.store.set("setup", "pending");
+      // A desk that synced before first_pass was kept is past its first minutes.
+      if (this.store.get("first_pass") === null) this.store.set("first_pass", this.syncedAt ? "done" : "running");
       if (first) yield* this.connectGitHub();
       else yield* Effect.forEach(this.connectors, (c) => c.init(false), { discard: true });
       yield* this.migrateSettings();
@@ -1924,8 +1927,45 @@ export class Desk {
         paused: this.paused(),
         stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
         inbox,
+        first_pass: this.firstPass(snap),
       };
     });
+  }
+
+  // A new desk's first minutes, said on its Inbox: the first sync, then what the judge and the scorer haven't answered yet.
+  // Once they're through, or held (a bubble says why), it's done for good.
+  firstPass(snap: Snapshot): FirstPass | null {
+    if (this.store.get("first_pass") !== "running") return null;
+    if (!this.syncedAt) {
+      if (this.syncError) return null;
+      const p = this.gh.progress;
+      const done = p?.done ?? 0;
+      const total = p?.total ?? 0;
+      const found = p?.found ?? 0;
+      const so = !found ? "" : done < total ? ` ${found} found so far` : ` ${found} found, reading them`;
+      return { step: "sync", done, total, found, line: `Getting your PRs from GitHub…${so}` };
+    }
+    const entries = this.urgency.entries(snap);
+    const scoring = this.urgency.scorer() !== null;
+    const sorting = new Set(this.judge.offReason() ? [] : this.judge.queue().map((g) => g.item.id));
+    const answered = entries.filter(
+      (e) =>
+        !sorting.has(e.item.id) &&
+        (!scoring || this.store.get(`score:${e.item.id}`) !== null) &&
+        !this.urgency.outcomes(e).some((o) => o.waiting),
+    ).length;
+    if (answered === entries.length || this.judge.status().retry_at || this.urgency.held) {
+      this.store.set("first_pass", "done");
+      return null;
+    }
+    const what = entries.every((e) => e.item.kind === "pr") ? "PRs" : "items";
+    return {
+      step: "sort",
+      done: answered,
+      total: entries.length,
+      found: entries.length,
+      line: `Sorting ${entries.length} ${what}… ${answered} done`,
+    };
   }
 
   // The most urgent board placement, for items that have no active one (resolved, cleared).

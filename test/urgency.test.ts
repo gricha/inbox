@@ -11,6 +11,7 @@ import { fakeDecisions } from "./helpers/decisions.ts";
 import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
+import { Effect } from "effect";
 
 const posix = { skip: process.platform === "win32" };
 const QUIET = { "policy.judge": false, "review.auto_ai": false, "notify.quiet": "" };
@@ -71,16 +72,17 @@ const teamAsk = (n: number) =>
 test("sections: an urgent yes and a hand-back lift it whatever its score; fyi holds; a direct ask or a pin never goes below Standard", () => {
   const t = { urgent_at: 8, fyi_at: 3 };
   const at = (o: Partial<Parameters<typeof sectionOf>[0]>) =>
-    sectionOf({ score: 5, urgent: false, bucket: "today", floor: false, ...o }, t);
+    sectionOf({ score: 5, urgent: false, bucket: "today", floor: false, scored: true, ...o }, t);
   assert.equal(at({}), "standard");
   assert.equal(at({ score: 8 }), "urgent", "the Urgent threshold is inclusive");
   assert.equal(at({ score: 3 }), "fyi", "the FYI threshold is inclusive");
+  assert.equal(at({ score: 3, bucket: "later", scored: false }), "standard", "only a model's low score sorts to FYI");
   assert.equal(at({ score: 0, urgent: true, bucket: "fyi" }), "urgent", "an urgent yes beats the score and a sort to fyi");
   assert.equal(at({ score: 0, urgent: true, bucket: "hide" }), "urgent");
   assert.equal(at({ score: 9, bucket: "fyi" }), "fyi", "what the rules sorted to fyi stays there, but for an urgent yes");
   assert.equal(at({ score: 1, floor: true }), "standard", "asked by name or pinned: never below Standard");
   assert.equal(at({ score: 9, bucket: "fyi", floor: true }), "urgent");
-  assert.equal(sectionOf({ score: 6, urgent: false, bucket: "today", floor: false }, { urgent_at: 6, fyi_at: 3 }), "urgent");
+  assert.equal(sectionOf({ score: 6, urgent: false, bucket: "today", floor: false, scored: true }, { urgent_at: 6, fyi_at: 3 }), "urgent");
   // With no model: where the rules put it, and a point a yes.
   assert.deepEqual(
     [fallbackScore("now", 0), fallbackScore("today", 2), fallbackScore("later", 1), fallbackScore("fyi", 0), fallbackScore("now", 9)],
@@ -282,6 +284,88 @@ test(
     assert.deepEqual([s10, c10.reason], ["urgent", "Your PR others wait on"]);
     // The row of what Follow up on silent reviewers pinned says it, whatever else it is.
     assert.equal(where(t, "acme/web#3")![1].reason, "Follow up on silent reviewers: the reviewers you named are silent two workdays");
+  },
+);
+
+test("a later item with no model score yet is Standard, below now and today; once the model scores it 3 it's FYI", posix, async (c) => {
+  const fake = fakeClaude(c);
+  // Your red PR is today; asked of your team is later.
+  const t = await setup([teamAsk(1), teamAsk(4), myPr(3, { ci: "red" })], { settings: QUIET });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const before = inbox(t);
+  assert.deepEqual(
+    before.standard.map((x) => [x.id, x.score]),
+    [
+      ["acme/web#3", fallbackScore("today", 0)],
+      ["acme/api#1", fallbackScore("later", 0)],
+      ["acme/api#4", fallbackScore("later", 0)],
+    ],
+    "the rules' later, at the FYI cutoff, still under today",
+  );
+  assert.deepEqual(before.fyi, []);
+  fake.say("score", [
+    { id: "acme/api#1", score: 3, why: "a team ask nobody waits on" },
+    { id: "acme/api#4", score: 5, why: "carol's small change" },
+    { id: "acme/web#3", score: 6, why: "your red PR" },
+  ]);
+  runSync(t.desk.putSettings({ set: { "agent.score": true } }));
+  await settled(t);
+  assert.deepEqual(where(t, "acme/api#1")!.slice(0, 1), ["fyi"], "the model's 3 is at the cutoff");
+  assert.deepEqual(where(t, "acme/api#4")!.slice(0, 1), ["standard"]);
+});
+
+test(
+  "a new desk says how its first minutes go: the first sync's searches, then what's sorted; a desk that synced before never does",
+  posix,
+  async (c) => {
+    const fake = fakeClaude(c);
+    const t = await setup([teamAsk(1), teamAsk(4), myPr(3, { ci: "red" })], { settings: { ...QUIET, "agent.score": true } });
+    c.after(t.cleanup);
+    const first = () => runSync(t.desk.queue()).first_pass;
+    assert.deepEqual(first(), { step: "sync", done: 0, total: 0, found: 0, line: "Getting your PRs from GitHub…" });
+    // The second search waits until the test lets it go.
+    let go!: () => void;
+    const gate = new Promise<void>((r) => {
+      go = r;
+    });
+    const search = t.gh.search.bind(t.gh);
+    t.gh.search = (q: string) =>
+      t.gh.searches.length === 1
+        ? Effect.andThen(
+            Effect.promise(() => gate),
+            search(q),
+          )
+        : search(q);
+    t.desk.urgency.running = true; // the scorer waits too, so the sort's start can be read
+    const syncing = run(t.desk.sync());
+    while (t.gh.searches.length < 1 || !t.desk.gh.progress?.done)
+      await new Promise((r) => {
+        setImmediate(r);
+      });
+    const mid = first()!;
+    assert.ok(mid.total > 1, `${mid.total} searches`);
+    assert.deepEqual(mid, { step: "sync", done: 1, total: mid.total, found: 3, line: "Getting your PRs from GitHub… 3 found so far" });
+    go();
+    await syncing;
+    assert.deepEqual(first(), { step: "sort", done: 0, total: 3, found: 3, line: "Sorting 3 PRs… 0 done" });
+    fake.say("score", [{ id: "acme/api#1", score: 3, why: "a team ask" }]);
+    t.desk.urgency.running = false;
+    t.desk.urgency.pump();
+    await settled(t);
+    assert.equal(first(), null, "scored: the desk's own score stands in for what the model left out");
+    assert.equal(t.desk.store.get("first_pass"), "done");
+
+    // A desk that synced before first_pass was kept is past its first minutes, whatever's left to sort.
+    const old = await setup([teamAsk(1)], { settings: { ...QUIET, "agent.score": true } });
+    c.after(old.cleanup);
+    old.desk.urgency.running = true;
+    await run(old.desk.sync());
+    assert.equal(runSync(old.desk.queue()).first_pass?.step, "sort");
+    old.desk.store.set("first_pass", null);
+    await run(old.desk.init());
+    assert.equal(old.desk.store.get("first_pass"), "done");
+    assert.equal(runSync(old.desk.queue()).first_pass, null);
   },
 );
 

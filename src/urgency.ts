@@ -53,14 +53,15 @@ export interface Outcome {
 
 // The section an Inbox item goes in. What holds it there first: an urgent yes and a hand-back lift it whatever its score;
 // what the rules or an automation sorted to fyi stays there; a direct ask or your pin (`floor`) never goes below Standard.
+// Only a model's low score sorts to FYI: before one lands, the rules' later sits at the cutoff and would bury a new desk's PRs.
 export function sectionOf(
-  o: { score: number; urgent: boolean; bucket: Bucket; floor: boolean },
+  o: { score: number; urgent: boolean; bucket: Bucket; floor: boolean; scored: boolean },
   t: { urgent_at: number; fyi_at: number },
 ): InboxSection {
   if (o.urgent) return "urgent";
   if (o.bucket === "fyi" && !o.floor) return "fyi";
   if (o.score >= t.urgent_at) return "urgent";
-  if (o.score <= t.fyi_at && !o.floor) return "fyi";
+  if (o.score <= t.fyi_at && !o.floor && o.scored) return "fyi";
   return "standard";
 }
 
@@ -306,7 +307,7 @@ export class Urgency {
       const back = snap.needs.has(c.id);
       const floor = e.analysis.signals.me.requested_direct || snap.pins.get(c.id) === "them";
       c.score = Math.round(score * 10) / 10;
-      c.section = sectionOf({ score, urgent: back || urgent.length > 0, bucket: p.bucket, floor }, t);
+      c.section = sectionOf({ score, urgent: back || urgent.length > 0, bucket: p.bucket, floor, scored: !!model }, t);
       // Why it's here: a hand-back's own words, an urgent yes, an automation's why, the score's, the yeses, the rules'.
       const automation = snap.auto.has(c.id) || !!p.judge?.by;
       c.reason = [back ? c.why : "", named(urgent), automation ? c.why : "", model?.why ?? "", named(yes), c.why].find(Boolean) ?? "";

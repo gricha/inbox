@@ -356,7 +356,9 @@ interface QueueView {
   paused: { who: "claude" | "ai"; why: string } | null; // shown once, as a bubble
   stacks: Record<string, Stack>; // each stack a card here carries
   inbox: { urgent: Card[]; standard: Card[]; fyi: Card[] }; // what the window draws (see Urgency)
+  first_pass: FirstPass | null; // a new desk's first minutes (see The first pass)
 }
+// FirstPass: { step: "sync" | "sort"; done; total; found; line }, `line` in the desk's words for the Inbox.
 // FocusView: { sessions, sections: { now, today }, reviewing, cards, paused }; never resolved items.
 // BoardView: { board: BoardSummary & { queries }, sections, hidden, cleared }; every PR, no stacks.
 
@@ -366,7 +368,14 @@ interface Overview {
   syncing: boolean;
   sync_error: string | null;
   config_errors: ConfigError[];
-  connectors: { id: string; name: string; status: "ok" | "syncing" | "paused" | "error"; synced_at: string | null; error: string | null }[];
+  connectors: {
+    id: string;
+    name: string;
+    status: "ok" | "syncing" | "paused" | "error";
+    synced_at: string | null;
+    error: string | null;
+    progress?: { done: number; total: number; found: number } | null;
+  }[]; // progress: the running pass's searches done of total, items found so far
   spaces: { id: string; name: string; boards: BoardSummary[] }[]; // counts per bucket, cleared, new, error?
   focus: { now: number; today: number; new: number; asks: number; sessions: number };
   inflight: { total: number }; // your open PRs in Merging
@@ -1133,11 +1142,17 @@ A model that can't answer holds every question and score for 30 minutes (`Urgenc
 
 1. Urgent for an urgent yes or a hand-back (`snap.needs`).
 2. Else FYI for what was sorted to fyi.
-3. Else Urgent at `queue.urgent_at` (8) or above, FYI at `queue.fyi_at` (3) or below, Standard between.
+3. Else Urgent at `queue.urgent_at` (8) or above, FYI at `queue.fyi_at` (3) or below, Standard between. Only a kept score (`score:<id>`) sorts to FYI: without one, the rules' later sits at the cutoff, so a new desk's later items are Standard, under now and today, until the scorer answers.
 
 A review asked of you by name, and your pin, are never below Standard, even with Asked by name off. Agents' questions and the sessions that need you lead Urgent. Each section is ordered by score, then the desk's order (`byPart()` of now and today, then later, then fyi).
 
 Each card carries `section`, `score` and `reason`, the row's quiet why. `reason` is the first of: a hand-back's words, the urgent yeses' names, an automation's why, the score's why, the yeses' names, the rules' why.
+
+**The first pass** (`Desk.firstPass()`, `QueueView.first_pass`). A new desk says what it's doing on its Inbox until its first minutes are through:
+
+- `sync` until the first sync finishes: the searches done of total and items found so far (`ConnectorStatus.progress`; only the first pass tells the window of each search). "Getting your PRs from GitHub… 63 found so far".
+- `sort` while the judge, a criterion's question or the scorer hasn't answered an Inbox item yet: "Sorting 120 PRs… 40 done".
+- Then kv `first_pass` is `done` for good; so too once the judge or the scorer is held (its bubble says why), and on a desk that had synced before the key was kept. A failed first sync shows its bubble instead.
 
 **The dataset.** Every answer the desk takes, a criterion's or a score's, is appended to `<home>/labels.jsonl`: `{ kind, at, by, item, input, … }` with what the model was given and what it said (`yes` and `p`; `score`, `why`, the decision model's `probabilities`). It's for distilling a cheaper model later; the desk only appends to it.
 

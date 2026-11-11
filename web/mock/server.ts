@@ -2029,6 +2029,7 @@ function queue(): QueueView {
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
     inbox: inboxOf([...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi]),
+    first_pass: null,
   };
 }
 
@@ -2089,7 +2090,11 @@ function inboxOf(cards: Card[]): Record<InboxSection, Card[]> {
     const model = setting("agent.score") ? SCORED[c.id] : undefined;
     const score = model?.score ?? fallbackScore(c.bucket, yes.length);
     const floor = signals(r).me.requested_direct ? true : c.pinned;
-    const section = sectionOf({ score, urgent: !!c.handed_back || urgent.length > 0, bucket: c.bucket, floor }, t);
+    // A settled desk: the scorer has been through every item, keeping the desk's own score for those it left out.
+    const section = sectionOf(
+      { score, urgent: !!c.handed_back || urgent.length > 0, bucket: c.bucket, floor, scored: setting("agent.score") },
+      t,
+    );
     const names = (xs: Criterion[]) => xs.map((x) => x.name).join(" \u00b7 ");
     const reason =
       [c.handed_back ? c.why : "", names(urgent), c.placed_by === "automation" ? c.why : "", model?.why ?? "", names(yes), c.why].find(

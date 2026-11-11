@@ -14,6 +14,7 @@ import type {
   AskLines,
   AsksView,
   AutomationView,
+  FirstPass,
   InflightView,
   OmarchyTheme,
   Overview,
@@ -116,8 +117,8 @@ async function start(): Promise<string> {
   return `http://localhost:${VITE}`;
 }
 
-// The queue has loaded: its rows, or its one empty line.
-const READY = ".queue .line, .queue .queue-empty";
+// The queue has loaded: its rows, its one empty line, or a new desk's first minutes.
+const READY = ".queue .line, .queue .queue-empty, .queue .queue-first";
 
 interface Shot {
   name: string;
@@ -743,6 +744,47 @@ const setupShot = (name: string, github: boolean, viewport?: { width: number; he
     await setupDone(page);
   },
 });
+// A new desk's first minutes (QueueView.first_pass): one line where the empty Inbox would be, or above its rows.
+const firstPassShot = (name: string, pass: FirstPass, viewport?: { width: number; height: number }): Shot => ({
+  name,
+  sizes: ["wide"],
+  go: async (page) => {
+    if (viewport) await page.setViewportSize(viewport);
+    await at("#/")(page);
+    await queueAs((q) => {
+      q.first_pass = pass;
+      if (pass.step === "sync") {
+        q.sections.now = [];
+        q.sections.today = [];
+        q.inbox = { urgent: [], standard: [], fyi: [] };
+        q.inquiries = [];
+        q.sessions = [];
+      }
+    })(page);
+    await top(page);
+    const seen = await page.evaluate<{ line: string | null; empty: number; above: boolean }>(`(() => {
+      const line = document.querySelector(".queue-first");
+      const head = document.querySelector(".queue .group-head");
+      return {
+        line: line?.textContent ?? null,
+        empty: document.querySelectorAll(".queue-empty").length,
+        above: !head || (!!line && line.getBoundingClientRect().bottom <= head.getBoundingClientRect().top),
+      };
+    })()`);
+    if (seen.line !== pass.line || seen.empty || !seen.above) failures.push(`${name}: the Inbox reads ${JSON.stringify(seen)}`);
+  },
+  after: async (page) => {
+    if (viewport) {
+      const wide = SIZES.find((x) => x.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+    }
+    await unroute(page);
+    await page.reload();
+    await page.locator(READY).first().waitFor({ timeout: 15_000 });
+  },
+});
+const SYNCING: FirstPass = { step: "sync", done: 4, total: 12, found: 63, line: "Getting your PRs from GitHub… 63 found so far" };
+const SORTING: FirstPass = { step: "sort", done: 40, total: 120, found: 120, line: "Sorting 120 PRs… 40 done" };
 const SHOTS: Shot[] = [
   setupShot("setup", true),
   setupShot("setup-github", false),
@@ -1139,6 +1181,10 @@ const SHOTS: Shot[] = [
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
     },
   },
+  firstPassShot("first-sync", SYNCING),
+  firstPassShot("first-sync-narrow", SYNCING, { width: 390, height: 760 }),
+  firstPassShot("first-sorting", SORTING),
+  firstPassShot("first-sorting-narrow", SORTING, { width: 390, height: 760 }),
   {
     // PRs held back until Claude has reviewed them: one quiet line under the queue.
     name: "queue-reviewing",

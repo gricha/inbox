@@ -1055,6 +1055,19 @@ p {
   font-size: 16px;
 }
 
+/* A new desk's first minutes: one quiet line where the empty line would be, above the rows once they come. */
+.queue-first {
+  margin: 0;
+  padding: 24px var(--pad) 10px;
+  color: var(--pencil);
+  font-size: 16px;
+}
+
+.queue-first.above {
+  padding: 16px var(--pad) 0;
+  font-size: 14px;
+}
+
 /* One line each, as one table: a sheet with a hairline between rows. Selected, a neutral fill. */
 .lines {
   --row-hover: color-mix(in oklab, var(--ink) 3.5%, var(--sheet));
@@ -1895,6 +1908,7 @@ p {
 }
 
 .beside .queue-empty,
+.beside .queue-first,
 .beside .quiet-note {
   padding: 16px;
   font-size: 14px;

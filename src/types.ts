@@ -672,6 +672,7 @@ export interface ConnectorStatus {
   status: "ok" | "syncing" | "paused" | "error"; // paused = rate limited
   synced_at: string | null; // when the last full pass finished
   error: string | null;
+  progress?: { done: number; total: number; found: number } | null; // the pass running: searches done of total, items found so far
 }
 
 export interface BoardView {
@@ -711,6 +712,17 @@ export interface QueueView {
   // The Inbox, by section, each by score then the desk's order: what's in now, today, later and fyi (sections), as
   // src/urgency.ts places it. Agents' questions and the sessions that need you lead Urgent.
   inbox: Record<InboxSection, Card[]>;
+  first_pass: FirstPass | null; // said above the Inbox's rows
+}
+
+// A new desk's first minutes: its first sync, then the judge's and the scorer's first answers. null once through, when what
+// sorts is held or failed (a bubble says so), and on a desk that synced before this was kept.
+export interface FirstPass {
+  step: "sync" | "sort";
+  done: number; // sync: searches; sort: Inbox items answered
+  total: number;
+  found: number; // sync: items its searches found so far; sort: as total
+  line: string; // what the Inbox says
 }
 
 // The Inbox's sections: Urgent (an urgent criterion said yes, a hand-back, or a score at queue.urgent_at or above), FYI

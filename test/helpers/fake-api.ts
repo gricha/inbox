@@ -189,6 +189,7 @@ const queueView: QueueView = {
   paused: null,
   stacks: {},
   inbox: { urgent: [CARDS.now], standard: [CARDS.today], fyi: [CARDS.later, CARDS.fyi] },
+  first_pass: null,
 };
 
 // Your PR in Merging: CI failing on one check, stacked on another branch, with the coordinator's last note.

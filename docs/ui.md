@@ -93,6 +93,7 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 
 - While a page waits on the desk, quiet bars stand where its rows or text will be. They show only after about 150 ms, so a quick answer never flashes them.
 - An empty page is one pencil line: "Nothing needs you right now.", "Nothing is blocked.", "Nothing in Merging yet: …", "Nothing here yet: …". With a filter: "No matches."
+- A new desk's first minutes are one pencil line in the empty line's place, or above the rows once they come: "Getting your PRs from GitHub… 63 found so far", then "Sorting 120 PRs… 40 done". The desk words it (`QueueView.first_pass`); it's gone once the first sorting is through and never shows again.
 - A list page opens at its top. Back from a review or a question, it returns where you left it.
 - Every page ends a little below its last row: no empty paper to scroll into.
 
@@ -102,7 +103,7 @@ The main page: what the desk put on your desk, in three sections. `src/urgency.t
 
 - **Urgent**: what an urgent criterion says yes to (for example "Asked by name": a review asked of you, not your team, until you review it; or "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold. Agents' questions and sessions that need you lead it.
 - **Standard**: the rest.
-- **FYI**: what rules or an automation sorted away, or a low score. A review asked of you by name and a pinned item never go here.
+- **FYI**: what rules or an automation sorted away, or a model's low score. A review asked of you by name and a pinned item never go here. Before the scorer answers, what the rules put in later is Standard, under the rest.
 
 Each section is a heading with its count; a click opens or closes it. Within a section: higher score first, then the desk's order (`group` on each card): hand-backs, other people's PRs waiting on your review, issues and the rest, then your own PRs.
 

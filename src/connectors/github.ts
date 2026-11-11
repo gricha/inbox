@@ -84,6 +84,7 @@ export class GitHubConnector implements Connector {
   desk: Desk;
   api: GitHub;
   syncing = false;
+  progress: { done: number; total: number; found: number } | null = null; // the running pass's searches
   syncAgain = false;
   polling = false;
   started = false;
@@ -184,7 +185,7 @@ export class GitHubConnector implements Connector {
 
   status(): ConnectorStatus {
     const status = this.syncing ? "syncing" : Date.now() < this.pausedUntil ? "paused" : this.error ? "error" : "ok";
-    return { id: this.id, name: this.name, status, synced_at: this.syncedAt, error: this.error };
+    return { id: this.id, name: this.name, status, synced_at: this.syncedAt, error: this.error, progress: this.progress };
   }
 
   // ---------------------------------------------------------------- context and searches
@@ -333,6 +334,7 @@ export class GitHubConnector implements Connector {
         Effect.ensuring(
           Effect.sync(() => {
             this.syncing = false;
+            this.progress = null;
           }),
         ),
         Effect.andThen(
@@ -365,7 +367,13 @@ export class GitHubConnector implements Connector {
       const found = new Map<string, { ids: string[]; total: number }>();
       const hits = new Map<string, SearchHit>();
       const errors: { why: string; e: GitHubReadError }[] = []; // why: "<query>: <its words>"
-      for (const q of queries) {
+      // Only the first pass tells the window of each search: its Inbox says how that's going.
+      const step = (done: number) => {
+        this.progress = { done, total: queries.length, found: hits.size };
+        if (!this.syncedAt) desk.changed();
+      };
+      step(0);
+      for (const [i, q] of queries.entries()) {
         const r = yield* this.api.search(q, 300).pipe(
           Effect.catch((e) =>
             e._tag === "GitHubRateLimited"
@@ -377,9 +385,11 @@ export class GitHubConnector implements Connector {
                 }),
           ),
         );
-        if (!r) continue;
-        found.set(q, { ids: r.hits.map((h) => h.id), total: r.total });
-        for (const h of r.hits) hits.set(h.id, h);
+        if (r) {
+          found.set(q, { ids: r.hits.map((h) => h.id), total: r.total });
+          for (const h of r.hits) hits.set(h.id, h);
+        }
+        step(i + 1);
       }
       const meta = desk.store.itemMeta();
       // Its own open pin (a bare id) no search returns would go stale and be pruned in 14 days; nothing says when it changed, so 3 min.

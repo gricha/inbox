@@ -40,7 +40,7 @@ export function Queue({
     return (
       <div className="queue">
         {first ? (
-          <p className="quiet-note">Filling your Inbox for the first time. This takes about 30 seconds.</p>
+          <p className="quiet-note">Getting your PRs from GitHub…</p>
         ) : (
           // Under a heading's placeholder, so the first section's rows land where these were.
           <section className="group">
@@ -63,8 +63,11 @@ export function Queue({
     .filter(({ g, lead }) => lead > 0 || g.cards.length > 0 || g.fold > 0);
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
+  // A new desk's first minutes, said in the desk's words: where the empty line would be, or above the rows.
+  const first = view.first_pass && !filter.trim() ? view.first_pass.line : null;
   return (
     <div className="queue">
+      {first && <p className={cls("queue-first", any && "above")}>{first}</p>}
       {any ? (
         parts.map(({ g, lead }) => (
           <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
@@ -113,7 +116,7 @@ export function Queue({
             )}
           </section>
         ))
-      ) : (
+      ) : first ? null : (
         <p className="queue-empty">{filter.trim() ? "No matches." : "Nothing needs you right now."}</p>
       )}
       {view.reviewing > 0 && (

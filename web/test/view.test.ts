@@ -127,6 +127,7 @@ const queue = (): QueueView => ({
   paused: null,
   stacks: {},
   inbox: { urgent: [card("acme/api#1")], standard: [card("acme/web#2", { author: "priya" })], fyi: [card("acme/api#3")] },
+  first_pass: null,
 });
 
 test("routes round-trip through the hash", () => {
