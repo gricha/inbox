@@ -3,8 +3,10 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Effect, Result } from "effect";
+import { parse as parseToml } from "smol-toml";
 import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
@@ -800,15 +802,32 @@ export const CODEX_PAUSED = "Codex isn't logged in, so nothing is being sorted o
 export const notLoggedIn = (agent: DriverId) => (agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN);
 
 // Whether the agent's CLI is logged in now, by its own status command (no model call): `claude auth status` prints
-// {"loggedIn": …}, `codex login status` exits 0 only when it is. Anything else (not installed, a timeout) is no.
+// {"loggedIn": …}, `codex login status` exits 0 only when it is (or a provider of yours has its key, below). Anything
+// else (not installed, a timeout) is no.
 export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
   const command = agent === "codex" ? codexCommand() : claudeCommand();
   const args = agent === "codex" ? ["login", "status"] : ["auth", "status"];
-  return claudeSpawn(command, args).pipe(
-    Effect.flatMap((s) => runCommand(s, { timeout: 15_000, missing: command })),
-    Effect.map((out) => agent === "codex" || /"loggedIn"\s*:\s*true/.test(out)),
+  const said = claudeSpawn(command, args).pipe(Effect.flatMap((s) => runCommand(s, { timeout: 15_000, missing: command })));
+  if (agent === "codex")
+    return said.pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => codexKeyed()),
+    );
+  return said.pipe(
+    Effect.map((out) => /"loggedIn"\s*:\s*true/.test(out)),
     Effect.orElseSucceed(() => false),
   );
+}
+
+// A provider of yours in Codex's config.toml (model_provider, as for OpenRouter) signs in with the key its env_key names,
+// which `codex login status` doesn't count: set in the desk's environment, that's logged in.
+function codexKeyed(env: NodeJS.ProcessEnv = process.env): boolean {
+  const file = path.join(env.CODEX_HOME?.trim() ? env.CODEX_HOME : path.join(os.homedir(), ".codex"), "config.toml");
+  type Conf = { model_provider?: unknown; model_providers?: Record<string, { env_key?: unknown } | undefined> };
+  const conf = Result.getOrNull(Result.try({ try: () => parseToml(fs.readFileSync(file, "utf8")) as Conf, catch: () => null }));
+  const provider = conf?.model_provider;
+  const key = typeof provider === "string" ? conf?.model_providers?.[provider]?.env_key : undefined;
+  return typeof key === "string" && !!env[key]?.trim();
 }
 
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `detail`, for the log. An API error's JSON body comes down to its message.

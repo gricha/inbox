@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CODEX_NOT_LOGGED_IN } from "../src/errors.ts";
+import { loggedIn } from "../src/review.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
@@ -222,6 +223,27 @@ test("a Codex agent run that needs a login says Codex's words; one at its limit 
   t.fake.file("fail", null);
   t.fake.file("turnfail", "You've hit your usage limit. Try again at 4:12 PM.");
   assert.equal((await t.go()).error, "You've hit your usage limit. Try again at 4:12 PM.");
+});
+
+test("Codex counts as logged in on a provider of yours whose key is set, which `codex login status` doesn't count", posix, async (c) => {
+  const fake = fakeCodex(c);
+  fake.file("fail", "Not logged in\n");
+  assert.equal(await run(loggedIn("codex")), false);
+  // As for OpenRouter: a provider of your own in config.toml, signing in with the key its env_key names.
+  fake.file(
+    "codex-home/config.toml",
+    'model = "openai/gpt-5-mini"\nmodel_provider = "openrouter"\n\n[model_providers.openrouter]\nbase_url = "https://openrouter.ai/api/v1"\nenv_key = "DESK_TEST_PROVIDER_KEY"\nwire_api = "responses"\n',
+  );
+  assert.equal(await run(loggedIn("codex")), false, "its key isn't set");
+  process.env.DESK_TEST_PROVIDER_KEY = "k";
+  c.after(() => {
+    delete process.env.DESK_TEST_PROVIDER_KEY;
+  });
+  assert.equal(await run(loggedIn("codex")), true);
+  fake.file("codex-home/config.toml", 'model = "o3"\n');
+  assert.equal(await run(loggedIn("codex")), false, "OpenAI's own login is codex login status's to say");
+  fake.file("fail", null);
+  assert.equal(await run(loggedIn("codex")), true, "codex login status says so");
 });
 
 // ---------------------------------------------------------------- your agent
