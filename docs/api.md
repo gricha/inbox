@@ -11,7 +11,7 @@ The CLI, `desk mcp` and the web UI are all clients of it. Types live in [src/typ
 
 ## Contents
 
-- **Reference:** [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
+- **Reference:** [The first run](#the-first-run) · [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
 - **Agents and models:** [Your own agent](#your-own-agent) · [The decision model](#the-decision-model-openrouter)
 - **Reviews:** [The AI review](#the-ai-review) · [What reviewers said](#what-reviewers-said)
 - **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The policy and the judge](#the-policy-and-the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
@@ -23,6 +23,16 @@ The CLI, `desk mcp` and the web UI are all clients of it. Types live in [src/typ
 ## Connect an agent
 
 Agents reach the queue over MCP. The desk serves it at `/mcp` whenever it runs, so there is nothing else to start.
+
+### The first run
+
+A desk that was never set up (no `config.toml` and nothing learned from GitHub yet) shows the window's first-run page instead of the Inbox, until you pick your agent. A desk from before that page never shows it. The desk decides (`Desk.setupView()`, kv `setup`), so the window, `desk setup` and any client see the same state.
+
+- **GitHub.** The first config is written from what GitHub says about you. When that fails (no `gh`, not logged in, offline), the desk still starts, without a config: `setup.github` says why and what to run, and every page's route answers 503 "GitHub isn't connected yet". Retry (`POST /api/setup/check`) asks again, writes the first config and syncs.
+- **Your agent.** Each of Claude Code, Codex and OpenCode with whether its CLI is on PATH and logged in (its own status command, as the login check uses; asked at most every 30 seconds, and again on Retry), and what to run while it isn't. Picking one (`POST /api/setup`) sets `agent.harness` and runs Connect for it, then the page is done for good. It refuses an agent that isn't ready, or while GitHub isn't connected, with what to run.
+- **From a terminal:** `desk setup` asks both again and prints the same; `desk setup claude` (or `codex`, `opencode`) picks one.
+
+Settings → Agent is where you change it afterwards.
 
 ### Your agent (Settings → Agent)
 
@@ -179,6 +189,9 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | PUT    | `/api/settings`       | `{ set?, reset? }` → `{ ok, errors, settings }`; writes nothing if any value is invalid. Setting a secret (`agent.decision_key`) is own page only                                                                                                         |     |
 | GET    | `/api/agents`         | `AgentStatus` for your agent: `{ driver, mcp: { connected, command }, skill: { state, path, command }, needs, taken, connect }`. `skill.state` is `installed`, `outdated`, `missing` or `taken`; `needs` is `connect`, `update`, `taken` or null          |     |
 | POST   | `/api/agents/connect` | `AgentStatus` after installing the skill and registering the MCP server. 409 when the name is taken (`taken` says what holds it); 502 with the command to run yourself when the agent's CLI fails or isn't on PATH                                        |     |
+| GET    | `/api/setup`          | `SetupView`: `{ needed, github: { login, error, fix }, agent, agents: [{ id, name, installed, logged_in, fix }] }`. `fix` is the command to run, null when there's none ([The first run](#the-first-run))                                                 |     |
+| POST   | `/api/setup/check`    | `SetupView` after asking GitHub (when it wasn't connected: then the first config and sync) and each agent's CLI again                                                                                                                                     |     |
+| POST   | `/api/setup`          | `{ agent }` → `SetupView`: sets `agent.harness`, connects it as `POST /api/agents/connect` does, and ends the first-run page. 409 while GitHub isn't connected or the agent isn't installed and logged in, with what to run                               |     |
 | POST   | `/api/update`         | `UpdateView`: the packaged app downloads the newer release and restarts into it. 409 when there's none or the app can't install it itself                                                                                                                 |     |
 | GET    | `/api/omarchy`        | The theme Omarchy has on; null off Omarchy                                                                                                                                                                                                                |     |
 

@@ -1007,11 +1007,33 @@ export const pausedWords = (agent: DriverId) => (agent === "codex" ? CODEX_PAUSE
 export const notLoggedIn = (agent: DriverId) =>
   agent === "codex" ? CODEX_NOT_LOGGED_IN : agent === "opencode" ? OPENCODE_NOT_LOGGED_IN : NOT_LOGGED_IN;
 
+const agentCommand = (agent: DriverId) => (agent === "codex" ? codexCommand() : agent === "opencode" ? opencodeCommand() : claudeCommand());
+
+// Whether the agent's CLI is on PATH (or where DESK_CLAUDE and the rest point), without running it.
+export function installed(agent: DriverId): boolean {
+  const command = agentCommand(agent);
+  const exts = process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")] : [""];
+  const dirs = path.isAbsolute(command) ? [""] : (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const mode = process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK;
+  const runs = (file: string) =>
+    Result.getOrElse(
+      Result.try({
+        try: () => {
+          fs.accessSync(file, mode);
+          return fs.statSync(file).isFile();
+        },
+        catch: () => false,
+      }),
+      () => false,
+    );
+  return dirs.some((d) => exts.some((e) => runs(path.join(d, command + e))));
+}
+
 // Whether the agent's CLI is logged in now, by its own status command (no model call): `claude auth status` prints
 // {"loggedIn": …}, `codex login status` exits 0 only when it is (or a provider of yours has its key, below), and
 // `opencode auth list` counts its stored logins and the providers' keys it finds set. Anything else (not installed, a timeout) is no.
 export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
-  const command = agent === "codex" ? codexCommand() : agent === "opencode" ? opencodeCommand() : claudeCommand();
+  const command = agentCommand(agent);
   const args = agent === "codex" ? ["login", "status"] : agent === "opencode" ? ["auth", "list"] : ["auth", "status"];
   const said = claudeSpawn(command, args).pipe(Effect.flatMap((s) => runCommand(s, { timeout: 15_000, missing: command })));
   if (agent === "codex")

@@ -3,12 +3,14 @@
 // rules, changing buckets, caps or defaults in the config editor really moves cards.
 // MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
+// POST /api/mock/setup { needed, github } shows the first-run page (GitHub signed out when github is false).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Effect, Result } from "effect";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { onBehalf } from "../../src/github/behalf.ts";
 import { plan } from "../../src/agents.ts";
+import { agentView, githubView } from "../../src/setup.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
 import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
@@ -28,7 +30,7 @@ import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, 
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { mergeLine, stage, standings } from "../../src/stage.ts";
 import { agentDefs, agentName, checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, settingDef } from "../../src/settings.ts";
-import type { ErrorBody } from "../../src/errors.ts";
+import { GitHubAuthError, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
   Action,
@@ -84,6 +86,7 @@ import type {
   ReviewView,
   ReviewState,
   SettingsView,
+  SetupView,
   SettingValue,
   Signals,
   Stack,
@@ -3695,6 +3698,22 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 // Agents: Claude Code has the MCP tools but not the skill yet, so Settings → Agent shows Connect; Codex has neither.
 
 const linked = new Set(["claude-code mcp"]);
+
+// The first-run page: Claude Code ready, Codex logged out, OpenCode not installed.
+const firstRun = { needed: false, github: true };
+function setupView(): SetupView {
+  const signedOut = new GitHubAuthError({ reason: "no_token", message: "no GitHub token: run `gh auth login`" });
+  return {
+    needed: firstRun.needed,
+    github: githubView(ME, firstRun.github ? null : signedOut),
+    agent: setting("agent.harness"),
+    agents: [
+      agentView("claude-code", "Claude Code", true, true),
+      agentView("codex", "Codex", true, false),
+      agentView("opencode", "OpenCode", false, false),
+    ],
+  };
+}
 function agentStatus(): AgentStatus {
   const driver = setting("agent.harness") === "codex" ? "codex" : "claude-code";
   const command =
@@ -4114,6 +4133,22 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return putSettings((body.set ?? {}) as Record<string, unknown>, (body.reset ?? []) as string[]);
   }
   if (route === "GET /api/agents") return agentStatus();
+  if (route === "GET /api/setup" || route === "POST /api/setup/check") return setupView();
+  if (route === "POST /api/setup") {
+    const agent = String((await readBody(req)).agent);
+    if (!firstRun.github)
+      throw new HttpError(409, "connect GitHub first: You're not signed in to GitHub. Run gh auth login", { tag: "Conflict" });
+    if (setupView().agents.find((a) => a.id === agent)?.fix) throw new HttpError(409, `${agent} isn't ready`, { tag: "Conflict" });
+    putSettings({ "agent.harness": agent }, []);
+    firstRun.needed = false;
+    bump();
+    return setupView();
+  }
+  if (route === "POST /api/mock/setup") {
+    const body = await readBody(req);
+    Object.assign(firstRun, { needed: body.needed !== false, github: body.github !== false });
+    return setupView();
+  }
   if (route === "GET /api/remote") return remoteView();
   const device = /^\/api\/devices\/([^/]+)$/.exec(url.pathname);
   if (device && req.method === "DELETE") {

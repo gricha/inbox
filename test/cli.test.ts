@@ -360,6 +360,7 @@ test("usage errors exit 2", async () => {
     ["serve", "--port", "0"],
     ["connect", "vim"],
     ["connect", "claude", "codex"],
+    ["setup", "vim"],
     ...settings,
   ]) {
     const r = await run(argv);
@@ -509,6 +510,27 @@ test("connect claude prints what's missing and the commands that fix it", async 
   assert.equal(
     taken[3],
     "# claude has another MCP server named inbox (mail-mcp), not this desk at http://localhost:47960/mcp: rename or remove it, then connect again",
+  );
+});
+
+test("setup shows GitHub and each agent with what to run, and naming one picks it", async () => {
+  const r = await run(["setup"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.out.split("\n"), [
+    "✓ GitHub: signed in as @you",
+    "  Claude Code  ready",
+    "  Codex        not logged in. Run: codex login",
+    "  OpenCode     not installed. Run: curl -fsSL https://opencode.ai/install | bash && opencode auth login",
+    "Pick one: desk setup claude, codex or opencode",
+    "",
+  ]);
+  const picked = await run(["setup", "claude"]);
+  assert.equal(picked.out, "✓ GitHub: signed in as @you\n✓ Claude Code is your agent: MCP tools and skill connected\n");
+  assert.deepEqual(fake.calls.at(-1), { method: "POST", path: "/api/setup", body: { agent: "claude-code" } });
+  const refused = await run(["setup", "opencode"]);
+  assert.deepEqual(
+    [refused.code, refused.err],
+    [1, "desk: OpenCode isn't installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login\n"],
   );
 });
 

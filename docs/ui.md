@@ -18,6 +18,7 @@ The pages:
 | [Archive](#archive)                     | `#/archive`         | What's done, snoozed, muted or hidden by rules           |
 | [A review document](#a-review-document) | `#/doc/<id>`        | A review document the desk rendered                      |
 | [Settings](#settings)                   | `#/settings/<part>` | Configuration, one part at a time                        |
+| [The first run](#the-first-run)         | any                 | GitHub and your agent, once, before the Inbox            |
 
 ## Principles
 
@@ -576,6 +577,16 @@ The Sessions plugin's part ([api.md → Sessions](api.md#sessions)):
 - **Ask your agent whether a question waits on you** (`sessions.ask`).
 - **More Sessions settings**: **Stalled after** (`sessions.quiet_minutes`).
 
+## The first run
+
+A desk that was never set up shows one page in the window's place, without the sidebar, until you pick your agent ([api.md → The first run](api.md#the-first-run)). Its top is the drag handle.
+
+- **Set up Inbox**, with the mark.
+- **GitHub**: "Signed in as @you", or why not ("You're not signed in to GitHub.", "The GitHub CLI isn't installed.", "Couldn't reach GitHub: …") with the command to run and **Retry**.
+- **Your agent**: one line on what it does, then Claude Code, Codex and OpenCode, each "Installed and logged in." with a green **Use Claude Code**, or "Not logged in." / "Not installed." with the command to run and **Retry**. While GitHub isn't connected the agents say only where they stand; GitHub's Retry asks about everything.
+- **Use …** is one press: "Connecting…", then the Inbox with the first sync running. What fails (the CLI refusing the MCP server, a name another server holds) is red under that agent, and the button stays to try again.
+- It never shows again. Settings → Agent changes the agent; `desk setup` does the same from a terminal.
+
 ## Bubbles
 
 What's wrong with the system is never a line in a page. It's a small stack of bubbles at the window's bottom right (left of the chat when it's open). `noticesOf()` in `web/src/notices.ts` decides them from what the desk reports, so the tray and MCP agree.
@@ -689,6 +700,7 @@ Code: `onKey` and `onCapture` (`SIDE_PAGES`, `stepTo()`) in `web/src/App.tsx`, p
 | `web/src/components/Inflight.tsx`                                                               | Merging and Claude's work                                                            |
 | `web/src/components/Chat.tsx`, `Prose.tsx`                                                      | Ask your agent; drawing an agent's text                                              |
 | `web/src/components/Settings.tsx`, `Rules.tsx`, `Policy.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
+| `web/src/components/Setup.tsx`                                                                  | the first-run page                                                                   |
 | `web/src/styles.css`, `web/src/theme.ts`                                                        | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
 | `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                                          | the mark ([visual.md → The brand](visual.md#the-brand))                              |
 | `web/src/fonts/`                                                                                | bundled fonts, so nothing loads from the network                                     |

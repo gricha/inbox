@@ -680,7 +680,86 @@ const besideOpen = async (page: Page, name: string, sel: string) => {
 };
 let skTop = -1; // where queue-loading's placeholders started
 const LONG = "Stream partial results to the client while the hash join stage spills its build side to disk under memory pressure";
+// The first-run page, as a fresh desk shows it: a mock-only switch (web/mock/server.ts), then a reload, since the window
+// asks about it only until it's done. `github: false` is GitHub signed out.
+const firstRun =
+  (github = true) =>
+  async (page: Page) => {
+    await page.evaluate(`fetch("/api/mock/setup", { method: "POST", body: JSON.stringify({ needed: true, github: ${github} }) })`);
+    await page.reload();
+    await page.locator(".setup").waitFor({ timeout: 15_000 });
+  };
+const setupDone = async (page: Page) => {
+  await page.evaluate(`fetch("/api/mock/setup", { method: "POST", body: JSON.stringify({ needed: false }) })`);
+  await page.reload();
+  await page.locator(READY).first().waitFor({ timeout: 15_000 });
+};
+// What the first-run page says: its rows' labels and help, and its buttons.
+const setupSays = (page: Page) =>
+  page.evaluate<{ side: boolean; title: string; rows: string[]; buttons: string[]; go: string[] }>(`(() => ({
+    side: !!document.querySelector(".side"),
+    title: document.querySelector(".setup-title")?.textContent ?? "",
+    rows: [...document.querySelectorAll(".setup .setting")].map((r) => r.querySelector(".s-label").textContent + " | " + (r.querySelector(".s-help")?.textContent ?? "")),
+    buttons: [...document.querySelectorAll(".setup button")].map((b) => b.textContent),
+    go: [...document.querySelectorAll(".setup .act.primary.go")].map((b) => b.textContent),
+  }))()`);
+const setupShot = (name: string, github: boolean, viewport?: { width: number; height: number }): Shot => ({
+  name,
+  writes: true,
+  ...(viewport && { sizes: ["wide"] }),
+  go: async (page) => {
+    if (viewport) await page.setViewportSize(viewport);
+    await firstRun(github)(page);
+    const s = await setupSays(page);
+    const want = github
+      ? {
+          rows: [
+            "Signed in as @me | ",
+            "Claude Code | Installed and logged in.",
+            "Codex | Not logged in. Run codex login in a terminal, then Retry.",
+            "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
+          ],
+          buttons: ["Use Claude Code", "Retry", "Retry"],
+        }
+      : {
+          rows: [
+            "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
+            "Claude Code | Installed and logged in.",
+            "Codex | Not logged in. Run codex login in a terminal.",
+            "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal.",
+          ],
+          buttons: ["Retry"],
+        };
+    const got = { rows: s.rows, buttons: s.buttons };
+    if (s.side || s.title !== "Set up Inbox" || JSON.stringify(got) !== JSON.stringify(want))
+      failures.push(`${name}: the page reads ${JSON.stringify(s)}`);
+    if (s.go.length !== (github ? 1 : 0)) failures.push(`${name}: its green buttons are ${JSON.stringify(s.go)}`);
+  },
+  after: async (page) => {
+    if (viewport) {
+      const wide = SIZES.find((x) => x.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+    }
+    await setupDone(page);
+  },
+});
 const SHOTS: Shot[] = [
+  setupShot("setup", true),
+  setupShot("setup-github", false),
+  setupShot("setup-narrow", true, { width: 390, height: 760 }),
+  {
+    // Picking your agent: one press, then the Inbox.
+    name: "setup-done",
+    writes: true,
+    sizes: ["wide"],
+    go: async (page) => {
+      await firstRun()(page);
+      await page.locator(".setup .act.primary.go", { hasText: "Use Claude Code" }).click();
+      await page.locator(READY).first().waitFor({ timeout: 5000 });
+      if (await page.locator(".setup").count()) failures.push("setup-done: the first-run page is still there");
+      if ((await sideOn(page)) !== "Inbox") failures.push("setup-done: it didn't land on the Inbox");
+    },
+  },
   {
     // Nothing is selected on load: no row's fill, no filled call to action.
     name: "queue",

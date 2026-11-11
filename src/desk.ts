@@ -47,6 +47,8 @@ import type {
   Action,
   ActivityPage,
   AgentStatus,
+  SetupAgent,
+  SetupView,
   AiReview,
   Ask,
   AskAbout,
@@ -101,6 +103,7 @@ import type {
 import { byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
+import { AGENTS, agentView, githubView } from "./setup.ts";
 import { RELEASES, Updates, type AppUpdater } from "./updates.ts";
 import {
   catchAllOf,
@@ -338,6 +341,7 @@ export interface ReviewDeps {
     agent: agents.DriverId,
   ): Effect.Effect<AiReview, CommandError | ClaudeError>;
   loggedIn?(agent: agents.DriverId): Effect.Effect<boolean>; // the CLI's own status command; absent: nothing checks it
+  installed?(agent: agents.DriverId): boolean; // its CLI is on PATH; absent: none is
 }
 
 // What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
@@ -363,6 +367,7 @@ export class Desk {
   log: (msg: string) => void;
   review: ReviewDeps | null;
   writer: GitHubWriter | null;
+  githubError: GitHubReadError | Upstream | null = null; // why a first run couldn't read GitHub yet: no config until it can
   decisions: string | undefined;
   policyPath: string;
   policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
@@ -482,13 +487,14 @@ export class Desk {
   init(): Effect.Effect<void, GitHubReadError | Upstream | FsError> {
     return Effect.gen({ self: this }, function* () {
       const first = !fs.existsSync(this.configPath);
-      const parts = yield* Effect.forEach(this.connectors, (c) => c.init(first));
-      if (first) yield* this.firstConfig(parts.filter((p) => p !== null).join("\n"));
+      // A desk never set up shows the first-run page until you pick your agent; one from before that page never does.
+      if (first && this.store.get("context") === null) this.store.set("setup", "pending");
+      if (first) yield* this.connectGitHub();
+      else yield* Effect.forEach(this.connectors, (c) => c.init(false), { discard: true });
       yield* this.migrateSettings();
       yield* this.migrateSecrets();
-      yield* this.migrateRules();
       yield* this.readPolicy();
-      yield* this.reloadConfig();
+      if (!this.githubError) yield* this.loadConfig();
       fs.watchFile(this.policyPath, { interval: 2000 }, () => {
         this.edited("policy.md");
       });
@@ -498,6 +504,25 @@ export class Desk {
       fs.watchFile(this.configPath, { interval: 2000 }, (cur) => {
         if (cur.nlink !== 0) this.edited("config.toml"); // deleted or mid-rename: keep the loaded config
       });
+    });
+  }
+
+  private loadConfig(sync = false): Effect.Effect<void, FsError> {
+    return Effect.andThen(this.migrateRules(), this.reloadConfig(sync));
+  }
+
+  // The first config, from what GitHub says about you. What stops it (no gh, not logged in, offline) waits in githubError
+  // for the first-run page's Retry, and the desk runs without a config until then.
+  private connectGitHub(): Effect.Effect<void, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      const got = yield* Effect.result(Effect.forEach(this.connectors, (c) => c.init(true)));
+      if (Result.isFailure(got)) {
+        this.githubError = got.failure;
+        this.log(`GitHub isn't connected yet: ${got.failure.message}`);
+        return;
+      }
+      this.githubError = null;
+      yield* this.firstConfig(got.success.filter((p) => p !== null).join("\n"));
     });
   }
 
@@ -987,6 +1012,74 @@ export class Desk {
     return agents
       .connect(agents.driverOf(this.settings["agent.harness"]), mcpUrl, { log })
       .pipe(Effect.mapError((e) => (e._tag === "Conflict" ? e : new Upstream({ message: e.message, cause: e }))));
+  }
+
+  // ---------------------------------------------------------------- first run
+
+  // Whether GitHub and each agent's CLI are ready, and whether the first-run page still shows. The CLIs are asked at most
+  // every 30 seconds, as the window refreshes often while the first sync runs; `fresh` (Retry) asks again.
+  setupView(fresh = false): Effect.Effect<SetupView> {
+    return Effect.gen({ self: this }, function* () {
+      return {
+        needed: this.store.get("setup") === "pending",
+        github: githubView(this.me(), this.githubError),
+        agent: this.agent(),
+        agents: yield* this.agentChecks(fresh),
+      };
+    });
+  }
+
+  private agentsSeen: { at: number; agents: SetupAgent[] } | null = null;
+  private agentChecks(fresh: boolean): Effect.Effect<SetupAgent[]> {
+    const seen = this.agentsSeen;
+    if (!fresh && seen && Date.now() - seen.at < 30_000) return Effect.succeed(seen.agents);
+    const review = this.review;
+    const one = ({ id, name }: (typeof AGENTS)[number]) => {
+      const on = review?.installed?.(id) ?? false;
+      const logged = on && review?.loggedIn ? review.loggedIn(id) : Effect.succeed(false);
+      return Effect.map(logged, (yes) => agentView(id, name, on, yes));
+    };
+    return Effect.forEach(AGENTS, one, { concurrency: "unbounded" }).pipe(
+      Effect.tap((list) =>
+        Effect.sync(() => {
+          this.agentsSeen = { at: Date.now(), agents: list };
+        }),
+      ),
+    );
+  }
+
+  // The first-run page's Retry: GitHub again if it wasn't connected (then the first config and sync), and each agent's CLI.
+  checkSetup(): Effect.Effect<SetupView, FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (this.githubError) {
+        yield* this.connectGitHub();
+        if (!this.githubError) yield* this.loadConfig(true);
+        this.changed();
+      }
+      return yield* this.setupView(true);
+    });
+  }
+
+  // The first-run page's choice: your agent, connected as Settings → Agent's Connect does it. Then the page is done for good.
+  chooseAgent(id: string, mcpUrl: string): Effect.Effect<SetupView, BadRequest | Conflict | Upstream | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (!AGENTS.some((a) => a.id === id))
+        return yield* new BadRequest({ message: `unknown agent: ${id} (claude-code, codex or opencode)` });
+      if (this.githubError) {
+        const g = githubView("", this.githubError);
+        return yield* new Conflict({ message: `connect GitHub first: ${g.error}${g.fix ? ` Run ${g.fix}` : ""}` });
+      }
+      const a = (yield* this.agentChecks(true)).find((x) => x.id === id)!;
+      if (a.fix) return yield* new Conflict({ message: `${a.name} ${a.installed ? "isn't logged in" : "isn't installed"}. Run ${a.fix}` });
+      const saved = yield* this.putSettings({ set: { "agent.harness": id } });
+      if (!saved.ok) return yield* new Conflict({ message: saved.errors.map((e) => e.message).join("; ") });
+      yield* this.connectAgent(mcpUrl);
+      this.store.set("setup", "done");
+      this.log(`set up with ${a.name}`);
+      if (!this.syncedAt && !this.syncing) this.runner.fork("sync", this.sync());
+      this.changed();
+      return yield* this.setupView();
+    });
   }
 
   // ---------------------------------------------------------------- sync and the event log

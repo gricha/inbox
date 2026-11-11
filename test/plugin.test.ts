@@ -12,7 +12,7 @@ import { NotFound, Upstream } from "../src/errors.ts";
 import type { ConnectorStatus, Head } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
-import { failure, failureSync, run, runSync } from "./helpers/run.ts";
+import { failureSync, run, runSync } from "./helpers/run.ts";
 
 const DAY = 24 * 3_600_000;
 
@@ -211,7 +211,8 @@ test("init asks every source what it needs: a first config.toml is GitHub's then
 
   const failing = start();
   failing.notes.init = () => Effect.fail(new Upstream({ message: "notes are offline" }));
-  assert.equal((await failure(failing.desk.init())).message, "notes are offline");
+  await run(failing.desk.init());
+  assert.equal(failing.desk.githubError?.message, "notes are offline");
   assert.equal(fs.existsSync(config), false, "GitHub's part isn't written alone");
   failing.desk.stop();
 

@@ -11,7 +11,7 @@ The owner's direction: a small core, with every source (GitHub first) as a plugi
 
 - `id`, `name`: `"github"`, `"GitHub"`. `id` is the `source` of its events and boards.
 - `rules`, `automations`, `criteria`: what it ships for its boards (`github-rules.ts`), automations (`github-automations.ts`) and Urgency (`github-criteria.ts`). The owner only switches them.
-- `init(first)`: what it must have before the desk starts (GitHub: your context), and its part of the first config.toml. `Desk.init()` asks every connector.
+- `init(first)`: what it must have before the desk starts (GitHub: your context), and its part of the first config.toml. `Desk.init()` asks every connector. On a first run one failing writes no config and the desk starts without one; the first-run page says why and its Retry asks again ([api.md → The first run](api.md#the-first-run)).
 - `start`, `stop`, `reschedule`: its loops; re-arm on a settings change.
 - `reconcile` (a full pass, `Desk.sync()`), `poll` (the cheap change feed).
 - `events(prev, next)`: what changed between two snapshots (GitHub: `itemEvents` in `github-events.ts`).

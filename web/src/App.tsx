@@ -15,6 +15,7 @@ import type {
   QueueView,
   Reviewer,
   SettingsView,
+  SetupView,
   Work,
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
@@ -60,6 +61,7 @@ import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
+import { Setup } from "./components/Setup.tsx";
 import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { useSourceDown } from "./components/Source.tsx";
@@ -144,6 +146,7 @@ if (desktop) {
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [setup, setSetup] = useState<SetupView | null>(null); // the first-run page, while the desk says it's needed
   const [view, setView] = useState<QueueView | null>(null);
   const [down, setDown] = useState<Down | null>(null);
   const [epoch, setEpoch] = useState(0); // bumped to reopen the event stream
@@ -203,6 +206,7 @@ export function App() {
   const undoSeq = useRef<number | null>(null);
   const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // Undo after a close or a draft, instead
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
+  const setupDone = useRef(false); // asked once the desk says the first-run page is done
   // An id we just asked for (e.g. after undo) that the next refresh will bring back.
   const pending = useRef<{ id: string; until: number } | null>(null);
 
@@ -283,7 +287,22 @@ export function App() {
             },
           }),
         );
-        return r.name === "settings" ? Effect.all([loadSettings(), views], { concurrency: "unbounded", discard: true }) : views;
+        const page = r.name === "settings" ? Effect.all([loadSettings(), views], { concurrency: "unbounded", discard: true }) : views;
+        if (setupDone.current) return page;
+        // Until the desk says the first-run page is done, it's asked first; a desk that doesn't answer is said as before.
+        return api.setup().pipe(
+          Effect.matchEffect({
+            onSuccess: (s) =>
+              Effect.suspend(() => {
+                if (n !== loadSeq.current) return Effect.void;
+                setSetup(s);
+                if (s.needed) return Effect.void;
+                setupDone.current = true;
+                return page;
+              }),
+            onFailure: () => page,
+          }),
+        );
       }),
     [flash, loadSettings],
   );
@@ -1467,6 +1486,17 @@ export function App() {
         ctx={compact}
         filter={filter}
         toggle={toggleGroup}
+      />
+    );
+
+  if (setup?.needed)
+    return (
+      <Setup
+        view={setup}
+        onChange={(s) => {
+          setSetup(s);
+          if (!s.needed) refresh(0);
+        }}
       />
     );
 

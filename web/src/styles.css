@@ -6372,3 +6372,58 @@ pre,
 .builtin-rules li.off .br-text {
   color: var(--faint);
 }
+
+/* The first-run page --------------------------------------------------------- */
+
+/* In the window's place, without the sidebar: GitHub, then your agent, in one calm column. Its top is the drag handle, clear
+   of the macOS traffic lights. */
+.setup {
+  min-height: 100vh;
+  padding: 52px 24px 48px;
+  background: var(--paper);
+}
+
+.setup::before {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 52px;
+  content: "";
+  -webkit-app-region: drag;
+}
+
+.setup-col {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.setup-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 24px 0 16px;
+  padding: 0 14px; /* the mark's tray on the heads' text edge: its viewBox leaves 3px of room */
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.setup-head {
+  margin: 20px 0 0;
+  padding: 0 17px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.setup-help {
+  padding: 0 17px;
+  color: var(--pencil);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (width <= 640px) {
+  .setup {
+    padding-inline: 12px;
+  }
+}

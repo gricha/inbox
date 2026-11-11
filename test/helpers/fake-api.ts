@@ -20,6 +20,7 @@ import type {
   Overview,
   QueueView,
   SettingsView,
+  SetupView,
   SettingValue,
 } from "../../src/types.ts";
 
@@ -368,6 +369,26 @@ const ANSWERED = inquiry("a1c0ffee", { text: "Now, on #12's branch", at: ago(1),
 type Reply = { status: number; data: unknown };
 const reply = (status: number, data: unknown): Reply => ({ status, data });
 
+// A fresh desk: signed in to GitHub, Claude Code ready, Codex logged out, OpenCode not installed.
+function setupView(needed: boolean, agent: string): SetupView {
+  return {
+    needed,
+    github: { login: "you", error: null, fix: null },
+    agent,
+    agents: [
+      { id: "claude-code", name: "Claude Code", installed: true, logged_in: true, fix: null },
+      { id: "codex", name: "Codex", installed: true, logged_in: false, fix: "codex login" },
+      {
+        id: "opencode",
+        name: "OpenCode",
+        installed: false,
+        logged_in: false,
+        fix: "curl -fsSL https://opencode.ai/install | bash && opencode auth login",
+      },
+    ],
+  };
+}
+
 function route(api: FakeApi, method: string | undefined, url: URL, body: any): Reply {
   switch (`${method} ${url.pathname}`) {
     case "GET /health":
@@ -416,6 +437,15 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, { ok: true, id: CARDS.now.id, action: "done" });
     case "POST /api/sync":
       return reply(200, { ok: true });
+    case "POST /api/setup/check":
+      return reply(200, setupView(true, "claude-code"));
+    case "POST /api/setup":
+      return body.agent === "opencode"
+        ? reply(409, {
+            error: "OpenCode isn't installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login",
+            tag: "Conflict",
+          })
+        : reply(200, setupView(false, body.agent));
     case "GET /api/config":
       return reply(200, {
         path: api.configPath,

@@ -36,6 +36,7 @@ import {
   type QueueView,
   type SettingsView,
   type SettingValue,
+  type SetupView,
   type Until,
 } from "./types.ts";
 
@@ -220,6 +221,9 @@ export function createClient(send: (path: string, init: RequestInit) => Response
       return call<ActivityPage>("GET", `/api/activity?${params.toString()}`, undefined, ((o.wait ?? 0) + 15) * 1000);
     },
     health: () => call<{ ok: true; version: string }>("GET", "/health"),
+    // The first run: GitHub and your agent (checkSetup asks both again); picking one connects it and ends the first-run page.
+    checkSetup: () => call<SetupView>("POST", "/api/setup/check", {}, 60_000),
+    chooseAgent: (agent: string) => call<SetupView>("POST", "/api/setup", { agent }, 120_000),
     // Pairing another device (src/remote.ts): a code to trade there, or a token here; the trade, from the other device.
     pairCode: () => call<{ code: string; expires_at: string; url: string; pair_url: string }>("POST", "/api/pair/code", {}),
     pairToken: (name: string) => call<{ url: string; token: string }>("POST", "/api/pair/token", { name }),
@@ -248,4 +252,6 @@ export const {
   health,
   pairCode,
   pairToken,
+  checkSetup,
+  chooseAgent,
 } = createClient();

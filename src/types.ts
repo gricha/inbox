@@ -329,6 +329,23 @@ export interface RemoteView {
   devices: Device[];
 }
 
+// GET /api/setup: a desk never set up shows the first-run page while `needed`, until you pick your agent.
+export interface SetupView {
+  needed: boolean;
+  // login: who GitHub says you are; else why it can't be read and what to run (null: nothing to run, just Retry)
+  github: { login: string | null; error: string | null; fix: string | null };
+  agent: string; // agent.harness
+  agents: SetupAgent[];
+}
+
+export interface SetupAgent {
+  id: "claude-code" | "codex" | "opencode";
+  name: string; // Claude Code, Codex, OpenCode
+  installed: boolean;
+  logged_in: boolean;
+  fix: string | null; // what to run while it isn't installed or logged in
+}
+
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.
 export interface AgentStatus {
   driver: string;

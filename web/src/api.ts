@@ -6,6 +6,7 @@ import type { ErrorBody } from "../../src/errors.ts";
 import type {
   Action,
   AgentStatus,
+  SetupView,
   AiReview,
   InlineAt,
   Ask,
@@ -251,6 +252,10 @@ export const api = {
   remote: () => call<RemoteView>("GET", "/api/remote"),
   revokeDevice: (id: string) => call<{ ok: true }>("DELETE", `/api/devices/${encodeURIComponent(id)}`),
   connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
+  // The first-run page: its state, Retry (GitHub and the agents asked again), and picking your agent.
+  setup: () => call<SetupView>("GET", "/api/setup"),
+  checkSetup: () => call<SetupView>("POST", "/api/setup/check", {}),
+  chooseAgent: (agent: string) => call<SetupView>("POST", "/api/setup", { agent }),
   policy: () => call<PolicyDoc>("GET", "/api/policy"),
   omarchy: () => call<OmarchyTheme | null>("GET", "/api/omarchy"),
   // A stale `base` (the hash it was read at) fails with DeskConflict "Stale".

@@ -40,7 +40,7 @@ import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import type { AppUpdater } from "./updates.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
-import { dropHostSession, fetchPr, generateReview, loggedIn } from "./review.ts";
+import { dropHostSession, fetchPr, generateReview, installed, loggedIn } from "./review.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
@@ -290,7 +290,14 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const STARTING = "desk is starting; the first sync can take a minute";
   // Before the first sync there's nothing to show, unless it's the config's errors.
   const up = Effect.suspend((): Effect.Effect<void, Unavailable> =>
-    !desk.loaded && !desk.configErrors.length ? Effect.fail(new Unavailable({ message: STARTING, reason: "starting" })) : Effect.void,
+    !desk.loaded && !desk.configErrors.length
+      ? Effect.fail(
+          new Unavailable({
+            message: desk.githubError ? `GitHub isn't connected yet (${desk.githubError.message}): run desk setup` : STARTING,
+            reason: "starting",
+          }),
+        )
+      : Effect.void,
   );
   type Req = { req: { json<T>(): Promise<T> } };
   const notJson = () => new BadRequest({ message: "the body must be a JSON object" });
@@ -835,6 +842,15 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const mcpUrl = `http://localhost:${port}/mcp`;
   app.get("/api/agents", (c) => respond(c, desk.agentStatus(mcpUrl), { log, read: true }));
   app.post("/api/agents/connect", (c) => respond(c, desk.connectAgent(mcpUrl), { log }));
+  app.get("/api/setup", (c) => respond(c, desk.setupView(), { log, read: true }));
+  app.post("/api/setup/check", (c) => respond(c, desk.checkSetup(), { log }));
+  app.post("/api/setup", (c) =>
+    respond(
+      c,
+      Effect.flatMap(json(c), (b) => desk.chooseAgent(typeof b.agent === "string" ? b.agent : "", mcpUrl)),
+      { log },
+    ),
+  );
   app.post("/api/update", (c) => respond(c, desk.update(), { log }));
   app.get("/api/status", (c) =>
     respond(
@@ -1145,7 +1161,7 @@ export const startDesk = Effect.fnUntraced(function* (
     github: createGitHub({ log }),
     log,
     notify: opts.notify,
-    review: { fetchPr, generate: generateReview, loggedIn },
+    review: { fetchPr, generate: generateReview, loggedIn, installed },
     writer: opts.writer ?? createWriter({ log }),
     mcpUrl: `http://localhost:${port}/mcp`,
     app: opts.app,

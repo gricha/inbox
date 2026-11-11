@@ -152,7 +152,7 @@ test("the desk stopping mid-pass records nothing: no error, and the pass lets go
   assert.ok(!logs.some((l) => l.includes("failed")), logs.join("\n"));
 });
 
-test("a desk with no context yet fails init with what GitHub's viewer fails with", async (c) => {
+test("a desk with no context yet starts without a config, keeping what GitHub's viewer failed with for the first-run page", async (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   const gh = new FakeGitHub([], () => []);
   const err = refused();
@@ -162,10 +162,13 @@ test("a desk with no context yet fails init with what GitHub's viewer fails with
     desk.stop();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  await assert.rejects(run(desk.init()), (e) => e === err);
+  await run(desk.init());
+  assert.equal(desk.githubError, err);
+  assert.equal(desk.loaded, null);
+  assert.equal(fs.existsSync(path.join(home, "config.toml")), false);
 });
 
-test("a desk that couldn't read your GitHub context writes no first config: init fails Upstream with what failed", async (c) => {
+test("a desk that couldn't read your GitHub context writes no first config, and keeps what failed as Upstream", async (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
   const gh = new FakeGitHub([], () => []);
   gh.context = () => Effect.fail(refused());
@@ -174,7 +177,8 @@ test("a desk that couldn't read your GitHub context writes no first config: init
     desk.stop();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  const err = await failure(desk.init());
+  await run(desk.init());
+  const err = desk.githubError!;
   assert.deepEqual(
     [err._tag, err.message],
     ["Upstream", `couldn't read your GitHub context to write a first config: ${refused().message}`],

@@ -136,7 +136,7 @@ async function whenLetGo(port: number): Promise<string> {
   return ended;
 }
 
-test("startServer rejects with what stopped the desk, in its words: its port in use, or GitHub's viewer when gh isn't there", async (c) => {
+test("startServer rejects with what stopped the desk, in its words, its port in use; a first run without gh starts and says so", async (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-start-"));
   fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false }));
   const saved = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
@@ -159,14 +159,20 @@ test("startServer rejects with what stopped the desk, in its words: its port in 
   assert.equal(stopped.mock.callCount(), 1, "the desk it made is let go");
   stopped.mock.restore();
   taken.close();
-  // No gh and no token: GitHub's viewer fails init, and the desk and its port are let go for a retry.
+  // No gh and no token on a first run: the desk starts without a config, and its first-run page says what to run.
   process.env.PATH = home;
   delete process.env.GITHUB_TOKEN;
   const free = await unusedPort();
-  for (const _ of [1, 2]) {
-    await assert.rejects(startServer({ port: free, home, log: () => {} }), { message: /GitHub CLI \(gh\) not found/ });
-    assert.equal(await whenLetGo(free), "ECONNREFUSED");
+  const srv = await startServer({ port: free, home, log: () => {} });
+  try {
+    const first = (await (await fetch(`${srv.url}/api/setup`)).json()) as { needed: boolean; github: { error: string } };
+    assert.equal(first.needed, true);
+    assert.match(first.github.error, /^The GitHub CLI isn't installed/);
+    assert.equal(fs.existsSync(path.join(home, "config.toml")), false);
+  } finally {
+    await srv.close();
   }
+  assert.equal(await whenLetGo(free), "ECONNREFUSED");
 });
 
 test("startServer's close lets go of its port: a second desk on the same port and home starts", async (c) => {

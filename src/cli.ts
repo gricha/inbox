@@ -54,6 +54,8 @@ const USAGE = `usage: desk <command>
   fields                              the fields rules can use
   mcp [--url <address>]               MCP server on stdio (the desk also serves MCP over HTTP at /mcp); --url or DESK_URL,
                                       with DESK_TOKEN, for a desk on another machine
+  setup [claude|codex|opencode]       the first-run page: GitHub and each agent, what to run; naming one sets it as your
+                                      agent and connects it (Settings → Agent)
   connect [claude|codex|opencode] [--apply]
                                       connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
   connect <address> --code <code> [claude|codex|opencode]
@@ -118,6 +120,7 @@ const ARITY: Record<string, [number, number]> = {
   settings: [0, 3],
   mcp: [0, 0],
   connect: [0, 2],
+  setup: [0, 1],
   pair: [0, 0],
   install: [0, 0],
   uninstall: [0, 0],
@@ -535,6 +538,28 @@ const connect = Effect.fnUntraced(function* (x: Ctx) {
   return 0;
 });
 
+// The first-run page in a terminal: GitHub and each agent asked again; with an agent named, that one picked and connected.
+const setup = Effect.fnUntraced(function* (x: Ctx) {
+  const pick = x.args[0];
+  const driver = pick === undefined ? undefined : HARNESSES[pick];
+  if (pick !== undefined && !driver)
+    return yield* new UsageError({ message: `unknown agent: ${pick} (try: desk setup claude, codex or opencode)` });
+  const s = driver ? yield* api.chooseAgent(driver.id) : yield* api.checkSetup();
+  const g = s.github;
+  x.out(g.login ? `${x.c.green("✓")} GitHub: signed in as @${g.login}` : `GitHub: ${g.error}${g.fix ? ` Run: ${g.fix}` : ""}`);
+  if (driver) {
+    x.out(`${x.c.green("✓")} ${driver.label} is your agent: MCP tools and skill connected`);
+    return 0;
+  }
+  for (const a of s.agents) {
+    const state = a.logged_in ? "ready" : a.installed ? "not logged in" : "not installed";
+    const mark = s.agent === a.id && !s.needed ? x.c.green("✓") : " ";
+    x.out(`${mark} ${a.name.padEnd(12)} ${state}${a.fix ? `. Run: ${a.fix}` : ""}`);
+  }
+  if (s.needed) x.out(`Pick one: desk setup claude, codex or opencode`);
+  return 0;
+});
+
 // launchd is macOS-only; elsewhere the desktop app's login item does the job.
 const macOnly = (cmd: string): Effect.Effect<void, CliError> =>
   process.platform === "darwin"
@@ -584,6 +609,7 @@ const COMMANDS: Record<string, Command> = {
   config,
   settings,
   connect,
+  setup,
   pair,
   add,
   done: act("done"),
