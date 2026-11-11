@@ -12,7 +12,7 @@ import {
   urlPlace,
   type Block,
   type Span,
-} from "../src/prose.ts";
+} from "../../src/prose.ts";
 
 const t = (text: string, bold = false): Span => ({ t: "text", text, bold });
 const c = (text: string, bold = false): Span => ({ t: "code", text, bold });

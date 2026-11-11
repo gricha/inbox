@@ -11,11 +11,11 @@ import type {
   ReviewFile,
   ReviewHunk,
   ReviewNote,
-  ReviewOrder,
   SettingDef,
   SettingValue,
   SettingsView,
 } from "../../src/types.ts";
+import { onLines, type Section } from "../../src/sections.ts";
 import { ago, BUCKET_LABEL, shortRef, aiName } from "./format.ts";
 
 // The Inbox (`queue`: Urgent, Standard and FYI), a PR's review in its place, Blocked, your PRs in Merging, the Archive
@@ -229,73 +229,9 @@ export function filePatch(f: ReviewFile): string {
   return `diff --git a/${before} b/${f.path}\n${mode}--- ${from}\n+++ ${to}\n${f.patch ?? ""}\n`;
 }
 
-// One stretch of the review: a file's hunks next to each other in the desk's order, at one level and for one reason.
-export interface Section {
-  key: string;
-  path: string;
-  file: number; // index in ReviewView.files
-  level: ReviewHunk["level"]; // skip: Claude left it out, or under a ranked review's fold; null: no ranking
-  why: string | null; // Claude's few words, why it wasn't read, or why the desk folded the file
-  hunks: ReviewHunk[]; // none for a file with no text diff
-  notes: number[]; // indices into ai.notes, in reading order
-}
-
-// A file's neighbouring hunks at one level and for one reason, as one section.
-function grouped(hunks: ReviewHunk[], list: Section[] = []): Section[] {
-  const from = list.length;
-  for (const h of hunks) {
-    const last = list.length > from ? list.at(-1) : undefined;
-    if (last?.path === h.path && last.level === h.level && last.why === h.why) {
-      last.hunks.push(h);
-      last.notes.push(...h.notes);
-    } else list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes] });
-  }
-  return list;
-}
-
-const restOf = (o: ReviewOrder): Section[] =>
-  o.rest.map((r) => ({
-    key: `rest:${r.path}`,
-    path: r.path,
-    file: r.file,
-    level: o.ranked ? "skip" : null,
-    why: r.why,
-    hunks: r.hunks,
-    notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
-  }));
-
-// The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
-export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
-  const list = grouped([...o.chunks, ...o.unread, ...o.skipped]);
-  return { list: [...list, ...restOf(o)], rest: list.length };
-}
-
-export interface WalkStep {
-  at: number; // its first section in the list
-  title: string;
-  body: string;
-  check: string;
-  note: string; // block prose, or ""
-  diagram: string; // the id of its diagram in ai.diagrams, or ""
-}
-
 // The section a line of the diff is drawn in, -1 when none draws it.
 export function sectionOf(list: Pick<Section, "path" | "hunks">[], path: string, at: Pick<ReviewNote, "side" | "line">): number {
   return list.findIndex((x) => x.path === path && onLines(x.hunks, at));
-}
-
-// The walk-through as one list of sections: each step's, then from `beyond` on what no step covers, then the desk's fold.
-export function walk(o: ReviewOrder): { list: Section[]; rest: number; steps: WalkStep[]; beyond: number } {
-  const list: Section[] = [];
-  const steps = (o.steps ?? []).map((st) => {
-    const at = list.length;
-    grouped(st.hunks, list);
-    return { at, title: st.title, body: st.body, check: st.check, note: st.note ?? "", diagram: st.diagram ?? "" };
-  });
-  const beyond = list.length;
-  grouped(o.beyond ?? [], list);
-  const rest = list.length;
-  return { list: [...list, ...restOf(o)], rest, steps, beyond };
 }
 
 const DRAW_LINES = 400; // about what Pierre highlights in a frame or two
@@ -314,15 +250,6 @@ export function drawUpTo(list: { hunks: Pick<ReviewHunk, "patch">[] }[], from: n
 // The rows a diff of these hunks draws at least: its context, added and removed lines.
 export function diffRows(hunks: Pick<ReviewHunk, "patch">[]): number {
   return hunks.reduce((n, h) => n + h.patch.split("\n").filter((l) => /^[ +-]/.test(l)).length, 0);
-}
-
-// Whether a note sits on one of these hunks' lines; one that doesn't is about the whole file, above its diff.
-export function onLines(hunks: Pick<ReviewHunk, "header">[], n: Pick<ReviewNote, "side" | "line">): boolean {
-  return hunks.some((h) => {
-    const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(h.header);
-    const [from, count] = n.side === "old" ? [m?.[1], m?.[2]] : [m?.[3], m?.[4]];
-    return !!from && n.line >= Number(from) && n.line < Number(from) + Number(count ?? 1);
-  });
 }
 
 type Side = "new" | "old";

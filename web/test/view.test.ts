@@ -54,7 +54,6 @@ import {
   lineOf,
   linesLabel,
   navigable,
-  onLines,
   pageOf,
   parseList,
   PAGE_GROUPS,
@@ -66,8 +65,6 @@ import {
   attachCommand,
   routeHash,
   says,
-  sections,
-  walk,
   settingsBack,
   settingsPart,
   partName,
@@ -83,6 +80,7 @@ import {
   handsOff,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
+import { onLines, sections, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {

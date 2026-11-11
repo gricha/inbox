@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
-import { shownUrl, urlPlace } from "../prose.ts";
+import { shownUrl, urlPlace } from "../../../src/prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;

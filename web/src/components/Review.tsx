@@ -22,7 +22,7 @@ import {
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when, aiName } from "../format.ts";
-import { blocks, inline, lead, unlinked, urlPlace } from "../prose.ts";
+import { blocks, inline, lead, unlinked, urlPlace } from "../../../src/prose.ts";
 import { reviewOf } from "../reviews.ts";
 import {
   boxBack,
@@ -48,18 +48,15 @@ import {
   inlineAt,
   lineName,
   linesLabel,
-  onLines,
   sectionOf,
   resolvedHead,
   routeHash,
   says,
-  sections,
   splitPath,
   threadsOn,
-  walk,
   type Acted,
-  type Section,
 } from "../view.ts";
+import { FIT, LEVEL, onLines, sections, STATUS, VERDICT, walk, type Section } from "../../../src/sections.ts";
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
@@ -109,9 +106,6 @@ interface Fact {
 const calm = (c: Card) => cls(`b-${c.bucket}`, (c.status !== "active" || c.resolved !== null || c.bucket === "hide") && "dim");
 
 const LINE = 96; // px below the window's top where "the section you're in" is read off
-const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
-const LEVEL: Record<NonNullable<Section["level"]>, string> = { look: "Look", skim: "Skim", unread: "Not read", skip: "Skip" };
-const STATUS: Partial<Record<ReviewFile["status"], string>> = { added: "new", removed: "deleted", renamed: "renamed", copied: "copied" };
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
 const ROOM = 1000; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
@@ -1541,11 +1535,6 @@ function StackList({ stack }: { stack: Stack }) {
 // The AI review's read, from the review or, until it lands, from its row's preflight (no model or time yet).
 type AiShown = Pick<AiReview, "verdict" | "risk" | "summary" | "since" | "concerns"> &
   Partial<Pick<AiReview, "model" | "at" | "intent" | "risk_reasons" | "interfaces" | "improvements" | "diagrams" | "guide">>;
-
-const FIT: Partial<Record<NonNullable<AiReview["intent"]>["fit"], string>> = {
-  partial: "Not quite what the description says",
-  differs: "Not what the description says",
-};
 
 function AiSection({
   ai,

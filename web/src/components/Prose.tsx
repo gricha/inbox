@@ -2,9 +2,9 @@ import { Effect } from "effect";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { runUi } from "../api.ts";
 import { copyText } from "../format.ts";
-import { blocks, fencedCopy, textLines, unlinked, type Block, type Span } from "../prose.ts";
+import { blocks, fencedCopy, textLines, unlinked, type Block, type Span } from "../../../src/prose.ts";
 
-// An agent's words drawn from web/src/prose.ts: React elements only, never HTML, never an image.
+// An agent's words drawn from src/prose.ts: React elements only, never HTML, never an image.
 export function Prose({ text }: { text: string }) {
   const bs = useMemo(() => blocks(text), [text]);
   return <ProseBlocks bs={bs} />;
