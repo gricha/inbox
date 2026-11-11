@@ -93,10 +93,10 @@ test("switching a built-in rule off writes the board's off, and on again takes i
   const r = runSync(t.desk.switchRule("acme-review", "asked-directly", false, t.desk.getConfig().hash));
   assert.deepEqual(r, { ok: true, errors: [], warnings: [] });
   assert.match(fs.readFileSync(file, "utf8"), /^builtin = "review"\noff = \["asked-directly"\]\n/m);
-  // The next rule a direct ask matches: GitHub's for one a bot added, Today.
+  // No other rule of GitHub's matches a person's ask: the board's default, Later.
   assert.deepEqual(
-    runSync(t.desk.board("acme-review")).sections.today.map((c) => [c.id, c.why]),
-    [["acme/api#1", "asked you by name (added by carol)"]],
+    runSync(t.desk.board("acme-review")).sections.later.map((c) => [c.id, c.why]),
+    [["acme/api#1", "review requested"]],
   );
   const view = t.desk.getConfig().builtins.find((b) => b.board === "acme-review")!;
   assert.equal(view.rules.find((x) => x.id === "asked-directly")!.on, false);
@@ -155,6 +155,8 @@ rules = [
       "yours-via-bot",
       "after-changes-requested",
       "new-commits",
+      "team-taken",
+      "team-waited",
       "close-collaborator",
       "6",
       "bot-pr",
@@ -163,6 +165,8 @@ rules = [
       "added-by-bot",
       "codeowners-your-area",
       "codeowners",
+      "team-your-area",
+      "team",
     ],
   );
   assert.equal(b.rules.find((r) => r.id === "new-commits")!.when, "item.number == 3");
@@ -242,7 +246,10 @@ function samePlacements(text: string, next: string) {
   a.boards.forEach((board, i) => {
     const before = classify(board, entries);
     const after = classify(b.boards[i]!, entries);
-    assert.deepEqual(after.placements, before.placements, board.config.id);
+    // Where it's placed, not how the judge names and weighs the rules: yours became GitHub's, with GitHub's weights.
+    const where = (r: typeof before) =>
+      new Map([...r.placements].map(([id, { signals, ...p }]) => [id, { ...p, matched: signals?.map((x) => [x.bucket, x.why]) }]));
+    assert.deepEqual(where(after), where(before), board.config.id);
     assert.deepEqual(after.order, before.order, board.config.id);
     placed += [...before.placements.values()].filter((p) => p.rule !== null).length;
   });
@@ -250,7 +257,8 @@ function samePlacements(text: string, next: string) {
 }
 
 test("migrating a copy of GitHub's rules keeps what's yours and places every item as before", () => {
-  const old = defaultConfigText({ workOrgs: ["acme"], expanded: true });
+  // Copies had no weights: the migration compares rules without them.
+  const old = defaultConfigText({ workOrgs: ["acme"], expanded: true }).replaceAll(/, weight = \d+/g, "");
   const edited = old
     // Changed: GitHub's bot PR rule, made FYI.
     .replace(
@@ -312,13 +320,14 @@ test("a config shaped as the owner's migrates losslessly", () => {
   assert.deepEqual(
     boards.map((b) => [b.id, b.builtin ?? null, b.off ?? [], b.rules.filter((r) => r.own !== undefined).length]),
     [
-      ["acme-review", "review", [], 0],
-      ["acme-mine", "mine", ["no-review-ready"], 0], // a rule added since the copy: off, so nothing moves
+      // Rules added since the copy are off, so nothing moves; its hard asks and its older draft rule stand in GitHub's place.
+      ["acme-review", "review", ["team-taken", "team-waited", "team-your-area", "team"], 2],
+      ["acme-mine", "mine", ["no-review-ready"], 1],
       ["acme-mentions", "mentions", [], 0],
       ["acme-collaborators", "collaborators", [], 0],
       ["acme-watching", null, [], 0],
-      ["personal-review", "review", [], 0],
-      ["personal-mine", "mine", ["no-review-ready"], 0],
+      ["personal-review", "review", ["team-taken", "team-waited", "team-your-area", "team"], 2],
+      ["personal-mine", "mine", ["no-review-ready"], 1],
       ["personal-mentions", "issues", [], 0],
     ],
   );
@@ -328,14 +337,17 @@ test("a config shaped as the owner's migrates losslessly", () => {
   assert.ok(samePlacements(text, next) > 10000);
 });
 
-test("an older config takes the earlier migrations, then names GitHub's rules", () => {
-  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true });
-  const old = now.replace(
-    `why = "{me.requested_by} asked you directly", hard = true },\n  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`,
-    `why = "{me.requested_by} asked you directly", nocap = true },\n  { when = "me.requested_direct", bucket = "today", why = "asked you by name (added by {me.requested_by})", hard = true },`,
-  );
+test("an older config takes the earlier migrations, then names GitHub's rules, keeping the ask by name they made hard", () => {
+  const now = defaultConfigText({ workOrgs: ["acme"], expanded: true }).replaceAll(/, weight = \d+/g, "");
+  const old = now
+    .replace(`why = "{me.requested_by} asked you directly" },`, `why = "{me.requested_by} asked you directly", nocap = true },`)
+    .replace(/^ *\{ when = "me\.requested_direct && me\.requested_by_bot", .*\n/m, "");
   assert.notEqual(old, now);
-  assert.equal(migrateBuiltIns(migrateHard(old)!), defaultConfigText({ workOrgs: ["acme"] }));
+  const next = parseConfig(migrateBuiltIns(migrateHard(old)!)!).loaded!.config.boards[0]!;
+  assert.deepEqual(
+    [next.builtin, next.off, next.rules.filter((r) => r.own !== undefined).map((r) => [r.id, r.hard])],
+    ["review", ["asked-by-bot"], [["asked-directly", true]]],
+  );
 });
 
 test("a desk started on a config.toml with GitHub's rules copied names them once, with a backup", async () => {

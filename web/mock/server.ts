@@ -19,12 +19,11 @@ import { checksView } from "../../src/checks.ts";
 import { catchAllOf, resolveRules, spaceOf } from "../../src/config.ts";
 import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
-import { DEFAULT_POLICY } from "../../src/judge.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
 import { parseDiagram } from "../../src/diagram.ts";
 import { docOf } from "../../src/doc.ts";
 import { renderDoc } from "../../src/render.ts";
-import { capText, floorOf, placedBy, queueOrder, quietText } from "../../src/rules.ts";
+import { capText, floorOf, placedBy, queueOrder, quietText, weightOf } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
@@ -69,11 +68,11 @@ import type {
   Item,
   QueueView,
   ItemDetail,
+  JudgeStatus,
   ItemState,
   Mergeable,
   Overview,
   Placement,
-  PolicyDoc,
   Preflight,
   PreviewResult,
   Rule,
@@ -3650,6 +3649,7 @@ const settingsView = (): SettingsView => ({
   paused: {
     ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
   },
+  judge: judgeStatus(),
 });
 
 // Settings → This device's Tailscale rows: on with the setting, two devices paired, one used in the last hour; as of now,
@@ -3736,47 +3736,27 @@ function agentStatus(): AgentStatus {
 }
 
 // ---------------------------------------------------------------------------
-// The policy: your own.
+// The judge
 
-let policyText = `Docs-only and draft PRs from my teams are FYI; I'll read them when they're ready.
-Anything touching the oss/parsekit tokenizer or parser is Today: I maintain it.
-Dependency bumps from bots stay out of the way unless CI is red.
-Mentions in threads I haven't replied to for a week are FYI.
-Release notes and changelog pings are FYI; I read them at release time.
-`;
-let policyRev = 1;
-const policyHash = () => `mock${policyRev}`;
 const setting = <K extends keyof typeof DEFAULTS>(k: K) => ({ ...DEFAULTS, ...overrides })[k];
 
 function judgeOff(): string | null {
   return setting("policy.judge") ? null : "it's turned off";
 }
 
-function savePolicy(text: string): void {
-  policyText = text;
-  policyRev++;
-  bump();
-}
-
-function policyDoc(): PolicyDoc {
+// An expired login stops it as it stops every agent: they're all your one Claude Code.
+function judgeStatus(): JudgeStatus {
   const off = judgeOff();
   return {
-    path: `${homedir()}/.inbox/policy.md (mock, in memory)`,
-    text: policyText,
-    starter: DEFAULT_POLICY,
-    hash: policyHash(),
-    // An expired login stops it as it stops every agent: they're all your one Claude Code.
-    judge: {
-      state: off ? "off" : aiPaused ? "error" : agentsBusy ? "running" : "idle",
-      off_reason: off,
-      waiting: agentsBusy ? 2 : 0,
-      judged: off ? 0 : 23,
-      spent: off ? 0 : 7,
-      max_per_hour: setting("policy.max_per_hour"),
-      last_at: iso(0.3),
-      error: !off && aiPaused ? aiPaused : null,
-      retry_at: !off && aiPaused ? retryAt() : null,
-    },
+    state: off ? "off" : aiPaused ? "error" : agentsBusy ? "running" : "idle",
+    off_reason: off,
+    waiting: agentsBusy ? 2 : 0,
+    judged: off ? 0 : 23,
+    spent: off ? 0 : 7,
+    max_per_hour: setting("policy.max_per_hour"),
+    last_at: iso(0.3),
+    error: !off && aiPaused ? aiPaused : null,
+    retry_at: !off && aiPaused ? retryAt() : null,
   };
 }
 
@@ -4084,14 +4064,23 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const hard = config.boards.flatMap((b) =>
       rulesOf(b).flatMap((r) =>
         (r.hard || r.final) && r.bucket !== "judge"
-          ? [{ board: b.name, bucket: r.bucket, when: r.when, why: plainWhy(r.why ?? ""), ...(r.final && { final: true }) }]
+          ? [
+              {
+                board: b.name,
+                bucket: r.bucket,
+                when: r.when,
+                why: plainWhy(r.why ?? ""),
+                ...(r.final && { final: true }),
+                weight: weightOf(r),
+              },
+            ]
           : [],
       ),
     );
     const builtins = config.boards.flatMap((b, i) => {
       const set = b.builtin === undefined ? undefined : GITHUB_RULES[b.builtin];
       if (!set) return [];
-      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final }) => {
+      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final, weight }) => {
         const own = b.rules.findIndex((r) => r.id === id);
         return {
           id,
@@ -4100,6 +4089,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
           why: plainWhy(why),
           ...(h && { hard: true }),
           ...(final && { final: true }),
+          weight: weightOf({ weight }),
           on: !b.off?.includes(id),
           yours: own >= 0,
           ...(own >= 0 && { path: `boards[${i}].rules[${own}]` }),
@@ -4166,15 +4156,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     DEVICES.splice(0, DEVICES.length, ...paired());
     return { ok: true };
   }
-  if (route === "GET /api/policy") return policyDoc();
   if (route === "GET /api/omarchy") return null; // not an Omarchy machine: the shots answer for one
-  if (route === "PUT /api/policy") {
-    const body = await readBody(req);
-    if (body.base !== policyHash())
-      throw new HttpError(409, "policy.md changed since you opened it; reload to see it, then reapply your edit", { tag: "Stale" });
-    savePolicy(textOf(body));
-    return { ok: true, hash: policyHash() };
-  }
   if (route === "POST /api/mock/ai-paused") {
     pauseAi((await readBody(req)).paused !== false);
     return { ok: true, paused: aiPaused };

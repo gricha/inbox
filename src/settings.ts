@@ -201,7 +201,7 @@ export const SETTINGS = [
     label: "Sort my desk with Claude",
     type: "boolean",
     default: true,
-    help: "Claude places each item by your policy; off, only your rules do.",
+    help: "Claude places each item by weighing every rule that matches it; off, the first matching rule does.",
   },
   {
     key: "agent.score",
@@ -230,6 +230,7 @@ export const SETTINGS = [
   {
     key: "policy.max_per_hour",
     section: "agent",
+    more: true,
     label: "Let Claude sort up to",
     type: "number",
     default: 300,

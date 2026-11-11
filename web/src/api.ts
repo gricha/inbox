@@ -29,7 +29,6 @@ import type {
   ItemState,
   OmarchyTheme,
   Overview,
-  PolicyDoc,
   PreviewResult,
   QueueView,
   Reviewer,
@@ -57,8 +56,8 @@ export class DeskStarting extends Data.TaggedError("DeskStarting")<{ readonly me
 // The desk's rules have errors, so it never loaded (a 503 "config"): the notice that links to Settings → GitHub → Searches and rules.
 export class DeskConfigBroken extends Data.TaggedError("DeskConfigBroken")<{ readonly message: string }> {}
 
-// A 409: the state refuses it. kind is the desk's tag; Stale (what you edited changed meanwhile) is what Rules and Policy
-// recover from. candidates: the items an ambiguous ref matched.
+// A 409: the state refuses it. kind is the desk's tag; Stale (what you edited changed meanwhile) is what Rules recovers
+// from. candidates: the items an ambiguous ref matched.
 class DeskConflict extends Data.TaggedError("DeskConflict")<{
   readonly message: string;
   readonly kind: "AmbiguousRef" | "Stale" | "Busy" | "Conflict";
@@ -116,7 +115,7 @@ const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
   503: "Unavailable",
 };
 // Saving over a base that changed is the only 409 these answer, whatever tag the desk sends.
-const STALE = new Set(["PUT /api/policy", "PUT /api/config", "PUT /api/config/builtin"]);
+const STALE = new Set(["PUT /api/config", "PUT /api/config/builtin"]);
 
 function refusal(status: number, body: Partial<ErrorBody> | null, statusText: string, stale: boolean): ApiError {
   const message = body?.error ?? (statusText || String(status));
@@ -256,8 +255,5 @@ export const api = {
   setup: () => call<SetupView>("GET", "/api/setup"),
   checkSetup: () => call<SetupView>("POST", "/api/setup/check", {}),
   chooseAgent: (agent: string) => call<SetupView>("POST", "/api/setup", { agent }),
-  policy: () => call<PolicyDoc>("GET", "/api/policy"),
   omarchy: () => call<OmarchyTheme | null>("GET", "/api/omarchy"),
-  // A stale `base` (the hash it was read at) fails with DeskConflict "Stale".
-  savePolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
 };

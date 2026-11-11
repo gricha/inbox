@@ -101,11 +101,8 @@ test("a 503 is the desk starting or its rules broken, by its reason or else its 
   }
 });
 
-test("a 409 from saving the policy or the rules is Stale whatever its tag; elsewhere it isn't", async () => {
-  refusing(409, { error: "policy.md changed since you opened it", tag: "Conflict" });
-  const policy = await failure(api.savePolicy("text", "base"));
-  assert.equal(policy._tag === "DeskConflict" && policy.kind, "Stale");
-  refusing(409, { error: "config.toml changed on disk since you opened it" });
+test("a 409 from saving the rules is Stale whatever its tag; elsewhere it isn't", async () => {
+  refusing(409, { error: "config.toml changed on disk since you opened it", tag: "Conflict" });
   const config = await failure(api.saveConfig("text", "base"));
   assert.equal(config._tag === "DeskConflict" && config.kind, "Stale");
   const seen = refusing(409, { error: "in Merging already" });
@@ -166,8 +163,8 @@ test("a 2xx body cut short is a bad response in the parser's words; a refusal's 
 });
 
 test("an answer decodes to the value", async () => {
-  desk(200, JSON.stringify({ ok: true, hash: "h2" }));
-  assert.deepEqual(await Effect.runPromise(api.savePolicy("text", "h1")), { ok: true, hash: "h2" });
+  desk(200, JSON.stringify({ ok: true, errors: [] }));
+  assert.deepEqual(await Effect.runPromise(api.saveConfig("text", "h1")), { ok: true, errors: [] });
 });
 
 test("runUi: an interrupted read aborts its request and says nothing", async (t) => {

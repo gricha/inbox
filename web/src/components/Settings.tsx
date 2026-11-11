@@ -16,7 +16,6 @@ import type {
   DesktopBridge,
   GitHubStatus,
   JudgeStatus,
-  PolicyDoc,
   RemoteView,
   SettingDef,
   SettingsView,
@@ -27,7 +26,6 @@ import { api, runUi } from "../api.ts";
 import { ago, aiName, cls, githubTip, MAC, orgsLine } from "../format.ts";
 import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
 import { Criteria } from "./Criteria.tsx";
-import { Policy } from "./Policy.tsx";
 import { Rules } from "./Rules.tsx";
 import { withCode } from "./Review.tsx";
 import { SkLines } from "./Skeleton.tsx";
@@ -735,7 +733,7 @@ function ClaudeStatus({
         </div>
       )}
       {/* A pause after failures in a row (an expired login) is the agent's, said once here rather than on every PR; when
-          the sorting fails for the same reason, this says it for both, and Your policy doesn't again. */}
+          the sorting fails for the same reason, this says it for both, and the sorting switch doesn't again. */}
       {paused && (
         <div className="setting s-status">
           <div className="s-label-col">
@@ -938,7 +936,6 @@ interface PartProps {
   now: number;
   loads: number;
   configErrors: number;
-  policy: PolicyDoc | null;
   flash: (text: string) => void;
 }
 
@@ -961,36 +958,29 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
   app: () => <ThemeRow />,
 };
 
-// Rows after a setting's own, by its key: your policy under the switch that sorts by it.
+// Rows after a setting's own, by its key: the sorting's failure under the switch that turns it on.
 const AFTER: Record<string, (p: PartProps) => ReactNode> = {
   "app.tailscale": (p) => (
     <RemoteRows active={p.active} loads={p.loads} on={p.view.values["app.tailscale"] === true} now={p.now} flash={p.flash} />
   ),
   // The agent's own status under its name, and only while something needs you.
   "agent.harness": (p) => (
-    <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.policy?.judge} now={p.now} flash={p.flash} />
+    <ClaudeStatus active={p.active} loads={p.loads} paused={p.view.paused.ai} judge={p.view.judge} now={p.now} flash={p.flash} />
   ),
-  "policy.judge": ({ policy, view, now }) => {
+  "policy.judge": ({ view, now }) => {
     // Its failure, unless it's the one the agent's status already says for the AI reviews too.
-    const failed = policy?.judge.state === "error" && !onePause(view.paused.ai, policy.judge);
+    if (view.judge.state !== "error" || onePause(view.paused.ai, view.judge)) return null;
     return (
-      <ViewRow
-        id="policy"
-        tone={failed ? "ink" : undefined}
-        help={
-          failed
-            ? withCode(judgeStatusText(policy.judge, now)) // an agent's failure, in ink: it's about Claude, not your work
-            : policy && !policy.text.trim()
-              ? "The starter policy, until you change it."
-              : `How ${aiName()} sorts, in your words.`
-        }
-      />
+      <div className="setting s-status">
+        <div className="s-label-col">
+          <p className="s-label">Sorting failed</p>
+          {/* An agent's failure, in ink: it's about Claude, not your work. */}
+          <p className="s-help s-ink">{withCode(judgeStatusText(view.judge, now))}</p>
+        </div>
+      </div>
     );
   },
 };
-
-// Settings a view draws, not their part: the hourly cap sits in Your policy, next to how much of it this hour took.
-const ELSEWHERE = new Set(["policy.max_per_hour"]);
 
 // A view's own head under the page's: its name and one line.
 function ViewHead({ id, line }: { id: string; line: string }) {
@@ -1031,7 +1021,7 @@ export function Settings({
   onRulesDirty,
 }: {
   active: boolean;
-  section: string; // a part's id (automations: yours), or a view's (rules, policy, automations/<id>)
+  section: string; // a part's id (automations: yours), or a view's (rules, automations/<id>)
   view: SettingsView | null;
   now: number;
   loads: number;
@@ -1043,7 +1033,6 @@ export function Settings({
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const [more, setMore] = useState<Record<string, boolean>>({});
-  const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const inView = settingsBack(section) !== null;
   const au = useAutomations(active, loads, flash);
   // Who answers an automation's question: the decision model once its key is set, else Claude.
@@ -1165,10 +1154,8 @@ export function Settings({
           </div>
         )}
         {view?.sections.map((x) => {
-          const p: PartProps = { view, active, now, loads, configErrors, policy, flash };
-          const defs = view.defs.filter(
-            (d) => d.section === x.id && !ELSEWHERE.has(d.key) && (SHOWN[d.key]?.(view.values, desktop) ?? true),
-          );
+          const p: PartProps = { view, active, now, loads, configErrors, flash };
+          const defs = view.defs.filter((d) => d.section === x.id && (SHOWN[d.key]?.(view.values, desktop) ?? true));
           const folded = defs.filter((d) => d.more);
           // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
           const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));
@@ -1235,12 +1222,6 @@ export function Settings({
           onSaved={onRulesSaved}
           onDirty={onRulesDirty}
         />
-      </section>
-      <section className="s-view" hidden={section !== "policy"} aria-labelledby="s-view-policy">
-        <ViewHead id="policy" line={`How you want ${aiName()} to sort your desk, in your words. An agent can change it when you ask.`} />
-        <Policy active={active} shown={active && section === "policy"} refresh={loads} now={now} flash={flash} onDoc={setPolicy}>
-          {view && <div className="lines s-sheet">{row(view.defs.find((d) => d.key === "policy.max_per_hour"))}</div>}
-        </Policy>
       </section>
       <section className="s-view" hidden={automation === null} aria-labelledby="s-view-automation">
         {lastAutomation !== null && (

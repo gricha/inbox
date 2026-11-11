@@ -16,7 +16,6 @@ import type {
   InquiryView,
   ItemDetail,
   Overview,
-  PolicyDoc,
   PreviewResult,
   QueueView,
   ReviewFile,
@@ -135,15 +134,15 @@ test("logged out: the queue says Claude is paused once, cards wait, every agent 
   const { paused } = (await call<SettingsView>("GET", "/api/settings")).data;
   assert.match(paused.ai?.why ?? "", /^Claude Code/);
   // The judge is the same Claude Code: it says it failed on the login, and when it tries again.
-  const { judge } = (await call<PolicyDoc>("GET", "/api/policy")).data;
+  const { judge } = (await call<SettingsView>("GET", "/api/settings")).data;
   assert.deepEqual([judge.state, judge.error, !!judge.retry_at], ["error", loggedOut, true]);
   await call("POST", "/api/mock/ai-paused", { paused: false });
   const { data: back } = await call<QueueView>("GET", "/api/queue");
   assert.equal(back.paused, null);
-  assert.equal((await call<PolicyDoc>("GET", "/api/policy")).data.judge.state, "idle");
+  assert.equal((await call<SettingsView>("GET", "/api/settings")).data.judge.state, "idle");
   // At work: the judge judging.
   await call("POST", "/api/mock/agents-busy", { busy: true });
-  assert.equal((await call<PolicyDoc>("GET", "/api/policy")).data.judge.state, "running");
+  assert.equal((await call<SettingsView>("GET", "/api/settings")).data.judge.state, "running");
   await call("POST", "/api/mock/agents-busy", { busy: false });
   assert.equal([...back.sections.now, ...back.sections.today].find((c) => c.id === "acme/web#2301")?.preflight?.state, "running");
 });
@@ -443,16 +442,6 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
   assert.ok(old.order.chunks.length && old.order.chunks.every((h) => h.level === null));
   const stale = await view("acme/api#4099");
   assert.deepEqual([stale.ai_stale, stale.order.ranked, stale.order.notes], [true, false, []]);
-});
-
-test("policy: a policy with its judge, saved against its hash", async () => {
-  const { data: p } = await call<PolicyDoc>("GET", "/api/policy");
-  assert.ok(p.text.trim());
-  assert.equal(p.judge.state, "idle");
-  const stale = await call<{ tag: string }>("PUT", "/api/policy", { text: "x", base: "stale" });
-  assert.deepEqual([stale.status, stale.data.tag], [409, "Stale"]);
-  const { data: saved } = await call<{ ok: boolean; hash: string }>("PUT", "/api/policy", { text: p.text, base: p.hash });
-  assert.notEqual(saved.hash, p.hash);
 });
 
 test("stacks: the queue lists each once with its chain, and a member no board lists opens in review", async () => {

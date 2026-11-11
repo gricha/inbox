@@ -31,7 +31,6 @@ import {
   type ItemDetail,
   type ItemState,
   type Overview,
-  type PolicyDoc,
   type PreviewResult,
   type QueueView,
   type SettingsView,
@@ -185,8 +184,6 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
     putConfig: (text: string, base?: string) =>
       call<{ ok: boolean; errors: ConfigError[]; warnings?: ConfigError[] }>("PUT", "/api/config", { text, base }),
-    policy: () => call<PolicyDoc>("GET", "/api/policy"),
-    putPolicy: (text: string, base: string) => call<{ ok: true; hash: string }>("PUT", "/api/policy", { text, base }),
     fields: () => call<FieldDoc[]>("GET", "/api/fields"),
     settings: () => call<SettingsView>("GET", "/api/settings"),
     putSettings: (patch: SettingsPatch) =>

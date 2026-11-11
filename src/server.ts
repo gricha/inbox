@@ -815,17 +815,6 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, put, { log });
   });
-  app.get("/api/policy", (c) => total(c, () => desk.getPolicy()));
-  app.put("/api/policy", (c) => {
-    const put = Effect.gen(function* () {
-      const { text, base } = yield* json(c);
-      if (typeof text !== "string") return yield* new BadRequest({ message: "need { text }" });
-      if (base !== undefined && typeof base !== "string")
-        return yield* new BadRequest({ message: "base must be the hash from GET /api/policy" });
-      return yield* desk.putPolicy(text, base);
-    });
-    return respond(c, put, { log });
-  });
   app.get("/api/fields", (c) => total(c, () => FIELDS));
   app.get("/api/settings", (c) => total(c, () => desk.getSettings()));
   app.put("/api/settings", (c) => {

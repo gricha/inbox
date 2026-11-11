@@ -4090,30 +4090,11 @@ button.s-edit:hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
-/* Policy: prose, so the UI font and wrapped lines, across its view's column. */
-.policy {
-  margin-top: 18px;
-}
-
-/* The hourly cap: one row on a sheet of its own, under how much of it this hour took. */
-.policy > .s-sheet {
-  margin-top: 24px;
-}
-
 .editor.prose {
   height: 240px;
   min-height: 160px;
   font: 14px/1.6 var(--sans);
   white-space: pre-wrap;
-}
-
-/* Your policy grows with what's in it, as far as the window leaves room for its foot, its status lines and the cap under it;
-   past that it scrolls. */
-.policy .editor.prose {
-  height: auto;
-  min-height: 240px;
-  max-height: max(240px, calc(100vh - 360px));
-  field-sizing: content;
 }
 
 /* An automation's instruction starts its words where its name's and its schedule's fields do. */

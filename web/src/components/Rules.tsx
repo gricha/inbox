@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewResult } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde, aiName } from "../format.ts";
-import { lineOf } from "../view.ts";
+import { lineOf, weightText } from "../view.ts";
 import { ActButton } from "./Detail.tsx";
 
 export function Rules({
@@ -156,7 +156,7 @@ export function Rules({
   // Window-level so ⌘S / ⌘↵ work wherever focus is on this view; a ref keeps the latest text.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
-    // An editor that saves itself (your policy's, an automation's) keeps its own ⌘S.
+    // An editor that saves itself (an automation's) keeps its own ⌘S.
     if (!(e.metaKey || e.ctrlKey) || document.activeElement?.closest("[data-own-save]")) return;
     if (e.key.toLowerCase() === "s") {
       e.preventDefault();
@@ -387,8 +387,8 @@ export function Rules({
               <h2 className="s-sub">Built in</h2>
               <p className="small">
                 GitHub's rules, after yours on each board that names them with <code>builtin</code>, as this version of the desk has them.
-                Switch one off here; to change one, write a rule of yours with its <code>id</code> in the board's <code>rules</code>, and it
-                stands in its place.
+                Each says how much {aiName()} counts it when it weighs what matches. Switch one off here; to change one, write a rule of
+                yours with its <code>id</code> in the board's <code>rules</code>, and it stands in its place.
               </p>
               {builtins.map((b) => (
                 // Open where you've changed something: what's off, or yours in a rule's place.
@@ -403,6 +403,7 @@ export function Rules({
                           <span>
                             {BUCKET_LABEL[r.bucket]}
                             {r.why && `: ${r.why}`}
+                            {!r.final && <span className="quiet"> · {weightText(r.weight)}</span>}
                             {r.hard && <span className="quiet"> (hard)</span>}
                             {r.final && <span className="quiet"> (final)</span>}
                           </span>
@@ -463,7 +464,7 @@ export function Rules({
                     <span>
                       {h.board} → {BUCKET_LABEL[h.bucket]}
                       {h.why && `: ${h.why}`}
-                      {h.final && <span className="quiet"> (final)</span>}
+                      {h.final ? <span className="quiet"> (final)</span> : <span className="quiet"> · {weightText(h.weight)}</span>}
                     </span>
                     <code>{h.when}</code>
                   </li>
@@ -566,7 +567,8 @@ export function Rules({
               <div className="fact">
                 <dt>rules</dt>
                 <dd>
-                  first matching <code>when</code> places the card; else <code>default</code>
+                  first matching <code>when</code> places the card (else <code>default</code>) until {aiName()} weighs every rule that
+                  matches
                 </dd>
               </div>
               <div className="fact">
@@ -609,6 +611,13 @@ export function Rules({
                 <dt>caps</dt>
                 <dd>
                   <code>caps = {"{ now = 3, today = 6 }"}</code>; <code>nocap = true</code> on a rule exempts it
+                </dd>
+              </div>
+              <div className="fact">
+                <dt>weight</dt>
+                <dd>
+                  <code>weight = 8</code> on a rule: how much {aiName()} counts it, 0 to 10 (5 unless set). 9 or 10 is your firm default, 6
+                  to 8 strong, 3 to 5 a lean, under 3 a hint
                 </dd>
               </div>
               <div className="fact">

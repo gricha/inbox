@@ -318,7 +318,7 @@ test("a secret setting is kept in secrets.json, yours alone to read, set only fr
   if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   const view = t.desk.getSettings();
   assert.deepEqual([view.values["agent.decision_key"], view.overridden.includes("agent.decision_key")], [DOTS, true]);
-  for (const p of ["/api/settings", "/api/overview", "/api/automations", "/api/status", "/api/policy", "/api/config"]) {
+  for (const p of ["/api/settings", "/api/overview", "/api/automations", "/api/status", "/api/config"]) {
     const body = await (await app.request(`http://127.0.0.1:47823${p}`)).text();
     assert.ok(!body.includes(KEY), `${p} doesn't carry it`);
   }
@@ -368,7 +368,10 @@ test("what sorts and reviews, and your agent, name the agent you chose", () => {
   assert.deepEqual([agentName("codex"), agentName("claude-code"), agentName("cursor")], ["Codex", "Claude", "Claude"]);
   const codex = by("codex");
   assert.equal(codex.get("policy.judge")!.label, "Sort my desk with Codex");
-  assert.equal(codex.get("policy.judge")!.help, "Codex places each item by your policy; off, only your rules do.");
+  assert.equal(
+    codex.get("policy.judge")!.help,
+    "Codex places each item by weighing every rule that matches it; off, the first matching rule does.",
+  );
   assert.equal(codex.get("policy.max_per_hour")!.label, "Let Codex sort up to");
   assert.equal(codex.get("policy.max_per_hour")!.help, "On your own Codex login, 20 items a call.");
   assert.equal(codex.get("review.auto_ai")!.label, "Codex reviews other people's PRs ahead of time");

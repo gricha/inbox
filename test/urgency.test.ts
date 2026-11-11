@@ -67,7 +67,7 @@ const where = (t: Awaited<ReturnType<typeof setup>>, id: string): [InboxSection,
 };
 const svcPr = (n: number, o: Partial<Item> = {}): Item => ({ ...teamPing(n), title: "Service accounts reach the control silo", ...o });
 const teamAsk = (n: number) =>
-  makeItem({ number: n, author: "carol", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }] });
+  makeItem({ number: n, author: "alice", review_requests: [{ reviewer: "ml-team", type: "team", codeowner: false }] });
 
 test("sections: an urgent yes and a hand-back lift it whatever its score; fyi holds; a direct ask or a pin never goes below Standard", () => {
   const t = { urgent_at: 8, fyi_at: 3 };
@@ -101,7 +101,7 @@ test("with no model to answer, the desk scores from the rules and the yeses: a f
   await settled(t);
   assert.match(t.desk.urgency.held?.why ?? "", /not found/, "it waits on the agent");
   const [s1, c1] = where(t, "acme/api#1")!;
-  assert.deepEqual([s1, c1.score, c1.reason], ["urgent", 8, "Asked by name"], "now's 7 and a yes");
+  assert.deepEqual([s1, c1.score, c1.reason], ["urgent", 10, "Asked by name"], "now's 7 and Asked by name's 3");
   const [s3, c3] = where(t, "acme/web#3")!;
   assert.deepEqual([s3, c3.reason], ["urgent", "Ready to merge"], "your PR approved and green: one press merges it");
   assert.ok((c3.score ?? 0) > fallbackScore("later", 0), "a yes counts toward it");
@@ -175,7 +175,7 @@ test(
 
 test("the score orders each section and says why on the row; a model's score can't push an urgent yes out of Urgent", posix, async (c) => {
   const fake = fakeClaude(c);
-  // Asked of your team: a review asked of you by name would be Urgent whatever its score.
+  // Asked of your team by alice, a close collaborator, so in Later: GitHub's rules send other team asks to FYI.
   const t = await setup([teamAsk(1), teamAsk(4), svcPr(2)], { settings: { ...QUIET, "agent.score": true } });
   c.after(t.cleanup);
   fake.say("ask", [{ id: "acme/api#2", yes: ["svc"] }]);
@@ -401,27 +401,58 @@ test("Ready to merge says yes to your PR approved or needing no review, green an
   assert.equal(where(t, "acme/web#2")![0], "urgent", "a repo that needs no review never approves");
 });
 
-test("a review asked of you by name is Urgent, whoever asked; one asked of your team isn't, nor one you've reviewed", posix, async (c) => {
-  const bot = { at: hoursAgo(1), actor: "renovate[bot]", actor_bot: true, reviewer: "me", reviewer_type: "user" as const };
-  const t = await setup([reviewAsk(1), reviewAsk(2, { request_events: [bot] }), teamPing(3), teamAsk(4), reviewAsk(5)], {
-    settings: { ...QUIET, "agent.score": false },
-  });
-  c.after(t.cleanup);
-  await run(t.desk.sync());
-  await settled(t);
-  const [s1, c1] = where(t, "acme/api#1")!;
-  assert.deepEqual([s1, c1.reason], ["urgent", "Asked by name"]);
-  assert.equal(where(t, "acme/api#2")?.[0], "urgent", "a bot adding you by name counts");
-  assert.notEqual(where(t, "acme/api#3")?.[0], "urgent", "a CODEOWNERS team ping");
-  assert.notEqual(where(t, "acme/api#4")?.[0], "urgent", "a team's request");
-  // You reviewed it: GitHub drops your request, and it's no longer urgent.
-  const it = t.gh.items.get("acme/api#5")!;
-  t.gh.items.set(it.id, {
-    ...it,
-    review_requests: [],
-    reviews: [{ author: "me", author_bot: false, state: "commented", at: hoursAgo(0), commit: it.head_oid }],
-  });
-  await run(t.desk.sync());
-  await settled(t);
-  assert.notEqual(where(t, "acme/api#5")?.[0], "urgent");
-});
+test(
+  "a review asked of you by name isn't forced into Urgent: it counts heavily, and the scorer can still make the call",
+  posix,
+  async (c) => {
+    const fake = fakeClaude(c);
+    const t = await setup([reviewAsk(1), reviewAsk(2)], { settings: { ...QUIET, "agent.score": true } });
+    c.after(t.cleanup);
+    fake.say("score", [
+      { id: "acme/api#1", score: 5, why: "a typo fix; no rush" },
+      { id: "acme/api#2", score: 9, why: "carol waits on you" },
+    ]);
+    await run(t.desk.sync());
+    await settled(t);
+    assert.deepEqual(
+      [where(t, "acme/api#1")?.[0], where(t, "acme/api#1")?.[1].reason],
+      ["standard", "a typo fix; no rush"],
+      "the scorer's 5: Standard, not Urgent",
+    );
+    assert.equal(where(t, "acme/api#2")?.[0], "urgent");
+    assert.match(fake.stdin("score"), /criteria: [^\n]*Asked by name: yes \(counts 3 times\)/);
+    // The desk's own score: Asked by name adds 3, so from Now or Today it reaches Urgent; from Later, Standard.
+    const asked = t.desk.urgency.all().find((x) => x.name === "Asked by name")!;
+    assert.deepEqual([asked.urgent, asked.weight], [false, 3]);
+    assert.deepEqual([fallbackScore("today", 3), fallbackScore("later", 3)], [9, 6]);
+  },
+);
+
+test(
+  "a review asked of you by name lands in Urgent by its weight, whoever asked; one asked of your team doesn't, nor one you've reviewed",
+  posix,
+  async (c) => {
+    const bot = { at: hoursAgo(1), actor: "renovate[bot]", actor_bot: true, reviewer: "me", reviewer_type: "user" as const };
+    const t = await setup([reviewAsk(1), reviewAsk(2, { request_events: [bot] }), teamPing(3), teamAsk(4), reviewAsk(5)], {
+      settings: { ...QUIET, "agent.score": false },
+    });
+    c.after(t.cleanup);
+    await run(t.desk.sync());
+    await settled(t);
+    const [s1, c1] = where(t, "acme/api#1")!;
+    assert.deepEqual([s1, c1.reason], ["urgent", "Asked by name"]);
+    assert.equal(where(t, "acme/api#2")?.[0], "urgent", "a bot adding you by name counts");
+    assert.notEqual(where(t, "acme/api#3")?.[0], "urgent", "a CODEOWNERS team ping");
+    assert.notEqual(where(t, "acme/api#4")?.[0], "urgent", "a team's request");
+    // You reviewed it: GitHub drops your request, and it's no longer urgent.
+    const it = t.gh.items.get("acme/api#5")!;
+    t.gh.items.set(it.id, {
+      ...it,
+      review_requests: [],
+      reviews: [{ author: "me", author_bot: false, state: "commented", at: hoursAgo(0), commit: it.head_oid }],
+    });
+    await run(t.desk.sync());
+    await settled(t);
+    assert.notEqual(where(t, "acme/api#5")?.[0], "urgent");
+  },
+);

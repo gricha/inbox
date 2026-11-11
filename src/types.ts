@@ -204,6 +204,9 @@ export interface Signals {
 // A rule's bucket, or "judge": no hint of its own, so the board default until Claude answers.
 export type RuleBucket = Bucket | "judge";
 
+// How much the judge counts a rule that doesn't say (0 to 10).
+export const RULE_WEIGHT = 5;
+
 export interface Rule {
   when: string;
   bucket: RuleBucket;
@@ -211,6 +214,7 @@ export interface Rule {
   nocap?: boolean; // matched items don't count toward caps and are never demoted
   hard?: boolean; // a floor: what it matches never sorts below its bucket (Today for a Now rule)
   final?: boolean; // Claude doesn't re-sort what it matches: it stays in the rule's bucket (a pin's floor still lifts it)
+  weight?: number; // 0 to 10: how much the judge counts it (RULE_WEIGHT when unset)
   id?: string; // the plugin's rule it is, or, with `own`, the one yours replaces
   own?: number; // yours, on a board with `builtin`: its index in the board's `rules` in config.toml
   after?: string; // yours, as config.toml has it: right after this built-in rule (resolved rules don't carry it)
@@ -309,6 +313,7 @@ export interface SettingsView {
   github: GitHubStatus;
   // Paused after failures in a row (an expired login): why, and when it tries again. Shown once in Settings, not per PR.
   paused: { ai: { why: string; until: string } | null };
+  judge: JudgeStatus;
 }
 
 // A device paired over Tailscale: a browser holds its token in a cookie, a machine's agents in their MCP config.
@@ -357,20 +362,11 @@ export interface AgentStatus {
   connect: string[]; // what Connect runs: only what's missing, in its order
 }
 
-// GET /api/policy: ~/.inbox/policy.md, prose the judge follows. While it's empty it follows `starter`.
-export interface PolicyDoc {
-  path: string;
-  text: string; // the file's; empty means the starter is in use
-  starter: string;
-  hash: string; // pass it back as `base` when saving
-  judge: JudgeStatus;
-}
-
 export interface JudgeStatus {
   state: "off" | "idle" | "running" | "error";
   off_reason: string | null; // why it's off: the setting
   waiting: number; // items without a fresh answer
-  judged: number; // items with an answer under this policy
+  judged: number; // items with an answer for what they are now
   spent: number; // items sent in the last hour
   max_per_hour: number;
   last_at: string | null; // the last call that finished
@@ -475,20 +471,31 @@ export interface Placement {
   floor?: Bucket; // ...or you pinned it, so it never sorts below this, whatever Claude, quiet days or caps say
   judge?: JudgeStep; // set while the judge is on
   hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it, which holds until Claude answers (for good on a final rule)
+  signals?: JudgeSignal[]; // every rule on this board that matches it, the first one's first
 }
 
-// The policy judge's step in a placement, or an automation's sort standing in for it.
+// One thing the judge weighs about an item: a rule that matches it, an automation's sort of it, or a criterion's yes.
+export interface JudgeSignal {
+  from: string; // in words: "rule asked-directly on PRs to review", "your rule 2 on Mine", "automation Triage", "criterion Asked by name"
+  bucket?: Bucket; // what it suggests; a criterion suggests none
+  why: string;
+  weight: number; // 0 to 10
+  hard?: boolean; // a floor: the judge answers at or above `bucket` (Today for a Now rule)
+  key: string; // what it is, for the judge's answer: changing the rule, its weight or its bucket asks again
+}
+
+// The judge's step in a placement, or an automation's sort standing in for it until the judge has weighed it.
 export interface JudgeStep {
   bucket: Bucket | null; // its answer; null: none, so where the rules put it
   why: string;
-  pending: boolean; // not judged under this policy since the item last changed (an earlier answer may still show)
+  pending: boolean; // not judged since the item or its signals last changed (an earlier answer may still show)
   by?: string; // the automation that sorted it, by name; absent: Claude
 }
 
-// Kept per item in kv `judge:<id>`: good while what the judge read of the item (judgeKey) and the policy stay the same.
+// Kept per item in kv `judge:<id>`: good while what the judge read of the item (judgeKey) and its signals stay the same.
 export interface JudgeAnswer {
-  key: string; // judgeKey()
-  policy: string; // the policy's hash
+  key: string; // judgeKey() with the signals it saw
+  signals?: Pick<JudgeSignal, "from" | "bucket" | "weight" | "key">[]; // what it weighed, for the item's trace
   bucket: Bucket | null; // null: the agent gave no answer for it
   why: string;
   at: string;
@@ -886,6 +893,8 @@ export interface ItemDetail {
   item: Item;
   signals: Signals;
   placements: Placement[];
+  // While the judge is on: what it weighs for the item now, and what its answer weighed (null: no answer yet)
+  judge?: { signals: JudgeSignal[]; saw: JudgeAnswer["signals"] | null; at: string | null; fresh: boolean };
   state: ItemState;
   handoff_prompt: string;
   ai: AiReview | null;
@@ -1309,7 +1318,7 @@ export interface AutomationItem {
   until?: string; // a snooze's, as the run said it
   // added: it's on your desk now; did: the desk did `do` (a sort, a snooze, done, mute); kept: it was on your desk already;
   // left: you'd dealt with it (done, snoozed, muted, in Merging), so it stays that way; resolved: nobody needs it now (closed,
-  // merged, approved by someone else); held: its sort is kept, but a hard rule, a final rule or your pin holds it where it is
+  // merged, approved by someone else); held: a review asked of them by name, or its sort is kept but a hard rule, a final rule or your pin holds it where it is
   // (error says which); refused: the automation may not do that (its `can`); failed: the desk couldn't (error says why)
   outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed";
   error?: string;
@@ -1324,6 +1333,7 @@ export interface Criterion {
   when?: string;
   ask?: string;
   urgent: boolean;
+  weight?: number; // points a yes adds to the desk's own score, and how heavily the scorer counts it (1 when unset)
   on: boolean;
   by: "you" | "an agent";
   updated_at: string;
@@ -1332,7 +1342,7 @@ export interface Criterion {
 }
 
 // What a plugin comes with: a criterion in its own file, as BuiltInAutomation is.
-export type BuiltInCriterion = Pick<Criterion, "name" | "when" | "ask" | "urgent"> & { id: string; help: string; on: boolean };
+export type BuiltInCriterion = Pick<Criterion, "name" | "when" | "ask" | "urgent" | "weight"> & { id: string; help: string; on: boolean };
 
 // PUT /api/criteria/:id
 export type CriterionBody = Pick<Criterion, "name" | "when" | "ask"> & { urgent?: boolean; on?: boolean };
@@ -1381,7 +1391,7 @@ export interface ConfigDoc {
   hash: string; // PUT /api/config takes it (or the whole text) as `base`
   errors: ConfigError[];
   warnings?: ConfigError[]; // leftover pre-settings keys: ignored, not fatal
-  hard: { board: string; bucket: Bucket; when: string; why: string; final?: boolean }[]; // the loaded config's hard and final rules, for Searches and rules
+  hard: { board: string; bucket: Bucket; when: string; why: string; final?: boolean; weight: number }[]; // the loaded config's hard and final rules, for Searches and rules
   builtins: BuiltInBoard[]; // the loaded config's boards that use a plugin's rules, and each of those rules as it stands
 }
 
@@ -1398,6 +1408,7 @@ export interface BuiltInBoard {
     why: string; // in plain words
     hard?: boolean;
     final?: boolean;
+    weight: number; // 0 to 10: how much the judge counts it
     on: boolean; // not in the board's `off`
     yours: boolean; // a rule of yours with its id stands in its place
     path?: string; // yours: where it is in config.toml ("boards[1].rules[0]")

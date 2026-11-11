@@ -472,7 +472,7 @@ test("GitHub's two reviewer nudges leave a blocked PR alone: nobody can merge it
   assert.deepEqual(at(true), [false, false], "the same PR, stacked on one still open");
 });
 
-test("GitHub's blunt team-ping rules leave a PR in code you work on to your policy: never hidden or sent to FYI by them", () => {
+test("GitHub's blunt team-ping rules leave a PR in code you work on to the judge: never hidden or sent to FYI by them", () => {
   const whens = ["wide-ping", "team-reviewed"].map((id) => GITHUB_AUTOMATIONS.find((a) => a.id === id)!.when ?? "");
   const pr = makeItem({
     author: "trevor",

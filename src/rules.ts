@@ -1,7 +1,8 @@
-// Places items on a board: filter, first matching rule, caps, sort.
+// Places items on a board: filter, first matching rule, caps, sort. Every matching rule is a signal for the judge.
+import { createHash } from "node:crypto";
 import { Result } from "effect";
-import type { BoardConfig, Bucket, Card, ConfigError, JudgeStep, Placement, Signals, TraceStep } from "./types.ts";
-import { RANK } from "./types.ts";
+import type { BoardConfig, Bucket, Card, ConfigError, JudgeSignal, JudgeStep, Placement, Rule, Signals, TraceStep } from "./types.ts";
+import { RANK, RULE_WEIGHT } from "./types.ts";
 import type { ExprSyntaxError } from "./errors.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
 
@@ -56,8 +57,33 @@ function truthy(c: Expr, s: Signals): { matched: boolean; error?: string } {
   return Result.isSuccess(v) ? { matched: Boolean(v.success) } : { matched: false, error: v.failure.message };
 }
 
-// The policy judge's answer for an item while judging is on, or an automation's sort of it; null: nobody sorts it.
+// The judge's answer for an item while judging is on, or an automation's sort of it; null: nobody sorts it.
 export type JudgeLookup = (id: string) => JudgeStep | null;
+
+export const weightOf = (r: Pick<Rule, "weight">): number => r.weight ?? RULE_WEIGHT;
+
+// Whose rule it is, for the judge and the trace: a built-in's id, or yours by id or place in the board's rules.
+function ruleName(r: Rule, i: number): string {
+  if (r.own === undefined) return r.id !== undefined ? `built-in rule ${r.id}` : `your rule #${i + 1}`;
+  return r.id !== undefined ? `your rule ${r.id}` : `your rule #${r.own + 1}`;
+}
+
+export const signalKey = (parts: unknown[]): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 12);
+
+// A matching rule as the judge weighs it. A judge rule suggests the board default.
+function ruleSignal(cfg: BoardConfig, r: Rule, i: number, s: Signals): JudgeSignal {
+  const bucket = r.bucket === "judge" ? cfg.default : r.bucket;
+  const why = renderTemplate(r.bucket === "judge" && !r.why?.trim() ? cfg.default_why : (r.why ?? ""), s);
+  const weight = weightOf(r);
+  return {
+    from: `${ruleName(r, i)} on "${cfg.name}"`,
+    bucket,
+    why,
+    weight,
+    ...(r.hard && { hard: true }),
+    key: signalKey([cfg.id, r.id ?? r.own ?? i, r.when, r.bucket, r.why ?? "", weight, !!r.hard]),
+  };
+}
 
 // A hard rule's floor: Today for a Now rule, so Claude still picks Now or Today for what it matches.
 export const floorOf = (b: Bucket): Bucket => (b === "now" ? "today" : b);
@@ -99,15 +125,25 @@ function place(board: CompiledBoard, e: Entry, judge?: JudgeLookup): Placement |
     const own = to === j.bucket && j.why.trim() ? said : (lifted(j.bucket, to) ?? p.why);
     return { ...p, bucket: to, rule_bucket: to, why: own, judge: j, hint };
   };
+  // The first matching rule places it; the trace stops there, and every rule that matches is a signal for the judge.
+  let first: number | null = null;
+  const signals: JudgeSignal[] = [];
   for (const [i, c] of board.rules.entries()) {
     const rule = cfg.rules[i]!; // board.rules is compiled 1:1 from cfg.rules
     const r = truthy(c, s);
-    trace.push({ index: i, when: rule.when, ...r });
+    if (first === null) trace.push({ index: i, when: rule.when, ...r });
     if (!r.matched) continue;
-    if (rule.bucket === "judge") return judged(i, cfg.default, rule.why?.trim() ? rule.why : cfg.default_why);
-    return judged(i, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined, rule.final);
+    first ??= i;
+    signals.push(ruleSignal(cfg, rule, i, s));
   }
-  return judged(null, cfg.default, cfg.default_why);
+  const rule = first === null ? null : cfg.rules[first]!;
+  const p =
+    rule === null
+      ? judged(null, cfg.default, cfg.default_why)
+      : rule.bucket === "judge"
+        ? judged(first, cfg.default, rule.why?.trim() ? rule.why : cfg.default_why)
+        : judged(first, rule.bucket, rule.why ?? "", rule.hard ? floorOf(rule.bucket) : undefined, rule.final);
+  return signals.length ? { ...p, signals } : p;
 }
 
 // Who placed it, for its card: Claude or an automation where it chose the bucket (a hard rule's floor, or a pin's, may

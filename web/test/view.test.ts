@@ -19,6 +19,7 @@ import {
   when,
 } from "../src/format.ts";
 import {
+  weightText,
   acceleratorOf,
   authProblem,
   automationOf,
@@ -156,24 +157,37 @@ test("Settings' old section ids land on the part their settings live in now", ()
   assert.deepEqual(part("review"), { name: "settings", section: "github" });
   assert.deepEqual(part("appearance"), { name: "settings", section: "app" });
   assert.deepEqual(part("handoff"), { name: "settings", section: "github" });
-  // Rules and the policy are still places of their own, and every part's id goes round the hash unchanged.
+  // Rules are still a place of its own, Your policy's old link lands on Agent, and every part's id goes round the hash unchanged.
   assert.deepEqual(part("rules"), { name: "settings", section: "rules" });
-  assert.deepEqual(part("policy"), { name: "settings", section: "policy" });
+  assert.deepEqual(part("policy"), { name: "settings", section: "agent" });
   for (const section of ["github", "agent", "queue", "automations", "app"])
     assert.deepEqual(parseRoute(routeHash({ name: "settings", section })), { name: "settings", section });
   assert.equal(pageOf(part("notify"), "queue"), null);
 });
 
-test("Searches and rules and your policy are views inside Settings: each goes back to the part its Edit row is in", () => {
+test("Searches and rules is a view inside Settings: it goes back to the part its Edit row is in", () => {
   assert.equal(settingsBack("rules"), "github");
-  assert.equal(settingsBack("policy"), "agent");
-  for (const part of ["github", "agent", "queue", "automations", "app", "nowhere"]) assert.equal(settingsBack(part), null);
-  for (const id of ["rules", "policy"]) {
-    assert.deepEqual(parseRoute(routeHash({ name: "settings", section: id })), { name: "settings", section: id });
-    assert.equal(pageOf({ name: "settings", section: id }, "queue"), null);
-  }
+  for (const part of ["github", "agent", "queue", "automations", "app", "policy", "nowhere"]) assert.equal(settingsBack(part), null);
+  assert.deepEqual(parseRoute(routeHash({ name: "settings", section: "rules" })), { name: "settings", section: "rules" });
+  assert.equal(pageOf({ name: "settings", section: "rules" }, "queue"), null);
+  assert.deepEqual(Object.keys(SETTINGS_VIEWS), ["rules"]);
   assert.equal(SETTINGS_VIEWS.rules?.name, "Searches and rules");
-  assert.equal(SETTINGS_VIEWS.policy?.name, "Your policy");
+});
+
+test("a rule's weight in plain words", () => {
+  assert.deepEqual(
+    [10, 9, 8, 6, 5, 3, 2, 0].map((w) => weightText(w).replaceAll("\u00a0", " ")),
+    [
+      "firm, 10 of 10",
+      "firm, 9 of 10",
+      "strong, 8 of 10",
+      "strong, 6 of 10",
+      "a lean, 5 of 10",
+      "a lean, 3 of 10",
+      "a hint, 2 of 10",
+      "a hint, 0 of 10",
+    ],
+  );
 });
 
 test("an automation opens as a view inside Settings, from its own link, and goes back to Automations", () => {
@@ -1176,7 +1190,7 @@ test("a lapsed login that pauses the AI reviews and fails the sorting is one pau
   assert.equal(onePause(ai, { ...judge, error: "Claude's API answered 529: overloaded." }), null, "two failures: each says its own");
   assert.equal(onePause(ai, { ...judge, state: "idle", error: null }), null, "the sorting is fine");
   assert.equal(onePause(null, judge), null, "the AI reviews aren't paused");
-  assert.equal(onePause(ai), null, "the policy not loaded yet");
+  assert.equal(onePause(ai), null, "the judge's status not loaded yet");
 });
 
 test("treeGuides draws Blocked's tree from its depths: a branch with more under it, its last, the line past a deeper row, none", () => {

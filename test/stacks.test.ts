@@ -516,7 +516,7 @@ test("a ref counts the PR's own line: forks over a merged bottom are two PRs, no
 });
 
 test("desktop notifications go per PR: a member asked while the one below waits on your review too is news at once, and once", async (tc) => {
-  const t = await setup([reviewAsk(2, { head_ref: "b2" }), theirs(3, 2)], { settings: { "notify.quiet": "" } });
+  const t = await setup([reviewAsk(2, { head_ref: "b2" }), theirs(3, 2)], { settings: { "notify.quiet": "", "policy.judge": false } });
   tc.after(t.cleanup);
   await run(t.desk.sync());
   t.gh.items.set(id(3), reviewAsk(3, { head_ref: "b3", base: "b2", updated_at: at(1) }));

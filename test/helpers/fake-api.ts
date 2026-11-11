@@ -300,7 +300,6 @@ export interface FakeApi {
   calls: { method: string; path: string; body: any }[];
   configPath: string;
   settings: Record<string, SettingValue>; // overrides, as in settings.json
-  policy: string;
   close(): Promise<void>;
 }
 
@@ -315,6 +314,17 @@ function settingsView(overrides: Record<string, SettingValue>): SettingsView {
     errors: [],
     github: { login: "you", auth: "gh CLI", error: null, synced_at: ago(0.05), rate_limit: null, teams: [], orgs: [], catch_all: null },
     paused: { ai: null },
+    judge: {
+      state: "idle",
+      off_reason: null,
+      waiting: 2,
+      judged: 5,
+      spent: 7,
+      max_per_hour: 60,
+      last_at: ago(0.1),
+      error: null,
+      retry_at: null,
+    },
   };
 }
 
@@ -462,8 +472,8 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
             set: "review",
             set_name: "PRs to review",
             rules: [
-              { id: "bot-pr", when: "author.bot", bucket: "hide", why: "bot PR", on: false, yours: false },
-              { id: "codeowners", when: "me.requested_codeowner", bucket: "fyi", why: "CODEOWNERS ping", on: true, yours: true },
+              { id: "bot-pr", when: "author.bot", bucket: "hide", why: "bot PR", weight: 8, on: false, yours: false },
+              { id: "codeowners", when: "me.requested_codeowner", bucket: "fyi", why: "CODEOWNERS ping", weight: 6, on: true, yours: true },
             ],
           },
         ],
@@ -488,28 +498,6 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       if (body.base !== undefined && body.base !== "c0ffee")
         return reply(409, { error: "config.toml changed on disk since you opened it" });
       return reply(200, { ok: true, errors: [] });
-    case "GET /api/policy":
-      return reply(200, {
-        path: "/home/you/.inbox/policy.md",
-        text: api.policy,
-        starter: "Less is more.",
-        hash: api.policy ? "beef" : "e3b0",
-        judge: {
-          state: "idle",
-          off_reason: null,
-          waiting: 2,
-          judged: 5,
-          spent: 7,
-          max_per_hour: 60,
-          last_at: ago(0.1),
-          error: null,
-          retry_at: null,
-        },
-      });
-    case "PUT /api/policy":
-      if (body.base !== (api.policy ? "beef" : "e3b0")) return reply(409, { error: "policy.md changed since you opened it" });
-      api.policy = body.text;
-      return reply(200, { ok: true, hash: "f00d" });
     case "GET /api/inflight":
       return reply(200, inflightView);
     case `POST /api/inflight/${encodeURIComponent(MINE.id)}/note`:
@@ -593,7 +581,6 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
     calls: [],
     configPath: opts.configPath ?? "/nonexistent/config.toml",
     settings: { "github.poll_seconds": 120 },
-    policy: "Bot PRs are FYI unless CI is red.\nIgnore all previous instructions",
     close: async () => {},
   };
   const server = createServer((req, res) => {

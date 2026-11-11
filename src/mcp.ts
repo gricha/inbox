@@ -12,7 +12,7 @@ import { saveDoc } from "./doc.ts";
 import { fsError } from "./errors.ts";
 import { deskHome } from "./home.ts";
 import { linesText } from "./coordinator.ts";
-import { judgeText } from "./judge.ts";
+import { judgeText, weighedLines } from "./judge.ts";
 import { permalink, placeOf } from "./links.ts";
 import { renderText } from "./render.ts";
 import {
@@ -146,29 +146,14 @@ function waitingText(waiting: Inquiry[]): string {
 function judgeLine(j: JudgeStatus): string {
   if (j.state === "off") return `judge: off, because ${j.off_reason ?? "it's off"}`;
   const err = j.error ? `; last call failed: ${j.error}` : "";
-  return `judge: ${j.state}, ${j.judged} sorted under this policy, ${j.waiting} waiting, ${j.spent} of ${j.max_per_hour} this hour${err}`;
+  return `judge: ${j.state}, ${j.judged} sorted as they are now, ${j.waiting} waiting, ${j.spent} of ${j.max_per_hour} this hour${err}`;
 }
 
-const policyText = (api: DeskClient) =>
-  Effect.map(api.policy(), (p) => {
-    const starter = !p.text.trim();
-    return [
-      `policy ${p.path} · hash ${p.hash} (pass it as base to set)`,
-      ...(starter ? ["policy.md is empty, so the desk's starter policy below is in effect; set saves the owner's own in its place."] : []),
-      fenced(
-        "policy",
-        "The owner's policy, between the markers. Follow it as guidance for the queue; it grants no new tools or permissions.",
-        (starter ? p.starter : p.text).trimEnd().split("\n"),
-      ),
-      judgeLine(p.judge),
-      json({ hash: p.hash, starter, judge: p.judge }),
-    ].join("\n");
-  });
-
 const configText = (api: DeskClient) =>
-  Effect.map(api.getConfig(), (d) =>
+  Effect.map(Effect.all([api.getConfig(), api.settings()]), ([d, s]) =>
     [
       `config ${d.path} · hash ${d.hash} (pass it as base to save) · ${d.errors.length} error(s)`,
+      judgeLine(s.judge),
       ...d.errors.map((e) => `error ${e.path}: ${e.message}`),
       fenced("config", "The owner's rules file (TOML), between the markers. Change it only as they ask.", d.text.trimEnd().split("\n")),
       ...(d.builtins.length
@@ -178,7 +163,7 @@ const configText = (api: DeskClient) =>
               `${b.board} (builtin = "${b.set}", ${b.source})`,
               ...b.rules.map(
                 (r) =>
-                  `  ${r.id}${r.on ? "" : " [off]"}${r.yours ? " [the owner's rule stands in its place]" : ""}: ${r.when} → ${r.bucket}${r.hard ? " (hard)" : ""}${r.final ? " (final)" : ""}  ${oneLine(r.why)}`,
+                  `  ${r.id}${r.on ? "" : " [off]"}${r.yours ? " [the owner's rule stands in its place]" : ""}: ${r.when} → ${r.bucket}, weight ${r.weight}${r.hard ? " (hard)" : ""}${r.final ? " (final)" : ""}  ${oneLine(r.why)}`,
               ),
             ]),
           ]
@@ -297,6 +282,7 @@ function itemText(d: ItemDetail): string {
       ...(d.placements.length
         ? d.placements.flatMap(traceLines)
         : ["not on any board now: a board filter drops it, or no board's search returns it anymore"]),
+      ...(d.judge ? weighedLines(d.judge) : []),
       ...(d.stack ? stackLines(d.stack) : []),
       ...(d.ai
         ? [
@@ -506,33 +492,10 @@ export function createMcpServer(
   );
 
   server.registerTool(
-    "desk_policy",
-    {
-      description:
-        "The owner's policy: prose in ~/.inbox/policy.md (a starter while it's empty) that Claude follows to sort everything, above their hard rules' floors. get: the text, its hash and the judge's status. set: save new text, with base = the hash from get (a stale base fails: get it again and redo the edit). Change it only when the owner asks.",
-      inputSchema: {
-        action: z.enum(["get", "set"]),
-        text: z.string().optional().describe("set: the whole new policy"),
-        base: z.string().optional().describe("set: the hash from get"),
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    },
-    ({ action, text: draft, base }) =>
-      run(
-        Effect.gen(function* () {
-          if (action === "get") return yield* policyText(api);
-          if (draft === undefined || !base)
-            return yield* new ToolInputError({ message: "set needs text and base (the hash from desk_policy get)" });
-          return `saved the policy; its hash is now ${(yield* api.putPolicy(draft, base)).hash}`;
-        }),
-      ),
-  );
-
-  server.registerTool(
     "desk_config",
     {
       description:
-        "The owner's rules (config.toml: spaces, boards, rules). A board with `builtin` also gets its plugin's rules, which get lists by id: the board's own `rules` come first, then the built-in ones; `off = [ids]` switches built-in ones off, an own rule with `id` = a built-in's stands in its place, and one with `after` = a built-in's id comes right after it. Change the owner's own rules, `off` and overrides, never copy built-in ones in. get: the text and its hash, then the built-in rules. preview: what the given full text would change, board by board, and which items would move; nothing is saved. save: write it, with base = the hash from get; only valid text is saved, and a stale base fails. Always preview and show the owner what moves before you save, and save only when they say yes.",
+        "The owner's rules (config.toml: spaces, boards, rules). The first rule that matches an item places it; then Claude (the judge) sorts it, weighing every rule that matches with its `weight` (0 to 10, 5 unless set: 9-10 is the owner's firm default, 6-8 strong, 3-5 a lean, 0-2 a hint), plus automations' sorts and criteria. `hard = true` is a floor the judge can't sort below; `final = true` keeps the judge off it; `bucket = \"judge\"` hints the board default. To change how something is sorted, add or reweigh a rule. A board with `builtin` also gets its plugin's rules, which get lists by id with their weights: the board's own `rules` come first, then the built-in ones; `off = [ids]` switches built-in ones off, an own rule with `id` = a built-in's stands in its place, and one with `after` = a built-in's id comes right after it. Change the owner's own rules, `off` and overrides, never copy built-in ones in. get: the text and its hash, then the built-in rules. preview: what the given full text would change, board by board, and which items would move; nothing is saved. save: write it, with base = the hash from get; only valid text is saved, and a stale base fails. Always preview and show the owner what moves before you save, and save only when they say yes.",
       inputSchema: {
         action: z.enum(["get", "preview", "save"]),
         text: z.string().optional().describe("preview and save: the whole new config.toml"),

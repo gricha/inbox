@@ -5,10 +5,11 @@ export const GITHUB_CRITERIA: readonly BuiltInCriterion[] = [
   {
     id: "asked",
     name: "Asked by name",
-    help: "A review asked of you by name, not of a team you're on: it's Urgent until you review.",
+    help: "A review asked of you by name, not of a team you're on: it counts heavily toward Urgent until you review.",
     on: true,
     when: "me.requested_direct",
-    urgent: true,
+    urgent: false,
+    weight: 3,
   },
   {
     id: "reply",

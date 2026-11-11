@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { defaultConfigText } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
-import { judgeKey } from "../src/judge.ts";
 import type { Card, Context, Item } from "../src/types.ts";
 import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
@@ -141,8 +140,6 @@ test("Searches and rules lists the final rules with the hard ones, in board orde
   assert.deepEqual(
     work.map((h) => [h.board, h.bucket, h.why, !!h.final]),
     [
-      ["PRs to review (acme)", "now", "someone asked you directly", false],
-      ["PRs to review (acme)", "today", "asked you by name (added by someone)", false],
       ["My PRs (acme)", "blocked", "blocked by another PR, which waits on something", true],
       ["My PRs (acme)", "today", "your draft: finish it", false],
       ["My PRs (acme)", "blocked", "waits on something", true],
@@ -174,7 +171,8 @@ test("preview shows moves without saving; putConfig saves valid text only", asyn
 
 test("notifies for a new item on the queue after the first sync", async () => {
   const items = [reviewAsk(1)];
-  const t = await setup(items);
+  // Sorting off: the rules place it, as Claude's answer would before it notifies.
+  const t = await setup(items, { settings: { "policy.judge": false } });
   await run(t.desk.sync());
   assert.deepEqual(t.notes, []);
   t.gh.items.set("acme/api#5", reviewAsk(5));
@@ -194,9 +192,8 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   await run(t.desk.sync());
   assert.ok(runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/web#3" && x.placed_by === "pending"));
   assert.deepEqual(t.notes, [], "the rules put it there, and Claude may still sort it away");
-  const e = t.desk.snapshot().entries.get("acme/web#3")!;
-  const key = judgeKey(e.item, e.analysis.activity_at, null);
-  t.desk.store.set("judge:acme/web#3", { key, policy: t.desk.policy.hash, bucket: "today", why: "your PR is red", at: NOW.toISOString() });
+  const key = t.desk.snapshot().judging.get("acme/web#3")!.key;
+  t.desk.store.set("judge:acme/web#3", { key, bucket: "today", why: "your PR is red", at: NOW.toISOString() });
   t.desk.changed();
   t.desk.notifyNew();
   assert.deepEqual(t.notes, ["web#3 · your PR is red"]);
@@ -398,18 +395,34 @@ test("a ref can be the item's inbox:// link or the desk's own http link to it; a
   assert.deepEqual(t.gh.lookupCalls, ["acme/gone#5"], "a refused link fetches nothing");
 });
 
-test("policy.md that can't be written fails putPolicy with FsError, in Node's words", (c) => {
+test("an old policy.md is left on disk and unread: the desk says so once, and never again", async (c) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-test-"));
-  fs.mkdirSync(path.join(home, "policy.md"));
-  const desk = new Desk({ home, github: new FakeGitHub([], () => []), now: () => NOW, notify: () => {}, log: () => {} });
+  const policy = path.join(home, "policy.md");
+  fs.writeFileSync(policy, "Everything is today.");
+  const logs: string[] = [];
+  const start = async () => {
+    const desk = new Desk({
+      home,
+      github: new FakeGitHub([], () => []),
+      now: () => NOW,
+      notify: () => {},
+      log: (m) => {
+        logs.push(m);
+      },
+    });
+    await run(desk.init());
+    await run(desk.close());
+  };
   c.after(() => {
-    desk.stop();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  const e = failureSync(desk.putPolicy("Waiting PRs are fyi."));
-  assert.deepEqual([e._tag, e._tag === "FsError" && e.op], ["FsError", "rename"]);
-  assert.match(e.message, /policy\.md/, "Node's own message names the file");
-  assert.equal(desk.policy.text, "", "nothing changed");
+  await start();
+  await start();
+  assert.deepEqual(
+    logs.filter((l) => l.includes("policy.md")),
+    [`${policy} is no longer read: Claude sorts by your rules and their weights (Settings → GitHub → Searches and rules)`],
+  );
+  assert.equal(fs.readFileSync(policy, "utf8"), "Everything is today.", "the owner's file stays");
 });
 
 test("undo by seq refuses to overwrite a later action on the same item", async () => {
@@ -1414,23 +1427,11 @@ test("a file edited outside the desk is read again through the runner: one it ca
     },
   });
   c.after(t.cleanup);
-  const policy = path.join(t.home, "policy.md");
-  fs.writeFileSync(policy, "Only what blocks a release.");
-  t.desk.edited("policy.md");
-  assert.equal(t.desk.policy.text, "Only what blocks a release.");
   const rev = t.desk.rev;
-  t.desk.edited("policy.md");
+  t.desk.edited("config.toml");
   assert.equal(t.desk.rev, rev, "unchanged: nothing happens");
 
   // Each was an uncaught exception from the watcher, which ended the desk.
-  fs.rmSync(policy);
-  fs.mkdirSync(policy);
-  t.desk.edited("policy.md");
-  assert.equal(t.desk.policy.text, "Only what blocks a release.", "the last one it read stays");
-  assert.ok(
-    logs.some((l) => l.startsWith("policy.md failed: ") && l.includes("EISDIR")),
-    logs.join("\n"),
-  );
   const config = path.join(t.home, "config.toml");
   const loaded = t.desk.loaded;
   fs.rmSync(config);

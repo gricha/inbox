@@ -74,12 +74,17 @@ export const PAGE_GROUPS: Record<"queue" | "archive" | "blocked", GroupKey[]> = 
 };
 
 // Settings' old section ids, still in links and habits, and the part each one's settings live in now.
-const SETTINGS_ALIAS: Record<string, string> = { notify: "queue", review: "github", appearance: "app", handoff: "github" };
+const SETTINGS_ALIAS: Record<string, string> = {
+  notify: "queue",
+  review: "github",
+  appearance: "app",
+  handoff: "github",
+  policy: "agent", // Your policy, gone: rules and their weights sort now
+};
 
 // The editors that open as views of their own inside Settings, by id, and the part each one's Edit row is in.
 export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | undefined> = {
   rules: { name: "Searches and rules", part: "github" },
-  policy: { name: "Your policy", part: "agent" },
 };
 
 // Settings' parts, each a route (#/settings/<id>) and an item of the sidebar while you're in Settings: the core's, then under
@@ -658,18 +663,25 @@ export function acceleratorOf(e: KeyLike, mac: boolean): string | null {
 // Errors that `gh auth login` fixes, e.g. "GitHub rejected the token (HTTP 401)".
 export const authProblem = (error: string) => /\b(401|token|bad credentials|unauthori[sz]ed|gh auth)\b/i.test(error);
 
-// ---------------------------------------------------------------- the policy judge
+// ---------------------------------------------------------------- the judge
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!?]$/.test(s) ? "" : "."}`;
 // "5m": how long until `at`.
 const until = (at: string, now: number) => ago(new Date(2 * now - Date.parse(at)).toISOString(), now).replace(/ ago$/, "");
 
+// A rule's weight in plain words: how much Claude counts it when it sorts what the rule matches.
+export function weightText(w: number): string {
+  const how = w >= 9 ? "firm" : w >= 6 ? "strong" : w >= 3 ? "a lean" : "a hint";
+  return `${how}, ${w}\u00a0of\u00a010`; // kept on one line
+}
+
 // The judge's step in a rule trace, after "Claude": as src/judge.ts's judgeText says it to agents.
 export function judgeStepText(j: JudgeStep): string {
   if (j.bucket === null) return j.pending ? "not sorted yet, so where the rules put it" : "no answer, so where the rules put it";
   const why = j.why || "keeps the rule's why";
-  return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? " (an earlier answer; sorting it again)" : ""}`;
+  const pending = j.by ? ` (${aiName()} is weighing it)` : " (an earlier answer; sorting it again)";
+  return `${BUCKET_LABEL[j.bucket].toLowerCase()}, ${why}${j.pending ? pending : ""}`;
 }
 
 // AI reviews paused and Claude's sorting failing for the one reason (a lapsed login): Settings says it once, in Claude's

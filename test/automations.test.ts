@@ -610,7 +610,7 @@ test("a run's item says what to do with it, and the desk does only what you allo
   assert.equal(runSync(t.desk.automations.get("tidy")).on, false);
 });
 
-test("an automation's sort places the item and its trace says who; it holds until the item changes or you act, and a hard rule's floor wins", async (c) => {
+test("an automation's sort places the item and its trace says who; it holds until the item changes or you act, and never moves an ask by name", async (c) => {
   const fake = fakeClaude(c);
   const t = await setup([reviewAsk(1), teamPing(4), teamPing(5), teamPing(6)], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
@@ -635,7 +635,7 @@ test("an automation's sort places the item and its trace says who; it holds unti
       ["acme/api#4", "hide", "did", null],
       ["acme/api#5", "later", "did", null],
       ["acme/api#6", "today", "did", null],
-      ["acme/api#1", "fyi", "held", "a hard rule keeps it in Today or above"],
+      ["acme/api#1", "fyi", "held", "it's a review asked of you by name"],
     ],
   );
   const four = runSync(t.desk.item("acme/api#4"));
@@ -644,8 +644,8 @@ test("an automation's sort places the item and its trace says who; it holds unti
   assert.equal(judgeText(four.placements[0]!.judge), "automation Team pings: hide, a ping to the whole team");
   assert.equal(card("acme/api#5").bucket, "later");
   assert.deepEqual([card("acme/api#6").bucket, card("acme/api#6").pinned], ["today", false], "sorted, not pinned");
-  assert.equal(card("acme/api#1").bucket, "today", "asked by name: the hard rule's floor holds, as it does over Claude");
-  assert.equal(runSync(t.desk.item("acme/api#1")).placements[0]!.judge?.by, "Team pings", "its sort is kept, and bound");
+  assert.equal(card("acme/api#1").bucket, "now", "asked by name: where the rules put it");
+  assert.equal(runSync(t.desk.item("acme/api#1")).placements[0]!.judge, undefined, "its sort isn't kept");
   assert.deepEqual(t.notes, ["1 on your desk"], "what it sorted away is in its record, not a notification");
   assert.equal(
     t.desk.automations.view()[0]!.runs[0]!.did,
@@ -667,10 +667,10 @@ test("an automation's sort places the item and its trace says who; it holds unti
       ["acme/api#4", "kept"],
       ["acme/api#5", "kept"],
       ["acme/api#6", "kept"],
-      ["acme/api#1", "kept"],
+      ["acme/api#1", "held"],
     ],
   );
-  assert.equal(t.desk.automations.view()[0]!.runs[0]!.did, "");
+  assert.equal(t.desk.automations.view()[0]!.runs[0]!.did, "left 1 where a rule or your pin holds it");
   // New commits: it isn't the item the automation sorted, so its rules place it again.
   const five = t.gh.items.get("acme/api#5")!;
   t.gh.items.set(five.id, { ...five, head_oid: "def", updated_at: new Date(Date.parse(five.updated_at) + 60_000).toISOString() });
@@ -1505,7 +1505,7 @@ test("a sort holds only while its automation is on and may sort there, and only 
   assert.equal(card("acme/api#4").bucket, ruled, "on again, but it may no longer hide");
 });
 
-test("its snooze, done and mute leave alone what holds an item for you: a hand-back, your pin, a hard rule", async (c) => {
+test("its snooze, done and mute leave alone what holds an item for you: a hand-back, your pin, an ask by name", async (c) => {
   const t = await setup([myPr(1, { ci: "red" }), teamPing(4), reviewAsk(5)], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
   await runFx(t.desk.sync());
@@ -1531,7 +1531,7 @@ test("its snooze, done and mute leave alone what holds an item for you: a hand-b
     run.items.map((x) => [x.item_id, x.outcome, x.error]).toSorted((x, y) => String(x[0]).localeCompare(String(y[0]))),
     [
       ["acme/api#4", "held", "your pin keeps it on your desk"],
-      ["acme/api#5", "held", "a hard rule keeps it in Now"],
+      ["acme/api#5", "held", "it's a review asked of you by name"],
       ["acme/web#1", "held", "your agent handed it back to you"],
     ],
   );
@@ -1862,7 +1862,7 @@ test("a desk started on an empty home runs what GitHub comes with that's on: no 
     `active now: ${card("acme/api#6").why}`,
     `active ${card("acme/web#7").bucket}: ${card("acme/web#7").why}`,
   ]);
-  assert.notEqual(card("acme/api#6").why.startsWith("Wide team pings"), true, "your direct ask keeps its floor");
+  assert.notEqual(card("acme/api#6").why.startsWith("Wide team pings"), true, "no automation moves your direct ask");
   assert.equal(card("acme/web#7").status, "active", "what's off by default does nothing");
   assert.equal(fake.calls(), 0, "no model");
 
@@ -1875,7 +1875,7 @@ test("a desk started on an empty home runs what GitHub comes with that's on: no 
   // Switched off in the window, its sort stops holding at once, and it stays off once the desk starts again.
   const req = http(createApp(t.desk, 47823));
   assert.equal((await req("PUT", "/api/automations/github.wide-ping/on", { on: false }, DESK)).status, 200);
-  assert.equal(at("acme/api#5"), "active later: review requested");
+  assert.equal(at("acme/api#5"), "active fyi: asked of @ml-team");
   t.desk.stop();
   const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
   c.after(() => {

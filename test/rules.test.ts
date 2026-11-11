@@ -138,7 +138,7 @@ test("sorts: waiting (oldest request first), updated, newest", () => {
   assert.deepEqual(mk("newest"), ["acme/api#1", "acme/api#2"]);
 });
 
-test("default review rules: an ask by name is hard whoever added it; close collaborators' team pings hint Later", () => {
+test("default review rules: an ask by name weighs most whoever added it; close collaborators' team pings hint Later", () => {
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const direct = makeItem({
     number: 1,
@@ -165,10 +165,14 @@ test("default review rules: an ask by name is hard whoever added it; close colla
     [direct, botAskClose, botAsk, teamPing, closeTeamPing].map((it) => entry(it)),
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
-  assert.deepEqual([b(1).bucket, b(1).why, b(1).floor], ["now", "carol asked you directly", "today"]);
+  // A heavy default, not a floor: the judge may still sort it.
+  assert.deepEqual([b(1).bucket, b(1).why, b(1).floor, b(1).signals?.[0]?.weight], ["now", "carol asked you directly", undefined, 9]);
   // A bot (Junior) adds asks by name for people: they reach your desk too.
-  assert.deepEqual([b(2).bucket, b(2).why, b(2).floor], ["today", "asked you by name (added by helper)", "today"]);
-  assert.deepEqual([b(3).bucket, b(3).why, b(3).hard], ["today", "asked you by name (added by helper)", true]);
+  assert.deepEqual([b(2).bucket, b(2).why, b(2).floor], ["today", "asked you by name (added by helper)", undefined]);
+  assert.deepEqual(
+    [b(3).bucket, b(3).why, b(3).hard, b(3).signals?.[0]?.weight],
+    ["today", "asked you by name (added by helper)", undefined, 8],
+  );
   assert.equal(b(4).bucket, "fyi");
   assert.equal(b(4).why, "CODEOWNERS ping to @ml-team");
   assert.deepEqual([b(5).bucket, b(5).why], ["later", "close collaborator: you engaged with 12 of their PRs in 90 days"]);
@@ -190,7 +194,7 @@ test("default review rules: a bot's PR is hidden, but one it opened for a person
   );
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
   assert.deepEqual([b(1).bucket, b(1).why], ["hide", "bot PR"]);
-  assert.deepEqual([b(2).bucket, b(2).why], ["later", "review requested"]);
+  assert.deepEqual([b(2).bucket, b(2).why], ["fyi", "asked of @ml-team"], "a person's, asked of your team");
   assert.deepEqual([b(3).bucket, b(3).why], ["later", "your PR, opened through sentry-junior"]);
   assert.deepEqual([b(4).bucket, b(4).why], ["later", "your PR, opened through sentry-junior"]);
 });

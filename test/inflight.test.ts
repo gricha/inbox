@@ -146,7 +146,6 @@ test("in Merging, the coordinator owns it: done, snooze and mute are refused, an
   assert.equal(t.desk.store.state("acme/web#3").muted, true);
   runSync(t.desk.undo(muted.undo_seq));
   runSync(t.desk.act("web#3", "inflight"));
-  runSync(t.desk.putPolicy("Waiting PRs are fyi."));
   assert.ok(!t.desk.judge.queue().some((g) => g.item.id === "acme/web#3"));
 });
 

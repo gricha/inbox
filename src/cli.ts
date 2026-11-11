@@ -11,7 +11,7 @@ import * as api from "./client.ts";
 import { untilText } from "./client.ts";
 import { fsError, messageOf } from "./errors.ts";
 import { deskHome } from "./home.ts";
-import { judgeText } from "./judge.ts";
+import { judgeText, weighedLines } from "./judge.ts";
 import { permalink } from "./links.ts";
 import { renderText } from "./render.ts";
 import { install, uninstall } from "./launchd.ts";
@@ -272,6 +272,10 @@ const show = Effect.fnUntraced(function* (x: Ctx) {
     if (p.rule === null) x.out(x.c.dim(`  → default`));
     if (p.floor) x.out(x.c.dim(`  → ${p.hard ? "hard rule" : "pinned"}: never below ${p.floor}`));
     if (p.judge) x.out(`  → ${plain(judgeText(p.judge))}`);
+  }
+  if (d.judge) {
+    x.out();
+    for (const l of weighedLines(d.judge)) x.out(l.startsWith("  ") ? plain(l) : x.c.bold(l));
   }
   return 0;
 });

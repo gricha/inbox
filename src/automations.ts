@@ -121,7 +121,7 @@ const deny = (name: string | null) => [
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
   ...desks(
-    ["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations", "criteria"],
+    ["act", "add", "undo", "config", "note", "hand_back", "answer", "inquire", "inquiry", "automations", "criteria"],
     [...new Set([...NAMES, ...(name ? [name] : [])])],
   ),
 ];

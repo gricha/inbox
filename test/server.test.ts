@@ -16,7 +16,6 @@ import { createServer as createViteServer } from "vite";
 import { Desk } from "../src/desk.ts";
 import { GitHubGraphQLError, GitHubHttpError, NotFound, Upstream } from "../src/errors.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
-import { DEFAULT_POLICY, textHash } from "../src/judge.ts";
 import { notifyCommand, openCommand } from "../src/notify.ts";
 import { createApp, proxyUpgrades, respond, startServer } from "../src/server.ts";
 import { idle, myPr, reviewAsk, setup as withItems } from "./helpers/desk.ts";
@@ -208,10 +207,10 @@ test("a route that can't fail but throws is a logged 500 in the bug's words", as
   c.mock.method(t.desk, "log", (m: string) => {
     logs.push(m);
   });
-  c.mock.method(t.desk, "getPolicy", () => {
+  c.mock.method(t.desk, "getSettings", () => {
     throw new TypeError("x is undefined");
   });
-  const res = await t.req("/api/policy");
+  const res = await t.req("/api/settings");
   assert.deepEqual([res.status, await res.json()], [500, { error: "x is undefined", tag: "Internal" }]);
   assert.equal(logs.length, 1);
   assert.match(logs[0]!, /^error: .*x is undefined/s);
@@ -275,7 +274,6 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
       "desk_merging",
       "desk_note",
       "desk_overview",
-      "desk_policy",
       "desk_sync",
       "desk_undo",
     ]);
@@ -784,27 +782,6 @@ test("config preview and save", async () => {
   t.cleanup();
 });
 
-test("policy: empty by default, so the starter is in effect; saved to policy.md with the hash as base, 409 when stale", async (c) => {
-  // No judge: it must not start a real claude here (test/judge.test.ts runs it against a fake).
-  const t = await setup({ "policy.judge": false });
-  c.after(t.cleanup);
-  const put = (body: unknown) =>
-    t.req("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const p = await t.json("/api/policy");
-  assert.deepEqual([p.text, p.starter, p.hash], ["", DEFAULT_POLICY, textHash(DEFAULT_POLICY)]);
-  assert.equal(p.path, path.join(t.desk.home, "policy.md"));
-  assert.deepEqual([p.judge.state, p.judge.off_reason], ["off", "it's turned off"]);
-  const saved = (await (await put({ text: "Bot PRs are FYI.\n", base: p.hash })).json()) as { ok: boolean; hash: string };
-  assert.equal(saved.ok, true);
-  assert.equal(fs.readFileSync(path.join(t.desk.home, "policy.md"), "utf8"), "Bot PRs are FYI.\n");
-  const again = await t.json("/api/policy");
-  assert.deepEqual([again.text, again.hash], ["Bot PRs are FYI.\n", saved.hash]);
-  assert.equal(again.judge.off_reason, "it's turned off");
-  assert.equal((await put({ text: "x", base: p.hash })).status, 409, "the old hash is stale now");
-  assert.equal((await put({ base: saved.hash })).status, 400);
-  assert.equal((await put({ text: "x".repeat(20_001), base: saved.hash })).status, 400);
-});
-
 test("opening a URL and notifying per platform, all as argv", () => {
   const url = "http://localhost:47823";
   assert.deepEqual(openCommand(url, "darwin"), ["open", [url]]);
@@ -951,15 +928,11 @@ test("the desk's refusals answer through respond with their tag, words and statu
   assert.equal((await call("POST", "/api/act", { id: "web#3", action: "inflight" }, DESK))[0], 200);
   assert.deepEqual(await call("POST", "/api/inflight/web%233/note", { text: " ‮ " }), [400, no("BadRequest", "the note is empty")]);
   assert.deepEqual(await call("POST", "/api/inflight/web%233/handback", {}), [400, no("BadRequest", "need { why }")]);
-  assert.deepEqual(await call("PUT", "/api/policy", { text: "x", base: "stale" }), [
-    409,
-    no("Stale", "policy.md changed since you opened it; reload to see it, then reapply your edit"),
-  ]);
   assert.deepEqual(await call("PUT", "/api/config", { text: "x", base: "stale" }), [
     409,
     no("Stale", "config.toml changed on disk since you opened it; reload to see it, then reapply your edit"),
   ]);
-  assert.deepEqual(await call("PUT", "/api/policy", "null"), [400, no("BadRequest", "the body must be a JSON object")]);
+  assert.deepEqual(await call("PUT", "/api/config", "null"), [400, no("BadRequest", "the body must be a JSON object")]);
   assert.deepEqual(await call("PUT", "/api/settings", "[]"), [400, no("BadRequest", "the body must be a JSON object")]);
   assert.deepEqual(await call("POST", "/api/config/preview", "{"), [400, no("BadRequest", "the body must be a JSON object")]);
   const scalar = [400, no("BadRequest", "the body must be a JSON object")];

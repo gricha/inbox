@@ -80,12 +80,13 @@ import type {
   ItemState,
   SessionCard,
   Job,
+  Criterion,
   JudgeAnswer,
+  JudgeSignal,
   JudgeStep,
   Overview,
   Paused,
   Placement,
-  PolicyDoc,
   Preflight,
   PreviewResult,
   QueueView,
@@ -121,7 +122,7 @@ import {
   type LoadedConfig,
 } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
-import { classify, placedBy, queueOrder, type BoardResult, type CompiledBoard } from "./rules.ts";
+import { classify, placedBy, queueOrder, signalKey, weightOf, type BoardResult, type CompiledBoard } from "./rules.ts";
 import { compile, renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
@@ -137,7 +138,7 @@ import {
   type PrText,
 } from "./review.ts";
 import * as agents from "./agents.ts";
-import { DEFAULT_POLICY, Judge, judgeKey, sortKey, textHash } from "./judge.ts";
+import { Judge, judgeKey, sortKey, textHash } from "./judge.ts";
 import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
@@ -232,6 +233,7 @@ export interface Snapshot {
   handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
   stacks: Stacks;
   deps: Map<string, DepFacts>; // open PRs' dependency facts (src/deps.ts)
+  judging: Map<string, { signals: JudgeSignal[]; key: string }>; // while the judge is on: what it weighs for each item, and its answer's key
 }
 
 // Without it a pin no board places (desk_add's, or one a board's search dropped) would be on no page at all.
@@ -261,7 +263,24 @@ interface Acted {
 }
 
 // What a sort of the item holds for: the item as it is (sortKey), with its pin.
+// An automation's sort and a criterion's yes, as the judge weighs them beside the rules (docs/api.md → The judge).
+const SORT_WEIGHT = 8;
+const sortSignal = (s: Sorted): JudgeSignal => ({
+  from: `automation ${s.name}`,
+  bucket: s.bucket,
+  why: s.why,
+  weight: SORT_WEIGHT,
+  key: signalKey(["automation", s.automation, s.bucket, s.why]),
+});
+const criterionSignal = (c: Criterion): JudgeSignal => ({
+  from: `criterion ${c.name}`,
+  why: "says yes",
+  weight: c.weight ?? 1,
+  key: signalKey(["criterion", c.id]),
+});
 const sortKeyOf = (e: Entry, pin?: string) => sortKey(e.item, e.analysis.activity_at, pin, e.analysis.signals.pr.blocker);
+// No automation sorts or clears a review asked of you by name: that's the judge's to weigh, and yours.
+const ASKED_BY_NAME = "it's a review asked of you by name";
 const AT: Record<Bucket, string> = { now: "Now", today: "Today", blocked: "Blocked", later: "Later", fyi: "FYI", hide: "Hidden" };
 
 // In Merging rather than anywhere in the queue: handed off, and not snoozed, muted or done.
@@ -292,8 +311,6 @@ interface Merging {
   rebase?: string; // when the desk gave it to the coordinator to rebase, ready to merge but for a conflict
   back?: string; // when you brought it back with b
 }
-
-const MAX_POLICY = 20_000; // it goes with every judge call
 
 // Through a symlink to the real file, swapped in whole so a watcher never reads half of it.
 const replaceFile = Effect.fnUntraced(function* (file: string, text: string, backup = false): Effect.fn.Return<void, FsError> {
@@ -370,8 +387,6 @@ export class Desk {
   writer: GitHubWriter | null;
   githubError: GitHubReadError | Upstream | null = null; // why a first run couldn't read GitHub yet: no config until it can
   decisions: string | undefined;
-  policyPath: string;
-  policy = { text: "", hash: textHash(DEFAULT_POLICY) }; // the file's text; the hash is of what's in effect
   judge: Judge;
   convos: Conversations;
   coordinator: Coordinator;
@@ -436,7 +451,6 @@ export class Desk {
     this.decisions = opts.decisions;
     fs.mkdirSync(this.home, { recursive: true });
     this.configPath = path.join(this.home, "config.toml");
-    this.policyPath = path.join(this.home, "policy.md");
     this.settingsPath = settingsPath(this.home);
     this.settings = this.readSettings();
     this.store = new Store(path.join(this.home, "desk.db"));
@@ -496,11 +510,8 @@ export class Desk {
       else yield* Effect.forEach(this.connectors, (c) => c.init(false), { discard: true });
       yield* this.migrateSettings();
       yield* this.migrateSecrets();
-      yield* this.readPolicy();
+      this.oldPolicy();
       if (!this.githubError) yield* this.loadConfig();
-      fs.watchFile(this.policyPath, { interval: 2000 }, () => {
-        this.edited("policy.md");
-      });
       fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
         this.edited("settings.json");
       });
@@ -543,10 +554,8 @@ export class Desk {
 
   // One of the desk's files changed on disk (an editor, an agent): read again through the runner, so one it can't read is
   // logged and reported and the desk keeps what it had. Unchanged, nothing happens.
-  edited(file: "policy.md" | "settings.json" | "config.toml"): void {
+  edited(file: "settings.json" | "config.toml"): void {
     const reread = Effect.suspend((): Effect.Effect<void, FsError> => {
-      if (file === "policy.md")
-        return Effect.flatMap(this.policyFile(), (text) => (text === this.policy.text ? Effect.void : this.policyChanged()));
       if (file === "settings.json") {
         // One read: one it can't read is a problem on the Settings page, as at the start.
         const read = readSettings(this.settingsPath);
@@ -583,7 +592,6 @@ export class Desk {
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
-    fs.unwatchFile(this.policyPath);
     this.closeIfIdle();
   }
 
@@ -670,49 +678,14 @@ export class Desk {
     });
   }
 
-  // ---------------------------------------------------------------- policy
+  // ---------------------------------------------------------------- the judge
 
-  // policy.md as it is now, "" for none.
-  policyFile(): Effect.Effect<string, FsError> {
-    return Effect.try({
-      try: () => (fs.existsSync(this.policyPath) ? fs.readFileSync(this.policyPath, "utf8") : ""),
-      catch: fsError("read", this.policyPath),
-    });
-  }
-
-  readPolicy(): Effect.Effect<void, FsError> {
-    return Effect.map(this.policyFile(), (text) => {
-      this.policy = { text, hash: textHash(text.trim() ? text : DEFAULT_POLICY) };
-    });
-  }
-
-  // What the judge follows: policy.md, or the starter while it's empty.
-  policyText(): string {
-    return this.policy.text.trim() ? this.policy.text : DEFAULT_POLICY;
-  }
-
-  policyChanged(): Effect.Effect<void, FsError> {
-    return Effect.map(this.readPolicy(), () => {
-      this.changed();
-      this.judge.pump();
-    });
-  }
-
-  getPolicy(): PolicyDoc {
-    return { path: this.policyPath, text: this.policy.text, starter: DEFAULT_POLICY, hash: this.policy.hash, judge: this.judge.status() };
-  }
-
-  // `base` is the hash from GET: a stale one means it changed since (an agent, an editor) and nothing is written.
-  putPolicy(text: string, base?: string): Effect.Effect<{ ok: true; hash: string }, Stale | BadRequest | FsError> {
-    return Effect.gen({ self: this }, function* () {
-      if (base !== undefined && base !== this.policy.hash)
-        return yield* new Stale({ message: "policy.md changed since you opened it; reload to see it, then reapply your edit" });
-      if (text.length > MAX_POLICY)
-        return yield* new BadRequest({ message: `the policy is ${text.length} characters; keep it under ${MAX_POLICY}` });
-      yield* replaceFile(this.policyPath, text);
-      yield* this.policyChanged();
-      return { ok: true as const, hash: this.policy.hash };
-    });
+  // policy.md was the owner's prose for the judge; rules and their weights replaced it. Left on disk, and said once.
+  private oldPolicy(): void {
+    const file = path.join(this.home, "policy.md");
+    if (this.store.get("policy_md_noted") !== null || !fs.existsSync(file)) return;
+    this.store.set("policy_md_noted", new Date().toISOString());
+    this.log(`${file} is no longer read: Claude sorts by your rules and their weights (Settings → GitHub → Searches and rules)`);
   }
 
   // ---------------------------------------------------------------- settings
@@ -964,6 +937,7 @@ export class Desk {
       paused: {
         ai: this.aiPausedNow() ? { why: this.aiPaused!.why, until: new Date(this.aiPaused!.until).toISOString() } : null,
       },
+      judge: this.judge.status(),
     };
   }
 
@@ -1420,38 +1394,43 @@ export class Desk {
       const current = ai?.head_oid === e.item.head_oid ? ai : null;
       return current?.risk === "high" ? "look" : current?.verdict;
     };
-    // An answer for what the item was (judgeKey: its activity, commit, reviews, files, AI review) or an older policy stays
-    // until a fresh one lands, so the queue doesn't jump back to the rules' placements each time the policy changes.
+    // An answer for what the item was (judgeKey: its activity, commit, reviews, files, AI review) or for other signals stays
+    // until a fresh one lands, so the queue doesn't jump back to the rules' placements each time a rule changes.
     const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
+    // An automation's sort is a signal for the judge, and stands in for its answer until the judge has weighed it: while
+    // the item is what it sorted, and while the automation is on and may still sort there.
+    const sorts = this.store.prefixed<Sorted | null>("sorted:");
     const keyOf = (e: Entry) =>
       judgeKey(e.item, e.analysis.activity_at, reviews.get(e.item.id), pins.get(e.item.id), e.analysis.signals.pr.blocker);
-    // An automation's sort stands in for Claude's answer while the item is what it sorted, and while the automation is on
-    // and may still sort there; else Claude's again.
-    const sorts = this.store.prefixed<Sorted | null>("sorted:");
     const automations = new Map(this.automations.all().map((a) => [a.id, a]));
-    const sorted = (id: string): JudgeStep | null => {
-      const s = sorts.get(id);
+    // A rule's sort also needs its check to pass still: a rule narrowed since (a release, your edit) lets go of what it no longer covers.
+    const still = (x: Automation, sig: Signals) => {
+      if (x.decide !== "rule" || !x.when) return true;
+      const c = compile(x.when);
+      if (Result.isFailure(c)) return true;
+      const v = c.success.eval(sig);
+      return Result.isSuccess(v) && Boolean(v.success);
+    };
+    const holding = new Map<string, Sorted>();
+    for (const [id, s] of sorts) {
       const e = entries.get(id);
       const a = s && automations.get(s.automation);
-      // A rule's sort also needs its check to pass still: a rule narrowed since (a release, your edit) lets go of what it no longer covers.
-      const still = (x: Automation, sig: Signals) => {
-        if (x.decide !== "rule" || !x.when) return true;
-        const c = compile(x.when);
-        if (Result.isFailure(c)) return true;
-        const v = c.success.eval(sig);
-        return Result.isSuccess(v) && Boolean(v.success);
-      };
-      const holds =
-        s && e && a?.on && canOf(a).some((v) => v === s.bucket) && s.key === sortKeyOf(e, pins.get(id)) && still(a, e.analysis.signals);
-      return holds ? { bucket: s.bucket, why: s.why, pending: false, by: s.name } : null;
-    };
+      if (s && e && a?.on && canOf(a).some((v) => v === s.bucket) && s.key === sortKeyOf(e, pins.get(id)) && still(a, e.analysis.signals))
+        holding.set(id, s);
+    }
+    const bySort = (s: Sorted): JudgeStep => ({ bucket: s.bucket, why: s.why, pending: false, by: s.name });
+    // The sort shows until the judge has weighed it; pending is settled once every board has said what matches it (below).
     const claude = (id: string): JudgeStep => {
       const a = answers?.get(id);
-      if (!a) return { bucket: null, why: "", pending: true };
-      const e = entries.get(id);
-      return { bucket: a.bucket, why: a.why, pending: !e || a.policy !== this.policy.hash || a.key !== keyOf(e) };
+      const s = holding.get(id);
+      if (s && (!a?.bucket || !a.signals?.some((x) => x.key === sortSignal(s).key))) return { ...bySort(s), pending: true };
+      return a ? { bucket: a.bucket, why: a.why, pending: true } : { bucket: null, why: "", pending: true };
     };
-    const judge = answers ? (id: string) => sorted(id) ?? claude(id) : sorts.size ? sorted : undefined;
+    const asSorted = (id: string): JudgeStep | null => {
+      const s = holding.get(id);
+      return s ? bySort(s) : null;
+    };
+    const judge = answers ? claude : holding.size ? asSorted : undefined;
     // What an automation snoozed, marked done or muted says why, while that's still the last thing done to it.
     const acted = new Map<string, string>();
     for (const [id, a] of this.store.prefixed<Acted | null>("acted:")) {
@@ -1501,6 +1480,29 @@ export class Desk {
         if (!cur || RANK[p.bucket] < RANK[cur.bucket] || (p.bucket === cur.bucket && p.hard && !cur.hard)) best.set(id, p);
       }
     }
+    // What the judge weighs for each item it sorts: every board's rules that match it, an automation's sort, the criteria's
+    // yeses. Its answer is fresh while those and the item are as it saw them.
+    const judging = new Map<string, { signals: JudgeSignal[]; key: string }>();
+    if (answers) {
+      const criteria = this.urgency.all().filter((c) => c.on);
+      const placed = new Map<string, Placement[]>();
+      for (const b of boards.values())
+        for (const [id, p] of b.result.placements) if (p.judge) placed.set(id, [...(placed.get(id) ?? []), p]);
+      for (const [id, ps] of placed) {
+        const e = entries.get(id)!;
+        const s = holding.get(id);
+        const yes = this.urgency.outcomes(e, undefined, criteria).filter((o) => o.yes);
+        // Two boards with the same rules (a space's and another's) say it once.
+        const ruled = [
+          ...new Map(ps.flatMap((p) => p.signals ?? []).map((x) => [JSON.stringify([x.from, x.bucket, x.why, x.weight]), x])).values(),
+        ];
+        const signals = [...ruled, ...(s ? [sortSignal(s)] : []), ...yes.map((o) => criterionSignal(o.c))];
+        const key = signalKey([keyOf(e), signals.map((x) => x.key)]);
+        judging.set(id, { signals, key });
+        const a = answers.get(id);
+        for (const p of ps) p.judge!.pending = a?.key !== key;
+      }
+    }
     // A PR in Merging stays there; one the coordinator handed back tops your desk until done or m again.
     const needs = new Map<string, string>();
     for (const e of entries.values()) {
@@ -1548,6 +1550,7 @@ export class Desk {
       handed,
       stacks,
       deps,
+      judging,
     };
   }
 
@@ -2032,11 +2035,14 @@ export class Desk {
         .map((b) => snap.boards.get(b.config.id)!.result.placements.get(id))
         .filter((p): p is Placement => p !== undefined);
       const { snoozed_at: _, acked_at: __, ...state } = e.state;
+      const j = snap.judging.get(id);
+      const a = j ? (this.store.get(`judge:${id}`) as JudgeAnswer | null) : null;
       return {
         card: this.card(e, this.shownAt(e, snap), snap),
         item: e.item,
         signals: e.analysis.signals,
         placements,
+        ...(j && { judge: { signals: j.signals, saw: a?.signals ?? null, at: a?.at ?? null, fresh: a?.key === j.key } }),
         state,
         handoff_prompt: renderTemplate(
           e.item.kind === "issue"
@@ -2932,6 +2938,7 @@ export class Desk {
       if (e.resolved) return { ...said, outcome: "resolved" as const };
       if (e.status !== "active" || e.inflight) return { ...said, outcome: "left" as const };
       if (!snap.best.has(id)) return { ...said, outcome: "failed" as const, error: "no board lists it, so there's nowhere to sort it" };
+      if (e.analysis.signals.me.requested_direct) return { ...said, outcome: "held" as const, error: ASKED_BY_NAME };
       const key = sortKeyOf(e, snap.pins.get(id));
       // Its own sort of the item as it is still stands: nothing to do, and its first why stays.
       const was = this.store.get(`sorted:${id}`) as Sorted | null;
@@ -2973,7 +2980,14 @@ export class Desk {
       const p = snap.best.get(id);
       const pinned = snap.pins.get(id) === "them" && !this.store.lastPin(id)?.agent?.startsWith("automation:");
       const held =
-        this.raised(snap, id) ?? (pinned ? "your pin keeps it on your desk" : p?.hard ? `a hard rule keeps it in ${AT[p.bucket]}` : null);
+        this.raised(snap, id) ??
+        (e.analysis.signals.me.requested_direct
+          ? ASKED_BY_NAME
+          : pinned
+            ? "your pin keeps it on your desk"
+            : p?.hard
+              ? `a hard rule keeps it in ${AT[p.bucket]}`
+              : null);
       if (held) return { ...said, outcome: "held" as const, error: held };
       const { undo_seq } = yield* this.act(id, action, until, `automation:${a.id}`);
       const acted: Acted = { name: a.name, why: note, seq: undo_seq };
@@ -3789,7 +3803,16 @@ export class Desk {
     const hard = boards.flatMap((b) =>
       b.rules.flatMap((r) =>
         (r.hard || r.final) && r.bucket !== "judge"
-          ? [{ board: label(b), bucket: r.bucket, when: r.when, why: plainWhy(r.why ?? ""), ...(r.final && { final: true }) }]
+          ? [
+              {
+                board: label(b),
+                bucket: r.bucket,
+                when: r.when,
+                why: plainWhy(r.why ?? ""),
+                ...(r.final && { final: true }),
+                weight: weightOf(r),
+              },
+            ]
           : [],
       ),
     );
@@ -3797,7 +3820,7 @@ export class Desk {
       const source = b.source ?? "github";
       const set = b.builtin === undefined ? undefined : this.connectors.find((c) => c.id === source)?.rules[b.builtin];
       if (!set || b.builtin === undefined) return [];
-      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final }) => {
+      const rules = set.rules.map(({ id, when, bucket, why, hard: h, final, weight }) => {
         const own = b.rules.find((r) => r.id === id && r.own !== undefined)?.own;
         return {
           id,
@@ -3806,6 +3829,7 @@ export class Desk {
           why: plainWhy(why),
           ...(h && { hard: true }),
           ...(final && { final: true }),
+          weight: weightOf({ weight }),
           on: !b.off?.includes(id),
           yours: own !== undefined,
           ...(own !== undefined && { path: `boards[${i}].rules[${own}]` }),

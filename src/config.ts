@@ -3,6 +3,7 @@ import { Result } from "effect";
 import { parse, TomlError } from "smol-toml";
 import {
   BUCKETS,
+  RULE_WEIGHT,
   type BoardConfig,
   type Bucket,
   type BuiltInRules,
@@ -194,12 +195,14 @@ export function parseConfig(
     const own: Rule[] = rawRules.map((r, j) => {
       const rp = `${path}.rules[${j}]`;
       const rt = table(r, rp);
-      known(rt, rp, ["when", "bucket", "why", "nocap", "hard", "final", "id", "after"]);
+      known(rt, rp, ["when", "bucket", "why", "nocap", "hard", "final", "weight", "id", "after"]);
       const when = str(rt.when, `${rp}.when`, "");
       if (!when) err(`${rp}.when`, "is required");
       if (rt.nocap !== undefined && typeof rt.nocap !== "boolean") err(`${rp}.nocap`, "must be true or false");
       if (rt.hard !== undefined && typeof rt.hard !== "boolean") err(`${rp}.hard`, "must be true or false");
       if (rt.final !== undefined && typeof rt.final !== "boolean") err(`${rp}.final`, "must be true or false");
+      const weight = rt.weight === undefined ? undefined : num(rt.weight, `${rp}.weight`, RULE_WEIGHT);
+      if (weight !== undefined && (weight < 0 || weight > 10)) err(`${rp}.weight`, "must be from 0 to 10");
       const to = ruleBucket(rt.bucket, `${rp}.bucket`);
       if (rt.hard === true && to === "judge") err(`${rp}.hard`, "a hard rule places the item itself; give it a bucket, not judge");
       if (rt.final === true && to === "judge") err(`${rp}.final`, "a final rule places the item itself; give it a bucket, not judge");
@@ -223,6 +226,7 @@ export function parseConfig(
         hard: rt.hard === true,
         final: rt.final === true,
       };
+      if (weight !== undefined) rule.weight = weight;
       if (builtin !== undefined) rule.own = j;
       if (ref !== undefined) rule.id = ref;
       if (after !== undefined) rule.after = after;
@@ -388,6 +392,7 @@ function ruleToml(r: Rule): string {
     r.nocap && "nocap = true",
     r.hard && "hard = true",
     r.final && "final = true",
+    r.weight !== undefined && `weight = ${r.weight}`,
   ];
   return `{ ${keys.filter(Boolean).join(", ")} }`;
 }
@@ -414,7 +419,8 @@ export function defaultConfigText(opts: { workOrgs: string[]; expanded?: boolean
     `#   off = ["bot-pr"]                                      switches built-in rules off`,
     `#   { id = "bot-pr", when = "...", bucket = "fyi", ... }   in rules: yours, in that built-in rule's place`,
     `#   { after = "bot-pr", when = "...", bucket = "fyi" }     in rules: yours, right after it (the others in rules go first)`,
-    `# Claude then sorts every item by your policy (Settings → Agent → Your policy), with the rule's bucket as its hint.`,
+    `# Claude then sorts every item, weighing every rule that matches it: \`weight\` (0 to 10, ${RULE_WEIGHT} unless set) says how much`,
+    `# one counts. The first matching rule's bucket is where the item sits until Claude answers.`,
     `# A rule with \`hard = true\` is a floor: what it matches never sorts below its bucket (Today for a Now rule), whatever`,
     `# Claude, quiet days or caps say.`,
     `# A rule with \`final = true\` isn't re-sorted by Claude: what it matches stays in its bucket (your pin still lifts it).`,
