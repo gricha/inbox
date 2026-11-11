@@ -398,7 +398,7 @@ interface QueueView {
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
   cards: number; // queue.cards: the queue is one list, now's cards then today's (each the weightiest first); it shows this many, the rest behind one line; 0 = all
-  paused: { who: "claude" | "ai"; why: string } | null; // said once above the queue: claude, when the AI review or the judge can't log in; ai, when AI reviews nobody asked for keep failing otherwise
+  paused: { who: "claude" | "ai"; why: string } | null; // said once, as a bubble at the window's edge: claude, when the AI review or the judge can't log in; ai, when AI reviews nobody asked for keep failing otherwise
   reviewing: number; // someone else's PRs that would be in Now or Today, held until Claude's first review of them is written
   stacks: Record<string, Stack>; // by stack id: each stack a card here carries (Stacks, below); current is the card sections list it by, else its first card
   inbox: { urgent: Card[]; standard: Card[]; fyi: Card[] }; // the Inbox the window draws (Urgency, above): each card with section, score and reason

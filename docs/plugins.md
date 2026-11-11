@@ -134,7 +134,7 @@ export interface Plugin<I extends Head = Head> {
   start?(): void; // PULL: its loops on unref'd timers, each pass forked through host.runner (docs/effect.md)
   stop?(): void; // clears its timers; Desk.stop() calls it before runner.stop()
   sync?(): Effect.Effect<void>; // a full pass now (Sync now, an edited config.toml); never fails: status() says what did
-  status?(): ConnectorStatus & { paused?: Paused; detail?: unknown }; // its sync state; its pause, said once above the queue; its Settings section's facts (GitHub: the rate limit, where each org's items land, the catch-all space)
+  status?(): ConnectorStatus & { paused?: Paused; detail?: unknown }; // its sync state; its pause, said once as a bubble at the window's edge; its Settings section's facts (GitHub: the rate limit, where each org's items land, the catch-all space)
   react?(e: { on: "synced" } | { on: "settings" } | { on: "added"; id: string } | { on: "retry"; only?: string }): void; // after the core's moves, before it notifies; settings reloaded (it compares its own keys); you or a find added `id`; what failed on Claude tries now
   members?(board: CompiledBoard, scope: string): Members; // ADD: what one of its boards lists; scope: its space's
   ref?(text: string, held: readonly string[]): { held: string[]; id?: string; fetch?: Effect.Effect<string, Upstream | NotFound> } | null; // its matches; id: the one it names exactly, which fetch reads and puts, answering the id it's stored under; null: not its ref
