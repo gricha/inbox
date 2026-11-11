@@ -5,3 +5,4 @@ process.env.DESK_CLAUDE = "/nonexistent/claude";
 process.env.DESK_CLAUDE_HOME = "/nonexistent/.claude";
 process.env.DESK_CODEX_HOME = "/nonexistent/.codex";
 process.env.DESK_CLAUDE_APP = "/nonexistent/claude-code-sessions";
+process.env.DESK_OPENCODE = "/nonexistent/opencode";

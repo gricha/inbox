@@ -1051,7 +1051,7 @@ export function App() {
     document.querySelector<HTMLTextAreaElement>(".chat-input")?.focus();
   }
 
-  // Copy attach command copies `claude attach <id>` (Codex's: `codex resume <id>`); Wake it starts your agent, or has it look at Merging now.
+  // Copy attach command copies `claude attach <id>` (Codex's: `codex resume <id>`, OpenCode's: `opencode --session <id>`); Wake it starts your agent, or has it look at Merging now.
   function coordinatorAct(k: "copy" | "wake"): Effect.Effect<void> {
     const id = lane?.coordinator.id;
     const step: Effect.Effect<void, ApiError | ClipboardUnavailable> =
@@ -1065,7 +1065,7 @@ export function App() {
             ),
           )
         : id
-          ? copyText(attachCommand(id, aiName() === "Codex")).pipe(
+          ? copyText(attachCommand(id, aiName())).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
                   flash("Copied. Run it in a terminal to open your agent.");

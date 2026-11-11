@@ -617,6 +617,9 @@ export interface BoardSummary {
   error?: string; // last query error
 }
 
+// Who sorts and reviews (agent.harness), as the window and the desk's words name it.
+export type AgentName = "Claude" | "Codex" | "OpenCode";
+
 export interface Overview {
   me: string;
   synced_at: string | null;
@@ -629,7 +632,7 @@ export interface Overview {
   focus: { now: number; today: number; new: number; asks: number; sessions: number };
   inflight: { total: number }; // your open PRs in Merging
   agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
-  ai_agent: "Claude" | "Codex"; // who sorts and reviews (agent.harness), as the window names it
+  ai_agent: AgentName; // who sorts and reviews (agent.harness), as the window names it
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
   update?: UpdateView | null; // absent or null: no packaged app runs this desk (a checkout, desk serve), so nothing to update
@@ -1268,7 +1271,7 @@ export interface AutomationRun {
   summary: string; // the agent's: untrusted
   items: AutomationItem[];
   session: string | null; // the run's Claude Code session: claude --resume <id> shows what it did
-  agent?: "codex"; // run on Codex: codex resume <id> shows it
+  agent?: "codex" | "opencode"; // run on Codex (codex resume <id> shows it) or OpenCode (opencode -s <id>)
 }
 
 export interface AutomationItem {

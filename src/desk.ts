@@ -124,10 +124,10 @@ import { inQuietHours, notify } from "./notify.ts";
 import {
   agentDir,
   agentDown,
-  CLAUDE_PAUSED,
-  CODEX_PAUSED,
   forgetCodexServers,
+  forgetOpencodeServers,
   notLoggedIn,
+  pausedWords,
   reviewOrder,
   type FetchPrError,
   type PrText,
@@ -618,7 +618,7 @@ export class Desk {
     return agentDir(this.home);
   }
 
-  // The agent the tool-less calls run on (Settings → Agent): Claude Code unless it's Codex.
+  // The agent the tool-less calls run on (Settings → Agent): Claude Code unless it's Codex or OpenCode.
   agent(): agents.DriverId {
     return agents.driverOf(this.settings["agent.harness"]);
   }
@@ -770,6 +770,7 @@ export class Desk {
       // A changed agent starts afresh: whatever failed on the old one tries again now.
       if (agentKey(this.settings) !== agent) {
         forgetCodexServers();
+        forgetOpencodeServers();
         this.retryAgents();
       }
       this.pumpAi();
@@ -1690,8 +1691,7 @@ export class Desk {
   paused(): Paused | null {
     const login = (why: string | null | undefined) => !!why?.endsWith(notLoggedIn(this.agent()));
     const ai = this.autoAiOn() && this.aiPausedNow() ? this.aiPaused!.why : null;
-    if (login(ai) || (!this.judge.offReason() && login(this.judge.error)))
-      return { who: "claude", why: this.agent() === "codex" ? CODEX_PAUSED : CLAUDE_PAUSED };
+    if (login(ai) || (!this.judge.offReason() && login(this.judge.error))) return { who: "claude", why: pausedWords(this.agent()) };
     return ai ? { who: "ai", why: ai } : null;
   }
 

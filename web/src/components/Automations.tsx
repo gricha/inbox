@@ -12,6 +12,7 @@ import {
   VERBS,
   type ActivityKind,
   type AutomationBody,
+  type AutomationRun,
   type AutomationView as Auto,
   type RuleAction,
   type Verb,
@@ -64,9 +65,9 @@ const WAY: Record<Way, { name: string; help: string }> = {
 };
 // Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
 const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : `${aiName()} answers, without tools`);
-// Codex's run has only the desk's read tools: Codex can't hold a shell to gh's reads, so it has none.
+// Codex's and OpenCode's run have only the desk's read tools: neither can hold a shell to gh's reads, so they have none.
 const agentRun = () =>
-  aiName() === "Codex" ? "your Codex, read only, with the desk's read tools and no shell" : "your Claude Code, with read-only tools";
+  aiName() === "Claude" ? "your Claude Code, with read-only tools" : `your ${aiName()}, read only, with the desk's read tools and no shell`;
 
 // What goes to the desk for a draft: the whole automation. A rule's verb is the one thing it may do.
 function bodyOf(d: Draft): AutomationBody {
@@ -445,9 +446,9 @@ export function AutomationView({
   const turn = (on: boolean) => () => {
     runUi(au.turn(a, on));
   };
-  const resume = (session: string, codex: boolean) => {
+  const resume = (session: string, agent: AutomationRun["agent"]) => {
     if (!settingsPath) return null;
-    const cmd = resumeCommand(settingsPath, session, codex);
+    const cmd = resumeCommand(settingsPath, session, agent);
     return (
       <button
         type="button"
@@ -612,7 +613,7 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
 }
 
 // Each run: when, what it found, and what came of each item; its session one click from your clipboard.
-function Runs({ a, resume }: { a: Auto; resume: (session: string, codex: boolean) => ReactNode }) {
+function Runs({ a, resume }: { a: Auto; resume: (session: string, agent: AutomationRun["agent"]) => ReactNode }) {
   return (
     <div className="lines">
       {a.runs.map((r) => (
@@ -624,7 +625,7 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string, codex: boolean
               {r.didnt && <span className="t-bad"> · {r.didnt}</span>}
               {!r.done_at && <span className="busy" aria-label="running" />}
             </h3>
-            {r.session && resume(r.session, r.agent === "codex")}
+            {r.session && resume(r.session, r.agent)}
           </div>
           {r.error && <p className="t-bad au-run-error">{r.error}</p>}
           {r.summary && <p className="au-summary">{r.summary}</p>}
@@ -891,7 +892,7 @@ function Editor({
             <span className="s-help">
               {d.decide === "ask"
                 ? "In your words: what should happen to which items. It answers for each item, or leaves it as it is."
-                : `${aiName() === "Codex" ? "Your own Codex runs it read only, with the desk's read tools and no shell" : "Your own Claude Code runs it read only, with your tools"}; it lists PRs and issues with a line on why, and the desk does with them what you allow below.`}
+                : `${aiName() === "Claude" ? "Your own Claude Code runs it read only, with your tools" : `Your own ${aiName()} runs it read only, with the desk's read tools and no shell`}; it lists PRs and issues with a line on why, and the desk does with them what you allow below.`}
             </span>
           </label>
           <fieldset className="au-field">

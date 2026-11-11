@@ -1,4 +1,4 @@
-// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own agent (Claude Code or Codex)
+// A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own agent (Claude Code, Codex or OpenCode)
 // writes from them. The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -13,6 +13,7 @@ import {
   CODEX_NOT_LOGGED_IN,
   CodexServersUnknown,
   NOT_LOGGED_IN,
+  OPENCODE_NOT_LOGGED_IN,
   ClaudeBadOutput,
   ClaudeNotLoggedIn,
   CommandBadOutput,
@@ -193,6 +194,7 @@ export interface RunOpts {
   timeout: number;
   stdoutOnError?: boolean;
   missing: string;
+  env?: Record<string, string>; // added to the desk's own environment
 }
 
 type RunError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed;
@@ -215,7 +217,14 @@ export function runCommand(s: Spawn, opts: RunOpts): Effect.Effect<string, RunEr
   return Effect.callback<string, RunError>((resume) => {
     // Spawned in the register: no yield between starting the child and tracking it.
     const started = Result.try({
-      try: () => spawn(s.file, s.args, { cwd: opts.cwd, shell: s.shell, detached: OWN_GROUP, windowsHide: true }),
+      try: () =>
+        spawn(s.file, s.args, {
+          cwd: opts.cwd,
+          shell: s.shell,
+          detached: OWN_GROUP,
+          windowsHide: true,
+          ...(opts.env && { env: { ...process.env, ...opts.env } }),
+        }),
       catch: (cause) => cause,
     });
     if (Result.isFailure(started)) {
@@ -535,7 +544,7 @@ export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.en
 export interface AskOpts {
   dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
-  agent?: DriverId; // agent.harness: Claude Code unless it says Codex
+  agent?: DriverId; // agent.harness: Claude Code unless it says Codex or OpenCode
 }
 
 export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
@@ -582,7 +591,7 @@ export const askClaude = Effect.fn("askClaude")(function* (
 // The tool-less call on the agent you chose (Settings → Agent): the judge, the AI review and its check, the conversation
 // read and automations' questions all go through here, so they follow the setting from their next call.
 export const askAgent = (prompt: string, opts: { command?: string } & AskOpts): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError> =>
-  opts.agent === "codex" ? askCodex(prompt, opts) : askClaude(prompt, opts);
+  opts.agent === "codex" ? askCodex(prompt, opts) : opts.agent === "opencode" ? askOpencode(prompt, opts) : askClaude(prompt, opts);
 
 // The owner's own codex, as claude is: DESK_CODEX points tests and QA at a fake.
 export const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.DESK_CODEX : "codex");
@@ -806,18 +815,204 @@ const codexAnswer = Effect.fnUntraced(function* (events: string, last: string): 
   return { answer: yield* readJson(/\{[\s\S]*\}/.exec(last)?.[0] ?? "{}", last), model: model ?? "codex" };
 });
 
+// ---------------------------------------------------------------- OpenCode
+
+// The owner's own opencode, as claude is: DESK_OPENCODE points tests and QA at a fake.
+export const opencodeCommand = () => (process.env.DESK_OPENCODE?.trim() ? process.env.DESK_OPENCODE : "opencode");
+export const opencodeMissing = (command: string) => `${command} not found: install OpenCode so opencode runs from your PATH`;
+
+// Each run is the desk's own agent, defined in the config the desk passes (OPENCODE_CONFIG_CONTENT, merged last over yours):
+// its permissions come after your global ones, so its denials hold; your model, providers and login stay yours.
+export const OPENCODE_AGENT = "inbox-desk";
+// Every permission OpenCode knows, each denied by name too, so none of yours with the same key outlasts the agent's "*".
+const OPENCODE_TOOLS = ["read", "edit", "glob", "grep", "list", "bash", "task", "external_directory", "todowrite", "todoread"].concat([
+  "question",
+  "webfetch",
+  "websearch",
+  "codesearch",
+  "lsp",
+  "skill",
+  "doom_loop",
+]);
+const OPENCODE_DENY_ALL: Record<string, string> = Object.fromEntries(["*", ...OPENCODE_TOOLS].map((k) => [k, "deny"]));
+// --pure: no external plugins, which run code in the process whatever the permissions say. A new session's --title keeps
+// opencode from asking your small model for one, a second call that would carry the prompt to another model.
+export const opencodeRunArgs = (title: string, session?: string) => [
+  "run",
+  "--format",
+  "json",
+  "--pure",
+  "--agent",
+  OPENCODE_AGENT,
+  ...(session ? ["--session", session] : ["--title", title]),
+];
+
+let ocServers: { command: string; at: number; listed: Listed[] } | null = null;
+export function forgetOpencodeServers(): void {
+  ocServers = null;
+}
+
+// The MCP servers your config (`opencode debug config`, the merged one, in the folder it runs in) would load: each to turn
+// off. A config that can't be read refuses the call, as Codex's list does.
+const opencodeServers = Effect.fnUntraced(function* (command: string, dir: string) {
+  if (ocServers?.command === command && Date.now() - ocServers.at < SERVERS_TTL) return ocServers.listed;
+  const unknown = (reason: string, cause?: unknown) => new CodexServersUnknown({ reason, agent: "opencode", cause });
+  const spawnAs = yield* claudeSpawn(command, ["debug", "config", "--pure"]);
+  const out = yield* runCommand(spawnAs, { cwd: dir, timeout: 30_000, missing: opencodeMissing(command) }).pipe(
+    Effect.catchTags({
+      CommandFailed: (e) => Effect.fail(unknown(e.message, e)),
+      CommandTimeout: (e) => Effect.fail(unknown(e.message, e)),
+      CommandOutputTooLarge: (e) => Effect.fail(unknown(e.message, e)),
+    }),
+  );
+  const parsed = Result.try({ try: (): unknown => JSON.parse(out), catch: (cause) => cause });
+  const mcp = Result.isFailure(parsed) ? null : (parsed.success as { mcp?: unknown } | null)?.mcp;
+  const listed = mcp === undefined ? [] : listedOf(mcp);
+  if (!listed) return yield* unknown("`opencode debug config` printed no config the desk could read");
+  ocServers = { command, at: Date.now(), listed };
+  return listed;
+});
+
+// What a run may do: the agent's permissions, given the name the desk's MCP server goes by (its tools are <name>_<tool>).
+type Permits = (server: string) => Record<string, unknown>;
+
+// The config a run passes: every server of yours off but the desk's, if it has one (inbox when yours of that name is the
+// desk's, else inbox_desk, since a url merged into another server's entry wouldn't parse), never shared, and the agent.
+export const opencodeConfig = Effect.fnUntraced(function* (command: string, dir: string, permits: Permits, desk?: DeskMcp) {
+  const listed = yield* opencodeServers(command, dir);
+  const theirs = listed.find((s) => s.name === "inbox");
+  const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
+  const mcp: Record<string, object> = Object.fromEntries(
+    listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => [s.name, { enabled: false }]),
+  );
+  if (desk) mcp[name] = { type: "remote", url: desk.url, enabled: true };
+  const agent = { mode: "primary", description: "Inbox runs this agent for you.", permission: permits(name) };
+  const ours = { share: "disabled", mcp, agent: { [OPENCODE_AGENT]: agent } };
+  return JSON.stringify(withYours(ours, process.env.OPENCODE_CONFIG_CONTENT));
+});
+
+// Your own OPENCODE_CONFIG_CONTENT, if you set one, stays under the desk's: its servers and agents merged by name.
+function withYours(ours: { mcp: object; agent: object }, yours: string | undefined): object {
+  const parsed = yours?.trim() ? Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(yours), catch: () => null })) : null;
+  if (!parsed || typeof parsed !== "object") return ours;
+  const y = parsed as { mcp?: object; agent?: object };
+  return { ...y, ...ours, mcp: { ...y.mcp, ...ours.mcp }, agent: { ...y.agent, ...ours.agent } };
+}
+
+// The schema goes in the prompt: opencode run has no option for one, and the answer is read from its last text.
+const withSchema = (prompt: string, schema: object) =>
+  `${prompt}\n\nAnswer with one JSON object and nothing else (no code fence) that matches this JSON Schema:\n${JSON.stringify(schema)}`;
+
+// The tool-less call: every permission denied, no MCP server, and its session deleted after, as Claude Code keeps none.
+const askOpencode = (prompt: string, opts: { command?: string } & AskOpts): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError> =>
+  Effect.map(opencodeRun(prompt, opts), ({ answer, model }) => ({ answer, model }));
+
+// A run with the desk's MCP server (`desk`, its tools by name in `tools`) keeps its session, so it can be resumed.
+export const opencodeRun = Effect.fn("opencodeRun")(function* (
+  prompt: string,
+  opts: { command?: string; desk?: DeskMcp; timeout?: number } & AskOpts,
+): Effect.fn.Return<ClaudeAnswer & { session: string | null }, CommandError | ClaudeError> {
+  const command = opts.command ?? opencodeCommand();
+  const desk = opts.desk;
+  const permits: Permits = (server) => ({
+    ...OPENCODE_DENY_ALL,
+    ...Object.fromEntries((desk?.tools ?? []).map((t) => [`${server}_${t}`, "allow"])),
+  });
+  const config = yield* opencodeConfig(command, opts.dir, permits, desk);
+  const spawnAs = yield* claudeSpawn(command, opencodeRunArgs(desk ? "Inbox automation" : "Inbox"));
+  const events = yield* runCommand(spawnAs, {
+    input: withSchema(prompt, opts.schema ?? SCHEMA),
+    cwd: opts.dir,
+    timeout: opts.timeout ?? TIMEOUT,
+    stdoutOnError: true,
+    missing: opencodeMissing(command),
+    env: { OPENCODE_CONFIG_CONTENT: config },
+  }).pipe(
+    Effect.catchTag("CommandFailed", (e): Effect.Effect<never, CommandFailed | ClaudeNotLoggedIn | ClaudeApiError> =>
+      Effect.fail(OPENCODE_DOWN.test(e.stderr) ? opencodeError(e.stderr) : e),
+    ),
+  );
+  const session = opencodeSession(events);
+  const forget = !desk && session ? dropSession(command, opts.dir, session) : Effect.void;
+  return yield* Effect.ensuring(
+    Effect.map(opencodeAnswer(events), (a) => ({ ...a, session })),
+    forget,
+  );
+});
+
+// A tool-less run's session goes once it's read; one that won't go is left, as nothing depends on it.
+const dropSession = (command: string, dir: string, session: string): Effect.Effect<void> =>
+  claudeSpawn(command, ["session", "delete", session]).pipe(
+    Effect.flatMap((s) => runCommand(s, { cwd: dir, timeout: 15_000, missing: opencodeMissing(command) })),
+    Effect.ignore,
+  );
+
+// The session `opencode run --format json` names on each event.
+export function opencodeSession(events: string): string | null {
+  for (const line of events.split("\n")) {
+    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as { sessionID?: unknown } | null;
+    if (typeof e?.sessionID === "string" && e.sessionID) return e.sessionID;
+  }
+  return null;
+}
+
+// An `error` event's words, its HTTP status first when it has one ("401 User not found."), so a login or a limit reads as one.
+export function opencodeFailure(line: string): string | null {
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
+    type?: unknown;
+    error?: { name?: unknown; data?: { message?: unknown; statusCode?: unknown } };
+  } | null;
+  if (e?.type !== "error") return null;
+  const d = e.error?.data;
+  const words =
+    typeof d?.message === "string" && d.message ? d.message : typeof e.error?.name === "string" ? e.error.name : "opencode failed";
+  return typeof d?.statusCode === "number" ? `${d.statusCode} ${words}` : words;
+}
+
+const OPENCODE_LOGIN = /not logged in|\b401\b|unauthori[sz]ed|invalid api key|ProviderAuthError|opencode auth login/i;
+const OPENCODE_LIMIT = /\b429\b|\b402\b|too many requests|usage limit|rate.?limit|insufficient (credits|balance)|quota/i;
+export const OPENCODE_DOWN = new RegExp(`${OPENCODE_LOGIN.source}|${OPENCODE_LIMIT.source}`, "i");
+
+// opencode's error words: a login it needs pauses the desk with OpenCode's fix; a limit (or credits run out) is held.
+export function opencodeError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
+  const msg = raw.trim();
+  if (OPENCODE_LOGIN.test(msg)) return new ClaudeNotLoggedIn({ detail: msg, agent: "opencode" });
+  return new ClaudeApiError({ message: msg || "opencode failed", ...(OPENCODE_LIMIT.test(msg) && { status: 429 }) });
+}
+
+// `opencode run --format json`'s events: the last text part is the answer; with none, an error event says why. Its events
+// name no model, so its reviews say "opencode".
+const opencodeAnswer = Effect.fnUntraced(function* (events: string): Effect.fn.Return<ClaudeAnswer, ClaudeError> {
+  let last = "";
+  let failed: string | null = null;
+  for (const line of events.split("\n")) {
+    failed = opencodeFailure(line) ?? failed;
+    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
+      type?: unknown;
+      part?: { text?: unknown };
+    } | null;
+    if (e?.type === "text" && typeof e.part?.text === "string" && e.part.text.trim()) last = e.part.text;
+  }
+  if (!last.trim() && failed !== null) return yield* opencodeError(failed);
+  if (!last.trim()) return yield* new ClaudeBadOutput({ message: "opencode gave no answer", excerpt: events.slice(-500) });
+  return { answer: yield* readJson(/\{[\s\S]*\}/.exec(last)?.[0] ?? "{}", last), model: "opencode" };
+});
+
 // The queue's one line when it is: every agent stops on it, the judge too.
 export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
 export const CODEX_PAUSED = "Codex isn't logged in, so nothing is being sorted or reviewed. Run `codex login`.";
+export const OPENCODE_PAUSED = "OpenCode isn't logged in, so nothing is being sorted or reviewed. Run `opencode auth login`.";
+export const pausedWords = (agent: DriverId) => (agent === "codex" ? CODEX_PAUSED : agent === "opencode" ? OPENCODE_PAUSED : CLAUDE_PAUSED);
 // The agent's not-logged-in words: what a success on it retries, by suffix.
-export const notLoggedIn = (agent: DriverId) => (agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN);
+export const notLoggedIn = (agent: DriverId) =>
+  agent === "codex" ? CODEX_NOT_LOGGED_IN : agent === "opencode" ? OPENCODE_NOT_LOGGED_IN : NOT_LOGGED_IN;
 
 // Whether the agent's CLI is logged in now, by its own status command (no model call): `claude auth status` prints
-// {"loggedIn": …}, `codex login status` exits 0 only when it is (or a provider of yours has its key, below). Anything
-// else (not installed, a timeout) is no.
+// {"loggedIn": …}, `codex login status` exits 0 only when it is (or a provider of yours has its key, below), and
+// `opencode auth list` counts its stored logins and the providers' keys it finds set. Anything else (not installed, a timeout) is no.
 export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
-  const command = agent === "codex" ? codexCommand() : claudeCommand();
-  const args = agent === "codex" ? ["login", "status"] : ["auth", "status"];
+  const command = agent === "codex" ? codexCommand() : agent === "opencode" ? opencodeCommand() : claudeCommand();
+  const args = agent === "codex" ? ["login", "status"] : agent === "opencode" ? ["auth", "list"] : ["auth", "status"];
   const said = claudeSpawn(command, args).pipe(Effect.flatMap((s) => runCommand(s, { timeout: 15_000, missing: command })));
   if (agent === "codex")
     return said.pipe(
@@ -825,7 +1020,7 @@ export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
       Effect.orElseSucceed(() => codexKeyed()),
     );
   return said.pipe(
-    Effect.map((out) => /"loggedIn"\s*:\s*true/.test(out)),
+    Effect.map((out) => (agent === "opencode" ? opencodeKeyed(out) : /"loggedIn"\s*:\s*true/.test(out))),
     Effect.orElseSucceed(() => false),
   );
 }
@@ -840,6 +1035,9 @@ function codexKeyed(env: NodeJS.ProcessEnv = process.env): boolean {
   const key = typeof provider === "string" ? conf?.model_providers?.[provider]?.env_key : undefined;
   return typeof key === "string" && !!env[key]?.trim();
 }
+
+// `opencode auth list`: "N credentials" it stores, then "N environment variables" of providers' keys it finds set.
+export const opencodeKeyed = (out: string): boolean => /\b[1-9]\d* (credentials?|environment variables?)\b/.test(out);
 
 // claude's error, with the fix for an expired or missing login; the CLI's own words go in `detail`, for the log. An API error's JSON body comes down to its message.
 export function claudeError(raw: string, status?: number): ClaudeNotLoggedIn | ClaudeApiError {

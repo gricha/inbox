@@ -90,6 +90,37 @@ test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
   assert.equal(runSync(status("codex", MCP)).mcp?.connected, true, "desk.cmd mcp, on Windows");
 });
 
+test("OpenCode: ~/.config/opencode/opencode.json and its skills folder", () => {
+  const s = runSync(status("opencode", MCP));
+  assert.deepEqual(s.mcp, { connected: false, command: "opencode mcp add inbox --url http://localhost:47961/mcp" });
+  assert.equal(s.skill?.path, join(home, ".config", "opencode", "skills", "inbox", "SKILL.md"));
+  write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: { type: "remote", url: MCP } } }));
+  assert.equal(runSync(status("opencode", MCP)).mcp?.connected, true);
+  // OpenCode's command is the whole argv, its variables `environment`.
+  const local = { type: "local", command: ["/opt/desk/bin/desk", "mcp"], environment: { DESK_PORT: "47961" } };
+  write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: local } }));
+  assert.equal(runSync(status("opencode", MCP)).mcp?.connected, true, "desk mcp over stdio");
+  write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: { type: "local", command: ["helpdesk", "mcp"] } } }));
+  const taken = runSync(status("opencode", MCP));
+  assert.equal(taken.needs, "taken");
+  assert.match(taken.taken!, /^opencode has another MCP server named inbox \(helpdesk mcp\), not this desk/);
+});
+
+test(
+  "connect registers OpenCode through its own CLI and copies the skill to its folder",
+  { skip: process.platform === "win32" },
+  async () => {
+    fake(
+      "opencode",
+      `/bin/mkdir -p "$HOME/.config/opencode" && printf '{"mcp":{"inbox":{"type":"remote","url":"%s"}}}' "$5" > "$HOME/.config/opencode/opencode.json"`,
+    );
+    const o = await run(connect("opencode", MCP));
+    assert.equal(readFileSync(join(home, "opencode-args"), "utf8"), `mcp\nadd\ninbox\n--url\n${MCP}\n`);
+    assert.deepEqual([o.mcp?.connected, o.skill?.state, o.needs], [true, "installed", null]);
+    assert.equal(readFileSync(join(home, ".config", "opencode", "skills", "inbox", "SKILL.md"), "utf8"), SKILL);
+  },
+);
+
 // Already registered, so no agent CLI runs: this part works on every OS.
 test("connect copies the skill, and refreshes it when it's out of date", async () => {
   write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: MCP } } }));

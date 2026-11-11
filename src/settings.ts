@@ -5,7 +5,7 @@ import path from "node:path";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { fsError, type FsError } from "./errors.ts";
-import { SECRET_SET, type ConfigError, type SettingDef, type SettingsSection, type SettingValue } from "./types.ts";
+import { SECRET_SET, type AgentName, type ConfigError, type SettingDef, type SettingsSection, type SettingValue } from "./types.ts";
 
 const DEFAULT_PROMPT = `Review {item.url} by {item.author}.
 Read it with \`gh pr view {item.number} --repo {item.repo}\` and \`gh pr diff {item.number} --repo {item.repo}\`.
@@ -191,6 +191,7 @@ export const SETTINGS = [
     options: [
       { value: "claude-code", label: "Claude Code" },
       { value: "codex", label: "Codex" },
+      { value: "opencode", label: "OpenCode" },
     ],
     help: "Sorts your desk and reviews PRs ahead of time, on your own login.",
   },
@@ -368,7 +369,7 @@ export type Settings = { [D in (typeof SETTINGS)[number] as D["key"]]: ValueOf<D
 const DEFS = new Map<string, SettingDef>(SETTINGS.map((d) => [d.key, d]));
 
 // Who sorts and reviews (agent.harness), as the window and the desk's words name it.
-export const agentName = (harness: string): "Claude" | "Codex" => (harness === "codex" ? "Codex" : "Claude");
+export const agentName = (harness: string): AgentName => (harness === "codex" ? "Codex" : harness === "opencode" ? "OpenCode" : "Claude");
 
 // What the agent does names the one you chose; on Codex, running without asking is its bypass of sandbox and approvals.
 const AGENT_WORDED = new Set([
@@ -379,13 +380,19 @@ const AGENT_WORDED = new Set([
   "agent.coordinator",
   "agent.score",
 ]);
-const CODEX_BYPASS = "No sandbox and no approvals, as your own sessions run; off, it writes only in its folder. Its deny rules still hold.";
+const BYPASS = {
+  Codex: "No sandbox and no approvals, as your own sessions run; off, it writes only in its folder. Its deny rules still hold.",
+  // OpenCode has no sandbox, and nobody is there to answer what your config says to ask about.
+  OpenCode:
+    "Approves what your OpenCode config asks about; off, that's refused. OpenCode has no sandbox either way. Its deny rules still hold.",
+};
 export function agentDefs(harness: string): SettingDef[] {
-  if (agentName(harness) === "Claude") return [...SETTINGS];
-  const say = (t: string | undefined) => t?.replaceAll(/Claude( Code)?/g, "Codex");
+  const name = agentName(harness);
+  if (name === "Claude") return [...SETTINGS];
+  const say = (t: string | undefined) => t?.replaceAll(/Claude( Code)?/g, name);
   return SETTINGS.map((d: SettingDef) => {
     if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label)!, ...(d.help && { help: say(d.help) }) };
-    if (d.key === "agent.coordinator_bypass") return { ...d, help: CODEX_BYPASS };
+    if (d.key === "agent.coordinator_bypass") return { ...d, help: BYPASS[name] };
     return d;
   });
 }

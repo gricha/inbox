@@ -1,5 +1,14 @@
 import { Effect } from "effect";
-import { isCoordinator, UNTIL, type ActivityEvent, type Bucket, type Card, type Handoff, type Overview } from "../../src/types.ts";
+import {
+  isCoordinator,
+  UNTIL,
+  type ActivityEvent,
+  type AgentName,
+  type Bucket,
+  type Card,
+  type Handoff,
+  type Overview,
+} from "../../src/types.ts";
 import { ClipboardUnavailable } from "./api.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -55,15 +64,16 @@ export function when(at: string): string {
 }
 
 // Who sorts and reviews (Settings → Agent), as Overview.ai_agent names it: set on every load, read while drawing.
-let sorter: "Claude" | "Codex" = "Claude";
+let sorter: AgentName = "Claude";
 export const aiName = () => sorter;
-export function setAiName(name: "Claude" | "Codex"): void {
+export function setAiName(name: AgentName): void {
   sorter = name;
 }
 
-// Who wrote an AI review: "claude-opus-5[1m]" → "Opus 5", "claude-sonnet-4-5-20250929" → "Sonnet 4.5", "codex" → "Codex".
+// Who wrote an AI review: "claude-opus-5[1m]" → "Opus 5", "claude-sonnet-4-5-20250929" → "Sonnet 4.5", "codex" → "Codex", "opencode" → "OpenCode".
 export function modelName(id: string): string {
   if (id === "claude-code") return "Claude Code";
+  if (id === "opencode") return "OpenCode";
   const m = /^(?:claude-)?([a-z]+)((?:-\d{1,2})*)(?:-\d{8})?(?:\[\w+\])?$/.exec(id);
   if (!m) return id;
   const [, family = "", version = ""] = m;

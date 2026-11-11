@@ -194,7 +194,7 @@ desk fields                        the fields rules can use
 desk config [path|check|edit]      works with the server down too
 desk settings [set <key> <value> | reset <key>]
 desk mcp                           MCP server on stdio
-desk connect [claude|codex] [--apply]   your agent (Settings → Agent): its MCP tools and the skill; --apply connects what's missing
+desk connect [claude|codex|opencode] [--apply]   your agent (Settings → Agent): its MCP tools and the skill; --apply connects what's missing
 desk install | uninstall           launchd LaunchAgent for the headless server (macOS); the app has "Open at login"
 ```
 

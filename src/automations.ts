@@ -20,6 +20,7 @@ import {
   claudeSpawn,
   codexRun,
   deskMcp,
+  opencodeRun,
   makeAgentDir,
   runCommand,
 } from "./review.ts";
@@ -60,7 +61,7 @@ const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", 
 // The desk's MCP server, and its name before the rename to Inbox, which an agent connected then keeps until the desk renames it.
 const desks = (tools: string[]) => ["inbox", "review-desk"].flatMap((s) => tools.map((t) => `mcp__${s}__desk_${t}`));
 const READ_TOOLS = ["list", "item", "overview", "events", "brief", "merging"];
-// Codex's run has only these: no shell, no web, no MCP server but the desk's.
+// Codex's and OpenCode's run have only these: no shell, no web, no MCP server but the desk's.
 const CODEX_TOOLS =
   "- On this run you have the desk's read tools (desk_list, desk_item, desk_overview, desk_events, desk_brief, desk_merging) and nothing else: no shell, no gh, no web.";
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
@@ -874,7 +875,8 @@ export class Automations {
   // An agent: your own Claude Code with read-only tools, handed the items when there are any; it may look further.
   byAgent(a: Automation, run: AutomationRun, last: AutomationRun | null, passed: string[] | null, batch?: Batch) {
     return Effect.gen({ self: this }, function* () {
-      if (this.desk.agent() === "codex") return yield* this.byCodex(a, run, last, passed, batch);
+      const agent = this.desk.agent();
+      if (agent !== "claude-code") return yield* this.byCodex(a, run, last, passed, batch, agent);
       const handed = passed?.slice(0, ITEMS_MAX) ?? null;
       const spawnAs = yield* claudeSpawn(claudeCommand(), [
         "-p",
@@ -904,20 +906,29 @@ export class Automations {
   }
 
   // On Codex: no shell, since Codex can't hold one to gh's reads, so only the desk's read tools, in a read-only sandbox.
-  byCodex(a: Automation, run: AutomationRun, last: AutomationRun | null, passed: string[] | null, batch?: Batch) {
+  // On OpenCode the same tools, every other permission denied.
+  byCodex(
+    a: Automation,
+    run: AutomationRun,
+    last: AutomationRun | null,
+    passed: string[] | null,
+    batch: Batch | undefined,
+    agent: "codex" | "opencode",
+  ) {
     return Effect.gen({ self: this }, function* () {
       const url = yield* deskMcp(this.desk.mcpUrl);
       const handed = passed?.slice(0, ITEMS_MAX) ?? null;
       const said = [prompt(a, run.at, last, handed && this.fence(handed, batch?.happened)), CODEX_TOOLS].join("\n");
-      const got = yield* codexRun(said, {
+      const opts = {
         dir: yield* this.dir(),
         schema: schemaFor(canOf(a)),
         desk: { url, tools: READ_TOOLS.map((t) => `desk_${t}`) },
         timeout: TIMEOUT,
-      });
+      };
+      const got = yield* agent === "codex" ? codexRun(said, opts) : opencodeRun(said, opts);
       if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
       run.session = got.session;
-      run.agent = "codex";
+      run.agent = agent;
       return yield* this.took(a, run, got.answer, JSON.stringify(got.answer), passed);
     });
   }

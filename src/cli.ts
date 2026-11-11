@@ -54,8 +54,9 @@ const USAGE = `usage: desk <command>
   fields                              the fields rules can use
   mcp [--url <address>]               MCP server on stdio (the desk also serves MCP over HTTP at /mcp); --url or DESK_URL,
                                       with DESK_TOKEN, for a desk on another machine
-  connect [claude|codex] [--apply]    connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
-  connect <address> --code <code> [claude|codex]
+  connect [claude|codex|opencode] [--apply]
+                                      connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
+  connect <address> --code <code> [claude|codex|opencode]
                                       on another machine: pair with the desk at its tailnet address, connect your agent to it
   pair [--print] [--name <name>]      pair another device over Tailscale: a one-time code and what to run there;
                                       --print: a token for one machine and the commands to paste there
@@ -448,11 +449,12 @@ const settings = Effect.fnUntraced(function* (x: Ctx) {
 
 const SKILL_STATE = { installed: "installed", outdated: "out of date", missing: "not installed", taken: "another skill has its folder" };
 
-// The harness you work in, given the desk's tools: Claude Code unless you name Codex. Works with the desk down too: it
+// The harness you work in, given the desk's tools: Claude Code unless you name Codex or OpenCode. Works with the desk down too: it
 // reads the agent's own config files.
 const HARNESSES: Record<string, { id: agents.DriverId; label: string }> = {
   claude: { id: "claude-code", label: "Claude Code" },
   codex: { id: "codex", label: "Codex" },
+  opencode: { id: "opencode", label: "OpenCode" },
 };
 
 // A desk on another machine, from its address as `desk pair` prints it: https://<its tailnet name>.
@@ -467,7 +469,7 @@ const connectTo = Effect.fnUntraced(function* (x: Ctx) {
   if (!at)
     return yield* new UsageError({ message: `the desk's address is https://<its tailnet name>, as desk pair prints it: not ${x.args[0]}` });
   const driver = HARNESSES[x.args[1] ?? "claude"];
-  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[1]} (try: claude, or codex)` });
+  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[1]} (try: claude, codex or opencode)` });
   if (typeof x.opts.code !== "string")
     return yield* new UsageError({ message: "connect <address> needs --code <code>: run desk pair on the desk's machine" });
   const desk = api.createClient((p, init) => fetch(at + p, init));
@@ -482,8 +484,10 @@ const connectTo = Effect.fnUntraced(function* (x: Ctx) {
   const skill = yield* Effect.tryPromise({ try: () => res.text(), catch: (cause) => noSkill(messageOf(cause), cause) });
   yield* agents.connectRemote(driver.id, `${at}/mcp`, token, skill);
   x.out(`${x.c.green("✓")} ${driver.label}: paired with ${at}, MCP tools and skill connected`);
-  if (driver.id === "codex") {
-    x.out(`# Codex reads the token from ${agents.TOKEN_VAR}: put this line in your shell's profile (it's a password for your desk)`);
+  if (driver.id !== "claude-code") {
+    x.out(
+      `# ${driver.label} reads the token from ${agents.TOKEN_VAR}: put this line in your shell's profile (it's a password for your desk)`,
+    );
     x.out(`export ${agents.TOKEN_VAR}=${token}`);
   }
   x.out(`# Revoke it on the desk's machine: Settings → This device`);
@@ -511,7 +515,7 @@ const connect = Effect.fnUntraced(function* (x: Ctx) {
   if (x.args[0] && /[.:]/.test(x.args[0])) return yield* connectTo(x);
   if (x.args.length > 1) return yield* new UsageError({ message: `connect: unexpected argument ${x.args[1]}` });
   const driver = HARNESSES[x.args[0] ?? "claude"];
-  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[0]} (try: desk connect claude, or codex)` });
+  if (!driver) return yield* new UsageError({ message: `unknown agent: ${x.args[0]} (try: desk connect claude, codex or opencode)` });
   const url = `http://localhost:${(process.env.DESK_PORT ?? "") || 47823}/mcp`;
   const log = (line: string) => {
     x.out(`# ${line}`);

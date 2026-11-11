@@ -268,11 +268,23 @@ test("Copy resume command resumes a run's session in the automations folder besi
   );
   assert.equal(resumeCommand("/tmp/my desk/settings.json", id), `cd '/tmp/my desk/automations' && claude --resume ${id}`);
   assert.equal(
-    resumeCommand("/Users/me/.inbox/settings.json", id, true),
+    resumeCommand("/Users/me/.inbox/settings.json", id, "codex"),
     `cd /Users/me/.inbox/automations && codex resume ${id}`,
     "a Codex run's",
   );
-  assert.deepEqual([attachCommand("c0ffee01", false), attachCommand(id, true)], ["claude attach c0ffee01", `codex resume ${id}`]);
+  assert.equal(
+    resumeCommand("/Users/me/.inbox/settings.json", "ses_e3686c48"),
+    "cd /Users/me/.inbox/automations && claude --resume ses_e3686c48",
+  );
+  assert.equal(
+    resumeCommand("/Users/me/.inbox/settings.json", "ses_e3686c48", "opencode"),
+    "cd /Users/me/.inbox/automations && opencode --session ses_e3686c48",
+    "an OpenCode run's",
+  );
+  assert.deepEqual(
+    [attachCommand("c0ffee01", "Claude"), attachCommand(id, "Codex"), attachCommand("ses_e3686c48", "OpenCode")],
+    ["claude attach c0ffee01", `codex resume ${id}`, "opencode --session ses_e3686c48"],
+  );
   assert.equal(resumeCommand("/tmp/it's/settings.json", id), String.raw`cd '/tmp/it'\''s/automations' && claude --resume ${id}`);
   assert.equal(
     resumeCommand(String.raw`C:\Users\me\.inbox\settings.json`, id),

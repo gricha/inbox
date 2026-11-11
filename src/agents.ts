@@ -13,14 +13,14 @@ import type { AgentStatus } from "./types.ts";
 const SKILL = fileURLToPath(new URL("../skills/inbox", import.meta.url));
 export const SKILL_MD = path.join(SKILL, "SKILL.md");
 const NAME = "inbox"; // the MCP server's name, and the skill's folder
-export const TOKEN_VAR = "INBOX_TOKEN"; // where Codex reads a desk's token on another machine
+export const TOKEN_VAR = "INBOX_TOKEN"; // where Codex and OpenCode read a desk's token on another machine
 const OLD = "review-desk"; // both, before the rename to Inbox
 
 interface Driver {
   bin: string;
   add: (url: string) => string[]; // registers the desk's MCP server for every project
   addRemote: (url: string, token: string) => string[]; // and a desk on another machine, with this machine's token
-  remove: (name: string) => string[]; // and unregisters one
+  remove?: (name: string) => string[]; // and unregisters one; OpenCode has no command for it, and its add replaces
   servers: (home: string) => unknown; // the agent's user-level MCP servers, by name
   skills: (home: string) => string;
 }
@@ -56,6 +56,15 @@ const DRIVERS = {
     servers: (home) => parse(fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8")).mcp_servers,
     skills: (home) => path.join(home, ".agents", "skills"),
   },
+  // OpenCode's global config and skills (opencode.ai/docs/skills); its add writes the remote server there, replacing one of that name.
+  opencode: {
+    bin: "opencode",
+    add: (url) => ["mcp", "add", NAME, "--url", url],
+    addRemote: (url) => ["mcp", "add", NAME, "--url", url, "--header", `Authorization=Bearer {env:${TOKEN_VAR}}`],
+    servers: (home) =>
+      (JSON.parse(fs.readFileSync(path.join(home, ".config", "opencode", "opencode.json"), "utf8")) as { mcp?: unknown }).mcp,
+    skills: (home) => path.join(home, ".config", "opencode", "skills"),
+  },
 } satisfies Record<string, Driver>;
 export type DriverId = keyof typeof DRIVERS;
 // agent.harness as a driver: a value this desk doesn't know is Claude Code's.
@@ -74,12 +83,22 @@ const CLI = fileURLToPath(new URL("cli.ts", import.meta.url));
 // named inbox, and a helpdesk's `mcp` isn't the desk's.
 function desks(entry: unknown, url: string): boolean {
   if (typeof entry !== "object" || entry === null) return false;
-  const e = entry as { url?: unknown; command?: unknown; args?: unknown; env?: { DESK_PORT?: unknown } };
+  const e = entry as {
+    url?: unknown;
+    command?: unknown;
+    args?: unknown;
+    env?: { DESK_PORT?: unknown };
+    environment?: { DESK_PORT?: unknown };
+  };
   const desk = urlOf(url);
-  if (typeof e.command === "string") {
-    const argv = [e.command, ...(Array.isArray(e.args) ? (e.args as unknown[]) : [])].map(String);
+  // OpenCode's command is the whole argv, its variables `environment`.
+  if (typeof e.command === "string" || Array.isArray(e.command)) {
+    const argv = (
+      Array.isArray(e.command) ? (e.command as unknown[]) : [e.command, ...(Array.isArray(e.args) ? (e.args as unknown[]) : [])]
+    ).map(String);
     const prog = argv.at(-2) ?? "";
-    const own = typeof e.env?.DESK_PORT === "string" ? e.env.DESK_PORT : "";
+    const vars = e.env ?? e.environment;
+    const own = typeof vars?.DESK_PORT === "string" ? vars.DESK_PORT : "";
     const port = own || (process.env.DESK_PORT ?? "") || "47823";
     return argv.at(-1) === "mcp" && (/^desk(\.cmd)?$/i.test(prog.split(/[\\/]/).at(-1) ?? "") || prog === CLI) && port === desk?.port;
   }
@@ -103,6 +122,7 @@ function server(d: Driver, home: string, name: string, url: string): "none" | "d
 function shown(entry: unknown): string {
   const { url, command, args } = (typeof entry === "object" ? (entry ?? {}) : {}) as { url?: unknown; command?: unknown; args?: unknown };
   if (typeof url === "string") return ` (${url})`;
+  if (Array.isArray(command)) return ` (${(command as unknown[]).map(String).join(" ")})`; // OpenCode's whole argv
   return typeof command === "string" ? ` (${[command, ...(Array.isArray(args) ? (args as unknown[]) : [])].map(String).join(" ")})` : "";
 }
 
@@ -259,6 +279,7 @@ const migrate = Effect.fnUntraced(function* (
     return;
   }
   if (now === "none") yield* run(d.bin, d.add(url), commandOf(d, d.add(url)), timeout);
+  if (!d.remove) return;
   yield* run(d.bin, d.remove(OLD), commandOf(d, d.remove(OLD)), timeout);
   said(`renamed ${d.bin}'s MCP server ${OLD} to ${NAME}`);
 });
@@ -303,6 +324,9 @@ export function remoteCommands(at: string, token: string): string[] {
     `# Codex, which reads the token from ${TOKEN_VAR}: put the export in your shell's profile`,
     commandOf(DRIVERS.codex, DRIVERS.codex.addRemote(`${at}/mcp`)),
     skill("~/.agents/skills"),
+    `# OpenCode, which reads it from ${TOKEN_VAR} too`,
+    commandOf(DRIVERS.opencode, DRIVERS.opencode.addRemote(`${at}/mcp`)),
+    skill("~/.config/opencode/skills"),
     `export ${TOKEN_VAR}=${token}`,
   ];
 }
@@ -328,7 +352,7 @@ export const connectRemote = Effect.fn("agents.connectRemote")(function* (
   const same = urlOf((entry as { url?: unknown } | undefined)?.url)?.href === urlOf(url)?.href;
   if (entry !== undefined && !same)
     return yield* new Conflict({
-      message: `${d.bin} has another MCP server named ${NAME}${shown(entry)}: remove it (${commandOf(d, d.remove(NAME))}), then connect again`,
+      message: `${d.bin} has another MCP server named ${NAME}${shown(entry)}: remove it${d.remove ? ` (${commandOf(d, d.remove(NAME))})` : ""}, then connect again`,
     });
   yield* Effect.try({
     try: () => {
@@ -337,7 +361,7 @@ export const connectRemote = Effect.fn("agents.connectRemote")(function* (
     },
     catch: fsError("write", path.join(dir, "SKILL.md")),
   });
-  if (same) yield* run(d.bin, d.remove(NAME), commandOf(d, d.remove(NAME)), timeout);
+  if (same && d.remove) yield* run(d.bin, d.remove(NAME), commandOf(d, d.remove(NAME)), timeout);
   return yield* run(d.bin, d.addRemote(url, token), commandOf(d, d.addRemote(url, "<token>")), timeout);
 });
 
@@ -348,7 +372,7 @@ export const connect = Effect.fn("agents.connect")(function* (
   url: string,
   { timeout = TIMEOUT, log = () => {} }: { timeout?: number; log?: (line: string) => void } = {},
 ): Effect.fn.Return<AgentStatus, FsError | RunError> {
-  const d = DRIVERS[driver];
+  const d: Driver = DRIVERS[driver];
   const s = yield* status(driver, url);
   if (s.taken) return yield* new Conflict({ message: s.taken });
   if (s.skill.state !== "installed") yield* copySkill(path.dirname(s.skill.path));

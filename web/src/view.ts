@@ -1,6 +1,7 @@
 import { Result } from "effect";
 import type {
   ActivityEvent,
+  AgentName,
   AskLines,
   Card,
   Conversation,
@@ -113,16 +114,20 @@ export const settingsPart = (section: string): string => settingsBack(section) ?
 // A part's name, for the page's head and the way back to it.
 export const partName = (id: string): string => SETTINGS_PARTS.find((p) => p.id === id)?.name ?? "Settings";
 
-// What shows an automation run's session (Claude Code's, or Codex's): resumed in the automations folder, beside settings.json in the desk's home.
-export function resumeCommand(settingsPath: string, session: string, codex = false): string {
+// The other agents' resume: Codex's by thread, OpenCode's TUI on a session.
+const RESUME = { codex: "codex resume", opencode: "opencode --session" } as const;
+
+// What shows an automation run's session (Claude Code's, Codex's or OpenCode's): resumed in the automations folder, beside settings.json in the desk's home.
+export function resumeCommand(settingsPath: string, session: string, agent?: "codex" | "opencode"): string {
   const win = /^[A-Za-z]:\\/.test(settingsPath);
   const dir = `${settingsPath.replace(/[\\/]settings\.json\b.*$/, "")}${win ? "\\" : "/"}automations`;
   const quoted = /^[\w./\\:~+-]+$/.test(dir) ? dir : win ? `"${dir}"` : `'${dir.replaceAll("'", String.raw`'\''`)}'`;
-  return `cd ${quoted} && ${codex ? "codex resume" : "claude --resume"} ${session}`;
+  return `cd ${quoted} && ${agent ? RESUME[agent] : "claude --resume"} ${session}`;
 }
 
-// What opens your agent from a terminal: Claude Code's attach, or Codex's resume of its session.
-export const attachCommand = (id: string, codex: boolean): string => (codex ? `codex resume ${id}` : `claude attach ${id}`);
+// What opens your agent from a terminal: Claude Code's attach, or Codex's or OpenCode's resume of its session.
+export const attachCommand = (id: string, agent: AgentName): string =>
+  agent === "Codex" ? `codex resume ${id}` : agent === "OpenCode" ? `opencode --session ${id}` : `claude attach ${id}`;
 
 // The desktop app's bridge as far as Settings' rows care (window.desktop): absent in a browser.
 type Shell = { platform: string } | undefined;

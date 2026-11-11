@@ -273,11 +273,15 @@ export class TailscaleError extends Data.TaggedError("TailscaleError")<{ readonl
 // The whole message: retryAgents, paused() and the judge find it by suffix in the stored error texts.
 export const NOT_LOGGED_IN = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 export const CODEX_NOT_LOGGED_IN = "Codex isn't logged in. Run `codex login` in a terminal.";
+export const OPENCODE_NOT_LOGGED_IN = "OpenCode isn't logged in. Run `opencode auth login` in a terminal.";
 
-// An expired or missing login, Claude Code's unless agent says Codex. detail is the CLI's own words ("401 OAuth access token has expired"), for the log.
-export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{ readonly detail: string; readonly agent?: "codex" }> {
+// An expired or missing login, Claude Code's unless agent says Codex or OpenCode. detail is the CLI's own words ("401 OAuth access token has expired"), for the log.
+export class ClaudeNotLoggedIn extends Data.TaggedError("ClaudeNotLoggedIn")<{
+  readonly detail: string;
+  readonly agent?: "codex" | "opencode";
+}> {
   override get message(): string {
-    return this.agent === "codex" ? CODEX_NOT_LOGGED_IN : NOT_LOGGED_IN;
+    return this.agent === "codex" ? CODEX_NOT_LOGGED_IN : this.agent === "opencode" ? OPENCODE_NOT_LOGGED_IN : NOT_LOGGED_IN;
   }
 }
 
@@ -300,10 +304,14 @@ export class ClaudeBadOutput extends Data.TaggedError("ClaudeBadOutput")<{
   readonly cause?: unknown;
 }> {}
 
-// codex couldn't list its MCP servers, so the desk can't turn each off: the call isn't run, and waits as a down agent does.
-export class CodexServersUnknown extends Data.TaggedError("CodexServersUnknown")<{ readonly reason: string; readonly cause?: unknown }> {
+// codex (or opencode) couldn't list its MCP servers, so the desk can't turn each off: the call isn't run, and waits as a down agent does.
+export class CodexServersUnknown extends Data.TaggedError("CodexServersUnknown")<{
+  readonly reason: string;
+  readonly agent?: "opencode";
+  readonly cause?: unknown;
+}> {
   override get message(): string {
-    return `Couldn't confirm Codex's MCP servers are off, so it didn't run: ${this.reason}`;
+    return `Couldn't confirm ${this.agent === "opencode" ? "OpenCode" : "Codex"}'s MCP servers are off, so it didn't run: ${this.reason}`;
   }
 }
 

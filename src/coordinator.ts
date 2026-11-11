@@ -1,7 +1,8 @@
 // The coordinator: one background Claude Code session (`claude --bg`) the desk starts on the first hand-off, ask or w, and
 // keeps running after that. It wakes it with one line per batch of what changed on PRs in Merging, or at once with the
 // owner's ask. Claude's own daemon runs it, so a desk restart leaves it be. On Codex it's one `codex exec` session, each
-// wake a `codex exec resume` turn the desk runs as its child and waits on, one at a time.
+// wake a `codex exec resume` turn the desk runs as its child and waits on, one at a time; on OpenCode, `opencode run`
+// and `opencode run --session`, the same way.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,6 +14,7 @@ import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
   ClaudeBadOutput,
+  ClaudeNotLoggedIn,
   CommandBadOutput,
   CommandFailed,
   CommandNotFound,
@@ -37,6 +39,14 @@ import {
   codexMissing,
   codexThread,
   deskMcp,
+  OPENCODE_DOWN,
+  opencodeCommand,
+  opencodeConfig,
+  opencodeError,
+  opencodeFailure,
+  opencodeMissing,
+  opencodeRunArgs,
+  opencodeSession,
   runCommand,
 } from "./review.ts";
 import {
@@ -58,7 +68,8 @@ const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as
 const ERROR = "coordinator_error"; // why it last couldn't run; kept so a desk restart doesn't notify again
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 const CODEX_KEY = "coordinator_codex"; // its Codex session, kept beside Claude Code's so switching back finds each
-const TURN = 60 * 60_000; // a wake on Codex is one turn the desk waits on; past this it's stopped
+const OPENCODE_KEY = "coordinator_opencode"; // and its OpenCode session
+const TURN = 60 * 60_000; // a wake on Codex or OpenCode is one turn the desk waits on; past this it's stopped
 // Off on Codex: what reaches past the desk and your shell (apps and plugins bring their own MCP servers, browsers, the screen).
 const CODEX_OFF = ["apps", "plugins", "browser_use", "browser_use_external", "in_app_browser", "computer_use"].flatMap((f) => [
   "--disable",
@@ -96,6 +107,51 @@ const CODEX_RULES = [
   }),
   "",
 ].join("\n");
+
+// The deny list as OpenCode's bash rules, which match the whole command (each part of a && chain), flags after the branch too.
+export const OPENCODE_RULES: Record<string, string> = Object.fromEntries(
+  DENY.map((r) => [r.replace(/^Bash\((.*)\)$/, "$1").replace(/:\*$/, " *"), "deny"]),
+);
+
+// A turn the desk runs as its child: how its agent's events name the session and say a failure, and its error words.
+interface TurnKind {
+  command: string;
+  missing: string;
+  id: (line: string) => string | null;
+  failed: (line: string) => string | null;
+  down: RegExp;
+  error: (why: string) => ClaudeNotLoggedIn | ClaudeApiError;
+}
+
+function codexFailure(line: string): string | null {
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
+    type?: unknown;
+    message?: unknown;
+    error?: { message?: unknown };
+  } | null;
+  if (e?.type === "error" && typeof e.message === "string") return e.message;
+  if (e?.type === "turn.failed") return typeof e.error?.message === "string" ? e.error.message : "codex failed";
+  return null;
+}
+
+const turnKind = (agent: "codex" | "opencode"): TurnKind =>
+  agent === "codex"
+    ? {
+        command: codexCommand(),
+        missing: codexMissing(codexCommand()),
+        id: codexThread,
+        failed: codexFailure,
+        down: CODEX_DOWN,
+        error: codexError,
+      }
+    : {
+        command: opencodeCommand(),
+        missing: opencodeMissing(opencodeCommand()),
+        id: opencodeSession,
+        failed: opencodeFailure,
+        down: OPENCODE_DOWN,
+        error: opencodeError,
+      };
 
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 const ROLE =
@@ -253,7 +309,8 @@ export class Coordinator {
   watching: NodeJS.Timeout | null = null;
   watchEvery = 10_000; // while an ask of yours waits on its answer
   failure: unknown = null; // the last run's, already reported: the routes' "didn't start" carries it
-  turn: ChildProcess | null = null; // on Codex: the wake in flight
+  turn: ChildProcess | null = null; // on Codex or OpenCode: the wake in flight
+  turnOf: TurnKind | null = null; // and whose it is
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -263,13 +320,16 @@ export class Coordinator {
     return this.desk.settings["agent.coordinator"];
   }
 
-  get codex(): boolean {
-    return this.desk.agent() === "codex";
+  // The agent whose turns the desk runs itself (Codex, OpenCode); null: Claude Code's daemon runs them.
+  get own(): "codex" | "opencode" | null {
+    const a = this.desk.agent();
+    return a === "claude-code" ? null : a;
   }
 
   // The chosen agent's session. A record from before the bypass setting has no mode: that session was started in default.
   saved(): { id: string; url?: string; mode?: Mode | "unknown" } | null {
-    return this.desk.store.get(this.codex ? CODEX_KEY : KEY) as { id: string; url?: string; mode?: Mode | "unknown" } | null;
+    const key = this.own === "codex" ? CODEX_KEY : this.own === "opencode" ? OPENCODE_KEY : KEY;
+    return this.desk.store.get(key) as { id: string; url?: string; mode?: Mode | "unknown" } | null;
   }
 
   // [PR id, what changed], oldest first; only appended to until delivered.
@@ -302,14 +362,14 @@ export class Coordinator {
 
   view(): CoordinatorView {
     const s = this.saved();
-    if (s && !s.url && this.on && !this.codex && Date.now() - this.checked > FRESH) this.flush();
-    const codex = this.turn ? "busy" : s ? "idle" : null; // nothing of Codex's runs between its turns
+    if (s && !s.url && this.on && !this.own && Date.now() - this.checked > FRESH) this.flush();
+    const own = this.turn ? "busy" : s ? "idle" : null; // nothing of Codex's or OpenCode's runs between its turns
     return {
       on: this.on,
       id: s?.id ?? null,
       url: s?.url ?? null,
       error: this.on ? this.error() : null,
-      status: this.on ? (this.codex ? codex : this.status) : null,
+      status: this.on ? (this.own ? own : this.status) : null,
       queued: this.asks().flatMap((l) => askOf(l) ?? []),
     };
   }
@@ -335,7 +395,7 @@ export class Coordinator {
 
   // Your ask goes now, not with the next batch: what cmd.exe can't pass fails before it's kept; what it gives waits for the run.
   tell(line: string): Effect.Effect<Effect.Effect<void>, UnsafeArgument> {
-    return Effect.map(claudeSpawn(this.codex ? codexCommand() : claudeCommand(), [line]), () => {
+    return Effect.map(claudeSpawn(this.own ? turnKind(this.own).command : claudeCommand(), [line]), () => {
       this.desk.store.set(ASKS, [...this.asks(), line]);
       this.watch();
       return this.ran(this.again());
@@ -361,8 +421,8 @@ export class Coordinator {
         this.watching = null;
         return;
       }
-      // A look that fails: the next run says why. Codex's state is the desk's own turn.
-      if (!this.flushing && !this.codex) this.desk.runner.fork("coordinator", Effect.ignore(this.find()));
+      // A look that fails: the next run says why. Codex's and OpenCode's state is the desk's own turn.
+      if (!this.flushing && !this.own) this.desk.runner.fork("coordinator", Effect.ignore(this.find()));
     }, this.watchEvery);
     this.watching.unref();
   }
@@ -417,7 +477,7 @@ export class Coordinator {
     const stop = Effect.gen({ self: this }, function* () {
       if (flushing) yield* Effect.promise(() => flushing);
       if (this.turn) kill(this.turn);
-      if (!this.saved() || this.codex) return;
+      if (!this.saved() || this.own) return;
       const a = yield* this.find();
       if (a) yield* this.halt(a);
     });
@@ -472,8 +532,9 @@ export class Coordinator {
       const stopping = this.stopping;
       if (stopping) yield* Effect.promise(() => stopping);
       if (!this.on) return;
-      if (this.codex) {
-        yield* this.runCodex();
+      const own = this.own;
+      if (own) {
+        yield* this.runOwn(own);
         return;
       }
       const a = yield* this.find();
@@ -633,9 +694,9 @@ export class Coordinator {
     });
   }
 
-  // On Codex: what waits goes as one turn, started in its folder the first time and resumed after; while a turn runs,
-  // it stays queued, and the turn's end delivers it.
-  runCodex(): Effect.Effect<void, RunError> {
+  // On Codex or OpenCode: what waits goes as one turn, started in its folder the first time and resumed after; while a
+  // turn runs, it stays queued, and the turn's end delivers it.
+  runOwn(agent: "codex" | "opencode"): Effect.Effect<void, RunError> {
     return Effect.gen({ self: this }, function* () {
       if (this.turn) return;
       const news = this.news();
@@ -643,13 +704,25 @@ export class Coordinator {
       if (!news.length && !asks.length && !this.asked) return;
       const text = this.message(news, asks);
       this.asked = false;
-      const dir = yield* this.codexDir();
       const id = this.saved()?.id;
       const url = yield* deskMcp(this.desk.mcpUrl);
-      const mcp = yield* codexMcp(codexCommand(), dir, { url });
-      const started = yield* this.codexTurn(codexArgs(dir, mcp, this.desk.settings["agent.coordinator_bypass"], id, text), dir);
-      if (started !== id) this.desk.store.set(CODEX_KEY, { id: started });
-      this.desk.log(`coordinator: ${id ? "woke" : "created"} ${started} on Codex`);
+      const bypass = this.desk.settings["agent.coordinator_bypass"];
+      const kind = turnKind(agent);
+      let started: string;
+      if (agent === "codex") {
+        const dir = yield* this.codexDir();
+        const mcp = yield* codexMcp(kind.command, dir, { url });
+        started = yield* this.ownTurn(kind, codexArgs(dir, mcp, bypass, id, text), dir);
+      } else {
+        const dir = yield* this.dir();
+        const config = yield* opencodeConfig(kind.command, dir, () => ({ bash: OPENCODE_RULES }), { url });
+        const args = opencodeRunArgs(NAME, id);
+        // Nobody is there to answer what your config asks about: with bypass it's approved (--auto), without it refused.
+        const said = id ? text : `${ROLE} ${text}`;
+        started = yield* this.ownTurn(kind, [...args, ...(bypass ? ["--auto"] : []), said], dir, { OPENCODE_CONFIG_CONTENT: config });
+      }
+      if (started !== id) this.desk.store.set(agent === "codex" ? CODEX_KEY : OPENCODE_KEY, { id: started });
+      this.desk.log(`coordinator: ${id ? "woke" : "created"} ${started} on ${agent === "codex" ? "Codex" : "OpenCode"}`);
       this.desk.store.set(NEWS, this.news().slice(news.length));
       this.desk.store.set(ASKS, this.asks().slice(asks.length));
       for (const l of asks) {
@@ -690,15 +763,27 @@ export class Coordinator {
     });
   }
 
-  // Started once codex names its thread (its first event); the rest of the turn runs as the desk's child, and its end
-  // says how it went and delivers what queued meanwhile. Interrupted before that, it stops it.
-  codexTurn(args: string[], dir: string): Effect.Effect<string, CommandError | ClaudeError | UnsafeArgument> {
-    const command = codexCommand();
+  // Started once the agent names its session (codex's first event, any of opencode's); the rest of the turn runs as the
+  // desk's child, and its end says how it went and delivers what queued meanwhile. Interrupted before that, it stops it.
+  ownTurn(
+    kind: TurnKind,
+    args: string[],
+    dir: string,
+    env?: Record<string, string>,
+  ): Effect.Effect<string, CommandError | ClaudeError | UnsafeArgument> {
+    const command = kind.command;
     return Effect.flatMap(claudeSpawn(command, args), (s) =>
       Effect.callback<string, CommandError | ClaudeError>((resume) => {
         const made = Result.try({
           try: () =>
-            spawn(s.file, s.args, { cwd: dir, shell: s.shell, detached: OWN_GROUP, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }),
+            spawn(s.file, s.args, {
+              cwd: dir,
+              shell: s.shell,
+              detached: OWN_GROUP,
+              windowsHide: true,
+              stdio: ["ignore", "pipe", "pipe"],
+              ...(env && { env: { ...process.env, ...env } }),
+            }),
           catch: (cause) => cause,
         });
         if (Result.isFailure(made)) {
@@ -720,17 +805,12 @@ export class Coordinator {
         }, TURN);
         timer.unref();
         const read = (line: string) => {
-          const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
-            type?: unknown;
-            message?: unknown;
-            error?: { message?: unknown };
-          } | null;
-          if (e?.type === "error" && typeof e.message === "string") said = e.message;
-          if (e?.type === "turn.failed") said = typeof e.error?.message === "string" ? e.error.message : "codex failed";
+          said = kind.failed(line) ?? said;
           if (id) return;
-          id = codexThread(line);
+          id = kind.id(line);
           if (!id) return;
           this.turn = child;
+          this.turnOf = kind;
           this.desk.changed();
           resume(Effect.succeed(id));
         };
@@ -751,13 +831,13 @@ export class Coordinator {
           if (rest) read(rest);
           const why = over
             ? "your agent's turn ran over an hour, so the desk stopped it"
-            : (said ?? (code === 0 ? null : stderr.trim() || `codex exited with ${code ?? sig}`));
+            : (said ?? (code === 0 ? null : stderr.trim() || `${path.basename(command)} exited with ${code ?? sig}`));
           if (id) {
             this.turnEnded(why);
             return;
           }
-          if (missing) resume(Effect.fail(new CommandNotFound({ command, hint: codexMissing(command) })));
-          else if (why && CODEX_DOWN.test(why)) resume(Effect.fail(codexError(why)));
+          if (missing) resume(Effect.fail(new CommandNotFound({ command, hint: kind.missing })));
+          else if (why && kind.down.test(why)) resume(Effect.fail(kind.error(why)));
           else if (said) resume(Effect.fail(new ClaudeApiError({ message: said })));
           else resume(Effect.fail(new CommandFailed({ command, code, signal: sig, stderr: stderr.trim() })));
         });
@@ -776,12 +856,14 @@ export class Coordinator {
     );
   }
 
-  // A Codex turn ended: what it failed with is shown as a run's error, and what queued meanwhile goes now.
+  // A Codex or OpenCode turn ended: what it failed with is shown as a run's error, and what queued meanwhile goes now.
   turnEnded(why: string | null): void {
+    const kind = this.turnOf;
     this.turn = null;
+    this.turnOf = null;
     if (this.desk.stopped || !this.on) return; // turned off: stop() ended it
     if (why) {
-      const e = CODEX_DOWN.test(why) ? codexError(why) : new ClaudeApiError({ message: why });
+      const e = kind?.down.test(why) ? kind.error(why) : new ClaudeApiError({ message: why });
       this.broke(e, e.message);
     }
     this.desk.changed();

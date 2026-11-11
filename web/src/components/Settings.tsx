@@ -691,7 +691,7 @@ function ClaudeStatus({
   }, [active, loads]);
 
   const need = status?.needs;
-  const say = need && needs(status.driver === "codex" ? "Codex" : "Claude Code")[need];
+  const say = need && needs(status.driver === "codex" ? "Codex" : status.driver === "opencode" ? "OpenCode" : "Claude Code")[need];
 
   function connect() {
     setBusy(true);

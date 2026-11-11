@@ -223,7 +223,7 @@ function Coordinator({ c, act }: { c: CoordinatorView; act: (k: "copy" | "wake")
             key="attach"
             type="button"
             className="link-btn"
-            title={attachCommand(c.id, aiName() === "Codex")}
+            title={attachCommand(c.id, aiName())}
             onClick={() => {
               act("copy");
             }}
